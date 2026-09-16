@@ -548,15 +548,22 @@ async function steamReturn(request: Request, url: URL, env: Env): Promise<Respon
     if (!String(err).includes("UNIQUE")) throw err;
     // Held by a web-only profile made when this person locked something on mxbsecure.com. Steam
     // just confirmed it's them, so the app profile takes over the Steam link and their assets.
-    const held = await env.DB.prepare("SELECT id, kind, creator_at FROM accounts WHERE steam_id = ?")
+    const held = await env.DB.prepare("SELECT id, kind, creator_at, creator_source FROM accounts WHERE steam_id = ?")
       .bind(result.steamId)
-      .first<{ id: string; kind: string; creator_at: number | null }>();
+      .first<{ id: string; kind: string; creator_at: number | null; creator_source: string | null }>();
     if (held?.kind !== "web") return steamResult(site, "already-linked");
     await env.DB.batch([
       env.DB.prepare("UPDATE assets SET creator_id = ? WHERE creator_id = ?").bind(login.account_id, held.id),
       env.DB.prepare("UPDATE accounts SET steam_id = NULL WHERE id = ?").bind(held.id),
-      env.DB.prepare("UPDATE accounts SET steam_id = ?, creator_at = COALESCE(creator_at, ?) WHERE id = ?").bind(
+      // `creator_source` travels with the standing it describes: someone who signed themselves
+      // up on the site is still a signup after they link the app, not an invitation we made.
+      env.DB.prepare(
+        "UPDATE accounts SET steam_id = ?," +
+          " creator_source = CASE WHEN creator_at IS NULL THEN ? ELSE creator_source END," +
+          " creator_at = COALESCE(creator_at, ?) WHERE id = ?",
+      ).bind(
         result.steamId,
+        held.creator_source,
         held.creator_at ?? Date.now(),
         login.account_id,
       ),
@@ -582,6 +589,7 @@ async function listEntitlements(account: Account, env: Env): Promise<Response> {
     "SELECT e.asset_id, a.title, e.source, e.granted_at" +
       " FROM entitlements e JOIN assets a ON a.id = e.asset_id" +
       " WHERE e.steam_id = ? AND e.revoked_at IS NULL AND a.withdrawn_at IS NULL AND a.taken_down_at IS NULL" +
+      " AND a.keys_revoked_at IS NULL" +
       " ORDER BY e.granted_at DESC",
   )
     .bind(steamId)
@@ -601,8 +609,9 @@ async function listEntitlements(account: Account, env: Env): Promise<Response> {
 /**
  * Status for a batch of secured assets the app found on disk. For each requested id: the public
  * `title` (null if we don't know the asset), whether this account `owned` it, and whether it is
- * `available` to unlock (has a stored key and isn't withdrawn). Lets the app show a locked file
- * with a real name and a reason, without ever needing the content key.
+ * `available` to unlock (has a stored key, and isn't withdrawn, taken down, or removed with its
+ * keys taken back). Lets the app show a locked file with a real name and a reason, without ever
+ * needing the content key.
  *
  * It also answers the question that makes a removal real on a machine that is already
  * provisioned: `revoked`. A `.mxbsecure` key is sealed to the buyer's PC and opens **offline**
@@ -614,9 +623,10 @@ async function listEntitlements(account: Account, env: Env): Promise<Response> {
  * It is deliberately a three-way answer rather than `!owned`:
  *
  * - `revoked: true` — we know the identity, we know the asset, and it may not be held. The
- *   entitlement was removed or never existed, or the asset is withdrawn / taken down. The same
- *   conditions `decideEntitlement` refuses a grant on, minus the audit write: the app polls this
- *   on every pass and a row per asset per poll would bury the creator's real usage log.
+ *   entitlement was removed or never existed, or the asset is withdrawn, taken down, or removed
+ *   by its creator with the keys taken back. The same conditions `decideEntitlement` refuses a
+ *   grant on, minus the audit write: the app polls this on every pass and a row per asset per
+ *   poll would bury the creator's real usage log.
  * - `revoked: false` — it may be held (entitled), **or** we can't tell: an unknown asset id (not
  *   ours to judge) or an account with no Steam link yet (`steamId: null`, so nothing is owned by
  *   anyone here and `!owned` would delete every key on the machine).
@@ -647,7 +657,7 @@ async function assetStatus(request: Request, account: Account, env: Env): Promis
   const placeholders = assetIds.map(() => "?").join(",");
   const known = await env.DB.prepare(
     `SELECT id, title, wrapped_key IS NOT NULL AS has_key,` +
-      ` (withdrawn_at IS NOT NULL OR taken_down_at IS NOT NULL) AS withdrawn` +
+      ` (withdrawn_at IS NOT NULL OR taken_down_at IS NOT NULL OR keys_revoked_at IS NOT NULL) AS withdrawn` +
       ` FROM assets WHERE id IN (${placeholders})`,
   )
     .bind(...assetIds)
@@ -675,9 +685,12 @@ async function assetStatus(request: Request, account: Account, env: Env): Promis
         registered: !!a,
         owned: owned.has(id),
         available: !!a && a.has_key === 1 && a.withdrawn !== 1,
-        // Only ever true about an asset we know, for an identity we know. A withdrawn or
-        // taken-down asset counts as revoked for everyone, entitled or not, because the grant
-        // refuses it for everyone — the key on disk should stop opening on the same terms.
+        // Only ever true about an asset we know, for an identity we know. A withdrawn, taken-down
+        // or key-revoked asset counts as revoked for everyone, entitled or not, because the grant
+        // refuses it for everyone — the key on disk should stop opening on the same terms. A
+        // removal that took the keys back is why the row is kept rather than dropped: an asset we
+        // no longer knew would be "can't tell", and the keys would stay on every PC that has one.
+        // A removal that left the keys alone says nothing here, which is exactly what it means.
         revoked: !!a && !!steamId && (a.withdrawn === 1 || !owned.has(id)),
       };
     }),
@@ -720,12 +733,16 @@ async function decideEntitlement(
 
   const decide = async (): Promise<{ allowed: boolean; reason: string; log: boolean }> => {
     if (!steamId) return { allowed: false, reason: "no Steam account linked", log: false };
-    const asset = await env.DB.prepare("SELECT withdrawn_at, taken_down_at FROM assets WHERE id = ?")
+    const asset = await env.DB.prepare("SELECT withdrawn_at, taken_down_at, keys_revoked_at FROM assets WHERE id = ?")
       .bind(assetId)
-      .first<{ withdrawn_at: number | null; taken_down_at: number | null }>();
+      .first<{ withdrawn_at: number | null; taken_down_at: number | null; keys_revoked_at: number | null }>();
     if (!asset) return { allowed: false, reason: "no such asset", log: false };
     // Ours, and checked first: a creator restoring a withdrawal doesn't lift it.
     if (asset.taken_down_at !== null) return { allowed: false, reason: "taken down", log: true };
+    // The creator removed it and asked for the keys back. Its own word rather than "withdrawn",
+    // because this one is final: the content key is gone, so there is nothing left to release
+    // even if it were allowed. A removal that kept the keys doesn't come through here at all.
+    if (asset.keys_revoked_at !== null) return { allowed: false, reason: "removed", log: true };
     if (asset.withdrawn_at !== null) return { allowed: false, reason: "withdrawn", log: true };
 
     const row = await env.DB.prepare(

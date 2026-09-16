@@ -191,7 +191,7 @@ describe("CORS", () => {
       const res = await preflight(env, origin);
       expect(res.status).toBe(204);
       expect(res.headers.get("Access-Control-Allow-Origin")).toBe(origin);
-      expect(res.headers.get("Access-Control-Allow-Methods")).toBe("GET, POST, PATCH, OPTIONS");
+      expect(res.headers.get("Access-Control-Allow-Methods")).toBe("GET, POST, PATCH, DELETE, OPTIONS");
       expect(res.headers.get("Access-Control-Allow-Headers")).toBe("Authorization, Content-Type");
       expect(res.headers.get("Vary")).toContain("Origin");
     }
@@ -564,6 +564,148 @@ describe("takedown", () => {
   });
 });
 
+describe("removal", () => {
+  const CREATOR = "76561198174305985";
+
+  /** A creator on the site, their asset, and a buyer holding it. */
+  async function sold(title = "Pine Hill") {
+    const env = await deployment({ MXB_WEB_SESSION_KEY: "session-secret" });
+    await addAccount(env.DB, "acc_creator", "Creator", CREATOR);
+    await env.DB.prepare("UPDATE accounts SET creator_at = 1 WHERE id = 'acc_creator'").run();
+    await env.DB.prepare("INSERT INTO accounts (id, rider_name, steam_id, token_hash, created_at) VALUES (?, ?, ?, ?, ?)")
+      .bind("acc_buyer", "Buyer", BUYER, await hashToken("buyer-token"), Date.now())
+      .run();
+    const cookie = `${SESSION_COOKIE}=${await sealToken({ t: "session", steamId: CREATOR, name: "C", exp: Date.now() + 60_000 }, "session-secret")}`;
+    // As the site sends it: the cookie, our Origin, and a body only when there is one.
+    const asCreator = (method: string, path: string, body?: unknown) =>
+      call(env, req(method, path, { key: null, origin: SITE, body, headers: { Cookie: cookie } }));
+    const made = await asCreator("POST", "/admin/assets", { title });
+    const { assetId } = (await made.json()) as { assetId: string };
+    await asCreator("POST", `/admin/assets/${assetId}/grants`, { add: [BUYER] });
+    const ask = () => call(env, req("POST", "/v1/keys/grant", { key: "buyer-token", body: { assetId, sessionId: "s1" } }));
+    const status = async () =>
+      ((await (await call(env, req("POST", "/v1/assets/status", { key: "buyer-token", body: { assetIds: [assetId] } }))).json()) as {
+        assets: { owned: boolean; available: boolean; revoked: boolean; registered: boolean }[];
+      }).assets[0];
+    const listed = async () =>
+      ((await (await asCreator("GET", "/admin/assets")).json()) as {
+        assets: { assetId: string; buyers: number; deletedAt: number | null; keysRevokedAt: number | null }[];
+      }).assets;
+    return { env, assetId, asCreator, ask, status, listed };
+  }
+
+  it("keeps the asset on the list, read-only, and leaves the buyers' keys alone", async () => {
+    const { env, assetId, asCreator, ask, status, listed } = await sold();
+    expect((await ask()).status).toBe(200);
+
+    const gone = await asCreator("DELETE", `/admin/assets/${assetId}?keys=keep`);
+    expect(gone.status).toBe(200);
+    expect(await gone.json()).toMatchObject({ assetId, deletedAt: expect.any(Number), keysRevokedAt: null });
+
+    // Still there, marked removed, with its buyer still counted.
+    expect(await listed()).toMatchObject([{ assetId, buyers: 1, deletedAt: expect.any(Number), keysRevokedAt: null }]);
+    // Nothing about it changes again, removal included.
+    for (const [method, path, body] of [
+      ["POST", `/admin/assets/${assetId}/grants`, { add: [OTHER] }],
+      ["PATCH", `/admin/assets/${assetId}`, { withdrawn: true }],
+    ] as [string, string, unknown][]) {
+      const res = await asCreator(method, path, body);
+      expect(res.status, `${method} ${path}`).toBe(409);
+      expect(await res.json()).toEqual({ error: "that asset has been removed" });
+    }
+    const again = await asCreator("DELETE", `/admin/assets/${assetId}?keys=revoke`);
+    expect(again.status).toBe(409);
+    expect(await again.json()).toEqual({ error: "that asset has already been removed" });
+    // But its buyers and its usage log still read.
+    expect((await asCreator("GET", `/admin/assets/${assetId}/grants`)).status).toBe(200);
+    expect((await asCreator("GET", `/admin/assets/${assetId}/usage`)).status).toBe(200);
+
+    // And the whole point: the buyer is untouched, on the PC they have and on the next one.
+    expect((await ask()).status).toBe(200);
+    expect(await status()).toMatchObject({ owned: true, available: true, revoked: false });
+
+    // Which is why a takedown still has to reach it: it is removed, and it is still granting.
+    expect((await call(env, req("PATCH", `/admin/assets/${assetId}`, { body: { takenDown: true } }))).status).toBe(200);
+    expect(await (await ask()).json()).toEqual({ error: "taken down" });
+  });
+
+  it("with keys=revoke destroys the key, revokes every buyer and takes the keys back", async () => {
+    const { env, assetId, asCreator, ask, status, listed } = await sold();
+    expect((await ask()).status).toBe(200);
+
+    const gone = await asCreator("DELETE", `/admin/assets/${assetId}?keys=revoke`);
+    expect(gone.status).toBe(200);
+    expect(await gone.json()).toMatchObject({ assetId, deletedAt: expect.any(Number), keysRevokedAt: expect.any(Number) });
+    expect(await listed()).toMatchObject([{ assetId, buyers: 0, keysRevokedAt: expect.any(Number) }]);
+
+    // The file never opens again: no key is left to release, and the buyer is told to drop theirs.
+    expect(await (await ask()).json()).toEqual({ error: "removed" });
+    expect(await status()).toMatchObject({ registered: true, owned: false, available: false, revoked: true });
+    expect(await env.DB.prepare("SELECT wrapped_key, withdrawn_at IS NOT NULL AS off FROM assets WHERE id = ?").bind(assetId).first()).toEqual({
+      wrapped_key: null,
+      off: 1,
+    });
+    expect(
+      await env.DB.prepare("SELECT COUNT(*) AS n FROM entitlements WHERE asset_id = ? AND revoked_at IS NULL").bind(assetId).first(),
+    ).toEqual({ n: 0 });
+    // The ledger is the point of keeping the row: who unlocked it is still on record.
+    const log = await env.DB.prepare("SELECT decision, reason FROM entitlement_grants WHERE asset_id = ? ORDER BY id").bind(assetId).all();
+    expect(log.results).toEqual([
+      { decision: "allow", reason: "entitled" },
+      { decision: "deny", reason: "removed" },
+    ]);
+  });
+
+  it("asks which it is, and won't guess", async () => {
+    const { assetId, asCreator, listed } = await sold();
+    for (const query of ["", "?keys=", "?keys=yes", "?keys=REVOKE"]) {
+      const res = await asCreator("DELETE", `/admin/assets/${assetId}${query}`);
+      expect(res.status, query).toBe(400);
+      expect(await res.json()).toEqual({ error: "keys must be revoke or keep" });
+    }
+    expect(await listed()).toMatchObject([{ deletedAt: null }]);
+  });
+
+  it("leaves another creator's asset, and an asset we've taken down, alone", async () => {
+    const { env, assetId, asCreator, listed } = await sold();
+    // Someone else signed in on the site can't remove it: it isn't theirs to see.
+    const stranger = `${SESSION_COOKIE}=${await sealToken({ t: "session", steamId: OTHER, name: "S", exp: Date.now() + 60_000 }, "session-secret")}`;
+    await addAccount(env.DB, "acc_other", "Other", OTHER);
+    await env.DB.prepare("UPDATE accounts SET creator_at = 1 WHERE id = 'acc_other'").run();
+    expect(
+      (await call(env, req("DELETE", `/admin/assets/${assetId}?keys=keep`, { key: null, origin: SITE, headers: { Cookie: stranger } }))).status,
+    ).toBe(404);
+
+    // Taken down by us, and a creator can't wipe it — that would take the ledger with it.
+    expect((await call(env, req("PATCH", `/admin/assets/${assetId}`, { body: { takenDown: true } }))).status).toBe(200);
+    const refused = await asCreator("DELETE", `/admin/assets/${assetId}?keys=revoke`);
+    expect(refused.status).toBe(403);
+    expect(await refused.json()).toEqual({ error: "that asset has been taken down; only mxbsecure can remove it" });
+    expect(await listed()).toMatchObject([{ deletedAt: null }]);
+
+    // We can.
+    expect((await call(env, req("DELETE", `/admin/assets/${assetId}?keys=revoke`))).status).toBe(200);
+    expect(await listed()).toMatchObject([{ deletedAt: expect.any(Number) }]);
+  });
+
+  it("refuses a removal that didn't come from the site", async () => {
+    const { assetId, asCreator, env } = await sold();
+    for (const origin of [undefined, "https://evil.mxbsecure.com"]) {
+      const res = await call(
+        env,
+        req("DELETE", `/admin/assets/${assetId}?keys=revoke`, {
+          key: null,
+          ...(origin ? { origin } : {}),
+          headers: { Cookie: `${SESSION_COOKIE}=${await sealToken({ t: "session", steamId: CREATOR, name: "C", exp: Date.now() + 60_000 }, "session-secret")}` },
+        }),
+      );
+      expect(res.status).toBe(403);
+      expect(await res.json()).toEqual({ error: "that request didn't come from mxbsecure.com" });
+    }
+    expect((await asCreator("DELETE", `/admin/assets/${assetId}?keys=keep`)).status).toBe(200);
+  });
+});
+
 describe("asset status", () => {
   /** Every asset's status for one account, keyed by asset id. */
   async function statuses(env: Env, token: string, assetIds: string[]) {
@@ -731,11 +873,10 @@ describe("a creator who started on the site", () => {
   it("brings their assets along when they link the same Steam account in the app", async () => {
     const env = await deployment({ MXB_WEB_SESSION_KEY: "session-secret", MXB_SITE_ORIGIN: SITE });
     await addAccount(env.DB, "acc_app", "Rider");
-    // A `kind = 'web'` profile from when the site could mint one. Nothing creates these now,
-    // but the ones that exist still have to hand their assets over on a real link.
+    // The `kind = 'web'` profile a signup on the site mints for somebody with no app account.
     await env.DB.prepare(
-      "INSERT INTO accounts (id, rider_name, steam_id, token_hash, created_at, kind, creator_at)" +
-        " VALUES ('acc_web', ?, ?, 'hash_web', 1, 'web', 1)",
+      "INSERT INTO accounts (id, rider_name, steam_id, token_hash, created_at, kind, creator_at, creator_source)" +
+        " VALUES ('acc_web', ?, ?, 'hash_web', 1, 'web', 1, 'self')",
     )
       .bind(`web:${STEAM}`, STEAM)
       .run();
@@ -749,7 +890,12 @@ describe("a creator who started on the site", () => {
     const res = await linkInApp(env, "acc_app", STEAM);
     expect(res.headers.get("Location")).toBe(`${SITE}/steam?r=linked`);
     expect(await env.DB.prepare("SELECT creator_id FROM assets WHERE id = ?").bind(assetId).first()).toEqual({ creator_id: "acc_app" });
-    expect(await env.DB.prepare("SELECT id, creator_at IS NOT NULL AS creator FROM accounts WHERE steam_id = ?").bind(STEAM).first()).toEqual({ id: "acc_app", creator: 1 });
+    // Creator standing travels, and so does the fact that they signed themselves up for it.
+    expect(
+      await env.DB.prepare("SELECT id, creator_at IS NOT NULL AS creator, creator_source FROM accounts WHERE steam_id = ?")
+        .bind(STEAM)
+        .first(),
+    ).toEqual({ id: "acc_app", creator: 1, creator_source: "self" });
     expect(await env.DB.prepare("SELECT steam_id FROM accounts WHERE id = ?").bind(web!.id).first()).toEqual({ steam_id: null });
   });
 
