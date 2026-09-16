@@ -1107,10 +1107,14 @@ fn corner(c: &mut Ctx) {
     let offset = dx * heading.cos() - dz * heading.sin(); // + is right of the fast line
     if offset.abs() > th::LINE_M && s.dir != 0 {
         let tighter = offset * s.dir as f32 > 0.0;
-        c.add("line", 0.75, apex_r, if tighter { "Take a wider line" } else { "Take a tighter line" }, format!(
-            "At the apex of {name} you are {:.1} m {} the fast lap. Pick its line before you brake.",
+        // Named as the rider would say it, not as a direction of travel: "wider" on its own
+        // reads as advice about effort, "the outside line" is a place on the track.
+        c.add("line", 0.75, apex_r, if tighter { "Take the outside line" } else { "Take the inside line" }, format!(
+            "At the apex of {name} you are {:.1} m {} the fast lap. Run {} through here, and pick that \
+             line before you brake.",
             offset.abs(),
-            if tighter { "inside" } else { "outside" }
+            if tighter { "inside" } else { "outside" },
+            if tighter { "the outside line" } else { "the inside line" }
         ));
     }
     let coast = |t: &Trace| t.time_where(start..end, |q| q.brake() < 0.05 && q.throttle < 0.15 && !q.air);
@@ -2084,19 +2088,16 @@ pub(crate) fn cue_points(r: &Trace, secs: &[Section]) -> Vec<CuePoint> {
                             add(off, cue::OFF_BRAKES);
                         }
                     }
-                    // A gear lower by the apex: down on the brakes.
-                    if let Some(i) = (on..apex).find(|&i| r.pts[i + 1].gear < r.pts[i].gear && r.pts[i + 1].gear > 0) {
-                        add(i, cue::DOWNSHIFT);
-                    }
                 }
                 add(a, cue::SIT);
                 let held = |i: usize| (i..(i + th::THROTTLE_HOLD_M).min(end)).all(|j| r.pts[j].throttle > th::THROTTLE_ON);
                 if let Some(g) = (apex..end).find(|&i| held(i)) {
                     add(g, cue::THROTTLE);
                 }
-                if let Some(i) = (apex..end).find(|&i| r.pts[i + 1].gear > r.pts[i].gear && r.pts[i].gear > 0) {
-                    add(i, cue::UPSHIFT);
-                }
+                // No shift cue here. Where the fast lap happens to change gear says nothing
+                // about whether the rider's gear is costing them anything, and "shift earlier"
+                // called at a corner a rider is carrying speed through reads as "go slower".
+                // Shift cues come from the gearing rules instead, in `cues::pick`.
             }
             Kind::Jump | Kind::Rhythm => {
                 if s.kind == Kind::Rhythm {

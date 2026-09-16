@@ -16,6 +16,7 @@ mod ground;
 mod hud;
 mod hudsheet;
 mod imports;
+mod ini;
 mod lines;
 mod others;
 mod overlay;
@@ -164,6 +165,7 @@ fn main() {
             coach::coach_ground,
             coach::coach_setup_plan,
             coach::coach_save_setup,
+            coach::coach_select_setup,
             coach::coach_write_cues,
             // The trainer laps: another rider's recordings, kept apart from the rider's own.
             imports::coach_imports,
@@ -188,6 +190,7 @@ fn main() {
             coach::coach_uninstall_plugin,
             hud::coach_hud,
             hud::coach_set_hud,
+            hud::coach_set_cue_pos,
             hud::coach_voice,
             hud::coach_set_voice,
             overlay::overlay_toggle,

@@ -126,7 +126,19 @@ pub struct Scenery {
 // ---------------------------------------------------------------------------
 
 /// The stem a track's own files are named after — `Millville.pkz` holds `Millville.map`.
-fn track_stem(path: &Path) -> String {
+///
+/// Inside a shared archive it is the track's own folder that names its files, not the file
+/// holding it: every stock track sits in one `tracks.pkz`, whose stem is `tracks`, while
+/// `tracks/motocross/forest` holds `forest.map`. Without the prefix a stock track ranks its
+/// own `.map` no higher than anything else, and a layout's `.scr` sorts ahead of the track's.
+fn track_stem(path: &Path, prefix: Option<&str>) -> String {
+    if let Some(p) = prefix {
+        let norm = p.replace('\\', "/");
+        let last = norm.trim_matches('/').rsplit('/').next().unwrap_or_default();
+        if !last.is_empty() {
+            return last.to_ascii_lowercase();
+        }
+    }
     path.file_stem()
         .map(|s| s.to_string_lossy().to_ascii_lowercase())
         .unwrap_or_default()
@@ -384,14 +396,15 @@ fn ambience(
 /// sky away. See [`crate::edf::parse_world`].
 pub fn backdrop(
     path: &str,
+    prefix: Option<&str>,
 ) -> Result<(
     Ambience,
     (MapMesh, Option<MapTexture>),
     (MapMesh, Option<MapTexture>),
 )> {
     let p = Path::new(path);
-    let names = crate::track::entry_names(p)?;
-    let stem = track_stem(p);
+    let names = crate::track::entry_names_under(p, prefix)?;
+    let stem = track_stem(p, prefix);
     let (amb, background, sky) = ambience(p, &names, &stem);
 
     // The picture a dome carries *is* the sky — twenty-two megabytes of it behind a few
@@ -514,10 +527,10 @@ const GROUND_WORDS: [&str; 10] = [
 /// that six times or more into a blur. Nothing in the file has finer detail *at a place*, but
 /// the ground sheets have plenty of it *as a material*, so one is tiled over the terrain to
 /// put grain back where interpolation took it out.
-pub fn ground_detail(path: &str) -> Result<Vec<MapTexture>> {
+pub fn ground_detail(path: &str, prefix: Option<&str>) -> Result<Vec<MapTexture>> {
     let p = Path::new(path);
-    let names = crate::track::entry_names(p)?;
-    let stem = track_stem(p);
+    let names = crate::track::entry_names_under(p, prefix)?;
+    let stem = track_stem(p, prefix);
     for entry in entries_with_ext(&names, "map", &stem) {
         let Ok(bytes) = crate::track::read_entry(p, &entry) else {
             continue;
@@ -665,10 +678,10 @@ pub fn save_scr(target: &str, props: &[Placement], overwrite: bool) -> Result<()
 ///
 /// Cheap on purpose: these files are a few kilobytes each, so the viewer can mark them while
 /// the scenery mesh — which is most of a gigabyte of archive away — is still being read.
-pub fn read_placements(path: &str) -> Result<Vec<Placement>> {
+pub fn read_placements(path: &str, prefix: Option<&str>) -> Result<Vec<Placement>> {
     let p = Path::new(path);
-    let names = crate::track::entry_names(p)?;
-    let stem = track_stem(p);
+    let names = crate::track::entry_names_under(p, prefix)?;
+    let stem = track_stem(p, prefix);
     let mut out = Vec::new();
 
     let mut take = |ext: &str, f: &dyn Fn(&[u8]) -> Vec<Placement>| {
@@ -883,12 +896,12 @@ fn take_map(key: &str) -> Option<(Vec<u8>, String)> {
 /// surfaces are hundreds of megabytes to inflate and reduce. Waiting for the second before
 /// showing the first is most of a second of blank canvas for no reason, so the viewer asks
 /// for the mesh, draws it, and asks for the surfaces after.
-pub fn load(app: &tauri::AppHandle, path: &str) -> Result<Scenery> {
-    let key = cache_key(path)?;
+pub fn load(app: &tauri::AppHandle, path: &str, prefix: Option<&str>) -> Result<Scenery> {
+    let key = cache_key(path, prefix)?;
     if let Some(hit) = cache_file(app, &key, MESH_CACHE).and_then(|f| read_cache(&f)) {
         return Ok(hit);
     }
-    let scenery = decode_with_key(Path::new(path), false, Some(&key))?;
+    let scenery = decode_with_key(Path::new(path), prefix, false, Some(&key))?;
     if let Some(f) = cache_file(app, &key, MESH_CACHE) {
         write_cache(&f, &scenery);
         prune_cache(app, MESH_CACHE);
@@ -900,12 +913,16 @@ pub fn load(app: &tauri::AppHandle, path: &str) -> Result<Scenery> {
 ///
 /// The pick is a couple of megabytes but the search is not: it inflates candidate sheets to
 /// check that a normal map really is one. Cached, opening a track again costs a file read.
-pub fn load_ground(app: &tauri::AppHandle, path: &str) -> Result<Vec<MapTexture>> {
-    let key = cache_key(path)?;
+pub fn load_ground(
+    app: &tauri::AppHandle,
+    path: &str,
+    prefix: Option<&str>,
+) -> Result<Vec<MapTexture>> {
+    let key = cache_key(path, prefix)?;
     if let Some(hit) = cache_file(app, &key, GROUND_CACHE).and_then(|f| read_surface_cache(&f)) {
         return Ok(hit);
     }
-    let sheets = ground_detail(path)?;
+    let sheets = ground_detail(path, prefix)?;
     if let Some(f) = cache_file(app, &key, GROUND_CACHE) {
         write_surface_cache(&f, &sheets);
         prune_cache(app, GROUND_CACHE);
@@ -918,15 +935,19 @@ pub fn load_ground(app: &tauri::AppHandle, path: &str) -> Result<Vec<MapTexture>
 /// Two or three hundred kilobytes once reduced — small next to the surfaces, and worth caching
 /// for the same reason: getting at it means pulling a several-hundred-megabyte `.map` out of an
 /// archive, which is most of a second.
-pub fn load_ground_layers(app: &tauri::AppHandle, path: &str) -> Result<Vec<u8>> {
-    let key = cache_key(path)?;
+pub fn load_ground_layers(
+    app: &tauri::AppHandle,
+    path: &str,
+    prefix: Option<&str>,
+) -> Result<Vec<u8>> {
+    let key = cache_key(path, prefix)?;
     if let Some(hit) = cache_file(app, &key, GROUND_LAYERS_CACHE).and_then(|f| std::fs::read(f).ok())
     {
         if hit.len() >= map::GROUND_LAYERS_HEADER && hit.starts_with(b"FGLY") {
             return Ok(hit);
         }
     }
-    let blob = map::ground_layers_blob(&read_ground_layers(path)?);
+    let blob = map::ground_layers_blob(&read_ground_layers(path, prefix)?);
     if let Some(f) = cache_file(app, &key, GROUND_LAYERS_CACHE) {
         if let Some(parent) = f.parent() {
             let _ = std::fs::create_dir_all(parent);
@@ -938,10 +959,10 @@ pub fn load_ground_layers(app: &tauri::AppHandle, path: &str) -> Result<Vec<u8>>
 }
 
 /// The uncached read: the expensive half, and the one the tests come in through.
-fn read_ground_layers(path: &str) -> Result<Vec<map::GroundLayer>> {
+fn read_ground_layers(path: &str, prefix: Option<&str>) -> Result<Vec<map::GroundLayer>> {
     let p = Path::new(path);
-    let names = crate::track::entry_names(p)?;
-    let stem = track_stem(p);
+    let names = crate::track::entry_names_under(p, prefix)?;
+    let stem = track_stem(p, prefix);
     for entry in entries_with_ext(&names, "map", &stem) {
         let Ok(bytes) = crate::track::read_entry(p, &entry) else {
             continue;
@@ -958,12 +979,16 @@ fn read_ground_layers(path: &str) -> Result<Vec<map::GroundLayer>> {
 }
 
 /// A track's surfaces, cached apart from its mesh.
-pub fn load_surfaces(app: &tauri::AppHandle, path: &str) -> Result<Vec<MapTexture>> {
-    let key = cache_key(path)?;
+pub fn load_surfaces(
+    app: &tauri::AppHandle,
+    path: &str,
+    prefix: Option<&str>,
+) -> Result<Vec<MapTexture>> {
+    let key = cache_key(path, prefix)?;
     if let Some(hit) = cache_file(app, &key, SURFACE_CACHE).and_then(|f| read_surface_cache(&f)) {
         return Ok(hit);
     }
-    let scenery = decode_with_key(Path::new(path), true, Some(&key))?;
+    let scenery = decode_with_key(Path::new(path), prefix, true, Some(&key))?;
     if let Some(f) = cache_file(app, &key, SURFACE_CACHE) {
         write_surface_cache(&f, &scenery.textures);
         prune_cache(app, SURFACE_CACHE);
@@ -975,13 +1000,18 @@ pub fn load_surfaces(app: &tauri::AppHandle, path: &str) -> Result<Vec<MapTextur
 /// this doesn't read — which is exactly why the result is worth caching.
 // The uncached entry point, for the tests; the app comes in through the cache.
 #[allow(dead_code)]
-fn decode(path: &Path, want_surfaces: bool) -> Result<Scenery> {
-    decode_with_key(path, want_surfaces, None)
+fn decode(path: &Path, prefix: Option<&str>, want_surfaces: bool) -> Result<Scenery> {
+    decode_with_key(path, prefix, want_surfaces, None)
 }
 
-fn decode_with_key(path: &Path, want_surfaces: bool, key: Option<&str>) -> Result<Scenery> {
-    let names = crate::track::entry_names(path)?;
-    let stem = track_stem(path);
+fn decode_with_key(
+    path: &Path,
+    prefix: Option<&str>,
+    want_surfaces: bool,
+    key: Option<&str>,
+) -> Result<Scenery> {
+    let names = crate::track::entry_names_under(path, prefix)?;
+    let stem = track_stem(path, prefix);
 
     let mut mesh = MapMesh::default();
     let mut textures: Vec<MapTexture> = Vec::new();
@@ -1163,7 +1193,10 @@ fn read_surface_cache(file: &Path) -> Option<Vec<MapTexture>> {
     Some(out)
 }
 
-fn cache_key(path: &str) -> Result<String> {
+/// A prefix joins the file name, so each stock track in `tracks.pkz` caches apart. With no
+/// prefix the key is what it always was, so existing entries stay valid. Mirrors
+/// `track::cache_key`.
+fn cache_key(path: &str, prefix: Option<&str>) -> Result<String> {
     let m = std::fs::metadata(path)?;
     let mtime = m
         .modified()
@@ -1181,7 +1214,13 @@ fn cache_key(path: &str) -> Result<String> {
     } else {
         m.len()
     };
-    Ok(format!("{name}:{size}:{mtime}"))
+    let norm = prefix
+        .map(|p| p.replace('\\', "/").trim_matches('/').to_ascii_lowercase())
+        .filter(|p| !p.is_empty());
+    match norm {
+        Some(p) => Ok(format!("{name}@{p}:{size}:{mtime}")),
+        None => Ok(format!("{name}:{size}:{mtime}")),
+    }
 }
 
 fn cache_file(app: &tauri::AppHandle, key: &str, dir_name: &str) -> Option<PathBuf> {
@@ -1567,7 +1606,7 @@ source1
         let size_x = mps * (layout.width.max(2) - 1) as f32;
         let size_z = mps * (layout.height.max(2) - 1) as f32;
 
-        let marshals: Vec<Placement> = read_placements(&path)
+        let marshals: Vec<Placement> = read_placements(&path, None)
             .expect("read placements")
             .into_iter()
             .filter(|p| p.kind == "marshal")
@@ -1605,14 +1644,14 @@ source1
     #[ignore = "needs a real track — set FROST_TRACK"]
     fn ground_sheet_of_a_real_track() {
         let path = std::env::var("FROST_TRACK").expect("set FROST_TRACK");
-        let sheets = ground_detail(&path).expect("look for a ground sheet");
+        let sheets = ground_detail(&path, None).expect("look for a ground sheet");
         if sheets.is_empty() {
             println!("  no ground sheet found");
         }
         // What the track calls its sheets, so a missing normal map can be told from a
         // mis-named one.
         let names = crate::track::entry_names(Path::new(&path)).unwrap_or_default();
-        let stem = track_stem(Path::new(&path));
+        let stem = track_stem(Path::new(&path), None);
         for entry in entries_with_ext(&names, "map", &stem) {
             if let Ok(bytes) = crate::track::read_entry(Path::new(&path), &entry) {
                 let all = crate::map::survey(&bytes);
@@ -1662,7 +1701,7 @@ source1
     #[ignore = "needs a real track — set FROST_TRACK"]
     fn backdrop_of_a_real_track() {
         let path = std::env::var("FROST_TRACK").expect("set FROST_TRACK");
-        let (amb, sky, back) = backdrop(&path).expect("read the ambience");
+        let (amb, sky, back) = backdrop(&path, None).expect("read the ambience");
         println!(
             "  sun {:?}  sky {:?}  fog {:?} @ {:?}",
             amb.sun, amb.sky_colour, amb.fog_colour, amb.fog_density
@@ -1885,7 +1924,7 @@ overcast\n{\nsky = my_own_dome.edf\n}\n";
                 .unwrap_or_default();
             let key = p.to_string_lossy().into_owned();
             let t0 = std::time::Instant::now();
-            let mesh = decode_with_key(p, false, Some(&key));
+            let mesh = decode_with_key(p, None, false, Some(&key));
             let mesh_ms = t0.elapsed().as_millis();
             let Ok(m) = mesh else {
                 println!("{name:<38} {:>7}", "—");
@@ -1893,7 +1932,7 @@ overcast\n{\nsky = my_own_dome.edf\n}\n";
             };
             ok += 1;
             let t1 = std::time::Instant::now();
-            let surf = decode_with_key(p, true, Some(&key))
+            let surf = decode_with_key(p, None, true, Some(&key))
                 .map(|s| s.textures.len())
                 .unwrap_or(0);
             let surf_ms = t1.elapsed().as_millis();
@@ -1949,7 +1988,7 @@ overcast\n{\nsky = my_own_dome.edf\n}\n";
     fn render_a_real_track() {
         let path = std::env::var("FROST_TRACK").expect("set FROST_TRACK");
         let out = std::env::var("FROST_PNG").unwrap_or_else(|_| "/tmp/track.png".into());
-        let s = decode(Path::new(&path), true).expect("decode the scenery");
+        let s = decode(Path::new(&path), None, true).expect("decode the scenery");
         let (lo, hi) = s.mesh.bounds();
         println!(
             "{} verts, {} tris, bbox x[{:.0},{:.0}] y[{:.0},{:.0}] z[{:.0},{:.0}]",
@@ -2135,7 +2174,7 @@ overcast\n{\nsky = my_own_dome.edf\n}\n";
     #[ignore = "needs a real track — set FROST_TRACK"]
     fn what_each_material_wears() {
         let path = std::env::var("FROST_TRACK").expect("set FROST_TRACK");
-        let s = decode(Path::new(&path), true).expect("decode the scenery");
+        let s = decode(Path::new(&path), None, true).expect("decode the scenery");
         let tex = &s.textures;
 
         let mut tris = vec![0u32; s.info.materials.max(1) as usize + 8];
@@ -2224,7 +2263,7 @@ overcast\n{\nsky = my_own_dome.edf\n}\n";
 
     fn real_track_report() {
         let path = std::env::var("FROST_TRACK").expect("set FROST_TRACK to a track .pkz/folder");
-        let s = decode(Path::new(&path), true).expect("decode the scenery");
+        let s = decode(Path::new(&path), None, true).expect("decode the scenery");
         let (lo, hi) = s.mesh.bounds();
         println!("  from {}", s.info.entry);
         println!(
@@ -2398,5 +2437,464 @@ obj3
         let objs = read_scr(bad);
         assert_eq!(objs.len(), 1, "only the complete object survives");
         assert_eq!(objs[0].0.name, "ok.edf");
+    }
+
+    // -----------------------------------------------------------------------
+    // Reading one track out of an archive that holds several
+    // -----------------------------------------------------------------------
+
+    fn scratch(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("scenery-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn write_zip(path: &Path, entries: &[(&str, Vec<u8>)]) {
+        use std::io::Write;
+        let mut zip = zip::ZipWriter::new(std::fs::File::create(path).unwrap());
+        let opts: zip::write::FileOptions<()> =
+            zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Stored);
+        for (name, bytes) in entries {
+            zip.start_file(*name, opts).unwrap();
+            zip.write_all(bytes).unwrap();
+        }
+        zip.finish().unwrap();
+    }
+
+    /// A `.map` carrying a ground stack, built the way a compiled one holds it — enough for
+    /// the layer walk to find, without a hundred-megabyte track on disk. The stack itself
+    /// mirrors the generator in `map`'s own tests; what matters here is which file it is in.
+    fn synth_ground_map(layers: &[(&str, f32, Option<u32>)]) -> Vec<u8> {
+        use flate2::{write::DeflateEncoder, Compression};
+        use std::io::Write;
+        // A layer's material record, ahead of its sheet count. `map::LAYER_MATERIAL`.
+        const LAYER_MATERIAL: usize = 56;
+        let mut b = b"MP2\0".to_vec();
+        b.extend_from_slice(&[0u8; 8]);
+        // No materials: this track has ground and no scenery, which is all these tests read.
+        b.extend_from_slice(&0u32.to_le_bytes());
+        b.extend_from_slice(&[0u8; 64]); // something in front, so offset zero is never it
+        for (name, tile, mask) in layers {
+            b.extend_from_slice(&[0u8; LAYER_MATERIAL]);
+            b.extend_from_slice(&1u32.to_le_bytes()); // one sheet
+            let mut nm = vec![0u8; 100];
+            nm[..name.len()].copy_from_slice(name.as_bytes());
+            b.extend_from_slice(&nm);
+            b.extend_from_slice(&0u32.to_le_bytes());
+            b.extend_from_slice(&8u32.to_le_bytes()); // 8x8 sheet
+            b.extend_from_slice(&8u32.to_le_bytes());
+            b.extend_from_slice(&[0u8; 16]); // hash
+            b.extend_from_slice(&0u32.to_le_bytes()); // no sub-records
+            let px = vec![128u8; 8 * 8 * 4];
+            let mut e = DeflateEncoder::new(Vec::new(), Compression::fast());
+            e.write_all(&px).unwrap();
+            let z = e.finish().unwrap();
+            b.extend_from_slice(&((z.len() + 8) as u32).to_le_bytes());
+            b.extend_from_slice(&[0u8; 8]);
+            b.extend_from_slice(&z);
+            b.extend_from_slice(&0u32.to_le_bytes()); // no secondary map
+            b.extend_from_slice(&tile.to_le_bytes());
+            b.extend_from_slice(&tile.to_le_bytes());
+            match mask {
+                Some(d) => {
+                    b.extend_from_slice(&1u32.to_le_bytes());
+                    b.extend_from_slice(&d.to_le_bytes());
+                    b.extend_from_slice(&d.to_le_bytes());
+                    let cov = vec![200u8; (*d as usize) * (*d as usize)];
+                    let mut e = DeflateEncoder::new(Vec::new(), Compression::fast());
+                    e.write_all(&cov).unwrap();
+                    let z = e.finish().unwrap();
+                    b.extend_from_slice(&((z.len() + 8) as u32).to_le_bytes());
+                    b.extend_from_slice(&[0u8; 8]);
+                    b.extend_from_slice(&z);
+                }
+                None => b.extend_from_slice(&0u32.to_le_bytes()),
+            }
+            b.extend_from_slice(&0u32.to_le_bytes()); // the word that closes a layer
+        }
+        b.extend_from_slice(&[0u8; 256]);
+        b
+    }
+
+    /// The fault the prefix exists for: every stock track shares one `tracks.pkz`, so the
+    /// whole archive's names hand the first track's `.map` to whichever track asked. Until
+    /// the prefix reached this loader, every stock track drew as bare terrain.
+    #[test]
+    fn a_track_in_a_shared_archive_paints_with_its_own_ground() {
+        let dir = scratch("stock");
+        let archive = dir.join("tracks.pkz");
+        write_zip(
+            &archive,
+            &[
+                (
+                    "tracks/motocross/club/club.map",
+                    synth_ground_map(&[
+                        ("club_base_c", 210.0, None),
+                        ("club_grass_c", 150.0, Some(32)),
+                    ]),
+                ),
+                (
+                    "tracks/motocross/forest/forest.map",
+                    synth_ground_map(&[
+                        ("forest_base_c", 200.0, None),
+                        ("forest_line_c", 180.0, Some(64)),
+                    ]),
+                ),
+            ],
+        );
+        let path = archive.to_string_lossy().into_owned();
+
+        let forest = read_ground_layers(&path, Some("tracks/motocross/forest")).unwrap();
+        assert_eq!(
+            forest.iter().map(|l| l.sheet.name.as_str()).collect::<Vec<_>>(),
+            ["forest_base_c", "forest_line_c"],
+            "a stock track has to get its own ground, not the archive's first"
+        );
+        assert_eq!(forest[1].mask.as_ref().unwrap().width, 64);
+
+        // Cased and slashed however the caller has it.
+        let same = read_ground_layers(&path, Some("Tracks\\Motocross\\Forest/")).unwrap();
+        assert_eq!(same.len(), forest.len());
+
+        let club = read_ground_layers(&path, Some("tracks/motocross/club")).unwrap();
+        assert_eq!(
+            club.iter().map(|l| l.sheet.name.as_str()).collect::<Vec<_>>(),
+            ["club_base_c", "club_grass_c"],
+            "and its neighbour gets its own, not the forest's"
+        );
+
+        // A track the archive doesn't hold has no ground rather than someone else's.
+        assert!(read_ground_layers(&path, Some("tracks/motocross/holjes"))
+            .unwrap()
+            .is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The two shapes an installed track comes in. Both are one track per file, so both read
+    /// without a prefix — and still do.
+    #[test]
+    fn an_installed_track_still_reads_without_a_prefix() {
+        let dir = scratch("mod");
+        // Every published track nests its files under a folder named after it.
+        let pkz = dir.join("SandPointMX.pkz");
+        write_zip(
+            &pkz,
+            &[(
+                "SandPointMX/SandPointMX.map",
+                synth_ground_map(&[("spmx_base_c", 160.0, None), ("spmx_rut_c", 140.0, Some(32))]),
+            )],
+        );
+        let layers = read_ground_layers(&pkz.to_string_lossy(), None).unwrap();
+        assert_eq!(layers.len(), 2, "a nested .pkz reads as the one track it is");
+        assert_eq!(layers[0].sheet.name, "spmx_base_c");
+
+        // And unpacked in `mods/tracks`, which is a directory rather than an archive.
+        let loose = dir.join("LooseMX");
+        std::fs::create_dir_all(&loose).unwrap();
+        std::fs::write(
+            loose.join("LooseMX.map"),
+            synth_ground_map(&[("loose_base_c", 120.0, None), ("loose_line_c", 100.0, Some(32))]),
+        )
+        .unwrap();
+        let layers = read_ground_layers(&loose.to_string_lossy(), None).unwrap();
+        assert_eq!(layers.len(), 2, "an unpacked track reads the same way");
+        assert_eq!(layers[0].sheet.name, "loose_base_c");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A stock track's files are named after its own folder, not after the archive holding
+    /// them. Without that its `.map` ranks no higher than a layout's and the wrong one wins.
+    #[test]
+    fn a_shared_archive_names_its_files_after_the_track() {
+        let archive = Path::new("C:/Games/MX Bikes/tracks.pkz");
+        assert_eq!(track_stem(archive, Some("tracks/motocross/forest")), "forest");
+        assert_eq!(track_stem(archive, Some("Tracks\\Motocross\\Forest/")), "forest");
+        assert_eq!(track_stem(archive, None), "tracks");
+        assert_eq!(track_stem(archive, Some("")), "tracks", "an empty prefix is none");
+
+        let names = vec![
+            "tracks/motocross/forest/short/short.map".to_string(),
+            "tracks/motocross/forest/forest.map".to_string(),
+        ];
+        assert_eq!(
+            entries_with_ext(&names, "map", "forest")[0],
+            "tracks/motocross/forest/forest.map",
+            "the track's own file comes before a layout's"
+        );
+    }
+
+    /// Each stock track caches apart, or whichever was opened first would answer for all
+    /// fifteen of them.
+    #[test]
+    fn each_track_in_a_shared_archive_caches_apart() {
+        let dir = scratch("cache-key");
+        let archive = dir.join("tracks.pkz");
+        write_zip(&archive, &[("tracks/motocross/forest/forest.map", vec![0u8; 32])]);
+        let p = archive.to_string_lossy().into_owned();
+        let bare = cache_key(&p, None).unwrap();
+        let forest = cache_key(&p, Some("tracks/motocross/forest")).unwrap();
+        let club = cache_key(&p, Some("tracks/motocross/club")).unwrap();
+        assert_ne!(forest, club);
+        assert_ne!(forest, bare);
+        assert_eq!(forest, cache_key(&p, Some("Tracks\\Motocross\\Forest/")).unwrap());
+        assert_eq!(
+            cache_key(&p, Some("")).unwrap(),
+            bare,
+            "an unprefixed key is unchanged, so existing entries stay valid"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The blobs the viewer receives, written out so a real track can be rendered outside the
+    /// app:
+    ///
+    /// ```text
+    /// FROST_TRACK="…/tracks.pkz" FROST_PREFIX=tracks/motocross/forest FROST_OUT=/tmp/forest \
+    ///   cargo test -p mxb-core --lib -- --ignored --nocapture dump_view_blobs
+    /// ```
+    #[test]
+    #[ignore = "writes the viewer's blobs — set FROST_TRACK and FROST_OUT"]
+    fn dump_view_blobs() {
+        let path = std::env::var("FROST_TRACK").expect("set FROST_TRACK");
+        let out = std::env::var("FROST_OUT").expect("set FROST_OUT");
+        let held = std::env::var("FROST_PREFIX").ok();
+        let prefix = held.as_deref().filter(|p| !p.is_empty());
+        std::fs::create_dir_all(&out).unwrap();
+        println!("  {path}  prefix {prefix:?}");
+
+        let layers = read_ground_layers(&path, prefix).expect("read the ground stack");
+        let blob = map::ground_layers_blob(&layers);
+        std::fs::write(format!("{out}/ground-layers.bin"), &blob).unwrap();
+        println!("  ground layers: {} ({} B)", layers.len(), blob.len());
+
+        let sheets = ground_detail(&path, prefix).unwrap_or_default();
+        std::fs::write(format!("{out}/ground.bin"), map::surfaces_blob(&sheets)).unwrap();
+        println!("  ground sheets: {}", sheets.len());
+
+        let p = Path::new(&path);
+        let master = crate::track::decode_master_under(p, prefix).expect("read the terrain");
+        let terrain = crate::track::terrain_blob(&master, 1024);
+        std::fs::write(format!("{out}/terrain.bin"), &terrain).unwrap();
+        println!("  terrain {}x{}", master.info.width, master.info.height);
+
+        match decode(p, prefix, true) {
+            Ok(s) => {
+                let b = self::blob(&s);
+                std::fs::write(format!("{out}/scenery.bin"), &b).unwrap();
+                println!(
+                    "  scenery: {} tris, {} surfaces ({} B)",
+                    s.info.triangle_count,
+                    s.textures.len(),
+                    b.len()
+                );
+            }
+            Err(e) => println!("  scenery: {e:#}"),
+        }
+    }
+
+    /// The rest of a track's own files, when one archive holds several: its cameras come from
+    /// the folder that asked, and a layout's — one level deeper — never outrank the track's.
+    #[test]
+    fn a_track_in_a_shared_archive_reads_its_own_markers() {
+        let dir = scratch("stock-markers");
+        let archive = dir.join("tracks.pkz");
+        let tsc = |x: f32| {
+            format!(
+                "numcamset = 1\ncamset0\n{{\nname = TV\nnumcameras = 1\ncamera0\n{{\npos = {x}, 9.4, 233.7\nrot = 35.3\n}}\n}}\n"
+            )
+            .into_bytes()
+        };
+        write_zip(
+            &archive,
+            &[
+                ("tracks/motocross/club/club.tsc", tsc(100.0)),
+                ("tracks/motocross/forest/forest.tsc", tsc(400.0)),
+                ("tracks/motocross/forest/short/short.tsc", tsc(900.0)),
+            ],
+        );
+        let path = archive.to_string_lossy().into_owned();
+        let cameras = |prefix: Option<&str>| -> Vec<f32> {
+            read_placements(&path, prefix)
+                .unwrap()
+                .into_iter()
+                .filter(|p| p.kind == "camera")
+                .map(|p| p.pos[0])
+                .collect()
+        };
+        assert_eq!(
+            cameras(Some("tracks/motocross/forest")),
+            [400.0],
+            "the track's own cameras, not its layout's and not its neighbour's"
+        );
+        assert_eq!(cameras(Some("tracks/motocross/club")), [100.0]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The ground the view draws, rendered outside the app so a stock track can be put beside
+    /// a mod one and the two judged by eye — the ground never reads right from the code.
+    ///
+    /// ```text
+    /// FROST_TRACK="…/tracks.pkz" FROST_PREFIX=tracks/motocross/forest \
+    ///   FROST_PNG=/tmp/forest.png \
+    ///   cargo test -p mxb-core --lib -- --ignored --nocapture render_track_ground
+    /// ```
+    ///
+    /// `FROST_BARE=1` leaves the ground and the light off, which is what the view drew for
+    /// every stock track while these loaders took no prefix.
+    #[test]
+    #[ignore = "needs a real track — set FROST_TRACK and FROST_PNG"]
+    fn render_track_ground() {
+        let path = std::env::var("FROST_TRACK").expect("set FROST_TRACK");
+        let out = std::env::var("FROST_PNG").unwrap_or_else(|_| "/tmp/ground.png".into());
+        let held = std::env::var("FROST_PREFIX").ok();
+        let prefix = held.as_deref().filter(|p| !p.is_empty());
+        let bare = std::env::var("FROST_BARE").is_ok();
+
+        let master =
+            crate::track::decode_master_under(Path::new(&path), prefix).expect("read the terrain");
+        let (gw, gh) = (master.info.width as usize, master.info.height as usize);
+        let mps = master.info.metres_per_sample.max(0.01);
+        println!("  terrain {gw}x{gh} at {mps:.2} m/sample  prefix {prefix:?}");
+
+        let layers = if bare {
+            Vec::new()
+        } else {
+            read_ground_layers(&path, prefix).unwrap_or_default()
+        };
+        for (i, l) in layers.iter().enumerate() {
+            let mask = l
+                .mask
+                .as_ref()
+                .map_or("none".to_string(), |m| format!("{}x{}", m.width, m.height));
+            println!(
+                "  layer {i}: {:<26} {}x{}  tile {:.0}x{:.0}  mask {mask}",
+                l.sheet.name, l.sheet.width, l.sheet.height, l.tile_u, l.tile_v
+            );
+        }
+
+        // The track's own light, taken the way the game-view shader takes it.
+        let amb = if bare {
+            Ambience::default()
+        } else {
+            match backdrop(&path, prefix) {
+                Ok((a, sky, back)) => {
+                    println!(
+                        "  sky {} tris, backdrop {} tris",
+                        sky.0.positions.len() / 9,
+                        back.0.positions.len() / 9
+                    );
+                    a
+                }
+                Err(e) => {
+                    println!("  backdrop: {e:#}");
+                    Ambience::default()
+                }
+            }
+        };
+        let norm = |v: [f32; 3]| {
+            let l = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt().max(1e-9);
+            [v[0] / l, v[1] / l, v[2] / l]
+        };
+        let sun_dir = norm(amb.sun.unwrap_or([0.5, 0.8, 0.35]));
+        let ambient = amb.ambient_colour.unwrap_or([0.4, 0.45, 0.55]);
+        let sun_col = amb.sun_colour.unwrap_or([1.0, 1.0, 1.0]);
+
+        let sheet_at = |t: &MapTexture, u: f32, v: f32| -> [f32; 3] {
+            let (tw, th) = (t.width.max(1) as usize, t.height.max(1) as usize);
+            let x = ((u.rem_euclid(1.0) * tw as f32) as usize).min(tw - 1);
+            let y = ((v.rem_euclid(1.0) * th as f32) as usize).min(th - 1);
+            let o = (y * tw + x) * 4;
+            match t.rgba.get(o..o + 3) {
+                Some(p) => [
+                    p[0] as f32 / 255.0,
+                    p[1] as f32 / 255.0,
+                    p[2] as f32 / 255.0,
+                ],
+                None => [0.5, 0.5, 0.5],
+            }
+        };
+        // The same uv the shader hands the mask, unscaled. Orientation is the shader's;
+        // nothing here re-derives it.
+        let mask_at = |m: &map::GroundMask, u: f32, v: f32| -> f32 {
+            let (mw, mh) = (m.width.max(1) as usize, m.height.max(1) as usize);
+            let x = ((u.clamp(0.0, 1.0) * (mw - 1) as f32) as usize).min(mw - 1);
+            let y = ((v.clamp(0.0, 1.0) * (mh - 1) as f32) as usize).min(mh - 1);
+            m.coverage.get(y * mw + x).copied().unwrap_or(0) as f32 / 255.0
+        };
+
+        let w = gw.clamp(2, 1100);
+        let h = gh.clamp(2, 1100);
+        let mut pixels = vec![0u8; w * h * 3];
+        let mut luma_sum = 0.0f64;
+        let height_at = |x: usize, z: usize| master.heights[z.min(gh - 1) * gw + x.min(gw - 1)];
+        let (lo, hi) = master
+            .heights
+            .iter()
+            .fold((f32::MAX, f32::MIN), |(a, b), v| (a.min(*v), b.max(*v)));
+
+        for py in 0..h {
+            for px in 0..w {
+                let u = px as f32 / (w - 1) as f32;
+                let v = py as f32 / (h - 1) as f32;
+                let (gx, gz) = (
+                    (u * (gw - 1) as f32) as usize,
+                    (v * (gh - 1) as f32) as usize,
+                );
+                // Slope from the grid itself, or the whole picture reads flat.
+                let dx = (height_at(gx + 1, gz) - height_at(gx.saturating_sub(1), gz)) / (2.0 * mps);
+                let dz = (height_at(gx, gz + 1) - height_at(gx, gz.saturating_sub(1))) / (2.0 * mps);
+                let n = norm([-dx, 1.0, -dz]);
+                let d = (sun_dir[0] * n[0] + sun_dir[1] * n[1] + sun_dir[2] * n[2]).max(0.0);
+
+                // The stack, blended the way the game's shader blends it: each layer lit on
+                // its own and mixed in by its mask.
+                let mut c = if layers.is_empty() {
+                    let t = ((height_at(gx, gz) - lo) / (hi - lo).max(1.0)).clamp(0.0, 1.0);
+                    let base = [0.52 + 0.35 * t, 0.45 + 0.32 * t, 0.34 + 0.28 * t];
+                    let shade = 0.55 + 0.45 * d;
+                    [base[0] * shade, base[1] * shade, base[2] * shade]
+                } else {
+                    [0.0, 0.0, 0.0]
+                };
+                for (i, l) in layers.iter().enumerate() {
+                    let s = sheet_at(&l.sheet, u * l.tile_u, v * l.tile_v);
+                    let lit = [
+                        s[0] * (ambient[0] + sun_col[0] * d).clamp(0.0, 1.0),
+                        s[1] * (ambient[1] + sun_col[1] * d).clamp(0.0, 1.0),
+                        s[2] * (ambient[2] + sun_col[2] * d).clamp(0.0, 1.0),
+                    ];
+                    match (i, l.mask.as_ref()) {
+                        (0, _) | (_, None) => c = lit,
+                        (_, Some(m)) => {
+                            let k = mask_at(m, u, v);
+                            for j in 0..3 {
+                                c[j] += (lit[j] - c[j]) * k;
+                            }
+                        }
+                    }
+                }
+                let at = (py * w + px) * 3;
+                for j in 0..3 {
+                    pixels[at + j] = (c[j].clamp(0.0, 1.0) * 255.0) as u8;
+                }
+                luma_sum +=
+                    (0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]).clamp(0.0, 1.0) as f64 * 255.0;
+            }
+        }
+
+        // Measured rather than squinted at: a band under about a hundredth of the map is not
+        // in the game whatever the stack says.
+        println!("  mean luma {:.0}", luma_sum / (w * h) as f64);
+        for (i, l) in layers.iter().enumerate() {
+            if let Some(m) = &l.mask {
+                let share = m.coverage.iter().filter(|c| **c > 128).count() as f32
+                    / m.coverage.len().max(1) as f32;
+                println!("  layer {i} {:<26} covers {:.1}%", l.sheet.name, share * 100.0);
+            }
+        }
+        image::save_buffer(&out, &pixels, w as u32, h as u32, image::ColorType::Rgb8)
+            .expect("write the png");
+        println!("  wrote {out}  ({} layers)", layers.len());
     }
 }

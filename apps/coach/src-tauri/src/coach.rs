@@ -845,7 +845,8 @@ pub fn coach_setup_plan(app: AppHandle, path: String, skills: Vec<String>) -> Re
     Ok(SetupPlan { name: r.name, file: r.file.map(|p| p.display().to_string()), save_as, why: r.why, fixes, sag, travel_used })
 }
 
-/// A setup the coach wrote: what it is called, and the settings it really changed.
+/// A setup the coach wrote: what it is called, what it really changed, and whether the game
+/// will load it.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SavedSetup {
@@ -853,10 +854,30 @@ pub struct SavedSetup {
     /// Named rather than counted, so the rider can check each one in the garage. A setting two
     /// tips wanted opposite ways is not in here, and was never claimed as a change either.
     pub changed: Vec<crate::stp::Field>,
+    /// The game is pointed at it for practice on this track.
+    pub selected: bool,
+    /// It wasn't, because MX Bikes is open. The rider can pick it in the garage now, or press
+    /// Select once the game is closed.
+    pub game_open: bool,
 }
 
-/// Saves a lap's setup fixes as a new setup: beside the rider's own, or as one of their own
-/// when they rode the game's default. Never overwrites a file.
+/// Point the game at a setup for practice on this track, by writing its own `default.ini`
+/// beside the setups (see `stp::select_default`).
+///
+/// Only with the game closed. MX Bikes holds the garage in memory and writes this file itself
+/// when it closes, so a change made while it runs is silently undone — which would be worse
+/// than not making it, because the rider would be told it had worked.
+fn select(dir: &Path, name: &str, wet: bool) -> Result<bool, String> {
+    if mxb_core::gamewindow::is_game_running() {
+        return Ok(false);
+    }
+    crate::stp::select_default(dir, name, wet)?;
+    Ok(true)
+}
+
+/// Saves a lap's setup fixes as a new setup — beside the rider's own, or as one of their own
+/// when they rode the game's default — and points the game at it. Never overwrites a file, and
+/// only the practice keys of `default.ini` are touched.
 #[tauri::command]
 pub fn coach_save_setup(app: AppHandle, path: String, skills: Vec<String>) -> Result<SavedSetup, String> {
     let rec = load(&path)?;
@@ -875,13 +896,33 @@ pub fn coach_save_setup(app: AppHandle, path: String, skills: Vec<String>) -> Re
         match fs::OpenOptions::new().write(true).create_new(true).open(dir.join(format!("{name}.stp"))) {
             Ok(mut f) => {
                 std::io::Write::write_all(&mut f, out.bytes()).map_err(err)?;
-                return Ok(SavedSetup { name, changed });
+                // A setup the rider has to go and find in the garage is a setup they ride
+                // without. Failing to select it is not failing to save it, so it is reported
+                // rather than raised.
+                let selected = select(&dir, &name, rec.session.conditions == 2).unwrap_or(false);
+                return Ok(SavedSetup { name, changed, selected, game_open: !selected });
             }
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
             Err(e) => return Err(err(e)),
         }
     }
     Err("There are already too many coach setups for this one.".into())
+}
+
+/// Point the game at a setup the coach already saved: for when it was written while MX Bikes
+/// was open, so selecting it then would not have stuck.
+#[tauri::command]
+pub fn coach_select_setup(app: AppHandle, path: String, name: String) -> Result<SavedSetup, String> {
+    let rec = load(&path)?;
+    let e = &rec.event;
+    let cfg = load_config(&app);
+    // Through `locate`, so the coach can only ever select a setup that is really there.
+    let file = crate::stp::locate(&cfg.profiles_dir(), &name, &e.track_id, &e.bike_id)
+        .ok_or_else(|| format!("\"{name}\" isn't in your profiles folder any more."))?;
+    let dir = file.parent().ok_or("The setup's folder couldn't be found.")?;
+    let selected = select(dir, &name, rec.session.conditions == 2)?;
+    // Nothing was written to the setup itself here: this only points the game at one.
+    Ok(SavedSetup { name, changed: Vec::new(), selected, game_open: !selected })
 }
 
 #[derive(Serialize)]
@@ -896,10 +937,51 @@ pub struct CuesOut {
     pub ghost: LapRef,
 }
 
+/// What the rider has already been called on this track and bike, beside the session index.
+/// Losing it is no worse than a fresh start: the next sheet simply repeats itself once.
+fn history_path(app: &AppHandle, track: &str, bike: &str) -> Option<PathBuf> {
+    Some(config::data_dir(app)?.join("coach").join("cues").join(crate::cues::history_name(track, bike)))
+}
+
+fn read_history(app: &AppHandle, track: &str, bike: &str) -> crate::cues::History {
+    history_path(app, track, bike)
+        .and_then(|p| fs::read(p).ok())
+        .and_then(|b| serde_json::from_slice(&b).ok())
+        .unwrap_or_default()
+}
+
+fn write_history(app: &AppHandle, track: &str, bike: &str, h: &crate::cues::History) {
+    let Some(path) = history_path(app, track, bike) else { return };
+    if let Some(parent) = path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    if let Ok(json) = serde_json::to_vec(h) {
+        let _ = fs::write(path, json);
+    }
+}
+
+/// The newest lap of this track and bike worth coaching from, so a sheet written mid-session
+/// is about the laps the rider is riding now rather than the one they opened the page on.
+fn newest_lap(app: &AppHandle, track: &str, bike: &str) -> Option<(String, i32)> {
+    let sessions = all_sessions(app);
+    sessions
+        .iter()
+        .filter(|s| s.track_id == track && s.bike_id == bike)
+        .flat_map(|s| s.laps.iter())
+        .filter(|l| l.comparable())
+        .next_back()
+        .map(|l| (l.path.clone(), l.num))
+}
+
 /// Writes the live cues for this lap's track and bike: the few calls the recorder shows in
 /// practice, from where this lap loses time to the lap it is held against. The reference is the
 /// one the rider picked in the review, so the cue sheet and the HUD sheet beside it are both
 /// against the lap they chose.
+///
+/// `latest` writes them for the newest lap on this track and bike instead of the one named,
+/// which is what the review page asks for while the rider is still out: a sheet is only worth
+/// anything if it is about the laps they are riding now. The reference stands either way: it is
+/// the lap they chose to be held against, not the lap being reviewed.
 #[tauri::command]
 pub fn coach_write_cues(
     app: AppHandle,
@@ -910,7 +992,17 @@ pub fn coach_write_cues(
     ref_path: Option<String>,
     ref_lap: Option<i32>,
     ideal: Option<bool>,
+    latest: Option<bool>,
 ) -> Result<CuesOut, String> {
+    // Which lap is coached is settled before the review, so the reference the rider picked is
+    // applied to the lap the calls actually come from.
+    let (path, lap) = match latest.unwrap_or(false) {
+        true => {
+            let head = summarize(Path::new(&path), &load(&path)?);
+            newest_lap(&app, &head.track_id, &head.bike_id).unwrap_or((path, lap))
+        }
+        false => (path, lap),
+    };
     let out = coach_review(app.clone(), path.clone(), lap, ref_path, ref_lap, None, ideal)?;
     let rec = load(&path)?;
     // The lap the calls are placed on, and the one the HUD races. The ideal lap can't be
@@ -925,7 +1017,10 @@ pub fn coach_write_cues(
     let ref_rec = if r.path == path { None } else { Some(load(&r.path)?) };
     let fast = trace(ref_rec.as_ref().unwrap_or(&rec), r.lap)?;
     let points = analysis::cue_points(&fast, &analysis::sections(&fast));
-    let cues = crate::cues::pick(&points, &out.review, level, amount);
+    // What the last sheets said, so this one moves on rather than repeating itself.
+    let seen = read_history(&app, &rec.event.track_id, &rec.event.bike_id);
+    let picked = crate::cues::pick(&points, &out.review, level, amount, &seen);
+    let (cues, next) = (picked.cues, picked.history);
     let cfg = load_config(&app);
     let dir = session_dirs(&cfg)
         .into_iter()
@@ -945,6 +1040,9 @@ pub fn coach_write_cues(
     let hud_tmp = dir.join(format!("{hud_name}.tmp"));
     fs::write(&hud_tmp, crate::hudsheet::write(rec.event.track_length, &fast, &parts, flags)).map_err(err)?;
     fs::rename(&hud_tmp, dir.join(&hud_name)).map_err(err)?;
+    // Only once the sheet is really on disk: a write that failed is a sheet the rider never
+    // heard, and it would be wrong to count it against them.
+    write_history(&app, &rec.event.track_id, &rec.event.bike_id, &next);
     Ok(CuesOut { file: file.display().to_string(), cues, ghost })
 }
 

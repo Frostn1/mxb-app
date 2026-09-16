@@ -149,9 +149,12 @@ pub async fn load_track_overview(
 /// Split from the scenery mesh because it costs nothing: these files are kilobytes, so the
 /// viewer can mark them while the `.map` is still being read out of the archive.
 #[tauri::command]
-pub async fn read_track_placements(path: String) -> Result<Vec<scenery::Placement>, String> {
+pub async fn read_track_placements(
+    path: String,
+    prefix: Option<String>,
+) -> Result<Vec<scenery::Placement>, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        scenery::read_placements(&path).map_err(|e| format!("{e:#}"))
+        scenery::read_placements(&path, prefix.as_deref()).map_err(|e| format!("{e:#}"))
     })
     .await
     .map_err(|e| format!("read_track_placements task failed: {e}"))?
@@ -167,8 +170,10 @@ pub async fn read_track_placements(path: String) -> Result<Vec<scenery::Placemen
 pub async fn load_track_scenery(
     app: tauri::AppHandle,
     path: String,
+    prefix: Option<String>,
 ) -> Result<tauri::ipc::Response, String> {
-    tauri::async_runtime::spawn_blocking(move || match scenery::load(&app, &path) {
+    tauri::async_runtime::spawn_blocking(move || match scenery::load(&app, &path, prefix.as_deref())
+    {
         Ok(s) => tauri::ipc::Response::new(scenery::blob(&s)),
         Err(e) => {
             log::debug!("[scenery] {path}: {e:#}");
@@ -188,14 +193,17 @@ pub async fn load_track_scenery(
 pub async fn load_track_surfaces(
     app: tauri::AppHandle,
     path: String,
+    prefix: Option<String>,
 ) -> Result<tauri::ipc::Response, String> {
-    tauri::async_runtime::spawn_blocking(move || match scenery::load_surfaces(&app, &path) {
-        Ok(t) => tauri::ipc::Response::new(scenery::surfaces_blob(&t)),
-        Err(e) => {
-            log::debug!("[scenery] surfaces for {path}: {e:#}");
-            tauri::ipc::Response::new(Vec::new())
-        }
-    })
+    tauri::async_runtime::spawn_blocking(
+        move || match scenery::load_surfaces(&app, &path, prefix.as_deref()) {
+            Ok(t) => tauri::ipc::Response::new(scenery::surfaces_blob(&t)),
+            Err(e) => {
+                log::debug!("[scenery] surfaces for {path}: {e:#}");
+                tauri::ipc::Response::new(Vec::new())
+            }
+        },
+    )
     .await
     .map_err(|e| format!("load_track_surfaces task failed: {e}"))
 }
@@ -207,8 +215,9 @@ pub async fn load_track_surfaces(
 #[tauri::command]
 pub async fn load_track_backdrop(
     path: String,
+    prefix: Option<String>,
 ) -> Result<tauri::ipc::Response, String> {
-    tauri::async_runtime::spawn_blocking(move || match scenery::backdrop(&path) {
+    tauri::async_runtime::spawn_blocking(move || match scenery::backdrop(&path, prefix.as_deref()) {
         Ok((amb, sky, back)) => tauri::ipc::Response::new(scenery::backdrop_blob(&amb, &sky, &back)),
         Err(e) => {
             log::debug!("[scenery] backdrop for {path}: {e:#}");
@@ -227,9 +236,10 @@ pub async fn load_track_backdrop(
 pub async fn load_track_ground(
     app: tauri::AppHandle,
     path: String,
+    prefix: Option<String>,
 ) -> Result<tauri::ipc::Response, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let sheets = scenery::load_ground(&app, &path).unwrap_or_default();
+        let sheets = scenery::load_ground(&app, &path, prefix.as_deref()).unwrap_or_default();
         tauri::ipc::Response::new(map::surfaces_blob(&sheets))
     })
     .await
@@ -245,9 +255,10 @@ pub async fn load_track_ground(
 pub async fn load_track_ground_layers(
     app: tauri::AppHandle,
     path: String,
+    prefix: Option<String>,
 ) -> Result<tauri::ipc::Response, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let blob = scenery::load_ground_layers(&app, &path).unwrap_or_else(|e| {
+        let blob = scenery::load_ground_layers(&app, &path, prefix.as_deref()).unwrap_or_else(|e| {
             log::debug!("[scenery] ground layers for {path}: {e:#}");
             Vec::new()
         });
