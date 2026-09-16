@@ -2,10 +2,11 @@
  * Secured assets, managed from the website.
  *
  * mxbsecure.com is where assets are created and where the list of who may open each one is
- * kept. Those are the two admin writes here: minting an asset (a fresh content key, stored
- * wrapped, handed back once) and changing its grants. Everything downstream — the check and
- * the key release in `index.ts` — already reads these same rows, so a grant made here is
- * honoured by `/v1/keys/grant` with nothing else to wire.
+ * kept. Those are the admin writes here: minting an asset (a fresh content key, stored wrapped,
+ * handed back once), changing its grants, and removing it — on its own, or taking the buyers'
+ * keys back with it. Everything downstream — the check and the key release in `index.ts` —
+ * already reads these same rows, so a grant made here is honoured by `/v1/keys/grant` with
+ * nothing else to wire.
  *
  * Behind `ADMIN_KEY` like the rest of `/admin`, and the only admin routes with CORS: the site
  * calls them from a browser, so the browser has to be told it may. Nothing else gets the
@@ -42,12 +43,19 @@ export function allowedOrigin(request: Request, env: Env): string | null {
  * sites out but not a sibling subdomain: a page there could send a plain-text POST, with no
  * preflight, and the cookie would ride along. It can't send our Origin, and a JSON content type
  * would need a preflight we refuse.
+ *
+ * The content type is asked of `POST` alone, because `POST` is the only write a page can send
+ * without one: every browser preflights a `PATCH` or a `DELETE`, and the preflight from an
+ * origin not on the list is already refused. Asking a bodyless `DELETE` to declare a body's
+ * type would buy nothing and trip up every client that doesn't send one.
  */
 export function refuseCrossSiteWrite(request: Request, env: Env): Response | null {
   if (request.method === "GET" || request.method === "HEAD") return null;
+  const offSite = json(403, { error: "that request didn't come from mxbsecure.com" });
+  if (!allowedOrigin(request, env)) return offSite;
+  if (request.method !== "POST") return null;
   const type = (request.headers.get("Content-Type") ?? "").split(";")[0].trim().toLowerCase();
-  if (allowedOrigin(request, env) && type === "application/json") return null;
-  return json(403, { error: "that request didn't come from mxbsecure.com" });
+  return type === "application/json" ? null : offSite;
 }
 
 /**
@@ -237,13 +245,21 @@ async function handle(
   if (scope.kind === "creator" && !(scope.accountId && (await ownedBy(assetId, scope.accountId, env)))) {
     return json(404, { error: "no such asset" });
   }
+  // A removed asset is history to its creator: it still reads — they keep its buyers and its
+  // usage log — and nothing about it changes again. Not to us, though. A removal that kept the
+  // keys goes on releasing them, so a takedown has to be able to land on one.
+  const closed = async () => scope.kind !== "admin" && (await removedAt(assetId, env)) !== null;
   if (sub === "grants") {
     if (method === "GET") return listGrants(assetId, env, names);
-    if (method === "POST") return changeGrants(request, assetId, env, fetchImpl);
+    if (method === "POST") {
+      return (await closed()) ? json(409, { error: "that asset has been removed" }) : changeGrants(request, assetId, env, fetchImpl);
+    }
   } else if (sub === "usage") {
     if (method === "GET") return assetUsage(assetId, env, names);
   } else if (method === "PATCH") {
-    return updateAsset(request, assetId, env, scope);
+    return (await closed()) ? json(409, { error: "that asset has been removed" }) : updateAsset(request, assetId, env, scope);
+  } else if (method === "DELETE") {
+    return removeAsset(url, assetId, env, scope);
   }
   return json(405, { error: "method not allowed" });
 }
@@ -368,6 +384,14 @@ async function ownedBy(assetId: string, accountId: string, env: Env): Promise<bo
   return row !== null;
 }
 
+/** When the creator removed this asset, or null while it is still live. */
+async function removedAt(assetId: string, env: Env): Promise<number | null> {
+  const row = await env.DB.prepare("SELECT deleted_at FROM assets WHERE id = ?")
+    .bind(assetId)
+    .first<{ deleted_at: number | null }>();
+  return row?.deleted_at ?? null;
+}
+
 /**
  * `PATCH /admin/assets/:id` — `{ blobSha256?, withdrawn?, takenDown? }`.
  *
@@ -429,6 +453,56 @@ async function updateAsset(request: Request, assetId: string, env: Env, scope: S
 }
 
 /**
+ * `DELETE /admin/assets/:id?keys=revoke|keep` — the creator taking what they locked off the site.
+ *
+ * Withdrawing is the reversible one: it stops new unlocks and can be put back. This is the other
+ * thing a creator asks for — a file locked by mistake, or one whose selling is over, off their
+ * list. The row stays and is flagged, so they keep its buyers and its usage log; what they lose
+ * is the ability to change any of it, removal included. It is one-way.
+ *
+ * `keys` is the question the site puts to them, and there is no default for it because there is
+ * no safe guess:
+ *
+ * - `keep` — nothing about the buyers changes. Their keys go on opening the file, and a buyer on
+ *   a new PC can still be handed one. The asset is simply off the list.
+ * - `revoke` — every entitlement is revoked and the content key is destroyed, so the packed file
+ *   never opens again for anyone, the creator included, and each buyer's app deletes the key it
+ *   holds on the next `/v1/assets/status` poll (which is why the row is kept rather than dropped:
+ *   an asset we no longer knew would read as "can't tell", and the keys would stay). Selling it
+ *   again means locking the file again, as a new asset with a new key. Nothing undoes this.
+ *
+ * A taken-down asset is ours, not theirs: a creator can't remove one, so the takedown — with its
+ * ledger — stays where an operator can see it.
+ */
+async function removeAsset(url: URL, assetId: string, env: Env, scope: Scope): Promise<Response> {
+  const keys = url.searchParams.get("keys");
+  if (keys !== "revoke" && keys !== "keep") {
+    return json(400, { error: "keys must be revoke or keep" });
+  }
+  const asset = await env.DB.prepare("SELECT deleted_at, taken_down_at FROM assets WHERE id = ?")
+    .bind(assetId)
+    .first<{ deleted_at: number | null; taken_down_at: number | null }>();
+  if (!asset) return json(404, { error: "no such asset" });
+  if (asset.deleted_at !== null) return json(409, { error: "that asset has already been removed" });
+  if (asset.taken_down_at !== null && scope.kind !== "admin") {
+    return json(403, { error: "that asset has been taken down; only mxbsecure can remove it" });
+  }
+  const now = Date.now();
+  const statements = [env.DB.prepare("UPDATE assets SET deleted_at = ? WHERE id = ?").bind(now, assetId)];
+  if (keys === "revoke") {
+    statements.push(
+      // `withdrawn_at` alongside, so a reader that has never heard of removal refuses it anyway.
+      env.DB.prepare(
+        "UPDATE assets SET keys_revoked_at = ?, withdrawn_at = COALESCE(withdrawn_at, ?), wrapped_key = NULL WHERE id = ?",
+      ).bind(now, now, assetId),
+      env.DB.prepare("UPDATE entitlements SET revoked_at = ? WHERE asset_id = ? AND revoked_at IS NULL").bind(now, assetId),
+    );
+  }
+  await env.DB.batch(statements);
+  return json(200, { assetId, deletedAt: now, keysRevokedAt: keys === "revoke" ? now : null });
+}
+
+/**
  * `POST /admin/assets` — a new asset and its content key.
  *
  * The key is 32 random bytes, stored only wrapped under the master key. The raw bytes are in
@@ -465,12 +539,16 @@ async function createAsset(request: Request, env: Env, owner: string): Promise<R
 /**
  * `GET /admin/assets` — newest first, with how many hold each one now, whether its file hash is
  * registered, and when a buyer's app last asked for its key. A creator sees only their own.
+ *
+ * Removed assets are on it too, carrying `deletedAt` and `keysRevokedAt`: a removal is not a
+ * disappearance, and the creator keeps a record of what they locked and what became of it.
  */
 async function listAssets(env: Env, scope: Scope): Promise<Response> {
   const mine = scope.kind === "creator";
   if (mine && !scope.accountId) return json(200, { assets: [] });
   const statement = env.DB.prepare(
-    "SELECT a.id, a.title, a.created_at, a.withdrawn_at, a.taken_down_at, a.blob_sha256 IS NOT NULL AS hashed," +
+    "SELECT a.id, a.title, a.created_at, a.withdrawn_at, a.taken_down_at, a.deleted_at, a.keys_revoked_at," +
+      " a.blob_sha256 IS NOT NULL AS hashed," +
       " (SELECT COUNT(*) FROM entitlements e WHERE e.asset_id = a.id AND e.revoked_at IS NULL) AS buyers," +
       ` (SELECT MAX(g.issued_at) FROM entitlement_grants g WHERE g.asset_id = a.id AND ${isSteamIdSql("g.steam_id")})` +
       " AS last_request_at" +
@@ -482,6 +560,8 @@ async function listAssets(env: Env, scope: Scope): Promise<Response> {
     created_at: number;
     withdrawn_at: number | null;
     taken_down_at: number | null;
+    deleted_at: number | null;
+    keys_revoked_at: number | null;
     hashed: number;
     buyers: number;
     last_request_at: number | null;
@@ -493,6 +573,8 @@ async function listAssets(env: Env, scope: Scope): Promise<Response> {
       createdAt: r.created_at,
       withdrawnAt: r.withdrawn_at,
       takenDownAt: r.taken_down_at,
+      deletedAt: r.deleted_at,
+      keysRevokedAt: r.keys_revoked_at,
       buyers: r.buyers,
       hashed: !!r.hashed,
       lastRequestAt: r.last_request_at,
@@ -764,7 +846,7 @@ async function assetExists(assetId: string, env: Env): Promise<boolean> {
  * CORS headers for an allowed origin; always `Vary: Origin`, since the answer depends on it.
  * Credentials are allowed so the sign-in cookie rides along from the site.
  */
-export function cors(response: Response, origin: string | null, preflight = false, methods = "GET, POST, PATCH, OPTIONS"): Response {
+export function cors(response: Response, origin: string | null, preflight = false, methods = "GET, POST, PATCH, DELETE, OPTIONS"): Response {
   const out = new Response(response.body, response);
   out.headers.append("Vary", "Origin");
   if (origin) {
