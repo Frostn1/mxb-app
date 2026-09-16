@@ -2,7 +2,7 @@ use serde::Serialize;
 
 // The game's process and window helpers live in core (the overlays share them); re-exported
 // so callers are unchanged.
-pub use mxb_core::gamewindow::is_game_running;
+pub use mxb_core::gamewindow::{focus_game, is_game_running};
 #[cfg(windows)]
 pub use mxb_core::gamewindow::game_pid;
 #[cfg(windows)]
