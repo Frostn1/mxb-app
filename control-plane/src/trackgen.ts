@@ -59,7 +59,8 @@ export const PROTOCOLS = {
   settings: {
     system: SETTINGS_SYSTEM,
     schema: SETTINGS_SCHEMA as unknown as Schema,
-    // Nineteen fields. There is no arithmetic in it for thinking to help with.
+    // Twenty fields, one of which is which discipline the brief asks for. There is no
+    // arithmetic in it for thinking to help with.
     maxTokens: 2000,
     think: false,
   },

@@ -531,6 +531,19 @@ mod tests {
             .as_str()
             .unwrap()
             .contains("stepUp"));
+
+        // And the same for the discipline, which is the one thing on the settings schema that
+        // has to reach the model as a closed list. It does not reach it as an `enum` — the
+        // SDK's transform pops that off — so what the model is actually held to is this
+        // sentence, and the prompt says the same thing again in words.
+        let settings = anthropic_body("claude-haiku-4-5", Protocol::Settings, &[]);
+        let settings = &settings["output_config"]["format"]["schema"];
+        assert!(!settings.to_string().contains("\"enum\""));
+        let says = settings["properties"]["discipline"]["description"].as_str().unwrap();
+        for value in ["mx", "sx", "smx"] {
+            assert!(says.contains(&format!("\"{value}\"")), "{value} is not in {says:?}");
+        }
+        assert!(settings["required"].as_array().unwrap().iter().any(|r| r == "discipline"));
     }
 
     #[test]

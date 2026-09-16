@@ -188,8 +188,13 @@ export interface TrackSettings {
   tilt: number;
   landforms: number;
   elevationChanges: number;
-  /** Set by the app from the discipline switch, never by the model. */
-  discipline?: Discipline;
+  /**
+   * Which kind of racing the brief asked for.
+   *
+   * The model's to pick, unless the switch on screen is set to something other than
+   * motocross — an explicit choice is not a brief's to overrule.
+   */
+  discipline: Discipline;
 }
 
 /** A generated track, and the settings it was drawn from when that was the mode. */

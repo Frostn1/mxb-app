@@ -352,6 +352,9 @@ export default function TrackStudio() {
         discipline,
       );
       await settle(next, { fresh: true });
+      // A brief can ask for a supercross round, so the switch follows what came back rather
+      // than sitting on motocross beside a stadium lap.
+      setDiscipline(next.discipline ?? "mx");
       // Minutes of generating is work worth asking about before it's dropped.
       setTouched(true);
       setFile(null);

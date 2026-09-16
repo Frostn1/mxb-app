@@ -107,6 +107,13 @@
   never reached the ground either side and it rode as one long wave instead of a row of lips you
   pick a line through. Now each hill lands back at grade, and the hills stand as tall as the ones
   on a real round.
+- Ask for a supercross in the brief. Write "a supercross round in a stadium" or "an SMX playoff
+  round" and that is what you get, without touching the MX / SX / SMX switch first. Set the
+  switch yourself and it still decides. The switch moves to whatever came back, so you can see
+  which kind of track you were given.
+- The supercross words in a brief reach the track. Say no whoops and the lap is built without a
+  set; say sand and there is sand in it, rather than the one round in two that carries it. How
+  packed you ask for still sets how much the lanes carry.
 
 ### Changed
 - The Studio reports anonymous usage from the same fixed list of names as the app, for the same
