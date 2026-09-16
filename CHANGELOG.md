@@ -1,5 +1,26 @@
 # Changelog
 
+## Unreleased - Frost's Studio
+
+### Added
+- Build a track from a real place. Type a track's name or its coordinates and Studio fetches
+  the public laser survey of that ground, plus an aerial photo of the same patch to trace the
+  lap on. It works out of the box in the United States, France, the Netherlands and England,
+  and the French and Dutch surveys are half-metre, finer than the American one.
+- Studio tells you what has actually been surveyed before it downloads anything. These map
+  services will happily stretch coarse data to look fine, so Studio asks first and says plainly
+  when the best available is 10 metres and your jumps will not be in it.
+- Bring your own ground. Any north-up GeoTIFF you downloaded from your own country's mapping
+  service can be imported and used exactly like a fetched one, which is how the rest of the
+  world gets in.
+- Every place records where its ground came from, when it was flown and under what licence, and
+  carries that through to the lap file. A venue rebuilt every year means a track built from a
+  2017 survey is a 2017 snapshot, and now the file says so.
+- A guide for building a track from a real place, in docs, written for riders rather than map
+  people. Where the files go, how to find your coordinates, what good and bad survey data look
+  like, what each resolution is actually good for, what to do when your country has no laser
+  survey, and the credit each source asks for.
+
 ## Unreleased — MXB App and MXB Coach
 
 ### Fixed
