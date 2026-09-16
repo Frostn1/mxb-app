@@ -101,16 +101,19 @@ export default function LiveCues({
     }
   };
 
-  // Once the rider has sent a sheet, keep it current: the recorder writes a lap, the watcher
-  // says so, and the calls are picked again from that lap. This is the whole point of them
-  // moving on — a sheet written three laps ago is about a lap already ridden past.
+  // The sheet keeps itself current: the recorder writes a lap, the watcher says so, and the
+  // calls are picked again from that lap. This is the whole point of them moving on — a sheet
+  // written three laps ago is about a lap already ridden past.
   const sendRef = useRef(send);
   useEffect(() => {
     sendRef.current = send;
   });
-  const following = sent != null;
+  // Written without being asked, and again whenever the settings that change the calls change.
+  // Having to press a button for this only ever meant riding a session with no cues in it.
   useEffect(() => {
-    if (!following) return;
+    void sendRef.current(false, true);
+  }, [level, amount, reference]);
+  useEffect(() => {
     let alive = true;
     let off: UnlistenFn | undefined;
     const onLap = () => {
@@ -127,7 +130,7 @@ export default function LiveCues({
       alive = false;
       off?.();
     };
-  }, [following]);
+  }, []);
   return (
     <div>
       <Label>{t("cues.title")}</Label>
@@ -140,7 +143,6 @@ export default function LiveCues({
             value={level}
             onChange={(v) => {
               setLevel(v);
-              setSent(null);
               remember(CUE_LEVEL_KEY, v);
             }}
             options={LEVELS.map((v) => ({ value: v, label: t(`cues.level.${v}` as TKey) }))}
@@ -153,20 +155,21 @@ export default function LiveCues({
             value={amount}
             onChange={(v) => {
               setAmount(v);
-              setSent(null);
               remember(CUE_AMOUNT_KEY, v);
             }}
             options={AMOUNTS.map((v) => ({ value: v, label: t(`cues.amount.${v}` as TKey) }))}
           />
         </div>
+        {/* No "send" button: the sheet writes itself and keeps following the rider. The one
+            button left is the override — coach the newest lap instead of the one on screen.
+            Called, not passed: the click event would arrive as `latest` and be truthy. */}
         <div className="flex flex-wrap items-center gap-2 pt-1">
-          {/* Called, not passed: the click event would arrive as `latest` and be truthy. */}
-          <Button size="sm" onClick={() => void send()} disabled={busy}>
-            {t("cues.send")}
-          </Button>
           <Button size="sm" variant="outline" onClick={() => void send(true)} disabled={busy}>
             {t("cues.fromLatest")}
           </Button>
+          <span className="text-[12px] text-muted-foreground">
+            {busy ? t("cues.sending") : sent ? t("cues.following", { n: sent.cues.length }) : t("cues.sending")}
+          </span>
         </div>
         <p className="text-[12px] text-muted-foreground">{t("cues.fromLatestHint")}</p>
         <p className="text-[12px] text-muted-foreground">{t("cues.where")}</p>
