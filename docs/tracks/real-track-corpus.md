@@ -844,7 +844,7 @@ Status: **M** measured, **P** published, **E** estimated.
 
 | Rule | Value in code | Measured or source | Status |
 |---|---|---|---|
-| Floor | ≤ 140 x 120 m, drawn 125–140 along | 117–150 along, 72–139 across: the FSX floors are 72–86, the 2020 rounds 124–139 | M |
+| Floor | ≤ 140 x 120 m, drawn 125–140 along, laid on a 240 m square plot under any of the eight symmetries, so lanes run along the plot or across it | 117–150 along, 72–139 across: the FSX floors are 72–86, the 2020 rounds 124–139 | M |
 | Lap | 750–900 m | 770 / 779 / 880, target 780 | M |
 | Riding width | 8.5–10 m | 9.3–11.3, median 10; 6.1 m real minimum | M, P |
 | Lanes | 7 to 9, 12–14 m apart; a lane may skip a row, which makes a wide turn on two 90s rather than a 180 | 5–8 of the 7–10 corners are 180s; parallel lanes 55–110 m | M, E (gap) |
