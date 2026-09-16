@@ -109,8 +109,12 @@ export default function SetupFixes({ path, findings }: { path: string; findings:
     try {
       const out = await coachSaveSetup(path, skills);
       setSaved(out);
+      // Named, so the rider can check each one in the garage rather than take our word for it.
+      const list = out.changed.map((f) => t(`setupField.${f}` as TKey)).join(", ");
       // Saved either way; the game only picks it up when it isn't running.
-      toast.success(out.selected ? t("setup.selected", { name: out.name }) : t("setup.savedGameOpen", { name: out.name }));
+      toast.success(out.selected ? t("setup.selected", { name: out.name }) : t("setup.savedGameOpen", { name: out.name }), {
+        description: list ? t("setup.savedChanged", { list }) : undefined,
+      });
     } catch (e) {
       toast.error(String(e));
     } finally {
@@ -273,7 +277,9 @@ function Changes({ fix }: { fix: SetupFix }) {
             <span className="text-foreground">{t(`setupField.${c.field}` as TKey)}</span>{" "}
             <span className="text-muted-foreground">{c.why}</span>
             {!c.writes && c.from !== c.to && (
-              <span className="ml-1.5 text-[11px] text-faint">{t("setup.byHand")}</span>
+              <span className="ml-1.5 text-[11px] text-faint">
+                {c.conflict ? t("setup.conflict") : t("setup.byHand")}
+              </span>
             )}
           </span>
           <span className="whitespace-nowrap font-mono text-[12px] text-accent-foreground">{amount(c, t)}</span>

@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 /** Mirrors `coach.rs` and `analysis.rs`. */
 
@@ -236,6 +237,10 @@ export const coachGround = (path: string) => invoke<GroundAnswer>("coach_ground"
 export const coachLines = (path: string) => invoke<Lines | null>("coach_lines", { path });
 export const coachSurface = (path: string) => invoke<Surface | null>("coach_surface", { path });
 export const coachSessions = () => invoke<SessionSummary[]>("coach_sessions");
+/** Fires when the recorder writes a session or adds to the one being ridden now. */
+export const onSessionsChanged = (run: () => void): Promise<UnlistenFn> =>
+  listen("coach-sessions-changed", () => run());
+
 /** The whole session the recording belongs to: every stint of that event, with all its laps. */
 export const coachSession = (path: string) => invoke<SessionDetail>("coach_session", { path });
 /** `solo` reviews the lap on its own; so does the backend when there's nothing to compare with. */
@@ -276,6 +281,8 @@ export interface SetupChange {
   toValue: string | null;
   /** The coach can make this change in a copy of the setup. */
   writes: boolean;
+  /** Another tip wants this setting the other way, so the coach leaves it to the rider. */
+  conflict: boolean;
 }
 
 export interface SetupFix {
@@ -302,16 +309,19 @@ export interface SetupPlan {
 export const coachSetupPlan = (path: string, skills: string[]) =>
   invoke<SetupPlan>("coach_setup_plan", { path, skills });
 
-/** A setup the coach wrote, and whether the game will load it. */
+/** A setup the coach wrote: its name, the settings it really changed, and whether the game
+ *  will load it. */
 export interface SavedSetup {
   name: string;
+  changed: SetupField[];
   /** The game is pointed at it for practice on this track. */
   selected: boolean;
   /** It isn't, because MX Bikes is open: the file is the game's, and it rewrites it on exit. */
   gameOpen: boolean;
 }
 
-/** Saves those changes as a new setup beside the rider's own, and selects it in the game. */
+/** Saves those changes as a new setup — beside the rider's own, or as one of their own when
+ *  they rode the game's default — and points the game at it. */
 export const coachSaveSetup = (path: string, skills: string[]) =>
   invoke<SavedSetup>("coach_save_setup", { path, skills });
 /** Points the game at a setup the coach already saved. Only works with MX Bikes closed. */
@@ -354,6 +364,8 @@ export interface HudPart {
   key: string;
   label: string;
   on: boolean;
+  /** The recorder this part needs, e.g. "0.24" for the newest ones. */
+  needs: string;
 }
 
 /** `hud.ini` as the recorder will read it: missing keys are on, except the map when MXBMRP3
@@ -364,23 +376,32 @@ export interface Hud {
   file: string;
   /** MXBMRP3 sits beside the recorder and draws a track map of its own. */
   mxbmrp3: boolean;
-  /** Where the live cue sits: fractions of the width and height, (0,0) top left. */
+  /** Where the live cue sits: the box's centre across, its top edge down, as fractions. */
   cuePos: [number, number];
+  /** The recorder that last ran is older than the newest settings need. */
+  preExtras: boolean;
 }
 
 export const coachHud = () => invoke<Hud>("coach_hud");
 /** Turn one part on or off, or the whole HUD with `enabled`. Always written out, so the
  *  recorder does what the switch says even when another plugin would decide for it. */
 export const coachSetHud = (key: string, on: boolean) => invoke<Hud>("coach_set_hud", { key, on });
-/** Move the live cue. FrostMod 0.24 reads it; older recorders leave the cue where it was. */
+/** Move the live cue: `x` is the box's centre across the screen, `y` its top edge down it.
+ *  FrostMod 0.24 reads them; older recorders leave the cue where it was. */
 export const coachSetCuePos = (x: number, y: number) => invoke<Hud>("coach_set_cue_pos", { x, y });
 
-/** Whether the recorder speaks its cues (`cues/voice.ini`), and how loud, 0–100. */
+/** Whether the recorder speaks its cues (`cues/voice.ini`), how loud, 0–100, and in which voice. */
 export interface Voice {
   enabled: boolean;
   volume: number;
+  voice: CueVoice;
+  /** The recorder that last ran is older than the voice choice needs. */
+  preExtras: boolean;
 }
 
+/** The voices the recorder has clips for. */
+export type CueVoice = "female" | "male";
+
 export const coachVoice = () => invoke<Voice>("coach_voice");
-export const coachSetVoice = (enabled: boolean, volume: number) =>
-  invoke<Voice>("coach_set_voice", { enabled, volume: Math.round(volume) });
+export const coachSetVoice = (enabled: boolean, volume: number, voice: CueVoice) =>
+  invoke<Voice>("coach_set_voice", { enabled, volume: Math.round(volume), voice });

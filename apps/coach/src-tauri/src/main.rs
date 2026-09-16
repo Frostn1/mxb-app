@@ -116,8 +116,12 @@ fn main() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         // The overlay's hotkey has to fire while MX Bikes holds keyboard focus.
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        // The sessions folders, watched while the app is open: the recorder writes all through
+        // a stint, and the list used to need the rider to leave the page and come back.
+        .manage(coach::SessionWatch::default())
         .setup(|app| {
             overlay::start(app.handle());
+            coach::watch_sessions(app.handle());
             // Anonymous counters, under the same switch and the same config file as the manager's
             // — which is also where the install id comes from. Coach does not mint one (no
             // `mint-install-id` feature, exactly as the studio), so a machine with only Coach on

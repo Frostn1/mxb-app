@@ -137,6 +137,32 @@ keep the more important one. The file is `<user folder>\mxbcoach\cues\<track>.<b
 `MXCQ` version 1, read by FrostMod's `src/coachcue.h`; the plugin shows each cue 1.2 s before
 its spot at the bike's speed for 1.5 s, only in testing or a race event's practice session.
 
+### What Coach writes for the recorder
+
+Two settings files under `<user folder>\mxbcoach`, both merged key by key so anything Coach
+doesn't set stays as it was (`ini.rs`). Every part is on unless the file says otherwise, with
+three exceptions.
+
+`hud.ini`, `[hud]`: `enabled`, `cue`, `section`, `gap`, `stance`, `map`, `susp`, `trail`,
+`setup`, plus `cue_x` and `cue_y`.
+
+- **`map`** defaults *off* when `plugins\mxbmrp3.dlo` sits beside the recorder, because MXBMRP3
+  draws its own. Coach reports that state rather than a plain "on", which is what made the
+  switch look broken, and always writes the key out explicitly when the rider touches it.
+- **`susp`** (suspension bars per end, with a bottomed mark) and **`trail`** (the reference lap
+  as a blue trail ahead on the map) default *off*: they are information over the game's own
+  screen rather than coaching.
+- **`cue_x`** is the centre of the cue box across the screen and **`cue_y`** its top edge, both
+  fractions with (0,0) top left; the default pair is the plugin's own box, `0.5` and `0.285`.
+  The section line follows the box. Out of range or unreadable keeps the default.
+
+`cues\voice.ini`, `[voice]`: `enabled`, `volume` (0–100) and `voice` (`female` or `male`;
+anything else is `female`, as the plugin reads it).
+
+`susp`, `trail`, `cue_x`/`cue_y` and `voice` need the recorder from FrostMod 0.24. Coach writes
+them whatever version ran — an older recorder ignores what it doesn't know — and says in the
+panel when the version that last ran is older than that.
+
 ### The sheet moves on
 
 A rider told the same four things every lap stops hearing them, so a sheet is not written once

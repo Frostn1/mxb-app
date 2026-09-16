@@ -3,10 +3,12 @@ import { cn } from "@frost/shared/lib/utils";
 import { useT, type TKey } from "@/i18n";
 import { coachSetCuePos, type Hud } from "@/api/coach";
 
-/** The nine places the live cue can sit, as fractions of the screen. The middle of the grid
- *  is where the recorder has always put it, so a rider who never touches this sees no change. */
-const X = [0.2, 0.5, 0.8];
-const Y = [0.12, 0.31, 0.86];
+/** The nine places the live cue can sit, as fractions of the screen: `X` is the cue box's
+ *  centre across, `Y` its top edge down. The middle of the grid is the recorder's own place
+ *  (`kCueBox`), so a rider who never touches this sees no change. The box is about 0.3 wide,
+ *  so the outer columns keep it clear of the edges rather than relying on the plugin's clamp. */
+const X = [0.25, 0.5, 0.75];
+const Y = [0.1, 0.285, 0.82];
 const X_KEYS: TKey[] = ["hud.cuePos.left", "hud.cuePos.centre", "hud.cuePos.right"];
 const Y_KEYS: TKey[] = ["hud.cuePos.top", "hud.cuePos.middle", "hud.cuePos.bottom"];
 
@@ -32,6 +34,7 @@ export default function CuePosition({ hud, onChange }: { hud: Hud; onChange: (hu
     <div className="border-t border-border pt-3">
       <div className="text-[13px] font-semibold">{t("hud.cuePos")}</div>
       <p className="mt-0.5 text-[12px] text-muted-foreground">{t("hud.cuePosBody")}</p>
+      {hud.preExtras && <p className="mt-1 text-[12px] text-warning">{t("hud.needs024")}</p>}
       <div className="mt-2.5 grid w-[104px] grid-cols-3 gap-1">
         {Y.map((_, iy) =>
           X.map((_, ix) => {

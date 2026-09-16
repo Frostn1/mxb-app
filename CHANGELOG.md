@@ -1,28 +1,48 @@
 # Changelog
 
-## 2026-09-15 — MXB Coach
+## Unreleased — MXB Coach
 
 ### Added
 - Saving a setup now sets it as the one practice loads on that track, so it's on the bike when
   you go out. Close MX Bikes first and it happens on save; otherwise there's a Select button
   for when the game is closed. Your other setups, and your race and qualifying picks, are left
   alone.
-- Move the live cue. Pick any of nine places on screen in the HUD panel, for the recorder from
-  FrostMod 0.24 onwards.
-- Send the cues from your newest lap without leaving the review you're reading.
-- Settings shows which recorder the game actually ran. It appears after you've started MX Bikes
-  once with the recorder installed.
-- Speak the cues and the in-game HUD say which recorder they need when yours is older than that.
+- Move the live cue. Pick any of nine places on screen in the HUD panel, and the section line
+  follows it.
+- Choose who speaks the cues: a woman's voice or a man's.
+- Two new things the recorder can draw: suspension bars for each end, with a mark when it
+  bottoms, and a blue trail ahead of you on the map showing the line to take. Both start off.
+- The newest settings say when your recorder is older than the FrostMod 0.24 they need.
+- On the game's default setup the coach now writes you a setup of your own, named after the
+  track, instead of asking you to go and save one in the garage first. It starts from another
+  setup you have for that bike where there is one, and from the bike's own settings where there
+  isn't. Your own setups are never written over.
+- The session list and the laps in an open session keep up with the recorder while you ride, so
+  a lap you have just finished shows up without leaving the page and coming back. Both pages
+  have a Refresh button too.
 
 ### Changed
-- The live cues move on. Send them again after a few laps and the coach drops what you've taken
-  and calls what's costing you time now, instead of repeating the same lap's calls.
+- The live cues move on. Once you've sent them, the coach keeps them up to date as you ride: it
+  drops what you've taken and calls what's costing you time now, instead of repeating the same
+  lap's calls every lap.
 - Cues say what to do and where: "Go inside here", "Stay wide", "Brake here". Line tips name the
   inside or the outside line in those words.
 - A shift is only called where your gear is really costing you time on the exit, and it names
   the gear to be in rather than telling you to change earlier.
 - The track map switch is a plain on/off that the game always obeys. With MXBMRP3 installed it
   says so, since that draws a map of its own.
+- Where two tips want one setting opposite ways — sand wants a tooth more on the rear, the rev
+  limiter a tooth less — the coach says so and leaves that setting to you, rather than listing
+  it as a change it will make. Saving a setup now names the settings it changed.
+
+## 2026-09-15 — MXB Coach
+
+### Added
+- Settings shows which recorder the game actually ran. It appears after you've started MX Bikes
+  once with the recorder installed.
+- Speak the cues and the in-game HUD say which recorder they need when yours is older than that.
+
+### Changed
 - One session per event. Go out, come in and go out again, and it's all one session with every
   lap you rode: your best lap and your ideal lap count all of them, and each lap says which
   stint it came from.
@@ -62,6 +82,9 @@
 - Check my connection, on that screen: it tests your internet, whether the master server's
   address resolves, whether outbound UDP is being blocked, and the server list itself, then says
   whose problem it is. The same numbers are public at mxbsecure.com/status.
+- Add your server, on the Servers tab: puts a server on the shared book by hand, for one the
+  game's own list never carries — a brand-new box, or a private league one. Anything the game
+  does list is remembered on its own and needs none of this.
 - A shared server book. The Servers tab already rebuilt its list by asking each server directly
   when the master wouldn't answer, but only from addresses you had already seen — so on a fresh
   install it had nothing to work from, which is exactly who an outage catches out. The app now

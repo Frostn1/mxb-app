@@ -8,11 +8,11 @@
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::time::UNIX_EPOCH;
+use std::time::{Duration, UNIX_EPOCH};
 
 use mxb_core::config::{self, AppConfig};
 use serde::{Deserialize, Serialize};
-use tauri::AppHandle;
+use tauri::{AppHandle, Emitter, Manager};
 
 use crate::analysis::{self, Ideal, Review, Trace};
 use crate::telemetry::{self, Recording};
@@ -336,7 +336,41 @@ fn all_sessions(app: &AppHandle) -> Vec<SessionSummary> {
 
 #[tauri::command]
 pub fn coach_sessions(app: AppHandle) -> Vec<SessionSummary> {
+    // The folder only exists once the recorder has written to it, so the watch that couldn't
+    // start when the app opened gets another go here.
+    ensure_watching(&app);
     all_sessions(&app)
+}
+
+/// The sessions folders, watched while the app is open.
+#[derive(Default)]
+pub struct SessionWatch(pub mxb_core::paintwatch::WatchSet);
+
+/// Told to the frontend when a recording is written or grows: the session list and the open
+/// session's laps re-read themselves rather than waiting for the rider to leave and come back.
+pub const SESSIONS_CHANGED: &str = "coach-sessions-changed";
+
+/// Slower than the paint watcher's. A recording is appended to all the way through a stint, so
+/// events never stop while the rider is out; the answer to each one is re-reading a file that
+/// is still growing, and nobody needs that several times a second.
+const SESSION_DEBOUNCE: Duration = Duration::from_secs(2);
+
+/// Watch the sessions folders, replacing any watch already running.
+pub fn watch_sessions(app: &AppHandle) {
+    let Some(state) = app.try_state::<SessionWatch>() else { return };
+    let dirs: Vec<String> = session_dirs(&load_config(app)).iter().map(|d| d.to_string_lossy().into_owned()).collect();
+    let handle = app.clone();
+    mxb_core::paintwatch::watch_folders(&state.0, "session watcher", &dirs, SESSION_DEBOUNCE, move |paths| {
+        log::info!("session watcher: {} file(s) changed", paths.len());
+        let _ = handle.emit(SESSIONS_CHANGED, ());
+    });
+}
+
+fn ensure_watching(app: &AppHandle) {
+    let watching = app.try_state::<SessionWatch>().is_some_and(|s| mxb_core::paintwatch::is_watching(&s.0));
+    if !watching {
+        watch_sessions(app);
+    }
 }
 
 fn load(path: &str) -> Result<Recording, String> {
@@ -510,6 +544,38 @@ pub fn coach_review(
     Ok(ReviewOut { track_id: summary.track_id, track_name: summary.track_name, lap: this, reference, review, rivals })
 }
 
+/// Where a setup the coach saves goes, and what it is called. It never writes over a file.
+enum Save {
+    /// Beside the rider's own setup, numbered off its name.
+    Beside(PathBuf),
+    /// Under this track, named after it. The rider rode the game's default, so there is no
+    /// name of theirs to build on.
+    Fresh(PathBuf, String),
+}
+
+impl Save {
+    fn dir(&self) -> &Path {
+        match self {
+            Save::Beside(f) => f.parent().unwrap_or(Path::new(".")),
+            Save::Fresh(d, _) => d,
+        }
+    }
+
+    /// The names to try, in order.
+    fn names(&self) -> Vec<String> {
+        match self {
+            Save::Beside(f) => crate::stp::coach_names(&setup_base(f)).collect(),
+            Save::Fresh(_, track) => crate::stp::fresh_names(track).collect(),
+        }
+    }
+
+    /// The first name nothing has taken.
+    fn free(&self) -> Option<String> {
+        let dir = self.dir();
+        self.names().into_iter().find(|n| !dir.join(format!("{n}.stp")).exists())
+    }
+}
+
 /// The setup the rider had on for a recording, as far as the coach could find and read it.
 struct RiderSetup {
     name: String,
@@ -520,6 +586,8 @@ struct RiderSetup {
     sag: Option<crate::sag::Sag>,
     /// The pressure each tyre the setup runs is made for, kPa.
     optimal: [Option<f32>; 2],
+    /// Where a copy with the coach's changes would go.
+    save: Option<Save>,
 }
 
 fn rider_setup(app: &AppHandle, rec: &Recording) -> RiderSetup {
@@ -535,12 +603,37 @@ fn rider_setup(app: &AppHandle, rec: &Recording) -> RiderSetup {
             o.insert(crate::stp::Field::SwingarmLength, sw);
         }
     }
-    let file = crate::stp::locate(&cfg.profiles_dir(), &raw, &e.track_id, &e.bike_id);
-    let setup = file
-        .as_ref()
-        .and_then(|p| fs::read(p).ok())
-        .and_then(|b| crate::stp::Setup::parse(&b, usize::try_from(e.gears).ok()).ok())
-        .filter(|s| s.bike_id() == e.bike_id);
+    let profiles = cfg.profiles_dir();
+    let gears = usize::try_from(e.gears).ok().filter(|&g| g > 0);
+    let read = |p: &Path| {
+        fs::read(p)
+            .ok()
+            .and_then(|b| crate::stp::Setup::parse(&b, gears).ok())
+            .filter(|s| s.bike_id() == e.bike_id)
+    };
+    let file = crate::stp::locate(&profiles, &raw, &e.track_id, &e.bike_id);
+    // Riding the game's default used to be the end of it: the coach asked the rider to go and
+    // save a setup in the garage first. Now it writes them one. Best is another setup of their
+    // own for this bike, which keeps every slot the coach doesn't model at a value the game
+    // itself wrote; failing that, the bike's own defaults out of its cfg.
+    let (setup, save) = match file.as_deref().and_then(read) {
+        Some(s) => (Some(s), file.clone().map(Save::Beside)),
+        None => {
+            let donor = crate::stp::setups_for_bike(&profiles, &e.track_id, &e.bike_id).into_iter().find_map(|p| read(&p));
+            let built = || {
+                let g = gears?;
+                let slots = crate::bikecfg::default_slots(bike_cfg.as_ref()?, g)?;
+                crate::stp::Setup::build(&e.bike_id, g, &slots).ok()
+            };
+            let s = donor.or_else(built);
+            let where_to = crate::stp::fresh_dir(&profiles, &e.track_id, &e.bike_id);
+            let save = match (&s, where_to) {
+                (Some(_), Some(d)) => Some(Save::Fresh(d, e.track_id.clone())),
+                _ => None,
+            };
+            (s, save)
+        }
+    };
     // The tyres the setup runs: their pressure lists join the bike's, with what they're made for.
     let mut optimal = [None, None];
     if let (Some(bc), Some(s), Some(o)) = (&bike_cfg, &setup, opts.as_mut()) {
@@ -553,18 +646,20 @@ fn rider_setup(app: &AppHandle, rec: &Recording) -> RiderSetup {
             }
         }
     }
-    let why = if name.is_empty() || name.eq_ignore_ascii_case("default") {
-        Some("You rode the bike's default setup. Save it under a name in the garage, and the coach can change it for you.".into())
-    } else if file.is_none() {
-        Some(format!("Your setup \"{name}\" wasn't found in your profiles folder."))
-    } else if setup.is_none() {
-        Some(format!("Your setup \"{name}\" couldn't be read."))
-    } else if opts.is_none() {
+    let why = if opts.is_none() {
         Some("The bike's own settings couldn't be read, so the coach can't tell how far each one goes.".into())
+    } else if setup.is_none() {
+        Some(if name.is_empty() || name.eq_ignore_ascii_case("default") {
+            format!("The coach couldn't read {}'s own settings, so it has nothing to build a setup from.", e.bike_name)
+        } else {
+            format!("Your setup \"{name}\" couldn't be read, and the coach found no other setup for this bike.")
+        })
+    } else if save.is_none() {
+        Some("The coach couldn't find a setups folder of yours to save into.".into())
     } else {
         None
     };
-    RiderSetup { name, file, setup, opts, why, sag: crate::sag::measure(rec), optimal }
+    RiderSetup { name, file, setup, opts, why, sag: crate::sag::measure(rec), optimal, save }
 }
 
 /// Every fix for the lap's setup tips, the sag and tyre ones included when they're asked for.
@@ -584,6 +679,9 @@ fn all_fixes(r: &RiderSetup, skills: &[String], travel: [f32; 2]) -> Vec<crate::
             }
         }
     }
+    // Last, over the whole list: what the save will really do decides what the rider is told
+    // it will do. Both commands come through here, so they can't disagree.
+    crate::fixes::settle(&mut fixes, r.setup.as_ref(), r.opts.as_ref());
     fixes
 }
 
@@ -593,7 +691,8 @@ pub struct SetupPlan {
     /// The setup the rider had on.
     pub name: String,
     pub file: Option<String>,
-    /// The name a saved copy gets: the next free "(coach)", "(coach 2)" … beside it.
+    /// The name a saved copy gets: the next free "(coach)", "(coach 2)" … beside the rider's
+    /// own, or "Coach <track>" when they rode the game's default and have none here.
     pub save_as: Option<String>,
     /// Why the coach can't make the changes itself, when it can't.
     pub why: Option<String>,
@@ -616,19 +715,20 @@ pub fn coach_setup_plan(app: AppHandle, path: String, skills: Vec<String>) -> Re
     let rec = load(&path)?;
     let r = rider_setup(&app, &rec);
     let fixes = all_fixes(&r, &skills, rec.event.susp_max_travel);
-    let save_as = r.file.as_deref().and_then(|f| {
-        let dir = f.parent()?;
-        crate::stp::coach_names(&setup_base(f)).find(|n| !dir.join(format!("{n}.stp")).exists())
-    });
+    let save_as = r.save.as_ref().and_then(Save::free);
     let (sag, travel_used) = (r.sag, crate::sag::travel_used(&rec));
     Ok(SetupPlan { name: r.name, file: r.file.map(|p| p.display().to_string()), save_as, why: r.why, fixes, sag, travel_used })
 }
 
-/// A setup the coach wrote, and whether the game will load it.
+/// A setup the coach wrote: what it is called, what it really changed, and whether the game
+/// will load it.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SavedSetup {
     pub name: String,
+    /// Named rather than counted, so the rider can check each one in the garage. A setting two
+    /// tips wanted opposite ways is not in here, and was never claimed as a change either.
+    pub changed: Vec<crate::stp::Field>,
     /// The game is pointed at it for practice on this track.
     pub selected: bool,
     /// It wasn't, because MX Bikes is open. The rider can pick it in the garage now, or press
@@ -650,32 +750,32 @@ fn select(dir: &Path, name: &str, wet: bool) -> Result<bool, String> {
     Ok(true)
 }
 
-/// Saves a lap's setup fixes as a new setup beside the rider's own, and points the game at it.
-/// Never overwrites a file: the rider's setup stays as it was, and only the practice keys of
-/// `default.ini` are touched.
+/// Saves a lap's setup fixes as a new setup — beside the rider's own, or as one of their own
+/// when they rode the game's default — and points the game at it. Never overwrites a file, and
+/// only the practice keys of `default.ini` are touched.
 #[tauri::command]
 pub fn coach_save_setup(app: AppHandle, path: String, skills: Vec<String>) -> Result<SavedSetup, String> {
     let rec = load(&path)?;
     let r = rider_setup(&app, &rec);
     let fixes = all_fixes(&r, &skills, rec.event.susp_max_travel);
-    let (Some(file), Some(setup), Some(opts)) = (r.file, r.setup, r.opts) else {
+    let (Some(setup), Some(opts), Some(save)) = (r.setup, r.opts, r.save) else {
         return Err(r.why.unwrap_or_else(|| "The coach can't change this setup.".into()));
     };
-    let (out, moved) = crate::fixes::apply(&setup, &fixes, &opts);
-    if moved == 0 {
+    let (out, changed) = crate::fixes::apply(&setup, &fixes, &opts);
+    if changed.is_empty() {
         return Err("There's nothing in this setup the coach can change.".into());
     }
-    let dir = file.parent().ok_or("The setup's folder couldn't be found.")?;
-    let base = setup_base(&file);
-    for name in crate::stp::coach_names(&base) {
+    let dir = save.dir().to_path_buf();
+    fs::create_dir_all(&dir).map_err(err)?;
+    for name in save.names() {
         match fs::OpenOptions::new().write(true).create_new(true).open(dir.join(format!("{name}.stp"))) {
             Ok(mut f) => {
                 std::io::Write::write_all(&mut f, out.bytes()).map_err(err)?;
                 // A setup the rider has to go and find in the garage is a setup they ride
                 // without. Failing to select it is not failing to save it, so it is reported
                 // rather than raised.
-                let selected = select(dir, &name, rec.session.conditions == 2).unwrap_or(false);
-                return Ok(SavedSetup { name, selected, game_open: !selected });
+                let selected = select(&dir, &name, rec.session.conditions == 2).unwrap_or(false);
+                return Ok(SavedSetup { name, changed, selected, game_open: !selected });
             }
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
             Err(e) => return Err(err(e)),
@@ -696,7 +796,8 @@ pub fn coach_select_setup(app: AppHandle, path: String, name: String) -> Result<
         .ok_or_else(|| format!("\"{name}\" isn't in your profiles folder any more."))?;
     let dir = file.parent().ok_or("The setup's folder couldn't be found.")?;
     let selected = select(dir, &name, rec.session.conditions == 2)?;
-    Ok(SavedSetup { name, selected, game_open: !selected })
+    // Nothing was written to the setup itself here: this only points the game at one.
+    Ok(SavedSetup { name, changed: Vec::new(), selected, game_open: !selected })
 }
 
 #[derive(Serialize)]
