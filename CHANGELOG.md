@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased — MXB App and MXB Coach
+
+### Fixed
+- The overlay shortcut always belongs to someone. With no MX Bikes folder set, MXB App told
+  MXB Coach it was holding the key for both and then never bound it, so the shortcut opened
+  nothing in either app.
+- MXB Coach keeps its own shortcut when it can't reach MXB App. If the local link between the
+  two never comes up — a firewall or antivirus blocking it is the usual cause — Coach used to
+  hand the key over to an MXB App that wasn't taking it, and then say an older MXB App was
+  running even when it was up to date. It now holds the key itself and says plainly that the
+  two apps aren't linked.
+
 ## Unreleased — MXB Coach
 
 ### Fixed

@@ -78,6 +78,9 @@ pub struct OverlayState {
     /// Why this app isn't holding the hotkey itself (Coach only): `linked`, `oldManager`,
     /// `updateManager`, `updateCoach`.
     pub deferred: Option<String>,
+    /// The loopback link between MXB App and MXB Coach never came up, so the two can't share
+    /// one key or show each other's tabs. Each holds its own shortcut instead.
+    pub link_down: bool,
 }
 
 /// Why the last [`register`](record_hotkey_result) call failed, if it did.
@@ -150,6 +153,8 @@ pub fn state(cfg: &config::AppConfig, peer: Option<PeerInfo>) -> OverlayState {
         hotkey_error: cfg.overlay_enabled.then(hotkey_error).flatten(),
         peer,
         deferred: None,
+        // Callers that have a link say so; the manager holds its own key either way.
+        link_down: false,
     }
 }
 

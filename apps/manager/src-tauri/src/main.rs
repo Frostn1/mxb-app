@@ -6706,13 +6706,26 @@ fn main() {
                 // And watch the paints the rider is wearing, so saving one over the top
                 // while the game runs reaches the game.
                 watch_worn_paints(handle);
-                // A combo another app already owns shouldn't stop the app from starting
-                // — Settings reports the state and lets the player pick another.
-                if let Err(e) = overlay::register(handle, &cfg) {
-                    log::warn!("overlay hotkey not registered: {e}");
-                }
             } else {
                 log::info!("no MX Bikes folder found — showing first-run setup");
+            }
+            // Outside the branch above on purpose: the overlay key and push-to-talk have
+            // nothing to do with where the game is installed, and `start_link` below tells
+            // MXB Coach this app is here and holding the key for both. Bound only inside it,
+            // an install with no game folder yet announced itself as the holder and then
+            // bound nothing — so Coach let go, MXB App never took it, and the key was held
+            // by nobody.
+            //
+            // A combo another app already owns shouldn't stop the app from starting
+            // — Settings reports the state and lets the player pick another.
+            //
+            // Read back rather than reusing the binding above: it lives inside that branch,
+            // which doesn't run without a game folder, and the branch may have saved changes
+            // to it. The defaults carry the default combo, which is the right key to bind
+            // when there is no config yet.
+            let hotkey_cfg = config::load(handle).unwrap_or_default();
+            if let Err(e) = overlay::register(handle, &hotkey_cfg) {
+                log::warn!("overlay hotkey not registered: {e}");
             }
             // Notice the game starting (Steam or Play button) to re-arm FrostMod for the
             // session and check the mods folder is really on disk.

@@ -28,6 +28,9 @@ export interface OverlayState {
   peer: OverlayPeer | null;
   /** Coach only: why MXB App holds the key instead. */
   deferred: "linked" | "oldManager" | "updateManager" | "updateCoach" | null;
+  /** The local link between the two apps never came up, so they can't share one key or show
+   *  each other's tabs. Each holds its own shortcut instead. */
+  linkDown: boolean;
 }
 
 export function getOverlayState(): Promise<OverlayState> {

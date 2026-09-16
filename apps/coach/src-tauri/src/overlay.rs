@@ -44,13 +44,22 @@ fn deferred() -> Option<&'static str> {
 
 /// Who should hold the key right now.
 fn decide(app: &AppHandle) -> Option<&'static str> {
-    if let Some(link) = core::link(app) {
-        if link.peer().is_some() {
-            return Some("linked");
-        }
-        if let Some(p) = link.mismatch() {
-            return Some(if p.proto > overlaylink::PROTO { "updateCoach" } else { "updateManager" });
-        }
+    let Some(link) = core::link(app) else {
+        // Coach's own link never started — a firewall or AV blocking the loopback listener
+        // is the usual cause. Without it there is no way to tell a current MXB App from one
+        // that predates the link, and the guess below would have Coach let the key go to an
+        // app that is already holding it for itself: the overlay then never opens at all,
+        // and Settings blames "an older MXB App" on a perfectly current one.
+        //
+        // So hold it. If an old MXB App really does own the combo the bind fails and says
+        // which, and a named failure beats a shortcut that silently does nothing.
+        return None;
+    };
+    if link.peer().is_some() {
+        return Some("linked");
+    }
+    if let Some(p) = link.mismatch() {
+        return Some(if p.proto > overlaylink::PROTO { "updateCoach" } else { "updateManager" });
     }
     // Running, and not linked: an MXB App that predates the link, holding the key itself.
     gamewindow::process_running(MANAGER_EXE).then_some("oldManager")
@@ -183,6 +192,9 @@ pub fn overlay_state(app: AppHandle) -> OverlayState {
     let mut state = core::state(&cfg, core::peer(&app));
     let why = deferred();
     state.deferred = why.map(str::to_string);
+    // No link means no sharing with MXB App, whatever else is true. Coach keeps the key in
+    // that case, so this is a note about the two apps, not about the shortcut.
+    state.link_down = core::link(&app).is_none();
     if why.is_some() {
         // Not ours to bind: only MXB App's own report, while linked, says anything.
         let peer_error = PEER_ERROR.lock().ok().and_then(|e| e.clone());

@@ -95,6 +95,9 @@ function Overlay() {
       {state?.deferred && (
         <p className="mt-3 text-[12px] text-muted-foreground">{t(`overlay.deferred.${state.deferred}` as TKey)}</p>
       )}
+      {/* Said plainly rather than left to look like a hotkey fault: with no link Coach keeps
+          its own key, so the shortcut works — it is the sharing that doesn't. */}
+      {state?.linkDown && <p className="mt-3 text-[12px] text-warning">{t("overlay.linkDown")}</p>}
       {state?.hotkeyError && (
         <div className="mt-3 text-[12px] text-warning">
           <div className="font-semibold">{t("overlay.hotkeyTaken")}</div>
