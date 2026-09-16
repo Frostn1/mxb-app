@@ -210,9 +210,17 @@ export function randomTrackProgram(
   seed?: number,
   scale: TrackScale = "normal",
   discipline: Discipline = "mx",
+  density?: number,
 ): Promise<TrackProgram> {
-  return invoke<TrackProgram>("random_track_program", { seed, scale, discipline });
+  return invoke<TrackProgram>("random_track_program", { seed, scale, discipline, density });
 }
+
+/**
+ * How packed a lap is, as a multiple of what a real round carries. 1 is the measured density.
+ *
+ * Only the stadium disciplines read it — a national spaces its jumps by a different rule.
+ */
+export const DENSITY_RANGE = { min: 0.65, max: 1.35, step: 0.05, reference: 1 } as const;
 
 /** Easy: smaller jumps, shallower ruts. Pro: the bigger, rougher raced build. */
 export type TrackScale = "easy" | "normal" | "pro";

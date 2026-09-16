@@ -175,6 +175,14 @@ pub struct Sections {
     /// carrying a rhythm lane and bordered with tuff blocks. `(0, 0)` on a lap that is already
     /// a stadium floor.
     pub stadium_blocks: (u32, u32),
+    /// How many lips a kilometre of this discipline's laps carries, at the corpus's own count.
+    ///
+    /// The target the lanes are packed out to, not a band to reject against: one section a lane
+    /// left a 110 m lane carrying 65 m of jumps and 45 m of nothing, which measured 42 a
+    /// kilometre against the seven rounds' 64. Measured with `analyse.py`, which counts every
+    /// stretch of ground standing off the floor — so a whoop, a rhythm hill and each face of a
+    /// triple are one apiece, and [`Feature::lips`] is the same unit.
+    pub packed_per_km: f32,
 }
 
 // ------------------------------------------------------------------------------------------
@@ -370,6 +378,8 @@ pub const SX_RULES: Rules = Rules {
         sand_m: (35.0, 60.0),
         // The whole lap is a stadium already.
         stadium_blocks: (0, 0),
+        // M: 56.8–71.9 over the seven, median 63.6.
+        packed_per_km: 63.6,
     }),
 };
 
@@ -472,6 +482,9 @@ pub const SMX_RULES: Rules = Rules {
         // E: one or two stretches of parallel lanes, which is what makes it look like SMX
         // rather than like a small national.
         stadium_blocks: (1, 2),
+        // M: 37.3–45.2 over the three, median 43.8. Lower than a stadium's because the lap is
+        // twice as long and a good part of it is the one very long side.
+        packed_per_km: 43.8,
     }),
 };
 
@@ -1764,8 +1777,46 @@ const TRIPLE_LEAST_M: f32 = 17.0;
 const RHYTHM_FIT_LOW: u32 = 6;
 const RHYTHM_ROOM_PITCHES: f32 = 3.5;
 
+/// The least free ground in a lane worth putting another section on, metres.
+///
+/// A rhythm double is the smallest thing the packing pass builds and wants 21 m of room, plus
+/// the clearance either side. Below that a hole is the run-up to the jump on one side of it and
+/// the run-out of the jump on the other, which is ground already doing a job.
+const PACK_LEAST_M: f32 = 26.0;
+
+/// Ground left clear between a packed-in section and the one it was fitted beside.
+const PACK_CLEAR_M: f32 = 2.0;
+
 /// How many of something a lap gets, from its measured band. A free function rather than a
 /// closure over the generator: a closure holds it borrowed for the whole of `section_features`.
+/// The lips a plan of sections will come out at, before any of it is built.
+///
+/// Each kind is worth about what its builder puts down: a rhythm run the middle of its hill
+/// band, a whoop set the middle of its count, a triple its three crests, a pair two, a table or
+/// a single one. Near enough to steer the plan by, which is all it is for — the lap is measured
+/// properly afterwards, off the ground.
+fn planned_lips(sec: &Sections, kinds: &[Option<Section>], rooms: &[f32]) -> f32 {
+    let mid = |b: (u32, u32)| (b.0 + b.1) as f32 * 0.5;
+    // A rhythm run is worth what its lane holds, not what its band asks for: `rhythm_lane`
+    // takes as many hills as the room allows and no more, so a 43 m lane gives three where the
+    // band says five or six. Counted at the band, a plan reads as met while the ground it
+    // stands on is half empty — which is how the first pass at this came out at 47 a kilometre
+    // believing it had hit 64.
+    let pitch = (sec.rhythm_pitch_m.0 + sec.rhythm_pitch_m.1) * 0.5;
+    kinds
+        .iter()
+        .enumerate()
+        .filter_map(|(i, k)| k.map(|k| (i, k)))
+        .map(|(i, k)| match k {
+            Section::Rhythm => ((rooms[i] / pitch) - 0.5).floor().clamp(3.0, mid(sec.rhythm_hills)),
+            Section::Whoops => mid(sec.whoops),
+            Section::Triple => 3.0,
+            Section::Double | Section::RhythmDouble => 2.0,
+            Section::Table | Section::Single => 1.0,
+        })
+        .sum()
+}
+
 fn count_in(rng: &mut Rng, band: (u32, u32)) -> i32 {
     rng.int(band.0 as i32, band.1 as i32).max(0)
 }
@@ -1954,10 +2005,20 @@ fn section_features(
     let (mut rhythms, mut doubles) = (count_in(rng, sec.rhythm_lanes), count_in(rng, sec.doubles));
     let (mut tables, mut sands) = (count_in(rng, sec.tables), count_in(rng, sec.sand_sections));
 
+    // What the lap should carry, in lips. `density` is the slider: 1.0 is the corpus.
+    //
+    // This steers which section a lane gets rather than how a section is shaped. A lane is
+    // full either way — the room is spent on a tabletop's ramps or on a rhythm run's hills —
+    // and a 43 m lane that spends itself on one tabletop is one lip where five would fit. That
+    // is the whole of the 42-against-64 gap: not bare ground, but ground spent a lip at a time.
+    let want = sec.packed_per_km * knobs.density * lap / 1000.0;
+
     // Lane zero is the start straight: the gate row stands on it and `trackllm::repair` builds
     // the finish jump into it, so nothing else goes there.
     let room = |l: &Lane| (l.from + LANE_CLEAR_M, (l.length() - 2.0 * LANE_CLEAR_M).max(0.0));
     let mut kind: Vec<Option<Section>> = vec![None; lanes.len()];
+    // What each lane has to spend, so a plan can be counted at what its lanes really hold.
+    let rooms: Vec<f32> = lanes.iter().map(|l| room(l).1).collect();
 
     // 1. Triples, longest lane first — the one thing here whose size the run-up decides.
     let mut longest: Vec<usize> = (1..lanes.len()).collect();
@@ -1999,9 +2060,16 @@ fn section_features(
     // Measured off the *short* end of the pitch band: sized off the long end, a 37 m lane fell
     // a metre short of the bar and SuperMotocross drew no rhythm lanes at all.
     let need = sec.rhythm_pitch_m.0 * RHYTHM_ROOM_PITCHES;
+    // A rhythm run is the only section that puts five or six lips on a single lane, so it is
+    // what the density target spends its lanes on: keep laying them past the rolled count while
+    // the lap is still short of what it should carry, up to the measured ceiling. At the
+    // corpus's own density that is what takes a lap from the three it drew to the five the
+    // rounds run.
+    let mut laid = 0usize;
     for pass in 0..2 {
         for i in 1..lanes.len() {
-            if rhythms <= 0 {
+            let short = planned_lips(&sec, &kind, &rooms) < want;
+            if (rhythms <= 0 && !short) || laid >= sec.rhythm_lanes.1 as usize {
                 break;
             }
             if kind[i].is_some() {
@@ -2013,6 +2081,7 @@ fn section_features(
             }
             kind[i] = Some(Section::Rhythm);
             rhythms -= 1;
+            laid += 1;
         }
     }
 
@@ -2026,6 +2095,11 @@ fn section_features(
         if doubles > 0 && r >= sec.double_m.1 + 24.0 && speed.carry(at + 8.0, 26.0) >= sec.double_m.0 {
             kind[i] = Some(Section::Double);
             doubles -= 1;
+        } else if planned_lips(&sec, &kind, &rooms) < want && r >= sec.rhythm_double_m.0 * 2.5 {
+            // Two lips rather than one, on a lane that would otherwise take a tabletop. A lap
+            // packed to the corpus reaches its count on pairs spread about, not on more tables:
+            // a table is 34 m of lane for a single lip.
+            kind[i] = Some(Section::RhythmDouble);
         } else if tables > 0 && r >= sec.table_deck_m.1 + 2.0 * crate::trackprog::lip_face_run(h, 24.0) {
             kind[i] = Some(Section::Table);
             tables -= 1;
@@ -2145,6 +2219,77 @@ fn section_features(
                     lay(&mut out, shifted(f, slack.max(0.0) * 0.5));
                 }
             }
+        }
+    }
+
+    // 4b. And pack the lanes out to the density the corpus carries.
+    //
+    // One section a lane is the right *shape* but not the right amount of it. A rhythm section
+    // is capped at `rhythm_m.1` and then centred in its lane, so a 110 m lane carried 65 m of
+    // jumps and 45 m of nothing: over twelve seeds that left 55% of the lap bare and measured
+    // 42 lips a kilometre against the seven rounds' 64 — while pitch, hill height and whoop
+    // spacing all sat on the corpus median. What was missing was never a section's shape, it
+    // was how much of the lane one was asked to cover.
+    //
+    // So whatever room a lane has left over gets another section, biggest hole first, until the
+    // lap carries what it should. Nothing already laid is touched or resized, which is why the
+    // numbers that measured right go on measuring right.
+    let lips = |fs: &[Feature]| fs.iter().map(|f| f.lips()).sum::<usize>() as f32;
+    if lips(&out) < want {
+        // The free ground inside each lane. Sand lies under the jumps rather than among them,
+        // so it never counts as ground taken.
+        let mut holes: Vec<(f32, f32)> = Vec::new();
+        for lane in lanes.iter().skip(1) {
+            let (at, r) = room(lane);
+            let (lo, hi) = (at, at + r);
+            let mut taken: Vec<(f32, f32)> = out
+                .iter()
+                .filter(|f| !matches!(f, Feature::Sand { .. }))
+                .map(|f| (f.at(), f.at() + f.length()))
+                .filter(|(a, b)| *b > lo && *a < hi)
+                .collect();
+            taken.sort_by(|a, b| a.0.total_cmp(&b.0));
+            let mut cursor = lo;
+            for (a, b) in taken {
+                if a - cursor >= PACK_LEAST_M {
+                    holes.push((cursor, a - cursor));
+                }
+                cursor = cursor.max(b);
+            }
+            if hi - cursor >= PACK_LEAST_M {
+                holes.push((cursor, hi - cursor));
+            }
+        }
+        // Biggest first: a 45 m hole takes a whole rhythm run, and spending it on a pair of
+        // hills instead would leave the run nowhere left to go.
+        holes.sort_by(|a, b| b.1.total_cmp(&a.1));
+        for (hole_at, hole_len) in holes {
+            if lips(&out) >= want {
+                break;
+            }
+            // A clear couple of metres either side, because `lay` takes the ground a section
+            // covers and a hole is bounded by two sections that are already down.
+            let (at, room_here) = (hole_at + PACK_CLEAR_M, hole_len - 2.0 * PACK_CLEAR_M);
+            // Whole rhythm runs only while the lap still carries fewer than the corpus does.
+            //
+            // Density is not an excuse to turn a lap into nothing but rhythm lanes: the seven
+            // rounds run four to seven of them and then reach their count with singles, tables
+            // and pairs spread round the rest. Past the measured ceiling this packs pairs, so
+            // the lap gets its lips without getting a shape no real round has.
+            let runs_down = out
+                .iter()
+                .filter(|f| matches!(f, Feature::Custom { .. }) && f.lips() >= 4)
+                .count();
+            let Some(f) = (if runs_down < sec.rhythm_lanes.1 as usize {
+                rhythm_lane(rng, at, room_here, &sec)
+                    .or_else(|| rhythm_double(rng, at, room_here, &sec))
+            } else {
+                rhythm_double(rng, at, room_here, &sec)
+            }) else {
+                continue;
+            };
+            let slack = room_here - f.length();
+            lay(&mut out, shifted(f, slack.max(0.0) * 0.5));
         }
     }
 
@@ -2540,6 +2685,12 @@ pub struct LayoutKnobs {
     pub(crate) roughness: Option<f32>,
     /// Which rules the lap is drawn by, see [`Rules`].
     pub(crate) discipline: Discipline,
+    /// How packed the lap is, as a multiple of [`Sections::packed_per_km`].
+    ///
+    /// 1.0 is what the corpus measures. Only the disciplines that build lane by lane read it —
+    /// a national's ribbon is spaced by `feature_gap`, which is the same question asked in the
+    /// units that path works in.
+    pub(crate) density: f32,
 }
 
 /// The feature odds [`draw`] has always used, cumulative. Written out rather than summed so
@@ -2586,6 +2737,7 @@ impl LayoutKnobs {
             wear: None,
             roughness: None,
             discipline,
+            density: 1.0,
         }
     }
 
@@ -2628,6 +2780,7 @@ impl LayoutKnobs {
                 location: some(&s.location),
                 wear: Some(s.wear),
                 roughness: Some(s.roughness),
+                density: density_of(s.jump_density),
                 ..LayoutKnobs::for_discipline(d)
             };
         }
@@ -2659,9 +2812,26 @@ impl LayoutKnobs {
             wear: Some(s.wear),
             roughness: Some(s.roughness),
             discipline: Discipline::Mx,
+            density: density_of(s.jump_density),
         }
     }
 }
+
+/// A brief's `jumpDensity` as a multiple of the measured density.
+///
+/// The brief states it as 0 sparse to 1 packed, which is the unit `feature_gap` wants; the
+/// lane-built disciplines want a multiple of what the corpus carries. Half way along is the
+/// corpus, so a brief that asks for nothing in particular gets a real supercross track.
+fn density_of(jump_density: f32) -> f32 {
+    (0.7 + 0.6 * jump_density.clamp(0.0, 1.0)).clamp(DENSITY_RANGE.0, DENSITY_RANGE.1)
+}
+
+/// How far either side of the measured density the knob goes.
+///
+/// Wide enough to be worth having and narrow enough that both ends are still a supercross
+/// track: at 0.65 a lane carries one section the way it used to, and at 1.35 the lap runs out
+/// of room before it runs out of target.
+pub(crate) const DENSITY_RANGE: (f32, f32) = (0.65, 1.35);
 
 /// One lap, from one number. Not checked — see [`search`] for that.
 pub fn draw(seed: u64) -> Option<TrackProgram> {
@@ -3983,7 +4153,13 @@ mod corner_shape_tests {
             .ok()
             .and_then(|d| serde_json::from_value(serde_json::Value::String(d)).ok())
             .unwrap_or_default();
-        let knobs = LayoutKnobs::for_discipline(discipline);
+        let mut knobs = LayoutKnobs::for_discipline(discipline);
+        // `LAYOUT_DENSITY=0.65` for the sparse end of the slider, `1.35` for the packed one.
+        if let Ok(d) = std::env::var("LAYOUT_DENSITY") {
+            if let Ok(d) = d.parse::<f32>() {
+                knobs.density = d.clamp(DENSITY_RANGE.0, DENSITY_RANGE.1);
+            }
+        }
         std::fs::create_dir_all(&dir).expect("create");
         let mut drew = 0;
         for seed in from..from + n {

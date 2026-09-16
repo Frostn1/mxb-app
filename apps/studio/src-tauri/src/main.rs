@@ -456,6 +456,7 @@ async fn random_track_program(
     seed: Option<u64>,
     scale: Option<trackprog::TrackScale>,
     discipline: Option<trackprog::Discipline>,
+    density: Option<f32>,
 ) -> Result<serde_json::Value, String> {
     let from = seed.unwrap_or_else(|| {
         std::time::SystemTime::now()
@@ -463,7 +464,12 @@ async fn random_track_program(
             .map(|d| d.as_nanos() as u64)
             .unwrap_or(1)
     });
-    let knobs = tracklayout::LayoutKnobs::for_discipline(discipline.unwrap_or_default());
+    let mut knobs = tracklayout::LayoutKnobs::for_discipline(discipline.unwrap_or_default());
+    // How packed the lap is. Left out it stays at what the corpus measures, which is what the
+    // slider defaults to — so a caller that never heard of it gets a real supercross track.
+    if let Some(d) = density {
+        knobs.density = d.clamp(tracklayout::DENSITY_RANGE.0, tracklayout::DENSITY_RANGE.1);
+    }
     let prog = tauri::async_runtime::spawn_blocking(move || {
         let mut prog =
             (0..24u64).find_map(|i| tracklayout::draw_with(from.wrapping_add(i), &knobs))?;
