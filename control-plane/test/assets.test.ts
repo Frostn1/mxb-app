@@ -731,11 +731,10 @@ describe("a creator who started on the site", () => {
   it("brings their assets along when they link the same Steam account in the app", async () => {
     const env = await deployment({ MXB_WEB_SESSION_KEY: "session-secret", MXB_SITE_ORIGIN: SITE });
     await addAccount(env.DB, "acc_app", "Rider");
-    // A `kind = 'web'` profile from when the site could mint one. Nothing creates these now,
-    // but the ones that exist still have to hand their assets over on a real link.
+    // The `kind = 'web'` profile a signup on the site mints for somebody with no app account.
     await env.DB.prepare(
-      "INSERT INTO accounts (id, rider_name, steam_id, token_hash, created_at, kind, creator_at)" +
-        " VALUES ('acc_web', ?, ?, 'hash_web', 1, 'web', 1)",
+      "INSERT INTO accounts (id, rider_name, steam_id, token_hash, created_at, kind, creator_at, creator_source)" +
+        " VALUES ('acc_web', ?, ?, 'hash_web', 1, 'web', 1, 'self')",
     )
       .bind(`web:${STEAM}`, STEAM)
       .run();
@@ -749,7 +748,12 @@ describe("a creator who started on the site", () => {
     const res = await linkInApp(env, "acc_app", STEAM);
     expect(res.headers.get("Location")).toBe(`${SITE}/steam?r=linked`);
     expect(await env.DB.prepare("SELECT creator_id FROM assets WHERE id = ?").bind(assetId).first()).toEqual({ creator_id: "acc_app" });
-    expect(await env.DB.prepare("SELECT id, creator_at IS NOT NULL AS creator FROM accounts WHERE steam_id = ?").bind(STEAM).first()).toEqual({ id: "acc_app", creator: 1 });
+    // Creator standing travels, and so does the fact that they signed themselves up for it.
+    expect(
+      await env.DB.prepare("SELECT id, creator_at IS NOT NULL AS creator, creator_source FROM accounts WHERE steam_id = ?")
+        .bind(STEAM)
+        .first(),
+    ).toEqual({ id: "acc_app", creator: 1, creator_source: "self" });
     expect(await env.DB.prepare("SELECT steam_id FROM accounts WHERE id = ?").bind(web!.id).first()).toEqual({ steam_id: null });
   });
 

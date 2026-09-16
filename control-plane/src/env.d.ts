@@ -82,9 +82,9 @@ declare global {
     /** "1" lets a local build of the site (localhost:5173, 127.0.0.1:5173) call the site's routes
      *  and land sign-in there. For `.dev.vars` only — never set it in production. */
     MXB_ALLOW_DEV_ORIGINS?: string;
-    /** "open" lets any Steam account on mxbsecure.com start locking and selling. Unset means
-     *  only accounts that are already creators can; nobody loses creator standing either way. */
-    /** New assets a creator may make a day. 10 when unset; the owner account has no ceiling. */
+    /** New assets a creator may make a day — the whole of what keeps open signup from being a
+     *  key-minting service. 10 when unset; the owner account has no ceiling. Not a secret: a
+     *  var in `wrangler.jsonc`, so changing the ceiling is a reviewable diff. */
     MXB_ASSETS_PER_DAY?: string;
     /** Rate limit on `/v1/web/steam/login` and `/return`, per client address (`ratelimits` in
      *  `wrangler.jsonc`). Optional so tests and a bare `wrangler dev` run without it. */
