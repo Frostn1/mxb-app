@@ -2955,6 +2955,8 @@ pub fn draw_with(seed: u64, knobs: &LayoutKnobs) -> Option<TrackProgram> {
             texture: Default::default(),
             wear: knobs.wear.unwrap_or_else(crate::trackprog::default_wear),
             roughness: knobs.roughness.unwrap_or_else(crate::trackprog::default_roughness),
+            // A drawn lap invents its own ground; scanned ground only ever arrives by import.
+            ground: None,
             // Gently rolling, and no more. A lap is benched into whatever it crosses, so
             // ground with twenty metres of landform in it puts the track in a trench with the
             // banners along the rim of the cut. A motocross venue is a field with shape in it.

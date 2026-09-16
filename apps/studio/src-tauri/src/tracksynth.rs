@@ -873,11 +873,26 @@ pub struct Landscape {
     seed: u32,
     /// `(x, z, long, across, height, bearing)` per mound.
     mounds: Vec<(f32, f32, f32, f32, f32, f32)>,
+    /// Real ground off a scan, when the program has some. Everything above is then unused: a
+    /// measured hillside is not improved by having an invented one added to it.
+    ///
+    /// This is the whole of the import seam, and it is here rather than in `synthesise`'s own
+    /// terrain loop on purpose. `Landscape` is the one thing in the generator that answers "what
+    /// does the ground do at this point, before there is a track" — and it is asked that by two
+    /// callers, not one. The terrain loop asks it to build the heightfield, and
+    /// [`place_on_ground`] asks it to *route the lap*, by trying the lap in many positions and
+    /// keeping the one that rides the ground best. Injecting the scan into the terrain loop
+    /// would have built real ground and then laid the track across it as though it were still
+    /// noise. Injecting it here means a scanned track is routed over its own real hills for
+    /// free, and every pass downstream — benching, ruts, berms, masks, scenery — carries on
+    /// knowing nothing about where the ground came from.
+    ground: Option<std::sync::Arc<crate::trackground::Ground>>,
 }
 
 impl Landscape {
     pub fn of(prog: &TrackProgram) -> Self {
         let r = &prog.terrain.relief;
+        let ground = prog.terrain.ground.as_ref().and_then(|g| crate::trackground::load(&g.id));
         let (sx, sz) = (prog.terrain.size_x, prog.terrain.size_z);
         let mut mounds = Vec::new();
         for n in 0..r.landforms.min(24) {
@@ -916,11 +931,20 @@ impl Landscape {
             wavelength: r.wavelength.max(1.0),
             seed: r.seed,
             mounds,
+            ground,
         }
+    }
+
+    /// Whether this ground was measured rather than invented.
+    pub fn is_scanned(&self) -> bool {
+        self.ground.is_some()
     }
 
     /// The hillside, its bumps, and the metre-scale grain that makes it read as land.
     pub fn at(&self, x: f32, z: f32) -> f32 {
+        if let Some(g) = &self.ground {
+            return g.at(x, z);
+        }
         let along = (x * self.tilt_dir.0 + z * self.tilt_dir.1) / self.span;
         -self.tilt * along
             + fbm_of(
@@ -2232,7 +2256,18 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
     // the same drop, and a 60-degree ramp one sample wide is the same thing to ride into. So
     // this is the slump instead — ground steeper than it can stand loses material downhill,
     // pass after pass, until nothing outside the corridor is steeper than a graded slope.
-    {
+    //
+    // Not on scanned ground. The pass exists to clean up an artefact the generator itself makes
+    // — the wall where two branches of a lap disagree about which station a cell belongs to —
+    // and real ground has no such artefact, because nothing generated it. What real ground does
+    // have is slopes steeper than the threshold that are *supposed* to be there: measured on the
+    // Ironman plot, 2.35% of it stands over 30 degrees and 0.95% over 38, and that 0.95% is the
+    // ravine bank along the south and west of the site. Slumping is mass-conserving and runs to
+    // convergence, so it would not soften those — it would flow them away and pile the material
+    // at their feet, and the thing that makes the place recognisable would be gone from the
+    // built track. The generated path is untouched: a program with no scanned ground takes this
+    // branch exactly as it always did.
+    if !land.is_scanned() {
         let far = SEAM_SLOPE_DEG.to_radians().tan() * mps_x.min(mps_z);
         let near = SEAM_STEEP_DEG.to_radians().tan() * mps_x.min(mps_z);
         for _ in 0..SEAM_PASSES {
@@ -9770,6 +9805,7 @@ mod tests {
             author: "MXB App".into(),
             location: "Test".into(),
             terrain: Terrain {
+                ground: None,
                 size_x: 400.0,
                 size_z: 400.0,
                 samples: 1025,

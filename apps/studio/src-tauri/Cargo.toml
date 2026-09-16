@@ -30,6 +30,9 @@ walkdir = "2"
 rayon = "1"
 md-5 = "0.10"
 sha2 = "0.10"
+# Reading a lidar tile. Already in the tree under `image`, which decodes TIFF with it; named
+# here because `trackground` reads the GeoTIFF tags `image` does not surface.
+tiff = "0.11"
 reqwest = { version = "0.12", default-features = false, features = [
     "rustls-tls",
     "stream",
