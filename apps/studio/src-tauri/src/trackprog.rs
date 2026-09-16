@@ -78,6 +78,34 @@ pub struct TrackProgram {
     /// Left out for motocross, so a project saved before this existed reads as one.
     #[serde(default, skip_serializing_if = "Discipline::is_mx")]
     pub discipline: Discipline,
+    /// What the blocks lining a lane's border are made of. Per track, and only placed where
+    /// the discipline asks for them. Left out when they are the soft ones, which is the
+    /// default, so a project saved before this existed reads the same.
+    #[serde(default, skip_serializing_if = "TuffBlocks::is_default")]
+    pub tuff: TuffBlocks,
+}
+
+/// What a tuff block is made of.
+///
+/// Both, because both are real. A supercross lane is bordered by foam-and-vinyl blocks that
+/// a rider goes through rather than into, and PiBoSo's engine has objects for exactly that —
+/// a model whose name begins `SOFT` is passed through with a penalty instead of stopping the
+/// bike. But plenty of tracks line their lanes with something that does stop you, and a
+/// border you can ride straight over is a border nobody respects.
+#[derive(serde::Deserialize, serde::Serialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum TuffBlocks {
+    /// PiBoSo's pass-through objects: ride through them, lose time, stay on the bike.
+    #[default]
+    Soft,
+    /// Our own cuboid, solid like a bale.
+    Solid,
+}
+
+impl TuffBlocks {
+    pub fn is_default(&self) -> bool {
+        *self == TuffBlocks::Soft
+    }
 }
 
 /// Which kind of racing a track is for. See [`crate::tracklayout::Rules`].
@@ -488,6 +516,16 @@ pub fn air_face_run(height: f32) -> f32 {
 /// take-offs measure 27° at the ninetieth.
 pub const JUMP_AIR_LIP_DEG: f32 = 24.0;
 pub const JUMP_AIR_FACE_MIN_M: f32 = 6.0;
+
+/// The face a take-off needs to leave its lip at `deg`, metres.
+///
+/// [`air_face_run`] with the angle handed in rather than fixed at [`JUMP_AIR_LIP_DEG`]. A
+/// stadium round's lips measure 21° at the median and 30 at the ninetieth, and its finish
+/// jump is built at 30 — the spread is the thing, so the angle has to be an argument.
+pub fn lip_face_run(height: f32, deg: f32) -> f32 {
+    let lip = deg.to_radians().tan() * (1.0 - TAKEOFF_TRANSITION / 2.0);
+    (height.abs() / lip.max(1e-4)).max(JUMP_AIR_FACE_MIN_M)
+}
 
 pub fn face_run(height: f32, deg: f32, min_m: f32) -> f32 {
     let half = (deg * 0.5).to_radians().tan().max(1e-4);
@@ -1046,6 +1084,13 @@ pub enum Feature {
     /// A groove worn into the line by everyone riding it. Corners grow their own — this is
     /// for putting one somewhere a corner wouldn't.
     Rut { at: f32, length: f32, depth: f32 },
+    /// A stretch of lap laid with sand: half a metre of it under the wheels and a sand band
+    /// painted over the ground.
+    ///
+    /// Ground rather than an obstacle, like a [`Feature::Rut`] — it stands nothing up and
+    /// digs nothing out, so the profile ignores it and the masks and the material stack are
+    /// the only things that read it.
+    Sand { at: f32, length: f32 },
     /// A shape drawn by hand: heights along the feature, from its start to its end.
     ///
     /// Its own kind rather than a field on the others, because once a jump has been shaped
@@ -1096,6 +1141,7 @@ impl Feature {
             | Feature::StepUp { at, .. }
             | Feature::Berm { at, .. }
             | Feature::Rut { at, .. }
+            | Feature::Sand { at, .. }
             | Feature::Custom { at, .. } => *at,
         }
     }
@@ -1111,6 +1157,7 @@ impl Feature {
             | Feature::StepUp { at, .. }
             | Feature::Berm { at, .. }
             | Feature::Rut { at, .. }
+            | Feature::Sand { at, .. }
             | Feature::Custom { at, .. } => at,
         }
     }
@@ -1129,6 +1176,7 @@ impl Feature {
             | Feature::StepUp { length, .. }
             | Feature::Berm { length, .. }
             | Feature::Rut { length, .. }
+            | Feature::Sand { length, .. }
             | Feature::Custom { length, .. } => *length,
             // Ramp, lip's back, gap, landing face, landing run-off. The lengths come from
             // `double_faces` rather than being written out again here: they used to be, and
@@ -1154,6 +1202,7 @@ impl Feature {
             Feature::StepUp { .. } => "step-up",
             Feature::Berm { .. } => "berm",
             Feature::Rut { .. } => "rut",
+            Feature::Sand { .. } => "sand section",
             Feature::Custom { .. } => "shape",
         }
     }
@@ -1179,6 +1228,8 @@ impl Feature {
             | Feature::Berm { height, .. } => *height,
             // A rut goes down rather than up, and its depth is the figure that matters.
             Feature::Rut { depth, .. } => -*depth,
+            // Ground, not an obstacle: it stands nothing up at all.
+            Feature::Sand { .. } => 0.0,
             // The tallest point it was drawn with.
             Feature::Custom { shape, .. } => shape
                 .iter()
@@ -1191,7 +1242,7 @@ impl Feature {
     /// triple is three, a table with a single after it two, a roller or a step one.
     pub fn lips(&self) -> usize {
         match self {
-            Feature::Rut { .. } | Feature::Berm { .. } => 0,
+            Feature::Rut { .. } | Feature::Berm { .. } | Feature::Sand { .. } => 0,
             Feature::Whoops { count, .. } => *count as usize,
             Feature::Custom { shape, .. } => shape
                 .windows(3)
@@ -2130,10 +2181,19 @@ impl TrackProgram {
             return Some(named);
         }
         let (from, to) = self.finish_window()?;
+        let rules = self.discipline.rules();
         self.features
             .iter()
-            .filter(|f| matches!(f, Feature::Tabletop { .. } | Feature::Double { .. }))
-            .filter(|f| f.height() >= self.discipline.rules().finish_jump_m.0 - 0.1)
+            .filter(|f| match f {
+                Feature::Tabletop { .. } | Feature::Double { .. } => true,
+                // A stadium lap ends over a triple, and a triple is a drawn shape. Only where
+                // the discipline says so: a national's lap is full of them mid-lap, and
+                // letting one count would stop `repair` building the tabletop that belongs
+                // on the main straight.
+                Feature::Custom { side, .. } => rules.finish_triple && *side == 0.0,
+                _ => false,
+            })
+            .filter(|f| f.height() >= rules.finish_jump_m.0 - 0.1)
             .filter(|f| f.at() >= from - 1.0 && f.at() + f.length() <= to + 1.0)
             .max_by(|a, b| a.height().total_cmp(&b.height()))
     }
@@ -2377,6 +2437,7 @@ mod tests {
             blend: default_blend(),
             elevation: Vec::new(),
             discipline: Discipline::Mx,
+            tuff: TuffBlocks::default(),
         }
     }
 

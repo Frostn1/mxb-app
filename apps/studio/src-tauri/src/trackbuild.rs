@@ -733,6 +733,16 @@ mod build_one {
         } else {
             serde_json::from_str(&std::fs::read_to_string(&prog_path).unwrap()).unwrap()
         };
+        // `FROST_REPAIR=1` runs the repair pass over a programme read from a path.
+        //
+        // `seed:` already got it — `tracklayout::search` repairs before it reviews — but a
+        // dumped programme is what the *walk* drew, and the finish jump is built in by repair
+        // rather than by the walk. `search` only ever draws motocross, so a supercross lap can
+        // only be built from a path, and without this it is built with no finish jump at all.
+        if std::env::var("FROST_REPAIR").is_ok() {
+            let done = crate::trackllm::repair_for_tests(&mut prog);
+            println!("  repaired: {}", if done.is_empty() { "nothing to do".into() } else { done.join("; ") });
+        }
         // FROST_SURFACE=soil|sand|grass overrides the drawn one: a seed rolls its surface, and a
         // layout worth riding again can come up on the wrong ground.
         if let Ok(sf) = std::env::var("FROST_SURFACE") {
