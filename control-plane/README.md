@@ -29,7 +29,7 @@ consequences fall out of that, and they're baked into the schema:
 | GET | `/v1/servers` | — | Server registry. Public: it is the app's join picker, and the people who most need it are the ones with no account yet. `agent_url` is not returned. |
 | POST | `/v1/servers/:id/hello` | agent token | A provisioned box announcing that it is up. Its address is taken from `cf-connecting-ip`, never from the body, so a box cannot register somebody else's. |
 | GET | `/v1/me` | bearer | Account, and a per-bike summary of what is stored for it |
-| PUT | `/v1/me/guid` | bearer | Claim a GUID. First-come. |
+| PUT | `/v1/me/guid` | bearer | Claim a GUID. First-come, and refused if that GUID is banned. |
 | PUT | `/v1/loadout` | bearer | Replace **one bike's** loadout. Kept for clients older than per-bike storage. |
 | PUT | `/v1/loadouts` | bearer | Replace the whole look, every bike at once. Returns `missing` — the blobs still to upload. |
 | GET | `/v1/roster?server=<id>` | bearer | Riders and their paints, for the sync. De-duplicated by destination. |
@@ -50,7 +50,7 @@ consequences fall out of that, and they're baked into the schema:
 | GET | `/v1/web/me` | Steam sign-in | Who is signed in on mxbsecure.com, whether they are a creator, and what is left of today's lock ceiling. Never cached. |
 | POST | `/v1/web/creator` | Steam sign-in | Signing up as a creator, which is what opens `/admin/assets*`. Anyone signed in may; `MXB_ASSETS_PER_DAY` is what bounds them afterwards. |
 | GET | `/v1/web/lockweb/*` | Steam sign-in | The WebAssembly locker. It cannot live on the static site, which serves everything it holds to everybody. Any signed-in rider gets it: the GUID lock is for all of them. |
-| GET/POST | `/v1/web/admin/*` | Steam sign-in + `MXB_ADMIN_STEAM_IDS` | The dashboards at mxbsecure.com/admin — usage, diagnostics, paint sync, plugin keys |
+| GET/POST | `/v1/web/admin/*` | Steam sign-in + `MXB_ADMIN_STEAM_IDS` | The dashboards at mxbsecure.com/admin — usage, diagnostics, paint sync, plugin keys, creators, bans |
 | GET | `/v1/plugins` | — | The paid-plugin catalogue. Public: what is on offer is not a secret. |
 | GET | `/v1/me/plugins` | bearer | What this account holds, each with a freshly signed license |
 | POST | `/v1/plugins/redeem` | bearer | Trade a key for months on a license |
@@ -269,6 +269,50 @@ so what keeps a figure worth deciding from is a stack of bounds rather than a cr
 None of that makes a field unforgeable — `version`, `os` and `game` are still whatever the
 caller said, and they are what "can I stop shipping 0.8.x" and "is GP Bikes worth carrying"
 are read off. Together the bounds make forging one cost more than the decision it would move.
+
+### Banning a rider from mxbsecure
+
+Every other revocation here is about *content*: a creator withdraws an asset, we take one down,
+a removal takes the buyers' keys back. A ban is the other direction — somebody who unlocked
+protected content and passed it around, refused across mxbsecure rather than asset by asset.
+`src/bans.ts` is the whole of it, and `0038_guid_bans.sql` says why it is keyed the way it is.
+
+**Keyed on the MX Bikes GUID.** It is the identity the game issues per install, it is what a
+report about cracked content carries, and it is the one of the three we hold that is neither
+free to mint (our account ids) nor replaceable for the price of a second purchase (a Steam ID).
+
+**Resolved through every identity we can tie to it**, which is what makes it worth more than a
+reinstall. `banFor` asks "is any identity this caller can be tied to a banned one", following
+the GUID in front of it, every GUID the calling account holds *or has ever claimed*
+(`guid_claims`), every account on the same Steam identity now or in the link log
+(`steam_links`), and every GUID those accounts have used. So a second account on the same Steam
+login, a fresh GUID claimed by a banned account, and a fresh Steam account on a banned install
+all resolve back to the ban. `guid_claims` exists for exactly the reason `steam_links` does:
+`accounts.guid` is a single mutable cell, and a ban that only read it would end at a rename.
+
+**Where it lands.** At the gates, by position rather than per feature, so a product added later
+inherits it:
+
+| | What a ban does |
+|---|---|
+| `POST /v1/keys/grant`, `POST /v1/entitlements/check` | Refused for every asset, before entitlement is even looked up. Written to `entitlement_grants` as `deny`/`banned` like any other refusal. |
+| `POST /v1/assets/status` | `revoked: true` for every secured file on the machine, so the app deletes the keys it already holds. This is the half that reaches content already unlocked — a `.mxbkey` opens offline forever, so a ban that only stopped the next grant would stop nothing. |
+| `GET /v1/entitlements` | Empty, and says `banned` — a list nothing can open only misleads the app. |
+| `/admin/assets*`, `POST /v1/web/creator`, `GET /v1/web/lockweb/*` | No locking, no selling, no signup, and no locker download: banned from making new protected content, not only from opening other people's. A creator API key belonging to a banned account is refused with it. |
+| `GET /v1/me/plugins`, `GET /v1/plugins/:id/bundle`, `POST /v1/plugins/redeem` | The paid plugins are sold through mxbsecure too, so a ban reaches them: no signed license, no build, and a key is refused *before* it is read so it stays unspent and still worth something. |
+| `PUT /v1/me/guid` | A banned GUID cannot be claimed. |
+
+Voice, paint sync, presence and the server book are deliberately **untouched**. They are the
+MXB App's, not mxbsecure's, and they are worthless unless the riders beside you can use them
+too — banning somebody from the grid punishes the grid. A ban is about the locking system and
+the content it protects.
+
+**Reversible, and reviewable.** A ban carries a reason (shown to the rider), the evidence, and
+the admin who applied it; lifting one is a timestamp, never a delete, so an upheld appeal stays
+readable and the same stale report cannot re-ban off it. The six installs the deployment ships
+banned arrived in the migration on purpose — this is the switch that refuses a paying customer,
+so turning it on leaves a diff somebody can review and revert. Later ones go through
+mxbsecure.com/admin/bans (`GET`/`POST /v1/web/admin/bans`), which records who pressed it.
 
 ## Security notes
 

@@ -26,6 +26,7 @@ import {
   terminateInstance,
 } from "./aws";
 import { adminAssets, isAssetsPath } from "./assets";
+import { BANNED, banFor, rememberGuid } from "./bans";
 import { isWebPath, landingSite, webRoutes } from "./web";
 import { steamResult, redirectPage } from "./page";
 import { rememberLink, steamIdFor } from "./steamlink";
@@ -584,6 +585,10 @@ async function steamReturn(request: Request, url: URL, env: Env): Promise<Respon
 async function listEntitlements(account: Account, env: Env): Promise<Response> {
   const steamId = await steamIdFor(env, account);
   if (!steamId) return json(200, { steamId: null, assets: [] });
+  // A banned install owns nothing here, whatever the rows say: `/v1/keys/grant` refuses every
+  // one of them, and a list the app can't act on is a list that only misleads it.
+  const ban = await banFor(env, { accountId: account.id, steamId, guid: account.guid });
+  if (ban) return json(200, { steamId, assets: [], banned: true, banReason: ban.reason });
 
   const rows = await env.DB.prepare(
     "SELECT e.asset_id, a.title, e.source, e.granted_at" +
@@ -650,8 +655,14 @@ async function assetStatus(request: Request, account: Account, env: Env): Promis
   // Through `steamIdFor`, like the grant decision, so a link Valve has already confirmed is put
   // back rather than read as "not linked" — which here would mean reporting nothing revoked.
   const steamId = await steamIdFor(env, account);
+  // The one answer here that doesn't need a Steam link to be certain. A `.mxbkey` already on
+  // disk opens offline forever, so a ban that only stopped the *next* grant would leave the
+  // banned install playing everything it had already unlocked — which is most of what it has.
+  // This poll is what reaches those keys, so a ban says "revoked" about every secured file the
+  // machine is holding, and the app deletes each one on its next pass.
+  const banned = !!(await banFor(env, { accountId: account.id, steamId, guid: account.guid }));
   if (assetIds.length === 0) {
-    return json(200, { steamId, assets: [] });
+    return json(200, { steamId, assets: [], ...(banned ? { banned: true } : {}) });
   }
 
   const placeholders = assetIds.map(() => "?").join(",");
@@ -677,21 +688,29 @@ async function assetStatus(request: Request, account: Account, env: Env): Promis
 
   return json(200, {
     steamId,
+    ...(banned ? { banned: true } : {}),
     assets: assetIds.map((id) => {
       const a = byId.get(id);
       return {
         assetId: id,
         title: a?.title ?? null,
         registered: !!a,
+        // Left honest: they did buy it, and a ban that rewrote the purchase would make the
+        // creator's own records lie. What changes is whether it may be opened.
         owned: owned.has(id),
-        available: !!a && a.has_key === 1 && a.withdrawn !== 1,
+        available: !!a && a.has_key === 1 && a.withdrawn !== 1 && !banned,
         // Only ever true about an asset we know, for an identity we know. A withdrawn, taken-down
         // or key-revoked asset counts as revoked for everyone, entitled or not, because the grant
         // refuses it for everyone — the key on disk should stop opening on the same terms. A
         // removal that took the keys back is why the row is kept rather than dropped: an asset we
         // no longer knew would be "can't tell", and the keys would stay on every PC that has one.
         // A removal that left the keys alone says nothing here, which is exactly what it means.
-        revoked: !!a && !!steamId && (a.withdrawn === 1 || !owned.has(id)),
+        //
+        // A ban is the one case that does not wait for a Steam link: it is a decision about the
+        // install, made from evidence about it, so "we know who this is" is already settled. It
+        // is also the only case where the key being deleted was legitimately bought, which is
+        // the consequence — not an accident of the wording.
+        revoked: !!a && (banned || (!!steamId && (a.withdrawn === 1 || !owned.has(id)))),
       };
     }),
   });
@@ -732,11 +751,20 @@ async function decideEntitlement(
   const steamId = await steamIdFor(env, account);
 
   const decide = async (): Promise<{ allowed: boolean; reason: string; log: boolean }> => {
-    if (!steamId) return { allowed: false, reason: "no Steam account linked", log: false };
+    // The asset first, and only so the answers below are about one that exists: an id nobody
+    // registered is the one refusal a caller can produce at will, and it must stay unlogged.
     const asset = await env.DB.prepare("SELECT withdrawn_at, taken_down_at, keys_revoked_at FROM assets WHERE id = ?")
       .bind(assetId)
       .first<{ withdrawn_at: number | null; taken_down_at: number | null; keys_revoked_at: number | null }>();
     if (!asset) return { allowed: false, reason: "no such asset", log: false };
+    // Then the person, before anything about entitlement: a ban refuses every asset at once and
+    // needs no entitlement to have existed. Logged when there is a Steam identity to log it
+    // against, because a banned install walking the catalogue is exactly the shape the audit
+    // ledger was added to make visible.
+    if (await banFor(env, { accountId: account.id, steamId, guid: account.guid })) {
+      return { allowed: false, reason: "banned", log: !!steamId };
+    }
+    if (!steamId) return { allowed: false, reason: "no Steam account linked", log: false };
     // Ours, and checked first: a creator restoring a withdrawal doesn't lift it.
     if (asset.taken_down_at !== null) return { allowed: false, reason: "taken down", log: true };
     // The creator removed it and asked for the keys back. Its own word rather than "withdrawn",
@@ -833,7 +861,9 @@ async function grantKey(request: Request, account: Account, env: Env): Promise<R
   const { assetId, session, blobSha256 } = parsed;
 
   const { allowed, reason } = await decideEntitlement(account, assetId, session, blobSha256, env);
-  if (!allowed) return json(403, { error: reason });
+  // The ledger's word for it is one word; what the app puts in front of a person should read
+  // as a sentence. Every other reason already does.
+  if (!allowed) return json(403, { error: reason === "banned" ? BANNED : reason });
 
   const asset = await env.DB.prepare(
     "SELECT wrapped_key, key_id, blob_sha256 FROM assets WHERE id = ?",
@@ -1030,6 +1060,14 @@ async function putGuid(request: Request, account: Account, env: Env): Promise<Re
   const { guid } = body as { guid?: unknown };
   if (!isGuid(guid)) return json(400, { error: "that doesn't look like an MX Bikes GUID" });
 
+  // A banned GUID is refused outright rather than stored and refused later. It changes nothing
+  // about mxbsecure — the grant resolves the ban through the claim log either way — but the
+  // claim is also what paint sync and the roster key on, and there is no reason to let a banned
+  // install move its identity onto an account we would then have to keep matching.
+  if (await banFor(env, { accountId: account.id, steamId: account.steam_id, guid })) {
+    return json(403, { error: BANNED });
+  }
+
   try {
     await env.DB.prepare("UPDATE accounts SET guid = ? WHERE id = ?")
       .bind((guid as string).trim(), account.id)
@@ -1040,6 +1078,8 @@ async function putGuid(request: Request, account: Account, env: Env): Promise<Re
     }
     throw err;
   }
+  // Append-only beside the column, so a later claim can't erase which install this account was.
+  await rememberGuid(env, account.id, guid);
   return json(200, { ok: true, guid: (guid as string).trim() });
 }
 

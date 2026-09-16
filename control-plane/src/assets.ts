@@ -15,6 +15,7 @@
 
 import { currentMasterVersion, wrapContentKey } from "./assetkey";
 import { hashToken, newToken, tokenMatches } from "./auth";
+import { BANNED, isBanned } from "./bans";
 import { repairBySteamId } from "./steamlink";
 import { isSteamId64, steamPersonaName } from "./steam";
 import { adminAllowed } from "./usage";
@@ -164,6 +165,11 @@ async function authorize(request: Request, url: URL, env: Env): Promise<Scope | 
       .bind(await hashToken(apiKey))
       .first<{ id: string; account_id: string; last_used_at: number | null; steam_id: string | null }>();
     if (!row) return json(401, { error: "that API key isn't valid" });
+    // A banned creator's key is as dead as their sign-in. Checked before the key's "last used"
+    // is touched, so a refused call doesn't read as a live integration on the dashboard.
+    if (await isBanned(env, { accountId: row.account_id, steamId: row.steam_id })) {
+      return json(403, { error: BANNED });
+    }
     const now = Date.now();
     // At most one write an hour per key: enough for the dashboard's "last used".
     if (!row.last_used_at || now - row.last_used_at > 60 * 60 * 1000) {
@@ -186,6 +192,14 @@ async function authorize(request: Request, url: URL, env: Env): Promise<Scope | 
     const account = (await find()) ?? ((await repairBySteamId(env, session.steamId)) ? await find() : null);
     if (!account?.creator_at) {
       return json(403, { error: CREATOR_SIGNUP_NEEDED });
+    }
+    // Banned from mxbsecure means banned from the half of it that makes new locked files, not
+    // only from opening them. Somebody who shares other people's content unlocked has no
+    // business shipping their own through the same system — and a ban that left the lock page
+    // working would let them go on minting asset ids and grants we would then have to refuse
+    // one by one.
+    if (await isBanned(env, { accountId: account.id, steamId: session.steamId })) {
+      return json(403, { error: BANNED });
     }
     return { kind: "creator", accountId: account.id, steamId: session.steamId, via: "cookie" };
   }

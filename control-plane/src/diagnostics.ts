@@ -40,6 +40,7 @@
  * raises the cost of the ordinary case; it is not a wall.
  */
 
+import { rememberGuid } from "./bans";
 import { asDeviations, loadStateRegions, parseDigests } from "./stateinvariants";
 import { isAppVersion, isGuid, isSha256, PRESENCE_TTL_MS } from "./validate";
 
@@ -526,6 +527,12 @@ export async function putReport(request: Request, account: Account, env: Env): P
       .bind((guid as string).trim(), account.id)
       .run();
   }
+  // The sighting is recorded whether or not the column was filled. Fill-only is right for the
+  // column — one account, one current GUID — but every GUID an account has ever reported is
+  // what ties an alt back to the install it came from, and an mxbsecure ban resolves through
+  // that log. It is also the one place a *second* GUID on one account is ever seen, which is
+  // precisely the case the column cannot hold.
+  await rememberGuid(env, account.id, guid);
 
   const now = Date.now();
   const version = isAppVersion(appVersion) ? appVersion : "";

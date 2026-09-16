@@ -19,6 +19,7 @@
  */
 
 import { likeTerm, MAX_COUNT, PAGE_SIZE, type Paged } from "./adminui";
+import { BANNED, isBanned } from "./bans";
 
 /** How long an license is honoured with no contact. */
 export const GRACE_DAYS = 7;
@@ -189,6 +190,10 @@ export async function listPlugins(env: Env): Promise<Response> {
 export async function myPlugins(account: Account, env: Env): Promise<Response> {
   const key = await signingKey(env);
   if (!key) return json(503, { error: "plugin licensing is not configured" });
+  // A ban is a ban from everything mxbsecure sells, and a paid plugin is sold here. No signed
+  // license, so the plugin stops running at the end of the one it holds — the same way it stops
+  // for a lapsed license, and without touching the rows, so lifting the ban restores it whole.
+  if (await isBanned(env, { accountId: account.id })) return json(403, { error: BANNED });
 
   const { results } = await env.DB.prepare(
     // A revoked license is not a lapsed one, and is not reported as one: the row is left
@@ -240,6 +245,9 @@ export async function redeemKey(
 ): Promise<Response> {
   const key = await signingKey(env);
   if (!key) return json(503, { error: "plugin licensing is not configured" });
+  // Refused before the code is read, so a banned account cannot spend a key it would then be
+  // refused the plugin for: the code stays unredeemed and is still worth something afterwards.
+  if (await isBanned(env, { accountId: account.id })) return json(403, { error: BANNED });
 
   let body: { code?: unknown };
   try {
@@ -352,6 +360,7 @@ export async function pluginBundle(
     .first<{ bundle_key: string | null; bundle_sha256: string | null; expires_at: number | null }>();
 
   if (!row) return json(404, { error: "no such plugin" });
+  if (await isBanned(env, { accountId: account.id })) return json(403, { error: BANNED });
   if (!row.expires_at || row.expires_at <= nowSec()) {
     return json(403, { error: "no live license for that plugin" });
   }
