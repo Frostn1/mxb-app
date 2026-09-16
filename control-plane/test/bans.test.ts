@@ -8,6 +8,7 @@
 
 import { describe, expect, it, vi } from "vitest";
 import { APP_BLOCK_MESSAGE, addBan, appGate, banFor, liftBan, listBans, normalizeGuid, rememberGuid } from "../src/bans";
+import { guidFromSteamId } from "../src/steam";
 import { hashToken } from "../src/auth";
 import { mintKeys } from "../src/plugins";
 import { sealToken, SESSION_COOKIE } from "../src/websession";
@@ -185,22 +186,41 @@ describe("which identities a ban resolves through", () => {
     expect(await banFor(env, { steamId: BUYER })).not.toBeNull();
   });
 
-  it("survives the banned account claiming a different GUID", async () => {
+  it("cannot move a Steam account's GUID off a ban — it is derived, not chosen", async () => {
     const env = await deployment();
     await account(env, "acc_banned", "banned-token", BUYER, null);
+    const derived = guidFromSteamId(BUYER)!;
     const claim = (guid: string) =>
       call(env, req("PUT", "/v1/me/guid", { key: "banned-token", body: { guid }, origin: null }));
 
-    expect((await claim("FF0110000111111111")).status).toBe(200);
-    await ban(env, "FF0110000111111111");
+    // Whatever the app asks for, it gets its own derived GUID: the server never trusts the value.
+    expect(await (await claim("FF0110000111111111")).json()).toEqual({ ok: true, guid: derived });
+    await ban(env, derived);
 
-    // The rename the ban has to outlive. Refused outright — and it would not have helped: the
-    // claim log still ties the account to the GUID it was banned on.
+    // Once banned, a second claim never even reaches the GUID logic: the estate gate refuses it,
+    // disguised. There was nowhere to move to in any case — the GUID is derived, not chosen.
     const moved = await claim("FF0110000122222222");
     expect(moved.status).toBe(403);
     expect(await moved.json()).toMatchObject({ error: APP_BLOCK_MESSAGE });
-    await env.DB.prepare("UPDATE accounts SET guid = 'FF0110000122222222' WHERE id = 'acc_banned'").run();
     expect(await banFor(env, { accountId: "acc_banned" })).not.toBeNull();
+  });
+
+  it("a non-Steam account's ban outlives a GUID change, through the claim log", async () => {
+    const env = await deployment();
+    // A Piboso copy: no SteamID64, so the GUID is opaque and first-come.
+    await account(env, "acc_piboso", "piboso-token", null, null);
+    const claim = (guid: string) =>
+      call(env, req("PUT", "/v1/me/guid", { key: "piboso-token", body: { guid }, origin: null }));
+    const first = "AA0110000100000010";
+    const other = "AA0110000100000020";
+
+    expect((await claim(first)).status).toBe(200);
+    await ban(env, first);
+
+    // Now caught, and a rename cannot escape: the gate refuses the next claim, and the claim log
+    // keeps the account tied to the GUID it was banned on either way.
+    expect((await claim(other)).status).toBe(403);
+    expect(await banFor(env, { accountId: "acc_piboso" })).not.toBeNull();
   });
 
   it("follows a GUID a diagnostics report named, even one the column never held", async () => {

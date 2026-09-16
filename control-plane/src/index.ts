@@ -10,6 +10,7 @@
 
 import { unwrapContentKey, rewrapToCurrent, wrappedVersion, currentMasterVersion } from "./assetkey";
 import {
+  guidFromSteamId,
   isVerified,
   loginUrl,
   verifyAssertion,
@@ -29,7 +30,7 @@ import { adminAssets, isAssetsPath } from "./assets";
 import { APP_BLOCK_MESSAGE, appGate, banFor, rememberGuid } from "./bans";
 import { isWebPath, landingSite, webRoutes } from "./web";
 import { steamResult, redirectPage } from "./page";
-import { rememberLink, steamIdFor } from "./steamlink";
+import { pinGuidFromSteam, rememberLink, steamIdFor } from "./steamlink";
 import { bmacWebhook } from "./bmac";
 import { pruneReports, putReport } from "./diagnostics";
 import { stateRegions } from "./stateinvariants";
@@ -617,6 +618,10 @@ async function steamReturn(request: Request, url: URL, env: Env): Promise<Respon
     ]);
   }
 
+  // Valve has vouched for the identity; its GUID is now derived and pinned, not waited for. This
+  // is what makes the GUID auto-found and unspoofable — see `pinGuidFromSteam`.
+  await pinGuidFromSteam(env, login.account_id, result.steamId);
+
   return steamResult(site, "linked");
 }
 
@@ -1129,6 +1134,23 @@ async function putGuid(request: Request, account: Account, env: Env): Promise<Re
   // for one request before anything noticed. Disguised, like every other app-facing refusal.
   if (await banFor(env, { guid })) return json(403, { error: APP_BLOCK_MESSAGE });
 
+  // If Valve has confirmed a Steam identity for this account, the GUID is not the client's to
+  // choose: it is derived from that identity and pinned. Whatever the app sent is ignored — a
+  // Steam player's only valid GUID is the derived one, so this both auto-corrects an honest
+  // stale value and refuses a spoof, with the same answer. `pinGuidFromSteam` also reclaims the
+  // GUID if another account was holding it.
+  const steamId = await steamIdFor(env, account);
+  if (steamId) {
+    const derived = guidFromSteamId(steamId);
+    if (derived) {
+      await pinGuidFromSteam(env, account.id, steamId);
+      return json(200, { ok: true, guid: derived });
+    }
+  }
+
+  // No Steam identity (a Piboso copy, or not linked yet): the GUID is opaque and first-come,
+  // corroborated later by server sightings and — the moment they link Steam — replaced by the
+  // derived one.
   try {
     await env.DB.prepare("UPDATE accounts SET guid = ? WHERE id = ?")
       .bind((guid as string).trim(), account.id)

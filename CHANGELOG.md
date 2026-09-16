@@ -3,6 +3,11 @@
 ## Unreleased — MXB App and MXB Coach
 
 ### Changed
+- Your MX Bikes GUID is found automatically from your signed-in Steam account, the instant the
+  app starts — no more waiting to be seen on a server for it to fill in. It's the same value the
+  game and the leaderboards use, and it can't be set to someone else's: for a Steam copy the GUID
+  is your Steam identity written in hex, confirmed by Steam sign-in, so the service derives it and
+  ignores any other value. A non-Steam (Piboso) copy still enters its GUID as before.
 - Riders banned for unlocking protected content and sharing it are refused across everything
   mxbsecure runs, not only the locking: the app itself will not open, and paint sync, voice,
   presence, the server queue, the server registry, the paid plugins and every key grant are all

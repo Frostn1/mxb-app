@@ -103,6 +103,32 @@ export function isSteamId64(value: string): boolean {
   return /^\d{17}$/.test(value);
 }
 
+/** The smallest SteamID64 — the base every account id is offset from. Below it is not one. */
+const STEAM_ID64_BASE = 76561197960265728n;
+
+/**
+ * The MX Bikes GUID for a Steam copy of the game: `FF` + the SteamID64 as 16 uppercase hex.
+ *
+ * This is the whole of what makes the GUID unspoofable for a Steam player. The GUID and the
+ * Steam ID are not two facts to be collected and trusted separately — they are one identity,
+ * and the Steam half is the one Valve confirms for us on sign-in (`verifyAssertion`). So a
+ * Steam player's GUID is *derived*, never claimed: we compute it from the identity Valve
+ * vouched for, and refuse to store any other. A rider cannot present a GUID that isn't theirs,
+ * and cannot take one that is somebody else's, because neither maps back to their SteamID.
+ *
+ * The game itself does the same derivation — `ranked.rs` reads a public rider page keyed on
+ * exactly this string — so what we compute is what servers and leaderboards see.
+ *
+ * Returns `null` for anything that isn't a SteamID64, so a caller can tell "not derivable"
+ * (a non-Steam / Piboso copy, whose GUID is its own opaque value) from a real answer.
+ */
+export function guidFromSteamId(steamId: string): string | null {
+  if (!isSteamId64(steamId)) return null;
+  const n = BigInt(steamId);
+  if (n < STEAM_ID64_BASE) return null;
+  return "FF" + n.toString(16).toUpperCase().padStart(16, "0");
+}
+
 /**
  * Is this assertion addressed to us?
  *

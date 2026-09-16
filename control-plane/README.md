@@ -30,7 +30,7 @@ consequences fall out of that, and they're baked into the schema:
 | POST | `/v1/servers/:id/hello` | agent token | A provisioned box announcing that it is up. Its address is taken from `cf-connecting-ip`, never from the body, so a box cannot register somebody else's. |
 | GET | `/v1/me` | bearer | Account, and a per-bike summary of what is stored for it. Looks ordinary to a banned install on purpose — see below. |
 | GET | `/v1/app/gate` | bearer | The desktop apps' startup gate. `{status:"ok"}` to run, `{status:"unsupported", message}` to refuse — a banned install is told a mundane untruth here, never that it is banned. |
-| PUT | `/v1/me/guid` | bearer | Claim a GUID. First-come, and refused if that GUID is banned. |
+| PUT | `/v1/me/guid` | bearer | Claim a GUID. Derived from the linked Steam identity and pinned (the client's value is ignored) for a Steam account; first-come for a non-Steam one; refused if banned. |
 | PUT | `/v1/loadout` | bearer | Replace **one bike's** loadout. Kept for clients older than per-bike storage. |
 | PUT | `/v1/loadouts` | bearer | Replace the whole look, every bike at once. Returns `missing` — the blobs still to upload. |
 | GET | `/v1/roster?server=<id>` | bearer | Riders and their paints, for the sync. De-duplicated by destination. |
@@ -270,6 +270,35 @@ so what keeps a figure worth deciding from is a stack of bounds rather than a cr
 None of that makes a field unforgeable — `version`, `os` and `game` are still whatever the
 caller said, and they are what "can I stop shipping 0.8.x" and "is GP Bikes worth carrying"
 are read off. Together the bounds make forging one cost more than the decision it would move.
+
+### The GUID is the Steam identity, and cannot be spoofed
+
+A rider's MX Bikes GUID is not a separate fact we collect and trust — for a Steam copy of the
+game it *is* the Steam account, written differently: `FF` followed by the SteamID64 as sixteen
+uppercase hex digits (`guidFromSteamId` in `steam.ts`). The game derives it that way, mxb-ranked
+keys a rider page on it, and so do we.
+
+That matters because the Steam half is the one we can prove. `accounts.steam_id` is only ever set
+by the Valve OpenID round trip (`/v1/steam/return`, `verifyAssertion`) — no endpoint trusts a
+client-posted Steam ID — so once an account is linked, its identity is Valve's word, not the
+app's. From that we **derive** the GUID and **pin** it (`pinGuidFromSteam` in `steamlink.ts`):
+
+- On every Steam link, the derived GUID is written to the account, and if any other row was
+  holding it — a stale first-come claim, or a spoofer who grabbed the victim's GUID — that row is
+  dispossessed in the same batch. Valve's word beats first-come.
+- `PUT /v1/me/guid` from a Steam-linked account ignores whatever the app sent and stores the
+  derived value. A Steam player's only valid GUID is the one their identity maps to, so this both
+  auto-corrects an honest stale value and refuses a spoof, with the same answer.
+- `0039_derive_guids.sql` backfills every already-linked account at deploy and clears the GUIDs
+  that were only guesses or spoofs.
+
+The app doesn't have to *observe* its own GUID any more either — it derives it from the signed-in
+Steam account (`mxb_core::steamid::local_guid`) the moment it starts, rather than watching a
+dedicated-server log the way it used to. Auto-found, and the same value the server will accept.
+
+A non-Steam (Piboso) copy has no SteamID64 to derive from, so its GUID stays opaque and
+first-come, corroborated by the sightings other installs report. That is the one identity a ban
+still leans on the claim log for; a Steam identity is nailed down by Valve.
 
 ### Banning a rider
 
