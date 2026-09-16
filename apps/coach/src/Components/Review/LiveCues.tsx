@@ -46,6 +46,12 @@ const AMOUNTS = ["few", "normal", "lots"] as const;
 /** The voices the recorder has clips for, as `hud.rs` writes them. */
 const VOICES = ["female", "male"] as const;
 
+/** The least time between two automatic re-picks. The sessions watcher fires whenever the
+ *  recording grows, which is every couple of seconds while the rider is out — not once a lap —
+ *  and a re-pick is a full review of the lap. A lap takes far longer than this, so the sheet
+ *  still follows the rider lap by lap without reviewing the same one over and over. */
+const AUTO_GAP_MS = 45_000;
+
 /** Live cues for this track and bike: short calls the recorder shows in practice, picked from
  *  where this lap loses time, for the rider's level and how much coaching they want. Shared by
  *  the review page and the overlay. */
@@ -55,10 +61,17 @@ export default function LiveCues({ path, lap }: { path: string; lap: number }) {
   const [amount, setAmount] = useState<CueAmount>(() => remembered(CUE_AMOUNT_KEY, AMOUNTS, "normal"));
   const [sent, setSent] = useState<CuesOut | null>(null);
   const [busy, setBusy] = useState(false);
+  /** A re-pick in progress, and when the last automatic one ran. */
+  const inFlight = useRef(false);
+  const lastAuto = useRef(0);
   /** `latest` coaches the last lap ridden on this track rather than the one on screen: sent
    *  mid-session, that is the one the rider wants calls about. `quiet` is for the automatic
    *  re-picks below, which shouldn't put a toast up every time a lap lands. */
   const send = async (latest = false, quiet = false) => {
+    // One at a time. Two overlapping re-picks would each read the same history and write it
+    // back, so one lap's worth of "the rider has heard this" would be lost.
+    if (inFlight.current) return;
+    inFlight.current = true;
     setBusy(true);
     try {
       const out = await coachWriteCues(path, lap, level, amount, latest);
@@ -67,6 +80,7 @@ export default function LiveCues({ path, lap }: { path: string; lap: number }) {
     } catch (e) {
       if (!quiet) toast.error(String(e));
     } finally {
+      inFlight.current = false;
       setBusy(false);
     }
   };
@@ -83,7 +97,13 @@ export default function LiveCues({ path, lap }: { path: string; lap: number }) {
     if (!following) return;
     let alive = true;
     let off: UnlistenFn | undefined;
-    void onSessionsChanged(() => void sendRef.current(true, true)).then((stop) => {
+    const onLap = () => {
+      const now = Date.now();
+      if (now - lastAuto.current < AUTO_GAP_MS) return;
+      lastAuto.current = now;
+      void sendRef.current(true, true);
+    };
+    void onSessionsChanged(onLap).then((stop) => {
       if (alive) off = stop;
       else stop();
     });
