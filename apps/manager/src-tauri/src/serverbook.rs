@@ -87,11 +87,17 @@ fn read(p: &Path) -> Vec<Entry> {
 /// nothing here is allowed to fail a list the player is already looking at.
 pub fn remember(app: &tauri::AppHandle, servers: &[WorldServer], now: u64) {
     let Ok(p) = path(app) else { return };
-    let merged = merge(read(&p), servers, now);
+    write(app, &merge(read(&p), servers, now));
+}
+
+/// Put a book on disk. Best-effort in the same sense as [`remember`], and split out from it
+/// because [`seed`] builds its book a different way and has the same nothing-may-fail rule.
+pub fn write(app: &tauri::AppHandle, book: &[Entry]) {
+    let Ok(p) = path(app) else { return };
     if let Some(dir) = p.parent() {
         let _ = std::fs::create_dir_all(dir);
     }
-    match serde_json::to_string_pretty(&merged) {
+    match serde_json::to_string_pretty(book) {
         Ok(text) => {
             if let Err(e) = std::fs::write(&p, text) {
                 log::warn!("[serverbook] couldn't write {}: {e}", p.display());
@@ -127,6 +133,52 @@ pub fn merge(existing: Vec<Entry>, servers: &[WorldServer], now: u64) -> Vec<Ent
             Some(e) => *e = fresh,
             None => book.push(fresh),
         }
+    }
+
+    book.sort_by(|a, b| b.last_seen.cmp(&a.last_seen).then_with(|| a.address.cmp(&b.address)));
+    book.truncate(MAX_ENTRIES);
+    book
+}
+
+/// The most addresses one seed from the shared book will add.
+///
+/// A real budget, not tidiness. A probe-only refresh sends one datagram per row, so seeding is
+/// the one path that could turn a tab refresh into a port scan — everything else in this file
+/// only ever learns addresses the player's own client was already talking to. A busy evening's
+/// master list is a few hundred servers, so this clears the real population comfortably and
+/// still bounds what a runaway roster could do.
+pub const MAX_SEEDED: usize = 600;
+
+/// Fill an empty book from the shared one, without disturbing what is already in it.
+///
+/// Deliberately not [`merge`]. That replaces a row wholesale, which is right for a master sweep
+/// — every field it carries is fresher than what was there — and wrong for this, where the only
+/// thing known about an address is the address. Seeding over a remembered row would trade a
+/// name, a location and a licence class for three empty strings.
+///
+/// A seeded row is marked joinable because that is what it is: the shared book only carries
+/// addresses that are a public `host:port` to begin with, which is the same test the master's
+/// own records are held to. Unjoinable rows are never probed, so seeding them as anything else
+/// would quietly add addresses that could never be asked and could only ever be dropped.
+pub fn seed(existing: Vec<Entry>, addresses: &[String], now: u64) -> Vec<Entry> {
+    let cutoff = now.saturating_sub(KEEP.as_millis() as u64);
+    let mut book: Vec<Entry> = existing.into_iter().filter(|e| e.last_seen >= cutoff).collect();
+    let known: std::collections::HashSet<String> =
+        book.iter().map(|e| e.address.clone()).collect();
+
+    for address in addresses.iter().take(MAX_SEEDED) {
+        let address = address.trim();
+        // An address already in the book keeps everything it knows, and keeps its own stamp:
+        // a seed is not a sighting, and must not make a cold row look freshly seen.
+        if address.is_empty() || known.contains(address) {
+            continue;
+        }
+        book.push(Entry {
+            address: address.to_string(),
+            joinable: true,
+            last_seen: now,
+            ..Default::default()
+        });
     }
 
     book.sort_by(|a, b| b.last_seen.cmp(&a.last_seen).then_with(|| a.address.cmp(&b.address)));
@@ -179,6 +231,51 @@ mod tests {
     }
 
     const DAY: u64 = 24 * 60 * 60 * 1000;
+
+    #[test]
+    fn seeding_fills_an_empty_book() {
+        // The case the shared book exists for: a fresh install, an outage, and nothing to fall
+        // back to until now.
+        let book = seed(vec![], &["198.51.100.1:54210".into(), "203.0.113.9:54210".into()], 1_000);
+        assert_eq!(book.len(), 2);
+        // Seeded rows have to be joinable or the probe skips them and they can only ever be
+        // dropped — which would make the whole seed a no-op.
+        assert!(book.iter().all(|e| e.joinable));
+        assert!(book.iter().all(|e| e.last_seen == 1_000));
+    }
+
+    #[test]
+    fn seeding_never_overwrites_what_the_master_taught_us() {
+        // `merge` replaces a row wholesale, which is right for a sweep and catastrophic here:
+        // the only thing a seed knows is the address, so seeding over a remembered row would
+        // trade its name, location and licence class for three empty strings.
+        let known = merge(vec![], &[server("198.51.100.1:54210", "One")], 1_000);
+        let book = seed(known, &["198.51.100.1:54210".into()], 9_000);
+
+        assert_eq!(book.len(), 1);
+        assert_eq!(book[0].name, "One");
+        assert_eq!(book[0].location, "EU");
+        // And its own stamp: a seed is not a sighting, so it must not make a cold row look
+        // freshly seen and win it another 30 days.
+        assert_eq!(book[0].last_seen, 1_000);
+    }
+
+    #[test]
+    fn seeding_ages_out_and_caps_like_any_other_write() {
+        let stale = merge(vec![], &[server("198.51.100.1:54210", "Old")], 1_000);
+        let book = seed(stale, &["203.0.113.9:54210".into()], 40 * DAY);
+        assert_eq!(book.len(), 1);
+        assert_eq!(book[0].address, "203.0.113.9:54210");
+    }
+
+    #[test]
+    fn a_runaway_shared_book_cannot_turn_a_refresh_into_a_port_scan() {
+        // One datagram per row on every probe-only refresh, so this bound is the real one.
+        let many: Vec<String> = (0..MAX_SEEDED + 50)
+            .map(|i| format!("198.51.100.{}:{}", i % 250, 54000 + i))
+            .collect();
+        assert_eq!(seed(vec![], &many, 1_000).len(), MAX_SEEDED);
+    }
 
     #[test]
     fn a_sweep_becomes_a_book() {
