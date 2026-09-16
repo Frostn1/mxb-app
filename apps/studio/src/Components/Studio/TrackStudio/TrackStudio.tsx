@@ -200,11 +200,15 @@ export default function TrackStudio() {
     value,
     label: t(`track.discipline.${value}`),
   }));
-  // Not a switch for Random like the two above: this one is the loaded track's own, so it
-  // is read off the program and settled back into it.
-  const tuffs = (["soft", "solid"] as const).map((value) => ({
+  // Not a switch for Random like the two above: these are the loaded track's own, so they
+  // are read off the program and settled back into it.
+  const borders = (["soft", "solid", "banners", "none"] as const).map((value) => ({
     value,
-    label: t(`track.tuff.${value}`),
+    label: t(`track.border.${value}`),
+  }));
+  const venues = (["stadium", "open"] as const).map((value) => ({
+    value,
+    label: t(`track.venue.${value}`),
   }));
   const randomAtScale = () => randomTrackProgram(undefined, scale, discipline, density);
   const rebuild = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1575,18 +1579,39 @@ export default function TrackStudio() {
                     value={program.terrain.texture}
                     onChange={(v) => settleTerrain({ texture: v })}
                   />
-                  {/* Only a supercross lane is lined with them, so nothing else is asked. */}
+                  {/* Only a stadium discipline lines its lanes, so nothing else is asked. The
+                      value falls back to `tuff`, which is what this was called before it grew
+                      banners and none, so an old project still shows its own answer. */}
                   {(program.discipline === "sx" || program.discipline === "smx") && (
                     <div>
                       <div className="font-cond text-[10px] font-semibold uppercase tracking-[0.22em] text-faint">
-                        {t("track.tuff")}
+                        {t("track.border")}
                       </div>
                       <div className="mt-2">
                         <Segmented
                           size="sm"
-                          options={tuffs}
-                          value={program.tuff ?? "soft"}
-                          onChange={(v) => void settle({ ...program, tuff: v })}
+                          options={borders}
+                          value={program.border ?? program.tuff ?? "soft"}
+                          onChange={(v) =>
+                            void settle({ ...program, border: v, tuff: undefined })
+                          }
+                        />
+                      </div>
+                    </div>
+                  )}
+                  {/* And whether there is a stadium round it at all, which only supercross
+                      builds: SuperMotocross is an outdoor round either way. */}
+                  {program.discipline === "sx" && (
+                    <div>
+                      <div className="font-cond text-[10px] font-semibold uppercase tracking-[0.22em] text-faint">
+                        {t("track.venue")}
+                      </div>
+                      <div className="mt-2">
+                        <Segmented
+                          size="sm"
+                          options={venues}
+                          value={program.venue ?? "stadium"}
+                          onChange={(v) => void settle({ ...program, venue: v })}
                         />
                       </div>
                     </div>
