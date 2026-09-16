@@ -43,10 +43,18 @@ export interface TrackProgram {
   elevation: { at: number; height: number }[];
   /** Which rules the lap is drawn and judged by. Left out for motocross. */
   discipline?: Discipline;
+  /** What the lane's blocks are made of. Only supercross lays any; left out for soft. */
+  tuff?: TuffBlocks;
 }
 
 /** Motocross, supercross or SuperMotocross. Mirrors `Discipline` in `trackprog.rs`. */
 export type Discipline = "mx" | "sx" | "smx";
+
+/**
+ * The padded blocks along a supercross lane: soft ones a rider rides through, solid ones
+ * stop the bike. Mirrors `TuffBlocks` in `trackprog.rs`.
+ */
+export type TuffBlocks = "soft" | "solid";
 
 export type TrackSegment =
   /** `rise` is metres climbed over the segment; negative drops, zero follows the ground. */

@@ -1372,6 +1372,10 @@ pub fn build(prog: &TrackProgram, syn: &Synth) -> Scenery {
         syn.outside_the_start(x, z).map(|e| e > OFF_THE_START_M).unwrap_or(true)
     };
     let pits = Pits::of(prog);
+    // A stadium has no trees, no wood behind them, no backdrop bank and no paddock: it has a
+    // wall round the floor and a grandstand, which `trackvenue::stadium` builds. SuperMotocross
+    // is an outdoor round and keeps the lot.
+    let outdoors = prog.discipline != crate::trackprog::Discipline::Sx;
 
     let mut stakes = Mesh::default();
     let mut banners = Mesh::default();
@@ -1686,7 +1690,7 @@ pub fn build(prog: &TrackProgram, syn: &Synth) -> Scenery {
     let mut n = 0usize;
     let mut placed: Vec<(f32, f32)> = Vec::new();
     let mut s = 0.0f32;
-    while s < lap {
+    while outdoors && s < lap {
         let st = at(s);
         let (rx, rz) = crate::trackprog::right_vector(st.heading);
         // Keyed on where round the lap we are, not on how many have been placed. Keyed on
@@ -1737,7 +1741,7 @@ pub fn build(prog: &TrackProgram, syn: &Synth) -> Scenery {
     let mut n = 0usize;
     let (sx, sz) = (prog.terrain.size_x, prog.terrain.size_z);
     let mut gz = WOOD_STEP_M * 0.5;
-    while gz < sz {
+    while outdoors && gz < sz {
         let mut gx = WOOD_STEP_M * 0.5;
         while gx < sx {
             let key = (gz / WOOD_STEP_M) as u32 * 4096 + (gx / WOOD_STEP_M) as u32;
@@ -1780,7 +1784,12 @@ pub fn build(prog: &TrackProgram, syn: &Synth) -> Scenery {
     //     it. The plot ends forty metres from the line in places, and past it there was only
     //     the sky — ridden as "scenery could use a backdrop and some more objects in the
     //     background". Drawn and never solid: nobody rides out there.
-    let (backdrop, far) = backdrop(prog, syn, seed);
+    let (backdrop, far) = if outdoors {
+        backdrop(prog, syn, seed)
+    } else {
+        // A stadium's horizon is its own stands.
+        (Mesh::default(), Vec::new())
+    };
     let n = far.len();
     plants.extend(far);
     tally.push(("backdrop trees", n));
@@ -1952,8 +1961,28 @@ pub fn build(prog: &TrackProgram, syn: &Synth) -> Scenery {
         );
     }
 
-    // The paddock, its road to the pits, and the sponsor wall behind the gates.
-    crate::trackvenue::dress(prog, syn, lib.as_ref(), &mut kinds, &mut tally);
+    // Tuff blocks down the lane borders, where the discipline lines its lanes with them.
+    if prog.discipline.rules().sections.is_some() {
+        let (blocks, count) = tuff_blocks(prog, syn);
+        tally.push(("tuff blocks", count));
+        let tex = tuff_sheet();
+        for (name, mesh) in blocks {
+            // Solid either way, because the `.tht` is how the game learns an object is there
+            // at all. What decides whether a rider goes through it is the model's *name* —
+            // see `SOFT_TUFF`.
+            kinds.push((name, mesh, tex.clone(), true));
+        }
+    }
+
+    // The paddock, its road to the pits, and the sponsor wall behind the gates — or, in a
+    // stadium, the wall round the floor and the stands behind it.
+    if outdoors {
+        crate::trackvenue::dress(prog, syn, lib.as_ref(), &mut kinds, &mut tally);
+    } else {
+        let v = crate::trackvenue::stadium(prog, syn);
+        tally.extend(v.tally);
+        kinds.extend(v.kinds);
+    }
 
     let mut files = Vec::new();
     let mut drawn = Vec::new();
@@ -1995,6 +2024,109 @@ pub fn build(prog: &TrackProgram, syn: &Synth) -> Scenery {
     println!("  scenery {shown:?}");
     log::info!("scenery {shown:?}");
     Scenery { files, drawn, solid, tally, models }
+}
+
+/// Tuff blocks: how big one is, how far outside the track's edge it stands, and how far apart.
+///
+/// Just off the edge on purpose. A lane's border is the foot of the mound the jumps either
+/// side of it spill into, and that is where a real round stands its blocks — far enough out to
+/// be a border and near enough to be one a rider can see from the seat.
+const TUFF_W_M: f32 = 1.2;
+const TUFF_H_M: f32 = 0.9;
+const TUFF_D_M: f32 = 0.5;
+/// How far a block's near edge clears the riding margin.
+///
+/// Worked out from [`RIDE_MARGIN_M`] rather than stated as an offset from the centreline, and
+/// that is the whole of why: a flat 1.1 m put a 0.6 m deep block's inner edge at 5.55 m on a
+/// 9.5 m lane, inside the 5.75 m bar `on_riding_surface` holds everything to, so every single
+/// block was thrown away and a supercross track shipped with no lane borders at all.
+const TUFF_CLEAR_M: f32 = 0.2;
+const TUFF_GAP_M: f32 = 2.6;
+
+/// PiBoSo's pass-through objects, by name.
+///
+/// The engine decides whether a scenery model stops a bike from what the model is *called*: a
+/// name beginning `SOFT` is ridden through with a penalty rather than into. So a soft border is
+/// not a flag on a block — it is the file the blocks are written to, and they still have to
+/// reach the `.tht` or the game never knows they are there at all.
+///
+/// Three of them rather than one, spread round the lap, because each is its own draw group and
+/// a single model of every block on the track is the kind of thing that walks into the
+/// 65,535-vertex limit as a lap grows.
+const SOFT_TUFF: [&str; 3] = ["SOFTHAYB", "SOFTBHAYB", "SOFTCHAYB"];
+
+fn tuff_sheet() -> Texture {
+    sheet("tuff_c", 128, |u, v| {
+        // Two colours down the row, and the bottom of every block filthy — they stand in the
+        // dirt and get roosted all day, and a clean one reads as plastic tat.
+        let dirt = (1.0 - v).powf(3.0) * 0.55;
+        let base = if u < 0.5 { [206.0f32, 46.0, 40.0] } else { [230.0f32, 230.0, 223.0] };
+        let g = 0.9 + 0.1 * grain(u, v, 0x7055, 18.0);
+        let c = |k: usize| (base[k] * g * (1.0 - dirt) + 92.0 * dirt).clamp(0.0, 255.0) as u8;
+        [c(0), c(1), c(2), 255]
+    })
+}
+
+/// The blocks lining a lane's borders, as one mesh per file they go in.
+///
+/// Never on the riding surface. A block standing where a rider is meant to be is in the wrong
+/// place whichever kind it is, and on a stadium floor the lanes are close enough together that
+/// "just outside this one" and "just inside the next" are two metres apart.
+fn tuff_blocks(prog: &TrackProgram, syn: &Synth) -> (Vec<(String, Mesh)>, usize) {
+    let names: Vec<String> = match prog.tuff {
+        crate::trackprog::TuffBlocks::Soft => SOFT_TUFF.iter().map(|s| (*s).to_string()).collect(),
+        crate::trackprog::TuffBlocks::Solid => vec!["tuff_blocks".to_string()],
+    };
+    let mut meshes: Vec<Mesh> = vec![Mesh::default(); names.len()];
+    let half = prog.width * 0.5;
+    // Just past the bar, not a guessed distance: the near edge has to clear the riding margin
+    // or the piece is dropped as standing on the lane.
+    let off = half + RIDE_MARGIN_M + TUFF_D_M * 0.5 + TUFF_CLEAR_M;
+    let stations = prog.stations(0.5);
+    let block = edfwrite::cuboid(TUFF_W_M, TUFF_H_M, TUFF_D_M);
+    let mut n = 0usize;
+    for side in [-1.0f32, 1.0] {
+        let line: Vec<(f32, f32)> = stations
+            .iter()
+            .map(|st| {
+                let (rx, rz) = crate::trackprog::right_vector(st.heading);
+                (st.x + rx * off * side, st.z + rz * off * side)
+            })
+            .collect();
+        let mut acc = vec![0.0f32];
+        for w in line.windows(2) {
+            acc.push(acc.last().unwrap() + (w[1].0 - w[0].0).hypot(w[1].1 - w[0].1));
+        }
+        let total = *acc.last().unwrap();
+        let (mut cursor, mut s, mut i) = (0usize, 0.0f32, 0u32);
+        while s < total {
+            let (x, z, deg) = along_line(&line, &acc, &mut cursor, s);
+            s += TUFF_GAP_M;
+            i += 1;
+            // No clearance bar against the nearest leg here, unlike the stakes. A lane border
+            // is *meant* to sit on the strip of dirt between two lanes — twelve metres centre
+            // to centre leaves two and a half of it — and asking a block to be nearer its own
+            // lane than the next one is asking for a border that cannot exist. Whether it
+            // stands where anybody rides is `on_riding_surface`'s question, below.
+            if !inside(prog, x, z, 2.0)
+                // Not across the gate row: twenty-two bikes leave it abreast.
+                || !syn.outside_the_start(x, z).map(|e| e > OFF_THE_START_M).unwrap_or(true)
+            {
+                continue;
+            }
+            let m = edfwrite::moved(
+                &edfwrite::turned(&block, deg),
+                [x, ground(syn, x, z) - 0.05, z],
+            );
+            if on_riding_surface(syn, half, &m) {
+                continue;
+            }
+            let k = i as usize % meshes.len();
+            meshes[k].append(&m);
+            n += 1;
+        }
+    }
+    (names.into_iter().zip(meshes).collect(), n)
 }
 
 /// The `scene<N>` blocks, in the form TerrainEd reads them.
