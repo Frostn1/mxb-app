@@ -56,6 +56,9 @@ image = { version = "0.25", default-features = false, features = [
 ] }
 # The track's name on a generated track's picture.
 ab_glyph = "0.2"
+# Reading the GeoTIFFs public elevation surveys are published as. The `image` crate above
+# is built without TIFF on purpose, and a DEM needs float cells and GeoTIFF tags anyway.
+tiff = "0.11"
 
 [features]
 # Matches the manager's. `tauri build` turns it on; a dev run leaves it off.
