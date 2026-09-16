@@ -2065,6 +2065,14 @@ export const ptBR: Translation = {
   "supporters.contributors": "Colaboradores",
   "supporters.contributorsDesc":
     "Pessoas que deixaram o app melhor com ideias, testes e feedback.",
+  "supporters.kind.code": "Contribuições de código",
+  "supporters.kind.codeDesc":
+    "Código que eles escreveram, rodando na versão que você usa.",
+  "supporters.kind.testing": "Testes",
+  "supporters.kind.testingDesc":
+    "Quebraram o app de propósito, em builds que ninguém mais tinha.",
+  "supporters.kind.ideas": "Ideias e feedback",
+  "supporters.kind.ideasDesc": "Sugeriram algo que acabou entrando no app.",
   "reshade.needsGameFolder":
     "O ReShade fica na sua pasta do {{game}} — defina ela em Pasta do jogo, ou aponte direto para ela aqui.",
   "reshade.folder": "Procurando na sua pasta do {{game}}:",

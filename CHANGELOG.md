@@ -21,19 +21,15 @@
   like, what each resolution is actually good for, what to do when your country has no laser
   survey, and the credit each source asks for.
 
-## Unreleased — MXB App and MXB Coach
+## 2026-09-16 — Code, testing, ideas
 
-### Fixed
-- The overlay shortcut always belongs to someone. With no MX Bikes folder set, MXB App told
-  MXB Coach it was holding the key for both and then never bound it, so the shortcut opened
-  nothing in either app.
-- MXB Coach keeps its own shortcut when it can't reach MXB App. If the local link between the
-  two never comes up — a firewall or antivirus blocking it is the usual cause — Coach used to
-  hand the key over to an MXB App that wasn't taking it, and then say an older MXB App was
-  running even when it was up to date. It now holds the key itself and says plainly that the
-  two apps aren't linked.
+### Changed
+- The Contributors list in Settings → Supporters now says what each person actually did. Code
+  contributions, testing and ideas each get their own heading and mark, so a pull request that
+  shipped reads as one and a suggestion that shipped reads as the other. Somebody who did two
+  of them is credited under both, and anyone not sorted yet stays in the list as before.
 
-## Unreleased — MXB Coach
+## 2026-09-16 — MXB Coach v0.1.14-beta.14
 
 ### Added
 - Coach keeps the recorder up to date by itself. Opening Settings puts the newest one in place
@@ -43,11 +39,6 @@
   nothing and says nothing about why.
 - Coach can find MX Bikes on its own. If it isn't where Coach looks, choose the folder in
   Settings instead of being sent to MXB App to set it there.
-
-### Fixed
-- MXB App and MXB Coach get on when they're both open. They share one settings file, and MXB
-  App wrote it in place — so a read by Coach landing in that moment saw an empty file, forgot
-  where the game was, and greyed out the buttons that needed it. It is written safely now.
 
 ### Fixed
 - The live cue and the blue trail appear in the game. Coach was writing them to a different
@@ -62,6 +53,14 @@
   look at: the track file has none of the ruts cut into it over a session, and big jumps get
   rounded off when its terrain is read, both of which make your laps sit unevenly above it. It
   now allows for that, and still refuses a track that genuinely isn't the one you rode.
+- MXB App and MXB Coach get on when they're both open. They share one settings file, and MXB
+  App wrote it in place — so a read by Coach landing in that moment saw an empty file, forgot
+  where the game was, and greyed out the buttons that needed it. It is written safely now.
+- Coach keeps its own overlay shortcut when it can't reach MXB App. If the local link between
+  the two never comes up — a firewall or antivirus blocking it is the usual cause — Coach used
+  to hand the key over to an MXB App that wasn't taking it, and then say an older MXB App was
+  running even when it was up to date. It now holds the key itself and says plainly that the
+  two apps aren't linked.
 
 ### Changed
 - The cues send themselves. There is no "Send to the game" button any more: Coach writes them
@@ -200,6 +199,11 @@
   reason.
 
 ## Unreleased — MXB App
+
+### Fixed
+- The overlay shortcut always belongs to someone. With no MX Bikes folder set, MXB App told
+  MXB Coach it was holding the key for both and then never bound it, so the shortcut opened
+  nothing in either app.
 
 ### Added
 - The 3D track view now shows the game's own tracks in full, with their ground, their markings,
