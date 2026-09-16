@@ -2,7 +2,6 @@ import { useCallback, useEffect, useState } from "react";
 import { Toaster } from "sonner";
 import { Gauge, Lightbulb, Megaphone, RefreshCw, Wrench } from "lucide-react";
 import OverlayFrame, { peerTabLabel, type FrameTab } from "@frost/shared/Components/Overlay/OverlayFrame";
-import { Switch } from "@frost/shared/Components/ui/switch";
 import { ThemeProvider, useTheme } from "@frost/shared/Context/Theme";
 import {
   getOverlayPeer,
@@ -16,11 +15,12 @@ import {
   type OverlayPeer,
 } from "@frost/shared/api/overlay";
 import { I18nProvider, useT, type TKey } from "@/i18n";
-import { coachHud, coachReview, coachSetHud, type Hud, type ReviewOut } from "@/api/coach";
+import { coachReview, type ReviewOut } from "@/api/coach";
 import { lastLap, type LastLap } from "@/lib/lastLap";
 import { gap, lapTime, lossColor } from "@/lib/format";
 import SetupFixes from "../Review/SetupFixes";
 import LiveCues from "../Review/LiveCues";
+import HudPanel from "../Review/HudPanel";
 import { Label } from "../Page";
 
 type Tab = "tips" | "setup" | "cues" | "hud";
@@ -139,42 +139,6 @@ function Tips({ last, data, error }: { last: LastLap | null | undefined; data: R
   );
 }
 
-/** What the recorder draws over the game, part by part. */
-function HudTab() {
-  const t = useT();
-  const [hud, setHud] = useState<Hud | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  useEffect(() => {
-    coachHud().then(setHud).catch((e) => setError(String(e)));
-  }, []);
-  const set = (key: string, on: boolean) =>
-    coachSetHud(key, on)
-      .then(setHud)
-      .catch((e) => setError(String(e)));
-  if (error) return <p className="text-[12.5px] text-muted-foreground">{error}</p>;
-  if (!hud) return <p className="text-[12.5px] text-muted-foreground">{t("common.loading")}</p>;
-  return (
-    <div>
-      <Label>{t("hud.title")}</Label>
-      <div className="border border-border bg-card px-4 py-3">
-        <p className="text-[12.5px] text-muted-foreground">{t("hud.body")}</p>
-        <div className="mt-3 flex items-center justify-between gap-4 border-b border-border pb-3">
-          <span className="text-[13px] font-semibold">{t("hud.enabled")}</span>
-          <Switch checked={hud.enabled} onCheckedChange={(on) => void set("enabled", on)} />
-        </div>
-        <div className="divide-y divide-border">
-          {hud.parts.map((p) => (
-            <div key={p.key} className="flex items-center justify-between gap-4 py-2.5">
-              <span className="text-[12.5px]">{p.label}</span>
-              <Switch checked={p.on} disabled={!hud.enabled} onCheckedChange={(on) => void set(p.key, on)} />
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function Panel() {
   const t = useT();
   const [tab, setTab] = useState<Tab>(() => {
@@ -250,7 +214,7 @@ function Panel() {
           ) : (
             <p className="text-[12.5px] text-muted-foreground">{t("otips.none")}</p>
           ))}
-        {tab === "hud" && <HudTab />}
+        {tab === "hud" && <HudPanel />}
       </div>
     </OverlayFrame>
   );

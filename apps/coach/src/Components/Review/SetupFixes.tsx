@@ -7,10 +7,10 @@ import {
   coachSetupPlan,
   type Finding,
   type SetupChange,
-  type SetupFix,
   type SetupPlan,
 } from "@/api/coach";
 import { Label } from "../Page";
+import BikeFeel, { FEELS, type Feel } from "./BikeFeel";
 
 const SUSPENSION = ["setup_brake_dive", "setup_exit_squat", "setup_shock_kick", "setup_rear_low", "setup_front_low"];
 const SETUP_GROUPS: { key: TKey; of: (skill: string) => boolean }[] = [
@@ -30,27 +30,12 @@ const SETUP_GROUPS: { key: TKey; of: (skill: string) => boolean }[] = [
   { key: "review.group.ground", of: (s) => s === "setup_sand" || s === "setup_hardpack" || s === "setup_mud" },
 ];
 
-type Feel = { key: TKey; skill: string; end?: 0 | 1; bottom?: boolean };
-
-/** What a rider can say about the bike, each with the setup tip it means. `end` marks the ones
- *  the travel used can argue with. */
-const FEELS: Feel[] = [
-  { key: "feel.frontBottoms", skill: "setup_bottoming_fork", end: 0, bottom: true },
-  { key: "feel.rearBottoms", skill: "setup_bottoming_shock", end: 1, bottom: true },
-  { key: "feel.frontHarsh", skill: "setup_stiff_fork", end: 0 },
-  { key: "feel.rearHarsh", skill: "setup_stiff_shock", end: 1 },
-  { key: "feel.dives", skill: "setup_brake_dive" },
-  { key: "feel.squats", skill: "setup_exit_squat" },
-  { key: "feel.kicks", skill: "setup_shock_kick" },
-  { key: "feel.packs", skill: "setup_packing_fork" },
-  { key: "feel.pushes", skill: "setup_front_push" },
-  { key: "feel.unstable", skill: "setup_unstable" },
-  { key: "feel.turnsSlow", skill: "setup_turns_slow" },
-  { key: "feel.revsOut", skill: "setup_gearing_tall" },
-  { key: "feel.bogs", skill: "setup_gearing_short" },
-];
 /** Telemetry can't see these at all. */
 const ONLY_FELT = ["setup_unstable", "setup_turns_slow"];
+
+/** A change with nowhere left to go: the setting is already at the end of its range. */
+const atLimit = (c: SetupChange) =>
+  !(c.fromValue && c.toValue && c.fromValue !== c.toValue) && c.from != null && c.from === c.to;
 
 /** What the laps say about a feel: they show it too, or the travel used says otherwise (the
  *  share, in percent), or neither. */
@@ -63,9 +48,92 @@ function feelCheck(f: Feel, findings: Finding[], used: [number, number] | null):
   return { seen: false };
 }
 
-/** Bike setup advice for the whole lap, by what it's about, with the changes behind each tip
- *  against the setup the rider had on, and a copy of that setup with them made. Shared by the
- *  review page and the overlay. */
+/** How far one change goes: the values where the bike's file says, else the direction. */
+function amount(c: SetupChange, t: ReturnType<typeof useT>): string {
+  if (c.fromValue && c.toValue && c.fromValue !== c.toValue) return `${c.fromValue} → ${c.toValue}`;
+  if (c.from != null && c.from === c.to) return t("setup.atLimit");
+  const n = Math.abs(c.steps);
+  if (c.field === "forkOil") return t(c.steps > 0 ? "setup.moreOil" : "setup.lessOil");
+  if (c.field === "frontSprocket" || c.field === "rearSprocket") return `${c.steps > 0 ? "+" : "−"}${n}T`;
+  if (c.field === "swingarmLength" || c.field === "rodLength") return t(c.steps > 0 ? "setup.longer" : "setup.shorter");
+  if (c.field === "forkHeight") return t(c.steps > 0 ? "setup.frontHigher" : "setup.frontLower");
+  if (c.field === "forkOffset") return t(c.steps > 0 ? "setup.moreOffset" : "setup.lessOffset");
+  const up = c.steps > 0;
+  // Rebound reads as slower or faster, preload as more or less, the rest firmer or softer.
+  const [one, many]: [TKey, TKey] =
+    c.field === "forkRebound" || c.field === "shockRebound"
+      ? up ? ["setup.slowerOne", "setup.slowerMany"] : ["setup.fasterOne", "setup.fasterMany"]
+      : c.field === "forkPreload" || c.field === "shockPreload"
+        ? up ? ["setup.moreOne", "setup.moreMany"] : ["setup.lessOne", "setup.lessMany"]
+        : up ? ["setup.firmerOne", "setup.firmerMany"] : ["setup.softerOne", "setup.softerMany"];
+  return n === 1 ? t(one) : t(many, { n });
+}
+
+/** One change on its own line: the setting and how far it goes, with the reason under it. */
+function Change({ c }: { c: SetupChange }) {
+  const t = useT();
+  return (
+    <li className="grid grid-cols-[1fr_auto] items-baseline gap-x-3 gap-y-0.5">
+      <span className="text-[12.5px] text-foreground">{t(`setupField.${c.field}` as TKey)}</span>
+      <span className="whitespace-nowrap font-mono text-[12px] text-accent-foreground">{amount(c, t)}</span>
+      <span className="col-span-2 text-[12px] leading-snug text-muted-foreground">
+        {c.why}
+        {!c.writes && c.from !== c.to && <span className="ml-1.5 text-[11px] text-faint">{t("setup.byHand")}</span>}
+      </span>
+    </li>
+  );
+}
+
+/** A list of changes by group, each setting named once. */
+function Plan({ groups }: { groups: { key: TKey; changes: SetupChange[] }[] }) {
+  const t = useT();
+  return (
+    <div className="space-y-3">
+      {groups.map((g) => (
+        <div key={g.key}>
+          <div className="mb-1 text-[12px] font-semibold text-foreground">{t(g.key)}</div>
+          <ul className="space-y-2 border-l border-border pl-3">
+            {g.changes.map((c) => (
+              <Change key={c.field} c={c} />
+            ))}
+          </ul>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** Every change behind a set of tips, in group order, with each setting named once. The ones
+ *  already as far as they go are counted rather than listed: they are noise in a list the
+ *  rider reads top to bottom. */
+function useGrouped(plan: SetupPlan | null, skills: string[]) {
+  return useMemo(() => {
+    if (!plan) return { groups: [], limited: 0 };
+    const mine = plan.fixes.filter((f) => skills.includes(f.skill));
+    const seen = new Set<string>();
+    const all = SETUP_GROUPS.map((g) => {
+      const changes = mine
+        .filter((f) => g.of(f.skill))
+        .flatMap((f) => f.changes)
+        .filter((c) => !seen.has(c.field) && seen.add(c.field));
+      return {
+        key: g.key,
+        changes: changes.filter((c) => !atLimit(c)),
+        limited: changes.filter(atLimit).length,
+      };
+    });
+    return {
+      groups: all.filter((g) => g.changes.length > 0),
+      limited: all.reduce((n, g) => n + g.limited, 0),
+    };
+  }, [plan, skills]);
+}
+
+/**
+ * Bike setup advice for the whole lap: what the coach would change, said plainly and without
+ * the rider picking anything, then how the bike feels as a bike. Shared by the review page and
+ * the overlay.
+ */
 export default function SetupFixes({ path, findings }: { path: string; findings: Finding[] }) {
   const t = useT();
   const [plan, setPlan] = useState<SetupPlan | null>(null);
@@ -98,7 +166,28 @@ export default function SetupFixes({ path, findings }: { path: string; findings:
       live = false;
     };
   }, [path, skills]);
+
+  // What the coach found on its own, and what the rider's feels added on top.
+  const found = useMemo(() => findings.map((f) => f.skill), [findings]);
+  const extra = useMemo(() => skills.filter((s) => !found.includes(s)), [skills, found]);
+  const foundGroups = useGrouped(plan, found);
+  const feltGroups = useGrouped(plan, extra);
+
   const writes = (plan?.saveAs != null && plan.fixes.some((f) => f.changes.some((c) => c.writes))) ?? false;
+  // The one line over the button: how many changes a copy gets, and the first couple by name.
+  const summary = useMemo(() => {
+    if (!plan) return "";
+    const seen = new Set<string>();
+    const all = plan.fixes
+      .flatMap((f) => f.changes)
+      .filter((c) => c.writes && !atLimit(c) && !seen.has(c.field) && seen.add(c.field));
+    if (all.length === 0) return "";
+    const named = all.slice(0, 2).map((c) => `${t(`setupField.${c.field}` as TKey).toLowerCase()} ${amount(c, t)}`);
+    const rest = all.length - named.length;
+    const what = [...named, ...(rest > 0 ? [t("setup.andMore", { n: rest })] : [])].join(", ");
+    return all.length === 1 ? t("setup.summaryOne", { what }) : t("setup.summaryMany", { n: all.length, what });
+  }, [plan, t]);
+
   const save = async () => {
     setSaving(true);
     try {
@@ -109,75 +198,76 @@ export default function SetupFixes({ path, findings }: { path: string; findings:
       setSaving(false);
     }
   };
+
   return (
     <div>
       <Label>{t("review.setup")}</Label>
-      <div className="space-y-4 border border-border bg-card px-4 py-3">
-        <div>
-          <div className="mb-1.5 eyebrow">{t("feel.title")}</div>
-          <p className="mb-2 text-[12.5px] text-muted-foreground">{t("feel.body")}</p>
-          <div className="flex flex-wrap gap-1.5">
-            {FEELS.map((f) => {
-              const on = felt.includes(f.skill);
-              return (
-                <button
-                  key={f.skill}
-                  type="button"
-                  aria-pressed={on}
-                  onClick={() => setFelt((v) => (on ? v.filter((s) => s !== f.skill) : [...v, f.skill]))}
-                  className={`border px-2 py-1 text-[12px] ${
-                    on ? "border-accent-foreground text-accent-foreground" : "border-border text-muted-foreground hover:text-foreground"
-                  }`}
-                >
-                  {t(f.key)}
-                </button>
-              );
-            })}
+      <div className="border border-border bg-card px-4 py-4">
+        {/* The copy it would save, first: the button and what it changes, in one line. */}
+        {plan && (writes || plan.why) && (
+          <div className="border-b border-border pb-4">
+            {writes ? (
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+                <Button size="sm" onClick={save} disabled={saving}>
+                  {t("setup.save", { name: plan.saveAs ?? "" })}
+                </Button>
+                <span className="min-w-0 flex-1 text-[12px] text-muted-foreground">{summary || t("setup.saveHint")}</span>
+              </div>
+            ) : (
+              <p className="text-[12px] text-muted-foreground">{plan.why}</p>
+            )}
           </div>
-          {feels.length > 0 && (
-            <div className="mt-3 space-y-3">
-              {feels.map(({ f, seen, against }) => {
-                const fix = !seen && against == null ? plan?.fixes.find((x) => x.skill === f.skill) : undefined;
-                const says = seen
-                  ? t("feel.agrees")
-                  : against != null
-                    ? t(f.bottom ? "feel.notBottoming" : "feel.usesAll", { pct: against })
-                    : t(ONLY_FELT.includes(f.skill) ? "feel.onlyYou" : "feel.notSeen");
-                return (
-                  <div key={f.skill}>
-                    <p className="text-[12.5px]">
+        )}
+
+        <div className="mt-4 grid gap-x-8 gap-y-5 min-[1100px]:grid-cols-2 min-[1100px]:items-start">
+          {/* Everything the coach would change, without the rider picking anything. */}
+          <div className="min-w-0">
+            <div className="mb-1.5 eyebrow">{t("setup.plan")}</div>
+            <p className="mb-3 text-[12.5px] text-muted-foreground">{t("setup.planBody")}</p>
+            {foundGroups.groups.length === 0 ? (
+              <p className="text-[12.5px] text-muted-foreground">{plan ? t("setup.planNone") : t("common.loading")}</p>
+            ) : (
+              <Plan groups={foundGroups.groups} />
+            )}
+            {foundGroups.limited > 0 && (
+              <p className="mt-3 text-[12px] text-faint">
+                {foundGroups.limited === 1 ? t("setup.atLimitOne") : t("setup.atLimitMany", { n: foundGroups.limited })}
+              </p>
+            )}
+          </div>
+
+          {/* How the bike feels, as a bike. */}
+          <div className="min-w-0 border-t border-border pt-5 min-[1100px]:border-l min-[1100px]:border-t-0 min-[1100px]:pl-8 min-[1100px]:pt-0">
+            <div className="mb-1.5 eyebrow">{t("feel.title")}</div>
+            <p className="mb-4 text-[12.5px] text-muted-foreground">{t("feel.body")}</p>
+            <BikeFeel felt={felt} onToggle={(skill) => setFelt((v) => (v.includes(skill) ? v.filter((s) => s !== skill) : [...v, skill]))} />
+            {feels.length > 0 && (
+              <div className="mt-4 space-y-2">
+                {feels.map(({ f, seen, against }) => {
+                  const says = seen
+                    ? t("feel.agrees")
+                    : against != null
+                      ? t(f.bottom ? "feel.notBottoming" : "feel.usesAll", { pct: against })
+                      : t(ONLY_FELT.includes(f.skill) ? "feel.onlyYou" : "feel.notSeen");
+                  return (
+                    <p key={f.skill} className="text-[12.5px]">
                       <span className="text-foreground">{t(f.key)}.</span> <span className="text-muted-foreground">{says}</span>
                     </p>
-                    {fix && <Changes fix={fix} />}
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-        {SETUP_GROUPS.map((g) => {
-          const mine = findings.filter((f) => g.of(f.skill));
-          if (mine.length === 0) return null;
-          return (
-            <div key={g.key}>
-              <div className="mb-1.5 eyebrow">{t(g.key)}</div>
-              {/* Each tip with the changes behind it right under it. */}
-              <div className="space-y-3">
-                {mine.map((f) => {
-                  const fix = plan?.fixes.find((x) => x.skill === f.skill);
-                  return (
-                    <div key={f.skill + f.title}>
-                      <Notes findings={[f]} />
-                      {fix && <Changes fix={fix} />}
-                    </div>
                   );
                 })}
               </div>
-            </div>
-          );
-        })}
+            )}
+            {feltGroups.groups.length > 0 && (
+              <div className="mt-4 space-y-3">
+                <div className="eyebrow">{t("setup.fromFeel")}</div>
+                <Plan groups={feltGroups.groups} />
+              </div>
+            )}
+          </div>
+        </div>
+
         {plan?.sag && (
-          <p className="text-[12px] text-muted-foreground">
+          <p className="mt-5 border-t border-border pt-4 text-[12px] text-muted-foreground">
             {plan.sag.still
               ? t("setup.sagStill", {
                   front: Math.round(plan.sag.metres[0] * 1000),
@@ -188,65 +278,8 @@ export default function SetupFixes({ path, findings }: { path: string; findings:
               : t("setup.sagRiding")}
           </p>
         )}
-        {plan && (writes || plan.why) && (
-          <div className="border-t border-border pt-3">
-            {writes ? (
-              <div className="flex flex-wrap items-center gap-3">
-                <Button size="sm" onClick={save} disabled={saving}>
-                  {t("setup.save", { name: plan.saveAs ?? "" })}
-                </Button>
-                <span className="text-[12px] text-muted-foreground">{t("setup.saveHint")}</span>
-              </div>
-            ) : (
-              <p className="text-[12px] text-muted-foreground">{plan.why}</p>
-            )}
-          </div>
-        )}
       </div>
     </div>
-  );
-}
-
-/** How far one change goes: the values where the bike's file says, else the direction. */
-function amount(c: SetupChange, t: ReturnType<typeof useT>): string {
-  if (c.fromValue && c.toValue && c.fromValue !== c.toValue) return `${c.fromValue} → ${c.toValue}`;
-  if (c.from != null && c.from === c.to) return t("setup.atLimit");
-  const n = Math.abs(c.steps);
-  if (c.field === "forkOil") return t(c.steps > 0 ? "setup.moreOil" : "setup.lessOil");
-  if (c.field === "frontSprocket" || c.field === "rearSprocket") return `${c.steps > 0 ? "+" : "−"}${n}T`;
-  if (c.field === "swingarmLength" || c.field === "rodLength") return t(c.steps > 0 ? "setup.longer" : "setup.shorter");
-  if (c.field === "forkHeight") return t(c.steps > 0 ? "setup.frontHigher" : "setup.frontLower");
-  if (c.field === "forkOffset") return t(c.steps > 0 ? "setup.moreOffset" : "setup.lessOffset");
-  const up = c.steps > 0;
-  // Rebound reads as slower or faster, preload as more or less, the rest firmer or softer.
-  const [one, many]: [TKey, TKey] =
-    c.field === "forkRebound" || c.field === "shockRebound"
-      ? up ? ["setup.slowerOne", "setup.slowerMany"] : ["setup.fasterOne", "setup.fasterMany"]
-      : c.field === "forkPreload" || c.field === "shockPreload"
-        ? up ? ["setup.moreOne", "setup.moreMany"] : ["setup.lessOne", "setup.lessMany"]
-        : up ? ["setup.firmerOne", "setup.firmerMany"] : ["setup.softerOne", "setup.softerMany"];
-  return n === 1 ? t(one) : t(many, { n });
-}
-
-/** The changes behind one tip, in the order to try them. */
-function Changes({ fix }: { fix: SetupFix }) {
-  const t = useT();
-  return (
-    <ol className="mt-2 space-y-1.5">
-      {fix.changes.map((c, i) => (
-        <li key={c.field} className="grid grid-cols-[14px_1fr_auto] items-baseline gap-x-2 text-[12.5px]">
-          <span className="font-mono text-faint">{i + 1}</span>
-          <span>
-            <span className="text-foreground">{t(`setupField.${c.field}` as TKey)}</span>{" "}
-            <span className="text-muted-foreground">{c.why}</span>
-            {!c.writes && c.from !== c.to && (
-              <span className="ml-1.5 text-[11px] text-faint">{t("setup.byHand")}</span>
-            )}
-          </span>
-          <span className="whitespace-nowrap font-mono text-[12px] text-accent-foreground">{amount(c, t)}</span>
-        </li>
-      ))}
-    </ol>
   );
 }
 
