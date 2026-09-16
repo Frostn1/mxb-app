@@ -165,8 +165,10 @@ async function authorize(request: Request, url: URL, env: Env): Promise<Scope | 
   }
   const session = await webSession(request, env);
   if (session) {
-    // Creators can lock and sell, and only creators: `creator_at` is set by hand for an
-    // affiliated creator, so a Steam sign-in on its own opens nothing here.
+    // Creators can lock and sell, and only creators. Signing up is a click on the site now
+    // (`POST /v1/web/creator`), but it is still a step somebody takes: signing in with Steam
+    // proves who they are, never on its own that they publish anything. Keeping the two apart
+    // is what gives every asset an account behind it, and what the daily ceiling counts against.
     const find = () =>
       env.DB.prepare("SELECT id, creator_at FROM accounts WHERE steam_id = ?")
         .bind(session.steamId)
@@ -174,11 +176,8 @@ async function authorize(request: Request, url: URL, env: Env): Promise<Scope | 
     // A creator whose `steam_id` has been lost looks exactly like a stranger here, and would be
     // turned away from their own dashboard. Retried once against the link log before that.
     const account = (await find()) ?? ((await repairBySteamId(env, session.steamId)) ? await find() : null);
-    // A Steam sign-in proves who someone is, never that they may sell. `creator_at` is set by
-    // hand, for an affiliated creator, and is the only thing that opens this: there is
-    // deliberately no path where signing in is enough.
     if (!account?.creator_at) {
-      return json(403, { error: "mxbsecure is invite only, for affiliated creators" });
+      return json(403, { error: CREATOR_SIGNUP_NEEDED });
     }
     return { kind: "creator", accountId: account.id, steamId: session.steamId, via: "cookie" };
   }
@@ -224,14 +223,11 @@ async function handle(
     if (method === "POST") {
       if (scope.kind === "admin") return createAsset(request, env, env.MXB_OWNER_ACCOUNT_ID!);
       const owner = scope.accountId;
-      if (owner !== env.MXB_OWNER_ACCOUNT_ID) {
-        const limit = assetsPerDay(env);
-        const made = await env.DB.prepare("SELECT COUNT(*) AS n FROM assets WHERE creator_id = ? AND created_at > ?")
-          .bind(owner, Date.now() - DAY_MS)
-          .first<{ n: number }>();
-        if ((made?.n ?? 0) >= limit) {
-          return json(429, { error: `You can lock ${limit} new files a day. Try again tomorrow.` });
-        }
+      // The ceiling is the whole of what open signup costs us: anyone may sign up, so what
+      // stops a signup minting keys all afternoon is this count, not the door.
+      const allowance = await lockAllowance(env, owner);
+      if (allowance.remaining === 0) {
+        return json(429, { error: `You can lock ${allowance.perDay} new files a day. Try again tomorrow.` });
       }
       return createAsset(request, env, owner);
     }
@@ -254,11 +250,40 @@ async function handle(
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
+/** What a signed-in Steam account that hasn't signed up yet is told. */
+export const CREATOR_SIGNUP_NEEDED = "sign up as a creator on mxbsecure.com first";
+
 /** New assets a creator may make a day (batch locking makes one per file): `MXB_ASSETS_PER_DAY`,
  *  10 when unset. The owner account has no ceiling. */
-function assetsPerDay(env: Env): number {
+export function assetsPerDay(env: Env): number {
   const n = Number(env.MXB_ASSETS_PER_DAY);
   return Number.isInteger(n) && n > 0 ? n : 10;
+}
+
+/** How many assets this account has made in the last 24 hours. */
+async function assetsMadeToday(env: Env, accountId: string, now = Date.now()): Promise<number> {
+  const made = await env.DB.prepare("SELECT COUNT(*) AS n FROM assets WHERE creator_id = ? AND created_at > ?")
+    .bind(accountId, now - DAY_MS)
+    .first<{ n: number }>();
+  return made?.n ?? 0;
+}
+
+/**
+ * What's left of today's ceiling for one creator, as the site shows it.
+ *
+ * `perDay` and `remaining` are null for the owner account, which has no ceiling — the site
+ * reads that as "no number to show" rather than as zero, which is the one way to get this
+ * wrong that stops somebody locking.
+ */
+export async function lockAllowance(
+  env: Env,
+  accountId: string,
+  now = Date.now(),
+): Promise<{ usedToday: number; perDay: number | null; remaining: number | null }> {
+  const usedToday = await assetsMadeToday(env, accountId, now);
+  if (accountId === env.MXB_OWNER_ACCOUNT_ID) return { usedToday, perDay: null, remaining: null };
+  const perDay = assetsPerDay(env);
+  return { usedToday, perDay, remaining: Math.max(0, perDay - usedToday) };
 }
 
 /** A creator API key in the Authorization header, else null. */
