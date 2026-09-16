@@ -28,7 +28,8 @@ consequences fall out of that, and they're baked into the schema:
 | POST | `/v1/enroll` | invite code | Trade an invite for an account and a bearer token |
 | GET | `/v1/servers` | — | Server registry. Public: it is the app's join picker, and the people who most need it are the ones with no account yet. `agent_url` is not returned. |
 | POST | `/v1/servers/:id/hello` | agent token | A provisioned box announcing that it is up. Its address is taken from `cf-connecting-ip`, never from the body, so a box cannot register somebody else's. |
-| GET | `/v1/me` | bearer | Account, and a per-bike summary of what is stored for it. Also where a banned account is told so — see below. |
+| GET | `/v1/me` | bearer | Account, and a per-bike summary of what is stored for it. Looks ordinary to a banned install on purpose — see below. |
+| GET | `/v1/app/gate` | bearer | The desktop apps' startup gate. `{status:"ok"}` to run, `{status:"unsupported", message}` to refuse — a banned install is told a mundane untruth here, never that it is banned. |
 | PUT | `/v1/me/guid` | bearer | Claim a GUID. First-come, and refused if that GUID is banned. |
 | PUT | `/v1/loadout` | bearer | Replace **one bike's** loadout. Kept for clients older than per-bike storage. |
 | PUT | `/v1/loadouts` | bearer | Replace the whole look, every bike at once. Returns `missing` — the blobs still to upload. |
@@ -301,21 +302,41 @@ all resolve back to the ban. `guid_claims` exists for exactly the reason `steam_
 | `web.ts` | mxbsecure.com — the signed-in identity, the creator signup, and the locker download. |
 
 A closed list (`bannedMayUse`) names the few endpoints that stay open to a banned account, and
-each is there because refusing it would work against the ban:
+each is there because refusing it outright would work against the ban:
 
-- `GET /v1/me` **reports** the ban and its reason, so an app can say what is going on. Everything
-  else answering 403 with nothing to explain it reads as an outage — and an outage gets a support
-  thread and a second account, not an appeal.
+- `GET /v1/app/gate` is the one that stops the apps opening. A banned install reaches it and is
+  told `{status:"unsupported"}` with a plausible, false reason ("this copy couldn't be verified,
+  reinstall"); the app then refuses to run. It is disguised on purpose — see **The app is lied
+  to** below.
+- `GET /v1/me` still answers, and still looks ordinary. The app is never told here that it is
+  banned; the gate above turns it away instead, so `/v1/me` staying unremarkable is part of the
+  disguise.
 - `PUT /v1/diagnostics` still observes, and still answers `{ ok: true }` whatever it made of the
   report. Refusing it would blind us to the install we most want to watch.
 - `POST /v1/steam/login` still links an identity, which is the plumbing an appeal is decided on.
 - `POST /v1/assets/status` still answers, with `revoked: true` for every secured file on the
   machine — this is what makes the app delete the keys it already holds, and a blanket 403 there
-  would read as "we don't know", which keeps them. `.mxbkey` opens offline forever, so without
-  this a ban would leave the banned install playing everything it had already unlocked.
-- `POST /v1/keys/grant` and `POST /v1/entitlements/check` answer with a *reason* rather than a
-  bare refusal, and write the denial to `entitlement_grants` — a banned install walking the
-  catalogue is only visible if the "no"s are recorded.
+  would read as "we don't know", which keeps them. It carries no ban flag: the per-asset
+  `revoked` reads exactly like the creator having removed the buyer, which is the disguise. And
+  `.mxbkey` opens offline forever, so without this a ban would leave the banned install playing
+  everything it had already unlocked.
+- `POST /v1/keys/grant` and `POST /v1/entitlements/check` still answer, and still write the
+  denial to `entitlement_grants` as `banned` — a banned install walking the catalogue is only
+  visible if the "no"s are recorded. What the app *sees* is the disguised failure (the grant) or
+  a plain `"unavailable"` (the check), never the word.
+
+#### The app is lied to; the website is not
+
+The website (`/v1/web/me`, the lock pages, the dashboard) tells a banned creator plainly that
+they are banned and why, because mxbsecure.com is where an appeal starts. The desktop apps are
+told the opposite — a verification/integrity failure — and it is deliberate. The app is not a
+place to argue; it is a place a content thief is trying to keep using. "Banned" only tells them
+to make another account, the honest message is the exact next-step coaching they would act on,
+and the reinstall the disguise names cannot help them, because a ban follows the GUID, the Steam
+login and the install, never the files. We always know it is a ban — the ledger, the admin page
+and the internal `reason` all say so. The machine in front of the person does not. The app side
+of the gate — the marker that keeps a blocked install blocked even offline — lives in
+`mxb-app`'s `gate.rs`.
 
 What a ban cannot reach is what carries no identity: the anonymous usage counters, the
 master-server probe, the shared server book, a live share code, and track generation (capped by

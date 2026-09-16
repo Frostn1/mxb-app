@@ -26,7 +26,7 @@ import {
   terminateInstance,
 } from "./aws";
 import { adminAssets, isAssetsPath } from "./assets";
-import { BANNED, banFor, rememberGuid } from "./bans";
+import { APP_BLOCK_MESSAGE, appGate, banFor, rememberGuid } from "./bans";
 import { isWebPath, landingSite, webRoutes } from "./web";
 import { steamResult, redirectPage } from "./page";
 import { rememberLink, steamIdFor } from "./steamlink";
@@ -311,7 +311,18 @@ async function route(request: Request, env: Env): Promise<Response> {
       steamId: account.steam_id,
       guid: account.guid,
     });
-    if (ban) return json(403, { error: BANNED, reason: ban.reason });
+    // Disguised, because this is the app path: a bearer token is a desktop app, never the
+    // website. It is handed the same mundane verification failure the startup gate returns,
+    // so a pirate poking at any endpoint learns nothing the gate wouldn't already have hidden.
+    // The website keeps the honest `BANNED` on its own surfaces (`web.ts`, `assets.ts`).
+    if (ban) return json(403, { error: APP_BLOCK_MESSAGE });
+  }
+
+  // The desktop apps' startup gate. In `bannedMayUse`, so a banned install can reach it and be
+  // told to stand down — with a reason that is not the truth. This is what makes MXB App,
+  // Studio, Coach and FrostMod refuse to run at all, not only lose their online features.
+  if (method === "GET" && path === "/v1/app/gate") {
+    return json(200, await appGate(env, { accountId: account.id, steamId: account.steam_id, guid: account.guid }));
   }
 
   // Open to every account, self-serve ones included: who you are, where you are, and the
@@ -692,7 +703,7 @@ async function assetStatus(request: Request, account: Account, env: Env): Promis
   // machine is holding, and the app deletes each one on its next pass.
   const banned = !!(await banFor(env, { accountId: account.id, steamId, guid: account.guid }));
   if (assetIds.length === 0) {
-    return json(200, { steamId, assets: [], ...(banned ? { banned: true } : {}) });
+    return json(200, { steamId, assets: [] });
   }
 
   const placeholders = assetIds.map(() => "?").join(",");
@@ -718,7 +729,6 @@ async function assetStatus(request: Request, account: Account, env: Env): Promis
 
   return json(200, {
     steamId,
-    ...(banned ? { banned: true } : {}),
     assets: assetIds.map((id) => {
       const a = byId.get(id);
       return {
@@ -869,7 +879,9 @@ async function checkEntitlement(request: Request, account: Account, env: Env): P
     parsed.blobSha256,
     env,
   );
-  return json(allowed ? 200 : 403, { allowed, reason });
+  // Same disguise as the grant: the app never sees the word. A ban reads to it as the asset
+  // being unavailable, which is what a withdrawn or removed one reads as too.
+  return json(allowed ? 200 : 403, { allowed, reason: reason === "banned" ? "unavailable" : reason });
 }
 
 /**
@@ -891,9 +903,9 @@ async function grantKey(request: Request, account: Account, env: Env): Promise<R
   const { assetId, session, blobSha256 } = parsed;
 
   const { allowed, reason } = await decideEntitlement(account, assetId, session, blobSha256, env);
-  // The ledger's word for it is one word; what the app puts in front of a person should read
-  // as a sentence. Every other reason already does.
-  if (!allowed) return json(403, { error: reason === "banned" ? BANNED : reason });
+  // The ledger keeps the honest `banned`; the app is handed the same disguised failure as
+  // everywhere else, so an unlock that a ban refused reads as a broken install, not a verdict.
+  if (!allowed) return json(403, { error: reason === "banned" ? APP_BLOCK_MESSAGE : reason });
 
   const asset = await env.DB.prepare(
     "SELECT wrapped_key, key_id, blob_sha256 FROM assets WHERE id = ?",
@@ -986,6 +998,7 @@ function b64(bytes: Uint8Array): string {
  * the reasoning for each entry is at the gate itself.
  */
 function bannedMayUse(method: string, path: string): boolean {
+  if (method === "GET" && path === "/v1/app/gate") return true;
   if (method === "GET" && path === "/v1/me") return true;
   if (method === "PUT" && path === "/v1/diagnostics") return true;
   if (method === "POST" && path === "/v1/steam/login") return true;
@@ -1016,11 +1029,9 @@ function invitedOnly(account: Account): Response | null {
  * the same thing the moment a publish half-fails, which is exactly when a player looks.
  */
 async function me(account: Account, env: Env): Promise<Response> {
-  // The one answer a banned account still gets, and the reason it does: with everything else
-  // refused, this is where an app learns that the refusals are a ban and not a broken server,
-  // and gets the words to put in front of the person. See the gate in `route`.
-  const ban = await banFor(env, { accountId: account.id, steamId: account.steam_id, guid: account.guid });
-
+  // No ban is surfaced here on purpose. This is the app's own identity call, and the app is
+  // never told it is banned — the startup gate (`/v1/app/gate`) turns it away with a mundane
+  // reason instead. Leaving `/v1/me` looking ordinary is part of that disguise.
   const paints = await env.DB.prepare(
     "SELECT bike_id, slot, file_name, sha256, size FROM loadout_paints WHERE account_id = ?" +
       " ORDER BY bike_id, slot",
@@ -1051,7 +1062,6 @@ async function me(account: Account, env: Env): Promise<Response> {
     riderName: account.rider_name,
     steamId: account.steam_id,
     guid: account.guid,
-    ...(ban ? { banned: true, banReason: ban.reason } : {}),
     bikes: [...bikes.values()],
     totalPaints: paints.results.length,
     paints: paints.results.map((p) => ({
@@ -1116,8 +1126,8 @@ async function putGuid(request: Request, account: Account, env: Env): Promise<Re
   // A banned GUID nobody has claimed yet is refused here rather than at the gate above, which
   // only knows the identities already tied to the caller: this is the claim that would make
   // the tie, and letting it through would put a banned install's identity on a fresh account
-  // for one request before anything noticed.
-  if (await banFor(env, { guid })) return json(403, { error: BANNED });
+  // for one request before anything noticed. Disguised, like every other app-facing refusal.
+  if (await banFor(env, { guid })) return json(403, { error: APP_BLOCK_MESSAGE });
 
   try {
     await env.DB.prepare("UPDATE accounts SET guid = ? WHERE id = ?")

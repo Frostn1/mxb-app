@@ -22,6 +22,7 @@ mod frostmod;
 mod frostmod_manage;
 pub(crate) use mxb_core::game;
 mod fileinfo;
+mod gate;
 mod gameproc;
 mod hub_clearance;
 mod hub_session;
@@ -6458,6 +6459,16 @@ fn main() {
         .manage(voice::session::Session::default())
         .setup(|app| {
             log::info!("MXB App {} starting", env!("CARGO_PKG_VERSION"));
+
+            // Before anything else, and before a window exists to flash: if a previous run was
+            // told this installation is blocked, refuse now — instantly, and without needing the
+            // network. `enforce_marker` shows the message and ends the process. A clean install
+            // has no marker and sails past. See `gate.rs` for why the reason it gives is not the
+            // real one.
+            gate::enforce_marker(app.handle());
+            // And ask the server afresh, off the startup path: this is what blocks a newly-banned
+            // install on its first run, and what lets a lifted ban back in by clearing the marker.
+            tauri::async_runtime::spawn(gate::check(app.handle().clone()));
 
             // The main window is `"create": false` in tauri.conf.json so it is built here
             // rather than by Tauri's own startup loop, which is the only way to decide the

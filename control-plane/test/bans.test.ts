@@ -7,7 +7,7 @@
  */
 
 import { describe, expect, it, vi } from "vitest";
-import { addBan, banFor, liftBan, listBans, normalizeGuid, rememberGuid } from "../src/bans";
+import { APP_BLOCK_MESSAGE, addBan, appGate, banFor, liftBan, listBans, normalizeGuid, rememberGuid } from "../src/bans";
 import { hashToken } from "../src/auth";
 import { mintKeys } from "../src/plugins";
 import { sealToken, SESSION_COOKIE } from "../src/websession";
@@ -198,7 +198,7 @@ describe("which identities a ban resolves through", () => {
     // claim log still ties the account to the GUID it was banned on.
     const moved = await claim("FF0110000122222222");
     expect(moved.status).toBe(403);
-    expect(await moved.json()).toMatchObject({ error: "this install is banned from mxbsecure" });
+    expect(await moved.json()).toMatchObject({ error: APP_BLOCK_MESSAGE });
     await env.DB.prepare("UPDATE accounts SET guid = 'FF0110000122222222' WHERE id = 'acc_banned'").run();
     expect(await banFor(env, { accountId: "acc_banned" })).not.toBeNull();
   });
@@ -256,7 +256,8 @@ describe("what a ban actually refuses", () => {
     await ban(env, GUID);
     const refused = await grant();
     expect(refused.status).toBe(403);
-    expect(await refused.json()).toEqual({ error: "this install is banned from mxbsecure" });
+    // Disguised: the app is never told it is a ban.
+    expect(await refused.json()).toEqual({ error: APP_BLOCK_MESSAGE });
 
     // The ledger's own word, so a banned install sweeping the catalogue is visible in it.
     const log = await env.DB.prepare(
@@ -284,7 +285,7 @@ describe("what a ban actually refuses", () => {
       req("POST", "/v1/entitlements/check", { key: "buyer-token", body: { assetId, sessionId: "s2" }, origin: null }),
     );
     expect(check.status).toBe(403);
-    expect(await check.json()).toEqual({ allowed: false, reason: "banned" });
+    expect(await check.json()).toEqual({ allowed: false, reason: "unavailable" });
 
     // Lifting it puts the buyer back where they were: the entitlement was never touched.
     await liftBan(env, GUID, BOSS);
@@ -336,7 +337,7 @@ describe("what a ban actually refuses", () => {
     await ban(env, GUID);
     for (const res of [await mine(), await bundle()]) {
       expect(res.status).toBe(403);
-      expect(await res.json()).toMatchObject({ error: "this install is banned from mxbsecure" });
+      expect(await res.json()).toMatchObject({ error: APP_BLOCK_MESSAGE });
     }
     // The license row is untouched, so lifting the ban restores exactly what they had.
     expect(
@@ -383,7 +384,8 @@ describe("what a ban actually refuses", () => {
     for (const [method, path, body] of routes) {
       const res = await as(method, path, body);
       expect(res.status, `${method} ${path}`).toBe(403);
-      expect(await res.json()).toMatchObject({ error: "this install is banned from mxbsecure" });
+      // Every app-facing refusal wears the same disguise — never the word "ban".
+      expect(await res.json()).toMatchObject({ error: APP_BLOCK_MESSAGE });
     }
 
     // `GET /v1/roster` is not in the list: the public server book answers that path for
@@ -405,24 +407,34 @@ describe("what a ban actually refuses", () => {
     const as = (method: string, path: string, body?: unknown) =>
       call(env, req(method, path, { key: "banned-token", body, origin: null }));
 
-    // Who am I: the answer that tells an app the refusals are a ban, with the words for it.
+    // Who am I: still answers, and still looks ordinary — the app is never told here that it
+    // is banned. `/v1/app/gate` is what turns it away, with a reason that is not the truth.
     const me = await as("GET", "/v1/me");
     expect(me.status).toBe(200);
-    expect(await me.json()).toMatchObject({
-      steamId: BUYER,
-      banned: true,
-      banReason: "unlocked and shared protected content",
-    });
+    const body = (await me.json()) as Record<string, unknown>;
+    expect(body).toMatchObject({ steamId: BUYER });
+    expect(body.banned).toBeUndefined();
+    expect(body.banReason).toBeUndefined();
+
+    // The gate: a banned install is told to stand down, mundanely, with no mention of a ban.
+    const gate = await as("GET", "/v1/app/gate");
+    expect(gate.status).toBe(200);
+    const verdict = (await gate.json()) as Record<string, unknown>;
+    expect(verdict.status).toBe("unsupported");
+    expect(String(verdict.message)).not.toMatch(/ban/i);
+    expect(verdict.message).toBe(APP_BLOCK_MESSAGE);
 
     // Diagnostics still observes, and still says nothing about what it made of the report.
     const report = await as("PUT", "/v1/diagnostics", { available: false, appVersion: "0.15.1", guid: GUID });
     expect(report.status).toBe(200);
     expect(await report.json()).toEqual({ ok: true });
 
-    // And the status poll still answers, because a 403 there would keep the keys on disk.
+    // And the status poll still answers, because a 403 there would keep the keys on disk. It
+    // carries no ban flag — the per-asset `revoked` does the work, and reads as an ordinary
+    // removal.
     const status = await as("POST", "/v1/assets/status", { assetIds: [] });
     expect(status.status).toBe(200);
-    expect(await status.json()).toMatchObject({ banned: true });
+    expect(((await status.json()) as Record<string, unknown>).banned).toBeUndefined();
   });
 
   it("closes the site: no creator signup, no locker, and /me says so", async () => {
@@ -472,6 +484,42 @@ describe("what a ban actually refuses", () => {
     expect(me.banned).toBeUndefined();
     expect((await call(env, req("GET", "/v1/web/lockweb/mxb_lockweb.js", { cookie: who }))).status).toBe(200);
     expect((await call(env, req("GET", "/admin/assets", { cookie: who }))).status).toBe(200);
+  });
+});
+
+describe("the desktop apps' startup gate", () => {
+  it("tells a clean install ok, and a banned one a mundane untruth", async () => {
+    const env = await deployment();
+    await account(env, "acc_clean", "clean-token", CLEAN, OTHER_GUID);
+    await account(env, "acc_banned", "banned-token", BUYER, GUID);
+
+    expect(await appGate(env, { accountId: "acc_clean" })).toEqual({ status: "ok" });
+
+    await ban(env, GUID);
+    const verdict = await appGate(env, { accountId: "acc_banned" });
+    expect(verdict.status).toBe("unsupported");
+    // The whole point: we know it is a ban, the message does not say so.
+    expect("message" in verdict && verdict.message).toBe(APP_BLOCK_MESSAGE);
+    expect(JSON.stringify(verdict)).not.toMatch(/ban/i);
+  });
+
+  it("is reachable through the router by a banned install, and the clean install runs", async () => {
+    const env = await deployment();
+    await account(env, "acc_banned", "banned-token", BUYER, GUID);
+    await account(env, "acc_clean", "clean-token", CLEAN, OTHER_GUID);
+    const gate = (token: string) => call(env, req("GET", "/v1/app/gate", { key: token, origin: null }));
+
+    expect(await (await gate("clean-token")).json()).toEqual({ status: "ok" });
+    expect(await (await gate("banned-token")).json()).toEqual({ status: "ok" });
+
+    await ban(env, GUID);
+    // The banned install still reaches the gate (it is on the allow-list) — that is how it is
+    // told to stop, rather than getting a bare 403 it would read as an outage.
+    const blocked = await gate("banned-token");
+    expect(blocked.status).toBe(200);
+    expect(await blocked.json()).toEqual({ status: "unsupported", message: APP_BLOCK_MESSAGE });
+    // And a clean install is unaffected.
+    expect(await (await gate("clean-token")).json()).toEqual({ status: "ok" });
   });
 });
 

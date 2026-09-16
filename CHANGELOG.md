@@ -4,11 +4,14 @@
 
 ### Changed
 - Riders banned for unlocking protected content and sharing it are refused across everything
-  mxbsecure runs, not only the locking: paint sync, voice, presence, the server queue, the server
-  registry, the paid plugins and every key grant. A ban follows the MX Bikes install rather than
-  the account, so a second account, a new GUID or another Steam login on the same PC is refused
-  with it, and protected files already unlocked there stop opening — the app deletes those keys
-  on its next pass. Nobody else is affected in any way, and a ban can be lifted.
+  mxbsecure runs, not only the locking: the app itself will not open, and paint sync, voice,
+  presence, the server queue, the server registry, the paid plugins and every key grant are all
+  refused. The app checks at startup and, for a blocked install, shows a plain "this copy
+  couldn't be verified" and closes — a blocked install stays blocked even offline. A ban follows
+  the MX Bikes install rather than the account, so a second account, a new GUID or another Steam
+  login on the same PC is refused with it, and protected files already unlocked there stop
+  opening — the app deletes those keys on its next pass. Nobody else is affected in any way, and
+  a ban can be lifted.
 
 ### Fixed
 - The overlay shortcut always belongs to someone. With no MX Bikes folder set, MXB App told

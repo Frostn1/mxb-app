@@ -81,13 +81,33 @@ export interface Who {
 }
 
 /**
- * The message a banned caller is given, wherever it is refused.
+ * The honest refusal, used on the **website** only.
  *
- * "mxbsecure" rather than a list of app names because it is the company, and because a refusal
- * has to be the same sentence in the app, the Studio, Coach and the site — a person hitting it
- * in two places should be able to tell it is one thing.
+ * mxbsecure.com is where a creator signs in, and where an appeal starts, so there the door is
+ * named: a person who has to argue a ban should be told it is one. The site's own card
+ * (`/v1/web/me` → `banned`/`banReason`) is the fuller version; this is the one-line 403.
  */
 export const BANNED = "this install is banned from mxbsecure";
+
+/**
+ * What the **app** is told instead — a plausible, mundane failure, never the word "ban".
+ *
+ * The app is not a place to argue; it is a place a pirate is trying to keep using. Telling it
+ * "banned" only says "make another account", and the honest message we show a creator is
+ * exactly the coaching a content thief would act on. So the desktop apps are handed a
+ * verification/integrity failure: it reads as an ordinary broken install, and the fix it names
+ * — reinstall — cannot work, because a ban follows the GUID, the Steam login and the install,
+ * not the files on disk. We know it is a ban (the ledger, the admin page and the internal
+ * `reason` all say so); the machine in front of the person does not.
+ *
+ * One sentence, identical across MXB App, Studio, Coach and FrostMod, so it never reads as a
+ * bug specific to one of them.
+ */
+export const APP_BLOCK_MESSAGE =
+  "This copy couldn't be verified. It may be out of date or damaged — reinstall the latest version from mxbsecure.com.";
+
+/** The gate verdict the desktop apps read: `ok` runs, `unsupported` refuses (a benign word). */
+export type AppGate = { status: "ok" } | { status: "unsupported"; message: string };
 
 /** How a GUID is written down: trimmed and upper-cased, or null if it isn't one. */
 export function normalizeGuid(raw: unknown): string | null {
@@ -199,6 +219,21 @@ export async function banFor(env: Env, who: Who): Promise<Ban | null> {
 /** Whether a ban applies, for the callers that only need the yes or no. */
 export async function isBanned(env: Env, who: Who): Promise<boolean> {
   return (await banFor(env, who)) !== null;
+}
+
+/**
+ * The verdict the desktop apps' startup gate reads — disguised on purpose.
+ *
+ * A banned install is told `unsupported` with the mundane message, never that it is banned; a
+ * clean one is told `ok`. This is the whole of what makes the app refuse to run for a banned
+ * rider without handing them the reason. The ban is still logged and still visible to us — see
+ * `APP_BLOCK_MESSAGE` for why the person is not.
+ */
+export async function appGate(env: Env, who: Who): Promise<AppGate> {
+  const ban = await banFor(env, who);
+  if (!ban) return { status: "ok" };
+  console.log(JSON.stringify({ msg: "app blocked", ban: ban.guid, reason: ban.reason }));
+  return { status: "unsupported", message: APP_BLOCK_MESSAGE };
 }
 
 /**
