@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased — MXB Coach
+## 2026-09-15 — MXB Coach v0.1.13-beta.13
 
 ### Added
 - Compare a lap with more than the session you're in. "Compare with" now offers your best ever
@@ -30,6 +30,9 @@
 - The session list and the laps in an open session keep up with the recorder while you ride, so
   a lap you have just finished shows up without leaving the page and coming back. Both pages
   have a Refresh button too.
+- Settings shows which recorder the game actually ran. It appears after you've started MX Bikes
+  once with the recorder installed.
+- Speak the cues and the in-game HUD say which recorder they need when yours is older than that.
 
 ### Changed
 - The lap review is split into tabs — Lap, Sections, Setup, In game and Track — so each one is a
@@ -50,15 +53,6 @@
 - Where two tips want one setting opposite ways — sand wants a tooth more on the rear, the rev
   limiter a tooth less — the coach says so and leaves that setting to you, rather than listing
   it as a change it will make. Saving a setup now names the settings it changed.
-
-## 2026-09-15 — MXB Coach
-
-### Added
-- Settings shows which recorder the game actually ran. It appears after you've started MX Bikes
-  once with the recorder installed.
-- Speak the cues and the in-game HUD say which recorder they need when yours is older than that.
-
-### Changed
 - One session per event. Go out, come in and go out again, and it's all one session with every
   lap you rode: your best lap and your ideal lap count all of them, and each lap says which
   stint it came from.
