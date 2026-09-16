@@ -1823,7 +1823,7 @@ struct AssetStatus {
     owned: bool,
     available: bool,
     /// This account may no longer hold a key for this asset — the buyer was removed, or the
-    /// asset was withdrawn, taken down, or removed from the site by its creator.
+    /// asset was withdrawn, taken down, or removed from the site with its keys taken back.
     /// `#[serde(default)]` on purpose: a control plane too old to send the field reads as
     /// `false`, and `false` keeps the key. The answer that deletes a file is never the one we
     /// infer from a missing field.

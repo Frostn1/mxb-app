@@ -587,28 +587,56 @@ describe("removal", () => {
       ((await (await call(env, req("POST", "/v1/assets/status", { key: "buyer-token", body: { assetIds: [assetId] } }))).json()) as {
         assets: { owned: boolean; available: boolean; revoked: boolean; registered: boolean }[];
       }).assets[0];
-    return { env, assetId, asCreator, ask, status };
+    const listed = async () =>
+      ((await (await asCreator("GET", "/admin/assets")).json()) as {
+        assets: { assetId: string; buyers: number; deletedAt: number | null; keysRevokedAt: number | null }[];
+      }).assets;
+    return { env, assetId, asCreator, ask, status, listed };
   }
 
-  it("takes the asset off the list, destroys its key and revokes every buyer", async () => {
-    const { env, assetId, asCreator, ask, status } = await sold();
+  it("keeps the asset on the list, read-only, and leaves the buyers' keys alone", async () => {
+    const { env, assetId, asCreator, ask, status, listed } = await sold();
     expect((await ask()).status).toBe(200);
 
-    const gone = await asCreator("DELETE", `/admin/assets/${assetId}`);
+    const gone = await asCreator("DELETE", `/admin/assets/${assetId}?keys=keep`);
     expect(gone.status).toBe(200);
-    expect((await gone.json()) as { assetId: string; deletedAt: number }).toMatchObject({ assetId, deletedAt: expect.any(Number) });
+    expect(await gone.json()).toMatchObject({ assetId, deletedAt: expect.any(Number), keysRevokedAt: null });
 
-    // Off the creator's list, and every other route on it answers like it never existed.
-    expect(((await (await asCreator("GET", "/admin/assets")).json()) as { assets: unknown[] }).assets).toEqual([]);
+    // Still there, marked removed, with its buyer still counted.
+    expect(await listed()).toMatchObject([{ assetId, buyers: 1, deletedAt: expect.any(Number), keysRevokedAt: null }]);
+    // Nothing about it changes again, removal included.
     for (const [method, path, body] of [
-      ["GET", `/admin/assets/${assetId}/grants`, undefined],
-      ["GET", `/admin/assets/${assetId}/usage`, undefined],
       ["POST", `/admin/assets/${assetId}/grants`, { add: [OTHER] }],
-      ["PATCH", `/admin/assets/${assetId}`, { withdrawn: false }],
-      ["DELETE", `/admin/assets/${assetId}`, undefined],
+      ["PATCH", `/admin/assets/${assetId}`, { withdrawn: true }],
     ] as [string, string, unknown][]) {
-      expect((await asCreator(method, path, body)).status, `${method} ${path}`).toBe(404);
+      const res = await asCreator(method, path, body);
+      expect(res.status, `${method} ${path}`).toBe(409);
+      expect(await res.json()).toEqual({ error: "that asset has been removed" });
     }
+    const again = await asCreator("DELETE", `/admin/assets/${assetId}?keys=revoke`);
+    expect(again.status).toBe(409);
+    expect(await again.json()).toEqual({ error: "that asset has already been removed" });
+    // But its buyers and its usage log still read.
+    expect((await asCreator("GET", `/admin/assets/${assetId}/grants`)).status).toBe(200);
+    expect((await asCreator("GET", `/admin/assets/${assetId}/usage`)).status).toBe(200);
+
+    // And the whole point: the buyer is untouched, on the PC they have and on the next one.
+    expect((await ask()).status).toBe(200);
+    expect(await status()).toMatchObject({ owned: true, available: true, revoked: false });
+
+    // Which is why a takedown still has to reach it: it is removed, and it is still granting.
+    expect((await call(env, req("PATCH", `/admin/assets/${assetId}`, { body: { takenDown: true } }))).status).toBe(200);
+    expect(await (await ask()).json()).toEqual({ error: "taken down" });
+  });
+
+  it("with keys=revoke destroys the key, revokes every buyer and takes the keys back", async () => {
+    const { env, assetId, asCreator, ask, status, listed } = await sold();
+    expect((await ask()).status).toBe(200);
+
+    const gone = await asCreator("DELETE", `/admin/assets/${assetId}?keys=revoke`);
+    expect(gone.status).toBe(200);
+    expect(await gone.json()).toMatchObject({ assetId, deletedAt: expect.any(Number), keysRevokedAt: expect.any(Number) });
+    expect(await listed()).toMatchObject([{ assetId, buyers: 0, keysRevokedAt: expect.any(Number) }]);
 
     // The file never opens again: no key is left to release, and the buyer is told to drop theirs.
     expect(await (await ask()).json()).toEqual({ error: "removed" });
@@ -628,24 +656,36 @@ describe("removal", () => {
     ]);
   });
 
+  it("asks which it is, and won't guess", async () => {
+    const { assetId, asCreator, listed } = await sold();
+    for (const query of ["", "?keys=", "?keys=yes", "?keys=REVOKE"]) {
+      const res = await asCreator("DELETE", `/admin/assets/${assetId}${query}`);
+      expect(res.status, query).toBe(400);
+      expect(await res.json()).toEqual({ error: "keys must be revoke or keep" });
+    }
+    expect(await listed()).toMatchObject([{ deletedAt: null }]);
+  });
+
   it("leaves another creator's asset, and an asset we've taken down, alone", async () => {
-    const { env, assetId, asCreator } = await sold();
+    const { env, assetId, asCreator, listed } = await sold();
     // Someone else signed in on the site can't remove it: it isn't theirs to see.
     const stranger = `${SESSION_COOKIE}=${await sealToken({ t: "session", steamId: OTHER, name: "S", exp: Date.now() + 60_000 }, "session-secret")}`;
     await addAccount(env.DB, "acc_other", "Other", OTHER);
     await env.DB.prepare("UPDATE accounts SET creator_at = 1 WHERE id = 'acc_other'").run();
-    expect((await call(env, req("DELETE", `/admin/assets/${assetId}`, { key: null, origin: SITE, headers: { Cookie: stranger } }))).status).toBe(404);
+    expect(
+      (await call(env, req("DELETE", `/admin/assets/${assetId}?keys=keep`, { key: null, origin: SITE, headers: { Cookie: stranger } }))).status,
+    ).toBe(404);
 
     // Taken down by us, and a creator can't wipe it — that would take the ledger with it.
     expect((await call(env, req("PATCH", `/admin/assets/${assetId}`, { body: { takenDown: true } }))).status).toBe(200);
-    const refused = await asCreator("DELETE", `/admin/assets/${assetId}`);
+    const refused = await asCreator("DELETE", `/admin/assets/${assetId}?keys=revoke`);
     expect(refused.status).toBe(403);
     expect(await refused.json()).toEqual({ error: "that asset has been taken down; only mxbsecure can remove it" });
-    expect(((await (await asCreator("GET", "/admin/assets")).json()) as { assets: unknown[] }).assets).toHaveLength(1);
+    expect(await listed()).toMatchObject([{ deletedAt: null }]);
 
     // We can.
-    expect((await call(env, req("DELETE", `/admin/assets/${assetId}`))).status).toBe(200);
-    expect(((await (await asCreator("GET", "/admin/assets")).json()) as { assets: unknown[] }).assets).toEqual([]);
+    expect((await call(env, req("DELETE", `/admin/assets/${assetId}?keys=revoke`))).status).toBe(200);
+    expect(await listed()).toMatchObject([{ deletedAt: expect.any(Number) }]);
   });
 
   it("refuses a removal that didn't come from the site", async () => {
@@ -653,7 +693,7 @@ describe("removal", () => {
     for (const origin of [undefined, "https://evil.mxbsecure.com"]) {
       const res = await call(
         env,
-        req("DELETE", `/admin/assets/${assetId}`, {
+        req("DELETE", `/admin/assets/${assetId}?keys=revoke`, {
           key: null,
           ...(origin ? { origin } : {}),
           headers: { Cookie: `${SESSION_COOKIE}=${await sealToken({ t: "session", steamId: CREATOR, name: "C", exp: Date.now() + 60_000 }, "session-secret")}` },
@@ -662,7 +702,7 @@ describe("removal", () => {
       expect(res.status).toBe(403);
       expect(await res.json()).toEqual({ error: "that request didn't come from mxbsecure.com" });
     }
-    expect((await asCreator("DELETE", `/admin/assets/${assetId}`)).status).toBe(200);
+    expect((await asCreator("DELETE", `/admin/assets/${assetId}?keys=keep`)).status).toBe(200);
   });
 });
 
