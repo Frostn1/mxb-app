@@ -197,9 +197,12 @@ export default function Track3D({
   // built from the laps is drawn meanwhile and looks finished, which is exactly how a rider
   // ends up believing the blurred grid is their circuit.
   const waiting = ground != null && !scene.terrain;
-  // Not the track at all, and it isn't coming. This is a banner, not a footnote, for the same
-  // reason: it is the difference between "your track" and "a guess from your laps".
+  // Not the track at all, and it isn't coming: it isn't in the rider's mods, it's locked, or
+  // its terrain wouldn't read. Anything that reads is drawn, so this is now rare.
   const guessing = !waiting && !real;
+  // Drawn, but the lines over it may sit a little off. A note, not a banner — the track is
+  // there and that is what the rider came to see.
+  const roughFit = real && ground?.roughFit === true;
   const note = real && scene.painting ? t("review.loadingTrack") : "";
 
   return (
@@ -256,6 +259,12 @@ export default function Track3D({
         <Key colour={YOU}>{t("review.legendYou")}</Key>
         {!review.solo && <Key colour={REF}>{t("review.legendRef")}</Key>}
         <span>{t("review.tipsOnTrack")}</span>
+        {roughFit && (
+          <span className="text-faint">
+            {t("review.linesRough")}
+            {why ? ` ${why}.` : ""}
+          </span>
+        )}
         {note && <span className="text-faint">{note}</span>}
       </div>
     </div>

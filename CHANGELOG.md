@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased — MXB Coach
+
+### Added
+- The lap review says whether you rode the high line or the low one through a corner — up on
+  the bank or down in the rut — and which one the fast lap took.
+- And which line you took over a jump. Tips about the line only ever worked on corners, so the
+  one place where where you take off decides where you land said nothing at all.
+
+### Changed
+- The 3D view shows your track whenever the track can be read, the same as MXB App does. It
+  used to hide the track and draw the ground built from your laps instead whenever your laps
+  didn't sit steadily enough above its terrain — which is most rutted tracks. The check now
+  only decides how high to hang your lines over the ground, and says so if they might sit a
+  little off.
+
 ## 2026-09-16 — Code, testing, ideas
 
 ### Changed
