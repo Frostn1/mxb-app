@@ -373,7 +373,7 @@ const SOURCES: &[Source] = &[
         protocol: Protocol::Wcs201,
         endpoint: "https://environment.data.gov.uk/spatialdata/lidar-composite-digital-terrain-model-dtm-1m/wcs",
         licence: "Open Government Licence v3.0 — free to use, attribution required",
-        attribution: "Contains public sector information licensed under the Open Government Licence v3.0. \u{a9} Environment Agency copyright and/or database right.",
+        attribution: "Contains public sector information licensed under the Open Government Licence v3.0. \u{a9} Environment Agency copyright and/or database right 2022. All rights reserved.",
         terms_url: "https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/",
     },
     Source {
@@ -427,6 +427,15 @@ const IMAGERY: &[Imagery] = &[
         layer: "",
         licence: "Public domain (work of the U.S. Government)",
         attribution: "",
+    },
+    Imagery {
+        id: "ign-ortho",
+        label: "IGN BD ORTHO — 20 cm colour ortho",
+        endpoint: "https://data.geopf.fr/wms-r/wms",
+        protocol: Protocol::WmsRaster,
+        layer: "HR.ORTHOIMAGERY.ORTHOPHOTOS",
+        licence: "Licence Ouverte / Open Licence Etalab 2.0",
+        attribution: "\u{a9} IGN — Licence Ouverte / Open Licence Etalab 2.0",
     },
     Imagery {
         id: "pdok-ortho",
@@ -1434,7 +1443,25 @@ async fn fetch_imagery(
 ) -> Result<ImageryNote, String> {
     // Pixels: enough that a rider can see a tyre line, capped so the request stays quick.
     let px = ((half * 2.0 / 0.5).round() as u32).clamp(256, 4096);
-    let (url, img) = if epsg >= 26900 && epsg <= 26960 {
+    let (url, img) = if epsg == 2154 {
+        // France publishes 20 cm ortho from the same service as its elevation, on the same
+        // grid, so one bbox serves both. Its own limit is 5010 px a side, and asking for
+        // finer than 20 cm only blurs, so the request is clamped on both counts.
+        let x0 = grid.origin_e - grid.cell / 2.0;
+        let y1 = grid.origin_n + grid.cell / 2.0;
+        let x1 = x0 + grid.width as f64 * grid.cell;
+        let y0 = y1 - grid.height as f64 * grid.cell;
+        let want = ((x1 - x0) / 0.2).round() as u32;
+        let px = want.clamp(256, 5000);
+        (
+            format!(
+                "{}?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap&LAYERS={}&STYLES=&CRS=EPSG:2154\
+                 &BBOX={x0},{y0},{x1},{y1}&WIDTH={px}&HEIGHT={px}&FORMAT=image%2Fjpeg",
+                IMAGERY[1].endpoint, IMAGERY[1].layer
+            ),
+            &IMAGERY[1],
+        )
+    } else if epsg >= 26900 && epsg <= 26960 {
         let x0 = grid.origin_e - grid.cell / 2.0;
         let y1 = grid.origin_n + grid.cell / 2.0;
         let x1 = x0 + grid.width as f64 * grid.cell;
@@ -1448,26 +1475,30 @@ async fn fetch_imagery(
             &IMAGERY[0],
         )
     } else if epsg == 28992 {
+        let _ = &IMAGERY[2];
         let (dlat, dlon) = degrees_per_m(lat);
         let (dlat, dlon) = (half * dlat, half * dlon);
         (
             format!(
                 "{}?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap&LAYERS={}&STYLES=&CRS=EPSG:4326\
                  &BBOX={},{},{},{}&WIDTH={px}&HEIGHT={px}&FORMAT=image/png",
-                IMAGERY[1].endpoint,
-                IMAGERY[1].layer,
+                IMAGERY[2].endpoint,
+                IMAGERY[2].layer,
                 lat - dlat,
                 lon - dlon,
                 lat + dlat,
                 lon + dlon
             ),
-            &IMAGERY[1],
+            &IMAGERY[2],
         )
     } else {
         return Err("no openly-licensed imagery covers this place".to_string());
     };
     let bytes = get_bytes(&url, "fetching aerial imagery").await?;
-    let rel = format!("{slug}.imagery.png");
+    // JPEG where the service sends JPEG; a name that lies about its contents breaks the
+    // webview's decoding rather than anything dramatic, but it still breaks it.
+    let jpeg = bytes.starts_with(&[0xFF, 0xD8]);
+    let rel = format!("{slug}.imagery.{}", if jpeg { "jpg" } else { "png" });
     std::fs::write(dir.join(&rel), &bytes).map_err(|e| format!("couldn't save the imagery: {e}"))?;
     Ok(ImageryNote {
         path: rel,
@@ -1612,9 +1643,12 @@ pub fn read_dem(path: &Path) -> Result<Grid, String> {
     let mut valid = 0usize;
     for v in z.iter_mut() {
         let x = *v as f64;
+        // Eleven services, five different sentinels, and three that ship no tag at all:
+        // -999999, -9999, -99999, and float max in both signs. So the tag is honoured when
+        // it is there and a sane elevation band is enforced regardless. Nothing on land is
+        // below -500 m or above 9000 m.
         let empty = !x.is_finite()
-            || x < -9000.0
-            || x > 30_000.0
+            || !(-500.0..=9000.0).contains(&x)
             || nodata.map(|n| (x - n).abs() <= n.abs() * 1e-6 + 1e-6).unwrap_or(false);
         if empty {
             *v = f32::NAN;
@@ -1812,8 +1846,16 @@ pub struct PlaceLayers {
 fn as_data_url(path: &Path) -> Result<String, String> {
     use base64::Engine;
     let bytes = std::fs::read(path).map_err(|e| format!("couldn't read {}: {e}", path.display()))?;
+    // Read the type off the bytes rather than the extension: France's ortho arrives as JPEG
+    // and everything else as PNG, and a data URL that lies about which simply fails to
+    // decode in the webview, silently.
+    let mime = if bytes.starts_with(&[0xFF, 0xD8]) {
+        "image/jpeg"
+    } else {
+        "image/png"
+    };
     Ok(format!(
-        "data:image/png;base64,{}",
+        "data:{mime};base64,{}",
         base64::engine::general_purpose::STANDARD.encode(bytes)
     ))
 }

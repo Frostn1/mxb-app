@@ -262,6 +262,35 @@ reason this step is a panel you click in rather than something the app attempts 
 Somebody who has ridden the place draws the right lap in two minutes. Somebody who has not
 can spend an hour and be confidently wrong.
 
+### A cheap check on whether your lap is right
+
+**A motocross lap is normally 2000 m to 2350 m.** The panel shows the length as you draw, so
+watch it.
+
+If you finish a lap and it comes out at 1200 m, the odds are strongly that you have missed
+part of the circuit rather than found an unusually short one. That is not a hypothetical: the
+two wrong Ironman traces measured 1175 m and 1606 m, and the one the rider drew measured
+2211 m. Both wrong ones were outside the window and neither of us noticed at the time.
+
+It is a weak check in the sense that a short lap is possible, and a strong one in the sense
+that it costs nothing and would have caught both mistakes.
+
+### If the person who knows the track is not the person at the computer
+
+This works, and it is how the Ironman lap in this repository was eventually got right.
+
+1. Save the aerial photo out of the place folder.
+2. Draw a grid over it and label the squares, A1 through H10 or similar.
+3. Send it to whoever knows the track and ask them to draw the lap on it, in any drawing app
+   or even on paper with a photograph of the result. Ask them for two more things while you
+   are there: **which way round it goes**, and **where the start is**, each as a pair of grid
+   squares, like "start straight runs G5 to F5". They will not think to tell you otherwise.
+4. Trace their line in the panel, using the grid squares to place it.
+
+Two pairs of squares is worth asking for rather than one, because the second is a free check:
+if both do not come out pointing the same way round your traced lap, your lap is wrong
+somewhere between them, and that tells you where to look.
+
 ### How to trace well
 
 - **Follow the middle of the worn lane, not the edge of the graded corridor.** The track
@@ -335,7 +364,7 @@ All four tested with a real download, not taken from documentation.
 
 | Where | Cells | Ground | Notes |
 |---|---|---|---|
-| **France** | **0.5 m** | bare earth | IGN LiDAR HD. Falls back to RGE ALTI at 1 m where LiDAR HD has not flown yet. |
+| **France** | **0.5 m** | bare earth | IGN LiDAR HD. Falls back to RGE ALTI at 1 m where LiDAR HD has not flown yet. Also the only country outside the US with openly licensed aerial photography in the tool, at **20 cm**. |
 | **Netherlands** | **0.5 m** | bare earth | AHN. Nationwide. |
 | **United States** | 1 m | bare earth | USGS 3DEP, but only where it has been flown. Check coverage first. |
 | **England** | 1 m | bare earth | Environment Agency National LiDAR. Scotland and Wales run separate programmes. |
@@ -354,6 +383,8 @@ came from.
 | Where | Cells | Service |
 |---|---|---|
 | Switzerland | **0.5 m** | swissALTI3D, at `data.geo.admin.ch` |
+| Scotland | **0.5 m** | Scottish Remote Sensing Portal, open storage at `srsp-open-data.s3.eu-west-2.amazonaws.com` |
+| Wales | 1 m | DataMapWales. Query `datamap.gov.wales/geoserver/ows` for the tiles covering your spot, then download. **Its catalogue records the flight date of every individual tile**, which nothing else does. |
 | Norway | 1 m | `hoydedata.no`, three services split by longitude |
 | Germany: North Rhine-Westphalia | 1 m | `wcs.nrw.de` |
 | Germany: Brandenburg | 1 m | `isk.geobasis-bb.de`, slow, allow 20 seconds |
@@ -361,11 +392,11 @@ came from.
 | Belgium: Flanders | 1 m | `geo.api.vlaanderen.be` |
 | Poland | 1 m | `mapy.geoportal.gov.pl`, slow, about 25 seconds |
 | Czechia | 2 m | `ags.cuzk.gov.cz` |
-| Spain | 5 m | `servicios.idee.es`, national only. Several regions publish better. |
+| Navarra (Spain) | 2 m | `idena.navarra.es` |
+| Spain, nationally | 5 m | `servicios.idee.es`. Catalonia and Andalucía publish finer data but only through download portals, not an open service, so it is a manual download. |
 
 Germany has no single national service, so it is one per state, and only three states are
-confirmed so far. Scotland, Wales and Wallonia all publish LiDAR but were not reachable at
-the addresses tried.
+confirmed so far. Wallonia publishes LiDAR but was not reachable at the addresses tried.
 
 ### Nowhere on this list
 
