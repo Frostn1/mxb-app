@@ -327,17 +327,50 @@ pub struct LapTrace {
     pub crs: String,
     #[serde(default = "yes")]
     pub closed: bool,
-    #[serde(default = "default_width", alias = "defaultWidthM")]
+    #[serde(default = "default_width")]
     pub default_width_m: f32,
     /// `[easting, northing]` or `[easting, northing, width]`. Mixed lengths allowed.
     pub points: Vec<Vec<f64>>,
     /// Which point the start line sits on. Optional; the trace rarely starts at the gate.
-    #[serde(default, alias = "startIndex")]
+    #[serde(default)]
     pub start_index: usize,
     #[serde(default)]
     pub dem: Option<TraceDem>,
     #[serde(default)]
     pub imagery: Option<Provenance>,
+    /// The trace is a first pass and the tracer says so.
+    ///
+    /// Read, kept, and carried into the built track's README, because a lap traced by eye off an
+    /// aerial photograph is a guess about where a racing line goes and the person who drew it is
+    /// the only one who knows how good a guess. Losing that on the way into the track would turn
+    /// a stated uncertainty into an implied fact.
+    #[serde(default)]
+    pub provisional: bool,
+    /// Whether anyone actually confirmed which way round the lap is ridden.
+    ///
+    /// Defaults to false — unverified until said otherwise — because the failure is silent: a
+    /// lap built backwards is a perfectly valid track that is simply wrong, and nothing
+    /// downstream can notice.
+    #[serde(default)]
+    pub direction_verified: bool,
+    /// What the tracer was and was not sure of, span by span.
+    #[serde(default)]
+    pub segments: Vec<TraceConfidence>,
+    #[serde(default)]
+    pub note: String,
+}
+
+/// How sure the tracer was about one stretch of the lap.
+#[derive(serde::Deserialize, Debug, Clone, Default)]
+pub struct TraceConfidence {
+    #[serde(default)]
+    pub from: usize,
+    #[serde(default)]
+    pub to: usize,
+    #[serde(default)]
+    pub confidence: String,
+    #[serde(default)]
+    pub what: String,
 }
 
 fn yes() -> bool {
@@ -384,6 +417,33 @@ pub struct Provenance {
     pub captured: String,
 }
 
+/// Fold every camelCase key in a trace's top level down to the snake_case one this reads.
+///
+/// The two halves of this pipeline agreed the format in snake_case and the writer, having been
+/// told either spelling was fine, emitted BOTH — so `defaultWidthM` and `default_width_m` sit
+/// side by side and serde's `alias` reads that as a duplicate field and refuses the file. Which
+/// is the right instinct for a wire format and the wrong one for a hand-written artefact that
+/// two independent programs are trying to agree on.
+///
+/// So the spellings are reconciled before serde sees them: camelCase is folded to snake_case,
+/// and where both are present the snake_case one wins, because that is the spelling the format
+/// was actually agreed in. Only the top level, and only keys that differ between the two
+/// conventions — the nested `dem` block is already read with `rename_all = "camelCase"`.
+fn normalise_keys(v: &mut serde_json::Value) {
+    const PAIRS: [(&str, &str); 4] = [
+        ("defaultWidthM", "default_width_m"),
+        ("startIndex", "start_index"),
+        ("directionVerified", "direction_verified"),
+        ("verticalDatum", "vertical_datum"),
+    ];
+    let Some(map) = v.as_object_mut() else { return };
+    for (camel, snake) in PAIRS {
+        if let Some(val) = map.remove(camel) {
+            map.entry(snake.to_string()).or_insert(val);
+        }
+    }
+}
+
 /// One traced point, in the tile's projected coordinates, with the width the rider gave it.
 #[derive(Clone, Copy, Debug)]
 pub struct TracePoint {
@@ -396,7 +456,10 @@ impl LapTrace {
     pub fn read(path: &Path) -> Result<Self> {
         let text = std::fs::read_to_string(path)
             .with_context(|| format!("couldn't read {}", path.display()))?;
-        let t: LapTrace = serde_json::from_str(&text)
+        let mut raw: serde_json::Value = serde_json::from_str(&text)
+            .with_context(|| format!("{} isn't JSON", path.display()))?;
+        normalise_keys(&mut raw);
+        let t: LapTrace = serde_json::from_value(raw)
             .with_context(|| format!("{} isn't a lap trace the Studio can read", path.display()))?;
         if t.points.len() < 4 {
             bail!(
@@ -690,6 +753,11 @@ pub struct Imported {
     /// Where the plot sits in the world, so a built track can say where it came from.
     pub origin_e: f64,
     pub origin_n: f64,
+    /// What the person who traced the lap said they were unsure of. Carried, not dropped.
+    pub provisional: bool,
+    pub direction_verified: bool,
+    pub confidence: Vec<TraceConfidence>,
+    pub note: String,
 }
 
 /// Bring a lidar tile and a traced lap in as a plot of real ground.
@@ -833,6 +901,10 @@ pub fn import(tif: &Path, lap: &Path, strength: f32) -> Result<Imported> {
         epsg: dem.epsg,
         origin_e: west,
         origin_n: north,
+        provisional: trace.provisional,
+        direction_verified: trace.direction_verified,
+        confidence: trace.segments.clone(),
+        note: trace.note.clone(),
     })
 }
 
@@ -924,10 +996,17 @@ pub fn program_for(imp: &Imported, jumps: crate::trackprog::ScanJumps) -> Result
     // The grid: the plot is square, so this is the samples on both edges.
     let samples = DEFAULT_SAMPLES;
 
+    // A provisional trace makes a provisional track, and it says so in its own name. The
+    // alternative is a file called "Ironman Raceway" that is a guess about where the racing line
+    // goes, sitting in a rider's mods folder with nothing on it to say so — and a name is the
+    // only part of a track that everyone reads.
+    let name = if imp.place.is_empty() { "Scanned Place".to_string() } else { imp.place.clone() };
+    let name = if imp.provisional { format!("{name} (provisional)") } else { name };
+
     let prog = TrackProgram {
-        name: if imp.place.is_empty() { "Scanned Place".into() } else { imp.place.clone() },
+        name,
         author: String::new(),
-        location: String::new(),
+        location: place_note(imp),
         terrain: Terrain {
             size_x: imp.size_m,
             size_z: imp.size_m,
@@ -967,6 +1046,35 @@ pub fn program_for(imp: &Imported, jumps: crate::trackprog::ScanJumps) -> Result
         venue: VenueKind::Open,
     };
     Ok(prog)
+}
+
+/// Where this track came from and what is not known about it, in one line, for the `location`
+/// field that every built track carries into its own `.ini` and README.
+///
+/// Provenance and doubt travel together on purpose. The source, the licence and the flight dates
+/// are what makes the track redistributable and dates the snapshot; the provisional and
+/// direction flags are what stops a reader taking it for a survey. A track that says
+/// "USGS 3DEP 1 m, flown 2017-2020, lap provisional, direction unverified" cannot be mistaken
+/// for this season's Ironman by anyone who reads it.
+pub fn place_note(imp: &Imported) -> String {
+    let mut bits: Vec<String> = Vec::new();
+    if !imp.source.is_empty() {
+        bits.push(imp.source.clone());
+    }
+    if !imp.collected.is_empty() {
+        bits.push(format!("flown {}", imp.collected));
+    }
+    if !imp.licence.is_empty() {
+        bits.push(imp.licence.clone());
+    }
+    bits.push(format!("EPSG:{} at {:.0} {:.0}", imp.epsg, imp.origin_e, imp.origin_n));
+    if imp.provisional {
+        bits.push("lap provisional".into());
+    }
+    if !imp.direction_verified {
+        bits.push("direction of travel unverified".into());
+    }
+    bits.join("; ")
 }
 
 /// What a fit cost, in words, for whoever is about to look at the track.
@@ -1174,7 +1282,9 @@ mod tests {
             "points": [[10,20],[11,21,9.5],[12,22],[13,23]],
             "somethingNew": {"we": "have not heard of"}
         }"#;
-        let t: LapTrace = serde_json::from_str(text).expect("reads, unknown keys and all");
+        let mut raw: serde_json::Value = serde_json::from_str(text).unwrap();
+        normalise_keys(&mut raw);
+        let t: LapTrace = serde_json::from_value(raw).expect("reads, unknown keys and all");
         let p = t.resolved().expect("resolves");
         assert_eq!(p.len(), 4);
         // Rotated so the start line's point comes first.

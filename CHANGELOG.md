@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026-09-16 — Tracks from real places
+
+### Added
+- Track Studio can build a track on the ground of a real place. Point it at a public-domain
+  laser scan of somewhere and a lap traced over the top, and the track stands on the land the
+  circuit was really cut into instead of on ground the generator made up. The banks, the fall
+  of the site and the jumps that were sitting there the day it was flown all come through.
+  Ironman Raceway is the first one built this way.
+- Ground brought in from a scan keeps its steep places. Banks and ravine sides that the
+  generator would have graded flat on a track of its own are left standing, because on a real
+  site they are the thing that makes it that site.
+- A scanned track says where it came from. The source, the licence, the dates it was flown and
+  anything the person who traced the lap was unsure of are carried into the built track, so it
+  is clear which year of a place you are riding.
+
 ## 2026-09-16 — Code, testing, ideas
 
 ### Changed

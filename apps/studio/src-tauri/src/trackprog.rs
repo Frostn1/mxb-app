@@ -2236,10 +2236,26 @@ fn fit_error(from: Start, segs: &[Segment], pts: &[(f32, f32, f32)]) -> (f32, f3
     if line.len() < 2 {
         return (f32::MAX, f32::MAX);
     }
+    // Both runs are ordered along the same path, so the span nearest point `k` is near span
+    // `k * spans / points`. Searching a window around that instead of the whole line turns this
+    // from quadratic into linear, which is the difference between a lap fitting in a moment and
+    // the test being killed: a 1175 m lap at a metre a sample against a line sampled every half
+    // metre is 2.7 million distance tests per candidate fit, and the walk asks for thousands of
+    // candidates.
+    //
+    // The window is generous — it has to cover the case the whole measurement exists to catch,
+    // which is the fitted line having wandered away from the trace. Sixty-four spans is 32 m of
+    // line either side of where the point ought to be, and anything further out than that is an
+    // error so large the exact figure has stopped mattering.
+    const WINDOW: usize = 64;
+    let spans = line.len() - 1;
     let (mut worst, mut sum) = (0.0f32, 0.0f64);
-    for p in pts {
+    for (k, p) in pts.iter().enumerate() {
+        let guess = if pts.len() > 1 { k * spans / (pts.len() - 1) } else { 0 };
+        let lo = guess.saturating_sub(WINDOW);
+        let hi = (guess + WINDOW).min(spans);
         let mut near = f32::MAX;
-        for w in line.windows(2) {
+        for w in line[lo..=hi].windows(2) {
             near = near.min(point_to_span(*p, w[0], w[1]));
         }
         worst = worst.max(near);
