@@ -144,9 +144,11 @@
   whoops, triples, doubles, tabletops, and a stretch of sand you can both see and feel. The lap
   finishes over a triple.
 - A supercross track is built in a stadium, with a wall round the floor and tiered stands
-  behind it.
-- Tuff blocks line the lane borders. Choose soft ones you ride through or solid ones you don't,
-  per track, in Track Studio.
+  behind it. Or not: Venue in Track Studio puts the same lap out in the open air instead, in a
+  field with the trees, the bank and the sponsor wall an outdoor round gets, and a fence round
+  the site where the stadium wall would have stood.
+- Choose what lines the lane borders in Track Studio: soft tuff blocks you ride through, solid
+  ones you don't, a printed banner wall the way a stadium lane is lined, or nothing at all.
 - SX and SMX laps carry as much as a real round does. A lane used to get one set of jumps and
   then a long run of flat ground to the next corner. Now the rest of the lane gets jumps too,
   so there is something to ride the whole way down it.

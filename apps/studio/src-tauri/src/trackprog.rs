@@ -78,33 +78,69 @@ pub struct TrackProgram {
     /// Left out for motocross, so a project saved before this existed reads as one.
     #[serde(default, skip_serializing_if = "Discipline::is_mx")]
     pub discipline: Discipline,
-    /// What the blocks lining a lane's border are made of. Per track, and only placed where
-    /// the discipline asks for them. Left out when they are the soft ones, which is the
-    /// default, so a project saved before this existed reads the same.
-    #[serde(default, skip_serializing_if = "TuffBlocks::is_default")]
-    pub tuff: TuffBlocks,
+    /// What lines a lane's borders. Per track, and only placed where the discipline asks for
+    /// them. Left out when they are the soft blocks, which is the default, so a project saved
+    /// before this existed reads the same — and a project saved when this was still called
+    /// `tuff`, which is what the alias is for.
+    #[serde(default, alias = "tuff", skip_serializing_if = "LaneBorder::is_default")]
+    pub border: LaneBorder,
+    /// Whether a supercross lap is laid inside a stadium or out in the open air. Ignored by
+    /// the outdoor disciplines, which never had a stadium to leave out. Left out when it is
+    /// the stadium, which is what a supercross track has always built.
+    #[serde(default, skip_serializing_if = "VenueKind::is_default")]
+    pub venue: VenueKind,
 }
 
-/// What a tuff block is made of.
+/// What lines a lane's borders.
 ///
-/// Both, because both are real. A supercross lane is bordered by foam-and-vinyl blocks that
-/// a rider goes through rather than into, and PiBoSo's engine has objects for exactly that —
-/// a model whose name begins `SOFT` is passed through with a penalty instead of stopping the
-/// bike. But plenty of tracks line their lanes with something that does stop you, and a
-/// border you can ride straight over is a border nobody respects.
+/// All four, because a real lane has been every one of them. A supercross lane is bordered by
+/// foam-and-vinyl blocks that a rider goes through rather than into, and PiBoSo's engine has
+/// objects for exactly that — a model whose name begins `SOFT` is passed through with a
+/// penalty instead of stopping the bike. Plenty of tracks line their lanes with something that
+/// does stop you, and a border you can ride straight over is a border nobody respects. And a
+/// stadium round mostly does not use blocks at all down the long lanes: it runs a low printed
+/// banner wall, which is the same sponsors' plastic the lap's own hoarding is made of.
 #[derive(serde::Deserialize, serde::Serialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
-pub enum TuffBlocks {
+pub enum LaneBorder {
     /// PiBoSo's pass-through objects: ride through them, lose time, stay on the bike.
     #[default]
     Soft,
     /// Our own cuboid, solid like a bale.
     Solid,
+    /// A low printed banner wall on stakes, the way a stadium lane is lined.
+    Banners,
+    /// Nothing. The lanes are marked by the dirt and by what is beyond them.
+    None,
 }
 
-impl TuffBlocks {
+impl LaneBorder {
     pub fn is_default(&self) -> bool {
-        *self == TuffBlocks::Soft
+        *self == LaneBorder::Soft
+    }
+}
+
+/// Whether a supercross lap stands in a stadium or in the open.
+///
+/// A supercross track has always built a bowl round itself: a wall ring round the floor, tiered
+/// stands behind it, and none of the field a national gets. That is right for a stadium round
+/// and wrong for the supercross-shaped lap somebody wants to ride in a field — so it is a
+/// choice rather than a consequence of the discipline. Open air is not the stadium deleted: it
+/// is the outdoor venue the other two disciplines already get, with a fence round the site
+/// where the wall stood.
+#[derive(serde::Deserialize, serde::Serialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum VenueKind {
+    /// The bowl: wall, stands, no field beyond them.
+    #[default]
+    Stadium,
+    /// A field: the trees, the bank, the paddock and the sponsor wall, inside a site fence.
+    Open,
+}
+
+impl VenueKind {
+    pub fn is_default(&self) -> bool {
+        *self == VenueKind::Stadium
     }
 }
 
@@ -2519,7 +2555,8 @@ mod tests {
             blend: default_blend(),
             elevation: Vec::new(),
             discipline: Discipline::Mx,
-            tuff: TuffBlocks::default(),
+            border: LaneBorder::default(),
+            venue: VenueKind::default(),
         }
     }
 

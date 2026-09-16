@@ -1374,8 +1374,11 @@ pub fn build(prog: &TrackProgram, syn: &Synth) -> Scenery {
     let pits = Pits::of(prog);
     // A stadium has no trees, no wood behind them, no backdrop bank and no paddock: it has a
     // wall round the floor and a grandstand, which `trackvenue::stadium` builds. SuperMotocross
-    // is an outdoor round and keeps the lot.
-    let outdoors = prog.discipline != crate::trackprog::Discipline::Sx;
+    // is an outdoor round and keeps the lot — and so does a supercross lap the rider asked for
+    // in the open air, which is the whole of what that choice means here.
+    let stadium = prog.discipline == crate::trackprog::Discipline::Sx
+        && prog.venue == crate::trackprog::VenueKind::Stadium;
+    let outdoors = !stadium;
 
     let mut stakes = Mesh::default();
     let mut banners = Mesh::default();
@@ -1961,16 +1964,16 @@ pub fn build(prog: &TrackProgram, syn: &Synth) -> Scenery {
         );
     }
 
-    // Tuff blocks down the lane borders, where the discipline lines its lanes with them.
+    // What lines the lane borders, where the discipline lines its lanes with anything.
     if prog.discipline.rules().sections.is_some() {
-        let (blocks, count) = tuff_blocks(prog, syn);
-        tally.push(("tuff blocks", count));
-        let tex = tuff_sheet();
-        for (name, mesh) in blocks {
-            // Solid either way, because the `.tht` is how the game learns an object is there
-            // at all. What decides whether a rider goes through it is the model's *name* —
-            // see `SOFT_TUFF`.
-            kinds.push((name, mesh, tex.clone(), true));
+        if let Some((pieces, tex, count)) = lane_border(prog, syn) {
+            tally.push(("lane border", count));
+            for (name, mesh) in pieces {
+                // Solid whichever it is, because the `.tht` is how the game learns an object is
+                // there at all. What decides whether a rider goes through it is the model's
+                // *name* — see `SOFT_TUFF`.
+                kinds.push((name, mesh, tex.clone(), true));
+            }
         }
     }
 
@@ -1978,6 +1981,14 @@ pub fn build(prog: &TrackProgram, syn: &Synth) -> Scenery {
     // stadium, the wall round the floor and the stands behind it.
     if outdoors {
         crate::trackvenue::dress(prog, syn, lib.as_ref(), &mut kinds, &mut tally);
+        // And where a stadium's wall would have stood, a fence: a supercross lap laid in a
+        // field is short enough that the lap's own hoarding runs out well inside the plot, and
+        // a lap nothing encloses reads as jumps left on bare ground.
+        if prog.discipline == crate::trackprog::Discipline::Sx {
+            let v = crate::trackvenue::open_air(prog, syn);
+            tally.extend(v.tally);
+            kinds.extend(v.kinds);
+        }
     } else {
         let v = crate::trackvenue::stadium(prog, syn);
         tally.extend(v.tally);
@@ -2067,21 +2078,50 @@ fn tuff_sheet() -> Texture {
     })
 }
 
-/// The blocks lining a lane's borders, as one mesh per file they go in.
+/// The files a lane border of banner is written to.
 ///
-/// Never on the riding surface. A block standing where a rider is meant to be is in the wrong
+/// Three of them for the reason [`SOFT_TUFF`] gives — each is its own draw group, and a banner
+/// piece is a quarter the length of a block's gap, so a lap's worth of them is four times the
+/// geometry. Not named `SOFT`: a banner wall is a wall.
+const LANE_BANNERS: [&str; 3] = ["lane_banner", "lane_bannerb", "lane_bannerc"];
+
+/// Pieces of lane banner that print one sponsor's design before the next takes over. Long,
+/// because a lane belongs to one name: at twenty-four it is a run of about thirty-seven metres,
+/// which is most of a stadium lane.
+const LANE_BANNER_RUN: usize = 24;
+
+/// What lines a lane's borders, as one mesh per file it goes in, with the sheet they wear and
+/// how many pieces stood. `None` where the track asked for no border at all.
+///
+/// Never on the riding surface. A border standing where a rider is meant to be is in the wrong
 /// place whichever kind it is, and on a stadium floor the lanes are close enough together that
 /// "just outside this one" and "just inside the next" are two metres apart.
-fn tuff_blocks(prog: &TrackProgram, syn: &Synth) -> (Vec<(String, Mesh)>, usize) {
-    let names: Vec<String> = match prog.tuff {
-        crate::trackprog::TuffBlocks::Soft => SOFT_TUFF.iter().map(|s| (*s).to_string()).collect(),
-        crate::trackprog::TuffBlocks::Solid => vec!["tuff_blocks".to_string()],
+///
+/// The banner is not new art. It is [`banner_piece`] in `Print::Tiled` — the same printed
+/// plastic the lap's own hoarding carries, off the same atlas, cut to a piece's width — because
+/// that is what a stadium lane is actually lined with: one design repeated the length of the
+/// lane on stakes every few pieces, not a parade of different names and not a new texture.
+fn lane_border(
+    prog: &TrackProgram,
+    syn: &Synth,
+) -> Option<(Vec<(String, Mesh)>, Texture, usize)> {
+    use crate::trackprog::LaneBorder;
+    let names: Vec<String> = match prog.border {
+        LaneBorder::None => return None,
+        LaneBorder::Soft => SOFT_TUFF.iter().map(|s| (*s).to_string()).collect(),
+        LaneBorder::Solid => vec!["tuff_blocks".to_string()],
+        LaneBorder::Banners => LANE_BANNERS.iter().map(|s| (*s).to_string()).collect(),
     };
+    let printed = prog.border == LaneBorder::Banners;
+    let seed = prog.terrain.relief.seed;
     let mut meshes: Vec<Mesh> = vec![Mesh::default(); names.len()];
     let half = prog.width * 0.5;
+    // How wide a piece is across the border line, and how far along to the next one. A banner
+    // is a sheet on a frame and its pieces butt; a block is a block and they stand apart.
+    let (depth, gap) = if printed { (BANNER_D_M, TILE_W_M) } else { (TUFF_D_M, TUFF_GAP_M) };
     // Just past the bar, not a guessed distance: the near edge has to clear the riding margin
     // or the piece is dropped as standing on the lane.
-    let off = half + RIDE_MARGIN_M + TUFF_D_M * 0.5 + TUFF_CLEAR_M;
+    let off = half + RIDE_MARGIN_M + depth * 0.5 + TUFF_CLEAR_M;
     let stations = prog.stations(0.5);
     let block = edfwrite::cuboid(TUFF_W_M, TUFF_H_M, TUFF_D_M);
     let mut n = 0usize;
@@ -2099,9 +2139,12 @@ fn tuff_blocks(prog: &TrackProgram, syn: &Synth) -> (Vec<(String, Mesh)>, usize)
         }
         let total = *acc.last().unwrap();
         let (mut cursor, mut s, mut i) = (0usize, 0.0f32, 0u32);
+        // The last piece stood, so a banner run knows when it is starting again and closes the
+        // end it would otherwise leave bare.
+        let mut last: Option<u32> = None;
         while s < total {
             let (x, z, deg) = along_line(&line, &acc, &mut cursor, s);
-            s += TUFF_GAP_M;
+            s += gap;
             i += 1;
             // No clearance bar against the nearest leg here, unlike the stakes. A lane border
             // is *meant* to sit on the strip of dirt between two lanes — twelve metres centre
@@ -2114,8 +2157,20 @@ fn tuff_blocks(prog: &TrackProgram, syn: &Synth) -> (Vec<(String, Mesh)>, usize)
             {
                 continue;
             }
+            let piece = if printed {
+                // The design changes every `LANE_BANNER_RUN` pieces, and the two sides break in
+                // different places so a lane is not the same name on both hands.
+                let run = i as usize / LANE_BANNER_RUN;
+                let key = (run as u32).wrapping_mul(2_654_435_761) ^ (side as i32 as u32);
+                let cell = (rnd(seed ^ 0x6C, key) * BANNER_CELLS as f32) as usize % BANNER_CELLS;
+                // Indexed by where the piece stands, not by how many have been stood, so the
+                // print still tiles across a piece the ground or the lane beside it took out.
+                banner_piece(Print::Tiled, cell, i as usize, last != Some(i - 1))
+            } else {
+                block.clone()
+            };
             let m = edfwrite::moved(
-                &edfwrite::turned(&block, deg),
+                &edfwrite::turned(&piece, deg),
                 [x, ground(syn, x, z) - 0.05, z],
             );
             if on_riding_surface(syn, half, &m) {
@@ -2123,10 +2178,12 @@ fn tuff_blocks(prog: &TrackProgram, syn: &Synth) -> (Vec<(String, Mesh)>, usize)
             }
             let k = i as usize % meshes.len();
             meshes[k].append(&m);
+            last = Some(i);
             n += 1;
         }
     }
-    (names.into_iter().zip(meshes).collect(), n)
+    let tex = if printed { banner_sheet() } else { tuff_sheet() };
+    Some((names.into_iter().zip(meshes).collect(), tex, n))
 }
 
 /// The `scene<N>` blocks, in the form TerrainEd reads them.
@@ -2186,6 +2243,118 @@ mod tests {
         let p: TrackProgram = serde_json::from_str(crate::trackprog::EXAMPLE).unwrap();
         let s = crate::tracksynth::synthesise(&p).unwrap();
         (p, s)
+    }
+
+    /// A supercross lap, drawn the way the app draws one, so the lane borders and the venue can
+    /// be judged on a track that actually has lanes. Built once for every test that asks.
+    fn sx_lap() -> &'static TrackProgram {
+        static S: std::sync::OnceLock<TrackProgram> = std::sync::OnceLock::new();
+        S.get_or_init(|| {
+            let knobs = crate::tracklayout::LayoutKnobs::for_discipline(
+                crate::trackprog::Discipline::Sx,
+            );
+            let p = (0..40)
+                .find_map(|i| crate::tracklayout::draw_with(200 + i, &knobs))
+                .expect("a supercross lap");
+            crate::tracksynth::with_fitted_budget(&p).expect("a budget")
+        })
+    }
+
+    /// One built with the border and venue asked for.
+    fn sx_built(
+        border: crate::trackprog::LaneBorder,
+        venue: crate::trackprog::VenueKind,
+    ) -> (TrackProgram, Scenery) {
+        let mut p = sx_lap().clone();
+        p.border = border;
+        p.venue = venue;
+        let s = crate::tracksynth::synthesise(&p).expect("it synthesises");
+        let sc = build(&p, &s);
+        (p, sc)
+    }
+
+    fn tallied(sc: &Scenery, k: &str) -> usize {
+        sc.tally.iter().find(|(n, _)| *n == k).map(|(_, v)| *v).unwrap_or(0)
+    }
+
+    /// A lane lined with banner gets banner, not blocks: the same printed plastic the lap's own
+    /// hoarding carries, in the files a banner border goes in, and none of the tuff models.
+    #[test]
+    fn a_lane_lined_with_banners_carries_printed_plastic() {
+        use crate::trackprog::{LaneBorder, VenueKind};
+        let (_, sc) = sx_built(LaneBorder::Banners, VenueKind::Stadium);
+        let files: Vec<&str> = sc.files.iter().map(|(f, _)| f.as_str()).collect();
+        assert!(
+            files.iter().any(|f| f.starts_with("lane_banner")),
+            "no banner border among {files:?}"
+        );
+        assert!(
+            !files.iter().any(|f| f.starts_with("tuff_blocks") || f.starts_with("SOFT")),
+            "a banner border still stood blocks: {files:?}"
+        );
+        assert!(tallied(&sc, "lane border") > 100, "a stadium lane's worth of banner");
+    }
+
+    /// And a lane asked for nothing gets nothing — not a thinner border, none.
+    #[test]
+    fn a_lane_asked_for_no_border_gets_none() {
+        use crate::trackprog::{LaneBorder, VenueKind};
+        let (_, sc) = sx_built(LaneBorder::None, VenueKind::Stadium);
+        let files: Vec<&str> = sc.files.iter().map(|(f, _)| f.as_str()).collect();
+        assert!(
+            !files.iter().any(|f| f.starts_with("lane_banner") || f.starts_with("tuff_blocks") || f.starts_with("SOFT")),
+            "a border stood on a lap that asked for none: {files:?}"
+        );
+        assert_eq!(tallied(&sc, "lane border"), 0);
+        // The rest of the track is still there: no border is a border choice, not a bare lap.
+        assert!(tallied(&sc, "stadium wall") > 0, "the stadium went with it");
+    }
+
+    /// Every kind of border stays inside what one model may draw.
+    ///
+    /// The one that can bite is banner: its pieces butt at a metre and a half where a block
+    /// stands every two and a half, so a lap's worth is four times the geometry, and a model
+    /// past 65,535 vertices silently does not draw at all.
+    #[test]
+    fn no_lane_border_model_overruns_the_draw_limit() {
+        use crate::trackprog::{LaneBorder, VenueKind};
+        for border in [LaneBorder::Soft, LaneBorder::Solid, LaneBorder::Banners] {
+            let (p, s) = {
+                let mut p = sx_lap().clone();
+                p.border = border;
+                p.venue = VenueKind::Stadium;
+                let s = crate::tracksynth::synthesise(&p).expect("it synthesises");
+                (p, s)
+            };
+            let (pieces, _, n) = lane_border(&p, &s).expect("a border");
+            assert!(n > 0, "{border:?} stood nothing");
+            for (name, mesh) in pieces {
+                assert!(
+                    mesh.vertex_count() < 65_536,
+                    "{name} holds {} vertices — past what a draw group may index",
+                    mesh.vertex_count()
+                );
+            }
+        }
+    }
+
+    /// A supercross lap asked for the open air gets a field and a fence, not a stadium.
+    #[test]
+    fn an_open_air_supercross_swaps_the_bowl_for_a_field() {
+        use crate::trackprog::{LaneBorder, VenueKind};
+        let (_, bowl) = sx_built(LaneBorder::Soft, VenueKind::Stadium);
+        let (_, field) = sx_built(LaneBorder::Soft, VenueKind::Open);
+        assert!(tallied(&bowl, "stadium wall") > 0 && tallied(&bowl, "stadium tiers") > 0);
+        assert_eq!(tallied(&field, "stadium wall"), 0, "the wall stayed up in the open air");
+        assert_eq!(tallied(&field, "stadium tiers"), 0, "the stands stayed up in the open air");
+        // Something still bounds it, and the field it stands in is a field.
+        assert!(tallied(&field, "site fence") > 0, "an open lap with nothing round it");
+        assert!(
+            tallied(&field, "backdrop trees") > 0 && tallied(&bowl, "backdrop trees") == 0,
+            "the open lap did not get the wood a national gets"
+        );
+        // And the lane borders are unchanged by where the lap stands.
+        assert_eq!(tallied(&bowl, "lane border"), tallied(&field, "lane border"));
     }
 
     #[test]
@@ -3081,6 +3250,145 @@ mod tests {
                     img.put_pixel(px, py, image::Rgba([c[0], c[1], c[2], 255]));
                 }
             }
+        }
+    }
+
+    /// A sheet's mean colour over the texels that are not see-through, so a cut-out sheet can
+    /// stand for itself in a picture rather than vanish.
+    fn mean_opaque(t: &Texture) -> [u8; 3] {
+        let (mut sum, mut n) = ([0u64; 3], 0u64);
+        for px in t.rgba.chunks_exact(4) {
+            if px[3] >= 128 {
+                for k in 0..3 {
+                    sum[k] += px[k] as u64;
+                }
+                n += 1;
+            }
+        }
+        [0usize, 1, 2].map(|k| if n == 0 { 200 } else { (sum[k] / n) as u8 })
+    }
+
+    /// Pictures of what the two new choices do: a lane border in each of its four kinds, close
+    /// enough in to read, and a supercross lap in the stadium beside the same lap in the open.
+    ///
+    /// Written as pictures because that is the only way to judge them. A tally says six hundred
+    /// pieces stood; it does not say whether they line the lane or wander across it.
+    ///
+    /// ```text
+    /// FROST_BORDER_PNG=/tmp/border cargo test --bins -- --ignored draw_the_lane_borders
+    /// ```
+    #[test]
+    #[ignore = "draws the borders — set FROST_BORDER_PNG"]
+    fn draw_the_lane_borders() {
+        use crate::trackprog::{LaneBorder, VenueKind};
+        let pre = std::env::var("FROST_BORDER_PNG").expect("set FROST_BORDER_PNG");
+        let texel = |t: &Texture, u: f32, v: f32| -> [u8; 4] {
+            let x = ((u.rem_euclid(1.0)) * t.width as f32) as usize % t.width as usize;
+            let y = ((v.rem_euclid(1.0)) * t.height as f32) as usize % t.height as usize;
+            let o = (y * t.width as usize + x) * 4;
+            [t.rgba[o], t.rgba[o + 1], t.rgba[o + 2], t.rgba[o + 3]]
+        };
+        let shoot = |sc: &Scenery, syn: &Synth, half: f32, r: (f32, f32, f32, f32), ppm: f32, path: String| {
+            let (x0, z0, x1, z1) = r;
+            let (w, h) = (((x1 - x0) * ppm) as u32, ((z1 - z0) * ppm) as u32);
+            let mut img = image::RgbaImage::new(w, h);
+            for py in 0..h {
+                for px in 0..w {
+                    let (x, z) = (x0 + px as f32 / ppm, z1 - py as f32 / ppm);
+                    let d = syn.dist[grid_cell(syn, x, z)];
+                    let c = if d < half { [150, 110, 70] } else { [96, 82, 64] };
+                    img.put_pixel(px, py, image::Rgba([c[0], c[1], c[2], 255]));
+                }
+            }
+            let to_px = |x: f32, z: f32| ((x - x0) * ppm, (z1 - z) * ppm);
+            // Tallest last, so a banner is not painted over by the ground bank behind it.
+            let mut order: Vec<usize> = (0..sc.files.len()).collect();
+            order.sort_by_key(|&i| (sc.models[i].0.bounds().1[1] * 100.0) as i32);
+            for i in order {
+                let name = &sc.files[i].0;
+                if name.contains("tree") || name.starts_with("backdrop") || name.starts_with("leafs") {
+                    continue;
+                }
+                let (m, t) = &sc.models[i];
+                for tri in m.indices.chunks_exact(3) {
+                    let p = |k: u32| (m.positions[k as usize * 3], m.positions[k as usize * 3 + 2]);
+                    let q = [p(tri[0]), p(tri[1]), p(tri[2])].map(|(x, z)| to_px(x, z));
+                    let uv = |k: u32| (m.uvs[k as usize * 2], m.uvs[k as usize * 2 + 1]);
+                    let (a, b, c) = (uv(tri[0]), uv(tri[1]), uv(tri[2]));
+                    let k = texel(t, (a.0 + b.0 + c.0) / 3.0, (a.1 + b.1 + c.1) / 3.0);
+                    // A cut-out sheet — the site fence's netting — samples through its own
+                    // holes more often than not, and skipping those leaves a fence that is
+                    // standing in the track and missing from the picture of it.
+                    let c = if k[3] < 128 { mean_opaque(t) } else { [k[0], k[1], k[2]] };
+                    fill_px(&mut img, q, c);
+                }
+            }
+            img.save(&path).unwrap();
+            println!("wrote {path} {w}x{h}");
+        };
+        // The four borders, cropped to sixty metres about a point a third of the way round the
+        // lap, which on a stadium floor is a lane and the two beside it.
+        for border in [LaneBorder::Soft, LaneBorder::Solid, LaneBorder::Banners, LaneBorder::None] {
+            let (p, sc) = sx_built(border, VenueKind::Stadium);
+            let s = crate::tracksynth::synthesise(&p).unwrap();
+            let st = p.stations(2.0);
+            let at = &st[st.len() / 3];
+            let half = p.width * 0.5;
+            let r = (at.x - 30.0, at.z - 30.0, at.x + 30.0, at.z + 30.0);
+            let n = tallied(&sc, "lane border");
+            println!("{border:?}: {n} pieces");
+            let low = format!("{border:?}").to_lowercase();
+            shoot(&sc, &s, half, r, 14.0, format!("{pre}_border_{low}.png"));
+            // And straight on at it, because from above a printed banner is its top edge and a
+            // border's whole point is what it looks like from the seat.
+            let (dx, dz) = crate::trackprog::heading_vector(at.heading);
+            let mut img = image::RgbaImage::from_pixel(1600, 150, image::Rgba([96, 82, 64, 255]));
+            let ppm = 32.0f32;
+            for i in 0..sc.files.len() {
+                let name = &sc.files[i].0;
+                if !(name.starts_with("lane_banner") || name.starts_with("tuff_blocks") || name.starts_with("SOFT")) {
+                    continue;
+                }
+                let (m, t) = &sc.models[i];
+                for tri in m.indices.chunks_exact(3) {
+                    let v = |k: u32| {
+                        let o = k as usize * 3;
+                        (m.positions[o], m.positions[o + 1], m.positions[o + 2])
+                    };
+                    let q = [tri[0], tri[1], tri[2]].map(|k| {
+                        let (x, y, z) = v(k);
+                        let (ax, az) = (x - at.x, z - at.z);
+                        (
+                            (ax * dx + az * dz + 25.0) * ppm,
+                            img.height() as f32 - (y - ground(&s, at.x, at.z) + 0.35) * ppm,
+                        )
+                    });
+                    // Only the border on the rider's right of this station, so the far side is
+                    // not drawn through it.
+                    let lat = tri.iter().map(|&k| { let (x, _, z) = v(k); (x - at.x) * dz - (z - at.z) * dx }).sum::<f32>() / 3.0;
+                    if lat.abs() > 12.0 || lat < 0.0 {
+                        continue;
+                    }
+                    let uv = |k: u32| (m.uvs[k as usize * 2], m.uvs[k as usize * 2 + 1]);
+                    let (a, b, c) = (uv(tri[0]), uv(tri[1]), uv(tri[2]));
+                    let k = texel(t, (a.0 + b.0 + c.0) / 3.0, (a.1 + b.1 + c.1) / 3.0);
+                    if k[3] < 128 {
+                        continue;
+                    }
+                    fill_px(&mut img, q, [k[0], k[1], k[2]]);
+                }
+            }
+            let path = format!("{pre}_border_{low}_side.png");
+            img.save(&path).unwrap();
+            println!("wrote {path}");
+        }
+        // And the venue, whole plot, so the bowl and the field can be put side by side.
+        for venue in [VenueKind::Stadium, VenueKind::Open] {
+            let (p, sc) = sx_built(LaneBorder::Soft, venue);
+            let s = crate::tracksynth::synthesise(&p).unwrap();
+            let r = (0.0, 0.0, p.terrain.size_x, p.terrain.size_z);
+            println!("{venue:?}: {:?}", sc.tally);
+            shoot(&sc, &s, p.width * 0.5, r, 4.0, format!("{pre}_venue_{}.png", format!("{venue:?}").to_lowercase()));
         }
     }
 

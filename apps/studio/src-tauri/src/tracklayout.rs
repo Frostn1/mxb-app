@@ -2976,7 +2976,8 @@ pub fn draw_with(seed: u64, knobs: &LayoutKnobs) -> Option<TrackProgram> {
         discipline: knobs.discipline,
         // Soft, which is what a stadium round lines its lanes with. A person changes it per
         // track; the walk has no opinion.
-        tuff: crate::trackprog::TuffBlocks::default(),
+        border: crate::trackprog::LaneBorder::default(),
+        venue: crate::trackprog::VenueKind::default(),
     };
     if rules.sections.is_some() {
         prog.features = section_features(&mut rng, &prog, knobs, seed);

@@ -1992,26 +1992,68 @@ fn stadium_stand_sheet() -> Texture {
     Texture { name: "stadium_stand_c".into(), width: n, height: n, rgba: px }
 }
 
-/// The venue a supercross track gets instead of the paddock and the sponsor wall: the wall round
-/// the stadium floor and the tiered stands rising behind it. Built where `trackscenery` would
-/// otherwise call [`build`], so a stadium lap is never given a field's paddock.
-pub fn stadium(prog: &TrackProgram, syn: &Synth) -> Venue {
+/// The fence round an outdoor supercross site: how tall it stands and how thick a panel is.
+///
+/// Where the stadium's wall would have been, and for the same reason. A supercross lap is a
+/// hundred and twenty metres across on a plot with room for a national, so its own hoarding
+/// stops well short of the plot's edge and nothing else says where the venue ends. Tall enough
+/// to read as the boundary of a site from the seat, and netting rather than board so it does
+/// not wall the racing off from whatever is behind it.
+const SX_FENCE_M: (f32, f32) = (2.2, 0.06);
+
+/// The venue an open-air supercross lap gets on top of the field's own: one ring of site fence
+/// where the stadium's wall stood, and no stands behind it.
+///
+/// Laid by the same [`sx_ring`] the stadium's wall is, at the same offset, under the same rule
+/// that a piece coming near a leg of the lap is left out rather than a closed ring bought at
+/// the price of a fence across the track.
+pub fn open_air(prog: &TrackProgram, syn: &Synth) -> Venue {
+    let (lo, hi) = lap_extent(prog);
+    let rect = grown_to_plot(prog, lo, hi, SX_OUT_M);
+    let perim = 2.0 * ((rect.2 - rect.0) + (rect.3 - rect.1));
+    let mut v = Venue { kinds: Vec::new(), tally: Vec::new(), paddock: None, road: Vec::new(), wall: None };
+    let mut fence = Mesh::default();
+    let step = (perim / SX_MAX_BOXES as f32).max(4.0);
+    let panels = sx_ring(prog, syn, rect, step, SX_FENCE_M, &mut fence);
+    debug_assert!(fence.vertex_count() < 65_536, "a site fence past what a model may draw");
+    if panels > 0 {
+        // Solid: it is the edge of the venue, and a rider who reaches it has left the track.
+        v.kinds.push(("site_fence".into(), fence, net_sheet(), true));
+    }
+    v.tally.push(("site fence", panels));
+    v
+}
+
+/// The lap's own extent, corner to corner.
+fn lap_extent(prog: &TrackProgram) -> ((f32, f32), (f32, f32)) {
     let (mut lo, mut hi) = ((f32::MAX, f32::MAX), (f32::MIN, f32::MIN));
     for q in prog.stations(2.0) {
         lo = (lo.0.min(q.x), lo.1.min(q.z));
         hi = (hi.0.max(q.x), hi.1.max(q.z));
     }
-    // The floor: the lap's extent grown by the clearance, and never off the plot. Growing the
-    // box is what keeps the wall off the track — every side of it stands `SX_OUT_M` out from the
-    // furthest the lap reaches that way.
-    let grown = |out: f32| {
-        (
-            (lo.0 - out).max(4.0),
-            (lo.1 - out).max(4.0),
-            (hi.0 + out).min(prog.terrain.size_x - 4.0),
-            (hi.1 + out).min(prog.terrain.size_z - 4.0),
-        )
-    };
+    (lo, hi)
+}
+
+/// That extent grown by `out` on every side and clamped inside the plot. Growing the box is
+/// what keeps a ring off the track: every side of it stands `out` from the furthest the lap
+/// reaches that way.
+fn grown_to_plot(prog: &TrackProgram, lo: (f32, f32), hi: (f32, f32), out: f32) -> (f32, f32, f32, f32) {
+    (
+        (lo.0 - out).max(4.0),
+        (lo.1 - out).max(4.0),
+        (hi.0 + out).min(prog.terrain.size_x - 4.0),
+        (hi.1 + out).min(prog.terrain.size_z - 4.0),
+    )
+}
+
+/// The venue a supercross track gets instead of the paddock and the sponsor wall: the wall round
+/// the stadium floor and the tiered stands rising behind it. Built where `trackscenery` would
+/// otherwise call [`build`], so a stadium lap is never given a field's paddock.
+pub fn stadium(prog: &TrackProgram, syn: &Synth) -> Venue {
+    let (lo, hi) = lap_extent(prog);
+    // The floor: the lap's extent grown by the clearance, and never off the plot — see
+    // [`grown_to_plot`].
+    let grown = |out: f32| grown_to_plot(prog, lo, hi, out);
     let wall_rect = grown(SX_OUT_M);
     let perim = 2.0 * ((wall_rect.2 - wall_rect.0) + (wall_rect.3 - wall_rect.1));
     let mut v = Venue { kinds: Vec::new(), tally: Vec::new(), paddock: None, road: Vec::new(), wall: None };

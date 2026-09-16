@@ -8748,7 +8748,7 @@ fn start_tcl(prog: &TrackProgram) -> Option<String> {
 /// the code that made it. Bump it with every change to what a program builds into: minor for
 /// a new feature, patch for a fix. 0.x until the generator is finished. History in
 /// `apps/studio/FROST_ALGORITHM.md`.
-pub const FROST_ALGORITHM_VERSION: &str = "0.40.0";
+pub const FROST_ALGORITHM_VERSION: &str = "0.41.0";
 
 /// The stamp every built track carries in `<slug>/frost-algorithm.ini`.
 ///
@@ -9804,7 +9804,8 @@ mod tests {
             blend: crate::trackprog::default_blend(),
             elevation: Vec::new(),
             discipline: Default::default(),
-            tuff: Default::default(),
+            border: Default::default(),
+            venue: Default::default(),
             features: vec![
                 Feature::Tabletop { at: 30.0, length: 22.0, height: 2.4, lip: 0.0, finish: false },
                 Feature::Double { at: 70.0, height: 2.0, gap: 9.0, lip: 6.0, finish: false },
@@ -13976,5 +13977,70 @@ mod mx_proof {
         // too: the collision terrain carries heights and surface ids and nothing about sheets.
         let wrote = super::write_source(&p, &syn, &out).expect("wrote the source");
         println!("{} bytes of .trh and {} source files", bytes.len(), wrote.len());
+    }
+}
+
+/// The stadium disciplines' proof: a batch of supercross and SuperMotocross laps, each printed
+/// as what it is made of, so a change meant to be a no-op at the default settings can be shown
+/// to be one rather than said to be one.
+///
+/// The same trap `mx_proof` is here for, one discipline over. A supercross lap is drawn, laid
+/// out, synthesised and dressed, and what comes out is a line a run on another branch can be
+/// diffed against: the lap's shape, what the layout put on it, every scenery tally, and a hash
+/// over the bytes of every model the track ships. The hash is the part that matters — a tally
+/// says how many blocks stood and the hash says they stood in the same places.
+///
+/// ```text
+/// cargo test -p frost-studio --bin frost-studio -- --ignored --nocapture sx_batch
+/// ```
+#[cfg(test)]
+mod sx_proof {
+    use crate::trackprog::{Discipline, Feature};
+
+    /// FNV-1a over a run of bytes. Not a checksum anybody has to trust — just a short thing to
+    /// compare two runs by.
+    fn hash(bytes: &[u8], h: &mut u64) {
+        for b in bytes {
+            *h ^= *b as u64;
+            *h = h.wrapping_mul(0x0000_0100_0000_01B3);
+        }
+    }
+
+    #[test]
+    #[ignore = "slow — synthesises and dresses twelve laps"]
+    fn sx_batch() {
+        for d in [Discipline::Sx, Discipline::Smx] {
+            let knobs = crate::tracklayout::LayoutKnobs::for_discipline(d);
+            for seed in 200u64..206 {
+                let Some(p) = crate::tracklayout::draw_with(seed, &knobs) else {
+                    println!("{d:?} {seed}: no lap");
+                    continue;
+                };
+                let p = crate::tracksynth::with_fitted_budget(&p).expect("a budget");
+                let syn = super::synthesise(&p).expect("it synthesises");
+                let sc = crate::trackscenery::build(&p, &syn);
+                let mut h = 0xcbf2_9ce4_8422_2325u64;
+                for (name, bytes) in &sc.files {
+                    hash(name.as_bytes(), &mut h);
+                    hash(bytes, &mut h);
+                }
+                let kind = |k: &str| p.features.iter().filter(|f| f.name() == k).count();
+                let sand = p.features.iter().any(|f| matches!(f, Feature::Sand { .. }));
+                let mut tally = sc.tally.clone();
+                tally.sort_by_key(|(k, _)| *k);
+                println!(
+                    "{d:?} {seed}: lap {:.0} m, width {:.1}, {} features \
+                     (double {}, whoops {}, table {}, sand {}), scenery {tally:?}, models {} @ {h:016x}",
+                    p.lap_length(),
+                    p.width,
+                    p.features.len(),
+                    kind("double"),
+                    kind("whoop section"),
+                    kind("tabletop"),
+                    sand as usize,
+                    sc.files.len(),
+                );
+            }
+        }
     }
 }

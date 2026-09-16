@@ -1694,7 +1694,8 @@ mod tests {
             start: crate::trackprog::Start { x: lap.start.0, z: lap.start.1, angle: lap.heading },
             segments: lap.program_segments(), width: 12.0, features: Vec::new(),
             blend: 1.2, elevation: Vec::new(), discipline: Default::default(),
-            tuff: Default::default(),
+            border: Default::default(),
+            venue: Default::default(),
         };
         let st = prog.stations(1.0);
         let place = |long: f32, lat: f32| -> (f32, f32) {
@@ -1810,7 +1811,8 @@ mod tests {
             start: crate::trackprog::Start { x: lap.start.0, z: lap.start.1, angle: lap.heading },
             segments: lap.program_segments(), width: 12.0, features: Vec::new(),
             blend: 1.2, elevation: Vec::new(), discipline: Default::default(),
-            tuff: Default::default(),
+            border: Default::default(),
+            venue: Default::default(),
         };
         let lap_st = prog.stations(1.0);
 

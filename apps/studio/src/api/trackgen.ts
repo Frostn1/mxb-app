@@ -50,8 +50,21 @@ export interface TrackProgram {
   elevation: { at: number; height: number }[];
   /** Which rules the lap is drawn and judged by. Left out for motocross. */
   discipline?: Discipline;
-  /** What the lane's blocks are made of. Only supercross lays any; left out for soft. */
-  tuff?: TuffBlocks;
+  /** What lines a lane's borders. Only a stadium discipline lays any; left out for soft. */
+  border?: LaneBorder;
+  /**
+   * What this was called before it grew banners and none. A project saved back then still
+   * carries it, and Rust still reads it, so the picker falls back to it rather than showing
+   * an old track the wrong answer.
+   *
+   * @deprecated read `border`.
+   */
+  tuff?: LaneBorder;
+  /**
+   * Whether a supercross lap stands in a stadium or in the open air. Ignored by the outdoor
+   * disciplines; left out for the stadium.
+   */
+  venue?: VenueKind;
 }
 
 /** Motocross, supercross or SuperMotocross. Mirrors `Discipline` in `trackprog.rs`. */
@@ -112,10 +125,16 @@ export function forgetTrackTexture(id: string): Promise<void> {
 }
 
 /**
- * The padded blocks along a supercross lane: soft ones a rider rides through, solid ones
- * stop the bike. Mirrors `TuffBlocks` in `trackprog.rs`.
+ * What lines a supercross lane: padded blocks a rider rides through, solid ones that stop the
+ * bike, a printed banner wall, or nothing. Mirrors `LaneBorder` in `trackprog.rs`.
  */
-export type TuffBlocks = "soft" | "solid";
+export type LaneBorder = "soft" | "solid" | "banners" | "none";
+
+/**
+ * Whether a supercross lap is laid in a stadium or out in a field. Mirrors `VenueKind` in
+ * `trackprog.rs`.
+ */
+export type VenueKind = "stadium" | "open";
 
 export type TrackSegment =
   /** `rise` is metres climbed over the segment; negative drops, zero follows the ground. */
