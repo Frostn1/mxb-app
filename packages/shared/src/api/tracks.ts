@@ -145,8 +145,11 @@ const SCENERY_MAGIC = 0x4e435346;
  * Raw bytes for the same reason the terrain is — this is a few hundred thousand triangles
  * and a couple of dozen surfaces, and the arrays are adopted in place rather than parsed.
  */
-export async function loadTrackScenery(path: string): Promise<TrackScenery | null> {
-  const buf = await invoke<ArrayBuffer>("load_track_scenery", { path });
+export async function loadTrackScenery(
+  path: string,
+  prefix?: string | null,
+): Promise<TrackScenery | null> {
+  const buf = await invoke<ArrayBuffer>("load_track_scenery", { path, prefix });
   // The track simply hasn't got any.
   if (buf.byteLength === 0) return null;
   return readSceneryBlob(buf);
@@ -250,9 +253,10 @@ const SURFACES_MAGIC = 0x46525346;
  */
 export async function loadTrackSurfaces(
   path: string,
+  prefix?: string | null,
   command = "load_track_surfaces",
 ): Promise<TrackSceneryTexture[]> {
-  const buf = await invoke<ArrayBuffer>(command, { path });
+  const buf = await invoke<ArrayBuffer>(command, { path, prefix });
   if (buf.byteLength === 0) return [];
 
   const view = new DataView(buf);
@@ -289,8 +293,11 @@ export async function loadTrackSurfaces(
  * Split from the scenery mesh because it costs nothing: these files are kilobytes, so the
  * markers land while the `.map` is still being read out of the archive.
  */
-export function readTrackPlacements(path: string): Promise<TrackPlacement[]> {
-  return invoke<TrackPlacement[]>("read_track_placements", { path });
+export function readTrackPlacements(
+  path: string,
+  prefix?: string | null,
+): Promise<TrackPlacement[]> {
+  return invoke<TrackPlacement[]>("read_track_placements", { path, prefix });
 }
 
 /** `"FSKY"`, the backdrop blob's magic. */
@@ -302,8 +309,11 @@ const BACKDROP_MAGIC = 0x594b5346;
  * Cheap next to the scenery — a dome is a few hundred triangles carrying one very large
  * picture — and it is what stops a track ending at a hard edge with nothing beyond it.
  */
-export async function loadTrackBackdrop(path: string): Promise<TrackBackdrop | null> {
-  const buf = await invoke<ArrayBuffer>("load_track_backdrop", { path });
+export async function loadTrackBackdrop(
+  path: string,
+  prefix?: string | null,
+): Promise<TrackBackdrop | null> {
+  const buf = await invoke<ArrayBuffer>("load_track_backdrop", { path, prefix });
   if (buf.byteLength === 0) return null;
   const view = new DataView(buf);
   if (view.getUint32(0, true) !== BACKDROP_MAGIC) {
@@ -349,8 +359,11 @@ export async function loadTrackBackdrop(path: string): Promise<TrackBackdrop | n
  * anything closer than that is interpolation. This is tiled over the terrain to put grain
  * back — it says what the ground is made of, not what is where.
  */
-export async function loadTrackGround(path: string): Promise<TrackGround | null> {
-  const sheets = await loadTrackSurfaces(path, "load_track_ground");
+export async function loadTrackGround(
+  path: string,
+  prefix?: string | null,
+): Promise<TrackGround | null> {
+  const sheets = await loadTrackSurfaces(path, prefix, "load_track_ground");
   if (sheets.length === 0) return null;
   // The colour first, then its relief where the track ships one.
   return { colour: sheets[0], normal: sheets[1] ?? null };
@@ -370,8 +383,11 @@ const GROUND_LAYERS_MAGIC = 0x594c4746;
  * Empty when the track's `.map` states no stack the walk could read, in which case the viewer
  * falls back to the single tiled sheet and the surface picture.
  */
-export async function loadTrackGroundLayers(path: string): Promise<TrackGroundLayer[]> {
-  const buf = await invoke<ArrayBuffer>("load_track_ground_layers", { path });
+export async function loadTrackGroundLayers(
+  path: string,
+  prefix?: string | null,
+): Promise<TrackGroundLayer[]> {
+  const buf = await invoke<ArrayBuffer>("load_track_ground_layers", { path, prefix });
   if (buf.byteLength === 0) return [];
   const view = new DataView(buf);
   if (buf.byteLength < GROUND_LAYERS_HEADER || view.getUint32(0, true) !== GROUND_LAYERS_MAGIC) {
