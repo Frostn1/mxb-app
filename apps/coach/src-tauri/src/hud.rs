@@ -45,12 +45,47 @@ pub struct Voice {
     pub volume: u8,
 }
 
-/// `<user folder>/mxbcoach`, found the way the sessions are.
+/// The version of the recorder the HUD and the spoken cues need.
+pub(crate) const RECORDER_NEEDS: &str = "0.23";
+
+/// `<user folder>/mxbcoach`, out of the folders the sessions are looked for in: the one the
+/// recorder actually uses, so the plugin reads what Coach writes. The first when the recorder
+/// hasn't written anywhere yet.
+pub(crate) fn coach_dir_of(dirs: &[PathBuf]) -> Option<PathBuf> {
+    let coach: Vec<&Path> = dirs.iter().filter_map(|d| d.parent()).collect();
+    let used = coach.iter().find(|c| c.is_dir() || c.join("sessions").is_dir());
+    used.or(coach.first()).map(|c| c.to_path_buf())
+}
+
 fn coach_dir(app: &AppHandle) -> Result<PathBuf, String> {
-    session_dirs(&load_config(app))
-        .into_iter()
-        .find_map(|d| d.parent().map(Path::to_path_buf))
+    coach_dir_of(&session_dirs(&load_config(app)))
         .ok_or_else(|| "The game's user folder wasn't found.".to_string())
+}
+
+/// The recorder's own version, from the `recorder.ini` it writes when the game runs it.
+pub(crate) fn recorder_version(dir: &Path) -> Option<String> {
+    let text = fs::read_to_string(dir.join("recorder.ini")).ok()?;
+    let version = get(&read_section(&text, "recorder"), "version")?.trim().to_string();
+    (!version.is_empty()).then_some(version)
+}
+
+/// `have` is `want` or newer, by number and not by text: 0.9 is older than 0.23, though it
+/// sorts after it. Anything after the numbers ("0.23.0-beta.1") counts as that version.
+pub(crate) fn at_least(have: &str, want: &str) -> bool {
+    fn parts(v: &str) -> Option<[u32; 3]> {
+        let v = v.trim().trim_start_matches('v');
+        let mut out = [0; 3];
+        let mut read = false;
+        for (i, p) in v.split(['-', '+']).next().unwrap_or(v).split('.').take(3).enumerate() {
+            out[i] = p.trim().parse().ok()?;
+            read = true;
+        }
+        read.then_some(out)
+    }
+    match (parts(have), parts(want)) {
+        (Some(a), Some(b)) => a >= b,
+        _ => false,
+    }
 }
 
 /// `key=value` lines of one `[section]`.
@@ -222,6 +257,43 @@ mod tests {
         let pairs = read_section(&out, "hud");
         assert_eq!(get(&pairs, "gap"), Some("0"));
         assert_eq!(get(&read_section(&out, "other"), "gap"), Some("1"));
+    }
+
+    #[test]
+    fn the_recorder_version_is_read_by_number_not_by_text() {
+        assert!(at_least("0.23.0", RECORDER_NEEDS));
+        assert!(at_least("0.23", RECORDER_NEEDS));
+        assert!(at_least("1.0.0", RECORDER_NEEDS));
+        assert!(at_least("0.23.0-beta.1", RECORDER_NEEDS), "a beta of it has what it needs");
+        assert!(!at_least("0.22.9", RECORDER_NEEDS));
+        assert!(!at_least("0.9.0", RECORDER_NEEDS), "0.9 is older than 0.23, though it sorts after it");
+        assert!(!at_least("", RECORDER_NEEDS));
+        assert!(!at_least("what", RECORDER_NEEDS));
+    }
+
+    #[test]
+    fn the_version_comes_from_the_file_the_recorder_writes() {
+        let dir = std::env::temp_dir().join(format!("coach-rec-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        assert_eq!(recorder_version(&dir), None, "nothing until the game has run the recorder");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("recorder.ini"), "[recorder]\nversion=0.23.0\n").unwrap();
+        assert_eq!(recorder_version(&dir).as_deref(), Some("0.23.0"));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// The user folder can be moved, so there is more than one candidate. Writing to one the
+    /// recorder never reads leaves the HUD and the cues off with nothing to show for it.
+    #[test]
+    fn the_coach_folder_is_the_one_the_recorder_uses() {
+        let dir = std::env::temp_dir().join(format!("coach-pick-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let (moved, default) = (dir.join("moved"), dir.join("default"));
+        let dirs = [moved.join("mxbcoach").join("sessions"), default.join("mxbcoach").join("sessions")];
+        assert_eq!(coach_dir_of(&dirs), Some(moved.join("mxbcoach")), "the first when neither is there yet");
+        fs::create_dir_all(&dirs[1]).unwrap();
+        assert_eq!(coach_dir_of(&dirs), Some(default.join("mxbcoach")), "the one with the sessions in it");
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
