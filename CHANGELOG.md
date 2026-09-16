@@ -2,6 +2,20 @@
 
 ## Unreleased — MXB Coach
 
+### Added
+- Coach keeps the recorder up to date by itself. Opening Settings puts the newest one in place
+  if what you have is older or missing, so there is no more updating FrostMod in MXB App,
+  closing it and coming back. Nothing had ever refreshed the recorder before, so whatever you
+  installed the first time is what you kept — and a recorder older than the app it serves draws
+  nothing and says nothing about why.
+- Coach can find MX Bikes on its own. If it isn't where Coach looks, choose the folder in
+  Settings instead of being sent to MXB App to set it there.
+
+### Fixed
+- MXB App and MXB Coach get on when they're both open. They share one settings file, and MXB
+  App wrote it in place — so a read by Coach landing in that moment saw an empty file, forgot
+  where the game was, and greyed out the buttons that needed it. It is written safely now.
+
 ### Fixed
 - The live cue and the blue trail appear in the game. Coach was writing them to a different
   folder from the one it writes the HUD settings to, so on any setup where those two folders

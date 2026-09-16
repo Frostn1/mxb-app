@@ -286,7 +286,12 @@ export const en = {
   "recorder.remove": "Remove",
   "recorder.installed": "Recorder installed. Restart MX Bikes if it's open.",
   "recorder.removed": "Recorder removed.",
-  "recorder.noGame": "The MX Bikes folder wasn't found. Set it in MXB App.",
+  "recorder.refreshed": "Recorder updated to {{version}}.",
+  "recorder.gameFolder": "MX Bikes folder",
+  "recorder.gameFolderNone": "Not found \u2014 pick it so Coach can install the recorder.",
+  "recorder.gameFolderPick": "Choose the folder",
+  "recorder.gameFolderSet": "MX Bikes folder set.",
+  "recorder.noGame": "Coach can't find MX Bikes. Choose the folder above and it can install the recorder itself.",
   "recorder.version": "Recorder {{version}}",
   "recorder.versionUnknown":
     "The recorder's version shows here once you've started MX Bikes with it installed.",

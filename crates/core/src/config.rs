@@ -829,7 +829,13 @@ pub fn save(app: &AppHandle, cfg: &AppConfig) -> anyhow::Result<()> {
     // entry would resurrect an old folder the next time the user switched back.
     let mut cfg = cfg.clone();
     cfg.stash_active();
-    std::fs::write(path, serde_json::to_string_pretty(&cfg)?)?;
+    // Aside and moved in, the way `patch_file` already does it. Written in place, this file is
+    // empty for as long as it takes to fill — and MXB Coach reads the same one. A read landing
+    // in that window falls back to a default config, which loses the game folder and greys out
+    // the very buttons the rider is reaching for.
+    let tmp = path.with_extension("json.tmp");
+    std::fs::write(&tmp, serde_json::to_string_pretty(&cfg)?)?;
+    std::fs::rename(&tmp, &path)?;
     crate::game::set_active(cfg.active_game);
     Ok(())
 }

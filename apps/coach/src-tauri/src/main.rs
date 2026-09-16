@@ -187,6 +187,8 @@ fn main() {
             mxb_core::trackview::load_track_ground_layers,
             mxb_core::trackview::read_track_placements,
             coach::coach_install_plugin,
+            coach::coach_refresh_plugin,
+            coach::coach_set_game_dir,
             coach::coach_uninstall_plugin,
             hud::coach_hud,
             hud::coach_set_hud,

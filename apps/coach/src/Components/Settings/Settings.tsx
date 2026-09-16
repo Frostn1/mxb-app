@@ -17,7 +17,15 @@ import {
 import { betaUpdates, setBetaUpdates, useUpdate } from "@/Context/Update";
 import { useConfig } from "@frost/shared/Context/Config";
 import { useT, type TKey } from "@/i18n";
-import { coachStatus, installRecorder, openFolder, removeRecorder, type CoachStatus } from "@/api/coach";
+import {
+  coachStatus,
+  installRecorder,
+  openFolder,
+  refreshRecorder,
+  removeRecorder,
+  setGameDir,
+  type CoachStatus,
+} from "@/api/coach";
 import Page, { Label } from "../Page";
 
 /** The folder a file sits in. */
@@ -142,6 +150,20 @@ export default function Settings() {
     }
   };
 
+  const pickGame = async () => {
+    const dir = await open({ directory: true });
+    if (typeof dir !== "string") return;
+    setBusy(true);
+    try {
+      setStatus(await setGameDir(dir));
+      toast.success(t("recorder.gameFolderSet"));
+    } catch (e) {
+      toast.error(String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const fromFile = async () => {
     const f = await open({ filters: [{ name: "MX Bikes plugin", extensions: ["dlo"] }] });
     if (typeof f === "string") await run(() => installRecorder(f), t("recorder.installed"));
@@ -149,6 +171,23 @@ export default function Settings() {
 
   const show = (job: Promise<void>) => job.catch((e) => toast.error(String(e)));
   const plugin = status?.pluginPath ?? "";
+
+  // Keep the recorder current without being asked. Nothing has ever refreshed `mxbcoach.dlo`,
+  // so a rider installed it once and kept it — and a recorder older than the app it serves
+  // draws nothing and, before 0.23, could not even say its own version.
+  useEffect(() => {
+    void refreshRecorder()
+      .then((v) => {
+        if (v) {
+          toast.success(t("recorder.refreshed", { version: v }));
+          load();
+        }
+      })
+      .catch(() => {});
+    // Once per visit to Settings; the button beside it is there for any other time. `load` and
+    // `t` are deliberately not dependencies: re-running this would re-download the recorder.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <Page title={t("coachSettings.title")}>
@@ -180,7 +219,20 @@ export default function Settings() {
           <p className="mt-3 text-[12px] text-muted-foreground">{t("recorder.versionUnknown")}</p>
         )}
         {status?.recorderOutdated && <p className="mt-3 text-[12px] text-warning">{t("recorder.updateIt")}</p>}
-        {status && !status.gameDir && <p className="mt-3 text-[12px] text-warning">{t("recorder.noGame")}</p>}
+        <div className="mt-4 border-t border-border pt-3">
+          <div className="text-[12.5px] font-semibold">{t("recorder.gameFolder")}</div>
+          <p className="mt-0.5 font-mono text-[12px] text-muted-foreground">
+            {status?.gameDir || t("recorder.gameFolderNone")}
+          </p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            <Button size="sm" variant="outline" disabled={busy} onClick={() => void pickGame()}>
+              {t("recorder.gameFolderPick")}
+            </Button>
+          </div>
+          {status && !status.gameDir && (
+            <p className="mt-2 text-[12px] text-warning">{t("recorder.noGame")}</p>
+          )}
+        </div>
       </div>
 
       <div className="mt-8">

@@ -20,6 +20,17 @@ use crate::telemetry::{self, Recording};
 const PLUGIN: &str = "mxbcoach.dlo";
 /// Built and released with FrostMod (`Frostn1/frostmod`, `src/mxbcoach.cpp`).
 const PLUGIN_URL: &str = "https://github.com/Frostn1/frostmod/releases/latest/download/mxbcoach.dlo";
+/// Which release that is. Same host the app's own updater already asks, once at startup.
+const PLUGIN_RELEASE: &str = "https://api.github.com/repos/Frostn1/frostmod/releases/latest";
+/// What Coach last put in the plugins folder, remembered so a recorder the game has never run
+/// still has a known version. Nothing else can say: the recorder only writes `recorder.ini`
+/// once the game has loaded it, and versions before 0.23 never wrote one at all — which is
+/// exactly the case where every warning in the app stayed silent.
+///
+/// Kept in Coach's own folder rather than the shared `config.json`, because MXB App's `save`
+/// writes that file from its own struct and serde drops every key the struct has no field
+/// for: a note left there would last only until the manager next saved anything.
+const INSTALLED_FILE: &str = "recorder-installed.json";
 
 fn err(e: impl std::fmt::Display) -> String {
     e.to_string()
@@ -1169,6 +1180,92 @@ pub async fn coach_install_plugin(app: AppHandle, from: Option<String>) -> Resul
         return Err("Couldn't replace the recorder. Close MX Bikes and try again.".into());
     }
     Ok(target.to_string_lossy().into_owned())
+}
+
+/// Point Coach at the MX Bikes folder itself.
+///
+/// It shares one `config.json` with MXB App, so this is the same setting the manager has — but
+/// until now only the manager could set it, and everything Coach does with the recorder is
+/// gated on it. A rider whose game isn't where autodetect looks was told to go and open MXB
+/// App, which is the whole "open the app, set it, close it, come back" dance.
+#[tauri::command]
+pub fn coach_set_game_dir(app: AppHandle, dir: String) -> Result<Status, String> {
+    let dir = dir.trim().to_string();
+    if !dir.is_empty() {
+        let path = Path::new(&dir);
+        if !path.is_dir() {
+            return Err("That folder isn't there.".into());
+        }
+        // The folder the game actually runs from, so a rider who picks the mods folder or the
+        // Steam library root is told now rather than after a download that goes nowhere.
+        if !path.join("mxbikes.exe").is_file() {
+            return Err("That isn't the MX Bikes folder: it has no mxbikes.exe in it.".into());
+        }
+    }
+    let mut keys = serde_json::Map::new();
+    keys.insert("game_path".into(), serde_json::Value::String(dir));
+    config::patch_json(&app, keys).map_err(|e| format!("{e:#}"))?;
+    Ok(coach_status(app))
+}
+
+fn installed_note_path(app: &AppHandle) -> Option<PathBuf> {
+    config::data_dir(app).map(|d| d.join("coach").join(INSTALLED_FILE))
+}
+
+fn installed_note(app: &AppHandle) -> Option<String> {
+    let bytes = fs::read(installed_note_path(app)?).ok()?;
+    let doc: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
+    doc.get("version").and_then(|v| v.as_str()).map(str::to_string)
+}
+
+fn write_installed_note(app: &AppHandle, version: &str) {
+    let Some(path) = installed_note_path(app) else { return };
+    if let Some(parent) = path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    let _ = fs::write(path, serde_json::json!({ "version": version }).to_string());
+}
+
+/// The newest FrostMod release's version, without the `v`.
+async fn latest_recorder() -> Result<String, String> {
+    let client = reqwest::Client::builder().user_agent("mxb-coach").build().map_err(err)?;
+    let resp = client.get(PLUGIN_RELEASE).send().await.map_err(err)?;
+    if !resp.status().is_success() {
+        return Err(format!("GitHub answered {}", resp.status()));
+    }
+    let body: serde_json::Value = resp.json().await.map_err(err)?;
+    let tag = body.get("tag_name").and_then(|t| t.as_str()).ok_or("no tag in the release")?;
+    Ok(tag.trim_start_matches('v').to_string())
+}
+
+/// Keep the recorder current without being asked.
+///
+/// The manager has refreshed its own `frostmod.dlo` from `status()` for a while; nothing ever
+/// did the same for `mxbcoach.dlo`, so a rider installed it once and kept it forever. A
+/// recorder older than the app it serves draws nothing and says nothing, and before 0.23 it
+/// couldn't even report its own version — so the app insisted everything was fine while the
+/// cue, the section tip, the gap and the setup card were all silently dropped.
+///
+/// Returns the version now installed when it changed anything.
+#[tauri::command]
+pub async fn coach_refresh_plugin(app: AppHandle) -> Result<Option<String>, String> {
+    let cfg = load_config(&app);
+    let Some(target) = plugin_path(&cfg) else { return Ok(None) };
+    let latest = latest_recorder().await?;
+    // What is there now: what the game last ran, else what Coach last installed. Neither, with
+    // a file present, means a recorder of unknown age — treat that as out of date, because the
+    // versions that can't say are precisely the ones that are.
+    let dirs = session_dirs(&cfg);
+    let ran = crate::hud::coach_dir_of(&dirs).as_deref().and_then(crate::hud::recorder_version);
+    let noted = installed_note(&app);
+    let have = ran.or(noted);
+    let current = target.is_file() && have.as_deref().is_some_and(|v| crate::hud::at_least(v, &latest));
+    if current {
+        return Ok(None);
+    }
+    coach_install_plugin(app.clone(), None).await?;
+    write_installed_note(&app, &latest);
+    Ok(Some(latest))
 }
 
 #[tauri::command]
