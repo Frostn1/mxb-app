@@ -710,6 +710,8 @@ const CREST_DROP_M: f32 = 0.15;
 
 /// How far into a whoop section its drawn shape is eased back over the blended one, metres.
 const WHOOP_EASE_M: f32 = 1.0;
+/// How far out from a whoop section a neighbour's hollow is eased back in, metres.
+const WHOOP_FLOOR_EASE_M: f32 = 6.0;
 const JUMP_HOLLOW: f32 = 0.30;
 const JUMP_HOLLOW_M: f32 = 22.0;
 
@@ -1208,7 +1210,14 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
         &mut turn.v,
         (prog.blend.max(0.0) / PROFILE_STEP).round() as usize,
     );
-    let feat = feature_profile(&prog.features, lap, prog.blend.max(0.0));
+    // Whether this discipline's lanes abut one another.
+    //
+    // A stadium floor stands its lanes 12–14 m apart with a 9.5 m line between them, so a
+    // jump's side mound and a drawn run of hills both have to answer to the ground there
+    // really is. Out on a national neither does — the seam is far away and the blend is what
+    // shaped every lap the rider has signed off — so motocross keeps exactly what it had.
+    let lanes_abut = prog.discipline.rules().sections.is_some();
+    let feat = feature_profile(&prog.features, lap, prog.blend.max(0.0), lanes_abut);
     let feat_side = side_profile(&prog.features, lap, prog.blend.max(0.0));
     let chords = jump_chords(&prog.features, &stations);
     let feat_soft = {
@@ -1412,9 +1421,16 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
             // two-metre clearance leaves the spill nowhere to go at all. The ground between
             // two lanes *is* the jumps' own mound, and the two sides are meant to meet at its
             // foot. Out on a national the seam is far enough that this is still the flat two.
-            let clear = SEAM_CLEAR_M.min(seam[i] * 0.25);
-            let reach = fd + seam[i] - clear;
-            heights[i] += f * lateral(fd, half, f, reach) * one_side(ft, feat_side.at(fs));
+            let reach = if lanes_abut {
+                // Short of the seam, but never short by more than a quarter of the way to it:
+                // two lanes sit twelve metres apart with a nine-and-a-half metre line between
+                // them, so a flat two-metre clearance leaves the spill nowhere to go at all.
+                fd + seam[i] - SEAM_CLEAR_M.min(seam[i] * 0.25)
+            } else {
+                // Exactly what a national has always had: a flat two metres.
+                fd + seam[i] - SEAM_CLEAR_M
+            };
+            heights[i] += f * lateral(fd, half, f, reach, lanes_abut) * one_side(ft, feat_side.at(fs));
         }
         // A berm stands on the outside of the corner, which is the side away from the turn.
         // Whatever the program asked for, plus what the corner would have grown on its own:
@@ -2752,7 +2768,7 @@ const SIDE_FADE_M: f32 = 5.0;
 ///
 /// The riding surface stays level. Crowning it tilted every face and deck under the wheels,
 /// and a table is the safe jump because you can land anywhere on its top.
-fn lateral(d: f32, half: f32, h: f32, reach: f32) -> f32 {
+fn lateral(d: f32, half: f32, h: f32, reach: f32, cap_wins: bool) -> f32 {
     let full = half * FEATURE_FULL;
     if d <= full {
         return 1.0;
@@ -2761,19 +2777,22 @@ fn lateral(d: f32, half: f32, h: f32, reach: f32) -> f32 {
     // meet at the same slope and the skirt lands flat.
     let (s, k) = (FEATURE_SIDE_DEG.to_radians().tan(), FEATURE_SIDE_KNEE);
     let (top, skirt) = (2.0 * (1.0 - k) * h.abs() / s, 3.0 * k * h.abs() / s);
-    // Scaled whole: never narrower than the old fixed fade, and then never past `reach` —
-    // which is the clamp that has to win, because it is the one that says how much dirt is
-    // actually there to spill onto.
+    // Scaled whole, and which of the two clamps wins is the discipline's call.
     //
-    // The two were the other way round, and the fade floor quietly defeated the cap. On a
-    // supercross lane — 12 m centre to centre with a 9.5 m line — a 1.5 m hill spilled 8.3 m
-    // off its own centreline with the next lane's edge 7.3 m away, so every rhythm hill stood
-    // a metre deep on the lane beside it. Out in a field the floor still wins, because out
-    // there `reach` is a thousand metres.
-    let width = (top + skirt)
-        .max(half * (FEATURE_EDGE - FEATURE_FULL))
-        .min((reach - full).max(0.0))
-        .max(1e-4);
+    // Where lanes abut, the cap wins: it is the one that says how much dirt is actually there
+    // to spill onto. On a supercross lane — 12 m centre to centre with a 9.5 m line — a 1.5 m
+    // hill spilled 8.3 m off its own centreline with the next lane's edge 7.3 m away, so every
+    // rhythm hill stood a metre deep on the lane beside it.
+    //
+    // Out on a national the fade floor wins instead. Not a leftover: that is the order every
+    // lap the rider has signed off was built with, and turning the cap up out there moves
+    // Northgate's ground — measured, 10,285 cells of it and 0.74 m at the worst.
+    let floor = half * (FEATURE_EDGE - FEATURE_FULL);
+    let width = if cap_wins {
+        (top + skirt).max(floor).min((reach - full).max(0.0)).max(1e-4)
+    } else {
+        (top + skirt).min(reach - full).max(floor)
+    };
     let scale = width / (top + skirt).max(1e-4);
     let (top, skirt) = (top * scale, skirt * scale);
     let u = d - full;
@@ -3312,7 +3331,7 @@ fn resample(st: &[Station], vals: &[f32], lap: f32) -> Profile {
 }
 
 /// Height added by everything built on the line, along the lap.
-fn feature_profile(features: &[Feature], lap: f32, blend: f32) -> Profile {
+fn feature_profile(features: &[Feature], lap: f32, blend: f32, restore_drawn: bool) -> Profile {
     let mut out = Profile::blank(lap);
     for f in features {
         if matches!(f, Feature::StepUp { .. } | Feature::Berm { .. } | Feature::Sand { .. }) {
@@ -3346,6 +3365,11 @@ fn feature_profile(features: &[Feature], lap: f32, blend: f32) -> Profile {
                 | Feature::Berm { .. }
                 | Feature::Rut { .. }
                 | Feature::Sand { .. }
+                // A whoop set is not a jump dug out of the ground. Measured on all seven
+                // rounds a real set's troughs sit at grade and its crests stand 0.55 m over
+                // the floor beside them; given a hollow at each end the whole section stands
+                // on a pad and its crests read 0.87 m, half again what a supercross whoop is.
+                | Feature::Whoops { .. }
         ) {
             continue;
         }
@@ -3378,6 +3402,28 @@ fn feature_profile(features: &[Feature], lap: f32, blend: f32) -> Profile {
                 let bowl = (x * std::f32::consts::PI).sin().powf(0.8);
                 dig[i] = dig[i].max(h * JUMP_HOLLOW * bowl);
             }
+        }
+    }
+    // And nothing else digs under one either. A rhythm hill's hollow reaches 22 m past its own
+    // foot, which is far enough to scoop the end of the whoop set next door and stand it on
+    // the same pad. Eased back in rather than cut off, so the ground still meets the hollow
+    // either side of the set without a step at the entry.
+    for f in features {
+        if !matches!(f, Feature::Whoops { .. }) {
+            continue;
+        }
+        let (at, len) = (f.at(), f.length());
+        let lo = (((at - WHOOP_FLOOR_EASE_M) / PROFILE_STEP).floor().max(0.0) as usize).min(dig.len() - 1);
+        let hi = (((at + len + WHOOP_FLOOR_EASE_M) / PROFILE_STEP).ceil() as usize).min(dig.len() - 1);
+        for i in lo..=hi {
+            let s = i as f32 * PROFILE_STEP;
+            // Nothing across the set itself, all of it a few metres out from either end.
+            let w = smoothstep(
+                ((at - s) / WHOOP_FLOOR_EASE_M)
+                    .max((s - at - len) / WHOOP_FLOOR_EASE_M)
+                    .clamp(0.0, 1.0),
+            );
+            dig[i] *= w;
         }
     }
     for i in 0..out.v.len() {
@@ -3430,8 +3476,14 @@ fn feature_profile(features: &[Feature], lap: f32, blend: f32) -> Profile {
         // and the hills are the whole of what a rhythm lane is. Three crests is a triple,
         // whose dips *should* be rounded, so the bar sits above it.
         let drawn = match f {
+            // A whoop set is a whoop set whoever drew it: the blend takes a third off every
+            // crest, and that is the whole reason this restore exists.
             Feature::Whoops { .. } => true,
-            Feature::Custom { .. } => f.lips() >= 4,
+            // A drawn run of hills, but only where lanes abut. Motocross draws its wave
+            // sections as one `Custom` of five to seven humps, which clears the four-lip bar,
+            // and restoring those would stand every national's waves taller than the laps the
+            // rider has already signed off were built with.
+            Feature::Custom { .. } => restore_drawn && f.lips() >= 4,
             _ => false,
         };
         if !drawn {
@@ -8122,7 +8174,7 @@ fn layers(prog: &TrackProgram) -> Vec<Layer> {
     let Grounds { field, ridden, line, shoulder, rut, loose, turf } =
         ground_looks(prog.terrain.surface);
     let (_, shoulder_scale) = ground(prog.terrain.surface);
-    vec![
+    let mut bands = vec![
         // Dark soil over the whole site, and the riding line painted *light* on top of it.
         //
         // The way round a published track has it. Indiana lays `soil_dark_c` (49, 35, 23)
@@ -8288,7 +8340,17 @@ fn layers(prog: &TrackProgram) -> Vec<Layer> {
             grass: true,
             gloss: 0,
         },
-    ]
+    ];
+    // And the sand band only where the lap actually carries a sand section.
+    //
+    // It was going out on every track: a motocross national paid for an eighth band and an
+    // all-zero `mask_sand.tga`, and because [`tht`] counts its material layers off the
+    // features instead, the picture of the ground and the stuff the ground is made of
+    // disagreed about whether there was any sand on the track at all.
+    if !prog.features.iter().any(|f| matches!(f, Feature::Sand { .. })) {
+        bands.retain(|l| !matches!(l.band, BandMask::Sand));
+    }
+    bands
 }
 
 fn hmf(prog: &TrackProgram, syn: &Synth) -> String {
@@ -9685,6 +9747,86 @@ mod tests {
         );
     }
 
+    /// And the ground a whoop set stands on is the ground beside it.
+    ///
+    /// Every jump is dug out of a hollow at each of its ends. A whoop set was being given one
+    /// of its own and taking the hollow of the jump next door as well, so the set stood on a
+    /// pad: measured the way the corpus measures, its crests read 0.87 m over the floor beside
+    /// them where all seven rounds read 0.55, and the entry had a scoop in it nobody asked for.
+    #[test]
+    fn a_whoop_set_stands_on_the_ground_beside_it() {
+        let (count, spacing, height) = (9u32, 5.4f32, 0.55f32);
+        let mut p = oval();
+        p.terrain.relief.amplitude = 0.0;
+        p.terrain.relief.tilt = 0.0;
+        p.terrain.relief.landforms = 0;
+        p.terrain.wear = 0.0;
+        // A rhythm-sized hill close enough in front that its hollow reaches into the set.
+        p.features = vec![
+            Feature::Tabletop { at: 8.0, length: 20.0, height: 1.5, lip: 0.0, finish: false },
+            Feature::Whoops { at: 40.0, count, spacing, height },
+        ];
+        let s = synthesise(&p).expect("synthesise");
+
+        let st = p.stations(0.25);
+        let along = |at: f32| -> f32 {
+            let q = st[((at / 0.25) as usize).min(st.len() - 1)];
+            let (rx, rz) = crate::trackprog::right_vector(q.heading);
+            let mut v: Vec<f32> = (-6..=6)
+                .map(|k| {
+                    let u = k as f32 * 0.25;
+                    sample_smooth(&s.heights, s.gw, s.gh, (q.x + rx * u) / s.mps, (q.z + rz * u) / s.mps)
+                })
+                .collect();
+            v.sort_by(f32::total_cmp);
+            v[v.len() / 2]
+        };
+
+        // The floor well clear of both, which is what a rolling percentile would find.
+        let mut bare: Vec<f32> = (120..160).map(|m| along(m as f32)).collect();
+        bare.sort_by(f32::total_cmp);
+        let bare = bare[bare.len() / 2];
+
+        // The troughs and crests of the set itself, skipping the eased first and last whoop.
+        let (mut troughs, mut crests) = (Vec::new(), Vec::new());
+        for k in 1..count - 1 {
+            let from = 40.0 + k as f32 * spacing;
+            let (mut hi, mut lo) = (f32::MIN, f32::MAX);
+            let mut at = from;
+            while at < from + spacing {
+                let v = along(at);
+                hi = hi.max(v);
+                lo = lo.min(v);
+                at += 0.1;
+            }
+            troughs.push(lo);
+            crests.push(hi);
+        }
+        troughs.sort_by(f32::total_cmp);
+        crests.sort_by(f32::total_cmp);
+        let (trough, crest) = (troughs[troughs.len() / 2], crests[crests.len() / 2]);
+        println!(
+            "bare {bare:.2} m, whoop trough {trough:.2} m ({:+.2}), crest {crest:.2} m ({:+.2} over bare)",
+            trough - bare,
+            crest - bare
+        );
+        assert!(
+            (trough - bare).abs() < 0.12,
+            "a whoop set's troughs stand {:+.2} m off the ground beside it",
+            trough - bare
+        );
+        // And so its crests read the height they were drawn at, not half again that.
+        //
+        // Tight on purpose: the blend keeps a section's mean, so with the drawn shape not
+        // restored the crests sit about 0.44 m over the floor rather than 0.55, and a looser
+        // bar than this passes that too — which it did, until the bar came down.
+        assert!(
+            (crest - bare - height).abs() < 0.10,
+            "whoops drawn at {height:.2} m read {:.2} m over the floor beside them",
+            crest - bare
+        );
+    }
+
     /// A jump's side mound never spills past the ground there is for it.
     ///
     /// The cap and the fade floor were the other way round, and the floor quietly won: on a
@@ -9698,7 +9840,7 @@ mod tests {
             let mut last = 1.0f32;
             for step in 0..600 {
                 let d = step as f32 * 0.05;
-                let v = lateral(d, half, 1.5, reach);
+                let v = lateral(d, half, 1.5, reach, true);
                 assert!((0.0..=1.0).contains(&v), "mound {v} at {d} m");
                 // It only ever falls away from the deck.
                 assert!(v <= last + 1e-4, "mound rises again at {d:.2} m: {last} -> {v}");
@@ -9709,7 +9851,7 @@ mod tests {
             }
         }
         // And out in a field it still spreads: the cap is a cap, not a new fade.
-        assert!(lateral(7.0, half, 1.5, 1000.0) > 0.0, "a mound in the open stops at 7 m");
+        assert!(lateral(7.0, half, 1.5, 1000.0, true) > 0.0, "a mound in the open stops at 7 m");
     }
 
     #[test]

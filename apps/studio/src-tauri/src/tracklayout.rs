@@ -2067,11 +2067,26 @@ fn section_features(
         let Some(k) = kind[i] else { continue };
         match k {
             Section::Triple => {
+                // The height is drawn again here, so the span this run-up carries is not the
+                // one the lane was picked on: a taller jump wants a longer face and may no
+                // longer fit the room that chose it. Centred on what is left rather than on
+                // what was asked for, and never started before the lane's own clear zone.
                 let h = rng.range(rules.finish_jump_m.0, rules.finish_jump_m.1);
                 let up = crate::trackprog::lip_face_run(h, 26.0);
-                if let Some(span) = triple_span(&speed, at + up, 26.0, sec.triple_span_m) {
-                    let total = up + 1.2 + span + landing_run(h);
-                    lay(&mut out, triple(at + (r - total) * 0.5, h, span, 26.0));
+                match triple_span(&speed, at + up, 26.0, sec.triple_span_m) {
+                    Some(span) => {
+                        let total = up + 1.2 + span + landing_run(h);
+                        lay(&mut out, triple(at + (r - total).max(0.0) * 0.5, h, span, 26.0));
+                    }
+                    // And where no triple fits at this height the lane gets a table instead of
+                    // nothing: the lane is already spoken for, so the pass that fills what is
+                    // left over never sees it, and it would otherwise build bare.
+                    None => {
+                        let deck = sec.table_deck_m.0;
+                        if up + deck + landing_run(h) <= r {
+                            lay(&mut out, table(at, h, deck, 26.0));
+                        }
+                    }
                 }
             }
             Section::Whoops => {

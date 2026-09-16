@@ -652,22 +652,11 @@ fn repair(prog: &mut TrackProgram) -> Vec<String> {
             height -= 0.1;
         }
         if let Some((height, deck, length, at)) = built {
-            // Whatever stood on that ground goes. Two jumps blended into each other are one
-            // shape with a dip in it, and the finish jump is the one that stands.
-            let taken = prog
-                .features
-                .iter()
-                .filter(|f| f.at() + f.length() > at && f.at() < at + length)
-                .map(|f| f.name())
-                .collect::<Vec<_>>()
-                .join(", ");
-            prog.features
-                .retain(|f| f.at() + f.length() <= at || f.at() >= at + length);
             // A stadium round finishes over a triple, not a table — 22.6–25.3 m crest to crest
             // at a 30° lip on all seven of the measured laps. Built at the span the run-up
             // carries, which `deck` already is: see `tracklayout::triple_span` for why that
             // and the measured median are not the same number.
-            prog.features.push(if rules.finish_triple {
+            let jump = if rules.finish_triple {
                 crate::tracklayout::finish_triple(at, height, deck)
             } else {
                 Feature::Tabletop {
@@ -681,11 +670,40 @@ fn repair(prog: &mut TrackProgram) -> Vec<String> {
                     // and undo.
                     finish: false,
                 }
-            });
+            };
+            // Whatever stood on that ground goes. Two jumps blended into each other are one
+            // shape with a dip in it, and the finish jump is the one that stands.
+            //
+            // Measured against the triple's own footprint, because a triple is a different
+            // size from the table this used to be and clearing only the table's ground left
+            // whatever sat on the rest of the triple standing in it.
+            //
+            // The tabletop keeps the window it has always had. `Feature::length` reports a
+            // table's *ramp-inclusive* footprint, which is longer than the stated `length`, so
+            // measuring that one the same way would clear ground on motocross laps that has
+            // never been cleared — a change nobody asked for, on laps already signed off.
+            let (ja, jb) = if rules.finish_triple {
+                (jump.at(), jump.at() + jump.length())
+            } else {
+                (at, at + length)
+            };
+            let taken = prog
+                .features
+                .iter()
+                .filter(|f| f.at() + f.length() > ja && f.at() < jb)
+                .map(|f| f.name())
+                .collect::<Vec<_>>()
+                .join(", ");
+            prog.features.retain(|f| f.at() + f.length() <= ja || f.at() >= jb);
+            let what = if rules.finish_triple {
+                format!("{height:.1} m triple, {deck:.0} m crest to crest")
+            } else {
+                format!("{height:.1} m tabletop {length:.0} m across a {deck:.0} m deck")
+            };
+            prog.features.push(jump);
             prog.features.sort_by(|a, b| a.at().total_cmp(&b.at()));
             done.push(format!(
-                "built the finish jump at {at:.0} m: a {height:.1} m tabletop {length:.0} m \
-                 across a {deck:.0} m deck, taken at {:.0} km/h{}",
+                "built the finish jump at {at:.0} m: a {what}, taken at {:.0} km/h{}",
                 speed.at(lip_at) * 3.6,
                 if taken.is_empty() {
                     String::new()
