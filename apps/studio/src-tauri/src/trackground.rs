@@ -362,6 +362,21 @@ pub struct LapTrace {
     pub segments: Vec<TraceConfidence>,
     #[serde(default)]
     pub note: String,
+    /// Where the route came from — a rider who knows the venue, or a guess off a photograph.
+    /// These are not the same thing and the track should not pretend they are.
+    #[serde(default)]
+    pub route_source: String,
+    /// Whether the route has been checked by whoever drew it. A route drawn by a rider and then
+    /// digitised by a machine is only as good as the digitisation, and that is a separate
+    /// question from whether the rider knew the track.
+    #[serde(default)]
+    pub route_confirmed: bool,
+    /// Defects the tracer knows about and could not fix — a pen lift bridged by a straight line,
+    /// a section not followed. Carried verbatim into the built track, because a rider looking at
+    /// a strange straight in the middle of a corner deserves to find out why from the track
+    /// rather than from a chat log.
+    #[serde(default)]
+    pub known_issues: Vec<String>,
 }
 
 /// How sure the tracer was about one stretch of the lap.
@@ -788,6 +803,34 @@ pub struct Imported {
     pub direction_verified: bool,
     pub confidence: Vec<TraceConfidence>,
     pub note: String,
+    pub route_source: String,
+    pub route_confirmed: bool,
+    pub known_issues: Vec<String>,
+}
+
+/// The plot a lap of this shape gets, in metres.
+///
+/// A plot is not free to be any shape, and the reason is the game's own grid. MX Bikes wants a
+/// power of two plus one samples on an edge, `grid_dims` puts the program's `samples` on the long
+/// edge and the nearest such number on the short one, and then refuses the pair if the cells come
+/// out more than five per cent from square. So the only short-to-long ratios a plot can actually
+/// express are the ones the sample counts can: 2049 against 2049, 1025, 513 and so on — that is,
+/// one, a half, a quarter.
+///
+/// Ironman wants 470 by 350, a ratio of 0.745, and there is no pair of sample counts that gives
+/// it: 1025 samples down 350 m is 0.342 m a cell against 0.229 m across. The honest answer is to
+/// round the short edge *up* to the nearest ratio the grid can hold, which here means a square
+/// plot with some spare ground along one side. Rounding down would crop the lap.
+fn plot_size(want_x: f32, want_z: f32) -> (f32, f32) {
+    let long = ((want_x.max(want_z)) / 10.0).ceil() * 10.0;
+    let short_wanted = want_x.min(want_z);
+    // Largest first, so the smallest ratio that still covers the lap wins.
+    let ratio = [0.125f32, 0.25, 0.5, 1.0]
+        .into_iter()
+        .find(|r| long * r >= short_wanted)
+        .unwrap_or(1.0);
+    let short = long * ratio;
+    if want_x >= want_z { (long, short) } else { (short, long) }
 }
 
 /// Bring a lidar tile and a traced lap in as a plot of real ground.
@@ -802,10 +845,9 @@ pub fn import(tif: &Path, lap: &Path, strength: f32) -> Result<Imported> {
     // The plot is the shape of the venue, rounded to ten metres so a trace nudged by a metre
     // does not move the whole plot. Cells stay square: whichever edge is longer gets
     // [`GROUND_DIM`] samples and the other gets the count that keeps a cell the same size.
-    let want_x = ((e1 - e0) as f32 + PLOT_MARGIN_M * 2.0 / 1.0).max(60.0);
+    let want_x = ((e1 - e0) as f32 + PLOT_MARGIN_M * 2.0).max(60.0);
     let want_z = ((n1 - n0) as f32 + PLOT_MARGIN_M * 2.0).max(60.0);
-    let size_x = (want_x / 10.0).ceil() * 10.0;
-    let size_z = (want_z / 10.0).ceil() * 10.0;
+    let (size_x, size_z) = plot_size(want_x, want_z);
     let (cx, cy) = ((e0 + e1) * 0.5, (n0 + n1) * 0.5);
     let (west, north) = (cx - size_x as f64 * 0.5, cy + size_z as f64 * 0.5);
 
@@ -922,6 +964,9 @@ pub fn import(tif: &Path, lap: &Path, strength: f32) -> Result<Imported> {
         direction_verified: trace.direction_verified,
         confidence: trace.segments.clone(),
         note: trace.note.clone(),
+        route_source: trace.route_source.clone(),
+        route_confirmed: trace.route_confirmed,
+        known_issues: trace.known_issues.clone(),
     })
 }
 
@@ -1018,7 +1063,11 @@ pub fn program_for(imp: &Imported, jumps: crate::trackprog::ScanJumps) -> Result
     // goes, sitting in a rider's mods folder with nothing on it to say so — and a name is the
     // only part of a track that everyone reads.
     let name = if imp.place.is_empty() { "Scanned Place".to_string() } else { imp.place.clone() };
-    let name = if imp.provisional { format!("{name} (provisional)") } else { name };
+    let name = if imp.provisional || !imp.route_confirmed {
+        format!("{name} (provisional)")
+    } else {
+        name
+    };
 
     let prog = TrackProgram {
         name,
@@ -1122,6 +1171,12 @@ pub fn provenance_lines(imp: &Imported) -> Vec<String> {
         "Destriping moved the ground by {:.2} cm rms.",
         imp.destripe_rms * 100.0
     ));
+    if !imp.route_source.is_empty() {
+        out.push(format!("Route: {}", imp.route_source));
+    }
+    if !imp.route_confirmed {
+        out.push("The route has NOT been confirmed by whoever drew it.".into());
+    }
     if imp.provisional {
         out.push("The traced lap is PROVISIONAL: it is where someone judged the racing line to \
                   be from an aerial photograph, not a survey."
@@ -1134,6 +1189,12 @@ pub fn provenance_lines(imp: &Imported) -> Vec<String> {
     }
     if !imp.note.is_empty() {
         out.push(format!("Tracer's note: {}", imp.note));
+    }
+    if !imp.known_issues.is_empty() {
+        out.push("Known defects in the traced lap:".into());
+        for k in &imp.known_issues {
+            out.push(format!("  - {k}"));
+        }
     }
     if !imp.confidence.is_empty() {
         out.push("How much of the lap is trusted, by traced point:".into());
@@ -1269,10 +1330,6 @@ mod tests {
             }
         }
         z
-    }
-
-    fn bump(dim: usize) -> Vec<f32> {
-        bump2(dim, dim)
     }
 
     #[test]
