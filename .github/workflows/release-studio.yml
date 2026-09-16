@@ -46,7 +46,11 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: npm
+
+      # bun installs the workspace from bun.lock, and tauri-action runs the app's
+      # beforeBuildCommand (`bun run build`) with it too.
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -77,7 +81,7 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install dependencies
-        run: npm ci
+        run: bun install --frozen-lockfile
 
       # The studio's Protect tab needs the same private module the manager does; without it
       # the tab hides itself rather than failing, so a fork still builds.

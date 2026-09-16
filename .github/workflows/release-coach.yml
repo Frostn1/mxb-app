@@ -41,9 +41,9 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: npm
 
-      # The app's beforeBuildCommand is `bun run build`.
+      # bun installs the workspace from bun.lock, and tauri-action runs the app's
+      # beforeBuildCommand (`bun run build`) with it too.
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
 
@@ -72,9 +72,8 @@ jobs:
           shared-key: release
           save-if: false
 
-      # The lockfile is npm's; the workspace install is the same one CI uses.
       - name: Install dependencies
-        run: npm ci
+        run: bun install --frozen-lockfile
 
       # The locked-content reader, as MXB App and Studio build with it: a GUID-locked track's
       # terrain and scenery then open for the 3D view. A fork builds without it, and the coach

@@ -86,8 +86,8 @@ The route takes no bearer token, because BMAC has no account here. Its credentia
 before it is verified. Two secrets, neither in the repository:
 
 ```sh
-npx wrangler secret put BMAC_WEBHOOK_SECRET          # shown by BMAC when the webhook is made
-npx wrangler secret put DISCORD_DONATION_WEBHOOK_URL # the channel webhook — a credential itself
+bunx wrangler secret put BMAC_WEBHOOK_SECRET          # shown by BMAC when the webhook is made
+bunx wrangler secret put DISCORD_DONATION_WEBHOOK_URL # the channel webhook — a credential itself
 ```
 
 Without them the route answers 503, the same way provisioning does without its AWS key.
@@ -281,12 +281,12 @@ are read off. Together the bounds make forging one cost more than the decision i
 ## Development
 
 ```sh
-npm install
-npx wrangler types                                              # regenerate Env
-npx tsc --noEmit
-npx vitest run
-for m in migrations/*.sql; do npx wrangler d1 execute mxb-control-plane --local --file "$m"; done
-npx wrangler dev
+bun install
+bunx wrangler types                                              # regenerate Env
+bunx tsc --noEmit
+bunx vitest run
+for m in migrations/*.sql; do bunx wrangler d1 execute mxb-control-plane --local --file "$m"; done
+bunx wrangler dev
 ```
 
 ### Pointing the app at it
@@ -296,7 +296,7 @@ a shipped binary always uses the baked-in URL, because responses from here becom
 into the game's mods folder and a redirectable target is a way to put content on a player's disk.
 
 ```sh
-MXB_EXPERIMENTAL=1 MXB_CONTROL_PLANE=http://127.0.0.1:8799 npm run start-dev
+MXB_EXPERIMENTAL=1 MXB_CONTROL_PLANE=http://127.0.0.1:8799 bun run start-dev
 ```
 
 The paint-sync round trip has a live test that needs both:
@@ -307,5 +307,5 @@ MXB_CONTROL_PLANE=http://127.0.0.1:8799 MXB_TEST_TOKEN=<token from /v1/enroll> \
   cargo test --locked live_sync -- --ignored --nocapture
 ```
 
-Deploy with `npx wrangler deploy`. Resources already provisioned in the personal account:
+Deploy with `bunx wrangler deploy`. Resources already provisioned in the personal account:
 D1 `mxb-control-plane` (WEUR) and R2 `mxb-paints` (WEUR).

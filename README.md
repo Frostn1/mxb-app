@@ -181,7 +181,7 @@ Running through all of it:
 | [`scripts/`](scripts/) | Release plumbing — changelog sections, Discord notes, the Linux AppImage fix-up. |
 | [`site/`](site/) | The landing page published by [`pages.yml`](.github/workflows/pages.yml). |
 
-The repo is an npm + Cargo workspace holding two applications. They share one copy of the
+The repo is a bun + Cargo workspace holding two applications. They share one copy of the
 file-format and 3D code (`crates/core`, `packages/shared`) and one config folder, so a bike
 the Studio paints is a bike the manager already knows about.
 
@@ -198,18 +198,18 @@ On Linux that includes `libasound2-dev` — see
 [`ci.yml`](.github/workflows/ci.yml) for the full apt list.
 
 ```sh
-npm install          # install frontend dependencies
-npm run tauri dev    # run the desktop app (Vite + Rust)
+bun install          # install frontend dependencies
+bun run tauri dev    # run the desktop app (Vite + Rust)
 ```
 
 Other scripts:
 
 ```sh
-npm run dev          # Vite dev server only (frontend; Tauri commands unavailable)
-npm run build        # typecheck + build the frontend
-npm run typecheck    # tsc --noEmit
-npm run lint         # eslint
-npm run tauri build  # produce a production desktop bundle
+bun run dev          # Vite dev server only (frontend; Tauri commands unavailable)
+bun run build        # typecheck + build the frontend
+bun run typecheck    # tsc --noEmit
+bun run lint         # eslint
+bun run tauri build  # produce a production desktop bundle
 ```
 
 Rust backend (from the repo root — it is the Cargo workspace root):

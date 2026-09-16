@@ -49,7 +49,11 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: npm
+
+      # bun installs the workspace from bun.lock, and tauri-action runs the app's
+      # beforeBuildCommand (`bun run build`) with it too.
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -87,7 +91,7 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install frontend dependencies
-        run: npm ci
+        run: bun install --frozen-lockfile
 
       # Pull in the optional local module from the private repo so published builds
       # can decode real bike geometry. Read-only deploy key (SIDECAR_DEPLOY_KEY);

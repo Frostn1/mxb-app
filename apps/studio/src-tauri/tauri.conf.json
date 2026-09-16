@@ -5,8 +5,8 @@
   "version": "0.1.10",
   "identifier": "com.frost.froststudio",
   "build": {
-    "beforeDevCommand": "npm run dev",
-    "beforeBuildCommand": "npm run build",
+    "beforeDevCommand": "bun run dev",
+    "beforeBuildCommand": "bun run build",
     "devUrl": "http://localhost:1430",
     "frontendDist": "../dist"
   },
