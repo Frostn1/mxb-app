@@ -32,7 +32,7 @@ export const en = {
   "coachSettings.check": "Check for updates",
 
   "sessions.title": "Sessions",
-  "sessions.sub": "Every stint you ride with the recorder on. Pick one to see its laps.",
+  "sessions.sub": "Every session you ride with the recorder on. Pick one to see its laps.",
   "sessions.emptyTitle": "No sessions yet",
   "sessions.emptyBody":
     "Install the recorder in Settings, ride a few laps in MX Bikes, and they show up here.",
@@ -63,6 +63,8 @@ export const en = {
   "session.fastestSetup": "Fastest",
   "session.thisSetup": "This session",
   "session.lapsShort": "laps",
+  "session.stints": "{{n}} stints",
+  "session.stintTag": "stint {{n}}",
 
   "review.title": "Lap review",
   "review.back": "Laps",
@@ -234,6 +236,11 @@ export const en = {
   "recorder.installed": "Recorder installed. Restart MX Bikes if it's open.",
   "recorder.removed": "Recorder removed.",
   "recorder.noGame": "The MX Bikes folder wasn't found. Set it in MXB App.",
+  "recorder.version": "Recorder {{version}}",
+  "recorder.versionUnknown":
+    "The recorder's version shows here once you've started MX Bikes with it installed.",
+  "recorder.tooOld": "Your recorder is {{version}}. This needs 0.23 or newer. Update it in Settings.",
+  "recorder.updateIt": "Your recorder is older than 0.23. Update it for the HUD and the spoken cues.",
   "recorder.missingTitle": "The recorder isn't installed",
   "recorder.missingBody": "Install it to start saving your laps.",
   "recorder.setUp": "Set up",
@@ -247,7 +254,7 @@ export const en = {
   "coachSettings.open": "Open",
 
   "cues.voice": "Speak the cues",
-  "cues.voiceBody": "Needs the recorder from FrostMod 0.22 or newer. Update it in Settings.",
+  "cues.voiceBody": "Needs the recorder from FrostMod 0.23 or newer. Update it in Settings.",
   "cues.volume": "Volume",
 
   "otips.none": "No laps to coach yet. Ride a whole lap with the recorder on.",

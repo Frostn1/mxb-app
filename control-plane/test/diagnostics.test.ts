@@ -274,8 +274,8 @@ describe("reading executable memory nothing accounts for", () => {
     protect: "rwx",
     thread: true,
     image: true,
-    name: "kaizo.dll",
-    pdb: "kaizo.pdb",
+    name: "trainer.dll",
+    pdb: "trainer.pdb",
     timestamp: 1695000000,
     sha256: HASH,
     ...extra,
@@ -284,7 +284,7 @@ describe("reading executable memory nothing accounts for", () => {
   it("stores a region as a row like any other", () => {
     const rows = parseRegions([region()])!;
     expect(rows).toHaveLength(1);
-    expect(rows[0].name).toBe("kaizo.dll");
+    expect(rows[0].name).toBe("trainer.dll");
     expect(rows[0].origin).toBe("memory");
     expect(rows[0].sha256).toBe(HASH);
     expect(rows[0].size).toBe(208896);
@@ -300,18 +300,18 @@ describe("reading executable memory nothing accounts for", () => {
   });
 
   it("falls back to the pdb, and then to a name of its own", () => {
-    expect(parseRegions([region({ name: "" })])![0].name).toBe("kaizo.pdb");
+    expect(parseRegions([region({ name: "" })])![0].name).toBe("trainer.pdb");
     expect(parseRegions([region({ name: "", pdb: "" })])![0].name).toBe("unnamed.region");
   });
 
   it("keeps the pdb visible when it is not already the name", () => {
-    const rows = parseRegions([region({ name: "d3d11.dll", pdb: "kaizo.pdb" })])!;
+    const rows = parseRegions([region({ name: "d3d11.dll", pdb: "trainer.pdb" })])!;
     expect(rows[0].name).toBe("d3d11.dll");
-    expect(rows[0].detail).toContain("kaizo.pdb");
+    expect(rows[0].detail).toContain("trainer.pdb");
   });
 
   it("drops a name that is not one rather than storing a path", () => {
-    const rows = parseRegions([region({ name: "c:\\users\\somebody\\kaizo.dll", pdb: "" })])!;
+    const rows = parseRegions([region({ name: "c:\\users\\somebody\\trainer.dll", pdb: "" })])!;
     expect(rows[0].name).toBe("unnamed.region");
   });
 
@@ -334,10 +334,10 @@ describe("reading executable memory nothing accounts for", () => {
     const rows = parseRegions([region()])!;
     expect(isUnaccounted(rows[0])).toBe(true);
     expect(classify(rows, []).state).toBe("warn");
-    const deny: ModuleRule = { id: 4, kind: "deny", pattern: "", sha256: HASH, label: "Kaizo" };
+    const deny: ModuleRule = { id: 4, kind: "deny", pattern: "", sha256: HASH, label: "Trainer" };
     const verdict = classify(rows, [deny]);
     expect(verdict.state).toBe("alert");
-    expect(verdict.matched[0].label).toBe("Kaizo");
+    expect(verdict.matched[0].label).toBe("Trainer");
   });
 
   it("is silenced by allowing the fingerprint, not by a release", () => {

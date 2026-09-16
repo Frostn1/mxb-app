@@ -1934,7 +1934,7 @@ fn straight(c: &mut Ctx) {
 pub struct SectionBest {
     pub name: String,
     pub best: f32,
-    /// The lap it came from.
+    /// The lap it came from, as the caller keys its laps.
     pub lap: i32,
     /// Standard deviation over the session's laps, seconds.
     pub spread: f32,

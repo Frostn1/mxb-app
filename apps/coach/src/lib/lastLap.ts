@@ -2,6 +2,8 @@ import { coachSessions, type SessionSummary } from "@/api/coach";
 
 export interface LastLap {
   session: SessionSummary;
+  /** The recording the lap is in: a session can be several stints on track. */
+  path: string;
   /** The lap's number, as the review takes it. */
   lap: number;
 }
@@ -11,7 +13,7 @@ export function pickLastLap(sessions: SessionSummary[]): LastLap | null {
   const newest = [...sessions].sort((a, b) => b.started.localeCompare(a.started));
   for (const session of newest) {
     const lap = [...session.laps].reverse().find((l) => l.whole && !l.invalid);
-    if (lap) return { session, lap: lap.num };
+    if (lap) return { session, path: lap.path, lap: lap.num };
   }
   return null;
 }

@@ -55,17 +55,28 @@ pub struct Status {
     pub plugin_path: Option<String>,
     pub plugin_installed: bool,
     pub session_dirs: Vec<String>,
+    /// The recorder's own version, as it wrote it the last time the game ran it. None until
+    /// the game has run it once.
+    pub recorder_version: Option<String>,
+    /// The recorder that ran is older than the one the HUD and the spoken cues need.
+    pub recorder_outdated: bool,
 }
 
 #[tauri::command]
 pub fn coach_status(app: AppHandle) -> Status {
     let cfg = load_config(&app);
     let plugin = plugin_path(&cfg);
+    let dirs = session_dirs(&cfg);
+    let recorder_version = crate::hud::coach_dir_of(&dirs).as_deref().and_then(crate::hud::recorder_version);
     Status {
         game_dir: cfg.install_dir(),
         plugin_installed: plugin.as_ref().is_some_and(|p| p.is_file()),
         plugin_path: plugin.map(|p| p.to_string_lossy().into_owned()),
-        session_dirs: session_dirs(&cfg).iter().map(|d| d.to_string_lossy().into_owned()).collect(),
+        session_dirs: dirs.iter().map(|d| d.to_string_lossy().into_owned()).collect(),
+        recorder_outdated: recorder_version
+            .as_deref()
+            .is_some_and(|v| !crate::hud::at_least(v, crate::hud::RECORDER_NEEDS)),
+        recorder_version,
     }
 }
 
@@ -73,6 +84,13 @@ pub fn coach_status(app: AppHandle) -> Status {
 #[serde(rename_all = "camelCase")]
 pub struct LapSummary {
     pub num: i32,
+    /// The recording this lap is in: a session is every stint of one event.
+    #[serde(default)]
+    pub path: String,
+    /// Which stint of the session it was ridden in, from 0. The game numbers laps per stint,
+    /// so two stints both have a lap 1.
+    #[serde(default)]
+    pub stint: i32,
     pub time_ms: i32,
     pub invalid: bool,
     /// Started and finished at the line: it can be compared.
@@ -93,11 +111,22 @@ impl LapSummary {
     }
 }
 
+/// One stint on track: one recording. A session is every stint of one event.
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Stint {
+    pub path: String,
+    pub started: String,
+    /// The setup it was ridden on, as the game names it.
+    pub setup: String,
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionSummary {
+    /// The first stint's file. Every stint is in `stints`.
     pub path: String,
-    /// `yyyymmdd-hhmmss-mmm`, local time the stint started. Sorts by date.
+    /// `yyyymmdd-hhmmss-mmm`, local time the first stint started. Sorts by date.
     pub started: String,
     pub rider: String,
     pub track_id: String,
@@ -105,23 +134,33 @@ pub struct SessionSummary {
     pub bike_id: String,
     pub bike_name: String,
     pub category: String,
+    /// 1 = testing, 2 = race, 4 = straight rhythm. A stint of another kind is another session.
+    #[serde(default)]
+    pub event_type: i32,
     pub track_length: f32,
     pub limiter: i32,
     /// False when the game quit mid-stint.
     pub complete: bool,
     pub laps: Vec<LapSummary>,
     pub best_ms: Option<i32>,
-    /// The setup it was ridden on, as the game names it (without a common setup's ':').
+    /// The setup the last stint was ridden on, as the game names it (without a common
+    /// setup's ':').
     #[serde(default)]
     pub setup: String,
+    /// Every stint this session was ridden in, oldest first.
+    #[serde(default)]
+    pub stints: Vec<Stint>,
 }
 
 fn summarize(path: &Path, rec: &Recording) -> SessionSummary {
+    let file = path.to_string_lossy().into_owned();
     let laps: Vec<LapSummary> = rec
         .laps()
         .iter()
         .map(|l| LapSummary {
             num: l.num,
+            path: file.clone(),
+            stint: 0,
             time_ms: l.time_ms,
             invalid: l.invalid,
             whole: l.whole,
@@ -131,22 +170,96 @@ fn summarize(path: &Path, rec: &Recording) -> SessionSummary {
         })
         .collect();
     let e = &rec.event;
+    let started = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+    let setup = rec.session.setup.trim_start_matches(':').to_string();
     SessionSummary {
-        path: path.to_string_lossy().into_owned(),
-        started: path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default(),
+        path: file.clone(),
         rider: e.rider.clone(),
         track_id: e.track_id.clone(),
         track_name: e.track_name.clone(),
         bike_id: e.bike_id.clone(),
         bike_name: e.bike_name.clone(),
         category: e.category.clone(),
+        event_type: e.event_type,
         track_length: e.track_length,
         limiter: e.limiter,
         complete: rec.complete,
-        setup: rec.session.setup.trim_start_matches(':').to_string(),
         best_ms: laps.iter().filter(|l| l.comparable()).map(|l| l.time_ms).min(),
         laps,
+        stints: vec![Stint { path: file, started: started.clone(), setup: setup.clone() }],
+        started,
+        setup,
     }
+}
+
+/// How long a break makes the next stint a new session. Going out and back in during one
+/// event writes another file every time, and those are all the same session.
+const SAME_EVENT_GAP_S: i64 = 3 * 60 * 60;
+
+/// Days since 1970-01-01, by Howard Hinnant's `days_from_civil`.
+fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
+    let y = if m <= 2 { y - 1 } else { y };
+    let era = if y >= 0 { y } else { y - 399 } / 400;
+    let yoe = y - era * 400;
+    let mp = (m + 9) % 12;
+    let doy = (153 * mp + 2) / 5 + d - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    era * 146_097 + doe - 719_468
+}
+
+/// A `yyyymmdd-hhmmss-mmm` stamp as seconds, so two stints can be held apart in time.
+fn stamp_secs(stamp: &str) -> Option<i64> {
+    let date: i64 = stamp.get(..8)?.parse().ok()?;
+    let time: i64 = stamp.get(9..15)?.parse().ok()?;
+    let day = days_from_civil(date / 10_000, date / 100 % 100, date % 100);
+    Some(day * 86_400 + time / 10_000 * 3600 + time / 100 % 100 * 60 + time % 100)
+}
+
+/// How long a stint was on track, seconds, by its laps.
+fn ridden_s(s: &SessionSummary) -> i64 {
+    s.laps.iter().map(|l| i64::from(l.time_ms.max(l.ridden_ms)).max(0)).sum::<i64>() / 1000
+}
+
+/// Whether two stints are the same event: the same rider on the same bike at the same track,
+/// in the same kind of event. Not the game's session — one race event runs through practice,
+/// qualifying and the race, and all of it is one session.
+fn same_event(a: &SessionSummary, b: &SessionSummary) -> bool {
+    (&a.rider, &a.track_id, &a.bike_id, a.event_type) == (&b.rider, &b.track_id, &b.bike_id, b.event_type)
+}
+
+/// Adds a stint to the session it belongs to.
+fn merge_stint(into: &mut SessionSummary, s: SessionSummary) {
+    let stint = into.stints.len() as i32;
+    into.laps.extend(s.laps.into_iter().map(|l| LapSummary { stint, ..l }));
+    into.best_ms = [into.best_ms, s.best_ms].into_iter().flatten().min();
+    // The last stint says how the session ended and what it was ridden on.
+    into.complete = s.complete;
+    into.setup = s.setup;
+    into.stints.extend(s.stints);
+}
+
+/// One session per event: stints of the same event, ridden back to back, become one session
+/// with all their laps. Oldest first.
+fn group_sessions(mut stints: Vec<SessionSummary>) -> Vec<SessionSummary> {
+    stints.sort_by(|a, b| a.started.cmp(&b.started));
+    // Each group with the time its last stint came off track.
+    let mut out: Vec<(SessionSummary, i64)> = Vec::new();
+    for s in stints {
+        let start = stamp_secs(&s.started);
+        let end = start.unwrap_or(0) + ridden_s(&s);
+        let joins = out.last().is_some_and(|(g, off)| {
+            same_event(g, &s) && start.map_or(true, |t| t - off <= SAME_EVENT_GAP_S)
+        });
+        match out.len().checked_sub(1).filter(|_| joins) {
+            Some(i) => {
+                let (g, off) = &mut out[i];
+                merge_stint(g, s);
+                *off = end;
+            }
+            None => out.push((s, end)),
+        }
+    }
+    out.into_iter().map(|(g, _)| g).collect()
 }
 
 #[derive(Serialize, Deserialize)]
@@ -157,11 +270,12 @@ struct Indexed {
 }
 
 fn index_path(app: &AppHandle) -> Option<PathBuf> {
-    // v3: sessions carry the setup they were ridden on.
-    Some(config::data_dir(app)?.join("coach").join("index-v3.json"))
+    // v4: stints carry the event they belong to, and laps the file they're in.
+    Some(config::data_dir(app)?.join("coach").join("index-v4.json"))
 }
 
-/// Every session on disk, newest first. A file that won't parse is skipped, not fatal.
+/// Every session on disk, newest first: the stints of one event as one session. A file that
+/// won't parse is skipped, not fatal.
 fn all_sessions(app: &AppHandle) -> Vec<SessionSummary> {
     let cfg = load_config(app);
     let index_file = index_path(app);
@@ -215,6 +329,7 @@ fn all_sessions(app: &AppHandle) -> Vec<SessionSummary> {
             let _ = fs::write(file, json);
         }
     }
+    let mut out = group_sessions(out);
     out.sort_by(|a, b| b.started.cmp(&a.started));
     out
 }
@@ -285,13 +400,14 @@ fn best_reference(sessions: &[SessionSummary], track_id: &str, bike_id: &str, ex
         .iter()
         .filter(|s| s.track_id == track_id)
         .flat_map(|s| s.laps.iter().filter(|l| l.comparable()).map(move |l| (s, l)))
-        .filter(|(s, l)| exclude != Some((s.path.as_str(), l.num)))
+        .filter(|(_, l)| exclude != Some((l.path.as_str(), l.num)))
         .min_by_key(|(s, l)| (s.bike_id != bike_id, l.time_ms))
         .map(|(s, l)| LapRef {
-            path: s.path.clone(),
+            // The lap's own file and the stint it was ridden in: a session spans several.
+            path: l.path.clone(),
             lap: l.num,
             time_ms: l.time_ms,
-            started: s.started.clone(),
+            started: s.stints.get(l.stint.max(0) as usize).map_or(&s.started, |x| &x.started).clone(),
             bike_name: s.bike_name.clone(),
         })
 }
@@ -306,23 +422,31 @@ pub struct SessionDetail {
     pub ideal: Option<Ideal>,
 }
 
+/// The whole session `path` belongs to: every stint of that event, with all their laps.
 #[tauri::command]
 pub fn coach_session(app: AppHandle, path: String) -> Result<SessionDetail, String> {
-    let rec = load(&path)?;
-    let summary = summarize(Path::new(&path), &rec);
     let sessions = all_sessions(&app);
+    let summary = match sessions.iter().find(|s| s.stints.iter().any(|x| x.path == path)) {
+        Some(s) => s.clone(),
+        None => summarize(Path::new(&path), &load(&path)?),
+    };
     let reference = best_reference(&sessions, &summary.track_id, &summary.bike_id, None);
     let ideal = match &reference {
         Some(r) => {
-            let ref_rec = if r.path == path { None } else { Some(load(&r.path)?) };
-            let ref_trace = trace(ref_rec.as_ref().unwrap_or(&rec), r.lap)?;
+            let ref_trace = trace(&load(&r.path)?, r.lap)?;
             let sections = analysis::sections(&ref_trace);
-            let laps: Vec<(i32, Trace)> = rec
-                .laps()
-                .iter()
-                .filter(|l| l.whole && !l.invalid)
-                .filter_map(|l| Some((l.num, Trace::new(l, rec.event.track_length)?)))
-                .collect();
+            // Keyed by where each lap sits in the session's list, not by its number: every
+            // stint starts counting at lap 1 again.
+            let mut laps: Vec<(i32, Trace)> = Vec::new();
+            for (i, st) in summary.stints.iter().enumerate() {
+                let Ok(rec) = load(&st.path) else { continue };
+                for l in rec.laps().iter().filter(|l| l.whole && !l.invalid) {
+                    let at = summary.laps.iter().position(|x| x.stint as usize == i && x.num == l.num);
+                    if let (Some(at), Some(t)) = (at, Trace::new(l, rec.event.track_length)) {
+                        laps.push((at as i32, t));
+                    }
+                }
+            }
             analysis::ideal(&sections, &laps)
         }
         None => None,
@@ -817,16 +941,94 @@ mod tests {
             bike_id: bike.into(),
             bike_name: bike.into(),
             category: String::new(),
+            event_type: 1,
             track_length: 1000.0,
             limiter: 0,
             complete: true,
             laps: laps
                 .iter()
-                .map(|&(num, time_ms, whole)| LapSummary { num, time_ms, invalid: false, whole, issue: None, crashed: false, ridden_ms: 0 })
+                .map(|&(num, time_ms, whole)| LapSummary {
+                    num,
+                    path: path.into(),
+                    stint: 0,
+                    time_ms,
+                    invalid: false,
+                    whole,
+                    issue: None,
+                    crashed: false,
+                    ridden_ms: time_ms,
+                })
                 .collect(),
             setup: String::new(),
-            best_ms: None,
+            best_ms: laps.iter().filter(|l| l.2).map(|l| l.1).min(),
+            stints: vec![Stint { path: path.into(), started: path.into(), setup: String::new() }],
         }
+    }
+
+    /// A stint of one event. Its file is its stamp, and each lap took as long as it says.
+    fn stint(started: &str, bike: &str, event_type: i32, laps: &[(i32, i32)]) -> SessionSummary {
+        let whole: Vec<(i32, i32, bool)> = laps.iter().map(|&(num, time_ms)| (num, time_ms, true)).collect();
+        let mut s = session(started, "indiana", bike, &whole);
+        s.rider = "Frost".into();
+        s.event_type = event_type;
+        s
+    }
+
+    #[test]
+    fn the_stints_of_one_event_are_one_session() {
+        let out = group_sessions(vec![
+            stint("20260915-100000-000", "kx450", 1, &[(0, 60_000), (1, 59_000)]),
+            stint("20260915-101500-000", "kx450", 1, &[(0, 58_000)]),
+            stint("20260915-104500-000", "kx450", 1, &[(0, 61_000)]),
+        ]);
+        assert_eq!(out.len(), 1, "going out and back in is still one session");
+        assert_eq!(out[0].laps.len(), 4);
+        assert_eq!(out[0].best_ms, Some(58_000), "the best lap is across the whole session");
+        assert_eq!(out[0].started, "20260915-100000-000", "it started when its first stint did");
+        let stints: Vec<i32> = out[0].laps.iter().map(|l| l.stint).collect();
+        assert_eq!(stints, [0, 0, 1, 2], "every lap knows the stint it was ridden in");
+        assert_eq!(out[0].laps[3].path, "20260915-104500-000", "and the file it's in");
+        assert_eq!(out[0].stints.len(), 3);
+    }
+
+    #[test]
+    fn another_event_is_another_session() {
+        let out = group_sessions(vec![
+            stint("20260915-100000-000", "kx450", 1, &[(0, 60_000)]),
+            stint("20260915-101000-000", "yz250", 1, &[(0, 60_000)]),
+            stint("20260915-102000-000", "kx450", 2, &[(0, 60_000)]),
+        ]);
+        assert_eq!(out.len(), 3, "another bike, or a race rather than testing, stands on its own");
+    }
+
+    #[test]
+    fn a_long_break_starts_a_new_session() {
+        let out = group_sessions(vec![
+            stint("20260915-100000-000", "kx450", 1, &[(0, 60_000)]),
+            stint("20260915-140000-000", "kx450", 1, &[(0, 60_000)]),
+        ]);
+        assert_eq!(out.len(), 2, "four hours later is a new session");
+    }
+
+    /// The break is measured from when the rider came off track, not from when the stint
+    /// started: two hours on track and another ride half an hour later is one session.
+    #[test]
+    fn the_break_is_measured_from_the_end_of_a_stint() {
+        let long: Vec<(i32, i32)> = (0..120).map(|k| (k, 60_000)).collect();
+        let out = group_sessions(vec![
+            stint("20260915-100000-000", "kx450", 1, &long),
+            stint("20260915-143000-000", "kx450", 1, &[(0, 60_000)]),
+        ]);
+        assert_eq!(out.len(), 1);
+    }
+
+    #[test]
+    fn a_stint_after_midnight_belongs_to_the_evening_before() {
+        let out = group_sessions(vec![
+            stint("20260930-235000-000", "kx450", 1, &[(0, 60_000)]),
+            stint("20261001-000500-000", "kx450", 1, &[(0, 60_000)]),
+        ]);
+        assert_eq!(out.len(), 1, "fifteen minutes, over the end of a month");
     }
 
     #[test]
