@@ -95,6 +95,14 @@
   so there is something to ride the whole way down it.
 - How packed the lap is, in Track Studio: a slider from sparse to packed, sitting by default
   where a real round sits. It shows for SX and SMX, which are the ones it changes.
+- Pick what a track looks like, apart from what it rides like. The ground buttons still set the
+  ride, and a new Look row sets the paint: Soil, Sand, Grass, or Stadium for a supercross floor
+  of dark trucked-in dirt with nothing growing beyond the lanes. Leave it on Ride and the look
+  follows the ground, the way it always has.
+- Use your own images for the ground. Four slots in Track Studio, under Look: the riding
+  surface, the line, the ruts, and whatever lies beyond the track. Pick a picture off your own
+  disk and the Studio copies it in, so the track still builds after you have moved or deleted
+  the original. It says what is wrong with an image it cannot take.
 - The ground comes back down between jumps. A row of hills used to sit on a shelf, so the dips
   never reached the ground either side and it rode as one long wave instead of a row of lips you
   pick a line through. Now each hill lands back at grade, and the hills stand as tall as the ones

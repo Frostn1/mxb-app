@@ -2952,6 +2952,7 @@ pub fn draw_with(seed: u64, knobs: &LayoutKnobs) -> Option<TrackProgram> {
             samples: rules.samples,
             scale: if rng.chance(0.5) { 63.0 } else { 70.0 },
             surface,
+            texture: Default::default(),
             wear: knobs.wear.unwrap_or_else(crate::trackprog::default_wear),
             roughness: knobs.roughness.unwrap_or_else(crate::trackprog::default_roughness),
             // Gently rolling, and no more. A lap is benched into whatever it crosses, so

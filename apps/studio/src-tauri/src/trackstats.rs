@@ -1687,6 +1687,7 @@ mod tests {
             terrain: crate::trackprog::Terrain {
                 size_x: 1000.0, size_z: 1000.0, samples: 513, scale: 100.0,
                 relief: Default::default(), surface: Default::default(),
+                texture: Default::default(),
                 wear: crate::trackprog::default_wear(),
                 roughness: crate::trackprog::default_roughness(),
             },
@@ -1802,6 +1803,7 @@ mod tests {
                 size_x: mps * (gw - 1) as f32, size_z: mps * (gh - 1) as f32,
                 samples: 513, scale: 100.0,
                 relief: Default::default(), surface: Default::default(),
+                texture: Default::default(),
                 wear: Default::default(),
                 roughness: crate::trackprog::default_roughness(),
             },
