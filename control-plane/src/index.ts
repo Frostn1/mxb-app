@@ -62,6 +62,7 @@ import {
 import { claimDeviceAccount, iceServers, voiceRoom } from "./voice";
 import { adminAllowed, pruneUsage, reportUsage, usageStats } from "./usage";
 import { masterStatus, pruneMasterProbes, reportMasterProbe } from "./masterstatus";
+import { claimRoster, pruneRoster, readRoster, reportRoster } from "./roster";
 import { VoiceRoom } from "./voiceroom";
 
 interface Account {
@@ -106,6 +107,7 @@ export default {
         pruneDeviceClaims(env),
         pruneUsage(env),
         pruneMasterProbes(env),
+        pruneRoster(env),
         pruneReports(env),
         pruneQueue(env),
         resolveTrackCatalog(env),
@@ -220,6 +222,21 @@ async function route(request: Request, env: Env): Promise<Response> {
   // see `masterstatus.ts` — so it is CORS-open and cacheable by anything.
   if (method === "POST" && path === "/v1/master-status") return reportMasterProbe(request, env);
   if (method === "GET" && path === "/v1/status") return masterStatus(env);
+
+  // The shared server book. The app already rebuilds the whole list from `GETINFO` when the
+  // master won't answer — a server answers that to anyone, with no account and no ticket — but
+  // its book of addresses is per-install and starts empty, so the fallback is worth nothing to
+  // a fresh install or to anybody who hadn't opened the tab before the outage. Which is the
+  // population the outage lands on hardest. Pooling the book is what gets the fallback there
+  // first.
+  //
+  // Unauthenticated on both halves, for the reasons the other two anonymous endpoints are. The
+  // write is safe to serve back because of what `roster.ts` does with it, not because of who
+  // sent it: an address is stored only if it is a public `host:port` at all, and served only
+  // once distinct networks have independently seen it in the game's own master list. Without
+  // that, this would be a reflection amplifier with a public API.
+  if (method === "POST" && path === "/v1/roster") return reportRoster(request, env);
+  if (method === "GET" && path === "/v1/roster") return readRoster(env);
 
   // Reading the numbers back. Behind `ADMIN_KEY`, above the account gate because it is not a
   // player's endpoint at all: the key belongs to whoever runs the deployment, and an account
@@ -338,6 +355,11 @@ async function route(request: Request, env: Env): Promise<Response> {
   const gate = invitedOnly(account);
   if (gate) return gate;
 
+  // A server's own operator putting it on the shared book, which needs no corroborating: the
+  // account is the corroboration, and it is recorded against them. Behind the same invite gate
+  // as registering a server, deliberately — a self-serve account anyone can mint would put this
+  // straight back where the anonymous path is, minus the two-network bar that makes that safe.
+  if (method === "POST" && path === "/v1/roster/mine") return claimRoster(request, account.id, env);
   if (method === "POST" && path === "/v1/servers") return registerServer(request, account, env);
   if (method === "GET" && path === "/v1/servers/mine") return myServers(account, env);
   if (method === "GET" && path === "/v1/fleet") return fleetState(account, env);

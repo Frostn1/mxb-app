@@ -26,6 +26,17 @@
 - Check my connection, on that screen: it tests your internet, whether the master server's
   address resolves, whether outbound UDP is being blocked, and the server list itself, then says
   whose problem it is. The same numbers are public at mxbsecure.com/status.
+- A shared server book. The Servers tab already rebuilt its list by asking each server directly
+  when the master wouldn't answer, but only from addresses you had already seen — so on a fresh
+  install it had nothing to work from, which is exactly who an outage catches out. The app now
+  seeds that book from a pooled one and adds what it sees, so the fallback is ready before the
+  outage instead of after it.
+
+### Fixed
+- "Is MX Bikes down" could say the servers were fine while they were down. When the master
+  didn't answer and the app rebuilt the list from its own address book, it reported the list
+  rather than the master — so every install with a warm book voted "working" through an outage
+  it was itself routing around.
 
 ## 2026-09-15 — v0.15.1 — Small fixes
 

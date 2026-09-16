@@ -120,6 +120,15 @@ Running through all of it:
   the usage counters use; the same numbers are public at
   [mxbsecure.com/status](https://mxbsecure.com/status), which is a link a Discord bot can
   post instead of a troubleshooting list.
+- **A shared server book.** The Servers tab has always rebuilt its whole list with `GETINFO`
+  when the master won't answer — a server answers that to anyone, with no account and no
+  ticket — but only from addresses this install had already been told about, so on a fresh
+  install the fallback had nothing to fall back to. That is exactly who an outage hits
+  hardest. The app now contributes the addresses it sees to a pooled book and seeds its own
+  from it, so the fallback is in place before the outage rather than after. Addresses only,
+  no names and no install id; the control plane holds one back until distinct networks have
+  independently seen it in the game's own list, because a list that tells thousands of apps
+  where to send a datagram cannot take anybody's word for it.
 - **Live reload.** A debounced watcher on `<modsPath>/mods` signals FrostMod to
   reload the game when mods are added — including ones installed outside the app.
   Off Windows that means the game's own Wine prefix — Proton's

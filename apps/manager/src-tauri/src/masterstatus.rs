@@ -118,6 +118,56 @@ pub fn classify(message: &str) -> Reason {
     }
 }
 
+/// What happened when the app went to the master, as far as the *master* is concerned.
+///
+/// The distinction this draws is the whole point of it. `list_master_servers` can hand back a
+/// perfectly good list having never reached the master at all — the app rebuilds it from the
+/// address book with `GETINFO`, which is the fallback working exactly as designed — and it can
+/// decline to ask in the first place, because MX Bikes spends the same Steam account the login
+/// needs and the app stays off the master while the game is running.
+///
+/// Reporting a list as though it were an answer from the master would make `/v1/status` blind
+/// to precisely the outages it exists for: every install with a warm book would report `ok`
+/// through an outage it was itself routing around. So the outcome travels separately from the
+/// list, and [`NotAsked`](Self::NotAsked) is reported as nothing at all rather than as either.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MasterOutcome {
+    /// The master answered, and the list came from it.
+    Answered,
+    /// The master didn't answer. There may still be a list — from the book — and that is not
+    /// evidence the master is up.
+    Failed(String),
+    /// The app never asked: the game is running and holds the account the login would spend.
+    /// Silence, not a data point, and never counted as either state.
+    NotAsked,
+}
+
+/// What, if anything, one outcome contributes to the count.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Say {
+    /// Send nothing at all.
+    Nothing,
+    Answered,
+    Failed(Reason),
+}
+
+/// Decide what an outcome is worth saying.
+///
+/// Two of these are silences, and both matter. An install that never asked has observed
+/// nothing — counting it either way would be inventing a data point out of the game being
+/// open. And a build with no server browser has nothing to say about the master: the control
+/// plane drops `unsupported` anyway, so reporting it spends a request to be discarded.
+pub fn what_to_say(outcome: &MasterOutcome) -> Say {
+    match outcome {
+        MasterOutcome::NotAsked => Say::Nothing,
+        MasterOutcome::Answered => Say::Answered,
+        MasterOutcome::Failed(message) => match classify(message) {
+            Reason::Unsupported => Say::Nothing,
+            reason => Say::Failed(reason),
+        },
+    }
+}
+
 #[derive(Serialize)]
 struct Probe<'a> {
     #[serde(rename = "installId")]
@@ -133,7 +183,13 @@ struct Probe<'a> {
 /// is waiting on, and it must never be able to slow the Servers tab down or make it fail. A
 /// report that doesn't send is simply a report that doesn't send — the next refresh sends
 /// another one, and the window is ten minutes wide.
-pub fn report(app: &AppHandle, outcome: Result<(), &str>) {
+pub fn report(app: &AppHandle, outcome: &MasterOutcome) {
+    let reason = match what_to_say(outcome) {
+        Say::Nothing => return,
+        Say::Answered => None,
+        Say::Failed(reason) => Some(reason),
+    };
+
     let cfg = match config::load(app) {
         Ok(cfg) => cfg,
         Err(_) => return,
@@ -143,13 +199,6 @@ pub fn report(app: &AppHandle, outcome: Result<(), &str>) {
         return;
     }
     let install_id = cfg.install_id.trim().to_string();
-    let reason = outcome.err().map(|message| classify(message));
-
-    // An unsupported build has nothing to say about the master and says nothing: reporting it
-    // would spend a request to tell the control plane something it explicitly discards.
-    if reason == Some(Reason::Unsupported) {
-        return;
-    }
 
     tauri::async_runtime::spawn(async move {
         let body = Probe {
@@ -251,7 +300,7 @@ pub struct SelfTest {
 /// nearest thing to the player, and somebody reading the list top to bottom stops at the line
 /// that is actually their problem. The master fetch itself is passed in rather than done here,
 /// because it lives behind `cfg(worldnet)` and this module is in the public tree.
-pub async fn self_test(app: AppHandle, master: Result<usize, String>) -> SelfTest {
+pub async fn self_test(app: AppHandle, master: &MasterOutcome, listed: Option<usize>) -> SelfTest {
     let mut checks = Vec::new();
 
     let hosts = {
@@ -295,13 +344,29 @@ pub async fn self_test(app: AppHandle, master: Result<usize, String>) -> SelfTes
         None => Check { id: "udp", state: "skip", detail: "needs the address first".into() },
     });
 
-    // 4. Our own fetch — the thing the player actually noticed.
-    checks.push(match &master {
-        Ok(count) => Check { id: "master", state: "ok", detail: format!("{count} servers listed") },
-        Err(e) if classify(e) == Reason::Unsupported => {
+    // 4. Our own fetch — the thing the player actually noticed. Reports whether the *master*
+    //    answered rather than whether a list came back: somebody running this is looking at a
+    //    broken tab, and the difference between those two is the entire question.
+    checks.push(match master {
+        MasterOutcome::Answered => Check {
+            id: "master",
+            state: "ok",
+            detail: match listed {
+                Some(n) => format!("{n} servers listed"),
+                None => "answered".into(),
+            },
+        },
+        // Neither a pass nor a failure: the app stayed off the master on purpose, because MX
+        // Bikes is running and holds the Steam account the login would spend.
+        MasterOutcome::NotAsked => Check {
+            id: "master",
+            state: "skip",
+            detail: "not asked — the game is using the account".into(),
+        },
+        MasterOutcome::Failed(e) if classify(e) == Reason::Unsupported => {
             Check { id: "master", state: "skip", detail: e.clone() }
         }
-        Err(e) => Check { id: "master", state: "fail", detail: e.clone() },
+        MasterOutcome::Failed(e) => Check { id: "master", state: "fail", detail: e.clone() },
     });
 
     // 5. Everyone else. Last because it is the only one that can overturn the rest: a machine
@@ -321,7 +386,7 @@ pub async fn self_test(app: AppHandle, master: Result<usize, String>) -> SelfTes
     });
 
     SelfTest {
-        verdict: verdict(&master, online, &status),
+        verdict: verdict(master, online, &status),
         summary: status.as_ref().map(|s| s.summary.clone()),
         checks,
     }
@@ -335,28 +400,40 @@ pub async fn self_test(app: AppHandle, master: Result<usize, String>) -> SelfTes
 /// that, a widespread failure outranks everything local — when the master is down every machine
 /// in the world looks broken from the inside, and "check your firewall" is precisely the advice
 /// that wastes an afternoon. Only once both are ruled out is a local failure worth naming.
-fn verdict(master: &Result<usize, String>, online: bool, status: &Option<MasterStatus>) -> &'static str {
-    if master.is_ok() {
-        return "fine";
-    }
-    let widespread = matches!(status.as_ref().map(|s| s.state.as_str()), Some("down") | Some("degraded"));
-    if widespread {
-        return "upstream";
-    }
-    // A build with no browser has not observed anything; saying "it's your machine" on the
-    // strength of a fetch that never happened would be a guess wearing a verdict's clothes.
-    if master.as_ref().err().map(|e| classify(e)) == Some(Reason::Unsupported) {
-        return "unknown";
-    }
-    if !online {
-        return "local";
-    }
-    // Our fetch failed, the internet is up, and the crowd is either fine or too quiet to say.
-    // Both of those mean something here rather than out there — but only when the crowd was
-    // loud enough to be believed.
-    match status.as_ref().map(|s| s.state.as_str()) {
-        Some("up") => "local",
-        _ => "unknown",
+fn verdict(master: &MasterOutcome, online: bool, status: &Option<MasterStatus>) -> &'static str {
+    let widespread =
+        matches!(status.as_ref().map(|s| s.state.as_str()), Some("down") | Some("degraded"));
+    match master {
+        MasterOutcome::Answered => "fine",
+        // We learned nothing ourselves, so the crowd is all there is. It can still settle this
+        // one way; it can never settle it the other, because there is no failure of ours to
+        // explain in the first place.
+        MasterOutcome::NotAsked => {
+            if widespread {
+                "upstream"
+            } else {
+                "unknown"
+            }
+        }
+        MasterOutcome::Failed(e) => {
+            if widespread {
+                return "upstream";
+            }
+            // A build with no browser has observed nothing either; saying "it's your machine"
+            // on a fetch that never happened would be a guess wearing a verdict's clothes.
+            if classify(e) == Reason::Unsupported {
+                return "unknown";
+            }
+            if !online {
+                return "local";
+            }
+            // Our fetch failed, the internet is up, and the crowd is either fine or too quiet
+            // to say. Only the first of those means it is ours.
+            match status.as_ref().map(|s| s.state.as_str()) {
+                Some("up") => "local",
+                _ => "unknown",
+            }
+        }
     }
 }
 
@@ -485,6 +562,36 @@ mod tests {
     }
 
     #[test]
+    fn a_list_rebuilt_from_the_book_is_not_the_master_answering() {
+        // The bug this exists to stop: the app routes around a dead master using its address
+        // book and hands back a perfectly good list, so reporting the *list* would have every
+        // install with a warm book calling the outage `ok` — blinding /v1/status to exactly
+        // the outages it is for.
+        assert_eq!(
+            what_to_say(&MasterOutcome::Failed("operation timed out".into())),
+            Say::Failed(Reason::Timeout)
+        );
+    }
+
+    #[test]
+    fn an_install_that_never_asked_says_nothing() {
+        // The game is running and holds the account the login would spend. Silence is not a
+        // vote, in either direction.
+        assert_eq!(what_to_say(&MasterOutcome::NotAsked), Say::Nothing);
+    }
+
+    #[test]
+    fn a_build_without_the_browser_spends_no_request() {
+        let e = MasterOutcome::Failed("The server browser isn't included in this build.".into());
+        assert_eq!(what_to_say(&e), Say::Nothing);
+    }
+
+    #[test]
+    fn a_master_that_answered_is_reported_as_answered() {
+        assert_eq!(what_to_say(&MasterOutcome::Answered), Say::Answered);
+    }
+
+    #[test]
     fn a_widespread_outage_outranks_every_local_check() {
         // Telling somebody to look at their firewall while the master is down is exactly the
         // advice that wastes their afternoon.
@@ -494,7 +601,7 @@ mod tests {
             master: MasterCounts { installs: 25, failing: 23, failing_for_minutes: Some(9) },
             window_minutes: 10,
         });
-        assert_eq!(verdict(&Err("timed out".into()), false, &down), "upstream");
+        assert_eq!(verdict(&MasterOutcome::Failed("timed out".into()), false, &down), "upstream");
     }
 
     #[test]
@@ -505,7 +612,7 @@ mod tests {
             master: MasterCounts { installs: 25, failing: 1, failing_for_minutes: None },
             window_minutes: 10,
         });
-        assert_eq!(verdict(&Err("timed out".into()), true, &up), "local");
+        assert_eq!(verdict(&MasterOutcome::Failed("timed out".into()), true, &up), "local");
     }
 
     #[test]
@@ -516,13 +623,13 @@ mod tests {
             master: MasterCounts { installs: 1, failing: 1, failing_for_minutes: None },
             window_minutes: 10,
         });
-        assert_eq!(verdict(&Err("timed out".into()), true, &quiet), "unknown");
-        assert_eq!(verdict(&Err("timed out".into()), true, &None), "unknown");
+        assert_eq!(verdict(&MasterOutcome::Failed("timed out".into()), true, &quiet), "unknown");
+        assert_eq!(verdict(&MasterOutcome::Failed("timed out".into()), true, &None), "unknown");
     }
 
     #[test]
     fn a_working_fetch_is_fine_whatever_else_is_unreachable() {
-        assert_eq!(verdict(&Ok(42), true, &None), "fine");
+        assert_eq!(verdict(&MasterOutcome::Answered, true, &None), "fine");
     }
 
     #[test]
@@ -535,12 +642,12 @@ mod tests {
             master: MasterCounts { installs: 25, failing: 23, failing_for_minutes: Some(9) },
             window_minutes: 10,
         });
-        assert_eq!(verdict(&Ok(42), true, &down), "fine");
+        assert_eq!(verdict(&MasterOutcome::Answered, true, &down), "fine");
     }
 
     #[test]
     fn a_build_without_the_browser_concludes_nothing() {
-        let e = Err("The server browser isn't included in this build.".to_string());
+        let e = MasterOutcome::Failed("The server browser isn't included in this build.".into());
         assert_eq!(verdict(&e, true, &None), "unknown");
     }
 }

@@ -44,6 +44,9 @@ consequences fall out of that, and they're baked into the schema:
 | GET | `/v1/usage/stats` | `ADMIN_KEY` | The same numbers as JSON, for anything that scripts them |
 | POST | `/v1/master-status` | — | One install saying whether it could reach MX Bikes' own master server. Unauthenticated for the same reason as `/v1/usage`; one row per install per minute. |
 | GET | `/v1/status` | — | Is the master answering? Public, CORS-open and cacheable — it is what mxbsecure.com/status renders and what a Discord bot answering `!timeout` reads. |
+| POST | `/v1/roster` | — | Addresses an app saw in the game's own master list. Held back until distinct networks agree — see below; without that this would be a reflection amplifier. |
+| GET | `/v1/roster` | — | The shared server book. Public and cacheable; the app seeds its own address book from it. |
+| POST | `/v1/roster/mine` | bearer (invited) | A server's own operator adding it, which needs no corroborating: the account is the corroboration. |
 | GET/POST | `/v1/web/admin/*` | Steam sign-in + `MXB_ADMIN_STEAM_IDS` | The dashboards at mxbsecure.com/admin — usage, diagnostics, paint sync, plugin keys |
 | GET | `/v1/plugins` | — | The paid-plugin catalogue. Public: what is on offer is not a secret. |
 | GET | `/v1/me/plugins` | bearer | What this account holds, each with a freshly signed license |
@@ -157,6 +160,44 @@ Rows live in `master_probes`, one per install per minute (so one person hammerin
 once, not twenty times), and are swept after an hour on the same cron as everything else.
 Reporting rides on the app's anonymous-stats setting; reading does not, because the reason to
 withhold a report is privacy and the reason to read the answer is that your game is broken.
+
+### The shared server book
+
+MXB App already survives a dead master server, and the mechanism matters because this is only
+its missing half. The master is the sole source of **discovery** — the only thing that can tell
+you a server exists — but it is the source of nothing else: a server answers `GETINFO` to
+whoever asks, with no account, no ticket and no challenge, and that reply carries the name, the
+riders, the seats and the whole event blob. So the app keeps a book of every address it has been
+told about and, when the master won't answer, rebuilds the entire list by asking the servers
+themselves.
+
+That works, and it works for the wrong people. The book is per-install and starts empty, so it is
+worth nothing to a fresh install and nothing to anyone who had not opened the Servers tab before
+the outage began — which is the population an outage lands on hardest. `/v1/roster` pools it, so
+the fallback is in place before the outage rather than after it.
+
+**Addresses, and nothing else.** No names, no locations, no operator free text. `GETINFO` already
+carries all of it, so a stored copy would only ever be staler — and an unauthenticated endpoint
+that takes free text from anonymous clients and serves it to every install is a content-injection
+channel this does not need.
+
+**Why an address has to be corroborated.** This list tells thousands of apps where to send a
+datagram, so an endpoint that served whatever it was handed would be a reflection amplifier with
+a public API: one POST naming a victim's `host:port`, and every MXB App probes them on the next
+outage. Two things stop that. `isPublicGameAddress` refuses loopback, private space, carrier NAT,
+link-local (where cloud metadata lives) and multicast before anything is stored; and an address is
+only *served* once `MIN_REPORTERS` distinct reporters have independently seen it in the game's own
+master list **on the same day**. A reporter is the day-salted digest of the caller's address that
+open signup already computes — never an install id, which one machine can mint at will — and the
+same-day rule is forced by that salt: the same network hashes differently tomorrow, so counting
+across days would read one persistent reporter as several and hand the injection straight back.
+
+Storage is `server_roster` (one row per address, `corroborated_at` sticky once earned) and
+`server_sightings` (evidence, swept the next day). A report takes the cheap path for every address
+already corroborated — a `last_seen` bump and nothing else — which in the steady state is the
+whole list, so contributing 300 servers every few minutes stays a couple of statements rather than
+six hundred. Servers in our own registry are folded into the answer, so a caller does not have to
+know we keep two lists.
 
 ### Usage counters
 
