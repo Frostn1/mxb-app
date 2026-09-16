@@ -398,6 +398,31 @@ came from.
 Germany has no single national service, so it is one per state, and only three states are
 confirmed so far. Wallonia publishes LiDAR but was not reachable at the addresses tried.
 
+### One trap to know about if you download by hand
+
+Some of these services will hand you **a picture of the ground instead of the ground**, from
+a request that looks exactly like a request for data, and put correct georeferencing on it.
+
+Poland's and Catalonia's services both do this. Ask them for `image/tiff` and you get an
+HTTP 200 and a valid GeoTIFF with the right pixel scale and the right tiepoint. It is an
+8-bit RGB rendering. There is no elevation in it at all. It passes every structural check you
+could think to make, and a track built from it would be nonsense in a way that is very hard
+to trace back.
+
+**The test is one field: BitsPerSample.** A real DEM is a single band of 32-bit float, or
+occasionally 16-bit integer. If a file says three bands of 8 bits, it is a picture. In QGIS
+it is in the layer properties; with `gdalinfo` it is the `Band 1 ... Type=` line, which
+should read `Float32` and not `Byte`.
+
+A second tell: file size. 470 by 470 cells of float32 is about 880 KB before compression. If
+what you downloaded is 9 KB, it is a picture.
+
+Where a service offers both, prefer the format that is unambiguously data: an ASCII grid,
+or a BIL, or a GeoTIFF you have checked. Spain is worth a specific mention, because its
+`image/tiff` path returns **16-bit integers** — real elevation, but rounded to the nearest
+whole metre, which is useless for jump faces. Its ASCII path returns the same data with
+millimetres.
+
 ### Nowhere on this list
 
 Two honest answers, in order of preference.
