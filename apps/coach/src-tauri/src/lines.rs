@@ -104,6 +104,10 @@ fn mean(rows: &[Row], f: impl Fn(&Row) -> f32) -> f32 {
     rows.iter().map(f).sum::<f32>() / rows.len().max(1) as f32
 }
 
+fn mean_of(xs: &[f32]) -> f32 {
+    xs.iter().sum::<f32>() / xs.len().max(1) as f32
+}
+
 /// `laps` in the order they were ridden; `reference` decides the sections and the fast line.
 /// `others` is every other rider's world x/z the recorder saw, for where the track will wear.
 pub fn lines(laps: &[(i32, Trace)], reference: &Trace, others: &[[f32; 2]]) -> Lines {
@@ -211,29 +215,77 @@ fn busy(si: usize, s: &Section, r: &Trace, others: &[[f32; 2]], rows: &[Row]) ->
     side.sort_by(f32::total_cmp);
     let crowd = side[side.len() / 2];
     let name = &s.name;
-    let way = |x: f32| if x * s.dir as f32 > 0.0 { "tighter" } else { "wider" };
-    let (title, detail) = if crowd.abs() <= BUSY_M {
+    let yours = mean(rows, |x| x.offset);
+    // Where the others' lines fall into two groups far enough apart to be two ruts rather than
+    // one spread, each one is a line with a name: the inside rut and the outside rut. Riders
+    // talk about them that way, and "which rut" is the thing they want told.
+    let (title, detail) = if let Some(between) = split(side.clone()) {
+        let (a, b): (Vec<f32>, Vec<f32>) = side.iter().partition(|x| **x < between);
+        let (in_off, out_off) = (mean_of(&a), mean_of(&b));
+        let (first, second) = (side_word(in_off, s.dir), side_word(out_off, s.dir));
+        let (busier, busier_n) = if a.len() >= b.len() { (first, a.len()) } else { (second, b.len()) };
+        let ridden = side_word(yours, s.dir);
         (
-            format!("Everyone rides the fast line in {name}"),
+            format!("Two ruts in {name}: the {first} and the {second}"),
             format!(
-                "Most of the other riders run within a metre of the fast line through {name}, so that's where it will \
-                 rut first. When it does, a line a metre or two wider stays smoother."
+                "The other riders split into two lines through {name}, about {:.1} m apart — {busier_n} of them on \
+                 the {busier}. You ride the {ridden}. The busier one ruts first, so when it does, take the other.",
+                (out_off - in_off).abs()
+            ),
+        )
+    } else if crowd.abs() <= BUSY_M {
+        let away = other_side(side_word(yours, s.dir));
+        (
+            format!("Everyone rides the same line in {name}"),
+            format!(
+                "The other riders all run within a metre of the fast lap through {name}, so that is where it will rut \
+                 first. When it does, move to the {away} — a metre or two off it stays smoother."
             ),
         )
     } else {
-        let yours = !rows.is_empty() && (mean(rows, |x| x.offset) - crowd).abs() <= BUSY_M;
+        let theirs = side_word(crowd, s.dir);
+        let same = !rows.is_empty() && (yours - crowd).abs() <= BUSY_M;
         (
-            format!("The others ride {} in {name}", way(crowd)),
+            format!("The others ride the {theirs} in {name}"),
             format!(
-                "Most of the other riders run about {:.1} m {} than the fast line through {name}, so that's where it will \
-                 rut first, and the fast line stays smoother.{}",
+                "The other riders run about {:.1} m to the {theirs} of the fast lap through {name}, so that is where \
+                 it will rut first, and the fast lap's line stays smoother.{}",
                 crowd.abs(),
-                way(crowd),
-                if yours { " You ride there too: move to the fast line." } else { "" }
+                if same {
+                    format!(" You ride the {theirs} too: move onto the fast lap's line.")
+                } else {
+                    String::new()
+                }
             ),
         )
     };
     Some(Note { section: si, name: name.clone(), kind: "wear", title, detail })
+}
+
+/// Which side of the fast lap a line sits on, in the words a rider actually uses.
+///
+/// Through a corner that is the inside or the outside — what the line is called when anyone
+/// talks about it. Off a corner there is no inside, so it is left or right of the fast lap
+/// instead. `offset` is metres to the right of the fast lap, `dir` +1 for a right-hander and
+/// -1 for a left: a line to the right of a right-hander is the inside of it.
+fn side_word(offset: f32, dir: i8) -> &'static str {
+    if dir == 0 {
+        if offset > 0.0 { "right" } else { "left" }
+    } else if offset * dir as f32 > 0.0 {
+        "inside"
+    } else {
+        "outside"
+    }
+}
+
+/// The other side. "Take the inside" is only half a tip without somewhere to go from.
+fn other_side(side: &str) -> &'static str {
+    match side {
+        "inside" => "outside",
+        "outside" => "inside",
+        "right" => "left",
+        _ => "right",
+    }
 }
 
 /// The laps split into two lines through a corner, and one of them is clearly quicker.
@@ -254,11 +306,10 @@ fn line_that_pays(si: usize, s: &Section, rows: &[Row]) -> Option<Note> {
     }
     let (fast, slow) = if lt < rt { (left, right) } else { (right, left) };
     let apart = avg(fast, |r| r.offset) - avg(slow, |r| r.offset);
-    let tighter = apart * s.dir as f32 > 0.0;
-    let way = if tighter { "tighter" } else { "wider" };
+    let way = side_word(apart, s.dir);
     let gap = (lt - rt).abs();
     let second = if gap <= ALT_S {
-        let other = if tighter { "wider" } else { "tighter" };
+        let other = other_side(way);
         format!(" The {other} line is only {gap:.2} s slower, so keep it for passing, or for when yours cuts up.")
     } else {
         String::new()
@@ -272,7 +323,8 @@ fn line_that_pays(si: usize, s: &Section, rows: &[Row]) -> Option<Note> {
         kind: "line",
         title: format!("The {way} line is faster in {}", s.name),
         detail: format!(
-            "On laps {} you took a line about {:.1} m {way} and were {:.2} s quicker through {}. Keep that line.{second}",
+            "On laps {} you took the {way} line, about {:.1} m off the other one, and were {:.2} s quicker through \
+             {}. Keep that line.{second}",
             which.join(", "),
             apart.abs(),
             gap,
@@ -334,8 +386,8 @@ fn combo(a: (&str, i32), b: (&str, i32), recs: &[ComboRow]) -> Option<Note> {
     if !other.is_finite() || gain <= FASTER_S {
         return None;
     }
-    // Right of the fast line is the tight side of a right-hander.
-    let way = |right_side: bool, dir: i32| if (right_side as i32 * 2 - 1) * dir > 0 { "tight" } else { "wide" };
+    // Right of the fast lap is the inside of a right-hander.
+    let way = |right_side: bool, dir: i32| side_word((right_side as i32 * 2 - 1) as f32, dir as i8);
     let mut which: Vec<i32> = best.1.iter().map(|r| r.lap + 1).collect();
     which.sort_unstable();
     let which: Vec<String> = which.iter().map(|n| n.to_string()).collect();
@@ -382,11 +434,15 @@ fn cutting_up(si: usize, s: &Section, rows: &[Row]) -> Option<Note> {
             let alt: Vec<&Row> = rows.iter().filter(|r| (r.offset >= cut) != late_right).collect();
             (alt.len() >= 2).then(|| {
                 let d = alt.iter().map(|r| r.offset).sum::<f32>() / alt.len() as f32 - mean(late, |r| r.offset);
-                let way = if d * s.dir as f32 > 0.0 { "tighter" } else { "wider" };
+                let way = side_word(d, s.dir);
                 let mut laps: Vec<i32> = alt.iter().map(|r| r.lap + 1).collect();
                 laps.sort_unstable();
                 let laps: Vec<String> = laps.iter().map(|n| n.to_string()).collect();
-                format!(" On laps {} you took a line about {:.1} m {way}: try it as the ruts deepen.", laps.join(", "), d.abs())
+                format!(
+                    " On laps {} you took the {way} line, about {:.1} m off it: try that as the ruts deepen.",
+                    laps.join(", "),
+                    d.abs()
+                )
             })
         })
         .unwrap_or_default();
@@ -429,7 +485,7 @@ mod tests {
         let laps = vec![(0, lap(&FAST)), (1, lap(&FAST)), (2, lap(&wide)), (3, lap(&wide))];
         let out = lines(&laps, &lap(&FAST), &[]);
         let t1 = out.notes.iter().find(|n| n.kind == "line" && n.name == "Turn 1").unwrap_or_else(|| panic!("{:?}", titles(&out)));
-        assert!(t1.title.contains("wider"), "{}", t1.title);
+        assert!(t1.title.contains("outside"), "{}", t1.title);
         assert!(t1.detail.contains("laps 3, 4"), "{}", t1.detail);
         assert!(!out.notes.iter().any(|n| n.kind == "line" && n.name == "Turn 2"), "same line in Turn 2");
     }
@@ -444,7 +500,7 @@ mod tests {
         let laps = vec![(0, lap(&FAST)), (1, lap(&FAST)), (2, lap(&wide)), (3, lap(&wide))];
         let out = lines(&laps, &lap(&FAST), &[]);
         let t1 = out.notes.iter().find(|n| n.kind == "line" && n.name == "Turn 1").unwrap_or_else(|| panic!("{:?}", titles(&out)));
-        assert!(t1.detail.contains("tighter line is only") && t1.detail.contains("for passing"), "{}", t1.detail);
+        assert!(t1.detail.contains("inside line is only") && t1.detail.contains("for passing"), "{}", t1.detail);
         // A line that's much slower isn't offered as a second one.
         let far = Style { wide: 2.5, corner_v: 11.0, ..FAST };
         let laps = vec![(0, lap(&FAST)), (1, lap(&FAST)), (2, lap(&far)), (3, lap(&far))];
@@ -464,8 +520,8 @@ mod tests {
         ];
         let note = combo(("Turn 3", 1), ("Turn 4", 1), &recs).unwrap();
         assert_eq!(note.title, "Turn 3 and Turn 4 go together");
-        assert!(note.detail.contains("alone the tight line is quicker"), "{}", note.detail);
-        assert!(note.detail.contains("Wide into Turn 3, then tight through Turn 4, is 0.40 s"), "{}", note.detail);
+        assert!(note.detail.contains("alone the inside line is quicker"), "{}", note.detail);
+        assert!(note.detail.contains("Outside into Turn 3, then inside through Turn 4, is 0.40 s"), "{}", note.detail);
         assert!(note.detail.contains("laps 3, 4"), "{}", note.detail);
     }
 
@@ -511,5 +567,48 @@ mod tests {
         let n = out.notes.iter().find(|n| n.kind == "wear" && n.section == si).expect("a wear note");
         assert!(n.detail.contains("about 2.0 m"), "{}", n.detail);
         assert!(lines(&[], &fast, &crowd[..10]).notes.iter().all(|n| n.kind != "wear"), "too few passes to say");
+    }
+
+    /// Every line note names a side a rider can act on. "Take the fast line" was the whole
+    /// complaint: it is a summary, not somewhere to put the bike. The cue text has had this
+    /// guard since the cues were written; the notes never did, which is how the words here
+    /// survived a round of fixing the ones over in `analysis`.
+    #[test]
+    fn no_note_tells_the_rider_to_take_the_fast_line() {
+        let wide = Style { wide: 2.5, corner_v: 11.0, ..FAST };
+        let sunk = Style { wide: 2.5, corner_v: 10.2, ..FAST };
+        let laps = vec![
+            (0, lap(&FAST)),
+            (1, lap(&FAST)),
+            (2, lap(&wide)),
+            (3, lap(&wide)),
+            (4, lap(&sunk)),
+            (5, lap(&sunk)),
+        ];
+        let out = lines(&laps, &lap(&FAST), &[]);
+        assert!(!out.notes.is_empty(), "nothing to check");
+        for n in &out.notes {
+            for text in [&n.title, &n.detail] {
+                assert!(!text.contains("fast line"), "\"{text}\" tells the rider nothing they can do");
+                for vague in ["tighter", "wider", "tight line", "wide line"] {
+                    assert!(!text.contains(vague), "\"{text}\" says {vague} where it could say inside or outside");
+                }
+            }
+        }
+    }
+
+    /// Inside and outside are the corner's own sides, not the rider's left and right: the
+    /// inside of a left-hander is to the left of the fast lap, and of a right-hander, right.
+    #[test]
+    fn a_side_is_named_by_the_corner_it_is_in() {
+        assert_eq!(side_word(1.0, 1), "inside", "right of a right-hander");
+        assert_eq!(side_word(-1.0, 1), "outside");
+        assert_eq!(side_word(-1.0, -1), "inside", "left of a left-hander");
+        assert_eq!(side_word(1.0, -1), "outside");
+        // Off a corner there is no inside, so it is simply which way off the fast lap.
+        assert_eq!(side_word(1.0, 0), "right");
+        assert_eq!(side_word(-1.0, 0), "left");
+        assert_eq!(other_side("inside"), "outside");
+        assert_eq!(other_side("outside"), "inside");
     }
 }

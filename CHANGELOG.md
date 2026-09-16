@@ -15,6 +15,12 @@
 - The cues send themselves. There is no "Send to the game" button any more: Coach writes them
   when you open a lap, again whenever you change the level or how much coaching you want, and
   it keeps them following you as you ride. Changes reach the game the next time you go out.
+- The lap notes name the line. "Take the fast line" said nothing you could act on; every note
+  about a line now says inside or outside, at the corner — which one the other riders are on,
+  which one paid on your own laps, and which one to move to when the busy one ruts.
+- Where the other riders split into two lines through a corner, Coach says so: the two ruts,
+  which side each is on, how far apart they are, how many riders are in each, and which one
+  you are riding.
 
 ## 2026-09-15 — MXB Coach v0.1.13-beta.13
 
