@@ -434,6 +434,11 @@ export const coachRemoveImport = (path: string) => invoke<void>("coach_remove_im
 export const installRecorder = (from?: string) =>
   invoke<string>("coach_install_plugin", { from: from ?? null });
 export const removeRecorder = () => invoke<void>("coach_uninstall_plugin");
+/** Put the newest recorder in place if what's there is older, or missing. Returns the version
+ *  it installed, or null when nothing needed doing. */
+export const refreshRecorder = () => invoke<string | null>("coach_refresh_plugin");
+/** Point Coach at the MX Bikes folder itself, rather than sending the rider to MXB App. */
+export const setGameDir = (dir: string) => invoke<CoachStatus>("coach_set_game_dir", { dir });
 
 /** One thing the recorder can draw over the game. Labels come from `hud.rs`. */
 export interface HudPart {
