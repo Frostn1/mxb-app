@@ -506,6 +506,7 @@ describe("creator API keys", () => {
     for (const r of [
       withKey(key, "POST", "/admin/assets", { title: "X" }),
       withKey(key, "PATCH", `/admin/assets/${assetId}`, { withdrawn: true }),
+      withKey(key, "DELETE", `/admin/assets/${assetId}`),
       withKey(key, "GET", `/admin/assets/${assetId}/usage`),
       withKey(key, "POST", "/admin/api-keys", { label: "more" }),
       withKey(key, "GET", "/admin/api-keys"),

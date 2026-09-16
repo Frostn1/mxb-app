@@ -191,7 +191,7 @@ describe("CORS", () => {
       const res = await preflight(env, origin);
       expect(res.status).toBe(204);
       expect(res.headers.get("Access-Control-Allow-Origin")).toBe(origin);
-      expect(res.headers.get("Access-Control-Allow-Methods")).toBe("GET, POST, PATCH, OPTIONS");
+      expect(res.headers.get("Access-Control-Allow-Methods")).toBe("GET, POST, PATCH, DELETE, OPTIONS");
       expect(res.headers.get("Access-Control-Allow-Headers")).toBe("Authorization, Content-Type");
       expect(res.headers.get("Vary")).toContain("Origin");
     }
@@ -561,6 +561,108 @@ describe("takedown", () => {
     expect(((await up.json()) as { takenDownAt: number | null }).takenDownAt).toBeNull();
     expect((await ask()).status).toBe(200);
     expect(await status()).toBe(true);
+  });
+});
+
+describe("removal", () => {
+  const CREATOR = "76561198174305985";
+
+  /** A creator on the site, their asset, and a buyer holding it. */
+  async function sold(title = "Pine Hill") {
+    const env = await deployment({ MXB_WEB_SESSION_KEY: "session-secret" });
+    await addAccount(env.DB, "acc_creator", "Creator", CREATOR);
+    await env.DB.prepare("UPDATE accounts SET creator_at = 1 WHERE id = 'acc_creator'").run();
+    await env.DB.prepare("INSERT INTO accounts (id, rider_name, steam_id, token_hash, created_at) VALUES (?, ?, ?, ?, ?)")
+      .bind("acc_buyer", "Buyer", BUYER, await hashToken("buyer-token"), Date.now())
+      .run();
+    const cookie = `${SESSION_COOKIE}=${await sealToken({ t: "session", steamId: CREATOR, name: "C", exp: Date.now() + 60_000 }, "session-secret")}`;
+    // As the site sends it: the cookie, our Origin, and a body only when there is one.
+    const asCreator = (method: string, path: string, body?: unknown) =>
+      call(env, req(method, path, { key: null, origin: SITE, body, headers: { Cookie: cookie } }));
+    const made = await asCreator("POST", "/admin/assets", { title });
+    const { assetId } = (await made.json()) as { assetId: string };
+    await asCreator("POST", `/admin/assets/${assetId}/grants`, { add: [BUYER] });
+    const ask = () => call(env, req("POST", "/v1/keys/grant", { key: "buyer-token", body: { assetId, sessionId: "s1" } }));
+    const status = async () =>
+      ((await (await call(env, req("POST", "/v1/assets/status", { key: "buyer-token", body: { assetIds: [assetId] } }))).json()) as {
+        assets: { owned: boolean; available: boolean; revoked: boolean; registered: boolean }[];
+      }).assets[0];
+    return { env, assetId, asCreator, ask, status };
+  }
+
+  it("takes the asset off the list, destroys its key and revokes every buyer", async () => {
+    const { env, assetId, asCreator, ask, status } = await sold();
+    expect((await ask()).status).toBe(200);
+
+    const gone = await asCreator("DELETE", `/admin/assets/${assetId}`);
+    expect(gone.status).toBe(200);
+    expect((await gone.json()) as { assetId: string; deletedAt: number }).toMatchObject({ assetId, deletedAt: expect.any(Number) });
+
+    // Off the creator's list, and every other route on it answers like it never existed.
+    expect(((await (await asCreator("GET", "/admin/assets")).json()) as { assets: unknown[] }).assets).toEqual([]);
+    for (const [method, path, body] of [
+      ["GET", `/admin/assets/${assetId}/grants`, undefined],
+      ["GET", `/admin/assets/${assetId}/usage`, undefined],
+      ["POST", `/admin/assets/${assetId}/grants`, { add: [OTHER] }],
+      ["PATCH", `/admin/assets/${assetId}`, { withdrawn: false }],
+      ["DELETE", `/admin/assets/${assetId}`, undefined],
+    ] as [string, string, unknown][]) {
+      expect((await asCreator(method, path, body)).status, `${method} ${path}`).toBe(404);
+    }
+
+    // The file never opens again: no key is left to release, and the buyer is told to drop theirs.
+    expect(await (await ask()).json()).toEqual({ error: "removed" });
+    expect(await status()).toMatchObject({ registered: true, owned: false, available: false, revoked: true });
+    expect(await env.DB.prepare("SELECT wrapped_key, withdrawn_at IS NOT NULL AS off FROM assets WHERE id = ?").bind(assetId).first()).toEqual({
+      wrapped_key: null,
+      off: 1,
+    });
+    expect(
+      await env.DB.prepare("SELECT COUNT(*) AS n FROM entitlements WHERE asset_id = ? AND revoked_at IS NULL").bind(assetId).first(),
+    ).toEqual({ n: 0 });
+    // The ledger is the point of keeping the row: who unlocked it is still on record.
+    const log = await env.DB.prepare("SELECT decision, reason FROM entitlement_grants WHERE asset_id = ? ORDER BY id").bind(assetId).all();
+    expect(log.results).toEqual([
+      { decision: "allow", reason: "entitled" },
+      { decision: "deny", reason: "removed" },
+    ]);
+  });
+
+  it("leaves another creator's asset, and an asset we've taken down, alone", async () => {
+    const { env, assetId, asCreator } = await sold();
+    // Someone else signed in on the site can't remove it: it isn't theirs to see.
+    const stranger = `${SESSION_COOKIE}=${await sealToken({ t: "session", steamId: OTHER, name: "S", exp: Date.now() + 60_000 }, "session-secret")}`;
+    await addAccount(env.DB, "acc_other", "Other", OTHER);
+    await env.DB.prepare("UPDATE accounts SET creator_at = 1 WHERE id = 'acc_other'").run();
+    expect((await call(env, req("DELETE", `/admin/assets/${assetId}`, { key: null, origin: SITE, headers: { Cookie: stranger } }))).status).toBe(404);
+
+    // Taken down by us, and a creator can't wipe it — that would take the ledger with it.
+    expect((await call(env, req("PATCH", `/admin/assets/${assetId}`, { body: { takenDown: true } }))).status).toBe(200);
+    const refused = await asCreator("DELETE", `/admin/assets/${assetId}`);
+    expect(refused.status).toBe(403);
+    expect(await refused.json()).toEqual({ error: "that asset has been taken down; only mxbsecure can remove it" });
+    expect(((await (await asCreator("GET", "/admin/assets")).json()) as { assets: unknown[] }).assets).toHaveLength(1);
+
+    // We can.
+    expect((await call(env, req("DELETE", `/admin/assets/${assetId}`))).status).toBe(200);
+    expect(((await (await asCreator("GET", "/admin/assets")).json()) as { assets: unknown[] }).assets).toEqual([]);
+  });
+
+  it("refuses a removal that didn't come from the site", async () => {
+    const { assetId, asCreator, env } = await sold();
+    for (const origin of [undefined, "https://evil.mxbsecure.com"]) {
+      const res = await call(
+        env,
+        req("DELETE", `/admin/assets/${assetId}`, {
+          key: null,
+          ...(origin ? { origin } : {}),
+          headers: { Cookie: `${SESSION_COOKIE}=${await sealToken({ t: "session", steamId: CREATOR, name: "C", exp: Date.now() + 60_000 }, "session-secret")}` },
+        }),
+      );
+      expect(res.status).toBe(403);
+      expect(await res.json()).toEqual({ error: "that request didn't come from mxbsecure.com" });
+    }
+    expect((await asCreator("DELETE", `/admin/assets/${assetId}`)).status).toBe(200);
   });
 });
 

@@ -1,0 +1,15 @@
+-- A creator removing an asset they locked: gone from their list, and gone for good.
+--
+-- Withdrawing is reversible and says so — it stops new unlocks and can be put back. What was
+-- missing was the other thing a creator asks for: a mod uploaded by mistake, or one whose sale
+-- is over, taken off the site entirely. That can't be a `DELETE FROM assets`. The audit ledger
+-- (`entitlement_grants`) names the asset by id and is the record of who unlocked what, buyers'
+-- entitlements cascade, and a row that vanishes makes `/v1/assets/status` answer "not ours to
+-- judge" about a file a PC is still holding a key for — which is exactly the answer that leaves
+-- the key in place.
+--
+-- So a removal is a timestamp, like every other revocation here, with the content key destroyed
+-- beside it (`wrapped_key = NULL`): irreversible on purpose, since a removed asset can never be
+-- unlocked again by anyone, and nothing else in this schema can undo that. The row itself stays,
+-- so the ledger still reads and every buyer's app is told the key must go.
+ALTER TABLE assets ADD COLUMN deleted_at INTEGER;

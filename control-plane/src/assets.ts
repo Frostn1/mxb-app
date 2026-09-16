@@ -2,10 +2,11 @@
  * Secured assets, managed from the website.
  *
  * mxbsecure.com is where assets are created and where the list of who may open each one is
- * kept. Those are the two admin writes here: minting an asset (a fresh content key, stored
- * wrapped, handed back once) and changing its grants. Everything downstream — the check and
- * the key release in `index.ts` — already reads these same rows, so a grant made here is
- * honoured by `/v1/keys/grant` with nothing else to wire.
+ * kept. Those are the admin writes here: minting an asset (a fresh content key, stored wrapped,
+ * handed back once), changing its grants, and removing it — which revokes every buyer and
+ * destroys the key. Everything downstream — the check and the key release in `index.ts` —
+ * already reads these same rows, so a grant made here is honoured by `/v1/keys/grant` with
+ * nothing else to wire.
  *
  * Behind `ADMIN_KEY` like the rest of `/admin`, and the only admin routes with CORS: the site
  * calls them from a browser, so the browser has to be told it may. Nothing else gets the
@@ -42,12 +43,19 @@ export function allowedOrigin(request: Request, env: Env): string | null {
  * sites out but not a sibling subdomain: a page there could send a plain-text POST, with no
  * preflight, and the cookie would ride along. It can't send our Origin, and a JSON content type
  * would need a preflight we refuse.
+ *
+ * The content type is asked of `POST` alone, because `POST` is the only write a page can send
+ * without one: every browser preflights a `PATCH` or a `DELETE`, and the preflight from an
+ * origin not on the list is already refused. Asking a bodyless `DELETE` to declare a body's
+ * type would buy nothing and trip up every client that doesn't send one.
  */
 export function refuseCrossSiteWrite(request: Request, env: Env): Response | null {
   if (request.method === "GET" || request.method === "HEAD") return null;
+  const offSite = json(403, { error: "that request didn't come from mxbsecure.com" });
+  if (!allowedOrigin(request, env)) return offSite;
+  if (request.method !== "POST") return null;
   const type = (request.headers.get("Content-Type") ?? "").split(";")[0].trim().toLowerCase();
-  if (allowedOrigin(request, env) && type === "application/json") return null;
-  return json(403, { error: "that request didn't come from mxbsecure.com" });
+  return type === "application/json" ? null : offSite;
 }
 
 /**
@@ -248,6 +256,8 @@ async function handle(
     if (method === "GET") return assetUsage(assetId, env, names);
   } else if (method === "PATCH") {
     return updateAsset(request, assetId, env, scope);
+  } else if (method === "DELETE") {
+    return removeAsset(assetId, env, scope);
   }
   return json(405, { error: "method not allowed" });
 }
@@ -339,7 +349,9 @@ async function apiKeys(request: Request, url: URL, env: Env, scope: Scope): Prom
 }
 
 async function ownedBy(assetId: string, accountId: string, env: Env): Promise<boolean> {
-  const row = await env.DB.prepare("SELECT id FROM assets WHERE id = ? AND creator_id = ?").bind(assetId, accountId).first();
+  const row = await env.DB.prepare("SELECT id FROM assets WHERE id = ? AND creator_id = ? AND deleted_at IS NULL")
+    .bind(assetId, accountId)
+    .first();
   return row !== null;
 }
 
@@ -404,6 +416,43 @@ async function updateAsset(request: Request, assetId: string, env: Env, scope: S
 }
 
 /**
+ * `DELETE /admin/assets/:id` — the creator taking down what they locked, for good.
+ *
+ * Withdrawing is the reversible one: it stops new unlocks and can be put back. This is the
+ * other thing a creator asks for — a file locked by mistake, or one whose selling is over,
+ * off the site. So it is deliberately one-way: the asset leaves their list, every live buyer
+ * is revoked, and the content key is destroyed, which is the part nothing can undo. Nobody
+ * can open that packed file again, the creator included; locking it again means locking it
+ * again, as a new asset with a new key.
+ *
+ * The row is kept and flagged rather than deleted (see `0036_asset_removal.sql`): the usage
+ * ledger names assets by id, and a PC that already unlocked has to be *told* its key must go —
+ * `/v1/assets/status` can only say that about an asset we still know, and an unknown one means
+ * "leave the key alone". `withdrawn_at` is set alongside so every reader that already refuses a
+ * withdrawn asset refuses this one, whether or not it has heard of removal.
+ *
+ * A taken-down asset is ours, not theirs: a creator can't erase one, so the removal is refused
+ * and the takedown — with its ledger — stays where an operator can see it.
+ */
+async function removeAsset(assetId: string, env: Env, scope: Scope): Promise<Response> {
+  const asset = await env.DB.prepare("SELECT taken_down_at FROM assets WHERE id = ? AND deleted_at IS NULL")
+    .bind(assetId)
+    .first<{ taken_down_at: number | null }>();
+  if (!asset) return json(404, { error: "no such asset" });
+  if (asset.taken_down_at !== null && scope.kind !== "admin") {
+    return json(403, { error: "that asset has been taken down; only mxbsecure can remove it" });
+  }
+  const now = Date.now();
+  await env.DB.batch([
+    env.DB.prepare(
+      "UPDATE assets SET deleted_at = ?, withdrawn_at = COALESCE(withdrawn_at, ?), wrapped_key = NULL WHERE id = ?",
+    ).bind(now, now, assetId),
+    env.DB.prepare("UPDATE entitlements SET revoked_at = ? WHERE asset_id = ? AND revoked_at IS NULL").bind(now, assetId),
+  ]);
+  return json(200, { assetId, deletedAt: now });
+}
+
+/**
  * `POST /admin/assets` — a new asset and its content key.
  *
  * The key is 32 random bytes, stored only wrapped under the master key. The raw bytes are in
@@ -439,7 +488,8 @@ async function createAsset(request: Request, env: Env, owner: string): Promise<R
 
 /**
  * `GET /admin/assets` — newest first, with how many hold each one now, whether its file hash is
- * registered, and when a buyer's app last asked for its key. A creator sees only their own.
+ * registered, and when a buyer's app last asked for its key. A creator sees only their own, and
+ * nobody sees a removed one: `DELETE` is how an asset leaves this list.
  */
 async function listAssets(env: Env, scope: Scope): Promise<Response> {
   const mine = scope.kind === "creator";
@@ -449,7 +499,8 @@ async function listAssets(env: Env, scope: Scope): Promise<Response> {
       " (SELECT COUNT(*) FROM entitlements e WHERE e.asset_id = a.id AND e.revoked_at IS NULL) AS buyers," +
       ` (SELECT MAX(g.issued_at) FROM entitlement_grants g WHERE g.asset_id = a.id AND ${isSteamIdSql("g.steam_id")})` +
       " AS last_request_at" +
-      ` FROM assets a${mine ? " WHERE a.creator_id = ?" : ""} ORDER BY a.created_at DESC, a.id DESC`,
+      ` FROM assets a WHERE a.deleted_at IS NULL${mine ? " AND a.creator_id = ?" : ""}` +
+      " ORDER BY a.created_at DESC, a.id DESC",
   );
   const rows = await (mine ? statement.bind(scope.accountId) : statement).all<{
     id: string;
@@ -531,7 +582,7 @@ async function listGrants(assetId: string, env: Env, names: typeof fetch | null)
  * plaintext.
  */
 async function assetUsage(assetId: string, env: Env, names: typeof fetch | null): Promise<Response> {
-  const asset = await env.DB.prepare("SELECT taken_down_at FROM assets WHERE id = ?")
+  const asset = await env.DB.prepare("SELECT taken_down_at FROM assets WHERE id = ? AND deleted_at IS NULL")
     .bind(assetId)
     .first<{ taken_down_at: number | null }>();
   if (!asset) return json(404, { error: "no such asset" });
@@ -730,8 +781,9 @@ async function lookUpVanity(
   return { steamId: id };
 }
 
+/** Is there an asset here to act on? A removed one reads as gone, to every route but its own. */
 async function assetExists(assetId: string, env: Env): Promise<boolean> {
-  const row = await env.DB.prepare("SELECT id FROM assets WHERE id = ?").bind(assetId).first();
+  const row = await env.DB.prepare("SELECT id FROM assets WHERE id = ? AND deleted_at IS NULL").bind(assetId).first();
   return row !== null;
 }
 
@@ -739,7 +791,7 @@ async function assetExists(assetId: string, env: Env): Promise<boolean> {
  * CORS headers for an allowed origin; always `Vary: Origin`, since the answer depends on it.
  * Credentials are allowed so the sign-in cookie rides along from the site.
  */
-export function cors(response: Response, origin: string | null, preflight = false, methods = "GET, POST, PATCH, OPTIONS"): Response {
+export function cors(response: Response, origin: string | null, preflight = false, methods = "GET, POST, PATCH, DELETE, OPTIONS"): Response {
   const out = new Response(response.body, response);
   out.headers.append("Vary", "Origin");
   if (origin) {
