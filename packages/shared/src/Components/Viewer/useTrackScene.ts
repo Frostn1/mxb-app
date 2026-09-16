@@ -91,8 +91,8 @@ export interface TrackScene {
 }
 
 /** `path` null loads nothing (and clears). `prefix` is the track's folder inside an archive
- *  holding several (a stock track in tracks.pkz): terrain, overview and info take it; the other
- *  loaders don't, so with a prefix they are skipped and their steps settle as "none".
+ *  holding several (a stock track in tracks.pkz), and every loader takes it, so a stock track
+ *  draws its own ground, scenery and sky rather than the bare terrain it used to.
  *  `generation` reloads when it changes. */
 export function useTrackScene(
   path: string | null,
@@ -159,44 +159,40 @@ export function useTrackScene(
       .then((i) => alive && setInfo(i))
       .catch(() => {});
 
-    // The loaders below read a whole archive as one track, so a track that is one folder of
-    // several has nothing of its own for them to find.
-    if (prefix) {
-      settle("sky", "none");
-      settle("ground", "none");
-    } else {
-      // Kilobytes of cfg, so these land while the terrain is still being read — the markers
-      // are up before the scenery they stand among.
-      readTrackPlacements(path)
-        .then((p) => alive && setPlacements(p))
-        .catch(() => {});
+    // Every loader below takes the prefix, so one track's folder inside a shared archive is
+    // read as the track it is. These used to be skipped whenever a prefix was set, which is
+    // every stock track — so all fifteen of them drew as bare terrain with nothing on it.
+    // Kilobytes of cfg, so these land while the terrain is still being read — the markers
+    // are up before the scenery they stand among.
+    readTrackPlacements(path, prefix)
+      .then((p) => alive && setPlacements(p))
+      .catch(() => {});
 
-      // The sky is a few hundred triangles, so it lands with the first pass rather than after
-      // the scenery — a track should never be on screen with nothing above it.
-      loadTrackBackdrop(path)
-        .then((b) => {
-          if (!alive) return;
-          setBackdrop(b);
-          settle("sky", b ? "done" : "none");
-        })
-        .catch(() => settle("sky", "failed"));
+    // The sky is a few hundred triangles, so it lands with the first pass rather than after
+    // the scenery — a track should never be on screen with nothing above it.
+    loadTrackBackdrop(path, prefix)
+      .then((b) => {
+        if (!alive) return;
+        setBackdrop(b);
+        settle("sky", b ? "done" : "none");
+      })
+      .catch(() => settle("sky", "failed"));
 
-      // One small sheet, so it lands early and the ground has grain from the first frame the
-      // terrain is up.
-      loadTrackGround(path)
-        .then((g) => alive && setGround(g))
-        .catch(() => {});
+    // One small sheet, so it lands early and the ground has grain from the first frame the
+    // terrain is up.
+    loadTrackGround(path, prefix)
+      .then((g) => alive && setGround(g))
+      .catch(() => {});
 
-      // The ground the game draws. A few hundred kilobytes once reduced, and it replaces the
-      // surface picture rather than adding to it, so it is worth having as early as possible.
-      loadTrackGroundLayers(path)
-        .then((l) => {
-          if (!alive) return;
-          setGroundLayers(l);
-          settle("ground", l.length ? "done" : "none");
-        })
-        .catch(() => settle("ground", "failed"));
-    }
+    // The ground the game draws. A few hundred kilobytes once reduced, and it replaces the
+    // surface picture rather than adding to it, so it is worth having as early as possible.
+    loadTrackGroundLayers(path, prefix)
+      .then((l) => {
+        if (!alive) return;
+        setGroundLayers(l);
+        settle("ground", l.length ? "done" : "none");
+      })
+      .catch(() => settle("ground", "failed"));
 
     void (async () => {
       try {
@@ -205,14 +201,12 @@ export function useTrackScene(
         const surface = loadTrackOverview(path, OVERVIEW_DIM, prefix).catch(() => null);
         // The heaviest read in the view — most of a track's bulk is its `.map` — so it is
         // started here and settled last, under a terrain that is already up.
-        const objects = prefix
-          ? Promise.resolve(null)
-          : loadTrackScenery(path).catch((e) => {
-              setSceneryError(e instanceof Error ? e.message : String(e));
-              settle("scenery", "failed");
-              settle("colours", "failed");
-              return null;
-            });
+        const objects = loadTrackScenery(path, prefix).catch((e) => {
+          setSceneryError(e instanceof Error ? e.message : String(e));
+          settle("scenery", "failed");
+          settle("colours", "failed");
+          return null;
+        });
 
         const coarse = await loadTrackTerrain(path, COARSE_DIM, prefix);
         if (!alive) return;
@@ -246,7 +240,7 @@ export function useTrackScene(
           settle("scenery", "done");
           settle("colours", "running");
           setPainting(true);
-          loadTrackSurfaces(path)
+          loadTrackSurfaces(path, prefix)
             .then((tex) => {
               if (!alive) return;
               setSurfaces(tex);
