@@ -335,12 +335,12 @@ mod tests {
     #[test]
     fn a_mapped_image_names_itself() {
         let ident = identify(&reader(image(
-            "kaizo.dll",
-            r"C:\Users\somebody\source\repos\Kaizo\x64\Release\Kaizo.pdb",
+            "trainer.dll",
+            r"C:\Users\somebody\source\repos\Trainer\x64\Release\trainer.pdb",
         )))
         .unwrap();
-        assert_eq!(ident.name, "kaizo.dll");
-        assert_eq!(ident.pdb, "kaizo.pdb");
+        assert_eq!(ident.name, "trainer.dll");
+        assert_eq!(ident.pdb, "trainer.pdb");
         assert!(ident.is_dll);
         assert_eq!(ident.timestamp, 0x6512_3456);
         assert_eq!(ident.size_of_image, 0x0002_0000);
@@ -384,7 +384,7 @@ mod tests {
     fn a_truncated_read_costs_a_field_and_not_the_answer() {
         // Everything past the section table is unreadable — the shape of a region that was
         // unmapped, or shrank, between the walk and the read.
-        let img = image("kaizo.dll", r"C:\x\kaizo.pdb");
+        let img = image("trainer.dll", r"C:\x\trainer.pdb");
         let ident = identify(&|rva, len| {
             if rva >= 0x1000 {
                 return None;
@@ -404,15 +404,15 @@ mod tests {
     fn the_fingerprint_is_the_build_and_not_the_address_it_landed_at() {
         // The same build read twice — the only thing a relocation would change is content,
         // and the fingerprint is over the header fields, which do not move.
-        let a = identify(&reader(image("kaizo.dll", r"C:\a\kaizo.pdb"))).unwrap();
-        let b = identify(&reader(image("kaizo.dll", r"D:\somewhere-else\kaizo.pdb"))).unwrap();
+        let a = identify(&reader(image("trainer.dll", r"C:\a\trainer.pdb"))).unwrap();
+        let b = identify(&reader(image("trainer.dll", r"D:\somewhere-else\trainer.pdb"))).unwrap();
         assert_eq!(a.fingerprint(), b.fingerprint());
     }
 
     #[test]
     fn a_different_build_fingerprints_differently() {
-        let a = identify(&reader(image("kaizo.dll", r"C:\a\kaizo.pdb"))).unwrap();
-        let mut img = image("kaizo.dll", r"C:\a\kaizo.pdb");
+        let a = identify(&reader(image("trainer.dll", r"C:\a\trainer.pdb"))).unwrap();
+        let mut img = image("trainer.dll", r"C:\a\trainer.pdb");
         img[PE_OFF + 8..PE_OFF + 12].copy_from_slice(&0x7000_0000u32.to_le_bytes());
         let b = identify(&reader(img)).unwrap();
         assert_ne!(a.fingerprint(), b.fingerprint());
