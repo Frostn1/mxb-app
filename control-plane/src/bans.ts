@@ -1,5 +1,9 @@
 /**
- * Who is banned from mxbsecure, and every identity that resolves to them.
+ * Who is banned, and every identity that resolves to them.
+ *
+ * "Banned" means banned from all of it. MXB App, Studio, Coach, FrostMod and mxbsecure are one
+ * brand and one company, so there is no version of this that bans somebody from the locking
+ * system and leaves them the rest of the estate.
  *
  * A ban is recorded against an MX Bikes GUID (`0038_guid_bans.sql` says why that key and not
  * another), but a ban that only matched the GUID column on one account would be worth about a
@@ -25,17 +29,27 @@
  *
  * ## Where this is asked
  *
- * At the gates of mxbsecure, and at as few of them as will cover it, so a product added behind
- * one inherits the ban rather than having to remember it: the entitlement decision
- * (`decideEntitlement`, which every key grant and check goes through), the status poll that
- * tells an app to delete a key it already holds, the creator authorization in `assets.ts`, the
- * site's creator signup and locker download, and the paid plugins — which are sold here too.
+ * At the three doors the estate comes through, never per feature. MXB App, Studio, Coach,
+ * FrostMod and mxbsecure are one brand, and a ban is a ban from all of it:
  *
- * It is deliberately *not* asked by voice, paint sync, presence or the server book. Those are
- * the MXB App's, not mxbsecure's, and they are worthless unless the riders beside you can use
- * them too — banning somebody from the grid everyone else is on punishes the grid. The scope of
- * a ban is what mxbsecure sells and protects: the locking system, the content behind it, and
- * the paid plugins.
+ *  1. **`route` in `index.ts`, straight after `authenticate`.** Every bearer-token endpoint —
+ *     voice, paint sync, presence, the queue, the server registry, provisioning, the plugins,
+ *     the key grants — is below that line, so all of them are refused by position and anything
+ *     added later inherits the refusal. A short closed list (`bannedMayUse`) names the few that
+ *     stay open, and the gate itself says why each one does.
+ *  2. **`assets.ts`'s `authorize`,** for the creator surface, which arrives on a sign-in cookie
+ *     or a creator API key rather than an account token.
+ *  3. **`web.ts`,** for the site: the signed-in identity on mxbsecure.com, its creator signup,
+ *     and the locker download.
+ *
+ * `decideEntitlement` also asks, though the gate already covers its routes, because the answer
+ * there is not a refusal but a *reason* — written to the audit ledger, and returned to the app
+ * so a buyer is told why a file they paid for stopped opening.
+ *
+ * What a ban cannot reach is the handful of endpoints that carry no identity at all: anonymous
+ * usage counters, the master-server probe, the shared server book, a live share code, an
+ * unenrolled track generation. There is nothing there to match a ban against, and inventing
+ * something to match would mean identifying everybody else too.
  */
 
 import { isGuid } from "./validate";
@@ -66,7 +80,13 @@ export interface Who {
   guid?: string | null;
 }
 
-/** The message a banned caller is given, wherever it is refused. */
+/**
+ * The message a banned caller is given, wherever it is refused.
+ *
+ * "mxbsecure" rather than a list of app names because it is the company, and because a refusal
+ * has to be the same sentence in the app, the Studio, Coach and the site — a person hitting it
+ * in two places should be able to tell it is one thing.
+ */
 export const BANNED = "this install is banned from mxbsecure";
 
 /** How a GUID is written down: trimmed and upper-cased, or null if it isn't one. */

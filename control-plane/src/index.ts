@@ -280,6 +280,40 @@ async function route(request: Request, env: Env): Promise<Response> {
   const account = await authenticate(request, env);
   if (!account) return json(401, { error: "unauthorized" });
 
+  // The ban gate, and it is deliberately *here* rather than on the endpoints a ban is
+  // obviously about.
+  //
+  // MXB App, Studio, Coach, FrostMod and mxbsecure are one thing to the people who use them
+  // and one thing to the person banned from them. So a ban is refused at the door the whole
+  // estate comes through, which is this one: every route below inherits it, and a product
+  // added next year inherits it without anybody remembering to ask. The alternative — a check
+  // per feature — is a list that is complete on the day it is written and wrong by the next
+  // release.
+  //
+  // Four things stay open to a banned account, each because refusing it would work against
+  // the ban rather than for it:
+  //
+  //  * `GET /v1/me`, which reports the ban and its reason. Everything else answering 403 with
+  //    nothing to explain it reads as an outage, and an outage gets support threads and a
+  //    second account; being told plainly is also what makes an appeal possible.
+  //  * `PUT /v1/diagnostics`, which observes and answers `{ ok: true }` whatever it made of
+  //    the report. Refusing it would blind us to the install we most want to watch, and would
+  //    hand it a way to tell that it is the report that is refused.
+  //  * `POST /v1/steam/login`, so an identity can still be linked — that is the plumbing an
+  //    appeal and a lift are decided on.
+  //  * The three mxbsecure answers that carry a ban's own consequences: the status poll that
+  //    tells an app to delete the keys it holds (a blanket 403 there reads as "we don't know",
+  //    which keeps the keys), and the grant and check, which answer with a reason and write
+  //    the refusal to the audit ledger.
+  if (!bannedMayUse(method, path)) {
+    const ban = await banFor(env, {
+      accountId: account.id,
+      steamId: account.steam_id,
+      guid: account.guid,
+    });
+    if (ban) return json(403, { error: BANNED, reason: ban.reason });
+  }
+
   // Open to every account, self-serve ones included: who you are, where you are, and the
   // voice room for the server you said you are on.
   if (method === "GET" && path === "/v1/me") return me(account, env);
@@ -585,10 +619,6 @@ async function steamReturn(request: Request, url: URL, env: Env): Promise<Respon
 async function listEntitlements(account: Account, env: Env): Promise<Response> {
   const steamId = await steamIdFor(env, account);
   if (!steamId) return json(200, { steamId: null, assets: [] });
-  // A banned install owns nothing here, whatever the rows say: `/v1/keys/grant` refuses every
-  // one of them, and a list the app can't act on is a list that only misleads it.
-  const ban = await banFor(env, { accountId: account.id, steamId, guid: account.guid });
-  if (ban) return json(200, { steamId, assets: [], banned: true, banReason: ban.reason });
 
   const rows = await env.DB.prepare(
     "SELECT e.asset_id, a.title, e.source, e.granted_at" +
@@ -949,6 +979,23 @@ function b64(bytes: Uint8Array): string {
 }
 
 /**
+ * The endpoints a banned account still reaches, and nothing else.
+ *
+ * A closed list, checked by the gate in `route`. Adding to it is a decision to let a banned
+ * install keep using something, so it should be as hard to do by accident as this is to read —
+ * the reasoning for each entry is at the gate itself.
+ */
+function bannedMayUse(method: string, path: string): boolean {
+  if (method === "GET" && path === "/v1/me") return true;
+  if (method === "PUT" && path === "/v1/diagnostics") return true;
+  if (method === "POST" && path === "/v1/steam/login") return true;
+  if (method === "POST" && path === "/v1/assets/status") return true;
+  if (method === "POST" && path === "/v1/entitlements/check") return true;
+  if (method === "POST" && path === "/v1/keys/grant") return true;
+  return false;
+}
+
+/**
  * Refuse anything a self-serve account has no business doing.
  *
  * Voice and paint sync are open to everyone with the app — both are worthless unless the
@@ -969,6 +1016,11 @@ function invitedOnly(account: Account): Response | null {
  * the same thing the moment a publish half-fails, which is exactly when a player looks.
  */
 async function me(account: Account, env: Env): Promise<Response> {
+  // The one answer a banned account still gets, and the reason it does: with everything else
+  // refused, this is where an app learns that the refusals are a ban and not a broken server,
+  // and gets the words to put in front of the person. See the gate in `route`.
+  const ban = await banFor(env, { accountId: account.id, steamId: account.steam_id, guid: account.guid });
+
   const paints = await env.DB.prepare(
     "SELECT bike_id, slot, file_name, sha256, size FROM loadout_paints WHERE account_id = ?" +
       " ORDER BY bike_id, slot",
@@ -999,6 +1051,7 @@ async function me(account: Account, env: Env): Promise<Response> {
     riderName: account.rider_name,
     steamId: account.steam_id,
     guid: account.guid,
+    ...(ban ? { banned: true, banReason: ban.reason } : {}),
     bikes: [...bikes.values()],
     totalPaints: paints.results.length,
     paints: paints.results.map((p) => ({
@@ -1060,13 +1113,11 @@ async function putGuid(request: Request, account: Account, env: Env): Promise<Re
   const { guid } = body as { guid?: unknown };
   if (!isGuid(guid)) return json(400, { error: "that doesn't look like an MX Bikes GUID" });
 
-  // A banned GUID is refused outright rather than stored and refused later. It changes nothing
-  // about mxbsecure — the grant resolves the ban through the claim log either way — but the
-  // claim is also what paint sync and the roster key on, and there is no reason to let a banned
-  // install move its identity onto an account we would then have to keep matching.
-  if (await banFor(env, { accountId: account.id, steamId: account.steam_id, guid })) {
-    return json(403, { error: BANNED });
-  }
+  // A banned GUID nobody has claimed yet is refused here rather than at the gate above, which
+  // only knows the identities already tied to the caller: this is the claim that would make
+  // the tie, and letting it through would put a banned install's identity on a fresh account
+  // for one request before anything noticed.
+  if (await banFor(env, { guid })) return json(403, { error: BANNED });
 
   try {
     await env.DB.prepare("UPDATE accounts SET guid = ? WHERE id = ?")

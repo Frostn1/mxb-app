@@ -198,7 +198,7 @@ describe("which identities a ban resolves through", () => {
     // claim log still ties the account to the GUID it was banned on.
     const moved = await claim("FF0110000122222222");
     expect(moved.status).toBe(403);
-    expect(await moved.json()).toEqual({ error: "this install is banned from mxbsecure" });
+    expect(await moved.json()).toMatchObject({ error: "this install is banned from mxbsecure" });
     await env.DB.prepare("UPDATE accounts SET guid = 'FF0110000122222222' WHERE id = 'acc_banned'").run();
     expect(await banFor(env, { accountId: "acc_banned" })).not.toBeNull();
   });
@@ -313,9 +313,10 @@ describe("what a ban actually refuses", () => {
     // Nobody else's machine hears anything about it.
     expect(await asset("clean-token")).toMatchObject({ owned: true, available: true, revoked: false });
 
-    // The entitlement list says the same thing rather than offering a list nothing can open.
+    // The entitlement list is simply refused, like everything else the gate covers: the app
+    // learns what is going on from `/v1/me`, not from a list it can do nothing with.
     const mine = await call(env, req("GET", "/v1/entitlements", { key: "buyer-token", origin: null }));
-    expect(await mine.json()).toMatchObject({ steamId: BUYER, assets: [], banned: true });
+    expect(mine.status).toBe(403);
   });
 
   it("refuses the paid plugins mxbsecure sells, without spending a key or touching a license", async () => {
@@ -335,7 +336,7 @@ describe("what a ban actually refuses", () => {
     await ban(env, GUID);
     for (const res of [await mine(), await bundle()]) {
       expect(res.status).toBe(403);
-      expect(await res.json()).toEqual({ error: "this install is banned from mxbsecure" });
+      expect(await res.json()).toMatchObject({ error: "this install is banned from mxbsecure" });
     }
     // The license row is untouched, so lifting the ban restores exactly what they had.
     expect(
@@ -351,6 +352,77 @@ describe("what a ban actually refuses", () => {
     expect(await env.DB.prepare("SELECT redeemed_by FROM plugin_keys WHERE code = ?").bind(second).first()).toEqual({
       redeemed_by: null,
     });
+  });
+
+  it("refuses the rest of the estate too — voice, paint sync, presence, the queue, servers", async () => {
+    const env = await deployment();
+    await account(env, "acc_banned", "banned-token", BUYER, GUID);
+    // An invited account, so the server-estate routes below are refused for the ban rather than
+    // for the invite gate that normally stops a self-serve one.
+    await env.DB.prepare("UPDATE accounts SET kind = 'invited' WHERE id = 'acc_banned'").run();
+    await ban(env, GUID);
+    const as = (method: string, path: string, body?: unknown) =>
+      call(env, req(method, path, { key: "banned-token", body, origin: null }));
+
+    // Every app in the brand comes through these, and none of them is about locked content.
+    const routes: [string, string, unknown?][] = [
+      ["PUT", "/v1/me/name", { riderName: "Someone" }],
+      ["PUT", "/v1/presence", { server: "srv_1" }],
+      ["GET", "/v1/voice/ice"],
+      ["GET", "/v1/voice/room?server=srv_1"],
+      ["PUT", "/v1/loadouts", { bikes: [] }],
+      ["GET", "/v1/presence?server=srv_1"],
+      ["PUT", "/v1/queue", { server: "srv_1" }],
+      ["GET", "/v1/me/plugins"],
+      ["GET", "/v1/entitlements"],
+      ["POST", "/v1/servers", { name: "Frost", address: "1.2.3.4:54000" }],
+      ["GET", "/v1/servers/mine"],
+      ["POST", "/v1/provision", { region: "eu-west-1" }],
+      ["GET", "/v1/fleet"],
+    ];
+    for (const [method, path, body] of routes) {
+      const res = await as(method, path, body);
+      expect(res.status, `${method} ${path}`).toBe(403);
+      expect(await res.json()).toMatchObject({ error: "this install is banned from mxbsecure" });
+    }
+
+    // `GET /v1/roster` is not in the list: the public server book answers that path for
+    // everybody before the account gate is reached (the bearer paint roster below it is
+    // shadowed by it, which predates this and is not a ban's business). Publishing a look is
+    // gated, which is the half of paint sync a ban is actually about.
+
+    // Nothing is refused for an account that isn't banned, on any of them: the gate is about
+    // who is asking, not about the routes.
+    await account(env, "acc_clean", "clean-token", CLEAN, OTHER_GUID);
+    const clean = await call(env, req("GET", "/v1/voice/ice", { key: "clean-token", origin: null }));
+    expect(clean.status).toBe(200);
+  });
+
+  it("still answers the four things a ban needs to stay reachable", async () => {
+    const env = await deployment();
+    await account(env, "acc_banned", "banned-token", BUYER, GUID);
+    await ban(env, GUID);
+    const as = (method: string, path: string, body?: unknown) =>
+      call(env, req(method, path, { key: "banned-token", body, origin: null }));
+
+    // Who am I: the answer that tells an app the refusals are a ban, with the words for it.
+    const me = await as("GET", "/v1/me");
+    expect(me.status).toBe(200);
+    expect(await me.json()).toMatchObject({
+      steamId: BUYER,
+      banned: true,
+      banReason: "unlocked and shared protected content",
+    });
+
+    // Diagnostics still observes, and still says nothing about what it made of the report.
+    const report = await as("PUT", "/v1/diagnostics", { available: false, appVersion: "0.15.1", guid: GUID });
+    expect(report.status).toBe(200);
+    expect(await report.json()).toEqual({ ok: true });
+
+    // And the status poll still answers, because a 403 there would keep the keys on disk.
+    const status = await as("POST", "/v1/assets/status", { assetIds: [] });
+    expect(status.status).toBe(200);
+    expect(await status.json()).toMatchObject({ banned: true });
   });
 
   it("closes the site: no creator signup, no locker, and /me says so", async () => {

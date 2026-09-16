@@ -28,7 +28,7 @@ consequences fall out of that, and they're baked into the schema:
 | POST | `/v1/enroll` | invite code | Trade an invite for an account and a bearer token |
 | GET | `/v1/servers` | — | Server registry. Public: it is the app's join picker, and the people who most need it are the ones with no account yet. `agent_url` is not returned. |
 | POST | `/v1/servers/:id/hello` | agent token | A provisioned box announcing that it is up. Its address is taken from `cf-connecting-ip`, never from the body, so a box cannot register somebody else's. |
-| GET | `/v1/me` | bearer | Account, and a per-bike summary of what is stored for it |
+| GET | `/v1/me` | bearer | Account, and a per-bike summary of what is stored for it. Also where a banned account is told so — see below. |
 | PUT | `/v1/me/guid` | bearer | Claim a GUID. First-come, and refused if that GUID is banned. |
 | PUT | `/v1/loadout` | bearer | Replace **one bike's** loadout. Kept for clients older than per-bike storage. |
 | PUT | `/v1/loadouts` | bearer | Replace the whole look, every bike at once. Returns `missing` — the blobs still to upload. |
@@ -270,12 +270,14 @@ None of that makes a field unforgeable — `version`, `os` and `game` are still 
 caller said, and they are what "can I stop shipping 0.8.x" and "is GP Bikes worth carrying"
 are read off. Together the bounds make forging one cost more than the decision it would move.
 
-### Banning a rider from mxbsecure
+### Banning a rider
 
 Every other revocation here is about *content*: a creator withdraws an asset, we take one down,
 a removal takes the buyers' keys back. A ban is the other direction — somebody who unlocked
-protected content and passed it around, refused across mxbsecure rather than asset by asset.
-`src/bans.ts` is the whole of it, and `0038_guid_bans.sql` says why it is keyed the way it is.
+protected content and passed it around, refused across everything we run. MXB App, Studio,
+Coach, FrostMod and mxbsecure are one brand, so a ban is a ban from all of it, not from the
+locking system alone. `src/bans.ts` is the whole of it, and `0038_guid_bans.sql` says why it is
+keyed the way it is.
 
 **Keyed on the MX Bikes GUID.** It is the identity the game issues per install, it is what a
 report about cracked content carries, and it is the one of the three we hold that is neither
@@ -290,22 +292,34 @@ login, a fresh GUID claimed by a banned account, and a fresh Steam account on a 
 all resolve back to the ban. `guid_claims` exists for exactly the reason `steam_links` does:
 `accounts.guid` is a single mutable cell, and a ban that only read it would end at a rename.
 
-**Where it lands.** At the gates, by position rather than per feature, so a product added later
-inherits it:
+**Asked at three doors, never per feature**, so a product added later inherits it:
 
-| | What a ban does |
+| Door | What it covers |
 |---|---|
-| `POST /v1/keys/grant`, `POST /v1/entitlements/check` | Refused for every asset, before entitlement is even looked up. Written to `entitlement_grants` as `deny`/`banned` like any other refusal. |
-| `POST /v1/assets/status` | `revoked: true` for every secured file on the machine, so the app deletes the keys it already holds. This is the half that reaches content already unlocked — a `.mxbkey` opens offline forever, so a ban that only stopped the next grant would stop nothing. |
-| `GET /v1/entitlements` | Empty, and says `banned` — a list nothing can open only misleads the app. |
-| `/admin/assets*`, `POST /v1/web/creator`, `GET /v1/web/lockweb/*` | No locking, no selling, no signup, and no locker download: banned from making new protected content, not only from opening other people's. A creator API key belonging to a banned account is refused with it. |
-| `GET /v1/me/plugins`, `GET /v1/plugins/:id/bundle`, `POST /v1/plugins/redeem` | The paid plugins are sold through mxbsecure too, so a ban reaches them: no signed license, no build, and a key is refused *before* it is read so it stays unspent and still worth something. |
-| `PUT /v1/me/guid` | A banned GUID cannot be claimed. |
+| `route`, straight after `authenticate` | Every bearer-token endpoint in the estate: voice, paint sync, presence, the queue, the server registry, provisioning, the paid plugins, the key grants. They are all below that line, so a route added below it is covered without anybody remembering to ask. |
+| `authorize` in `assets.ts` | The creator surface, which arrives on a sign-in cookie or a creator API key: no locking, no selling, no new asset ids, no API keys. |
+| `web.ts` | mxbsecure.com — the signed-in identity, the creator signup, and the locker download. |
 
-Voice, paint sync, presence and the server book are deliberately **untouched**. They are the
-MXB App's, not mxbsecure's, and they are worthless unless the riders beside you can use them
-too — banning somebody from the grid punishes the grid. A ban is about the locking system and
-the content it protects.
+A closed list (`bannedMayUse`) names the few endpoints that stay open to a banned account, and
+each is there because refusing it would work against the ban:
+
+- `GET /v1/me` **reports** the ban and its reason, so an app can say what is going on. Everything
+  else answering 403 with nothing to explain it reads as an outage — and an outage gets a support
+  thread and a second account, not an appeal.
+- `PUT /v1/diagnostics` still observes, and still answers `{ ok: true }` whatever it made of the
+  report. Refusing it would blind us to the install we most want to watch.
+- `POST /v1/steam/login` still links an identity, which is the plumbing an appeal is decided on.
+- `POST /v1/assets/status` still answers, with `revoked: true` for every secured file on the
+  machine — this is what makes the app delete the keys it already holds, and a blanket 403 there
+  would read as "we don't know", which keeps them. `.mxbkey` opens offline forever, so without
+  this a ban would leave the banned install playing everything it had already unlocked.
+- `POST /v1/keys/grant` and `POST /v1/entitlements/check` answer with a *reason* rather than a
+  bare refusal, and write the denial to `entitlement_grants` — a banned install walking the
+  catalogue is only visible if the "no"s are recorded.
+
+What a ban cannot reach is what carries no identity: the anonymous usage counters, the
+master-server probe, the shared server book, a live share code, and track generation (capped by
+its own shape rather than by who is asking). There is nothing there to match a ban against.
 
 **Reversible, and reviewable.** A ban carries a reason (shown to the rider), the evidence, and
 the admin who applied it; lifting one is a timestamp, never a delete, so an upheld appeal stays

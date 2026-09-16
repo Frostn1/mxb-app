@@ -2,6 +2,14 @@
 
 ## Unreleased — MXB App and MXB Coach
 
+### Changed
+- Riders banned for unlocking protected content and sharing it are refused across everything
+  mxbsecure runs, not only the locking: paint sync, voice, presence, the server queue, the server
+  registry, the paid plugins and every key grant. A ban follows the MX Bikes install rather than
+  the account, so a second account, a new GUID or another Steam login on the same PC is refused
+  with it, and protected files already unlocked there stop opening — the app deletes those keys
+  on its next pass. Nobody else is affected in any way, and a ban can be lifted.
+
 ### Fixed
 - The overlay shortcut always belongs to someone. With no MX Bikes folder set, MXB App told
   MXB Coach it was holding the key for both and then never bound it, so the shortcut opened
