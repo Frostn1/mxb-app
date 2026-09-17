@@ -25,7 +25,7 @@
 //! The bound is not a guess. A graft bisection against a matched good/bad pair narrowed the
 //! fatal bytes to `0x7f..0x85`: copying a donor's `0x0..0x86` made a crashing file load, copying
 //! `0x0..0x7f` did not. Clearing the slack alone was then confirmed in game. The analysis, the
-//! bisection and the in-game test are all Thomas Malt's (`thomas4f/mxbmrp3`, `crash_analysis/`);
+//! bisection and the in-game test are all Thomas's (`thomas4f/mxbmrp3`, `crash_analysis/`);
 //! this is his repair applied to the folder the app already manages.
 //!
 //! ## What this refuses to touch
