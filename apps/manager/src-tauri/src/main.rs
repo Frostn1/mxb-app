@@ -2309,6 +2309,19 @@ async fn mxbsecure_status(app: tauri::AppHandle) -> Result<Vec<SecureStatusItem>
     }
 }
 
+/// A client that always gives up eventually, for the two calls the Steam sign-in wall waits on.
+///
+/// `reqwest` has no timeout of its own, and a command that never resolves is a wall whose button
+/// never comes back — the frontend cannot leave the state it entered to make the call. Twenty
+/// seconds, matching `mxb_core::appgate`; the default client is the fallback so a builder failure
+/// can't be the thing that stops sign-in working at all.
+fn gate_http() -> reqwest::Client {
+    reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(20))
+        .build()
+        .unwrap_or_default()
+}
+
 /// Start linking this account to a Steam identity: ask the control plane for a Steam OpenID
 /// sign-in URL. The frontend opens it in the browser; the browser half lands on
 /// `/v1/steam/return`, which sets `accounts.steam_id`. Returns the URL to open.
@@ -2317,7 +2330,7 @@ async fn steam_link_start(app: tauri::AppHandle) -> Result<String, String> {
     let cfg = config::load_or_detect(&app).unwrap_or_default();
     // No account yet: claim a self-serve one. Steam is the identity; no invite needed.
     let tok = voice::signal::account(&app, &cfg).await?;
-    let resp = reqwest::Client::new()
+    let resp = gate_http()
         .post(format!("{}/v1/steam/login", crate::paintsync::control_plane()))
         .bearer_auth(&tok)
         .send()
@@ -2344,7 +2357,7 @@ async fn steam_link_status(app: tauri::AppHandle) -> Result<Option<String>, Stri
     if tok.is_empty() {
         return Ok(None);
     }
-    let resp = reqwest::Client::new()
+    let resp = gate_http()
         .get(format!("{}/v1/entitlements", crate::paintsync::control_plane()))
         .bearer_auth(&tok)
         .send()

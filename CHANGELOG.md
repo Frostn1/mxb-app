@@ -9,11 +9,16 @@
   and the wall only comes down for an install that has one. The same thing happened after a
   reinstall that lost its settings. Every install of yours now signs in, and they are all the
   same you: the same mods, the same bans, the same GUID.
-- The sign-in wall says what happened instead of waiting forever. If the service can't be
-  reached, it says so; if Steam never comes back, it says to check the browser tab that opened
-  rather than leaving "Waiting for Steam to confirm it's you…" on screen with nothing behind it.
-  It also waits the full ten minutes the sign-in is good for, so a Steam Guard prompt no longer
-  outlasts it, and the button comes back either way.
+- The "Sign in with Steam" button stays clickable. It used to grey out for the whole wait, so a
+  sign-in that had already failed in the browser left you looking at a wall with one control on
+  it that did nothing — for minutes, or for good if the service stopped answering mid-request.
+  Now it goes quiet only while the browser is opening, and after that reads "Open Steam again"
+  and starts you a fresh sign-in whenever you press it.
+- The wall says what happened instead of waiting in silence. If the service can't be reached, it
+  says so; if Steam never comes back, it says to check the browser tab that opened rather than
+  leaving "Waiting for Steam to confirm it's you…" on screen with nothing behind it. It also
+  waits the full ten minutes a sign-in is good for, so a Steam Guard prompt no longer outlasts
+  it.
 - Reloading the Steam tab after you'd already signed in said "Already linked — this Steam
   account is linked to another MXB App profile", which described a problem you didn't have. It
   now says the sign-in was already used.

@@ -19,20 +19,37 @@ import { Button } from "../ui/button";
  *
  * Honest throughout: this is a requirement to meet, not the disguised block a banned install
  * gets (that one closes the app instead of ever reaching here).
+ *
+ * The one rule this door has to keep: **the button is never dead**. It is the only control on
+ * the only thing on screen, so a state it cannot be clicked out of is the app not opening. It
+ * used to be disabled for the whole wait — minutes, on a sign-in that had already failed in the
+ * browser, with no way to start another and no way to tell that from the app having hung. Now it
+ * only goes quiet for the moment it takes to open the browser, and every wait can be restarted
+ * over the top of itself.
  */
 export default function SigninGate() {
   const [required, setRequired] = useState(false);
   const [message, setMessage] = useState("Sign in with Steam to use MXB App.");
-  const [busy, setBusy] = useState(false);
+  /** The browser is being opened. The one moment when a second click has nothing to do. */
+  const [opening, setOpening] = useState(false);
+  /** The browser is open and we are waiting on Steam. Clicking again starts a fresh sign-in. */
+  const [waiting, setWaiting] = useState(false);
   const [note, setNote] = useState<string | null>(null);
-  const polling = useRef(false);
+  /**
+   * Which attempt is the live one. Bumped by every click, so a poll left over from an earlier
+   * attempt sees it has been superseded and stops touching the screen — the alternative being an
+   * old loop's "Steam hasn't come back" landing on top of the attempt the person is watching.
+   */
+  const attempt = useRef(0);
 
   useEffect(() => {
     const pending = listen<{ required: boolean; message: string }>("mxb-signin-required", (e) => {
       setRequired(e.payload.required);
       if (e.payload.message) setMessage(e.payload.message);
       if (!e.payload.required) {
-        setBusy(false);
+        attempt.current++;
+        setOpening(false);
+        setWaiting(false);
         setNote(null);
       }
     });
@@ -42,53 +59,67 @@ export default function SigninGate() {
   }, []);
 
   const signIn = async () => {
-    // Nothing to start while a poll is already running, and returning from the middle of the
-    // old flow left `busy` set for good — a wall with a button that never came back.
-    if (polling.current) return;
-    setBusy(true);
+    if (opening) return;
+    // Synchronous, before any await: two clicks landing in one tick both read the ref, and the
+    // second supersedes the first rather than running beside it.
+    const mine = ++attempt.current;
+    const mineStill = () => attempt.current === mine;
+    setOpening(true);
+    setWaiting(false);
     setNote("Opening Steam in your browser…");
-    polling.current = true;
+
     try {
       const url = await invoke<string>("steam_link_start");
       await openUrl(url);
-      setNote("Waiting for Steam to confirm it's you…");
-      // Poll until the link lands, then let the gate have the final word. The ceiling matches
-      // the control plane's own ten-minute sign-in window: stopping at five left a sign-in that
-      // was still perfectly valid — a Steam Guard prompt, a password typed slowly — with
-      // nothing watching for it.
-      let linked: string | null = null;
-      let lastError: string | null = null;
-      for (let i = 0; i < 300 && !linked; i++) {
-        await new Promise((r) => setTimeout(r, 2000));
-        try {
-          linked = await invoke<string | null>("steam_link_status");
-          lastError = null;
-        } catch (e) {
-          // One failed poll is nothing — the service is a network away. A run of them is the
-          // reason the wall is still up, so the last one is kept and said out loud below.
-          lastError = typeof e === "string" ? e : null;
-        }
-      }
-      if (linked) {
-        setNote("Signed in. Getting you in…");
-        await invoke("recheck_gate").catch(() => {});
-      } else if (lastError) {
-        setNote(`${lastError}. Try again.`);
-      } else {
-        // The old flow ended here with "Waiting for Steam to confirm it's you…" still on
-        // screen and nothing further ever happening, which is indistinguishable from the app
-        // being broken. The browser tab is where the answer is, and it is the half that can
-        // fail on its own — so say so, rather than going quiet.
-        setNote(
-          "Steam hasn't come back. Check the browser tab that opened: if it says the sign-in " +
-            "expired or couldn't be confirmed, start it again here.",
-        );
-      }
     } catch (e) {
+      if (!mineStill()) return;
+      setOpening(false);
       setNote(typeof e === "string" ? e : "Couldn't start the sign-in. Try again.");
-    } finally {
-      polling.current = false;
-      setBusy(false);
+      return;
+    }
+    if (!mineStill()) return;
+
+    // The browser is open, so the button comes back: from here the useful thing a second click
+    // does is open Steam again, which is exactly what somebody looking at a browser tab that
+    // said "sign-in expired" needs.
+    setOpening(false);
+    setWaiting(true);
+    setNote("Waiting for Steam to confirm it's you…");
+
+    // Poll until the link lands, then let the gate have the final word. The ceiling matches the
+    // control plane's own ten-minute sign-in window: stopping at five left a sign-in that was
+    // still perfectly valid — a Steam Guard prompt, a password typed slowly — with nothing
+    // watching for it.
+    let linked: string | null = null;
+    let lastError: string | null = null;
+    for (let i = 0; i < 300 && !linked && mineStill(); i++) {
+      await new Promise((r) => setTimeout(r, 2000));
+      try {
+        linked = await invoke<string | null>("steam_link_status");
+        lastError = null;
+      } catch (e) {
+        // One failed poll is nothing — the service is a network away. A run of them is the
+        // reason the wall is still up, so the last one is kept and said out loud below.
+        lastError = typeof e === "string" ? e : null;
+      }
+    }
+    if (!mineStill()) return;
+
+    setWaiting(false);
+    if (linked) {
+      setNote("Signed in. Getting you in…");
+      await invoke("recheck_gate").catch(() => {});
+    } else if (lastError) {
+      setNote(`${lastError}. Try again.`);
+    } else {
+      // This used to end with "Waiting for Steam to confirm it's you…" still on screen and
+      // nothing further ever happening, which is indistinguishable from the app being broken.
+      // The browser tab is where the answer is, and it is the half that can fail on its own —
+      // so say so, rather than going quiet.
+      setNote(
+        "Steam hasn't come back. Check the browser tab that opened: if it says the sign-in " +
+          "expired or couldn't be confirmed, start it again here.",
+      );
     }
   };
 
@@ -101,13 +132,15 @@ export default function SigninGate() {
         <p className="mt-3 text-sm text-muted-foreground">{message}</p>
         <p className="mt-1 text-sm text-muted-foreground">It takes one click and keeps your account yours.</p>
         <div className="mt-7">
-          <Button size="lg" className="rounded-full px-8" disabled={busy} onClick={() => void signIn()}>
-            {busy ? "Signing in…" : "Sign in with Steam"}
+          <Button size="lg" className="rounded-full px-8" disabled={opening} onClick={() => void signIn()}>
+            {opening ? "Opening Steam…" : waiting ? "Open Steam again" : "Sign in with Steam"}
           </Button>
         </div>
         {note && <p className="mt-4 text-xs text-muted-foreground">{note}</p>}
         <p className="mt-6 text-xs text-muted-foreground/70">
-          Opens Steam in your browser · nothing else works until you do
+          {waiting
+            ? "Finish the sign-in in your browser · press the button again for a fresh one"
+            : "Opens Steam in your browser · nothing else works until you do"}
         </p>
       </div>
     </div>

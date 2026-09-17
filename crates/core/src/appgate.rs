@@ -21,6 +21,7 @@
 //! calling three functions rather than by copying the machinery and letting it drift.
 
 use std::path::PathBuf;
+use std::time::Duration;
 
 use serde::Deserialize;
 use tauri::{AppHandle, Emitter, Manager};
@@ -36,6 +37,19 @@ const FALLBACK_BLOCK: &str =
 
 /// Shown behind the sign-in wall when the server sent no message of its own.
 const FALLBACK_SIGNIN: &str = "Sign in with Steam to continue.";
+
+/// Every request here is one the sign-in wall is waiting on, and `reqwest` has no timeout of its
+/// own: a connection that opens and then says nothing hangs for as long as the OS allows. On the
+/// wall that is not a slow request, it is a button that never comes back — the command never
+/// resolves, so the frontend never leaves the state it entered to make the call. `account.rs`
+/// already builds its client this way; this is the rest of the flow catching up.
+const HTTP_TIMEOUT: Duration = Duration::from_secs(20);
+
+/// A client that always gives up eventually. Falls back to the default client if the builder
+/// fails, which keeps a timeout from being the thing that stops the gate working at all.
+fn http() -> reqwest::Client {
+    reqwest::Client::builder().timeout(HTTP_TIMEOUT).build().unwrap_or_default()
+}
 
 /// The verdict `GET /v1/app/gate` returns.
 #[derive(Deserialize)]
@@ -138,7 +152,7 @@ pub async fn check(app: AppHandle) {
         }
     };
 
-    let resp = match reqwest::Client::new()
+    let resp = match http()
         .get(format!("{}/v1/app/gate", control_plane()))
         .bearer_auth(&token)
         .send()
@@ -189,7 +203,7 @@ pub async fn check(app: AppHandle) {
 /// lands on `/v1/steam/return`, which sets `steam_id` and pins the derived GUID.
 pub async fn steam_link_start(app: &AppHandle) -> Result<String, String> {
     let token = account::ensure_token(app).await?;
-    let resp = reqwest::Client::new()
+    let resp = http()
         .post(format!("{}/v1/steam/login", control_plane()))
         .bearer_auth(&token)
         .send()
@@ -214,7 +228,7 @@ pub async fn steam_link_status(app: &AppHandle) -> Result<Option<String>, String
     if token.is_empty() {
         return Ok(None);
     }
-    let resp = reqwest::Client::new()
+    let resp = http()
         .get(format!("{}/v1/entitlements", control_plane()))
         .bearer_auth(&token)
         .send()
