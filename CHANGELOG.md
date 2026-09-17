@@ -345,6 +345,12 @@
 ## Unreleased — MXB App
 
 ### Fixed
+- MX Bikes' own Browse screen stops saying "connection timeout" for the rest of the evening.
+  Leave a server, go back to Browse, and the game would sit there timing out on a master server
+  that is answering everyone else, with nothing to do about it but restart. The game leaves its
+  connection to the master half-open when a session ends and then refuses to make a new one.
+  FrostMod now spots that and clears it while you play, so your next look at the list works.
+  There is a Fix in-game browser button on the Servers tab too, for the times it holds off.
 - The overlay shortcut always belongs to someone. With no MX Bikes folder set, MXB App told
   MXB Coach it was holding the key for both and then never bound it, so the shortcut opened
   nothing in either app.

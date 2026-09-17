@@ -136,6 +136,9 @@ pub fn is_running() -> bool {
 //       back; reselecting the same bike does not re-read the model.
 //   `swap_bike` — switch the active bike outright. NOT implemented in FrostMod
 //       yet (Stage B); it logs and ignores.
+//   `reset_server_browser` — close the game's half-open master session so the next Browse
+//       starts clean. FrostMod does this by itself when it recognises the wedge; this is
+//       the button for when it declines to. Carries no bike id.
 //
 // A verb the running FrostMod predates is logged as unknown and dropped, which
 // looks exactly like success from this side — see `supports_model_refresh`.
@@ -292,6 +295,40 @@ pub fn signal_swap_bike(bike_id: &str) -> CommandOutcome {
 /// caller must clear first.
 pub fn signal_refresh_model(bike_id: &str) -> CommandOutcome {
     send_command(command_json("refresh_bike_model", bike_id))
+}
+
+/// Ask FrostMod to close the game's master session, so the next Browse starts from nothing.
+///
+/// For the bug where the in-game browser says "connection timeout" for the rest of a session
+/// after you leave a server. The game's login state is left half-open — the socket keeps the
+/// source port it has had since the first Browse, and the master may still hold a session for
+/// the account — and the only thing that tears it down is a command the game reaches solely
+/// through the browser's own cancel path. FrostMod watches for the wedge and clears it
+/// unprompted; this is the manual half, for a case its rule declines to act on.
+///
+/// Safe to send to any FrostMod that understands it — see `server_browser_reset_supported`
+/// for why an older one is withheld from rather than allowed to no-op.
+pub fn signal_reset_server_browser() -> CommandOutcome {
+    send_command(command_json("reset_server_browser", ""))
+}
+
+/// The oldest FrostMod that knows the `reset_server_browser` verb.
+///
+/// A capability floor, not a safety one — an older FrostMod logs the verb as unknown and
+/// drops it, which costs nothing. It is here because from this side that is indistinguishable
+/// from success, and a button that reports "done" while doing nothing is worse than one that
+/// says it can't. Must stay in step with the FrostMod release that adds the verb.
+pub const SERVER_BROWSER_RESET_MIN_VERSION: &str = "v0.34.0";
+
+/// May we send `reset_server_browser` to the installed FrostMod, tagged `tag`?
+///
+/// An unreadable tag counts as unsupported, for the same reason the floor exists at all: we
+/// would rather tell the player we can't than claim we did.
+pub fn server_browser_reset_supported(tag: Option<&str>) -> bool {
+    match (tag.and_then(version_parts), version_parts(SERVER_BROWSER_RESET_MIN_VERSION)) {
+        (Some(have), Some(min)) => have >= min,
+        _ => false,
+    }
 }
 
 /// The oldest FrostMod we will send `refresh_bike_model` to.
@@ -669,6 +706,30 @@ mod tests {
         assert!(!model_refresh_is_safe(Some("")));
         assert!(!model_refresh_is_safe(Some("nightly")));
         assert!(!model_refresh_is_safe(Some("v-broken-")));
+    }
+
+    /// The browser reset is withheld from anything that predates the verb, because an older
+    /// FrostMod drops it silently and the button would claim to have done something.
+    #[test]
+    fn browser_reset_needs_a_frostmod_that_knows_the_verb() {
+        assert!(server_browser_reset_supported(Some("v0.34.0")));
+        assert!(server_browser_reset_supported(Some("v0.35.1")));
+        assert!(server_browser_reset_supported(Some("v1.0.0")));
+        assert!(!server_browser_reset_supported(Some("v0.33.0")));
+        assert!(!server_browser_reset_supported(Some("v0.9.11")));
+        // Unreadable is unsupported, same as every other gate here.
+        assert!(!server_browser_reset_supported(None));
+        assert!(!server_browser_reset_supported(Some("nightly")));
+    }
+
+    /// The verb carries no bike, so the field has to be there and empty — FrostMod reads it
+    /// unconditionally and a missing key would read as garbage.
+    #[test]
+    fn browser_reset_command_carries_an_empty_bike() {
+        assert_eq!(
+            command_json_at("reset_server_browser", "", 7),
+            r#"{"at":"7","bikeId":"","verb":"reset_server_browser"}"#
+        );
     }
 
     /// Every FrostMod ever released was built for MX Bikes, so the GP floor must not

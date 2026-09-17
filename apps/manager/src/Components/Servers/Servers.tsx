@@ -16,6 +16,7 @@ import {
   ChevronDown,
   Globe,
   ServerCog,
+  Unplug,
   UserCheck,
   Hourglass,
   LayoutGrid,
@@ -42,6 +43,7 @@ import {
   serverTrackPreviews,
   serverTrackCatalog,
   resolveQuickInstall,
+  resetServerBrowser,
   modTypesFor,
   type CatalogTrack,
   type MasterServer,
@@ -50,6 +52,7 @@ import { useConfig } from "@frost/shared/Context/Config";
 import { useInstall } from "../../Context/Install";
 import { useT } from "@/i18n";
 import { useFavorites } from "@/lib/useFavorites";
+import { useGameRunning } from "@/lib/useGameRunning";
 import { isFull, useServerQueue } from "@/lib/useServerQueue";
 import { REGION_LABEL_KEY, REGION_ORDER, canonicalRegion, type RegionKey } from "@/lib/serverRegion";
 import JoinServerDialog from "../Shell/JoinServerDialog";
@@ -116,6 +119,24 @@ const Servers = () => {
   const queue = useServerQueue();
   const [joinOpen, setJoinOpen] = useState(false);
   const [registerOpen, setRegisterOpen] = useState(false);
+  // Only offered while the game is up: with nothing running there is no half-open session to
+  // close, and the button would be a puzzle rather than a fix.
+  const { running: gameRunning } = useGameRunning();
+  const [unwedging, setUnwedging] = useState(false);
+
+  /** Close the game's half-open master session so its own Browse screen works again. */
+  const unwedgeBrowser = useCallback(() => {
+    setUnwedging(true);
+    resetServerBrowser()
+      .then((outcome) => {
+        if (outcome === "signaled") toast.success(t("serverBrowser.unwedgeSent"));
+        else if (outcome === "withheld") toast.error(t("serverBrowser.unwedgeNeedsFrostmod"));
+        else if (outcome === "not_running") toast.error(t("serverBrowser.unwedgeNoFrostmod"));
+        else toast.error(t("serverBrowser.unwedgeFailed"));
+      })
+      .catch((e: unknown) => toast.error(typeof e === "string" ? e : String(e)))
+      .finally(() => setUnwedging(false));
+  }, [t]);
   const [detail, setDetail] = useState<MasterServer | null>(null);
   // Spam and cheat-advertising servers are marked by the backend, not dropped, so this can
   // reveal them. Off by default: the whole point is not to have to read past them.
@@ -542,6 +563,26 @@ const Servers = () => {
           <ServerCog className="size-3.5" />
           {t("registerServer.action")}
         </Button>
+        {/* For the game's own Browse screen saying "connection timeout" until you restart it.
+            FrostMod clears that by itself when it recognises the state, so this is only here
+            for the times it holds off — which is why it is quiet, and why it appears only
+            while there is a game running to fix. */}
+        {gameRunning && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={unwedgeBrowser}
+            disabled={unwedging}
+            title={t("serverBrowser.unwedgeBlurb")}
+          >
+            {unwedging ? (
+              <Loader2 className="size-3.5 animate-spin" />
+            ) : (
+              <Unplug className="size-3.5" />
+            )}
+            {t("serverBrowser.unwedge")}
+          </Button>
+        )}
         <HelpHint title={t("servers.title")} description={t("serverBrowser.help")} />
       </ContextBarRight>
 
