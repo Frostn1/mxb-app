@@ -209,12 +209,6 @@ export const KNOWN_EVENTS: Readonly<Record<string, readonly AppId[]>> = {
   "track.settings": STUDIO,
   "track.build.install": STUDIO,
   "paint.save": STUDIO,
-  // The replay recorder. How a recording started is the question worth answering — the
-  // feature exists to make the automatic one the usual answer — and only a count can say
-  // whether it is.
-  "replay.record.auto": STUDIO,
-  "replay.record.manual": STUDIO,
-  "replay.ffmpeg.fetch": STUDIO,
 
   // MXB Coach.
   "view.sessions": COACH,
