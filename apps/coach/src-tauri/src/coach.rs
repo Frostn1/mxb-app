@@ -1096,6 +1096,11 @@ pub struct Ground {
     pub name: String,
     /// How high the bike rides above this terrain, metres.
     pub lift: f32,
+    /// The laps didn't sit steadily above this terrain, so `lift` is the best guess rather
+    /// than a measurement and the lines may float or sink a little. The track is still drawn:
+    /// a rider looking at their lap wants to see their track, and the ground built from the
+    /// laps is a poor substitute for it.
+    pub rough_fit: bool,
 }
 
 /// The track's own terrain, or why the ground built from the laps is drawn instead.
@@ -1130,19 +1135,33 @@ fn ground_for(app: &AppHandle, path: &str) -> Result<GroundAnswer, String> {
         rec.samples.iter().filter(|s| !s.airborne() && !s.crashed).step_by(5).map(|s| [s.x, s.y, s.z]).collect();
     let i = &master.info;
     let fit = crate::ground::measure(i.width as usize, i.height as usize, i.metres_per_sample, &master.heights, &points);
-    match fit.lift {
-        Some(lift) => Ok(GroundAnswer { ground: Some(Ground { path: src.path, prefix: src.prefix, name: src.name, lift }), why: None }),
-        // Say what was measured. "Doesn't line up" on its own left nothing to look into, and
-        // this is the branch a rider on a track they own actually hits.
-        None if fit.on_grid < points.len() / 2 => no(&format!(
-            "only {} of {} points on your laps land on its terrain, so it looks like a different track",
-            fit.on_grid, fit.offered
-        )),
-        None => no(&format!(
-            "the height of your laps above its terrain wanders by {:.1} m, too much to trust it as the same track",
-            fit.spread
-        )),
-    }
+    // The track is shown whenever its terrain can be read, exactly as MXB App shows it: the
+    // check below decides how high to hang the lines over it, not whether the rider gets to
+    // see their track at all. Refusing on a poor fit meant a rutted lap came back as a blurred
+    // grid of its own telemetry, which is nobody's idea of the circuit they just rode.
+    let ground = Ground {
+        path: src.path,
+        prefix: src.prefix,
+        name: src.name,
+        lift: fit.lift.unwrap_or(fit.median_lift),
+        rough_fit: fit.lift.is_none(),
+    };
+    // Said only when it is true, and only about the lines: what was measured, so a lap sitting
+    // oddly over the ground can be looked into rather than guessed at.
+    let why = fit.lift.is_none().then(|| {
+        if fit.on_grid < points.len() / 2 {
+            format!(
+                "only {} of {} points on your laps land on this terrain, so your lines may not sit on it",
+                fit.on_grid, fit.offered
+            )
+        } else {
+            format!(
+                "the height of your laps above the ground wanders by {:.1} m, so your lines may float or sink a little",
+                fit.spread
+            )
+        }
+    });
+    Ok(GroundAnswer { ground: Some(ground), why })
 }
 
 /// The ground under a session's laps, built from the laps; see `surface.rs`.

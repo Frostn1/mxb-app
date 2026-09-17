@@ -22,6 +22,7 @@ mod trackline;
 mod trackllm;
 mod trackmodel;
 mod trackobjects;
+mod trackplace;
 mod trackprog;
 mod trackprops;
 mod trackscenery;
@@ -174,6 +175,16 @@ fn main() {
             paint_studio_save,
             paint_studio_extract,
             read_track_placeable,
+            // Turning a real place into ground a track can be built on.
+            trackplace::place_find,
+            trackplace::place_coverage,
+            trackplace::place_fetch,
+            trackplace::place_list,
+            trackplace::place_forget,
+            trackplace::place_paths,
+            trackplace::place_layers,
+            trackplace::place_save_trace,
+            trackplace::place_import_dem,
             load_track_prop,
             save_track_props,
             // Reading a track, and the archive metadata behind it. The studio previews the
