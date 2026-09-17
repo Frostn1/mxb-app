@@ -1305,6 +1305,21 @@ export function shareLogs(): Promise<LogsShare> {
   return invoke<LogsShare>("share_logs");
 }
 
+/** How many crash dumps are sitting here that the player hasn't been asked about.
+ *
+ *  The short JSON report goes on its own — it is addresses and nothing else. The dump is
+ *  megabytes of the game's memory and never leaves the machine without a press, so it is a
+ *  question, asked once per crash. */
+export function crashDumpsWaiting(): Promise<number> {
+  return invoke<number>("crash_dumps_waiting");
+}
+
+/** Record that the player has been asked about the dumps waiting now. Called whether they
+ *  sent them or dismissed: asking twice about the same crash is nagging. */
+export function crashDumpsOffered(): Promise<void> {
+  return invoke<void>("crash_dumps_offered");
+}
+
 /** Subscribe to log-share pack/upload phase updates. Same payload as the file share's,
  *  on its own event so Settings never hears the Library's upload. */
 export function onLogsShareProgress(

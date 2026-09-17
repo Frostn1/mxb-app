@@ -2,6 +2,12 @@
 
 ## Unreleased — MXB App, Frost's Studio and MXB Coach
 
+### Added
+- MX Bikes closing to desktop is finally something we can see. When the game goes down,
+  FrostMod leaves a short report of where it happened, and the app sends that on its own. If
+  a crash dump was written too, the app says so once and asks whether to send it. Nothing
+  that size leaves your PC without you pressing the button.
+
 ### Fixed
 - The live cues change as you ride. They were the same every lap and every session, for two
   reasons: the recorder read the sheet once when the session started and never looked again, and

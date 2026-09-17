@@ -32,6 +32,7 @@ import { isWebPath, landingSite, webRoutes } from "./web";
 import { steamResult, redirectPage } from "./page";
 import { pinGuidFromSteam, rememberLink, steamIdFor } from "./steamlink";
 import { bmacWebhook } from "./bmac";
+import { putCrash } from "./crashes";
 import { pruneReports, putReport } from "./diagnostics";
 import { stateRegions } from "./stateinvariants";
 import { listPlugins, myPlugins, pluginBundle, redeemKey } from "./plugins";
@@ -345,6 +346,10 @@ async function route(request: Request, env: Env): Promise<Response> {
   if (method === "PUT" && path === "/v1/me/name") return putName(request, account, env);
   if (method === "PUT" && path === "/v1/presence") return putPresence(request, account, env);
   if (method === "PUT" && path === "/v1/diagnostics") return putReport(request, account, env);
+
+  // Where the game died. Same pipe, same reasoning as the report above it: the client
+  // observes, this decides what any of it means, and nothing comes back down.
+  if (method === "PUT" && path === "/v1/diagnostics/crash") return putCrash(request, account, env);
   // Which runs of the game's memory to hash, for the build the client is running. Where to
   // read, never what to expect: the baselines stay here, so the shipped binary still knows
   // nothing about what any of it should contain. An unbaselined build answers empty.
@@ -1029,6 +1034,7 @@ function bannedMayUse(method: string, path: string): boolean {
   if (method === "GET" && path === "/v1/app/gate") return true;
   if (method === "GET" && path === "/v1/me") return true;
   if (method === "PUT" && path === "/v1/diagnostics") return true;
+  if (method === "PUT" && path === "/v1/diagnostics/crash") return true;
   if (method === "POST" && path === "/v1/steam/login") return true;
   if (method === "POST" && path === "/v1/assets/status") return true;
   if (method === "POST" && path === "/v1/entitlements/check") return true;

@@ -248,6 +248,17 @@ export const de: Translation = {
   "runtime.fixIt": "Installieren",
   "runtime.installing": "Wird installiert…",
   "runtime.dismiss": "Hinweis ausblenden",
+  "crash.body": "MX Bikes wurde beim letzten Spielen unerwartet beendet.",
+  "crash.bodyMany": "MX Bikes wurde {{count}} Mal unerwartet beendet.",
+  "crash.pitch":
+    "Den Kurzbericht haben wir bereits. Der Absturzbericht sagt, warum — und er verlässt deinen PC nur, wenn du ihn sendest.",
+  "crash.send": "Senden",
+  "crash.sending": "Wird gesendet…",
+  "crash.dismiss": "Diesen Absturz nicht senden",
+  "crash.sent": "Absturzbericht gesendet",
+  "crash.sentDesc": "Danke. Das ist das Einzige, was wir anders nicht bekommen.",
+  "crash.failed": "Konnte nicht gesendet werden",
+  "crash.failedDesc": "In den Einstellungen gibt es die Schaltfläche „Logs senden“, die dasselbe tut.",
   "cloud.genericProvider":
     "ein Cloud-Sync-Dienst",
   "cloud.evictedBody":

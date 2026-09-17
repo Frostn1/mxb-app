@@ -245,6 +245,17 @@ export const fr: Translation = {
   "runtime.fixIt": "L'installer",
   "runtime.installing": "Installation…",
   "runtime.dismiss": "Masquer cet avertissement",
+  "crash.body": "MX Bikes s'est fermé tout seul la dernière fois que tu as joué.",
+  "crash.bodyMany": "MX Bikes s'est fermé tout seul {{count}} fois.",
+  "crash.pitch":
+    "Nous avons déjà le rapport court. Le fichier de plantage dit pourquoi, et il ne quitte ton PC que si tu l'envoies.",
+  "crash.send": "L'envoyer",
+  "crash.sending": "Envoi…",
+  "crash.dismiss": "Ne pas envoyer ce plantage",
+  "crash.sent": "Rapport de plantage envoyé",
+  "crash.sentDesc": "Merci. C'est la seule chose qu'on ne peut pas obtenir autrement.",
+  "crash.failed": "Envoi impossible",
+  "crash.failedDesc": "Les Paramètres ont un bouton Envoyer les journaux qui fait la même chose.",
   "cloud.genericProvider":
     "un outil de synchronisation cloud",
   "cloud.evictedBody":

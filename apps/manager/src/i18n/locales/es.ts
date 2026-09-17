@@ -242,6 +242,17 @@ export const es: Translation = {
   "runtime.fixIt": "Instalarlo",
   "runtime.installing": "Instalando…",
   "runtime.dismiss": "Descartar este aviso",
+  "crash.body": "MX Bikes se cerró inesperadamente la última vez que jugaste.",
+  "crash.bodyMany": "MX Bikes se cerró inesperadamente {{count}} veces.",
+  "crash.pitch":
+    "Ya tenemos el informe corto. El volcado de memoria es lo que dice por qué, y solo sale de tu PC si lo envías.",
+  "crash.send": "Enviarlo",
+  "crash.sending": "Enviando…",
+  "crash.dismiss": "No enviar este fallo",
+  "crash.sent": "Informe de fallo enviado",
+  "crash.sentDesc": "Gracias. Es lo único que no podemos conseguir de otra forma.",
+  "crash.failed": "No se pudo enviar",
+  "crash.failedDesc": "En Ajustes hay un botón Enviar registros que hace lo mismo.",
   "cloud.genericProvider":
     "una herramienta de sincronización en la nube",
   "cloud.evictedBody":

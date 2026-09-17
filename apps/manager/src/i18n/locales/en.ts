@@ -236,6 +236,17 @@ export const en = {
   "runtime.fixIt": "Install it",
   "runtime.installing": "Installing…",
   "runtime.dismiss": "Dismiss this warning",
+  "crash.body": "MX Bikes closed unexpectedly last time you played.",
+  "crash.bodyMany": "MX Bikes closed unexpectedly {{count}} times.",
+  "crash.pitch":
+    "We already have the short report. The crash dump is the part that says why, and it only leaves your PC if you send it.",
+  "crash.send": "Send it",
+  "crash.sending": "Sending…",
+  "crash.dismiss": "Don't send this crash",
+  "crash.sent": "Crash report sent",
+  "crash.sentDesc": "Thanks. That's the one thing we couldn't get any other way.",
+  "crash.failed": "Couldn't send it",
+  "crash.failedDesc": "Settings has a Send logs button that does the same thing.",
   "cloud.genericProvider":
     "a cloud sync tool",
   "cloud.evictedBody":
