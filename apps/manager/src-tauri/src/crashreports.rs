@@ -104,12 +104,20 @@ async fn send(token: &str, app_version: &str, guid: &str, build: &str, body: &st
         .timeout(Duration::from_secs(10))
         .send()
         .await?;
-    // A refusal is final: the report is malformed and resending it next time changes nothing,
-    // so it is marked sent either way. Only a transport error leaves it to try again.
-    if !res.status().is_success() && !res.status().is_client_error() {
-        anyhow::bail!("control plane said {}", res.status());
+    // Which refusals are final, and which are worth keeping the file for.
+    //
+    // This is the whole difference between collecting crashes and quietly binning them. A
+    // 400 means the report is malformed and sending it again next week changes nothing, so
+    // it is done with. Everything else is about the moment, not the report: a 404 is an
+    // endpoint that has not been deployed yet, a 401 is a token that will be refreshed, a
+    // 429 is a retry by definition, and a 5xx is somebody else's bad day. Treating any of
+    // those as final would throw away exactly the reports that arrive around a release,
+    // which are the ones worth having.
+    let status = res.status();
+    if status.is_success() || status == reqwest::StatusCode::BAD_REQUEST {
+        return Ok(());
     }
-    Ok(())
+    anyhow::bail!("control plane said {status}")
 }
 
 /// Send whatever is waiting. Safe to call on every session end and at startup.
