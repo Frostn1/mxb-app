@@ -68,3 +68,23 @@ as common as it is.
 | the table | `control-plane/migrations/0038_crash_reports.sql` |
 
 The dashboard page that renders the reads lives in `mxbsecure-web` and is not built yet.
+
+## The crashes we act on, and where they rank
+
+MXBMRP3 publishes a survey of 46,246 crash reports from 276,220 sessions (June–September 2026,
+`thomas4f/mxbmrp3`, `usage_survey/REPORT.md`). It is the ranking this work is aimed at, and
+three of the top four are addressed from our side:
+
+| Crash | Share | Where it is handled |
+| --- | --- | --- |
+| Offline track-load crash (`msvcr90.dll+0x36ede`) | 39% | `trainerfix.rs` — clears the damaged bytes |
+| Physics contact blow-up (`mxbikes.exe+0x1f1923`) | 18% | FrostMod v0.30.0 — refuses a height query that is not a position |
+| Session teardown null deref (`mxbikes.exe+0x11d753`) | 8% | FrostMod v0.28.0 — refuses a double close |
+| OpenGL vertex-fill overrun | 7% | not handled; suspected ReShade, which the app installs |
+
+The first three had no published workaround. The catalogue those offsets come from is
+`thomas4f/mxbmrp3`, `crash_analysis/KNOWN_GAME_CRASHES.md`.
+
+One thing that connects two of them: the trainer file's magic is `GHS\0`, which is the same
+magic on the ten-slot handle pool behind `+0x11d753`. The crash at track load and the crash
+leaving a session are the same files, failing in two different ways.

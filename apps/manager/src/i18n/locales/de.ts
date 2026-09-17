@@ -259,6 +259,11 @@ export const de: Translation = {
   "crash.sentDesc": "Danke. Das ist das Einzige, was wir anders nicht bekommen.",
   "crash.failed": "Konnte nicht gesendet werden",
   "crash.failedDesc": "In den Einstellungen gibt es die Schaltfläche „Logs senden“, die dasselbe tut.",
+  "trainers.repaired": "{{count}} Rundendatei(en) repariert",
+  "trainers.repairedDesc":
+    "Deine gespeicherten Runden für {{what}} waren beschädigt, was MX Bikes beim Laden einer Strecke abstürzen lässt. Die Originale liegen im Papierkorb.",
+  "trainers.repairedPlain":
+    "Sie waren beschädigt, was MX Bikes beim Laden einer Strecke abstürzen lässt. Die Originale liegen im Papierkorb.",
   "cloud.genericProvider":
     "ein Cloud-Sync-Dienst",
   "cloud.evictedBody":

@@ -255,6 +255,11 @@ export const ptBR: Translation = {
   "crash.sentDesc": "Valeu. É a única coisa que não conseguimos de outro jeito.",
   "crash.failed": "Não deu para enviar",
   "crash.failedDesc": "Em Configurações tem um botão Enviar logs que faz o mesmo.",
+  "trainers.repaired": "{{count}} arquivo(s) de volta corrigido(s)",
+  "trainers.repairedDesc":
+    "Suas voltas salvas de {{what}} tinham dano que faz o MX Bikes fechar enquanto carrega uma pista. Os originais estão na lixeira.",
+  "trainers.repairedPlain":
+    "Tinham dano que faz o MX Bikes fechar enquanto carrega uma pista. Os originais estão na lixeira.",
   "cloud.genericProvider":
     "uma ferramenta de sincronização na nuvem",
   "cloud.evictedBody":

@@ -253,6 +253,11 @@ export const es: Translation = {
   "crash.sentDesc": "Gracias. Es lo único que no podemos conseguir de otra forma.",
   "crash.failed": "No se pudo enviar",
   "crash.failedDesc": "En Ajustes hay un botón Enviar registros que hace lo mismo.",
+  "trainers.repaired": "Se repararon {{count}} archivo(s) de vuelta",
+  "trainers.repairedDesc":
+    "Tus vueltas guardadas de {{what}} tenían daños que hacen que MX Bikes se cierre mientras carga una pista. Los originales están en la papelera.",
+  "trainers.repairedPlain":
+    "Tenían daños que hacen que MX Bikes se cierre mientras carga una pista. Los originales están en la papelera.",
   "cloud.genericProvider":
     "una herramienta de sincronización en la nube",
   "cloud.evictedBody":

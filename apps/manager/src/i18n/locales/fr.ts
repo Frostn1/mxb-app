@@ -256,6 +256,11 @@ export const fr: Translation = {
   "crash.sentDesc": "Merci. C'est la seule chose qu'on ne peut pas obtenir autrement.",
   "crash.failed": "Envoi impossible",
   "crash.failedDesc": "Les Paramètres ont un bouton Envoyer les journaux qui fait la même chose.",
+  "trainers.repaired": "{{count}} fichier(s) de tour réparé(s)",
+  "trainers.repairedDesc":
+    "Tes tours enregistrés pour {{what}} étaient abîmés, ce qui fait planter MX Bikes pendant le chargement d'une piste. Les originaux sont dans la corbeille.",
+  "trainers.repairedPlain":
+    "Ils étaient abîmés, ce qui fait planter MX Bikes pendant le chargement d'une piste. Les originaux sont dans la corbeille.",
   "cloud.genericProvider":
     "un outil de synchronisation cloud",
   "cloud.evictedBody":

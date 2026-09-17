@@ -1219,6 +1219,14 @@ export interface ModsDehydrated {
   provider: string | null;
 }
 
+/** Trainer files the app repaired before the game could crash on them. Matches `Report`. */
+export interface TrainersRepaired {
+  /** How many files were repaired. */
+  count: number;
+  /** A few bike names, so the notice is concrete rather than a number. */
+  examples: string[];
+}
+
 /** State of a FrostMod plugin copy in the game's `plugins` folder. Matches `PluginCopy`. */
 export type PluginCopy = "absent" | "current" | "refreshed" | "locked";
 
