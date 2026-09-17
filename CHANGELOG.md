@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-09-17 — v0.17.2 — Steam sign-in takes your click
+
+### Fixed
+- The Steam sign-in card takes your click when a dialog opened behind it at launch. It looked
+  normal and did nothing, which is why it kept coming back after the other sign-in fixes.
+
 ## Unreleased — Replay moves into the Studio, and records itself
 
 ### Added
