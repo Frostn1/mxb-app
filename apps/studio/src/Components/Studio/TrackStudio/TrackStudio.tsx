@@ -1889,6 +1889,7 @@ const KIND_KEY = {
   stepUp: "track.kind.stepUp",
   berm: "track.kind.berm",
   rut: "track.kind.rut",
+  sand: "track.kind.sand",
   custom: "track.kind.custom",
 } as const;
 
@@ -1900,6 +1901,7 @@ const FEATURE_ICON: Record<TrackFeature["kind"], LucideIcon> = {
   stepUp: TrendingUp,
   berm: Spline,
   rut: Minus,
+  sand: Waves,
   custom: PenLine,
 };
 
@@ -2038,6 +2040,8 @@ function fieldsOf(step: LapStep, ground?: number): StepField[] {
         len(f.length, 120),
         up,
       ];
+    case "sand":
+      return [len(f.length, 200), up];
     default:
       return [
         { key: "height", label: "height", value: f.height, step: 0.1, min: 0, max: 6, unit: "m" },
@@ -2072,6 +2076,7 @@ function summarise(step: LapStep, t: ReturnType<typeof useT>): string {
     case "rut":
       return `${m(f.length)} · ${f.depth.toFixed(2)} m ${t("track.deep")}`;
     case "custom":
+    case "sand":
       return m(f.length);
     default:
       return `${m(f.length)} · h ${f.height.toFixed(1)} m`;

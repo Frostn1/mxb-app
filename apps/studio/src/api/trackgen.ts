@@ -151,6 +151,8 @@ export type TrackFeature =
   | { kind: "stepUp"; at: number; length: number; height: number }
   | { kind: "berm"; at: number; length: number; height: number }
   | { kind: "rut"; at: number; length: number; depth: number }
+  /** A stretch of sand. Supercross lays one; it is ground, not a jump, so it has no height. */
+  | { kind: "sand"; at: number; length: number }
   /** A shape drawn point by point. `u` runs 0 at the feature's start to 1 at its end. */
   | { kind: "custom"; at: number; length: number; shape: { u: number; h: number }[] };
 
@@ -566,6 +568,8 @@ export function newFeature(kind: TrackFeatureKind, at: number): TrackFeature {
       return { kind, at, length: 20, height: 1.6 };
     case "rut":
       return { kind, at, length: 20, depth: 0.15 };
+    case "sand":
+      return { kind, at, length: 40 };
     case "custom":
       return { kind, at, length: 24, shape: [
         { u: 0, h: 0 },
@@ -722,6 +726,7 @@ export const FEATURE_COLOUR: Record<TrackFeatureKind, string> = {
   stepUp: "rgb(110, 180, 130)",
   berm: "rgb(150, 110, 200)",
   rut: "rgb(90, 90, 110)",
+  sand: "rgb(198, 176, 124)",
   custom: "rgb(200, 200, 210)",
 };
 

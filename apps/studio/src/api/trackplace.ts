@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import type { TrackProgram } from "@/api/trackgen";
 
 /**
  * Turning a real place into ground a track can be built on.
@@ -185,6 +186,19 @@ export const importPlaceDem = (
   licence: string,
   attribution: string,
 ) => invoke<Place>("place_import_dem", { name, path, licence, attribution });
+
+/**
+ * Turn a fetched place and its traced lap into a track programme.
+ *
+ * Stops at the programme rather than building, so a scanned place goes through the same
+ * `buildTrack` as every other track — same progress, same packer, same install.
+ *
+ * `recut` takes the scan's own jumps back out and lets the generator cut its own on the real
+ * landform, for a tile whose vintage is wrong. Off by default: the measured jumps are the
+ * reason to scan a place at all.
+ */
+export const placeProgram = (slug: string, recut = false) =>
+  invoke<TrackProgram>("place_program", { slug, recut });
 
 /**
  * The length of a lap, in metres, closed or not.

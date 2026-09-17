@@ -9,6 +9,7 @@ import { Switch } from "@frost/shared/Components/ui/switch";
 import { Segmented } from "@frost/shared/Components/ui/segmented";
 import { cn } from "@frost/shared/lib/utils";
 import { useT } from "@/i18n";
+import { buildTrack } from "@/api/trackgen";
 import {
   fetchPlace,
   findPlace,
@@ -19,6 +20,7 @@ import {
   placeCoverage,
   placeLayers,
   placePaths,
+  placeProgram,
   savePlaceTrace,
   traceLength,
   type CoverageReport,
@@ -427,10 +429,20 @@ function TracePanel({ slug, onBack }: { slug: string; onBack: () => void }) {
   const [width, setWidth] = useState(6);
   const [startIndex, setStartIndex] = useState(0);
   const [saving, setSaving] = useState(false);
+  const [building, setBuilding] = useState(false);
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [drag, setDrag] = useState<number | null>(null);
+  // Every edit the rider can make, so the keyboard can walk back through them. The button
+  // used to drop the last point, which is not undo: it could not take back a move or a
+  // removal, which are the edits most likely to be a slip.
+  const [past, setPast] = useState<number[][][]>([]);
+  const [future, setFuture] = useState<number[][][]>([]);
   const boxRef = useRef<HTMLDivElement>(null);
+  // A drag ends with a mouse-up, and the browser turns that into a click on the canvas —
+  // which used to drop a new point under the one just moved. Set while dragging and cleared
+  // by the click it causes.
+  const draggedRef = useRef(false);
 
   useEffect(() => {
     void placeLayers(slug)
@@ -478,21 +490,80 @@ function TracePanel({ slug, onBack }: { slug: string; onBack: () => void }) {
     return [col, row];
   };
 
+  /** Change the lap and remember what it was, so the change can be taken back. */
+  const edit = useCallback((next: (p: number[][]) => number[][]) => {
+    setPts((p) => {
+      const after = next(p);
+      if (after === p) return p;
+      setPast((h) => [...h.slice(-199), p]);
+      setFuture([]);
+      return after;
+    });
+  }, []);
+
+  const undo = useCallback(() => {
+    setPast((h) => {
+      if (h.length === 0) return h;
+      const prev = h[h.length - 1];
+      setPts((cur) => {
+        setFuture((f) => [cur, ...f.slice(0, 199)]);
+        return prev;
+      });
+      return h.slice(0, -1);
+    });
+  }, []);
+
+  const redo = useCallback(() => {
+    setFuture((f) => {
+      if (f.length === 0) return f;
+      const nextPts = f[0];
+      setPts((cur) => {
+        setPast((h) => [...h.slice(-199), cur]);
+        return nextPts;
+      });
+      return f.slice(1);
+    });
+  }, []);
+
+  // Cmd-Z on a Mac, Ctrl-Z elsewhere, with Shift for redo — what every drawing tool does.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== "z") return;
+      const el = document.activeElement;
+      // Never steal undo from a field the rider is typing in.
+      if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) return;
+      e.preventDefault();
+      if (e.shiftKey) redo();
+      else undo();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [undo, redo]);
+
   const onCanvasClick = (ev: React.MouseEvent) => {
     if (drag !== null) return;
+    if (draggedRef.current) {
+      draggedRef.current = false;
+      return;
+    }
     const cell = eventToCell(ev);
     if (!cell) return;
-    setPts((p) => [...p, toWorld(cell[0], cell[1])]);
+    edit((p) => [...p, toWorld(cell[0], cell[1])]);
   };
 
   const onPointDown = (ev: React.MouseEvent, i: number) => {
     ev.stopPropagation();
     // Alt-click removes, which keeps the right mouse button free for panning.
     if (ev.altKey) {
-      setPts((p) => p.filter((_, j) => j !== i));
+      edit((p) => p.filter((_, j) => j !== i));
       setStartIndex((s) => (s >= i && s > 0 ? s - 1 : s));
       return;
     }
+    // One history step per drag, taken now — a drag fires on every mouse move, and a step
+    // per pixel would make undo useless.
+    setPast((h) => [...h.slice(-199), pts]);
+    setFuture([]);
+    draggedRef.current = true;
     setDrag(i);
   };
 
@@ -502,6 +573,26 @@ function TracePanel({ slug, onBack }: { slug: string; onBack: () => void }) {
     if (!cell) return;
     const w = toWorld(cell[0], cell[1]);
     setPts((p) => p.map((q, j) => (j === drag ? [w[0], w[1], ...q.slice(2)] : q)));
+  };
+
+  /**
+   * Save the lap, turn the place into a programme, and build it — the whole way from a traced
+   * picture to a track the game lists, without leaving this panel.
+   */
+  const onBuild = async () => {
+    setBuilding(true);
+    try {
+      await savePlaceTrace(slug, pts, closed, width, startIndex);
+      const program = await placeProgram(slug, false);
+      const built = await buildTrack(program, null, true);
+      toast.success(t("place.built", { name: program.name }), {
+        description: built.installed ?? undefined,
+      });
+    } catch (e) {
+      toast.error(t("place.buildFailed"), { description: String(e) });
+    } finally {
+      setBuilding(false);
+    }
   };
 
   const onSave = async () => {
@@ -571,17 +662,28 @@ function TracePanel({ slug, onBack }: { slug: string; onBack: () => void }) {
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => setPts((p) => p.slice(0, -1))}
-            disabled={pts.length === 0}
+            onClick={undo}
+            disabled={past.length === 0}
           >
             <Undo2 className="size-3.5" />
             {t("place.undo")}
           </Button>
-          <Button variant="ghost" size="sm" onClick={() => setPts([])} disabled={pts.length === 0}>
+          <Button variant="ghost" size="sm" onClick={redo} disabled={future.length === 0}>
+            {t("place.redo")}
+          </Button>
+          <Button variant="ghost" size="sm" onClick={() => edit(() => [])} disabled={pts.length === 0}>
             {t("place.clear")}
           </Button>
-          <Button size="sm" onClick={() => void onSave()} disabled={pts.length < 3 || saving}>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => void onSave()}
+            disabled={pts.length < 3 || saving || building}
+          >
             {saving ? t("place.saving") : t("place.saveTrace")}
+          </Button>
+          <Button size="sm" onClick={() => void onBuild()} disabled={pts.length < 3 || building}>
+            {building ? t("place.building") : t("place.build")}
           </Button>
         </div>
       </div>

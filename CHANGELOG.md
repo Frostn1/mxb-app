@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased — Frost's Studio
+
+### Added
+- Make the track, from the place you traced. The button sits beside Save lap: it saves the lap,
+  turns the ground and the line into a track and builds it into your tracks folder, without
+  leaving the panel. Until now a traced place was kept and could not be built.
+
+### Fixed
+- A random supercross or SuperMotocross track opens instead of leaving the panel blank. A lap
+  that laid a stretch of sand had nothing to show for it in the step list, which took the whole
+  page with it. Sand reads and edits as a length of ground, which is what it is.
+- Undo takes back what you last did on a traced lap, with Cmd-Z on a Mac and Ctrl-Z elsewhere,
+  and Shift with it steps forward again. It takes back a moved point or a removed one, not only
+  the last point added.
+- Moving a point no longer leaves a new point underneath it.
+- A place whose ground and picture come from the same survey is credited once rather than twice.
+
 ## Unreleased — MXB Coach
 
 ### Added

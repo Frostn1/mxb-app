@@ -1882,14 +1882,19 @@ pub async fn place_layers(app: AppHandle, slug: String) -> Result<PlaceLayers, S
         .map(camelise)
         .and_then(|v| serde_json::from_value::<LapTrace>(v).ok());
 
-    let mut attributions = Vec::new();
-    if !place.dem.attribution.is_empty() {
-        attributions.push(place.dem.attribution.clone());
-    }
-    if let Some(i) = &place.imagery {
-        if !i.attribution.is_empty() {
-            attributions.push(i.attribution.clone());
+    // One credit per source, not one per file. The ground and the picture often come from
+    // the same survey — every French place has IGN twice — and a doubled credit reads as a
+    // mistake rather than as care.
+    let mut attributions: Vec<String> = Vec::new();
+    let mut add = |a: &str| {
+        let a = a.trim();
+        if !a.is_empty() && !attributions.iter().any(|x| x == a) {
+            attributions.push(a.to_string());
         }
+    };
+    add(&place.dem.attribution);
+    if let Some(i) = &place.imagery {
+        add(&i.attribution);
     }
 
     Ok(PlaceLayers {
@@ -2165,6 +2170,52 @@ fn geotiff_epsg(path: &Path) -> Option<u32> {
     }
     None
 }
+
+
+// ── Making the track ─────────────────────────────────────────────────────────
+
+/// Turn a fetched place and its traced lap into a track programme, ready for `build_track`.
+///
+/// This is the step that was missing. Everything before it — find, coverage, fetch, trace,
+/// save — left a folder on disk that only a test could turn into a track, so the feature was
+/// complete for whoever wrote it and unusable for everyone else.
+///
+/// It stops at the programme rather than building, so a scanned place goes through exactly
+/// the same build, progress reporting and install as any other track. One build path, one
+/// packer, and nothing here to drift out of step with it.
+#[tauri::command]
+pub async fn place_program(
+    app: AppHandle,
+    slug: String,
+    recut: bool,
+) -> Result<serde_json::Value, String> {
+    let dir = place_dir(&app, &slug)?;
+    let dem = dir.join(format!("{slug}.dem.tif"));
+    let lap = dir.join(format!("{slug}.lap.json"));
+    if !dem.is_file() {
+        return Err("That place has no elevation saved. Fetch it again.".to_string());
+    }
+    if !lap.is_file() {
+        return Err(
+            "That place has no lap yet. Trace one on the picture and press Save lap first."
+                .to_string(),
+        );
+    }
+    let jumps = if recut {
+        crate::trackprog::ScanJumps::Recut
+    } else {
+        crate::trackprog::ScanJumps::Keep
+    };
+    let prog = tauri::async_runtime::spawn_blocking(move || {
+        let imp = crate::trackground::import(&dem, &lap, 1.0)?;
+        crate::trackground::program_for(&imp, jumps)
+    })
+    .await
+    .map_err(|e| format!("the ground reader stopped: {e}"))?
+    .map_err(|e| e.to_string())?;
+    serde_json::to_value(prog).map_err(|e| format!("couldn't hand the programme over: {e}"))
+}
+
 
 #[cfg(test)]
 mod tests {
