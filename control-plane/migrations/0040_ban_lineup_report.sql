@@ -11,8 +11,9 @@
 -- unlocked content (already banned here, with its second install), and two more that took part.
 -- Each is banned on what was said about it, and the roles are kept apart in `reason` rather than
 -- flattened into one sentence, because `reason` is what the rider is shown on the website and
--- what an appeal is argued against. One install was named at the head of the list with no act
--- stated; its row says exactly that, rather than borrowing a role from the ones below it.
+-- what an appeal is argued against. The install at the head of the list is the one the operator
+-- describes as involved throughout rather than in any single act, and its row says that — a
+-- wider reason than the others, and deliberately not one of theirs borrowed.
 --
 -- Handles are deliberately not in this file. This repository is public. A GUID identifies an
 -- install to us without publishing an accusation against a named person, and the handles the
@@ -38,8 +39,8 @@ WITH seed(guid, reason, evidence) AS (VALUES
    'took part in unlocking protected content and passing it around',
    'reported 2026-09-17: named among those taking part in the group above'),
   ('FF011000012E746802',
-   'named in the 2026-09-17 report on the group that unlocked and shared paid content',
-   'reported 2026-09-17: named at the head of the list. The report states no particular act for this install, so none is recorded here; the operator holds the rest of the evidence and an appeal should be judged on it')
+   'unlocked protected content and shared it, across the whole of what this report describes',
+   'reported 2026-09-17: named at the head of the list as the one involved throughout rather than in a single act; the operator holds the evidence and an appeal is judged on it')
 )
 INSERT INTO guid_bans (guid, reason, evidence, alt_of, banned_at, banned_by)
 SELECT guid, reason, evidence, NULL, CAST(strftime('%s', 'now') AS INTEGER) * 1000, 'seed:0040'
