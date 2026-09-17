@@ -55,7 +55,14 @@
     // becomes a proven identity, and a ban has no fresh-account escape. This shuts out anyone
     // without a Steam copy of the game (a Piboso owner has no Steam identity to confirm), so it
     // is a deliberate "Steam players only" decision — flip to "0" to reopen the apps.
-    "MXB_REQUIRE_STEAM": "1"
+    "MXB_REQUIRE_STEAM": "1",
+    // Whether mxbsecure.com takes new creators on its own. "closed": the sign-up button is
+    // gone and `POST /v1/web/creator` refuses, so the only way to become a creator is the
+    // creators page, where one of us adds them — the invite list again, on purpose. A ban
+    // follows an install and a Steam login, and while this stood open the way past one was a
+    // new Steam account and one click. Anything but "open" is closed; flip it to "open" to
+    // take signups again.
+    "MXB_CREATOR_SIGNUP": "closed"
   },
 
   // The idle reaper. Every five minutes it asks each running server who is connected and

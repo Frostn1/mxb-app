@@ -29,6 +29,15 @@
   Mod's existing bundle lands in the right place without a byte of it changing.
 - Plugin licensing is shared rather than the manager's alone, so both apps check one licence,
   in one way, from one copy of the code.
+- **Signing yourself up as a creator is off.** mxbsecure is taking new creators by hand again:
+  the sign-up button is replaced by a line saying so, and asking us is how you get in. Nothing
+  changes for anyone already selling through it — same standing, same daily allowance, same
+  dashboard — and the GUID lock is open to everyone as it always was. The reason is the ban
+  list: a ban follows an install and the Steam login behind it, and while signing up was one
+  click, coming back after one was also one click. It is a switch, so it can be opened again.
+- **A banned Steam account is refused on the site even with no MXB App account behind it.** For
+  a Steam copy the MX Bikes GUID *is* the Steam account written in hex, so the ban is recognised
+  from the sign-in alone — deleting an account, or never having made one, is not a way round it.
 
 ## 2026-09-17 — Frost's Studio v0.3.0 — Make the track, and point at it on a photo
 

@@ -52,7 +52,7 @@ consequences fall out of that, and they're baked into the schema:
 | GET | `/v1/roster` | — | The shared server book. Public and cacheable; the app seeds its own address book from it. |
 | POST | `/v1/roster/mine` | bearer (invited) | A server's own operator adding it, which needs no corroborating: the account is the corroboration. |
 | GET | `/v1/web/me` | Steam sign-in | Who is signed in on mxbsecure.com, whether they are a creator, and what is left of today's lock ceiling. Never cached. |
-| POST | `/v1/web/creator` | Steam sign-in | Signing up as a creator, which is what opens `/admin/assets*`. Anyone signed in may; `MXB_ASSETS_PER_DAY` is what bounds them afterwards. |
+| POST | `/v1/web/creator` | Steam sign-in | Signing up as a creator, which is what opens `/admin/assets*`. Shut unless `MXB_CREATOR_SIGNUP` is `"open"` — see **The front door, and why it is shut**. An existing creator still gets `already: true`, never a refusal. |
 | GET | `/v1/web/lockweb/*` | Steam sign-in | The WebAssembly locker. It cannot live on the static site, which serves everything it holds to everybody. Any signed-in rider gets it: the GUID lock is for all of them. |
 | GET/POST | `/v1/web/admin/*` | Steam sign-in + `MXB_ADMIN_STEAM_IDS` | The dashboards at mxbsecure.com/admin — usage, diagnostics, paint sync, plugin keys, creators, bans |
 | GET | `/v1/plugins` | — | The paid-plugin catalogue. Public: what is on offer is not a secret. |
@@ -351,6 +351,35 @@ A Piboso owner has no Steam identity to confirm and cannot pass the wall, so ena
 deliberate "Steam players only" decision the deployment makes and can reverse — not something
 baked into a release.
 
+### The front door, and why it is shut
+
+Becoming a creator was one click for anyone with a Steam account: sign in, `POST
+/v1/web/creator`, start locking. The argument for that was sound as far as it went — the invite
+list gatekept a tool whose real protection is elsewhere, since every asset is tied to the
+account that made it and `MXB_ASSETS_PER_DAY` caps what that account mints in a day.
+
+It answers the wrong question for the people the ban list is about. A ban follows an install,
+the Steam login behind it and every account either has held; what it cannot follow is a brand
+new Steam account, which is a new identity by every measure we have. That is a deliberate
+limit — but while the front door was a button, it was also the whole of the work required to
+come back. A ceiling on what a fresh account can mint is not an answer to an account that
+should not be minting anything.
+
+So `MXB_CREATOR_SIGNUP` (`wrangler.jsonc`) decides, `"open"` and nothing else opens it, and
+unset is closed — a deployment that was never told should not be holding the door open. Closed:
+
+- `POST /v1/web/creator` answers 403 with `SIGNUP_CLOSED`, which is honest and names the way
+  in, because mxbsecure.com is where somebody with real work to sell turns up;
+- `GET /v1/web/me` carries `creatorSignup`, so the site draws the closed door rather than a
+  button that fails;
+- **existing creators are untouched.** They keep `creator_at`, keep locking, and a second POST
+  still answers `already: true` rather than telling them the door is shut. Closing is not
+  removing; removing is the creators page's own button.
+
+New creators arrive through the creators page instead (`addCreator`, `creator_source = 'admin'`),
+which is the invite list again, on purpose: it puts a person between a fresh Steam account and
+the right to mint keys. Reopening is a one-line diff when the ban list stops being the reason.
+
 ### Banning a rider
 
 Every other revocation here is about *content*: a creator withdraws an asset, we take one down,
@@ -366,9 +395,12 @@ free to mint (our account ids) nor replaceable for the price of a second purchas
 
 **Resolved through every identity we can tie to it**, which is what makes it worth more than a
 reinstall. `banFor` asks "is any identity this caller can be tied to a banned one", following
-the GUID in front of it, every GUID the calling account holds *or has ever claimed*
-(`guid_claims`), every account on the same Steam identity now or in the link log
-(`steam_links`), and every GUID those accounts have used. So a second account on the same Steam
+the GUID in front of it, the GUID a Steam identity *derives to* (`guidFromSteamId` — for a Steam
+copy the two are one value, so a banned Steam login needs no row in the database to be refused,
+which is the website's caller: signed in with Steam and possibly with no MXB App account at
+all), every GUID the calling account holds *or has ever claimed* (`guid_claims`), every account
+on the same Steam identity now or in the link log (`steam_links`), and every GUID those accounts
+have used. So a second account on the same Steam
 login, a fresh GUID claimed by a banned account, and a fresh Steam account on a banned install
 all resolve back to the ban. `guid_claims` exists for exactly the reason `steam_links` does:
 `accounts.guid` is a single mutable cell, and a ban that only read it would end at a rename.
@@ -424,10 +456,18 @@ its own shape rather than by who is asking). There is nothing there to match a b
 
 **Reversible, and reviewable.** A ban carries a reason (shown to the rider), the evidence, and
 the admin who applied it; lifting one is a timestamp, never a delete, so an upheld appeal stays
-readable and the same stale report cannot re-ban off it. The six installs the deployment ships
-banned arrived in the migration on purpose — this is the switch that refuses a paying customer,
-so turning it on leaves a diff somebody can review and revert. Later ones go through
-mxbsecure.com/admin/bans (`GET`/`POST /v1/web/admin/bans`), which records who pressed it.
+readable and the same stale report cannot re-ban off it. The twelve installs the deployment
+ships banned arrived in migrations on purpose (`0038_guid_bans.sql`, and
+`0040_ban_lineup_report.sql` for the six a later report added) — this is the switch that
+refuses a paying customer, so turning it on leaves a diff somebody can review and revert. A
+seeded ban is inserted `ON CONFLICT DO NOTHING`, so a redeploy cannot quietly re-ban one that
+has since been lifted. Later ones go through mxbsecure.com/admin/bans (`GET`/`POST
+/v1/web/admin/bans`), which records who pressed it.
+
+A seed carries the GUID, the reason and the evidence, and never the handle the report used:
+this repository is public, and a GUID identifies an install to us without publishing an
+accusation against a named person. Who each banned GUID was reported to be is kept privately,
+with the rest of the evidence.
 
 ## Security notes
 
