@@ -3582,7 +3582,10 @@ async fn guess_server_track(app: tauri::AppHandle, track: String) -> Result<Trac
 
     // Installed wins outright: nothing to buy, and the track's own artwork beats a shop photo.
     // A server names the folder inside a track's `.pkz`, which is often not the file's name.
-    if let Ok(entries) = scan_library(app.clone(), "tracks".into()).await {
+    // "mods/tracks": `mods_path` is the user folder, so "tracks" scanned a folder that isn't
+    // there and every installed track read as missing — which on this screen means offering to
+    // sell the player a track they already have.
+    if let Ok(entries) = scan_library(app.clone(), "mods/tracks".into()).await {
         let want = id.clone();
         let hit = tauri::async_runtime::spawn_blocking(move || {
             mxb_core::tracksource::find_installed(entries, &want)
@@ -3723,7 +3726,7 @@ async fn server_track_previews(
     app: tauri::AppHandle,
     tracks: Vec<String>,
 ) -> Result<std::collections::HashMap<String, String>, String> {
-    let entries = scan_library(app.clone(), "tracks".into()).await.unwrap_or_default();
+    let entries = scan_library(app.clone(), "mods/tracks".into()).await.unwrap_or_default();
     let install = config::load(&app).map(|c| c.install_dir()).unwrap_or_default();
     tauri::async_runtime::spawn_blocking(move || track_previews(&entries, &install, tracks))
         .await

@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased — MXB App and MXB Coach
+
+### Fixed
+- MXB Coach finds your tracks. It was looking for them in a folder that doesn't exist, so every
+  track you have installed came back as "isn't in your mods" — which is why the 3D view showed
+  ground built from your laps instead of the track you were riding. It has never worked.
+- The Servers tab in MXB App had the same fault: it read your installed tracks as missing, and
+  offered to sell you tracks you already own.
+
 ## 2026-09-16 — MXB Coach v0.1.15-beta.15
 
 ### Added

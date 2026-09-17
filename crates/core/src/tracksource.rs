@@ -23,14 +23,24 @@ pub struct TrackSource {
     pub locked: bool,
 }
 
+/// Where installed tracks live, under the user folder. The `mods` segment is what routes the
+/// lookup through the mods root; without it the scan lands somewhere that isn't there.
+const TRACKS: &str = "mods/tracks";
+
 /// The track an id names: an installed mod first, then the game's own.
 pub fn resolve(cfg: &AppConfig, track_id: &str) -> Option<TrackSource> {
     let id = track_id.trim();
     if id.is_empty() {
         return None;
     }
-    let entries =
-        library::scan_library(&cfg.mods_path, "tracks", &[], cfg.game()).unwrap_or_default();
+    // "mods/tracks", not "tracks". `mods_path` is the user folder, and only a leading `mods`
+    // segment is routed through the mods root — so "tracks" asked for `<user>/tracks`, which
+    // does not exist on a normal install, while every track sits in `<user>/mods/tracks`.
+    // `scan_library` answers a missing folder with an empty list and `unwrap_or_default`
+    // swallowed the rest, so every mod track came back "isn't in your mods" and always had.
+    let dir = library::mods_subdir(&cfg.mods_path, TRACKS);
+    let entries = library::scan_library(&cfg.mods_path, TRACKS, &[], cfg.game()).unwrap_or_default();
+    log::debug!("track \"{id}\": {} installed in {}", entries.len(), dir.display());
     if let Some(hit) = find_installed(entries, id) {
         return Some(installed_source(hit));
     }
@@ -218,5 +228,29 @@ mod tests {
         keyless.locked = true;
         assert!(installed_source(keyless).locked);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// `resolve` scans a real folder, and every other test here hands `find_installed` a list
+    /// it built itself — so nothing ever checked *where* the scan looks. It looked under
+    /// `<user>/tracks`, which does not exist on a normal install, while every track lives in
+    /// `<user>/mods/tracks`. The result was that no installed mod track ever resolved, from
+    /// the day the module was written, with `unwrap_or_default` swallowing the empty scan.
+    #[test]
+    fn resolve_looks_where_tracks_are_actually_installed() {
+        let user = scratch("scan-root");
+        let tracks = user.join("mods").join("tracks");
+        std::fs::create_dir_all(&tracks).unwrap();
+        write_zip(&tracks.join("Farm 14.pkz"), &[("Farm14/farm.trh", "")]);
+        // The folder the broken version scanned, with a decoy in it: if the scan ever goes
+        // back there, this test finds the wrong track rather than nothing, and says so.
+        let wrong = user.join("tracks");
+        std::fs::create_dir_all(&wrong).unwrap();
+        write_zip(&wrong.join("Decoy.pkz"), &[("Decoy/decoy.trh", "")]);
+
+        let cfg = AppConfig { mods_path: user.to_string_lossy().into_owned(), ..AppConfig::default() };
+        let found = resolve(&cfg, "Farm14").expect("a track in mods/tracks must resolve");
+        assert_eq!(found.name, "Farm 14", "found the installed track, not the decoy");
+        assert!(resolve(&cfg, "Decoy").is_none(), "nothing outside mods/tracks is a track");
+        let _ = std::fs::remove_dir_all(&user);
     }
 }
