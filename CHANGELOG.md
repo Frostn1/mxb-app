@@ -2,6 +2,23 @@
 
 ## Unreleased — MXB App, Frost's Studio and MXB Coach
 
+### Fixed
+- The live cues change as you ride. They were the same every lap and every session, for two
+  reasons: the recorder read the sheet once when the session started and never looked again, and
+  Coach only picked new calls while the Live cues panel was actually on screen — riding with the
+  app on any other tab wrote nothing at all. The recorder now takes a newer sheet at the line,
+  and Coach keeps the sheet following your laps wherever you are in the app.
+- A call you have already heard gives up its place. It was only scored down, which still left it
+  ahead of a smaller one, so on a short sheet the same calls came back forever. It now stands
+  aside while there is anything else worth saying, and comes back only when there isn't.
+- Corners are called corners. A jump on a curved piece of track — ordinary motocross — used to
+  delete the turn completely: you got "Rhythm 2" where the corner is, and the braking zone
+  before it came back as a "Straight". The jump now belongs to the corner, and its advice still
+  fires there.
+- Sweeping corners are found. Anything wider than a 45 m radius could never be a corner however
+  far round it went, so long fast turns were read as straights. The limit is now about how far a
+  corner turns rather than how tight it is.
+
 ### Added
 - The whole lineup can be locked to a Steam sign-in. When turned on for the deployment, MXB App,
   Frost's Studio and MXB Coach each show a "Sign in with Steam" wall at startup and won't run
@@ -13,6 +30,8 @@
   verified" rather than the truth.
 
 ### Changed
+- Secured content that isn't available on this PC is now shown plainly, in Settings and in the
+  prompt, without a reason attached to it.
 - The security that was in MXB App now covers Studio and Coach the same way, from one shared
   place: the debugger guard, the startup gate and the Steam-link flow all live in the shared core
   so the three apps can't drift, and the release build already strips symbols, dissolves the call

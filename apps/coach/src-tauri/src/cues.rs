@@ -216,6 +216,11 @@ impl History {
         self.sent.iter().find(|s| s.kind == kind && s.section == section)
     }
 
+    /// Whether this call is resting, and so should be passed over while there is anything else.
+    fn resting(&self, section: &str, kind: u8) -> bool {
+        self.find(section, kind).is_some_and(|s| s.resting > 0)
+    }
+
     /// How much a call's score is worth now: full, or a fifth of it while it rests.
     fn weight(&self, section: &str, kind: u8) -> f32 {
         match self.find(section, kind) {
@@ -261,7 +266,7 @@ pub struct Picked {
 /// order.
 pub fn pick(points: &[CuePoint], review: &Review, level: Level, amount: Amount, seen: &History) -> Picked {
     let (max, _) = timing(amount);
-    let mut cands: Vec<(f32, usize, u8, usize)> = Vec::new();
+    let mut cands: Vec<(f32, usize, u8, usize, bool)> = Vec::new();
     let mut consider = |at: usize, kind: u8, si: usize| {
         let Some(sr) = review.sections.get(si) else { return };
         let lost = sr.lost.max(0.0);
@@ -269,9 +274,10 @@ pub fn pick(points: &[CuePoint], review: &Review, level: Level, amount: Amount, 
             return;
         }
         let answered = sr.findings.iter().any(|f| answers(f.skill) == Some(kind));
+        let resting = seen.resting(&sr.section.name, kind);
         let score = (lost * if answered { 2.0 } else { 1.0 } + basic(kind) * basics_weight(level))
             * seen.weight(&sr.section.name, kind);
-        cands.push((score, at, kind, si));
+        cands.push((score, at, kind, si, resting));
     };
     for p in points {
         consider(p.at, p.kind, p.section);
@@ -286,21 +292,34 @@ pub fn pick(points: &[CuePoint], review: &Review, level: Level, amount: Amount, 
         }
     }
     cands.sort_by(|x, y| y.0.total_cmp(&x.0).then(x.1.cmp(&y.1)).then(x.2.cmp(&y.2)));
-    let mut chosen: Vec<(f32, usize, u8, usize)> = Vec::new();
-    for c in cands {
-        if chosen.len() >= max as usize {
-            break;
+    // Anything resting is passed over entirely while there is something else to say, and only
+    // taken on the second pass when there isn't. Scoring it down was not enough: a fifth of a
+    // big number still beats a small one, and where the candidates barely fill the sheet the
+    // same calls came back however long the rider had been hearing them. Resting has to mean
+    // "not this time" for the sheet to move on at all.
+    let mut chosen: Vec<(f32, usize, u8, usize, bool)> = Vec::new();
+    for pass_resting in [false, true] {
+        for c in &cands {
+            if chosen.len() >= max as usize {
+                break;
+            }
+            if c.4 != pass_resting {
+                continue;
+            }
+            if chosen.iter().any(|k| k.1.abs_diff(c.1) < APART_M) {
+                continue;
+            }
+            chosen.push(*c);
         }
-        if chosen.iter().any(|k| k.1.abs_diff(c.1) < APART_M) {
-            continue;
-        }
-        chosen.push(c);
     }
+    // Back into score order: the sheet is read in order, and two passes put the rested ones
+    // at the end regardless of how much time they cost.
+    chosen.sort_by(|x, y| y.0.total_cmp(&x.0).then(x.1.cmp(&y.1)).then(x.2.cmp(&y.2)));
     let n = chosen.len();
     let mut cues: Vec<CueOut> = chosen
         .into_iter()
         .enumerate()
-        .map(|(rank, (_, at, kind, si))| CueOut {
+        .map(|(rank, (_, at, kind, si, _))| CueOut {
             at: at as f32,
             kind,
             priority: (255 - (rank * 200 / n.max(1)) as i32).max(1) as u8,
@@ -491,5 +510,33 @@ mod tests {
     fn file_names_match_the_plugin() {
         assert_eq!(file_name("indiana nationals", "MX2OEM_2023_KTM_250_SX-F"), "indiana_nationals.MX2OEM_2023_KTM_250_SX-F.cue");
         assert_eq!(history_name("indiana nationals", "KX450"), "indiana_nationals.KX450.json");
+    }
+
+    /// A resting call is passed over while there is anything else to say, not merely scored
+    /// down. Scoring it down was not enough: a fifth of a big number still beats a small one,
+    /// so where the candidates barely filled the sheet the rider heard the same calls forever.
+    #[test]
+    fn a_resting_call_gives_up_its_place_to_a_fresh_one() {
+        let slow = Style { decel: 2.5, brake: 0.5, corner_v: 9.0, ..FAST };
+        let fresh = picked(&slow, Level::New, Amount::Normal, &History::default());
+        assert!(fresh.cues.len() >= 2, "need a couple of calls to swap between: {:?}", fresh.cues.len());
+        let head = &fresh.cues[0];
+
+        // Rest the top call, and nothing else.
+        let seen = History {
+            sent: vec![Sent { section: head.section.clone(), kind: head.kind, runs: 0, resting: 2 }],
+        };
+        let after = picked(&slow, Level::New, Amount::Normal, &seen);
+        let still_there = after.cues.iter().any(|c| c.section == head.section && c.kind == head.kind);
+        assert!(!still_there, "the rested call kept its place: {:?}", after.cues.iter().map(|c| (&c.section, c.kind)).collect::<Vec<_>>());
+        assert!(!after.cues.is_empty(), "and something else was said instead");
+
+        // With nothing else to say it comes back rather than leaving the rider in silence:
+        // resting means "not while there is better", not "never".
+        let only = History {
+            sent: fresh.cues.iter().map(|c| Sent { section: c.section.clone(), kind: c.kind, runs: 0, resting: 2 }).collect(),
+        };
+        let all_rested = picked(&slow, Level::New, Amount::Normal, &only);
+        assert!(!all_rested.cues.is_empty(), "silence is worse than a repeat");
     }
 }
