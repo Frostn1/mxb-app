@@ -89,15 +89,22 @@ WHERE guid IS NOT NULL AND TRIM(guid) <> '';
 -- `FF011000016EAE6204` was reported as a second install of `FF0110000162638666`; the other
 -- four arrived in the same list without a stated relationship, so none is claimed for them.
 -- Each is banned on its own evidence in any case — the link is a note, never the reason.
+--
+-- Written as a VALUES list rather than a chain of `SELECT ... UNION ALL`, which is what
+-- this was and why the deploy failed: D1 refuses a compound SELECT of more than five
+-- terms (`too many terms in compound SELECT`, SQLITE_ERROR 7500), and six riders is six
+-- terms. Plain SQLite allows five hundred, so it applies locally and in every test, and
+-- fails only against the real database. A VALUES list has no such limit.
+WITH seed(guid, alt_of) AS (VALUES
+  ('FF011000016EAE6204', 'FF0110000162638666'),
+  ('FF0110000162638666', NULL),
+  ('FF011000012D2FBD46', NULL),
+  ('FF01100001308ED7FA', NULL),
+  ('FF0110000164B7DCE8', NULL),
+  ('FF011000012B467ED8', NULL)
+)
 INSERT INTO guid_bans (guid, reason, evidence, alt_of, banned_at, banned_by)
 SELECT guid, 'unlocked protected content and shared it unlocked',
        'reported 2026-09-16 with proof of unlocking or sharing unlocked content', alt_of,
        CAST(strftime('%s', 'now') AS INTEGER) * 1000, 'seed:0038'
-FROM (
-  SELECT 'FF011000016EAE6204' AS guid, 'FF0110000162638666' AS alt_of
-  UNION ALL SELECT 'FF0110000162638666', NULL
-  UNION ALL SELECT 'FF011000012D2FBD46', NULL
-  UNION ALL SELECT 'FF01100001308ED7FA', NULL
-  UNION ALL SELECT 'FF0110000164B7DCE8', NULL
-  UNION ALL SELECT 'FF011000012B467ED8', NULL
-);
+FROM seed;
