@@ -15,7 +15,7 @@
     },
     "apps/coach": {
       "name": "@frost/coach",
-      "version": "0.1.14",
+      "version": "0.1.15",
       "dependencies": {
         "@frost/shared": "*",
         "@tauri-apps/api": "^2.1.1",

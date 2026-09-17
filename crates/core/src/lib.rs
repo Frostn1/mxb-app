@@ -9,6 +9,7 @@
 //! sites elsewhere kept resolving through the move unchanged.
 
 pub mod bikefiles;
+pub mod clientlog;
 pub mod cloudfiles;
 pub mod config;
 pub mod game;
@@ -23,6 +24,9 @@ pub mod proton;
 pub mod update_channel;
 pub mod usage;
 pub mod winehost;
+pub mod account;
+pub mod antidebug;
+pub mod appgate;
 pub mod cfg;
 pub mod edf;
 pub mod gate;

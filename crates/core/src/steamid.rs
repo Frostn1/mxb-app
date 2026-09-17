@@ -155,9 +155,44 @@ fn is_steam_id64(s: &str) -> bool {
     s.len() == 17 && s.bytes().all(|b| b.is_ascii_digit())
 }
 
+/// The smallest SteamID64: the base every account id is offset from.
+const STEAM_ID64_BASE: u64 = 76_561_197_960_265_728;
+
+/// The MX Bikes GUID for a Steam copy of the game: `FF` + the SteamID64 as 16 uppercase hex.
+///
+/// The GUID and the Steam ID are one identity, not two. For a Steam player the game derives the
+/// GUID from the login this way, mxb-ranked reads a rider page keyed on exactly this string, and
+/// the control plane pins the same value from the identity Valve confirmed. So the app does not
+/// have to *observe* its own GUID — off a server log, or out of game memory — it can compute it
+/// the moment it knows which Steam account is signed in. `None` for a non-Steam id, whose GUID is
+/// its own opaque value.
+pub fn guid_from_steam_id64(id: &str) -> Option<String> {
+    let n: u64 = id.trim().parse().ok()?;
+    (n >= STEAM_ID64_BASE).then(|| format!("FF{n:016X}"))
+}
+
+/// This machine's own GUID, derived from the signed-in Steam account — the smart auto-find.
+///
+/// `None` when Steam can't be read or the copy isn't a Steam one; the caller then falls back to
+/// whatever the running game reported.
+pub fn local_guid() -> Option<String> {
+    guid_from_steam_id64(&current_steam_id64()?)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn guid_is_ff_plus_the_steam_id_in_hex() {
+        assert_eq!(guid_from_steam_id64("76561197984950104").as_deref(), Some("FF011000010178A758"));
+        // The base account, and the not-an-account cases.
+        assert_eq!(guid_from_steam_id64("76561197960265728").as_deref(), Some("FF0110000100000000"));
+        assert_eq!(guid_from_steam_id64("0"), None);
+        assert_eq!(guid_from_steam_id64("not a number"), None);
+        // Spacing a person might paste in.
+        assert_eq!(guid_from_steam_id64(" 76561197984950104 ").as_deref(), Some("FF011000010178A758"));
+    }
 
     const SAMPLE: &str = r#"
 "users"

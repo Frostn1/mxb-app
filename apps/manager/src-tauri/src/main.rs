@@ -1,7 +1,6 @@
 // Prevents an additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-mod antidebug;
 pub(crate) use mxb_core::bikefiles;
 mod bikeswap;
 mod bundle;
@@ -12,6 +11,7 @@ mod trashbin;
 pub(crate) use mxb_core::cloudfiles;
 pub(crate) use mxb_core::viewer;
 pub(crate) use mxb_core::config;
+pub(crate) use mxb_core::{antidebug, appgate as gate};
 mod cookie_session;
 mod downloads;
 mod dropzone;
@@ -1218,14 +1218,7 @@ async fn uninstall_mod(app: tauri::AppHandle, from_path: String, subpath: String
 /// them.
 #[tauri::command]
 fn log_client(level: String, message: String) {
-    // A log line is not a transport for arbitrary payloads. Trim rather than reject: a
-    // truncated fact still reads, and a dropped one is a support thread that goes nowhere.
-    let msg: String = message.chars().take(2000).collect();
-    match level.as_str() {
-        "error" => log::error!("[webview] {msg}"),
-        "warn" => log::warn!("[webview] {msg}"),
-        _ => log::info!("[webview] {msg}"),
-    }
+    mxb_core::clientlog::record(&level, &message);
 }
 
 /// Where MXB App's own logs are, where the game's are, and what's currently in each.
@@ -2348,6 +2341,16 @@ async fn steam_link_status(app: tauri::AppHandle) -> Result<Option<String>, Stri
     }
     let ent: Ent = resp.json().await.map_err(|e| format!("bad response: {e}"))?;
     Ok(ent.steam_id)
+}
+
+/// Re-ask the estate gate now, rather than at the next launch.
+///
+/// The frontend calls this after the Steam sign-in wall has been satisfied, so a freshly linked
+/// account takes the wall down at once instead of on restart. It routes through the same
+/// [`gate::check`] as startup, so the verdict — and any block — is decided in exactly one place.
+#[tauri::command]
+async fn recheck_gate(app: tauri::AppHandle) {
+    gate::check(app).await;
 }
 
 #[tauri::command]
@@ -6459,6 +6462,16 @@ fn main() {
         .setup(|app| {
             log::info!("MXB App {} starting", env!("CARGO_PKG_VERSION"));
 
+            // Before anything else, and before a window exists to flash: if a previous run was
+            // told this installation is blocked, refuse now — instantly, and without needing the
+            // network. `enforce_marker` shows the message and ends the process. A clean install
+            // has no marker and sails past. See `gate.rs` for why the reason it gives is not the
+            // real one.
+            gate::enforce_marker(app.handle());
+            // And ask the server afresh, off the startup path: this is what blocks a newly-banned
+            // install on its first run, and what lets a lifted ban back in by clearing the marker.
+            tauri::async_runtime::spawn(gate::check(app.handle().clone()));
+
             // The main window is `"create": false` in tauri.conf.json so it is built here
             // rather than by Tauri's own startup loop, which is the only way to decide the
             // drag-drop handler per run: it can only be turned off while the window is
@@ -6866,6 +6879,7 @@ fn main() {
             mxbsecure_status,
             steam_link_start,
             steam_link_status,
+            recheck_gate,
             mxb_core::viewer::load_bike_model,
             preview_model_swap,
             mxb_core::viewer::load_rider_model,

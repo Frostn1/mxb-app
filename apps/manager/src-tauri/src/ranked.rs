@@ -104,16 +104,16 @@ pub struct RankedProfile {
 }
 
 /// MX Bikes' GUID for a Steam account: `FF` + the SteamID64 as 16 uppercase hex digits.
+///
+/// One derivation, in `mxb_core::steamid`, so the ranked scraper, the identity auto-find and the
+/// control plane cannot drift apart on what a Steam player's GUID is.
 pub fn guid_from_steam_id64(id: &str) -> Option<String> {
-    let n: u64 = id.trim().parse().ok()?;
-    // Below the base is not an account id at all, and formatting it would produce a GUID that
-    // looks right and belongs to nobody.
-    (n >= 76_561_197_960_265_728).then(|| format!("FF{n:016X}"))
+    crate::steamid::guid_from_steam_id64(id)
 }
 
 /// The signed-in Steam account's GUID, or `None` when Steam can't be read.
 pub fn local_guid() -> Option<String> {
-    guid_from_steam_id64(&crate::steamid::current_steam_id64()?)
+    crate::steamid::local_guid()
 }
 
 /// Tidy a GUID a person typed or pasted — from the site, a URL, or with spaces in it.

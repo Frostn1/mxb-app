@@ -2,11 +2,12 @@
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "MXB Coach",
   "mainBinaryName": "MXB Coach",
-  "version": "0.1.14",
+  "version": "0.1.15",
   "identifier": "com.frost.mxbcoach",
   "build": {
     "beforeDevCommand": "bun run dev",
     "beforeBuildCommand": "bun run build",
+    "beforeBundleCommand": "bash ../../scripts/pack-binary.sh",
     "devUrl": "http://localhost:1440",
     "frontendDist": "../dist"
   },
