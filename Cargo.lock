@@ -3801,6 +3801,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "tauri",
+ "tauri-plugin-dialog",
  "tauri-plugin-global-shortcut",
  "tauri-plugin-updater",
  "tokio",
