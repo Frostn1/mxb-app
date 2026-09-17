@@ -776,8 +776,42 @@ impl Ground {
         let base_m = f32_at(24);
         let lo = f32_at(28);
         let span = f32_at(32);
-        if dim_x < 2 || dim_z < 2 || bytes.len() < HEAD + dim_x * dim_z * 2 {
-            bail!("stored ground is truncated");
+        if dim_x < 2 || dim_z < 2 || dim_x > 1 << 15 || dim_z > 1 << 15 {
+            bail!("stored ground says it is {dim_x} by {dim_z}, which is not a plot");
+        }
+        if !(size_x.is_finite() && size_z.is_finite() && size_x > 0.0 && size_z > 0.0) {
+            bail!("stored ground has no sensible size");
+        }
+        if !(base_m.is_finite() && lo.is_finite() && span.is_finite() && span > 0.0) {
+            bail!("stored ground has no sensible height range");
+        }
+        // The length check has to count everything the writer writes, and this is where it went
+        // wrong before: version 2 added the floor beside the span and moved the header, and the
+        // check moved with it — but the cover count that every version-3 file carries was still
+        // treated as optional on read. So a file truncated by exactly those four bytes was long
+        // enough to satisfy the check and was accepted, which is how a garbage heightfield gets
+        // in looking plausible. It is the same fault as the others today: one thing changed and a
+        // dependent quantity left deriving from the old assumption.
+        let want = HEAD
+            .checked_add(dim_x.checked_mul(dim_z).and_then(|n| n.checked_mul(2)).unwrap_or(usize::MAX))
+            .and_then(|n| n.checked_add(4))
+            .unwrap_or(usize::MAX);
+        if bytes.len() < want {
+            bail!(
+                "stored ground is truncated: {} bytes for a {dim_x} by {dim_z} plot that needs {want}",
+                bytes.len()
+            );
+        }
+        let cover_n =
+            u32::from_le_bytes(bytes[want - 4..want].try_into().unwrap()) as usize;
+        if cover_n != 0 && cover_n != dim_x * dim_z {
+            bail!(
+                "stored ground carries {cover_n} cover cells for a {dim_x} by {dim_z} plot, which \
+                 is neither none nor one each"
+            );
+        }
+        if bytes.len() < want + cover_n {
+            bail!("stored ground's cover is truncated");
         }
         let mut z = Vec::with_capacity(dim_x * dim_z);
         for i in 0..dim_x * dim_z {
@@ -785,13 +819,7 @@ impl Ground {
             let q = u16::from_le_bytes([bytes[o], bytes[o + 1]]);
             z.push(lo + q as f32 / 65535.0 * span);
         }
-        let after = HEAD + dim_x * dim_z * 2;
-        let cover = if bytes.len() >= after + 4 {
-            let n = u32::from_le_bytes(bytes[after..after + 4].try_into().unwrap()) as usize;
-            if bytes.len() >= after + 4 + n { bytes[after + 4..after + 4 + n].to_vec() } else { Vec::new() }
-        } else {
-            Vec::new()
-        };
+        let cover = bytes[want..want + cover_n].to_vec();
         Ok(Ground { dim_x, dim_z, size_x, size_z, z, cover, base_m })
     }
 }
@@ -1499,10 +1527,30 @@ mod tests {
     fn a_short_or_wrong_file_is_refused_rather_than_guessed() {
         assert!(Ground::decode(b"").is_err());
         assert!(Ground::decode(b"NOPE1234567890123456789012").is_err());
+        // Every truncation, not one chosen length. Truncating by exactly four bytes is what
+        // slipped through: it removed the cover count, which the reader treated as optional, and
+        // left a file long enough to satisfy a length check that had not moved with the format.
         let g = Ground { dim_x: 9, dim_z: 9, size_x: 100.0, size_z: 100.0, z: vec![0.0; 81], cover: Vec::new(), base_m: 0.0 };
-        let mut b = g.encode();
-        b.truncate(b.len() - 4);
-        assert!(Ground::decode(&b).is_err());
+        let full = g.encode();
+        for cut in 1..=40 {
+            let short = &full[..full.len() - cut];
+            assert!(
+                Ground::decode(short).is_err(),
+                "a file {cut} bytes short of {} was accepted",
+                full.len()
+            );
+        }
+        // And one with a cover plane, so the cover length is checked too.
+        let withc = Ground { dim_x: 9, dim_z: 9, size_x: 100.0, size_z: 100.0, z: vec![0.0; 81], cover: vec![1u8; 81], base_m: 0.0 };
+        let fc = withc.encode();
+        assert!(Ground::decode(&fc).is_ok(), "a whole file with cover must still read");
+        for cut in 1..=20 {
+            assert!(Ground::decode(&fc[..fc.len() - cut]).is_err(), "cover {cut} short was accepted");
+        }
+        // A plausible header with nonsense in it is refused rather than guessed at.
+        let mut bad = full.clone();
+        bad[8] = 0; bad[9] = 0; bad[10] = 0; bad[11] = 0;
+        assert!(Ground::decode(&bad).is_err(), "a zero dimension was accepted");
     }
 
     #[test]
