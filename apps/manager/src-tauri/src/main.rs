@@ -13,6 +13,7 @@ pub(crate) use mxb_core::viewer;
 pub(crate) use mxb_core::config;
 pub(crate) use mxb_core::{antidebug, appgate as gate};
 mod cookie_session;
+mod crashreports;
 mod downloads;
 mod dropzone;
 mod feel;
@@ -1288,6 +1289,23 @@ async fn share_logs(app: tauri::AppHandle) -> Result<logs::ShareResult, String> 
     let summary =
         logs::summary(&version, frostmod_manage::installed_version(&app).as_deref(), &cfg, &info);
     logs::share(&app, &info, &summary).await.map_err(|e| format!("{e:#}"))
+}
+
+/// Whether the last session ended by crashing, and a dump is sitting here unasked about.
+///
+/// The small JSON report has already gone on its own (see [`crate::crashreports`]); this is
+/// only about the minidump, which is megabytes of the game's memory and never leaves the
+/// machine without a press. Answers the number waiting, which the banner turns into one
+/// sentence, and `0` on every platform where FrostMod does not run.
+#[tauri::command]
+fn crash_dumps_waiting(app: tauri::AppHandle) -> usize {
+    crashreports::dumps_waiting(&frostmod_manage::frostmod_dir(&app)).len()
+}
+
+/// Record that the player has been asked. Called whether they send or dismiss.
+#[tauri::command]
+fn crash_dumps_offered(app: tauri::AppHandle) {
+    crashreports::mark_dumps_offered(&frostmod_manage::frostmod_dir(&app));
 }
 
 /// Where `tauri_plugin_log`'s `LogDir` target writes. Empty when the path can't be
@@ -6923,6 +6941,8 @@ fn main() {
             log_client,
             logs_info,
             share_logs,
+            crash_dumps_waiting,
+            crash_dumps_offered,
             open_logs_folder,
             export_logs,
             set_game_path,

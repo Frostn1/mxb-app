@@ -27,6 +27,14 @@ const REPORT_EVERY: Duration = Duration::from_secs(45);
 pub fn start(app: &AppHandle) {
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
+        // Whatever the last session left behind, before this one starts. A crash with the
+        // app closed is the ordinary case, and it would otherwise sit there until the player
+        // happened to play again and quit again.
+        {
+            let cfg = crate::config::load_or_detect(&app).unwrap_or_default();
+            send_crash_reports(&app, &cfg).await;
+        }
+
         let mut was_running = false;
         // A handle on the current session, held so how it ended is still readable once the
         // process is gone.
@@ -93,9 +101,33 @@ pub fn start(app: &AppHandle) {
             } else if reported.take().is_some() {
                 // The session is over, so nothing that was true of it is true now.
                 crate::procmods::reset();
+                // And if it ended by crashing, FrostMod left a report behind. This is the
+                // first moment it can be sent: the game is gone, so the file is finished and
+                // nothing is competing for the disk.
+                send_crash_reports(&app, &cfg).await;
             }
 
             tokio::time::sleep(POLL).await;
         }
     });
+}
+
+/// Hand anything FrostMod left after a crash to [`crate::crashreports`].
+///
+/// Here rather than inline because both callers want it and neither wants to know where
+/// FrostMod's folder is or which build the game on disk is.
+async fn send_crash_reports(app: &AppHandle, cfg: &crate::config::AppConfig) {
+    let dir = crate::frostmod_manage::frostmod_dir(app);
+    if !crate::crashreports::any_pending(&dir) {
+        return;
+    }
+    let version = app.package_info().version.to_string();
+    // Which build the crash's offsets are offsets into. The usual build fingerprint is read
+    // out of the running process, and by now the process is the thing that died — so this is
+    // the game executable's own digest, off the disk. Computed only when there is a report
+    // waiting, which is the rare case. Empty if it cannot be read, which is honest: a site
+    // with no build against it is still a site, it just cannot be compared across an update.
+    let exe = std::path::PathBuf::from(cfg.install_dir()).join(cfg.game().exe);
+    let build = crate::paintsync::sha256_file(&exe).unwrap_or_default();
+    crate::crashreports::flush(&version, cfg, &dir, &build).await;
 }

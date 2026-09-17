@@ -244,6 +244,17 @@ export const ptBR: Translation = {
   "runtime.fixIt": "Instalar",
   "runtime.installing": "Instalando…",
   "runtime.dismiss": "Dispensar este aviso",
+  "crash.body": "O MX Bikes fechou sozinho da última vez que você jogou.",
+  "crash.bodyMany": "O MX Bikes fechou sozinho {{count}} vezes.",
+  "crash.pitch":
+    "O relatório curto a gente já tem. O dump é a parte que diz o porquê, e ele só sai do seu PC se você enviar.",
+  "crash.send": "Enviar",
+  "crash.sending": "Enviando…",
+  "crash.dismiss": "Não enviar esse crash",
+  "crash.sent": "Relatório de crash enviado",
+  "crash.sentDesc": "Valeu. É a única coisa que não conseguimos de outro jeito.",
+  "crash.failed": "Não deu para enviar",
+  "crash.failedDesc": "Em Configurações tem um botão Enviar logs que faz o mesmo.",
   "cloud.genericProvider":
     "uma ferramenta de sincronização na nuvem",
   "cloud.evictedBody":

@@ -241,6 +241,17 @@ export const it: Translation = {
   "runtime.fixIt": "Installalo",
   "runtime.installing": "Installazione…",
   "runtime.dismiss": "Nascondi questo avviso",
+  "crash.body": "MX Bikes si è chiuso da solo l'ultima volta che hai giocato.",
+  "crash.bodyMany": "MX Bikes si è chiuso da solo {{count}} volte.",
+  "crash.pitch":
+    "Il rapporto breve ce l'abbiamo già. Il file di crash è quello che dice perché, e lascia il tuo PC solo se lo mandi tu.",
+  "crash.send": "Mandalo",
+  "crash.sending": "Invio…",
+  "crash.dismiss": "Non mandare questo crash",
+  "crash.sent": "Rapporto di crash inviato",
+  "crash.sentDesc": "Grazie. È l'unica cosa che non possiamo avere in altro modo.",
+  "crash.failed": "Invio non riuscito",
+  "crash.failedDesc": "Nelle Impostazioni c'è un pulsante Invia log che fa la stessa cosa.",
   "cloud.genericProvider":
     "uno strumento di sincronizzazione cloud",
   "cloud.evictedBody":
