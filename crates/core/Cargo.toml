@@ -25,6 +25,9 @@ tauri = "2"
 tauri-plugin-updater = "2"
 # The overlay hotkey both apps bind (overlay.rs).
 tauri-plugin-global-shortcut = "2"
+# The startup gate shows a message box when an install is blocked (appgate.rs); each app still
+# initialises the plugin in its own builder.
+tauri-plugin-dialog = "2"
 semver = "1"
 walkdir = "2"
 rayon = "1"

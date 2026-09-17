@@ -86,6 +86,11 @@ declare global {
      *  key-minting service. 10 when unset; the owner account has no ceiling. Not a secret: a
      *  var in `wrangler.jsonc`, so changing the ceiling is a reviewable diff. */
     MXB_ASSETS_PER_DAY?: string;
+    /** Require a Valve-confirmed Steam sign-in before the desktop apps will run. `"1"` turns it
+     *  on for every install; unset (the default) leaves the apps open to invite/self-serve
+     *  accounts as before. A var in `wrangler.jsonc`, so switching it is a reviewable diff — and
+     *  a switch, not a build, because it locks out anyone without a Steam copy (see README). */
+    MXB_REQUIRE_STEAM?: string;
     /** Rate limit on `/v1/web/steam/login` and `/return`, per client address (`ratelimits` in
      *  `wrangler.jsonc`). Optional so tests and a bare `wrangler dev` run without it. */
     SIGNIN_LIMITER?: RateLimit;

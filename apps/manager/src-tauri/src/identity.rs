@@ -3,10 +3,12 @@
 //! Two facts the control plane needs, and neither was reliably arriving.
 //!
 //! **The GUID** is the only stable identity a rider has: a name is free text they can change
-//! between sessions, and one they share with anybody who picked the same one. Until now the
-//! app could only learn it by watching a rider connect to a dedicated server *they
-//! themselves administer* — the server's log is where the GUID is written — so in practice
-//! almost nobody had one.
+//! between sessions, and one they share with anybody who picked the same one. For a Steam copy
+//! of the game it is not observed at all any more — it is *derived* from the signed-in Steam
+//! account (`steamid::local_guid`: `FF` + the SteamID64 in hex), the same value the control
+//! plane pins from the identity Valve confirms, so it is known instantly and cannot be a
+//! different rider's. Only a non-Steam (Piboso) copy still has to be watched for: there the GUID
+//! is opaque, and it is read from the running game (below) or a dedicated-server log.
 //!
 //! **The rider name** was read off the game's profile *folder*, which is not the name the
 //! server shows. A player who never renamed their profile is `unnamedProfile`, and so is
@@ -47,6 +49,22 @@ pub fn guid_to_claim<'a>(held: &str, seen: &'a str) -> Option<&'a str> {
     Some(seen)
 }
 
+/// The GUID to auto-find, preferring the one derived from the signed-in Steam account.
+///
+/// For a Steam copy of the game the GUID is a pure function of the Steam login
+/// (`steamid::local_guid`), which is deterministic and known without watching a server or
+/// reading game memory — and it is exactly the value the control plane will pin from the
+/// identity Valve confirms, so claiming anything else is pointless. `steam_derived` is `None`
+/// only on a non-Steam (Piboso) copy or when Steam can't be read; there we fall back to what the
+/// running game reported. Either way the value still passes through [`guid_to_claim`], so an
+/// unchanged GUID is not re-sent.
+pub fn preferred_guid<'a>(steam_derived: Option<&'a str>, seen: &'a str) -> &'a str {
+    match steam_derived {
+        Some(g) if !g.trim().is_empty() => g,
+        _ => seen,
+    }
+}
+
 /// The rider name worth sending, or nothing.
 ///
 /// The game's name wins over the one enrolment guessed, because it is the name the server
@@ -72,7 +90,11 @@ pub async fn claim_from_game(app: &AppHandle, seen: &SeenIdentity) {
         return;
     }
 
-    if let Some(guid) = guid_to_claim(&cfg.cp_guid, &seen.guid) {
+    // Prefer the Steam-derived GUID over whatever the game happened to report: it is the same
+    // value for a Steam player and it is the one the control plane treats as authoritative.
+    let steam_derived = crate::steamid::local_guid();
+    let want = preferred_guid(steam_derived.as_deref(), &seen.guid);
+    if let Some(guid) = guid_to_claim(&cfg.cp_guid, want) {
         match claim_guid(app, guid).await {
             Ok(()) => log::info!("[identity] claimed GUID {guid} from the running game"),
             // First-come on the server side, so a rejection is a real answer — another
@@ -183,6 +205,18 @@ mod tests {
     #[test]
     fn a_session_reporting_no_name_leaves_the_enrolled_one_alone() {
         assert_eq!(name_to_claim("Frost", ""), None);
+    }
+
+    #[test]
+    fn the_steam_derived_guid_is_preferred_when_present() {
+        assert_eq!(preferred_guid(Some("FF011000010178A758"), "FF0000000000000001"), "FF011000010178A758");
+    }
+
+    #[test]
+    fn a_non_steam_copy_falls_back_to_what_the_game_reported() {
+        assert_eq!(preferred_guid(None, "AA0110000100000010"), "AA0110000100000010");
+        // An empty derived value (Steam unreadable) is not preferred over a real one.
+        assert_eq!(preferred_guid(Some("  "), "AA0110000100000010"), "AA0110000100000010");
     }
 
     #[test]

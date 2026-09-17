@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  guidFromSteamId,
   isVerified,
   loginUrl,
   returnToMatches,
@@ -218,5 +219,25 @@ describe("loginUrl", () => {
     expect(url.searchParams.get("openid.identity")).toBe(
       "http://specs.openid.net/auth/2.0/identifier_select",
     );
+  });
+});
+
+describe("the GUID derived from a Steam identity", () => {
+  it("is FF + the SteamID64 as sixteen uppercase hex digits", () => {
+    // The rider whose page the app's fixture came from — the game derives the same string.
+    expect(guidFromSteamId("76561197984950104")).toBe("FF011000010178A758");
+    expect(guidFromSteamId("76561198174305985")).toBe("FF011000010CC1FEC1");
+  });
+
+  it("matches the game's own derivation for the base account", () => {
+    // The smallest SteamID64: FF + 0110000100000000.
+    expect(guidFromSteamId("76561197960265728")).toBe("FF0110000100000000");
+  });
+
+  it("is null for anything that isn't a SteamID64, so a Piboso copy is left alone", () => {
+    expect(guidFromSteamId("0")).toBeNull();
+    expect(guidFromSteamId("123")).toBeNull();
+    expect(guidFromSteamId("not a number")).toBeNull();
+    expect(guidFromSteamId("7656119796026572")).toBeNull(); // 16 digits
   });
 });

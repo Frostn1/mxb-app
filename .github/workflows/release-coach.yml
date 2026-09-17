@@ -104,11 +104,21 @@ jobs:
         shell: bash
         run: echo "name=${GITHUB_REF_NAME#coach-}" >> "$GITHUB_OUTPUT"
 
+      # UPX for the Windows binary pack (scripts/pack-binary.sh runs as the app's
+      # beforeBundleCommand). Windows leg only; the script no-ops without it and without MXB_PACK.
+      - name: Install UPX (Windows)
+        if: startsWith(matrix.platform, 'windows')
+        shell: bash
+        run: choco install upx -y
+
       - name: Build and publish pre-release
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VITE_APP_NAME: "MXB Coach"
+          # Pack the Windows binary with UPX via the beforeBundleCommand (scripts/pack-binary.sh).
+          # Windows leg only; empty elsewhere so the hook no-ops. See the script for the AV caveat.
+          MXB_PACK: ${{ startsWith(matrix.platform, 'windows') && '1' || '' }}
           # The coach's own key, not the manager's: a leak here can't sign a manager update.
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.COACH_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.COACH_SIGNING_PRIVATE_KEY_PASSWORD }}

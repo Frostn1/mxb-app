@@ -10,6 +10,7 @@
 
 import { unwrapContentKey, rewrapToCurrent, wrappedVersion, currentMasterVersion } from "./assetkey";
 import {
+  guidFromSteamId,
   isVerified,
   loginUrl,
   verifyAssertion,
@@ -26,9 +27,10 @@ import {
   terminateInstance,
 } from "./aws";
 import { adminAssets, isAssetsPath } from "./assets";
+import { APP_BLOCK_MESSAGE, APP_SIGNIN_MESSAGE, appGate, banFor, rememberGuid } from "./bans";
 import { isWebPath, landingSite, webRoutes } from "./web";
 import { steamResult, redirectPage } from "./page";
-import { rememberLink, steamIdFor } from "./steamlink";
+import { pinGuidFromSteam, rememberLink, steamIdFor } from "./steamlink";
 import { bmacWebhook } from "./bmac";
 import { pruneReports, putReport } from "./diagnostics";
 import { stateRegions } from "./stateinvariants";
@@ -278,6 +280,63 @@ async function route(request: Request, env: Env): Promise<Response> {
 
   const account = await authenticate(request, env);
   if (!account) return json(401, { error: "unauthorized" });
+
+  // The ban gate, and it is deliberately *here* rather than on the endpoints a ban is
+  // obviously about.
+  //
+  // MXB App, Studio, Coach, FrostMod and mxbsecure are one thing to the people who use them
+  // and one thing to the person banned from them. So a ban is refused at the door the whole
+  // estate comes through, which is this one: every route below inherits it, and a product
+  // added next year inherits it without anybody remembering to ask. The alternative — a check
+  // per feature — is a list that is complete on the day it is written and wrong by the next
+  // release.
+  //
+  // Four things stay open to a banned account, each because refusing it would work against
+  // the ban rather than for it:
+  //
+  //  * `GET /v1/me`, which reports the ban and its reason. Everything else answering 403 with
+  //    nothing to explain it reads as an outage, and an outage gets support threads and a
+  //    second account; being told plainly is also what makes an appeal possible.
+  //  * `PUT /v1/diagnostics`, which observes and answers `{ ok: true }` whatever it made of
+  //    the report. Refusing it would blind us to the install we most want to watch, and would
+  //    hand it a way to tell that it is the report that is refused.
+  //  * `POST /v1/steam/login`, so an identity can still be linked — that is the plumbing an
+  //    appeal and a lift are decided on.
+  //  * The three mxbsecure answers that carry a ban's own consequences: the status poll that
+  //    tells an app to delete the keys it holds (a blanket 403 there reads as "we don't know",
+  //    which keeps the keys), and the grant and check, which answer with a reason and write
+  //    the refusal to the audit ledger.
+  if (!bannedMayUse(method, path)) {
+    const ban = await banFor(env, {
+      accountId: account.id,
+      steamId: account.steam_id,
+      guid: account.guid,
+    });
+    // Disguised, because this is the app path: a bearer token is a desktop app, never the
+    // website. It is handed the same mundane verification failure the startup gate returns,
+    // so a pirate poking at any endpoint learns nothing the gate wouldn't already have hidden.
+    // The website keeps the honest `BANNED` on its own surfaces (`web.ts`, `assets.ts`).
+    if (ban) return json(403, { error: APP_BLOCK_MESSAGE });
+  }
+
+  // The desktop apps' startup gate. In `bannedMayUse`, so a banned install can reach it and be
+  // told to stand down — with a reason that is not the truth. This is what makes MXB App,
+  // Studio, Coach and FrostMod refuse to run at all, not only lose their online features.
+  //
+  // Three verdicts, in order of precedence:
+  //  1. a ban wins over everything — the disguised `unsupported`;
+  //  2. then, if this deployment requires a Steam sign-in and the account has no Valve-confirmed
+  //     one, `signin`: the app prompts for Steam and retries, and every install becomes a proven
+  //     identity — which is what makes the GUID and the ban unspoofable for the whole estate;
+  //  3. otherwise `ok`.
+  if (method === "GET" && path === "/v1/app/gate") {
+    const banned = await appGate(env, { accountId: account.id, steamId: account.steam_id, guid: account.guid });
+    if (banned.status !== "ok") return json(200, banned);
+    if (requireSteam(env) && !(await steamIdFor(env, account))) {
+      return json(200, { status: "signin", message: APP_SIGNIN_MESSAGE });
+    }
+    return json(200, { status: "ok" });
+  }
 
   // Open to every account, self-serve ones included: who you are, where you are, and the
   // voice room for the server you said you are on.
@@ -571,6 +630,10 @@ async function steamReturn(request: Request, url: URL, env: Env): Promise<Respon
     ]);
   }
 
+  // Valve has vouched for the identity; its GUID is now derived and pinned, not waited for. This
+  // is what makes the GUID auto-found and unspoofable — see `pinGuidFromSteam`.
+  await pinGuidFromSteam(env, login.account_id, result.steamId);
+
   return steamResult(site, "linked");
 }
 
@@ -650,6 +713,12 @@ async function assetStatus(request: Request, account: Account, env: Env): Promis
   // Through `steamIdFor`, like the grant decision, so a link Valve has already confirmed is put
   // back rather than read as "not linked" — which here would mean reporting nothing revoked.
   const steamId = await steamIdFor(env, account);
+  // The one answer here that doesn't need a Steam link to be certain. A `.mxbkey` already on
+  // disk opens offline forever, so a ban that only stopped the *next* grant would leave the
+  // banned install playing everything it had already unlocked — which is most of what it has.
+  // This poll is what reaches those keys, so a ban says "revoked" about every secured file the
+  // machine is holding, and the app deletes each one on its next pass.
+  const banned = !!(await banFor(env, { accountId: account.id, steamId, guid: account.guid }));
   if (assetIds.length === 0) {
     return json(200, { steamId, assets: [] });
   }
@@ -683,15 +752,22 @@ async function assetStatus(request: Request, account: Account, env: Env): Promis
         assetId: id,
         title: a?.title ?? null,
         registered: !!a,
+        // Left honest: they did buy it, and a ban that rewrote the purchase would make the
+        // creator's own records lie. What changes is whether it may be opened.
         owned: owned.has(id),
-        available: !!a && a.has_key === 1 && a.withdrawn !== 1,
+        available: !!a && a.has_key === 1 && a.withdrawn !== 1 && !banned,
         // Only ever true about an asset we know, for an identity we know. A withdrawn, taken-down
         // or key-revoked asset counts as revoked for everyone, entitled or not, because the grant
         // refuses it for everyone — the key on disk should stop opening on the same terms. A
         // removal that took the keys back is why the row is kept rather than dropped: an asset we
         // no longer knew would be "can't tell", and the keys would stay on every PC that has one.
         // A removal that left the keys alone says nothing here, which is exactly what it means.
-        revoked: !!a && !!steamId && (a.withdrawn === 1 || !owned.has(id)),
+        //
+        // A ban is the one case that does not wait for a Steam link: it is a decision about the
+        // install, made from evidence about it, so "we know who this is" is already settled. It
+        // is also the only case where the key being deleted was legitimately bought, which is
+        // the consequence — not an accident of the wording.
+        revoked: !!a && (banned || (!!steamId && (a.withdrawn === 1 || !owned.has(id)))),
       };
     }),
   });
@@ -732,11 +808,20 @@ async function decideEntitlement(
   const steamId = await steamIdFor(env, account);
 
   const decide = async (): Promise<{ allowed: boolean; reason: string; log: boolean }> => {
-    if (!steamId) return { allowed: false, reason: "no Steam account linked", log: false };
+    // The asset first, and only so the answers below are about one that exists: an id nobody
+    // registered is the one refusal a caller can produce at will, and it must stay unlogged.
     const asset = await env.DB.prepare("SELECT withdrawn_at, taken_down_at, keys_revoked_at FROM assets WHERE id = ?")
       .bind(assetId)
       .first<{ withdrawn_at: number | null; taken_down_at: number | null; keys_revoked_at: number | null }>();
     if (!asset) return { allowed: false, reason: "no such asset", log: false };
+    // Then the person, before anything about entitlement: a ban refuses every asset at once and
+    // needs no entitlement to have existed. Logged when there is a Steam identity to log it
+    // against, because a banned install walking the catalogue is exactly the shape the audit
+    // ledger was added to make visible.
+    if (await banFor(env, { accountId: account.id, steamId, guid: account.guid })) {
+      return { allowed: false, reason: "banned", log: !!steamId };
+    }
+    if (!steamId) return { allowed: false, reason: "no Steam account linked", log: false };
     // Ours, and checked first: a creator restoring a withdrawal doesn't lift it.
     if (asset.taken_down_at !== null) return { allowed: false, reason: "taken down", log: true };
     // The creator removed it and asked for the keys back. Its own word rather than "withdrawn",
@@ -811,7 +896,9 @@ async function checkEntitlement(request: Request, account: Account, env: Env): P
     parsed.blobSha256,
     env,
   );
-  return json(allowed ? 200 : 403, { allowed, reason });
+  // Same disguise as the grant: the app never sees the word. A ban reads to it as the asset
+  // being unavailable, which is what a withdrawn or removed one reads as too.
+  return json(allowed ? 200 : 403, { allowed, reason: reason === "banned" ? "unavailable" : reason });
 }
 
 /**
@@ -833,7 +920,9 @@ async function grantKey(request: Request, account: Account, env: Env): Promise<R
   const { assetId, session, blobSha256 } = parsed;
 
   const { allowed, reason } = await decideEntitlement(account, assetId, session, blobSha256, env);
-  if (!allowed) return json(403, { error: reason });
+  // The ledger keeps the honest `banned`; the app is handed the same disguised failure as
+  // everywhere else, so an unlock that a ban refused reads as a broken install, not a verdict.
+  if (!allowed) return json(403, { error: reason === "banned" ? APP_BLOCK_MESSAGE : reason });
 
   const asset = await env.DB.prepare(
     "SELECT wrapped_key, key_id, blob_sha256 FROM assets WHERE id = ?",
@@ -919,6 +1008,35 @@ function b64(bytes: Uint8Array): string {
 }
 
 /**
+ * The endpoints a banned account still reaches, and nothing else.
+ *
+ * A closed list, checked by the gate in `route`. Adding to it is a decision to let a banned
+ * install keep using something, so it should be as hard to do by accident as this is to read —
+ * the reasoning for each entry is at the gate itself.
+ */
+/**
+ * Does this deployment require a Valve-confirmed Steam sign-in to run the apps?
+ *
+ * Off unless `MXB_REQUIRE_STEAM` is exactly `"1"`. A switch rather than a build, because turning
+ * it on locks out anyone without a Steam copy of the game (a Piboso owner has no Steam identity
+ * to confirm) — a decision the deployment makes and can reverse, not one baked into a release.
+ */
+function requireSteam(env: Env): boolean {
+  return (env.MXB_REQUIRE_STEAM ?? "").trim() === "1";
+}
+
+function bannedMayUse(method: string, path: string): boolean {
+  if (method === "GET" && path === "/v1/app/gate") return true;
+  if (method === "GET" && path === "/v1/me") return true;
+  if (method === "PUT" && path === "/v1/diagnostics") return true;
+  if (method === "POST" && path === "/v1/steam/login") return true;
+  if (method === "POST" && path === "/v1/assets/status") return true;
+  if (method === "POST" && path === "/v1/entitlements/check") return true;
+  if (method === "POST" && path === "/v1/keys/grant") return true;
+  return false;
+}
+
+/**
  * Refuse anything a self-serve account has no business doing.
  *
  * Voice and paint sync are open to everyone with the app — both are worthless unless the
@@ -939,6 +1057,9 @@ function invitedOnly(account: Account): Response | null {
  * the same thing the moment a publish half-fails, which is exactly when a player looks.
  */
 async function me(account: Account, env: Env): Promise<Response> {
+  // No ban is surfaced here on purpose. This is the app's own identity call, and the app is
+  // never told it is banned — the startup gate (`/v1/app/gate`) turns it away with a mundane
+  // reason instead. Leaving `/v1/me` looking ordinary is part of that disguise.
   const paints = await env.DB.prepare(
     "SELECT bike_id, slot, file_name, sha256, size FROM loadout_paints WHERE account_id = ?" +
       " ORDER BY bike_id, slot",
@@ -1030,6 +1151,29 @@ async function putGuid(request: Request, account: Account, env: Env): Promise<Re
   const { guid } = body as { guid?: unknown };
   if (!isGuid(guid)) return json(400, { error: "that doesn't look like an MX Bikes GUID" });
 
+  // A banned GUID nobody has claimed yet is refused here rather than at the gate above, which
+  // only knows the identities already tied to the caller: this is the claim that would make
+  // the tie, and letting it through would put a banned install's identity on a fresh account
+  // for one request before anything noticed. Disguised, like every other app-facing refusal.
+  if (await banFor(env, { guid })) return json(403, { error: APP_BLOCK_MESSAGE });
+
+  // If Valve has confirmed a Steam identity for this account, the GUID is not the client's to
+  // choose: it is derived from that identity and pinned. Whatever the app sent is ignored — a
+  // Steam player's only valid GUID is the derived one, so this both auto-corrects an honest
+  // stale value and refuses a spoof, with the same answer. `pinGuidFromSteam` also reclaims the
+  // GUID if another account was holding it.
+  const steamId = await steamIdFor(env, account);
+  if (steamId) {
+    const derived = guidFromSteamId(steamId);
+    if (derived) {
+      await pinGuidFromSteam(env, account.id, steamId);
+      return json(200, { ok: true, guid: derived });
+    }
+  }
+
+  // No Steam identity (a Piboso copy, or not linked yet): the GUID is opaque and first-come,
+  // corroborated later by server sightings and — the moment they link Steam — replaced by the
+  // derived one.
   try {
     await env.DB.prepare("UPDATE accounts SET guid = ? WHERE id = ?")
       .bind((guid as string).trim(), account.id)
@@ -1040,6 +1184,8 @@ async function putGuid(request: Request, account: Account, env: Env): Promise<Re
     }
     throw err;
   }
+  // Append-only beside the column, so a later claim can't erase which install this account was.
+  await rememberGuid(env, account.id, guid);
   return json(200, { ok: true, guid: (guid as string).trim() });
 }
 

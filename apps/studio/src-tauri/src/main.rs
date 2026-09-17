@@ -8,8 +8,9 @@
 //! binaries build off one core, and that a command registered by path across a crate
 //! boundary actually reaches the webview.
 
-// Refuse to run under a debugger in release builds — the runtime half of the binary hardening.
-mod antidebug;
+// Refuse to run under a debugger in release builds — the runtime half of the binary hardening,
+// shared by the whole lineup from `mxb_core`.
+use mxb_core::antidebug;
 
 // The studio's own modules: making a track, packing a paint, sealing content for a buyer.
 mod edfwrite;
@@ -99,6 +100,23 @@ async fn save_track_props(
     .map_err(|e| format!("save_track_props task failed: {e}"))?
 }
 
+/// The Steam-link round trip and the gate re-check the sign-in wall drives. Thin wrappers over
+/// the shared `mxb_core::appgate`, so the studio's wall behaves exactly like the manager's.
+#[tauri::command]
+async fn steam_link_start(app: tauri::AppHandle) -> Result<String, String> {
+    mxb_core::appgate::steam_link_start(&app).await
+}
+
+#[tauri::command]
+async fn steam_link_status(app: tauri::AppHandle) -> Result<Option<String>, String> {
+    mxb_core::appgate::steam_link_status(&app).await
+}
+
+#[tauri::command]
+async fn recheck_gate(app: tauri::AppHandle) {
+    mxb_core::appgate::check(app).await;
+}
+
 fn main() {
     // As early as possible: refuse to run under a debugger in release builds. No-op in debug.
     antidebug::guard();
@@ -116,6 +134,9 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             mxb_core::viewer::app_platform,
             track_event,
+            steam_link_start,
+            steam_link_status,
+            recheck_gate,
             // The studio's own: making a track, packing a paint, sealing content.
             preview_model_swap,
             log_client,
@@ -217,6 +238,10 @@ fn main() {
             mxb_core::viewer::watch_viewer_source,
         ])
         .setup(|app| {
+            // The estate gate, first: refuse a blocked install now (offline-proof), and ask the
+            // server afresh in the background — the same lock as MXB App, from one shared core.
+            mxb_core::appgate::enforce_marker(app.handle());
+            tauri::async_runtime::spawn(mxb_core::appgate::check(app.handle().clone()));
             // The window is frameless with a custom title bar (see `TitleBar.tsx`), so the app
             // draws its own File menu. macOS keeps its global menu bar at the top of the screen —
             // that's the native home there — so the native menu is set on macOS only; elsewhere
@@ -2167,14 +2192,7 @@ async fn preview_model_swap(
 /// Frontend log lines, into the same file the Rust side writes.
 #[tauri::command]
 fn log_client(level: String, message: String) {
-    // A log line is not a transport for arbitrary payloads. Trim rather than reject: a
-    // truncated fact still reads, and a dropped one is a support thread that goes nowhere.
-    let msg: String = message.chars().take(2000).collect();
-    match level.as_str() {
-        "error" => log::error!("[webview] {msg}"),
-        "warn" => log::warn!("[webview] {msg}"),
-        _ => log::info!("[webview] {msg}"),
-    }
+    mxb_core::clientlog::record(&level, &message);
 }
 
 /// Remember which tyres the 3D preview should wear.

@@ -1,5 +1,39 @@
 # Changelog
 
+## Unreleased — MXB App, Frost's Studio and MXB Coach
+
+### Added
+- The whole lineup can be locked to a Steam sign-in. When turned on for the deployment, MXB App,
+  Frost's Studio and MXB Coach each show a "Sign in with Steam" wall at startup and won't run
+  until you've signed in once — one click, through Steam, and it remembers. It makes every
+  account a confirmed identity, which is what keeps a ban from being walked around and a GUID from
+  being anyone else's. Off unless the service turns it on, and it needs a Steam copy of the game.
+- A ban now reaches every app, not just the one holding secured content: a banned install is
+  refused across MXB App, Studio and Coach, and told the same mundane "this copy couldn't be
+  verified" rather than the truth.
+
+### Changed
+- The security that was in MXB App now covers Studio and Coach the same way, from one shared
+  place: the debugger guard, the startup gate and the Steam-link flow all live in the shared core
+  so the three apps can't drift, and the release build already strips symbols, dissolves the call
+  structure (fat LTO) and drops debug info for every one of them. The Windows builds are now
+  UPX-packed on top of that.
+
+### Changed
+- Your MX Bikes GUID is found automatically from your signed-in Steam account, the instant the
+  app starts — no more waiting to be seen on a server for it to fill in. It's the same value the
+  game and the leaderboards use, and it can't be set to someone else's: for a Steam copy the GUID
+  is your Steam identity written in hex, confirmed by Steam sign-in, so the service derives it and
+  ignores any other value. A non-Steam (Piboso) copy still enters its GUID as before.
+- Riders banned for unlocking protected content and sharing it are refused across everything
+  mxbsecure runs, not only the locking: the app itself will not open, and paint sync, voice,
+  presence, the server queue, the server registry, the paid plugins and every key grant are all
+  refused. The app checks at startup and, for a blocked install, shows a plain "this copy
+  couldn't be verified" and closes — a blocked install stays blocked even offline. A ban follows
+  the MX Bikes install rather than the account, so a second account, a new GUID or another Steam
+  login on the same PC is refused with it, and protected files already unlocked there stop
+  opening — the app deletes those keys on its next pass. Nobody else is affected in any way, and
+  a ban can be lifted.
 ## 2026-09-16 — MXB Coach v0.1.15-beta.15
 
 ### Added
