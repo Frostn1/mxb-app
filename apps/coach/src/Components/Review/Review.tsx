@@ -29,6 +29,7 @@ import Track3D from "./Track3D";
 import SectionStrip from "./SectionStrip";
 import Charts from "./Charts";
 import SetupFixes, { Notes, Num } from "./SetupFixes";
+import BikeSuspension from "./BikeSuspension";
 import LiveCues from "./LiveCues";
 import HudPanel from "./HudPanel";
 
@@ -334,7 +335,11 @@ export default function Review({
 
         {/* The bike: what it would change, and how it feels. */}
         <TabsContent value="setup">
-          <SetupFixes path={path} findings={review.setup} />
+          <div className="space-y-6">
+            {/* What the lap actually did to the suspension, before what to change about it. */}
+            <BikeSuspension channels={review.channels} />
+            <SetupFixes path={path} findings={review.setup} />
+          </div>
         </TabsContent>
 
         {/* What the rider gets while riding. */}
