@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-09-17 — v0.17.2 — Steam sign-in takes your click
+
+### Fixed
+- The Steam sign-in card takes your click when a dialog opened behind it at launch. It looked
+  normal and did nothing, which is why it kept coming back after the other sign-in fixes.
+
 ## Unreleased — Replay moves into the Studio, and records itself
 
 ### Added
@@ -48,9 +54,10 @@
   at the foot and a straight run to the lip, and a lane of hills was getting that on its first
   crest only: the rest arrived flat, which is a wave. You cannot leave a wave, so you roll the
   crest, drop into the trough compressed and get fired off whatever the suspension gives back —
-  which is the G-out and the trip to the moon. The last metre before a hill's lip now holds
-  81–86% of the slope it was drawn at, against 39–41% before: about 25° where it read 12.5°,
-  drawn at 29°. A triple's far crest was the same shape and is fixed by the same change.
+  which is the G-out and the trip to the moon. Measured on a stadium lap, the last metre into
+  each lip now stands at 25–29° where it stood at 12–15° — the first hill, the one that always
+  had its lip, is unchanged. A triple's far crest was the same shape and is fixed by the same
+  change.
 - **A tuff block is one colour again.** Each block was mapped across the whole texture, so
   every one of them wore the red half and the white half split down its middle, with the grime
   shaded along its top instead of its foot — a row of them read as popcorn rather than as a
@@ -65,6 +72,20 @@
   which is not something anybody wants to go and look up. It now asks the map for a motocross
   circuit of that name before giving up, and says what to do next when there genuinely isn't
   one.
+
+## 2026-09-17 — v0.17.1 — Signing in with Steam works
+
+A hotfix. v0.16.0 put a Steam sign-in in front of the whole lineup and the wall it
+was meant to raise mostly never appeared — so people were told they had to sign in
+and given no way to do it. Everything here is that, and the ways it went wrong for
+the people who did reach it.
+
+### Fixed
+- "Sign in with Steam" is clickable when another window is open behind it. If the app had
+  opened one of its own dialogs — the one asking about loose model-swap folders does it by
+  itself, at launch, which is exactly when the wall goes up — that dialog switched off clicks
+  everywhere except inside itself. The wall was drawn over the top of it, so what you got was a
+  normal-looking button that did nothing at all when you pressed it.
 - The "Sign in with Steam" wall now always appears when it is needed. It was announced by the
   app the moment the service answered — which on a cold start is usually before the window has
   finished loading, and an announcement nobody is listening for yet is simply lost. So the first
