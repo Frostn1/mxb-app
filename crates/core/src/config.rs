@@ -246,6 +246,12 @@ pub struct AppConfig {
     pub published_shares: Vec<PublishedShare>,
     /// Live share codes this machine follows.
     pub live_subscriptions: Vec<LiveSubscription>,
+    /// What Frost's Studio's replay recorder is set to do — see [`crate::replay::Recording`].
+    ///
+    /// In the shared config rather than a studio-only file because both apps write this one
+    /// file, and a second one they could disagree about is not worth the tidiness.
+    #[serde(default)]
+    pub replay: crate::replay::Recording,
     /// An MXB Ranked GUID typed by hand, for the players whose GUID we cannot derive.
     ///
     /// A Steam copy's GUID is `FF` + the SteamID64, which [`crate::ranked`] works out with no
@@ -407,6 +413,7 @@ impl Default for AppConfig {
             install_id: String::new(),
             published_shares: Vec::new(),
             live_subscriptions: Vec::new(),
+            replay: crate::replay::Recording::default(),
             ranked_guid: String::new(),
         }
     }

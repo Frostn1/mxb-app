@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-import { listPlugins } from "@/api/plugins";
+import { listPlugins, type PluginHost } from "../api/plugins";
 import {
   loadedPlugins,
   mountReady,
@@ -15,11 +15,19 @@ import {
  * because a plugin the user is licensed for should be there when they open the app, not
  * when they go looking for it in settings.
  *
+ * `host` is which app is asking. Both binaries can mount a plugin now, and each mounts only
+ * the ones whose manifest says its panels belong there — otherwise the Replay Mod would be a
+ * rail row in the mod manager and a screen in the Studio at the same time, which is two
+ * places to look for one tool and two copies of its state.
+ *
  * A plugin that fails to mount is reported through `onError` and then dropped. Everything
  * else carries on: a broken plugin must not be able to take the app down with it, and the
  * app is a mod manager first.
  */
-export function usePlugins(onError?: (id: string, message: string) => void): LoadedPlugin[] {
+export function usePlugins(
+  host: PluginHost,
+  onError?: (id: string, message: string) => void,
+): LoadedPlugin[] {
   const [plugins, setPlugins] = useState<LoadedPlugin[]>(() => loadedPlugins());
 
   useEffect(() => onPluginsChanged(() => setPlugins(loadedPlugins())), []);
@@ -29,7 +37,9 @@ export function usePlugins(onError?: (id: string, message: string) => void): Loa
     void (async () => {
       let ready: string[] = [];
       try {
-        ready = (await listPlugins()).filter((p) => p.ready).map((p) => p.id);
+        ready = (await listPlugins())
+          .filter((p) => p.ready && p.host === host)
+          .map((p) => p.id);
       } catch {
         // No control plane and nothing on disk yet. Not an error worth showing: the person
         // has not bought anything, and the Plugins page is where that conversation happens.
