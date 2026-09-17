@@ -78,6 +78,27 @@ negative in the Americas and west of Greenwich; latitude is negative south of th
 centred on the point you give, so if you aim at the gate you get half a track and half a
 field.
 
+### Or point at it, once you are close
+
+Once a search or a coordinate has put you somewhere, **Show the photo** opens an aerial
+photograph of that spot. Click the middle of the circuit and the cross moves there; drag the
+photograph to look around; the two buttons step between 400 m and 12.8 km across. **Use this
+spot** takes whatever is under the cross. Every move is one picture asked for when you asked
+for it, so nothing downloads while you sit and look.
+
+This is worth doing, because the name search fails in two expensive ways. "Ironman" returns
+nine places in five countries with the circuit seventh. "Saint-Jean" returns the town, and the
+circuit is kilometres out of it. Both cost a fetch and a build before anyone finds out, and a
+circuit is obvious from the air the moment you see it.
+
+The photograph is only offered over the United States, France and the Netherlands. That is not
+an oversight and it will not be fixed by adding a basemap: every worldwide aerial map sharp
+enough to pick a circuit out of is licensed for viewing inside its owner's own product, and
+tracing a lap off one would put a derivative of somebody else's photography inside a track that
+gets handed around. Google, Apple and Bing are out on exactly those grounds. Everywhere else,
+the Studio says so rather than showing you a picture you may not use — and those three are the
+same places a fetch can pull imagery from anyway.
+
 ---
 
 ## Step 2: check what has actually been surveyed
@@ -348,8 +369,12 @@ makes it worse: a JSON object with two keys pointing at the same field is reject
 a strict reader, so a file that tried to satisfy everyone satisfies no one. The app writes
 snake_case, and reads either.
 
-The `dem` block records what the ground is, when it was surveyed, and its licence, and that
-travels with the track. This matters more than it sounds: Ironman's survey was flown between
+The `dem` block records what the ground is, when it was surveyed, its licence and the credit
+that licence asks for, and all of that travels with the track: into the track's own `location`
+line, and into `place.txt` inside the `.pkz` where there is room for the whole of it. The
+`location` line is cut to 150 characters, because the game stops listing a track whose location
+runs much past that — measured, 155 characters lists and 193 does not. It is cut a whole piece
+at a time and the source and the credit are the first two pieces, so those are what survives. This matters more than it sounds: Ironman's survey was flown between
 2017 and 2020, and the venue is rebuilt every year, so a track built from it is **a dated
 snapshot and not today's Ironman**. Six months from now somebody will want to know which
 vintage they are looking at, and the file will tell them.

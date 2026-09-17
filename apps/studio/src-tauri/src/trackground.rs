@@ -418,6 +418,10 @@ pub struct TraceDem {
     pub collected: String,
     #[serde(default)]
     pub licence: String,
+    /// The exact line the licence says has to appear wherever this ground is used. Carried
+    /// separately from `licence` because it is the part that has to travel inside the track.
+    #[serde(default)]
+    pub attribution: String,
     #[serde(default)]
     pub source_url: String,
     #[serde(default)]
@@ -432,6 +436,9 @@ pub struct Provenance {
     pub source: String,
     #[serde(default)]
     pub licence: String,
+    /// The credit line the picture's licence asks for, when it asks for one.
+    #[serde(default)]
+    pub attribution: String,
     #[serde(default)]
     pub captured: String,
 }
@@ -904,6 +911,11 @@ pub struct Imported {
     pub source: String,
     pub collected: String,
     pub licence: String,
+    /// The credit the ground's licence requires, word for word. Empty where none is required.
+    pub attribution: String,
+    /// The same for the picture the lap was traced on, which can be a different survey under a
+    /// different licence.
+    pub imagery_attribution: String,
     pub epsg: u32,
     /// Where the plot sits in the world, so a built track can say where it came from.
     pub origin_e: f64,
@@ -1079,6 +1091,12 @@ pub fn import(tif: &Path, lap: &Path, strength: f32) -> Result<Imported> {
         source: d.source,
         collected: d.collected,
         licence: d.licence,
+        attribution: d.attribution,
+        imagery_attribution: trace
+            .imagery
+            .as_ref()
+            .map(|i| i.attribution.clone())
+            .unwrap_or_default(),
         epsg: dem.epsg,
         origin_e: west,
         origin_n: north,
@@ -1483,11 +1501,22 @@ pub fn place_note(imp: &Imported) -> String {
     if !imp.source.is_empty() {
         bits.push(imp.source.clone());
     }
-    if !imp.collected.is_empty() {
-        bits.push(format!("flown {}", imp.collected));
+    // Ordered by what has to survive being cut short. The game's `location` field holds about
+    // 155 characters before it stops listing the track at all, so the note is written most
+    // important first and `tracksynth::location_label` keeps whole pieces off the front of it.
+    // The credit the licence demands comes before the licence's own wording: one is an
+    // obligation, the other is a description of it.
+    if !imp.attribution.is_empty() {
+        bits.push(imp.attribution.clone());
     }
     if !imp.licence.is_empty() {
         bits.push(imp.licence.clone());
+    }
+    if !imp.imagery_attribution.is_empty() && imp.imagery_attribution != imp.attribution {
+        bits.push(format!("imagery {}", imp.imagery_attribution));
+    }
+    if !imp.collected.is_empty() {
+        bits.push(format!("flown {}", imp.collected));
     }
     bits.push(format!("EPSG:{} at {:.0} {:.0}", imp.epsg, imp.origin_e, imp.origin_n));
     if imp.provisional {
@@ -1518,6 +1547,14 @@ pub fn provenance_lines(imp: &Imported) -> Vec<String> {
     }
     if !imp.licence.is_empty() {
         out.push(format!("Licence: {}", imp.licence));
+    }
+    // The credit is a condition of the licence, so it travels inside the archive rather than
+    // living only in a panel the rider saw once.
+    if !imp.attribution.is_empty() {
+        out.push(format!("Credit this track must carry: {}", imp.attribution));
+    }
+    if !imp.imagery_attribution.is_empty() && imp.imagery_attribution != imp.attribution {
+        out.push(format!("Credit for the aerial photography: {}", imp.imagery_attribution));
     }
     out.push(format!(
         "Plot: {:.0} x {:.0} m at EPSG:{}, north-west corner {:.1} {:.1}",

@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { TrackProgram } from "@/api/trackgen";
 
 /**
@@ -157,6 +158,56 @@ export const fetchPlace = (
   plotM: number,
   sourceId: string,
 ) => invoke<Place>("place_fetch", { name, lat, lon, plotM, sourceId });
+
+/** One aerial picture of one square of ground, and the credit it has to be shown with. */
+export interface PlaceMap {
+  lat: number;
+  lon: number;
+  /** How many metres the picture is across, both ways. */
+  spanM: number;
+  /** A data URL, ready for an `<img>`. */
+  image: string;
+  source: string;
+  licence: string;
+  /** The line that has to be on screen while this picture is showing. */
+  attribution: string;
+}
+
+/** How far across the ground one map picture shows, coarsest last. */
+export const MAP_SPANS_M = [400, 800, 1600, 3200, 6400, 12800];
+
+/**
+ * One aerial picture of one spot, for picking a circuit out by eye.
+ *
+ * One request per picture and only ever on a move a rider made — there are no tiles here,
+ * nothing is fetched ahead, and opening the map costs nothing until it is pointed somewhere.
+ * Refused, in a sentence, where no openly licensed survey covers the spot.
+ */
+export const placeMap = (lat: number, lon: number, spanM: number) =>
+  invoke<PlaceMap>("place_map", { lat, lon, spanM });
+
+/** Which part of a fetch is running. */
+export type FetchStage = "elevation" | "hillshade" | "imagery";
+
+/** Where a fetch has got to. Mirrors `FetchProgress` in `trackplace.rs`. */
+export interface FetchProgress {
+  slug: string;
+  name: string;
+  stage: FetchStage;
+  /** Which layer is being asked for, when there is more than one candidate. */
+  detail: string;
+  from: number;
+  to: number;
+  /** Seconds this stage usually takes. */
+  expect: number;
+}
+
+/** Listen to a running fetch. The same shape as a build's progress, for the same reason. */
+export function onPlaceFetchProgress(
+  cb: (p: FetchProgress) => void,
+): Promise<UnlistenFn> {
+  return listen<FetchProgress>("place-fetch-progress", (e) => cb(e.payload));
+}
 
 export const listPlaces = () => invoke<Place[]>("place_list");
 export const forgetPlace = (slug: string) => invoke<void>("place_forget", { slug });

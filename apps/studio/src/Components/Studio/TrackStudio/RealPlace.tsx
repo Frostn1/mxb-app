@@ -1,7 +1,25 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { toast } from "sonner";
-import { ArrowLeft, Crosshair, Download, MapPin, Search, Trash2, Undo2 } from "lucide-react";
+import {
+  ArrowLeft,
+  Crosshair,
+  Download,
+  Map as MapIcon,
+  MapPin,
+  Search,
+  Trash2,
+  Undo2,
+  ZoomIn,
+  ZoomOut,
+} from "lucide-react";
 
 import { Button } from "@frost/shared/Components/ui/button";
 import { Input } from "@frost/shared/Components/ui/input";
@@ -11,23 +29,35 @@ import { cn } from "@frost/shared/lib/utils";
 import { useT } from "@/i18n";
 import { buildTrack } from "@/api/trackgen";
 import {
-  fetchPlace,
-  findPlace,
   forgetPlace,
   humanBytes,
-  importPlaceDem,
   listPlaces,
-  placeCoverage,
+  MAP_SPANS_M,
   placeLayers,
   placePaths,
   placeProgram,
   savePlaceTrace,
   traceLength,
-  type CoverageReport,
+  type FetchStage,
   type Place,
-  type PlaceHit,
   type PlaceLayers,
+  type PlaceMap,
 } from "@/api/trackplace";
+import {
+  closeMap,
+  fetchGround,
+  importDem,
+  mapZoom,
+  pick,
+  search,
+  setPlot,
+  setQuery,
+  showMap,
+  snapshot,
+  subscribe,
+  takeFetched,
+  type FetchRun,
+} from "./placeFinder";
 
 /**
  * Building a track from a real place: find it, fetch its ground, trace the lap on it.
@@ -49,6 +79,7 @@ type LayerView = "imagery" | "hillshade" | "both";
 export default function RealPlace({ onClose }: { onClose: () => void }) {
   const [mode, setMode] = useState<Mode>({ at: "browse" });
   const [places, setPlaces] = useState<Place[]>([]);
+  const finder = useSyncExternalStore(subscribe, snapshot);
 
   const refresh = useCallback(() => {
     void listPlaces()
@@ -59,6 +90,16 @@ export default function RealPlace({ onClose }: { onClose: () => void }) {
   // Reading the places folder is a local directory listing, not a network call, so it is
   // fine on mount. Nothing here reaches the internet until a button says so.
   useEffect(() => refresh(), [refresh]);
+
+  // A fetch that finished leaves the place behind rather than opening it itself, because it
+  // may well have finished while this panel was not on screen. Whoever is here picks it up.
+  useEffect(() => {
+    if (!finder.fetched) return;
+    const slug = takeFetched();
+    if (!slug) return;
+    refresh();
+    setMode({ at: "trace", slug });
+  }, [finder.fetched, refresh]);
 
   if (mode.at === "trace") {
     return (
@@ -95,64 +136,12 @@ function BrowsePanel({
   onClose: () => void;
 }) {
   const t = useT();
-  const [query, setQuery] = useState("");
-  const [hits, setHits] = useState<PlaceHit[] | null>(null);
-  const [picked, setPicked] = useState<PlaceHit | null>(null);
-  const [cover, setCover] = useState<CoverageReport | null>(null);
-  // A full lap is normally 2000 m or more, which does not fit a 470 m plot. The default
-  // here is the one a real circuit actually needs, not the generator's out-of-the-box size.
-  const [plot, setPlot] = useState(1200);
-  const [busy, setBusy] = useState<string | null>(null);
-
-  const onSearch = async () => {
-    setBusy("search");
-    setHits(null);
-    setPicked(null);
-    setCover(null);
-    try {
-      const found = await findPlace(query);
-      setHits(found);
-      if (found.length === 1) void onPick(found[0]);
-    } catch (e) {
-      toast.error(String(e));
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  const onPick = async (hit: PlaceHit) => {
-    setPicked(hit);
-    setCover(null);
-    setBusy("coverage");
-    try {
-      setCover(await placeCoverage(hit.lat, hit.lon));
-    } catch (e) {
-      toast.error(String(e));
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  const onFetch = async () => {
-    if (!picked || !cover?.best) return;
-    setBusy("fetch");
-    try {
-      const place = await fetchPlace(
-        picked.label.split(",")[0],
-        picked.lat,
-        picked.lon,
-        plot,
-        cover.best,
-      );
-      toast.success(t("place.fetched", { name: place.name }));
-      onRefresh();
-      onTrace(place.slug);
-    } catch (e) {
-      toast.error(t("place.fetchFailed"), { description: String(e) });
-    } finally {
-      setBusy(null);
-    }
-  };
+  // Held outside this component on purpose — see `placeFinder`. A fetch takes minutes and the
+  // rider is free to go and look at a lap they traced last week while it runs.
+  const { query, hits, picked, cover, plot, busy, run, map, mapError } = useSyncExternalStore(
+    subscribe,
+    snapshot,
+  );
 
   const onImport = async () => {
     const path = await openDialog({
@@ -160,23 +149,13 @@ function BrowsePanel({
       filters: [{ name: "GeoTIFF", extensions: ["tif", "tiff"] }],
     });
     if (typeof path !== "string") return;
-    setBusy("import");
-    try {
-      const place = await importPlaceDem("", path, "", "");
-      toast.success(t("place.imported", { name: place.name }));
-      onRefresh();
-      onTrace(place.slug);
-    } catch (e) {
-      toast.error(t("place.importFailed"), { description: String(e) });
-    } finally {
-      setBusy(null);
-    }
+    await importDem(path);
   };
 
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex flex-none items-center gap-2 border-b border-border px-4 py-2.5">
-        <Button variant="ghost" size="sm" onClick={onClose} disabled={busy !== null}>
+        <Button variant="ghost" size="sm" onClick={onClose} disabled={busy === "fetch"}>
           <ArrowLeft className="size-4" />
           {t("place.back")}
         </Button>
@@ -189,6 +168,11 @@ function BrowsePanel({
         </Button>
       </div>
 
+      {/* A fetch is a minute or two of somebody else's server cutting a plot out of a national
+          survey. Left silent it reads as a hang, so it says which of the three things it is
+          doing and creeps across each of them. */}
+      {run && <FetchBar run={run} />}
+
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
         <div className="mx-auto w-full max-w-[720px]">
           {/* ── Find it ───────────────────────────────────────────────────── */}
@@ -199,14 +183,14 @@ function BrowsePanel({
             <Input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && query.trim() && void onSearch()}
+              onKeyDown={(e) => e.key === "Enter" && query.trim() && void search()}
               placeholder={t("place.searchPlaceholder")}
               className="h-10"
               disabled={busy !== null}
             />
             <Button
               className="h-10 flex-none"
-              onClick={() => void onSearch()}
+              onClick={() => void search()}
               disabled={!query.trim() || busy !== null}
             >
               <Search className="size-4" />
@@ -226,7 +210,7 @@ function BrowsePanel({
                 <li key={i}>
                   <button
                     type="button"
-                    onClick={() => void onPick(h)}
+                    onClick={() => void pick(h)}
                     className={cn(
                       "flex w-full cursor-default items-start gap-2 px-3 py-2 text-left transition-colors hover:bg-muted/50",
                       picked === h && "bg-muted/60",
@@ -245,12 +229,38 @@ function BrowsePanel({
             </ol>
           )}
 
+          {/* ── Look at it ────────────────────────────────────────────────── */}
+          {picked && (map || mapError) && (
+            <MapPicker
+              map={map}
+              error={mapError}
+              busy={busy === "map"}
+              onPick={(lat, lon) => void pick({ ...picked, lat, lon })}
+            />
+          )}
+
           {/* ── What is actually here ─────────────────────────────────────── */}
           {picked && (
             <div className="mt-5 border border-border p-3">
-              <div className="font-cond text-[10px] font-semibold uppercase tracking-[0.22em] text-faint">
-                {t("place.coverageTitle")}
+              <div className="flex items-center gap-2">
+                <div className="flex-1 font-cond text-[10px] font-semibold uppercase tracking-[0.22em] text-faint">
+                  {t("place.coverageTitle")}
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() =>
+                    map ? closeMap() : void showMap(picked.lat, picked.lon, MAP_SPANS_M[2])
+                  }
+                  disabled={busy !== null}
+                >
+                  <MapIcon className="size-3.5" />
+                  {map ? t("place.mapClose") : t("place.mapOpen")}
+                </Button>
               </div>
+              <p className="mt-1 font-mono text-[10.5px] tabular-figures text-faint">
+                {picked.lat.toFixed(5)}, {picked.lon.toFixed(5)}
+              </p>
               {busy === "coverage" && (
                 <p className="mt-2 text-[12.5px] text-muted-foreground">{t("place.checking")}</p>
               )}
@@ -316,7 +326,7 @@ function BrowsePanel({
                     <span className="text-[12px] text-faint">m</span>
                     <Button
                       className="ml-auto h-8"
-                      onClick={() => void onFetch()}
+                      onClick={() => void fetchGround()}
                       disabled={!cover.best || busy !== null}
                     >
                       {busy === "fetch" ? t("place.fetching") : t("place.fetch")}
@@ -346,6 +356,184 @@ function BrowsePanel({
             )}
           </div>
         </div>
+      </div>
+    </div>
+  );
+}
+
+/** What each stage of a fetch is called on screen. */
+const STAGE_KEY: Record<FetchStage, "place.stageElevation" | "place.stageHillshade" | "place.stageImagery"> = {
+  elevation: "place.stageElevation",
+  hillshade: "place.stageHillshade",
+  imagery: "place.stageImagery",
+};
+
+/** The bar across the top of the panel while a fetch is running. */
+function FetchBar({ run }: { run: FetchRun }) {
+  const t = useT();
+  return (
+    <div className="flex-none border-b border-border px-4 py-2">
+      <div className="mx-auto w-full max-w-[720px]">
+        <div className="flex items-baseline gap-2">
+          <span className="truncate text-[12px]">{t("place.fetchingName", { name: run.name })}</span>
+          <span className="ml-auto truncate text-[11.5px] text-muted-foreground">
+            {t(STAGE_KEY[run.stage])}
+            {run.detail ? ` · ${run.detail}` : ""}
+          </span>
+          <span className="tabular-figures font-cond text-[11px] text-faint">
+            {Math.round(run.progress * 100)}%
+          </span>
+        </div>
+        <div className="mt-1.5 h-1 w-full bg-muted">
+          <div
+            className="h-full bg-primary transition-[width] duration-200 ease-linear"
+            style={{ width: `${Math.round(run.progress * 100)}%` }}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Picking a circuit off a photograph ───────────────────────────────────────
+
+/**
+ * An aerial photograph you can point at, instead of a name you have to spell.
+ *
+ * Searching "Ironman" gives nine places in five countries with the circuit seventh, and
+ * searching "Saint-Jean" gives the town while the circuit is kilometres out of it — both cost
+ * a fetch and a build before anybody finds out. A rider knows a circuit the moment they see it
+ * from above, so this shows them that.
+ *
+ * There is no map of the world behind it, because there is no map of the world we are allowed
+ * to use: every worldwide aerial basemap sharp enough to pick a circuit out of is licensed for
+ * viewing inside its owner's own product. So this shows the openly licensed surveys and says
+ * so plainly where there are none, rather than filling the space with grey.
+ *
+ * Every picture is one request a rider asked for. Moving, zooming and clicking each spend
+ * exactly one; nothing is fetched ahead, and nothing is fetched at all until the map is opened.
+ */
+function MapPicker({
+  map,
+  error,
+  busy,
+  onPick,
+}: {
+  map: PlaceMap | null;
+  error: string | null;
+  busy: boolean;
+  onPick: (lat: number, lon: number) => void;
+}) {
+  const t = useT();
+  const [drag, setDrag] = useState<{ x: number; y: number; dx: number; dy: number } | null>(null);
+
+  if (!map) {
+    return (
+      <div className="mt-5 border border-border p-3">
+        <p className="text-[12.5px] leading-relaxed text-amber-500">{error}</p>
+        <Button variant="ghost" size="sm" className="mt-2" onClick={closeMap}>
+          {t("place.mapClose")}
+        </Button>
+      </div>
+    );
+  }
+
+  /** A point in the picture, turned back into a place on the earth. */
+  const toLatLon = (el: HTMLElement, clientX: number, clientY: number) => {
+    const box = el.getBoundingClientRect();
+    const perPx = map.spanM / box.width;
+    const east = (clientX - box.left - box.width / 2) * perPx;
+    const north = -(clientY - box.top - box.height / 2) * perPx;
+    const dLat = 1 / 111_320;
+    const dLon = 1 / (111_320 * Math.max(Math.cos((map.lat * Math.PI) / 180), 0.05));
+    return [map.lat + north * dLat, map.lon + east * dLon] as const;
+  };
+
+  return (
+    <div className="mt-5 border border-border">
+      <div className="flex flex-wrap items-center gap-2 border-b border-border px-3 py-2">
+        <div className="flex-1 font-cond text-[10px] font-semibold uppercase tracking-[0.22em] text-faint">
+          {t("place.mapTitle")}
+        </div>
+        <span className="tabular-figures font-cond text-[11px] text-faint">
+          {t("place.mapSpan", { span: String(map.spanM) })}
+        </span>
+        <Button variant="ghost" size="sm" onClick={() => mapZoom(-1)} disabled={busy}>
+          <ZoomIn className="size-3.5" />
+          {t("place.mapIn")}
+        </Button>
+        <Button variant="ghost" size="sm" onClick={() => mapZoom(1)} disabled={busy}>
+          <ZoomOut className="size-3.5" />
+          {t("place.mapOut")}
+        </Button>
+        <Button variant="ghost" size="sm" onClick={closeMap} disabled={busy}>
+          {t("place.mapClose")}
+        </Button>
+      </div>
+
+      <div className="relative select-none overflow-hidden bg-black">
+        <img
+          src={map.image}
+          alt=""
+          draggable={false}
+          className={cn("block w-full cursor-crosshair", busy && "opacity-50")}
+          style={drag ? { transform: `translate(${drag.dx}px, ${drag.dy}px)` } : undefined}
+          onMouseDown={(ev) => {
+            ev.preventDefault();
+            setDrag({ x: ev.clientX, y: ev.clientY, dx: 0, dy: 0 });
+          }}
+          onMouseMove={(ev) =>
+            setDrag((d) => (d ? { ...d, dx: ev.clientX - d.x, dy: ev.clientY - d.y } : d))
+          }
+          onMouseLeave={() => setDrag(null)}
+          onMouseUp={(ev) => {
+            const started = drag;
+            setDrag(null);
+            if (busy) return;
+            const el = ev.currentTarget;
+            const moved = started ? Math.hypot(started.dx, started.dy) : 0;
+            // A drag moves the photograph under the middle; a click moves the middle to
+            // where you clicked. Either way it is one request, and only on letting go.
+            if (moved > 4 && started) {
+              const box = el.getBoundingClientRect();
+              const [lat, lon] = toLatLon(
+                el,
+                box.left + box.width / 2 - started.dx,
+                box.top + box.height / 2 - started.dy,
+              );
+              void showMap(lat, lon, map.spanM);
+              return;
+            }
+            const [lat, lon] = toLatLon(el, ev.clientX, ev.clientY);
+            void showMap(lat, lon, map.spanM);
+          }}
+        />
+        {/* Where the plot would be centred, which is the middle of the picture. */}
+        <div className="pointer-events-none absolute left-1/2 top-1/2 size-5 -translate-x-1/2 -translate-y-1/2">
+          <div className="absolute left-1/2 top-0 h-full w-px -translate-x-1/2 bg-amber-400" />
+          <div className="absolute left-0 top-1/2 h-px w-full -translate-y-1/2 bg-amber-400" />
+        </div>
+        {busy && (
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+            <span className="bg-black/70 px-2 py-1 text-[11.5px] text-white">
+              {t("place.mapLoading")}
+            </span>
+          </div>
+        )}
+      </div>
+
+      <div className="px-3 py-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <p className="min-w-0 flex-1 text-[11.5px] leading-relaxed text-muted-foreground">
+            {t("place.mapHint")}
+          </p>
+          <Button size="sm" onClick={() => onPick(map.lat, map.lon)} disabled={busy}>
+            {t("place.mapUse")}
+          </Button>
+        </div>
+        <p className="mt-1 text-[10.5px] leading-relaxed text-faint">
+          {t("place.attribution")}: {map.attribution}
+        </p>
       </div>
     </div>
   );
@@ -629,8 +817,14 @@ function TracePanel({ slug, onBack }: { slug: string; onBack: () => void }) {
   ];
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
-      <div className="flex flex-none flex-wrap items-center gap-2 border-b border-border px-4 py-2.5">
+    /* Three rows that cannot squeeze each other out: the tools, the picture, and the notes.
+       The toolbar used to wrap — on a modest window it took four rows, and between it and the
+       credits there was more chrome than panel, so the help text and the attribution fell off
+       the bottom of the window where nobody could read them. It is one row now and scrolls
+       sideways if it has to; the notes are capped and scroll on their own. The picture, which
+       is the only thing here with an appetite, gives up whatever is left. */
+    <div className="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden">
+      <div className="flex flex-nowrap items-center gap-2 overflow-x-auto border-b border-border px-4 py-2.5 [&>*]:shrink-0">
         <Button variant="ghost" size="sm" onClick={onBack} disabled={saving}>
           <ArrowLeft className="size-4" />
           {t("place.back")}
@@ -690,7 +884,7 @@ function TracePanel({ slug, onBack }: { slug: string; onBack: () => void }) {
 
       <div
         ref={boxRef}
-        className="relative min-h-0 flex-1 overflow-hidden bg-black"
+        className="relative min-h-0 overflow-hidden bg-black"
         onWheel={(ev) => {
           const next = Math.min(12, Math.max(1, zoom * (ev.deltaY < 0 ? 1.15 : 1 / 1.15)));
           setZoom(next);
@@ -781,7 +975,7 @@ function TracePanel({ slug, onBack }: { slug: string; onBack: () => void }) {
         </div>
       </div>
 
-      <div className="flex-none border-t border-border px-4 py-2">
+      <div className="max-h-[38%] overflow-y-auto border-t border-border px-4 py-2">
         <p className="text-[11.5px] leading-relaxed text-muted-foreground">
           {t("place.traceHelp")}
         </p>

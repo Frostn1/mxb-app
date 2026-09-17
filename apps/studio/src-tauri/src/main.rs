@@ -207,6 +207,7 @@ fn main() {
             trackplace::place_save_trace,
             trackplace::place_import_dem,
             trackplace::place_program,
+            trackplace::place_map,
             load_track_prop,
             save_track_props,
             // Reading a track, and the archive metadata behind it. The studio previews the

@@ -6,8 +6,26 @@
 - Make the track, from the place you traced. The button sits beside Save lap: it saves the lap,
   turns the ground and the line into a track and builds it into your tracks folder, without
   leaving the panel. Until now a traced place was kept and could not be built.
+- A photo you can point at, instead of a name you have to spell. Open the aerial photo from the
+  coverage panel, click the middle of the circuit to move the cross there, drag the photo to
+  look around, and zoom in and out. Searching "Ironman" gives nine places in five countries with
+  the circuit seventh, and searching a town gives the town rather than the circuit a few
+  kilometres outside it. The photo covers the United States, France and the Netherlands, which
+  are the surveys the Studio is allowed to trace from, and it says so plainly anywhere else.
+- A bar shows what a fetch is doing and how far it has got: getting the ground, drawing the
+  ground shape, getting the aerial photo.
+
+### Changed
+- The credit a survey asks for travels inside the built track. It goes in the track's own
+  location line and in place.txt inside the .pkz, and the location line is kept short enough
+  that the game still lists the track.
+- A fetch carries on while you go and look at a lap you traced earlier. The bar, the search
+  results and the coverage report are all still there when you come back.
 
 ### Fixed
+- The instructions and the credit line under the tracing picture stay on screen. The toolbar
+  above it is one row now and slides sideways when the window is small, instead of growing
+  down the panel.
 - A random supercross or SuperMotocross track opens instead of leaving the panel blank. A lap
   that laid a stretch of sand had nothing to show for it in the step list, which took the whole
   page with it. Sand reads and edits as a length of ground, which is what it is.
