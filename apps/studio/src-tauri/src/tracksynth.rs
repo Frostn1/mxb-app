@@ -4232,7 +4232,7 @@ pub fn write_source(prog: &TrackProgram, syn: &Synth, dir: &Path) -> Result<Vec<
         let l = bands.iter().find(|l| l.name == "soil_light_c").expect("the riding surface");
         band_mask(syn, l.band, half, seed, RIDING_MASK_DIM, RIDING_MASK_DIM)
     };
-    let line = band_named("soil_dark_c");
+    let mut line = band_named("soil_dark_c");
     let mut grass = band_named("hm_grass");
     // Off-track starts where the graded shoulder ends: the rider is on the track, or in the
     // field, with the shoulder belonging to neither. This one decides where the game says a
@@ -4271,13 +4271,61 @@ pub fn write_source(prog: &TrackProgram, syn: &Synth, dir: &Path) -> Result<Vec<
             &venue, syn, &mut dirt, RIDING_MASK_DIM, &mut grass, &mut rut, &mut loose, MASK_DIM,
         );
     }
+    // A scan is painted from the photograph of it, never from the lap.
+    //
+    // Everything above derives its masks from the riding line — the ribbon, the worn line, the
+    // tyre marks, the rut, the loose stuff beside it — and on a scan every one of those draws a
+    // track onto ground that already has one somewhere else. So for a raw scan they are all
+    // thrown away and rebuilt from the classified orthophoto, which knows where the dirt is
+    // because it can see it and has never heard of our centreline.
+    //
+    // The test for whether this is honest is simple and is worth stating: build the same scan
+    // twice with two completely different laps, and every one of these files must be byte for
+    // byte the same. If a mask moves when the lap moves, there is still a track being drawn.
+    if prog.is_raw_scan() {
+        let cover = prog
+            .terrain
+            .ground
+            .as_ref()
+            .and_then(|g| crate::trackground::load(&g.id))
+            .map(|g| (g.cover.clone(), g.dim_x, g.dim_z))
+            .filter(|(c, dx, dz)| c.len() == dx * dz);
+        let sample = |dim: usize, want: u8, x: usize, y: usize| -> u8 {
+            match &cover {
+                Some((c, dx, dz)) => {
+                    let sx = (x * (dx - 1) / (dim - 1).max(1)).min(dx - 1);
+                    let sy = (y * (dz - 1) / (dim - 1).max(1)).min(dz - 1);
+                    u8::from(c[sy * dx + sx] == want) * 255
+                }
+                // No photograph: plain dirt everywhere, which says "we do not know" rather than
+                // inventing a pattern.
+                None => u8::from(want == 1) * 255,
+            }
+        };
+        for y in 0..RIDING_MASK_DIM {
+            for x in 0..RIDING_MASK_DIM {
+                dirt[y * RIDING_MASK_DIM + x] = 255 - sample(RIDING_MASK_DIM, 0, x, y);
+            }
+        }
+        for y in 0..MASK_DIM {
+            for x in 0..MASK_DIM {
+                let i = y * MASK_DIM + x;
+                grass[i] = sample(MASK_DIM, 0, x, y);
+                loose[i] = sample(MASK_DIM, 2, x, y);
+                // The worn line, the tyre marks, the grooves and the patches are all pictures of
+                // a racing line. A scan has its own and we are not drawing another.
+                rut[i] = 0;
+                line[i] = 0;
+            }
+        }
+    }
     put("mask_dirt.tga", tga_alpha(RIDING_MASK_DIM, RIDING_MASK_DIM, &dirt), &mut wrote)?;
     put("mask_loose.tga", tga_alpha(MASK_DIM, MASK_DIM, &loose), &mut wrote)?;
-    let patches = band_of(BandMask::Patches);
+    let patches = if prog.is_raw_scan() { vec![0u8; MASK_DIM * MASK_DIM] } else { band_of(BandMask::Patches) };
     put("mask_patches.tga", tga_alpha(MASK_DIM, MASK_DIM, &patches), &mut wrote)?;
     put("mask_line.tga", tga_alpha(MASK_DIM, MASK_DIM, &line), &mut wrote)?;
     put("mask_rut.tga", tga_alpha(MASK_DIM, MASK_DIM, &rut), &mut wrote)?;
-    let worn = band_of(BandMask::Worn);
+    let worn = if prog.is_raw_scan() { vec![0u8; MASK_DIM * MASK_DIM] } else { band_of(BandMask::Worn) };
     put("mask_worn.tga", tga_alpha(MASK_DIM, MASK_DIM, &worn), &mut wrote)?;
     // The pit lane, in the same place the race data puts its stalls. It runs along the
     // opening straight, so the straight's own frame gives the side the lane is on — the
@@ -4319,8 +4367,20 @@ pub fn write_source(prog: &TrackProgram, syn: &Synth, dir: &Path) -> Result<Vec<
         tga_tinted(MASK_DIM, MASK_DIM, &grass_color, turf.base),
         &mut wrote,
     )?;
+    // On a raw scan the whole plot is rideable: there is no marked corridor, so there is
+    // nothing to be off the side of, and a penalty region derived from an invisible
+    // centreline would punish a rider for leaving a track that is not drawn anywhere.
+    let off = if prog.is_raw_scan() { vec![0u8; MASK_DIM * MASK_DIM] } else { off };
     put("area_off.tga", tga_alpha(MASK_DIM, MASK_DIM, &off), &mut wrote)?;
+    // On a raw scan the whole plot is rideable: there is no marked corridor, so there is
+    // nothing to be off the side of, and a penalty region derived from an invisible
+    // centreline would punish a rider for leaving a track that is not drawn anywhere.
+    let pit_area = if prog.is_raw_scan() { vec![0u8; MASK_DIM * MASK_DIM] } else { pit_area };
     put("area_pits.tga", tga_alpha(MASK_DIM, MASK_DIM, &pit_area), &mut wrote)?;
+    // On a raw scan the whole plot is rideable: there is no marked corridor, so there is
+    // nothing to be off the side of, and a penalty region derived from an invisible
+    // centreline would punish a rider for leaving a track that is not drawn anywhere.
+    let start = if prog.is_raw_scan() { vec![0u8; MASK_DIM * MASK_DIM] } else { start };
     put("area_start.tga", tga_alpha(MASK_DIM, MASK_DIM, &start), &mut wrote)?;
 
     // Each band writes four things, not one: the sheet, the normal map that gives it relief,

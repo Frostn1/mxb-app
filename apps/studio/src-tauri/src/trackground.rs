@@ -682,6 +682,15 @@ pub struct Ground {
     pub size_z: f32,
     /// Heights in metres above [`Ground::base_m`], row 0 at world z = 0.
     pub z: Vec<f32>,
+    /// What the aerial photograph says is on each cell: 0 grass, 1 dirt, 2 gravel or pale
+    /// hardstanding. Empty when no imagery was supplied.
+    ///
+    /// This is how a scanned track gets its ground painted without anyone drawing a track on it.
+    /// Every mask the generator normally writes is derived from the riding line — the ribbon, the
+    /// worn line, the tyre marks, the rut — which is exactly the thing that must not appear on a
+    /// scan. The photograph knows where the dirt is because it can see it, and it has never heard
+    /// of our centreline.
+    pub cover: Vec<u8>,
     /// What was subtracted to bring the plot's lowest point to zero — the real elevation of the
     /// track's own datum, kept so a height can be quoted back in the units it was measured in.
     pub base_m: f32,
@@ -733,7 +742,7 @@ impl Ground {
         let span = (hi - lo).max(1e-3);
         let mut out = Vec::with_capacity(36 + self.z.len() * 2);
         out.extend_from_slice(b"FGND");
-        out.extend_from_slice(&2u32.to_le_bytes());
+        out.extend_from_slice(&3u32.to_le_bytes());
         out.extend_from_slice(&(self.dim_x as u32).to_le_bytes());
         out.extend_from_slice(&(self.dim_z as u32).to_le_bytes());
         out.extend_from_slice(&self.size_x.to_le_bytes());
@@ -745,6 +754,8 @@ impl Ground {
             let q = (((v - lo) / span) * 65535.0).round().clamp(0.0, 65535.0) as u16;
             out.extend_from_slice(&q.to_le_bytes());
         }
+        out.extend_from_slice(&(self.cover.len() as u32).to_le_bytes());
+        out.extend_from_slice(&self.cover);
         out
     }
 
@@ -755,7 +766,7 @@ impl Ground {
         }
         let u32_at = |o: usize| u32::from_le_bytes(bytes[o..o + 4].try_into().unwrap());
         let f32_at = |o: usize| f32::from_le_bytes(bytes[o..o + 4].try_into().unwrap());
-        if u32_at(4) != 2 {
+        if u32_at(4) != 3 {
             bail!("stored ground is version {}, which this build doesn't read", u32_at(4));
         }
         let dim_x = u32_at(8) as usize;
@@ -774,7 +785,14 @@ impl Ground {
             let q = u16::from_le_bytes([bytes[o], bytes[o + 1]]);
             z.push(lo + q as f32 / 65535.0 * span);
         }
-        Ok(Ground { dim_x, dim_z, size_x, size_z, z, base_m })
+        let after = HEAD + dim_x * dim_z * 2;
+        let cover = if bytes.len() >= after + 4 {
+            let n = u32::from_le_bytes(bytes[after..after + 4].try_into().unwrap()) as usize;
+            if bytes.len() >= after + 4 + n { bytes[after + 4..after + 4 + n].to_vec() } else { Vec::new() }
+        } else {
+            Vec::new()
+        };
+        Ok(Ground { dim_x, dim_z, size_x, size_z, z, cover, base_m })
     }
 }
 
@@ -950,7 +968,10 @@ pub fn import(tif: &Path, lap: &Path, strength: f32) -> Result<Imported> {
         *v -= base;
     }
 
-    let ground = Ground { dim_x, dim_z, size_x, size_z, z, base_m: base };
+    // The aerial photograph of the same ground, classified, so the track can be painted from
+    // what is actually there rather than from where we guessed the lap goes.
+    let cover = imagery_cover(tif, lap, dim_x, dim_z);
+    let ground = Ground { dim_x, dim_z, size_x, size_z, z, cover, base_m: base };
 
     let id = {
         use sha2::Digest;
@@ -995,6 +1016,58 @@ pub fn import(tif: &Path, lap: &Path, strength: f32) -> Result<Imported> {
         route_confirmed: trace.route_confirmed,
         known_issues: trace.known_issues.clone(),
     })
+}
+
+/// Classify the orthophoto beside the scan into grass, dirt and gravel, on the plot's own grid.
+///
+/// Deliberately crude, and crude is the right amount of clever here: green is grass, pale and
+/// unsaturated is gravel or hardstanding, and what is left is dirt. A motocross venue from the
+/// air is mostly those three things, and the alternative — deriving the ground from the riding
+/// line — is what put a painted track on a scan three times running.
+///
+/// The photograph is expected beside the trace as the `imagery.path` the fetcher records, on the
+/// same extent as the DEM. If it is not there the cover comes back empty and the caller paints
+/// plain dirt, which is honest: we do not know what is where, so we do not pretend to.
+fn imagery_cover(tif: &Path, lap: &Path, dim_x: usize, dim_z: usize) -> Vec<u8> {
+    let Some(dir) = lap.parent() else { return Vec::new() };
+    let named = std::fs::read_to_string(lap)
+        .ok()
+        .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
+        .and_then(|v| v.get("imagery").and_then(|i| i.get("path")).and_then(|p| p.as_str().map(str::to_string)));
+    let mut tries: Vec<PathBuf> = Vec::new();
+    if let Some(n) = named {
+        tries.push(dir.join(n));
+    }
+    if let Some(stem) = tif.file_stem().and_then(|s| s.to_str()) {
+        let base = stem.trim_end_matches(".dem");
+        tries.push(dir.join(format!("{base}.imagery.png")));
+    }
+    let Some(img) = tries.iter().find_map(|p| image::open(p).ok()) else { return Vec::new() };
+    let rgb = img.to_rgb8();
+    let (iw, ih) = (rgb.width() as f32, rgb.height() as f32);
+    let mut out = vec![1u8; dim_x * dim_z];
+    for y in 0..dim_z {
+        for x in 0..dim_x {
+            let sx = ((x as f32 / (dim_x - 1).max(1) as f32) * (iw - 1.0)).round() as u32;
+            let sy = ((y as f32 / (dim_z - 1).max(1) as f32) * (ih - 1.0)).round() as u32;
+            let p = rgb.get_pixel(sx.min(rgb.width() - 1), sy.min(rgb.height() - 1)).0;
+            let (r, g, b) = (p[0] as i32, p[1] as i32, p[2] as i32);
+            let lum = (r + g + b) / 3;
+            let sat = (r.max(g).max(b) - r.min(g).min(b)) as f32 / lum.max(1) as f32;
+            // Thresholds set against the Ironman ortho rather than guessed. A first pass at
+            // lum > 120 called 42% of the venue gravel, because worked dirt in summer sun is
+            // pale; and requiring g > r + 6 found only 2% grass, because tree canopy in shadow
+            // is dark and barely green. Both are now measured off the image.
+            out[y * dim_x + x] = if lum < 95 || (g > r + 3 && g >= b) {
+                0 // vegetation: grass, or canopy, which is dark and only slightly green
+            } else if lum > 165 && sat < 0.10 {
+                2 // genuinely pale and colourless: concrete, gravel, a hardstanding
+            } else {
+                1 // worked dirt, which is most of a motocross venue and is not grey
+            };
+        }
+    }
+    out
 }
 
 /// Fill the odd nodata cell from its neighbours, so a puddle in the lidar is not a hole in the
@@ -1410,7 +1483,7 @@ mod tests {
     fn a_stored_square_survives_the_round_trip() {
         // Rectangular on purpose: a square would not catch the two dimensions being swapped.
         let (w, h) = (65usize, 41usize);
-        let g = Ground { dim_x: w, dim_z: h, size_x: 470.0, size_z: 290.0, z: bump2(w, h), base_m: 214.9 };
+        let g = Ground { dim_x: w, dim_z: h, size_x: 470.0, size_z: 290.0, z: bump2(w, h), cover: vec![1u8; w * h], base_m: 214.9 };
         let back = Ground::decode(&g.encode()).expect("decodes");
         assert_eq!((back.dim_x, back.dim_z), (w, h));
         assert_eq!((back.size_x, back.size_z), (470.0, 290.0));
@@ -1426,7 +1499,7 @@ mod tests {
     fn a_short_or_wrong_file_is_refused_rather_than_guessed() {
         assert!(Ground::decode(b"").is_err());
         assert!(Ground::decode(b"NOPE1234567890123456789012").is_err());
-        let g = Ground { dim_x: 9, dim_z: 9, size_x: 100.0, size_z: 100.0, z: vec![0.0; 81], base_m: 0.0 };
+        let g = Ground { dim_x: 9, dim_z: 9, size_x: 100.0, size_z: 100.0, z: vec![0.0; 81], cover: Vec::new(), base_m: 0.0 };
         let mut b = g.encode();
         b.truncate(b.len() - 4);
         assert!(Ground::decode(&b).is_err());
@@ -1442,6 +1515,7 @@ mod tests {
             size_x: per * (w - 1) as f32,
             size_z: per * (h - 1) as f32,
             z: bump2(w, h),
+            cover: Vec::new(),
             base_m: 0.0,
         };
         for y in [0usize, 7, 16, 20] {
