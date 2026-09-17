@@ -16,7 +16,8 @@
 - The security that was in MXB App now covers Studio and Coach the same way, from one shared
   place: the debugger guard, the startup gate and the Steam-link flow all live in the shared core
   so the three apps can't drift, and the release build already strips symbols, dissolves the call
-  structure (fat LTO) and drops debug info for every one of them.
+  structure (fat LTO) and drops debug info for every one of them. The Windows builds are now
+  UPX-packed on top of that.
 
 ### Changed
 - Your MX Bikes GUID is found automatically from your signed-in Steam account, the instant the
