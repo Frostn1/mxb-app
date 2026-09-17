@@ -145,7 +145,21 @@ export default function SigninGate() {
   if (!required) return null;
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-background/95 backdrop-blur-sm">
+    // `pointer-events-auto` is load-bearing, not decoration.
+    //
+    // A Radix dialog opened with `modal` (the default) sets `pointer-events: none` on
+    // `document.body` and hands pointer events back only inside its own content. This wall is a
+    // sibling of those dialogs, not a child, so while one is open every click on it lands on
+    // nothing — and because the wall is `z-[100]` and a dialog is `z-50`, the wall is still the
+    // thing being painted. The button looks completely ordinary, is not disabled, and does not
+    // respond: "it won't let me click the sign in with Steam".
+    //
+    // `LooseSwapPrompt` is the one that makes this routine rather than rare — it opens itself
+    // at launch whenever it finds a loose model-swap folder, which is exactly when the wall is
+    // going up — but any of the twenty-odd dialogs in the app does it. An explicit
+    // `pointer-events: auto` on a descendant overrides the `none` it inherits from body, which
+    // is the same mechanism Radix uses to re-enable its own content.
+    <div className="pointer-events-auto fixed inset-0 z-[100] flex items-center justify-center bg-background/95 backdrop-blur-sm">
       <div className="mx-4 w-full max-w-md rounded-2xl border border-border bg-card p-8 text-center shadow-xl">
         <h1 className="text-2xl font-bold tracking-tight text-foreground">Sign in with Steam to continue</h1>
         <p className="mt-3 text-sm text-muted-foreground">{message}</p>

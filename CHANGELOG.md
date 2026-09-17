@@ -47,6 +47,11 @@ and given no way to do it. Everything here is that, and the ways it went wrong f
 the people who did reach it.
 
 ### Fixed
+- "Sign in with Steam" is clickable when another window is open behind it. If the app had
+  opened one of its own dialogs — the one asking about loose model-swap folders does it by
+  itself, at launch, which is exactly when the wall goes up — that dialog switched off clicks
+  everywhere except inside itself. The wall was drawn over the top of it, so what you got was a
+  normal-looking button that did nothing at all when you pressed it.
 - The "Sign in with Steam" wall now always appears when it is needed. It was announced by the
   app the moment the service answered — which on a cold start is usually before the window has
   finished loading, and an announcement nobody is listening for yet is simply lost. So the first
