@@ -612,7 +612,11 @@ describe("the vocabulary", () => {
     const block = /pub const KNOWN_EVENTS: &\[&str\] = &\[([\s\S]*?)\];/.exec(rust);
     expect(block, "the client's KNOWN_EVENTS is not where this test expects it").not.toBeNull();
 
-    const client = [...block![1].matchAll(/"([^"]+)"/g)].map((m) => m[1]).sort();
+    // Comments out first: a quoted phrase in a comment beside the list is prose, not a name,
+    // and reading one as an event made this test fail for a reason that had nothing to do with
+    // the drift it exists to catch.
+    const names = block![1].replace(/\/\/[^\n]*/g, "");
+    const client = [...names.matchAll(/"([^"]+)"/g)].map((m) => m[1]).sort();
     expect(client.length).toBeGreaterThan(0);
     expect(client).toEqual(Object.keys(KNOWN_EVENTS).sort());
   });
