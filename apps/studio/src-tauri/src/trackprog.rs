@@ -3430,6 +3430,58 @@ impl TrackProgram {
 mod tests {
     use super::*;
 
+    /// Every `Feature` this crate can serialise is a kind the Studio's own union knows about.
+    ///
+    /// This exact gap shipped: the enum grew a ninth variant, `sand`, and the TypeScript union
+    /// stayed at eight. Both sides still compiled — each was internally consistent, and nothing
+    /// compared them — so a random supercross lap that laid a stretch of sand rendered a step
+    /// with no name and no icon and took the whole panel down with it. `tsc` could not see it
+    /// and neither could `cargo`. This test can: add a tenth variant without telling the Studio
+    /// about it and it fails here rather than on a rider's screen.
+    ///
+    /// Read out of the file rather than mirrored in a list, because a list is one more thing to
+    /// forget to update, which is the bug this is about.
+    #[test]
+    fn every_feature_kind_is_in_the_studios_union() {
+        let one_of_each = vec![
+            Feature::Tabletop { at: 0.0, length: 10.0, height: 1.0, lip: 0.0, finish: false },
+            Feature::Double { at: 0.0, height: 1.0, gap: 4.0, lip: 2.0, finish: false },
+            Feature::Roller { at: 0.0, length: 6.0, height: 0.4 },
+            Feature::Whoops { at: 0.0, count: 5, spacing: 4.0, height: 0.5 },
+            Feature::StepUp { at: 0.0, length: 8.0, height: 1.0 },
+            Feature::Berm { at: 0.0, length: 8.0, height: 1.0 },
+            Feature::Rut { at: 0.0, length: 8.0, depth: 0.2 },
+            Feature::Sand { at: 0.0, length: 20.0 },
+            Feature::Custom { at: 0.0, length: 8.0, shape: Vec::new(), side: Default::default() },
+        ];
+        // One of every variant, or the test proves nothing about the one that was left out.
+        assert_eq!(
+            one_of_each.len(),
+            9,
+            "a variant was added to Feature without being added here"
+        );
+
+        let ts = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../src/api/trackgen.ts");
+        let text = std::fs::read_to_string(&ts)
+            .unwrap_or_else(|e| panic!("couldn't read {}: {e}", ts.display()));
+        let union = text
+            .split("export type TrackFeature =")
+            .nth(1)
+            .and_then(|rest| rest.split("export type").next())
+            .expect("trackgen.ts has no TrackFeature union any more");
+
+        for f in &one_of_each {
+            let v = serde_json::to_value(f).expect("a feature serialises");
+            let kind = v["kind"].as_str().expect("every feature is tagged with a kind").to_string();
+            assert!(
+                union.contains(&format!("kind: \"{kind}\"")),
+                "the Studio's TrackFeature union has no {kind:?}: add it to the union, to \
+                 KIND_KEY, to FEATURE_ICON, to FEATURE_COLOUR, to newFeature and to track.kind.\
+                 {kind} in all six locales"
+            );
+        }
+    }
+
     fn prog(segments: Vec<Segment>) -> TrackProgram {
         TrackProgram {
             name: "t".into(),

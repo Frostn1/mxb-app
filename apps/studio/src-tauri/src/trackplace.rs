@@ -32,7 +32,7 @@
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
-use tauri::AppHandle;
+use tauri::{AppHandle, Emitter};
 
 use crate::config;
 
@@ -402,9 +402,8 @@ fn source(id: &str) -> Option<&'static Source> {
 /// are a US government work and a Dutch open-data release respectively, which is the whole
 /// of what is actually available at a resolution you can pick a lane out of.
 struct Imagery {
-    /// Only ever read by the test below that refuses a closed-licence imagery source. That
-    /// is reason enough for it to exist: the test is the point.
-    #[allow(dead_code)]
+    /// Which service this is. Read by the map, which builds a different request per shape,
+    /// and by the test that refuses a closed-licence imagery source.
     id: &'static str,
     label: &'static str,
     endpoint: &'static str,
@@ -1152,8 +1151,74 @@ pub async fn place_fetch(
     }
 }
 
+/// The event a fetch reports itself on.
+///
+/// The same shape and the same reason as a build's: a fetch is one to two minutes of a public
+/// server cutting a plot out of a national survey, and a window that sits there doing nothing
+/// for that long reads as a hang rather than as work.
+pub const FETCH_EVENT: &str = "place-fetch-progress";
+
+/// Where a fetch has got to.
+///
+/// `from` and `to` are where this stage sits on the bar and `expect` is how long it usually
+/// takes, so the panel can creep across a stage instead of standing still between two events —
+/// the stages here are single HTTP requests and there is nothing finer to report from inside
+/// one.
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FetchProgress {
+    /// Which fetch this is, so a second window's fetch isn't drawn as this one's.
+    pub slug: String,
+    /// The place, as the rider named it.
+    pub name: String,
+    /// `elevation`, `hillshade` or `imagery`. The panel has a line for each.
+    pub stage: String,
+    /// Which layer is being asked for, when there is more than one candidate.
+    pub detail: String,
+    pub from: f64,
+    pub to: f64,
+    /// Seconds this stage usually takes.
+    pub expect: f64,
+}
+
+/// Where each stage sits on the bar, and how long it usually takes.
+///
+/// Measured on a 1200 m plot over Ironman on a domestic line: the elevation cut is most of the
+/// wait, the hillshade is local arithmetic, and the imagery is a second big picture. The bar
+/// stops short of full because the command's own return is what finishes it.
+const FETCH_SPANS: [(&str, f64, f64, f64); 3] = [
+    ("elevation", 0.02, 0.62, 35.0),
+    ("hillshade", 0.62, 0.70, 2.0),
+    ("imagery", 0.70, 0.97, 25.0),
+];
+
+fn fetch_span(stage: &str) -> (f64, f64, f64) {
+    FETCH_SPANS
+        .iter()
+        .find(|(s, ..)| *s == stage)
+        .map(|(_, from, to, expect)| (*from, *to, *expect))
+        .unwrap_or((0.0, 1.0, 10.0))
+}
+
+/// Say where the fetch has got to. Never fails a fetch: a bar is not worth a folder.
+fn say_fetch(app: &AppHandle, slug: &str, name: &str, stage: &str, detail: &str) {
+    let (from, to, expect) = fetch_span(stage);
+    let _ = app.emit(
+        FETCH_EVENT,
+        FetchProgress {
+            slug: slug.to_string(),
+            name: name.to_string(),
+            stage: stage.to_string(),
+            detail: detail.to_string(),
+            from,
+            to,
+            expect,
+        },
+    );
+}
+
 async fn fetch_into(
-    _app: &AppHandle,
+    app: &AppHandle,
     dir: &Path,
     slug: &str,
     name: &str,
@@ -1191,6 +1256,8 @@ async fn fetch_into(
     let mut used = candidates[0].clone();
     let mut tried = Vec::new();
     for cand in &candidates {
+        let which = if cand.label.is_empty() { src.label } else { &cand.label };
+        say_fetch(app, slug, name, "elevation", which);
         let bytes = get_bytes(&cand.url, &cand.what).await?;
         std::fs::write(&dem_path, &bytes)
             .map_err(|e| format!("couldn't save the elevation to {}: {e}", dem_path.display()))?;
@@ -1214,11 +1281,13 @@ async fn fetch_into(
     let (url, crs_epsg, cell) = (used.url.clone(), used.epsg, used.cell);
     let relief = grid.max_z - grid.min_z;
 
+    say_fetch(app, slug, name, "hillshade", "");
     let hillshade_rel = format!("{slug}.hillshade.png");
     write_hillshade(&grid, &dir.join(&hillshade_rel))?;
 
     // Imagery is best-effort on purpose: a missing picture makes tracing harder, not
     // impossible, and it should never throw away elevation that arrived fine.
+    say_fetch(app, slug, name, "imagery", "");
     let imagery = fetch_imagery(dir, slug, lat, lon, half, crs_epsg, &grid).await;
     let imagery = match imagery {
         Ok(i) => Some(i),
@@ -1506,6 +1575,146 @@ async fn fetch_imagery(
         licence: img.licence.to_string(),
         attribution: img.attribution.to_string(),
         captured: String::new(),
+    })
+}
+
+// ── Picking a spot off a map ─────────────────────────────────────────────────
+//
+// Searching by name is not enough on its own, and the two ways it fails are both expensive.
+// "Ironman" returns nine places in five countries with the circuit seventh; "Saint-Jean"
+// returns the town, and the circuit is several kilometres out of it. Both cost a fetch and a
+// build before anyone finds out. A rider recognises a circuit the moment they see it from the
+// air, so the fix is to show them the air.
+//
+// There is no map of the world here, because there is no map of the world we are allowed to
+// use. Every worldwide aerial basemap at a resolution you could pick a circuit out of is
+// licensed for viewing inside its owner's own product, and tracing a lap off one would put a
+// derivative of somebody else's photography inside a track that gets handed around. Google,
+// Apple and Bing are out on those grounds and always will be. So the map is shown where there
+// is an openly-licensed survey and refused, in words, where there is not — which is no loss,
+// since those are exactly the places a fetch can work anyway.
+
+/// Which openly-licensed aerial imagery covers a spot, if any.
+///
+/// Rectangles rather than borders on purpose: the only thing this decides is which service to
+/// ask, and a request that lands just outside a survey comes back as a blank picture, which
+/// [`place_map`] recognises and reports rather than showing.
+fn imagery_at(lat: f64, lon: f64) -> Option<&'static Imagery> {
+    // The Netherlands first: its box and France's overlap along the Belgian border, and the
+    // Dutch service is the one that actually covers that overlap.
+    if (50.7..=53.7).contains(&lat) && (3.2..=7.3).contains(&lon) {
+        return Some(&IMAGERY[2]);
+    }
+    // Conterminous United States, and Hawaii, which NAIP also flies. Alaska it does not.
+    if (24.4..=49.4).contains(&lat) && (-125.0..=-66.9).contains(&lon) {
+        return Some(&IMAGERY[0]);
+    }
+    if (18.8..=22.3).contains(&lat) && (-160.3..=-154.7).contains(&lon) {
+        return Some(&IMAGERY[0]);
+    }
+    // Mainland France and Corsica.
+    if (41.3..=51.1).contains(&lat) && (-5.2..=9.6).contains(&lon) {
+        return Some(&IMAGERY[1]);
+    }
+    None
+}
+
+/// The smallest a real aerial picture ever comes back, in bytes.
+///
+/// A request that lands outside a survey is answered with a picture rather than an error: one
+/// flat colour. Measured, at 1024 px square: NAIP over open desert in Mexico, which it does not
+/// fly, came back at 17.2 KB, and the Dutch service over Brussels, which it does not cover, at
+/// 17.0 KB. Real ortho at the same size measured 161 KB over Ironman, 256 KB over Ernée and
+/// 425 KB over Utrecht, and even open sea off Cape Cod came back at 261 KB. 24 KB sits well
+/// clear of both. Showing the flat one would be showing a void and calling it a map.
+const BLANK_IMAGE_BYTES: usize = 24_000;
+
+/// How far across the ground one picture shows. Whole circuits at the coarse end, a single
+/// rhythm section at the fine end.
+const MAP_SPANS_M: [f64; 6] = [400.0, 800.0, 1600.0, 3200.0, 6400.0, 12800.0];
+
+/// One picture of one square of ground, and who has to be credited for it.
+#[derive(Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct PlaceMap {
+    /// The middle of the picture.
+    pub lat: f64,
+    pub lon: f64,
+    /// How many metres the picture is across, both ways.
+    pub span_m: f64,
+    /// Ready for an `<img>`.
+    pub image: String,
+    pub source: String,
+    pub licence: String,
+    /// The line that has to appear on screen while this picture is showing.
+    pub attribution: String,
+}
+
+/// Fetch one aerial picture of one spot, for picking a circuit off rather than typing its name.
+///
+/// One request, one picture, and only when a rider moved the map. Panning and zooming are
+/// button presses and drags, so each of them spends exactly one request — there is no tile
+/// pyramid, nothing is fetched ahead, and opening the panel costs nothing at all.
+#[tauri::command]
+pub async fn place_map(lat: f64, lon: f64, span_m: f64) -> Result<PlaceMap, String> {
+    let span = if span_m.is_finite() && span_m > 0.0 {
+        span_m.clamp(MAP_SPANS_M[0], MAP_SPANS_M[MAP_SPANS_M.len() - 1])
+    } else {
+        MAP_SPANS_M[2]
+    };
+    let img = imagery_at(lat, lon).ok_or_else(|| {
+        "No openly licensed aerial photography covers this spot, so there is no map to show. \
+         The surveys this tool can use are the United States, France and the Netherlands. \
+         Search by name, or type coordinates, and fetch the ground to see what is there."
+            .to_string()
+    })?;
+
+    let half = span / 2.0;
+    let (dlat, dlon) = degrees_per_m(lat);
+    let (dlat, dlon) = (half * dlat, half * dlon);
+    let (s, w, n, e) = (lat - dlat, lon - dlon, lat + dlat, lon + dlon);
+    // A square picture of a square of ground. Big enough to tell a lane from a track, small
+    // enough that a pan is a second rather than a wait.
+    let px = 1024;
+    let url = match img.id {
+        "naip" => format!(
+            "{}/exportImage?bbox={w},{s},{e},{n}&bboxSR=4326&imageSR=4326&size={px},{px}\
+             &format=jpg&f=image",
+            img.endpoint
+        ),
+        // WMS 1.3.0 takes EPSG:4326 in latitude-first order, which is the one thing about it
+        // that catches everybody.
+        _ => format!(
+            "{}?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap&LAYERS={}&STYLES=&CRS=EPSG:4326\
+             &BBOX={s},{w},{n},{e}&WIDTH={px}&HEIGHT={px}&FORMAT=image%2Fjpeg",
+            img.endpoint, img.layer
+        ),
+    };
+    let bytes = get_bytes(&url, "fetching the map").await?;
+    if bytes.len() < BLANK_IMAGE_BYTES {
+        return Err(
+            "The survey stops short of this spot, so the map came back blank. Move back towards \
+             ground the survey covers, or search by name instead."
+                .to_string(),
+        );
+    }
+    use base64::Engine;
+    let mime = if bytes.starts_with(&[0xFF, 0xD8]) { "image/jpeg" } else { "image/png" };
+    Ok(PlaceMap {
+        lat,
+        lon,
+        span_m: span,
+        image: format!(
+            "data:{mime};base64,{}",
+            base64::engine::general_purpose::STANDARD.encode(&bytes)
+        ),
+        source: img.label.to_string(),
+        licence: img.licence.to_string(),
+        attribution: if img.attribution.is_empty() {
+            format!("{} — {}", img.label, img.licence)
+        } else {
+            img.attribution.to_string()
+        },
     })
 }
 
@@ -1882,14 +2091,19 @@ pub async fn place_layers(app: AppHandle, slug: String) -> Result<PlaceLayers, S
         .map(camelise)
         .and_then(|v| serde_json::from_value::<LapTrace>(v).ok());
 
-    let mut attributions = Vec::new();
-    if !place.dem.attribution.is_empty() {
-        attributions.push(place.dem.attribution.clone());
-    }
-    if let Some(i) = &place.imagery {
-        if !i.attribution.is_empty() {
-            attributions.push(i.attribution.clone());
+    // One credit per source, not one per file. The ground and the picture often come from
+    // the same survey — every French place has IGN twice — and a doubled credit reads as a
+    // mistake rather than as care.
+    let mut attributions: Vec<String> = Vec::new();
+    let mut add = |a: &str| {
+        let a = a.trim();
+        if !a.is_empty() && !attributions.iter().any(|x| x == a) {
+            attributions.push(a.to_string());
         }
+    };
+    add(&place.dem.attribution);
+    if let Some(i) = &place.imagery {
+        add(&i.attribution);
     }
 
     Ok(PlaceLayers {
@@ -2166,6 +2380,52 @@ fn geotiff_epsg(path: &Path) -> Option<u32> {
     None
 }
 
+
+// ── Making the track ─────────────────────────────────────────────────────────
+
+/// Turn a fetched place and its traced lap into a track programme, ready for `build_track`.
+///
+/// This is the step that was missing. Everything before it — find, coverage, fetch, trace,
+/// save — left a folder on disk that only a test could turn into a track, so the feature was
+/// complete for whoever wrote it and unusable for everyone else.
+///
+/// It stops at the programme rather than building, so a scanned place goes through exactly
+/// the same build, progress reporting and install as any other track. One build path, one
+/// packer, and nothing here to drift out of step with it.
+#[tauri::command]
+pub async fn place_program(
+    app: AppHandle,
+    slug: String,
+    recut: bool,
+) -> Result<serde_json::Value, String> {
+    let dir = place_dir(&app, &slug)?;
+    let dem = dir.join(format!("{slug}.dem.tif"));
+    let lap = dir.join(format!("{slug}.lap.json"));
+    if !dem.is_file() {
+        return Err("That place has no elevation saved. Fetch it again.".to_string());
+    }
+    if !lap.is_file() {
+        return Err(
+            "That place has no lap yet. Trace one on the picture and press Save lap first."
+                .to_string(),
+        );
+    }
+    let jumps = if recut {
+        crate::trackprog::ScanJumps::Recut
+    } else {
+        crate::trackprog::ScanJumps::Keep
+    };
+    let prog = tauri::async_runtime::spawn_blocking(move || {
+        let imp = crate::trackground::import(&dem, &lap, 1.0)?;
+        crate::trackground::program_for(&imp, jumps)
+    })
+    .await
+    .map_err(|e| format!("the ground reader stopped: {e}"))?
+    .map_err(|e| e.to_string())?;
+    serde_json::to_value(prog).map_err(|e| format!("couldn't hand the programme over: {e}"))
+}
+
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2275,7 +2535,8 @@ mod tests {
             path: "x.dem.tif".into(), crs: "EPSG:26916".into(), cell_m: 1.0,
             origin_e: 1.5, origin_n: 2.5, width: 10, height: 10,
             vertical_datum: "NAVD88".into(), source: "USGS".into(), source_url: "http://x".into(),
-            collected: "2017".into(), licence: "public domain".into(), attribution: String::new(),
+            collected: "2017".into(), licence: "public domain".into(),
+            attribution: "\u{a9} IGN — Licence Ouverte".into(),
             ground: Ground::Terrain, min_z: 1.0, max_z: 2.0,
         };
         let trace = LapTrace {
@@ -2297,12 +2558,17 @@ mod tests {
         }
         // Per-point width survives, and the third element is not rounded away.
         assert!(text.contains("9.0"), "a point's own width must survive");
+        // The credit the licence demands is the one thing in here that is a legal obligation
+        // rather than a convenience, and the built track can only carry it if the lap file
+        // does. It has no business being dropped anywhere along the way.
+        assert!(text.contains("Licence Ouverte"), "the credit must survive: {text}");
         // And it reads back through the same door a rider's hand-edited file comes in by.
         let back: LapTrace = serde_json::from_value(camelise(v)).expect("reads back");
         assert_eq!(back.start_index, 3);
         assert_eq!(back.default_width_m, 7.0);
         assert_eq!(back.points[1].len(), 3);
         assert_eq!(back.dem.origin_e, 1.5);
+        assert!(back.dem.attribution.contains("Licence Ouverte"));
     }
 
     /// A file written in either spelling has to read back, because files in both exist.
@@ -2386,6 +2652,27 @@ mod tests {
             for banned in ["google", "apple", "bing", "virtualearth", "mapbox"] {
                 assert!(!e.contains(banned), "{} is not an open imagery source", i.id);
             }
+        }
+    }
+
+    /// The map is shown where there is an open survey and nowhere else.
+    ///
+    /// The honest finding behind this: there is no worldwide aerial basemap we are allowed to
+    /// trace off. Every one sharp enough to pick a circuit out of is licensed for viewing
+    /// inside its owner's own product. So the map covers the United States, France and the
+    /// Netherlands, and says so plainly everywhere else rather than filling the panel with a
+    /// picture nobody may use.
+    #[test]
+    fn the_map_is_offered_only_where_an_open_survey_covers_the_ground() {
+        // Ironman Raceway, Indiana.
+        assert_eq!(imagery_at(40.008, -86.9291).map(|i| i.id), Some("naip"));
+        // Ernée, France.
+        assert_eq!(imagery_at(48.297, -0.9285).map(|i| i.id), Some("ign-ortho"));
+        // Lierop, the Netherlands — and the Dutch box wins where it overlaps France's.
+        assert_eq!(imagery_at(51.35, 5.66).map(|i| i.id), Some("pdok-ortho"));
+        // Everywhere else, which is most of the world, and it is told so.
+        for (lat, lon) in [(-27.47, 153.02), (35.68, 139.69), (-33.9, 18.4), (61.2, -149.9)] {
+            assert!(imagery_at(lat, lon).is_none(), "{lat},{lon} has no open imagery");
         }
     }
 

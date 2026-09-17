@@ -1,5 +1,50 @@
 # Changelog
 
+## 2026-09-17 — Frost's Studio v0.3.0 — Make the track, and point at it on a photo
+
+### Added
+- Make the track, from the place you traced. The button sits beside Save lap: it saves the lap,
+  turns the ground and the line into a track and builds it into your tracks folder, without
+  leaving the panel. Until now a traced place was kept and could not be built.
+- A photo you can point at, instead of a name you have to spell. Open the aerial photo from the
+  coverage panel, click the middle of the circuit to move the cross there, drag the photo to
+  look around, and zoom in and out. Searching "Ironman" gives nine places in five countries with
+  the circuit seventh, and searching a town gives the town rather than the circuit a few
+  kilometres outside it. The photo covers the United States, France and the Netherlands, which
+  are the surveys the Studio is allowed to trace from, and it says so plainly anywhere else.
+- A bar shows what a fetch is doing and how far it has got: getting the ground, drawing the
+  ground shape, getting the aerial photo.
+
+### Changed
+- A real place is painted in the tones its own photo carries. Worked dirt, dry field, damp
+  shaded ground and hardstanding each get their own surface, so a venue reads as the venue
+  rather than as one colour across the whole site.
+- Where two surfaces meet, the join follows the edge in the photo.
+- A track's location line is the place again, short enough to read under its name and short
+  enough that the game still lists the track. The survey, the licence and the credit that
+  licence asks for travel inside the track itself, in place.txt.
+- A fetch carries on while you go and look at a lap you traced earlier. The bar, the search
+  results and the coverage report are all still there when you come back.
+- Making the track from a place shows the same bar and the same list of what each step produced
+  as any other track, and keeps building while you go off and trace the next one.
+
+### Fixed
+- A track built from a real place appears in the game's track list, alongside every other track
+  the Studio builds.
+- The ground of a track built from a real place is painted exactly where the aerial photo puts
+  it, corner for corner.
+- The instructions and the credit line under the tracing picture stay on screen. The toolbar
+  above it is one row now and slides sideways when the window is small, instead of growing
+  down the panel.
+- A random supercross or SuperMotocross track opens instead of leaving the panel blank. A lap
+  that laid a stretch of sand had nothing to show for it in the step list, which took the whole
+  page with it. Sand reads and edits as a length of ground, which is what it is.
+- Undo takes back what you last did on a traced lap, with Cmd-Z on a Mac and Ctrl-Z elsewhere,
+  and Shift with it steps forward again. It takes back a moved point or a removed one, not only
+  the last point added.
+- Moving a point no longer leaves a new point underneath it.
+- A place whose ground and picture come from the same survey is credited once rather than twice.
+
 ## Unreleased — MXB Coach
 
 ### Added
@@ -121,22 +166,6 @@
   didn't sit steadily enough above its terrain — which is most rutted tracks. The check now
   only decides how high to hang your lines over the ground, and says so if they might sit a
   little off.
-
-## Unreleased - Frost's Studio
-
-### Fixed
-- A track built from a real place now appears in the game's track list, alongside every other
-  track Studio builds.
-- The ground of a track built from a real place is painted exactly where the aerial photo puts
-  it, corner for corner.
-
-### Changed
-- A real place is painted in the tones its own photo carries. Worked dirt, dry field, damp
-  shaded ground and hardstanding each get their own surface, so a venue reads as the venue
-  rather than as one colour across the whole site.
-- Where two surfaces meet, the join follows the edge in the photo.
-- A track's location line is the place again, short enough to read under its name. The survey,
-  the licence and the dates it was flown ship inside the track itself, in `place.txt`.
 
 ## 2026-09-16 — Frost's Studio v0.2.0 — Tracks from real ground, and supercross
 

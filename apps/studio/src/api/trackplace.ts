@@ -1,4 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import type { TrackProgram } from "@/api/trackgen";
 
 /**
  * Turning a real place into ground a track can be built on.
@@ -157,6 +159,56 @@ export const fetchPlace = (
   sourceId: string,
 ) => invoke<Place>("place_fetch", { name, lat, lon, plotM, sourceId });
 
+/** One aerial picture of one square of ground, and the credit it has to be shown with. */
+export interface PlaceMap {
+  lat: number;
+  lon: number;
+  /** How many metres the picture is across, both ways. */
+  spanM: number;
+  /** A data URL, ready for an `<img>`. */
+  image: string;
+  source: string;
+  licence: string;
+  /** The line that has to be on screen while this picture is showing. */
+  attribution: string;
+}
+
+/** How far across the ground one map picture shows, coarsest last. */
+export const MAP_SPANS_M = [400, 800, 1600, 3200, 6400, 12800];
+
+/**
+ * One aerial picture of one spot, for picking a circuit out by eye.
+ *
+ * One request per picture and only ever on a move a rider made — there are no tiles here,
+ * nothing is fetched ahead, and opening the map costs nothing until it is pointed somewhere.
+ * Refused, in a sentence, where no openly licensed survey covers the spot.
+ */
+export const placeMap = (lat: number, lon: number, spanM: number) =>
+  invoke<PlaceMap>("place_map", { lat, lon, spanM });
+
+/** Which part of a fetch is running. */
+export type FetchStage = "elevation" | "hillshade" | "imagery";
+
+/** Where a fetch has got to. Mirrors `FetchProgress` in `trackplace.rs`. */
+export interface FetchProgress {
+  slug: string;
+  name: string;
+  stage: FetchStage;
+  /** Which layer is being asked for, when there is more than one candidate. */
+  detail: string;
+  from: number;
+  to: number;
+  /** Seconds this stage usually takes. */
+  expect: number;
+}
+
+/** Listen to a running fetch. The same shape as a build's progress, for the same reason. */
+export function onPlaceFetchProgress(
+  cb: (p: FetchProgress) => void,
+): Promise<UnlistenFn> {
+  return listen<FetchProgress>("place-fetch-progress", (e) => cb(e.payload));
+}
+
 export const listPlaces = () => invoke<Place[]>("place_list");
 export const forgetPlace = (slug: string) => invoke<void>("place_forget", { slug });
 export const placePaths = (slug: string) => invoke<PlacePaths>("place_paths", { slug });
@@ -185,6 +237,19 @@ export const importPlaceDem = (
   licence: string,
   attribution: string,
 ) => invoke<Place>("place_import_dem", { name, path, licence, attribution });
+
+/**
+ * Turn a fetched place and its traced lap into a track programme.
+ *
+ * Stops at the programme rather than building, so a scanned place goes through the same
+ * `buildTrack` as every other track — same progress, same packer, same install.
+ *
+ * `recut` takes the scan's own jumps back out and lets the generator cut its own on the real
+ * landform, for a tile whose vintage is wrong. Off by default: the measured jumps are the
+ * reason to scan a place at all.
+ */
+export const placeProgram = (slug: string, recut = false) =>
+  invoke<TrackProgram>("place_program", { slug, recut });
 
 /**
  * The length of a lap, in metres, closed or not.

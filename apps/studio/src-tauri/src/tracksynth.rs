@@ -7997,7 +7997,7 @@ fn hero_focus(prog: &TrackProgram, syn: &Synth) -> Vec<[f32; 3]> {
 fn ui_shot(prog: &TrackProgram, scene: &crate::trackshot::Scene, dim: usize) -> Vec<u8> {
     let mut rgb = crate::trackshot::render(scene, dim);
     let km = prog.lap_length() / 1000.0;
-    let sub = match location_label(&prog.location).trim() {
+    let sub = match location_short(&prog.location).trim() {
         "" | "Generated" => format!("{km:.1} km"),
         at => format!("{at} · {km:.1} km"),
     };
@@ -9043,7 +9043,7 @@ fn start_tcl(prog: &TrackProgram) -> Option<String> {
 /// the code that made it. Bump it with every change to what a program builds into: minor for
 /// a new feature, patch for a fix. 0.x until the generator is finished. History in
 /// `apps/studio/FROST_ALGORITHM.md`.
-pub const FROST_ALGORITHM_VERSION: &str = "0.43.0";
+pub const FROST_ALGORITHM_VERSION: &str = "0.43.1";
 
 /// The stamp every built track carries in `<slug>/frost-algorithm.ini`.
 ///
@@ -9053,26 +9053,56 @@ fn frost_algorithm_ini() -> String {
     format!("[frost-algorithm]\nname = Frost's Studio\nversion = {FROST_ALGORITHM_VERSION}\n")
 }
 
-/// The track's own description, in the shape published tracks write it.
+/// The first piece of a place note, short enough to sit under a name on a picture.
 ///
-/// `length` is the lap in whole metres, and published tracks really do state it — SFDR 1813,
-/// MX191 1350, FarmSX 1107. `altitude` is metres above sea level, which a made-up track has
-/// no honest answer for. `pic`/`pic_info` name the two files the writer puts beside this one.
-/// The `location` line as a label, not as a paper trail.
-///
-/// A scanned track's `location` used to be the whole provenance note — source, flight dates,
-/// licence, projection, origin and every caveat, 190 characters of it — because that was the
-/// only field in the `.pkz` anything could be written into. The game puts `location` under the
-/// track's name in a small label and the app prints it on the track's own picture, so what
-/// arrived there was a wall of text with the place missing from it. The note still ships: it
-/// goes in `<slug>/place.txt` beside this, where there is room for it.
-fn location_label(full: &str) -> String {
+/// The track's own `.tga` is 512 pixels across with the name already across the top, so what
+/// goes under it is a label and nothing else: where the track is, and how long the lap is.
+/// The paper trail belongs in the `.ini` and in `<slug>/place.txt` — see [`location_label`].
+fn location_short(full: &str) -> String {
     let head = full.split(';').next().unwrap_or(full).trim();
     if head.chars().count() <= 48 {
         return head.to_string();
     }
     let cut: String = head.chars().take(47).collect();
     format!("{}…", cut.trim_end())
+}
+
+/// The longest `location` the game will still list a track with.
+///
+/// Measured, not guessed: a track whose `location` ran to 155 characters appeared in the track
+/// list as normal, and the same track at 193 characters did not appear at all. 150 leaves room
+/// for the ellipsis and for the separators without going near the edge.
+const LOCATION_MAX: usize = 150;
+
+/// The `location` line a built track carries, cut to something the game will still list.
+///
+/// Whole pieces, never a slice through the middle of one: the note is written most important
+/// first — where the ground came from, then the credit its licence demands, then the licence,
+/// then the flight dates and the projection — and this keeps taking pieces while they fit,
+/// skipping one that doesn't and trying the next. So the source and the credit survive even
+/// when a long licence between them does not, which is the wrong way round to lose them.
+///
+/// Nothing is lost outright: the full note ships beside the track as `<slug>/place.txt`.
+fn location_label(full: &str) -> String {
+    let full = full.trim();
+    if full.chars().count() <= LOCATION_MAX {
+        return full.to_string();
+    }
+    let mut kept: Vec<&str> = Vec::new();
+    let mut used = 0usize;
+    for bit in full.split(';').map(str::trim).filter(|b| !b.is_empty()) {
+        let cost = bit.chars().count() + if kept.is_empty() { 0 } else { 2 };
+        if used + cost <= LOCATION_MAX {
+            kept.push(bit);
+            used += cost;
+        }
+    }
+    if kept.is_empty() {
+        // One piece, and it is longer than the whole budget on its own.
+        let cut: String = full.chars().take(LOCATION_MAX - 1).collect();
+        return format!("{}…", cut.trim_end());
+    }
+    kept.join("; ")
 }
 
 fn track_ini(prog: &TrackProgram) -> String {
@@ -9204,6 +9234,37 @@ mod rise {
 
 #[cfg(test)]
 mod tests {
+
+    /// The `location` a track carries has to be short enough that the game still lists it.
+    ///
+    /// Measured against the game: a track whose `location` ran to 155 characters appeared in
+    /// the track list as normal and the same track at 193 characters did not appear at all.
+    /// A scanned place's note is longer than either, so it has to be cut — and cut in a way
+    /// that keeps the source and the credit, which are the parts that make the track legal to
+    /// hand around.
+    #[test]
+    fn the_location_line_stays_short_enough_to_list() {
+        let note = "IGN LiDAR HD — 0.5 m bare earth, falling back to RGE ALTI at 1 m; \
+                    © IGN — Licence Ouverte / Open Licence Etalab 2.0; \
+                    Licence Ouverte / Open Licence Etalab 2.0 — free to use, attribution required; \
+                    flown 2021-2023; EPSG:2154 at 408205 6806602; lap provisional; \
+                    direction of travel unverified";
+        let cut = super::location_label(note);
+        assert!(cut.chars().count() <= 150, "{} characters: {cut}", cut.chars().count());
+        assert!(cut.starts_with("IGN LiDAR HD"), "the source has to survive: {cut}");
+        assert!(cut.contains("© IGN"), "the credit has to survive: {cut}");
+        // Whole pieces only — never a slice through the middle of one.
+        assert!(!cut.contains("Licence Ouverte / Open Licence Etalab 2.0 — free"));
+
+        // A generated track's location is a place name and comes back untouched.
+        assert_eq!(super::location_label("Northgate, Indiana"), "Northgate, Indiana");
+
+        // One piece longer than the whole budget is cut, because there is nothing else to do.
+        let long = "x".repeat(400);
+        let cut = super::location_label(&long);
+        assert_eq!(cut.chars().count(), 150);
+        assert!(cut.ends_with('…'));
+    }
     use super::*;
     use crate::trackprog::{Relief, Start, Terrain};
 
