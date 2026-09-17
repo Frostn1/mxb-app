@@ -2,6 +2,16 @@
 
 ## Unreleased — MXB App, Frost's Studio and MXB Coach
 
+### Fixed
+- The live cues change as you ride. They were the same every lap and every session, for two
+  reasons: the recorder read the sheet once when the session started and never looked again, and
+  Coach only picked new calls while the Live cues panel was actually on screen — riding with the
+  app on any other tab wrote nothing at all. The recorder now takes a newer sheet at the line,
+  and Coach keeps the sheet following your laps wherever you are in the app.
+- A call you have already heard gives up its place. It was only scored down, which still left it
+  ahead of a smaller one, so on a short sheet the same calls came back forever. It now stands
+  aside while there is anything else worth saying, and comes back only when there isn't.
+
 ### Added
 - The whole lineup can be locked to a Steam sign-in. When turned on for the deployment, MXB App,
   Frost's Studio and MXB Coach each show a "Sign in with Steam" wall at startup and won't run

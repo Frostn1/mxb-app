@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import type { UnlistenFn } from "@tauri-apps/api/event";
 import { Button } from "@frost/shared/Components/ui/button";
 import { Segmented } from "@frost/shared/Components/ui/segmented";
 import { Slider } from "@frost/shared/Components/ui/slider";
@@ -11,7 +10,6 @@ import {
   coachStatus,
   coachVoice,
   coachWriteCues,
-  onSessionsChanged,
   type CoachStatus,
   type CueAmount,
   type CueLevel,
@@ -23,36 +21,11 @@ import { BEST, refArgs, type Reference } from "@/lib/reference";
 import { Label } from "../Page";
 import { ReferenceLine } from "./RefPicker";
 
-const CUE_LEVEL_KEY = "coach-cue-level";
-const CUE_AMOUNT_KEY = "coach-cue-amount";
+import { AMOUNTS, CUE_AMOUNT_KEY, CUE_LEVEL_KEY, LEVELS, remember, remembered } from "@/lib/cues";
 
-function remembered<T extends string>(key: string, allowed: readonly T[], fallback: T): T {
-  try {
-    const v = localStorage.getItem(key);
-    return v && (allowed as readonly string[]).includes(v) ? (v as T) : fallback;
-  } catch {
-    return fallback;
-  }
-}
-
-function remember(key: string, v: string) {
-  try {
-    localStorage.setItem(key, v);
-  } catch {
-    /* no storage: the choice lasts the session */
-  }
-}
-
-const LEVELS = ["new", "intermediate", "subPro", "pro"] as const;
-const AMOUNTS = ["few", "normal", "lots"] as const;
 /** The voices the recorder has clips for, as `hud.rs` writes them. */
 const VOICES = ["female", "male"] as const;
 
-/** The least time between two automatic re-picks. The sessions watcher fires whenever the
- *  recording grows, which is every couple of seconds while the rider is out — not once a lap —
- *  and a re-pick is a full review of the lap. A lap takes far longer than this, so the sheet
- *  still follows the rider lap by lap without reviewing the same one over and over. */
-const AUTO_GAP_MS = 45_000;
 
 /** Live cues for this track and bike: short calls the recorder shows in practice, picked from
  *  where this lap loses time to the lap it's held against, for the rider's level and how much
@@ -78,7 +51,6 @@ export default function LiveCues({
   useEffect(() => setSent(null), [reference]);
   /** A re-pick in progress, and when the last automatic one ran. */
   const inFlight = useRef(false);
-  const lastAuto = useRef(0);
   /** `latest` coaches the last lap ridden on this track rather than the one on screen: sent
    *  mid-session, that is the one the rider wants calls about. The reference stands either way:
    *  it is the lap they chose to be held against. `quiet` is for the automatic re-picks below,
@@ -113,24 +85,10 @@ export default function LiveCues({
   useEffect(() => {
     void sendRef.current(false, true);
   }, [level, amount, reference]);
-  useEffect(() => {
-    let alive = true;
-    let off: UnlistenFn | undefined;
-    const onLap = () => {
-      const now = Date.now();
-      if (now - lastAuto.current < AUTO_GAP_MS) return;
-      lastAuto.current = now;
-      void sendRef.current(true, true);
-    };
-    void onSessionsChanged(onLap).then((stop) => {
-      if (alive) off = stop;
-      else stop();
-    });
-    return () => {
-      alive = false;
-      off?.();
-    };
-  }, []);
+  // Following the rider's laps is `CueKeeper`'s job now, mounted at the app root: doing it here
+  // meant it only happened while this panel was on screen, which is why the cues never changed.
+  // This panel still writes on opening a lap and on a settings change, which is what the rider
+  // is looking at when they are in it.
   return (
     <div>
       <Label>{t("cues.title")}</Label>
