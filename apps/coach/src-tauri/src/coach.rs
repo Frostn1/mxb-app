@@ -768,7 +768,8 @@ fn rider_setup(app: &AppHandle, rec: &Recording) -> RiderSetup {
             let built = || {
                 let g = gears?;
                 let slots = crate::bikecfg::default_slots(bike_cfg.as_ref()?, g)?;
-                crate::stp::Setup::build(&e.bike_id, g, &slots).ok()
+                let version = crate::bikecfg::setup_version(bike_cfg.as_ref()?).unwrap_or(crate::stp::SETUP_VERSION);
+                crate::stp::Setup::build(&e.bike_id, g, &slots, version).ok()
             };
             let s = donor.or_else(built);
             let where_to = crate::stp::fresh_dir(&profiles, &e.track_id, &e.bike_id);
