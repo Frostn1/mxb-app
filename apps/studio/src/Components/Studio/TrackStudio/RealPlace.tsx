@@ -27,7 +27,8 @@ import { Switch } from "@frost/shared/Components/ui/switch";
 import { Segmented } from "@frost/shared/Components/ui/segmented";
 import { cn } from "@frost/shared/lib/utils";
 import { useT } from "@/i18n";
-import { buildTrack } from "@/api/trackgen";
+import { isRunning, useTrackBuild } from "../../../Context/TrackBuild";
+import BuildCard from "./BuildCard";
 import {
   forgetPlace,
   humanBytes,
@@ -617,7 +618,12 @@ function TracePanel({ slug, onBack }: { slug: string; onBack: () => void }) {
   const [width, setWidth] = useState(6);
   const [startIndex, setStartIndex] = useState(0);
   const [saving, setSaving] = useState(false);
-  const [building, setBuilding] = useState(false);
+  const [preparing, setPreparing] = useState(false);
+  // A scanned place builds through the same provider every other track does, so the build
+  // carries on — and keeps saying so — when the rider leaves this panel to look at something
+  // else. It is a minute or more of compiling; nobody should have to sit and watch it.
+  const { build, start: startBuild } = useTrackBuild();
+  const building = preparing || (build !== null && isRunning(build.state));
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [drag, setDrag] = useState<number | null>(null);
@@ -766,20 +772,20 @@ function TracePanel({ slug, onBack }: { slug: string; onBack: () => void }) {
   /**
    * Save the lap, turn the place into a programme, and build it — the whole way from a traced
    * picture to a track the game lists, without leaving this panel.
+   *
+   * Handed to the build provider rather than compiled here, so a scanned place gets the same
+   * bar, the same step list and the same install as a generated track, and is still building
+   * if the rider goes off to trace the next one.
    */
   const onBuild = async () => {
-    setBuilding(true);
+    setPreparing(true);
     try {
       await savePlaceTrace(slug, pts, closed, width, startIndex);
-      const program = await placeProgram(slug, false);
-      const built = await buildTrack(program, null, true);
-      toast.success(t("place.built", { name: program.name }), {
-        description: built.installed ?? undefined,
-      });
+      startBuild(await placeProgram(slug, false));
     } catch (e) {
       toast.error(t("place.buildFailed"), { description: String(e) });
     } finally {
-      setBuilding(false);
+      setPreparing(false);
     }
   };
 
@@ -976,6 +982,11 @@ function TracePanel({ slug, onBack }: { slug: string; onBack: () => void }) {
       </div>
 
       <div className="max-h-[38%] overflow-y-auto border-t border-border px-4 py-2">
+        {build && (
+          <div className="mb-2">
+            <BuildCard />
+          </div>
+        )}
         <p className="text-[11.5px] leading-relaxed text-muted-foreground">
           {t("place.traceHelp")}
         </p>

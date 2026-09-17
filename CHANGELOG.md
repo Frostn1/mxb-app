@@ -25,6 +25,8 @@
   licence asks for travel inside the track itself, in place.txt.
 - A fetch carries on while you go and look at a lap you traced earlier. The bar, the search
   results and the coverage report are all still there when you come back.
+- Making the track from a place shows the same bar and the same list of what each step produced
+  as any other track, and keeps building while you go off and trace the next one.
 
 ### Fixed
 - A track built from a real place appears in the game's track list, alongside every other track
