@@ -423,6 +423,10 @@ or a BIL, or a GeoTIFF you have checked. Spain is worth a specific mention, beca
 whole metre, which is useless for jump faces. Its ASCII path returns the same data with
 millimetres.
 
+Every one of these, with a paste-into-curl address, its projection, its cell size, how it
+signals empty ground and its licence quoted word for word, is in
+[elevation-sources.md](elevation-sources.md) next door.
+
 ### Nowhere on this list
 
 Two honest answers, in order of preference.
