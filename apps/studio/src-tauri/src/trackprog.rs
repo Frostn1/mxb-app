@@ -1941,6 +1941,12 @@ pub const FIT_TOLERANCE_M: f32 = 1.5;
 /// likely to be two traced points that happened to fall close together than a real hairpin.
 pub const FIT_MIN_RADIUS_M: f32 = 8.0;
 
+/// How far a run may bow from its own chord and still be called a straight, metres.
+///
+/// Five centimetres, which is under the 0.23 m the terrain grid holds on a 470 m plot: a bow
+/// smaller than a cell cannot be built whatever the program says.
+const STRAIGHT_SAGITTA_M: f32 = 0.05;
+
 /// The longest a single segment may be, metres. A sanity bound rather than a design limit: no
 /// plot is five kilometres across, so a radius this large is a straight by any other name.
 const MAX_SEGMENT_M: f32 = 5000.0;
@@ -2089,15 +2095,32 @@ pub fn fit_lap(points: &[(f32, f32, f32)], closed: bool) -> Option<Fitted> {
 /// The segment a run of curvature describes on its own, with no reference to where it should
 /// arrive: the fallback for when the trace cannot be aimed at.
 fn segment_of(k: f32, len: f32) -> Segment {
-    if k.abs() < 1.0 / FIT_STRAIGHT_RADIUS_M {
+    // How far the run bows away from its own chord. This, rather than the radius, is what decides
+    // whether something is a straight — a bow the terrain grid cannot hold is not a corner
+    // however tight the arithmetic says its radius is.
+    //
+    // Radius alone was the test and it was too strict: a traced straight with a centimetre or two
+    // of hand-wobble in it has a mathematical radius of a hundred-odd metres, so a 300 m straight
+    // came back as 27 tiny alternating arcs. Geometrically that was fine — the line was in the
+    // right place — but a track program full of invented corners is a program nobody can read,
+    // and it is what fitting noise looks like.
+    let sagitta = k.abs() * len * len / 8.0;
+    if k.abs() < 1.0 / FIT_STRAIGHT_RADIUS_M || sagitta < STRAIGHT_SAGITTA_M {
         return Segment::Straight { length: len, rise: 0.0 };
     }
-    // Curvature is signed the same way a radius is: positive turns right.
+    // The run's own total turn, which is the thing that must survive.
+    //
+    // The angle used to be derived from the arc length after the radius had been clamped, and
+    // that quietly threw the turn away: a 3 m hairpin clamped to the 8 m minimum came out
+    // sweeping 67 degrees where the trace turned 180, so everything after it left in the wrong
+    // direction. A chain inherits heading, so when the two cannot both be kept the turn is kept
+    // and the length gives way.
+    let turn = (k * len).abs();
     let radius = (1.0 / k).clamp(-MAX_SEGMENT_M, MAX_SEGMENT_M);
     let radius =
         if radius.abs() < FIT_MIN_RADIUS_M { FIT_MIN_RADIUS_M * radius.signum() } else { radius };
-    let angle = (len / radius.abs()).to_degrees();
-    if angle.is_finite() && angle > 1e-4 {
+    let angle = turn.to_degrees();
+    if angle.is_finite() && angle > 1e-4 && angle < 355.0 {
         Segment::Arc { radius, angle, rise: 0.0 }
     } else {
         Segment::Straight { length: len, rise: 0.0 }

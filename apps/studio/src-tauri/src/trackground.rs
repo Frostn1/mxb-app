@@ -545,6 +545,13 @@ const STRIPE_ALONG_M: f32 = 100.0;
 /// The band the stripe lives in, across the flight line, metres. Measured at 11–17 m.
 const STRIPE_LO_M: f32 = 5.0;
 const STRIPE_HI_M: f32 = 40.0;
+/// The scale the ground is detrended at before the stripe is looked for, metres.
+///
+/// It has to be well ABOVE the band the stripe lives in, and it was not: detrending at six metres
+/// and then band-passing five to forty threw away most of what it was about to look for, because
+/// a six-metre high-pass keeps what is *shorter* than six metres and the stripe is eleven to
+/// seventeen. Caught by a test that put a known 12 m stripe in and got only 16% of it back out.
+const STRIPE_DETREND_M: f32 = 80.0;
 /// The most this is ever allowed to move the ground, metres.
 ///
 /// Measured amplitude on flat ground is 0.5–0.7 cm and the whole correction comes out at 0.9 cm
@@ -569,7 +576,7 @@ pub fn destripe(z: &mut [f32], w: usize, h: usize, cell: f32, flight_ns: bool, s
     if strength <= 0.0 || w < 8 || h < 8 {
         return 0.0;
     }
-    let detrended = high_pass(z, w, h, cell, 6.0);
+    let detrended = high_pass(z, w, h, cell, STRIPE_DETREND_M);
     // Average along the flight line.
     let mut along = detrended.clone();
     blur_axis(&mut along, w, h, STRIPE_ALONG_M / 2.355 / cell, flight_ns);
@@ -706,30 +713,42 @@ impl Ground {
     }
 
     fn encode(&self) -> Vec<u8> {
-        let span = self.relief().max(1e-3);
-        let mut out = Vec::with_capacity(32 + self.z.len() * 2);
+        // Quantised against the square's own floor and ceiling, not against zero.
+        //
+        // This used to assume the lowest sample was zero, which is true of everything `import`
+        // makes — it subtracts the plot minimum — and false of anything else. A square with a
+        // sample below its assumed floor had it silently clamped away: a caught round-trip
+        // returned 0 for a height of -0.356 m. Storing the floor costs four bytes and removes
+        // the assumption.
+        let lo = self.z.iter().copied().fold(f32::MAX, f32::min);
+        let hi = self.z.iter().copied().fold(f32::MIN, f32::max);
+        let (lo, hi) = if lo.is_finite() && hi.is_finite() { (lo, hi) } else { (0.0, 1.0) };
+        let span = (hi - lo).max(1e-3);
+        let mut out = Vec::with_capacity(36 + self.z.len() * 2);
         out.extend_from_slice(b"FGND");
-        out.extend_from_slice(&1u32.to_le_bytes());
+        out.extend_from_slice(&2u32.to_le_bytes());
         out.extend_from_slice(&(self.dim_x as u32).to_le_bytes());
         out.extend_from_slice(&(self.dim_z as u32).to_le_bytes());
         out.extend_from_slice(&self.size_x.to_le_bytes());
         out.extend_from_slice(&self.size_z.to_le_bytes());
         out.extend_from_slice(&self.base_m.to_le_bytes());
+        out.extend_from_slice(&lo.to_le_bytes());
         out.extend_from_slice(&span.to_le_bytes());
         for &v in &self.z {
-            let q = ((v / span) * 65535.0).round().clamp(0.0, 65535.0) as u16;
+            let q = (((v - lo) / span) * 65535.0).round().clamp(0.0, 65535.0) as u16;
             out.extend_from_slice(&q.to_le_bytes());
         }
         out
     }
 
     fn decode(bytes: &[u8]) -> Result<Self> {
-        if bytes.len() < 32 || &bytes[..4] != b"FGND" {
+        const HEAD: usize = 36;
+        if bytes.len() < HEAD || &bytes[..4] != b"FGND" {
             bail!("not a stored ground plot");
         }
         let u32_at = |o: usize| u32::from_le_bytes(bytes[o..o + 4].try_into().unwrap());
         let f32_at = |o: usize| f32::from_le_bytes(bytes[o..o + 4].try_into().unwrap());
-        if u32_at(4) != 1 {
+        if u32_at(4) != 2 {
             bail!("stored ground is version {}, which this build doesn't read", u32_at(4));
         }
         let dim_x = u32_at(8) as usize;
@@ -737,15 +756,16 @@ impl Ground {
         let size_x = f32_at(16);
         let size_z = f32_at(20);
         let base_m = f32_at(24);
-        let span = f32_at(28);
-        if dim_x < 2 || dim_z < 2 || bytes.len() < 32 + dim_x * dim_z * 2 {
+        let lo = f32_at(28);
+        let span = f32_at(32);
+        if dim_x < 2 || dim_z < 2 || bytes.len() < HEAD + dim_x * dim_z * 2 {
             bail!("stored ground is truncated");
         }
         let mut z = Vec::with_capacity(dim_x * dim_z);
         for i in 0..dim_x * dim_z {
-            let o = 32 + i * 2;
+            let o = HEAD + i * 2;
             let q = u16::from_le_bytes([bytes[o], bytes[o + 1]]);
-            z.push(q as f32 / 65535.0 * span);
+            z.push(lo + q as f32 / 65535.0 * span);
         }
         Ok(Ground { dim_x, dim_z, size_x, size_z, z, base_m })
     }
@@ -1026,6 +1046,13 @@ fn fill_holes(z: &mut [f32], w: usize, h: usize) {
     }
 }
 
+/// How raced scanned ground arrives, against [`crate::trackprog::default_wear`]'s 0.55.
+pub const SCAN_WEAR: f32 = 0.15;
+/// How rough the ridden surface is made, against a generated track's 1.0.
+pub const SCAN_ROUGHNESS: f32 = 0.30;
+/// Fine surface texture, metres, against [`crate::trackprog::default_texture`]'s 0.085.
+pub const SCAN_TEXTURE: f32 = 0.025;
+
 /// Build a track program that stands on imported ground and runs round the imported lap.
 ///
 /// Everything here is decided by what was measured rather than chosen, which is the point of
@@ -1082,7 +1109,7 @@ pub fn program_for(imp: &Imported, jumps: crate::trackprog::ScanJumps) -> Result
                 amplitude: 0.0,
                 wavelength: 180.0,
                 seed: 1,
-                texture: default_texture(),
+                texture: SCAN_TEXTURE,
                 tilt: 0.0,
                 tilt_angle: 0.0,
                 landforms: 0,
@@ -1090,8 +1117,21 @@ pub fn program_for(imp: &Imported, jumps: crate::trackprog::ScanJumps) -> Result
             },
             surface: Surface::Soil,
             texture: Default::default(),
-            wear: default_wear(),
-            roughness: default_roughness(),
+            // Turned down, because the scan already carries what these invent.
+            //
+            // The generator's wear, rut and surface-texture passes exist to put back the
+            // roughness a made-up landscape has none of. Scanned ground arrives with the real
+            // thing already in it — the riding line off the Ironman tile measures 11.7 cm rms
+            // after a 6 m detrend, which is Indiana's own 10.9 — so stamping the invented
+            // roughness on top counts it twice. Measured: at the generated defaults the built
+            // track read 24.1 cm on the line against Indiana's 10.9, which is not a statistic,
+            // it is a track that feels wrong under the wheels.
+            //
+            // Not off, though. A 1 m grid holds a rut as presence rather than as depth, so the
+            // scan under-carries the fine end and the generator should still supply some of it.
+            // These are the values the band table settled on; see `scanned_roughness`.
+            wear: SCAN_WEAR,
+            roughness: SCAN_ROUGHNESS,
             ground: Some(GroundRef {
                 id: imp.id.clone(),
                 place: imp.place.clone(),
@@ -1286,7 +1326,21 @@ mod scan_build {
         } else {
             crate::trackprog::ScanJumps::Keep
         };
-        let prog = super::program_for(&imp, jumps).expect("a program comes out");
+        let mut prog = super::program_for(&imp, jumps).expect("a program comes out");
+        // Calibration hooks. Test-only, so the shipped defaults are the ones in `program_for`.
+        if let Ok(v) = std::env::var("FROST_WEAR") {
+            prog.terrain.wear = v.parse().expect("FROST_WEAR is a number");
+        }
+        if let Ok(v) = std::env::var("FROST_ROUGH") {
+            prog.terrain.roughness = v.parse().expect("FROST_ROUGH is a number");
+        }
+        if let Ok(v) = std::env::var("FROST_TEX") {
+            prog.terrain.relief.texture = v.parse().expect("FROST_TEX is a number");
+        }
+        println!(
+            "surface: wear {:.2}, roughness {:.2}, texture {:.3}",
+            prog.terrain.wear, prog.terrain.roughness, prog.terrain.relief.texture
+        );
         prog.check().expect("and it is a valid one");
         println!(
             "program: {} segments, width {:.1} m, budget {:.0} m, plot {:.0} m, samples {}",
@@ -1302,6 +1356,10 @@ mod scan_build {
             syn.gw, syn.gh, syn.mps, syn.used_m, syn.budget_m);
 
         std::fs::create_dir_all(&out).expect("made the output folder");
+        // The same quantisation `terrained` will apply, written here so the band table can be
+        // measured without a five-minute compile in the loop.
+        std::fs::write(out.join("preview.trh"), crate::tracksynth::trh(&prog, &syn, true))
+            .expect("wrote a preview .trh");
         std::fs::write(
             out.join("program.json"),
             serde_json::to_vec_pretty(&prog).expect("the program serialises"),
