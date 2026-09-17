@@ -62,16 +62,13 @@
   you on the 3D view rather than moving you off it.
 - "Your best ever here" says when the lap it picks is slower than the one you are looking at.
 
-## Unreleased — MXB App and Frost's Studio
+## 2026-09-17 — v0.16.0 — Crashes, and a lock to your Steam account
 
 ### Fixed
-- **The crash while a track is loading.** This is the most common MX Bikes crash there is, and
-  it is not really a crash in the game's code: the game saves your lap files with a few bytes of
-  leftover memory after the bike's name, then chokes on them the next time it reads one. Sometimes
-  it closes, sometimes it hangs on the loading screen. The app now clears those bytes while the
-  game is closed, and puts the original in your recycle bin in case you ever want it back. Your
-  laps are untouched. Credit to Thomas Malt, whose crash survey identified the file and proved
-  the repair.
+- The app tidies up your saved lap files while the game is closed. MX Bikes writes a few bytes of
+  leftover memory into them after the bike's name, and those bytes have been linked to the game
+  closing or hanging while a track loads. The app clears them and puts the original in your
+  recycle bin. Your laps are untouched. The file and the repair were worked out by Thomas Malt.
 
 ### Added and changed
 - MX Bikes closing to desktop is finally something we can see. When the game goes down,

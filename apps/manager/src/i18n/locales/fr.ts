@@ -1640,6 +1640,15 @@ export const fr: Translation = {
   "showcase.supporters.title_one": "Rendu possible par {{count}} soutien",
   "showcase.supporters.title_other": "Rendu possible par {{count}} soutiens",
   "showcase.supporters.more": "+{{count}} autres",
+  "showcase.v0160.hero.title": "Moins de raisons pour que le jeu se ferme",
+  "showcase.v0160.hero.body":
+    "MX Bikes qui se ferme tout seul, c'est ce dont les pilotes se plaignent le plus. Cette version s'attaque aux deux causes les plus fréquentes et commence à enregistrer ce qui se passe.",
+  "showcase.v0160.trainers":
+    "Tes fichiers de tours enregistrés sont nettoyés pendant que le jeu est fermé. Le jeu y laisse des octets parasites, liés à des plantages et à des blocages sur l'écran de chargement.",
+  "showcase.v0160.reports":
+    "Quand le jeu plante, l'app sait où et envoie un court rapport. Le fichier de plantage reste sur ton PC tant que tu n'appuies pas sur le bouton.",
+  "showcase.v0160.steam":
+    "Ton GUID MX Bikes est trouvé depuis ton compte Steam dès le démarrage, au lieu d'attendre d'être vu sur un serveur.",
   "showcase.v0150.hero.title":
     "Installez le circuit d'un serveur et rejoignez-le, en un clic",
   "showcase.v0150.hero.body":

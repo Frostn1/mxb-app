@@ -1608,6 +1608,15 @@ export const en = {
   "showcase.supporters.title_one": "Made possible by {{count}} supporter",
   "showcase.supporters.title_other": "Made possible by {{count}} supporters",
   "showcase.supporters.more": "+{{count}} more",
+  "showcase.v0160.hero.title": "Fewer reasons for the game to close",
+  "showcase.v0160.hero.body":
+    "MX Bikes closing on its own is the thing riders complain about most. This build takes on the two most common reasons for it, and starts recording what happens when it does.",
+  "showcase.v0160.trainers":
+    "Your saved lap files are tidied up while the game is closed. The game leaves stray bytes in them that have been linked to crashes and hangs on the loading screen.",
+  "showcase.v0160.reports":
+    "When the game goes down, the app now knows where and sends a short report. A crash dump stays on your PC unless you press the button.",
+  "showcase.v0160.steam":
+    "Your MX Bikes GUID is found from your Steam account the moment the app starts, instead of waiting to be seen on a server.",
   "showcase.v0150.hero.title":
     "Install a server's track and join, in one click",
   "showcase.v0150.hero.body":
