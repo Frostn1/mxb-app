@@ -30,6 +30,8 @@
   verified" rather than the truth.
 
 ### Changed
+- Secured content that isn't available on this PC is now shown plainly, in Settings and in the
+  prompt, without a reason attached to it.
 - The security that was in MXB App now covers Studio and Coach the same way, from one shared
   place: the debugger guard, the startup gate and the Steam-link flow all live in the shared core
   so the three apps can't drift, and the release build already strips symbols, dissolves the call
