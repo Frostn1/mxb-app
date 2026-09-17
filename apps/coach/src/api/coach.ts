@@ -187,6 +187,9 @@ export interface ReviewOut {
   idealFrom: number | null;
   /** Other riders in the session worth comparing with. */
   rivals: Rival[];
+  /** No lap of yours on this track is faster than this one, so a reference picked for you is a
+   *  slower lap and the review has nothing to hold it against. */
+  bestHere: boolean;
 }
 
 export interface Rival {
@@ -221,14 +224,28 @@ export interface LineNote {
   detail: string;
 }
 
-/** How the session's lines and the track changed; see `lines.rs`. */
+/** Which lap of the session a line belongs to. Every stint starts counting at lap 1 again, so
+ *  it takes both the number and the stint to name a lap. */
+export interface LapId {
+  lap: number;
+  stint: number;
+}
+
+/** How the session's lines and the track changed; see `lines.rs`. Every stint of the session,
+ *  not just the recording being reviewed. */
 export interface Lines {
   /** Every whole lap's line, every metre, with the bike's height. */
-  laps: { lap: number; time: number; path: [number, number][]; heights: number[] }[];
+  laps: (LapId & { time: number; path: [number, number][]; heights: number[] })[];
   sections: Pick<SectionReview, "kind" | "name" | "start" | "end" | "core" | "dir">[];
   /** Per section, one row per lap: metres right of the fast line, and the section time. */
-  offsets: { lap: number; offset: number; time: number }[][];
+  offsets: (LapId & { offset: number; time: number })[][];
   notes: LineNote[];
+  /** Nobody else was on track, so where the track will rut can't be read off anyone's lines. */
+  alone: boolean;
+  /** Enough whole laps in the session to tell one line from another. */
+  enoughLaps: boolean;
+  /** Which stint of the session the lap being reviewed was ridden in. */
+  stint: number;
 }
 
 /** The track's own terrain for a session, when it is installed, readable and lines up. */
