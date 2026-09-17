@@ -164,7 +164,7 @@ export const en = {
   "cues.fromLatest": "From my newest lap",
   "cues.fromLatestHint": "Use the last lap you rode on this track, not the one you're reading.",
   "setup.save": "Save as \u201c{{name}}\u201d",
-  "setup.saveHint": "A copy with these changes, next to your setup. Yours stays as it is.",
+  "setup.saveHint": "A copy with these changes, saved for this track. Yours stays as it is.",
   "setup.summaryOne": "Saves a copy with 1 change: {{what}}.",
   "setup.summaryMany": "Saves a copy with {{n}} changes: {{what}}.",
   "setup.andMore": "and {{n}} more",
@@ -177,10 +177,14 @@ export const en = {
   "setup.selected": "Saved as \u201c{{name}}\u201d and set as your practice setup.",
   "setup.savedGameOpen":
     "Saved as \u201c{{name}}\u201d. MX Bikes is running, so pick it in the garage \u2014 or close the game and press Select.",
+  "setup.savedNotSelected":
+    "Saved as \u201c{{name}}\u201d, but the game is still set to load another setup. Pick it in the garage.",
+  "setup.savedOnce": "Saved as \u201c{{name}}\u201d. Open another lap to save another one.",
   "setup.select": "Select it in the game",
   "setup.selectHint": "Sets it as the setup practice loads on this track. Your other setups stay as they are.",
   "setup.selectDone": "\u201c{{name}}\u201d loads next time you go out on this track.",
   "setup.selectGameOpen": "Close MX Bikes first: it writes this file itself when it closes, and would undo the change.",
+  "setup.selectMissed": "The game is still set to load another setup on this track. Pick this one in the garage.",
   "setup.saved": "Saved as \u201c{{name}}\u201d. Pick it in the garage.",
   "setup.firmerOne": "1 step firmer",
   "setup.firmerMany": "{{n}} steps firmer",
