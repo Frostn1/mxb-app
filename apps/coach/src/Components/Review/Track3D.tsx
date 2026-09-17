@@ -148,7 +148,9 @@ export default function Track3D({
       const times = lines.laps.map((l) => l.time);
       const [lo, hi] = [Math.min(...times), Math.max(...times)];
       for (const l of lines.laps) {
-        if (l.lap === lap) continue;
+        // Every stint of the session is drawn, and each starts counting at lap 1 again: it
+        // takes the stint as well to leave out the lap that's already drawn in blue.
+        if (l.lap === lap && l.stint === lines.stint) continue;
         const hue = Math.round(120 * (1 - (l.time - lo) / Math.max(hi - lo, 0.01)));
         out.push({ points: whole(l.path, l.heights), colour: `hsl(${hue}, 65%, 55%)`, width: 1.2 });
       }

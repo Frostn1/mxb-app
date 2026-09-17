@@ -15,6 +15,7 @@ import {
 } from "@/api/coach";
 import { gap, lapTime, started } from "@/lib/format";
 import Page, { Label } from "../Page";
+import { LineNotes } from "../Review/Review";
 
 /** One session: every stint of the event, its laps, the lap they're compared with, and the
  *  ideal lap. */
@@ -167,17 +168,11 @@ export default function SessionView({
         </div>
       )}
 
-      {lines && lines.notes.length > 0 && (
+      {/* The same panel the review shows, so a session with no line notes says why here too
+          rather than quietly leaving the heading out. */}
+      {lines && (
         <div className="mt-8">
-          <Label>{t("review.linesTitle")}</Label>
-          <div className="space-y-1">
-            {lines.notes.map((n, k) => (
-              <div key={k} className="border border-border bg-card px-4 py-3">
-                <div className="text-[13px] font-semibold">{n.title}</div>
-                <div className="mt-0.5 text-[12.5px] leading-snug text-muted-foreground">{n.detail}</div>
-              </div>
-            ))}
-          </div>
+          <LineNotes lines={lines} />
         </div>
       )}
 

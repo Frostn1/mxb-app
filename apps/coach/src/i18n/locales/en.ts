@@ -88,6 +88,26 @@ export const en = {
   "review.group.tyres": "Tyres",
   "review.group.ground": "Ground",
   "review.nothing": "This lap is as fast as the reference everywhere.",
+  "review.nothingLost":
+    "You lose no time here against the lap you're compared with, so there's nothing to pick out. The tips come from where the time goes.",
+  "review.bestLapTitle": "This is your fastest lap here",
+  "review.bestLapWhy":
+    "Nothing of yours on this track is quicker, so there's nothing to hold it against and the review has no tips from it. Pick another lap, or compare with your ideal lap.",
+  "review.refSlowerTitle": "The lap you're compared with is slower than this one",
+  "review.refSlowerWhy":
+    "You're quicker than it almost everywhere, so there's nothing for the review to pick out. Pick a faster lap, or compare with your ideal lap.",
+  "review.useIdeal": "Compare with your ideal lap",
+  "review.idealBeaten": "You're at or under your own best in every section here. There's nothing left to take out of this lap.",
+  "review.linesHere_one": "Line and track: one note on the line you took and how the track changed.",
+  "review.linesHere_other": "Line and track: {{count}} notes on the lines you took and how the track changed.",
+  "review.linesOpen": "Open the track",
+  "review.linesNone": "Nothing to say about your lines this session.",
+  "review.linesFewLaps_one": "Telling one line from another takes several whole laps in a session; this one has one.",
+  "review.linesFewLaps_other":
+    "Telling one line from another takes several whole laps in a session; this one has {{count}}.",
+  "review.linesAlone":
+    "You rode alone. Where the track will rut is read off the other riders' lines, so there was nothing to read it from.",
+  "review.linesSame": "Your laps all took much the same line, and the ground held up.",
   "review.strip": "The lap from start to finish. Click a section, or use the arrow keys.",
   "review.viewMap": "Map",
   "review.viewLaps": "All laps",
@@ -107,6 +127,7 @@ export const en = {
   "review.tipsOnTrack": "A numbered post stands where each tip happens.",
   "review.compareWith": "Compare with",
   "review.bestEver": "Your best ever here",
+  "review.slowerThanThis": "slower than this lap",
   "review.idealLap": "Your ideal lap (never ridden whole)",
   "review.idealFrom": "your best of {{n}} laps",
   "review.idealSub":
