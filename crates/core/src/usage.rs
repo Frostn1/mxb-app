@@ -314,7 +314,14 @@ pub const KNOWN_EVENTS: &[&str] = &[
     "view.studio.pose",
     "view.studio.track",
     "view.studio.diagnose",
+    "view.studio.replay",
     "view.studio.settings",
+    // The replay recorder. How a recording started is the question worth answering: the
+    // feature exists to make "by itself" the usual answer, and only a count can say whether
+    // it is. Nothing about what was recorded is counted — a track name is not a counter.
+    "replay.record.auto",
+    "replay.record.manual",
+    "replay.ffmpeg.fetch",
     "track.generate",
     "track.settings",
     "track.build.install",

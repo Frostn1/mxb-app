@@ -39,6 +39,8 @@ pub mod paint;
 pub mod paintproxy;
 pub mod paintwatch;
 pub mod pkz;
+pub mod plugins;
+pub mod replay;
 pub mod scenery;
 pub mod securesource;
 pub mod steamid;

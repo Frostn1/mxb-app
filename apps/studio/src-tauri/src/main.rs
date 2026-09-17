@@ -16,6 +16,8 @@ use mxb_core::antidebug;
 mod edfwrite;
 mod gearrepair;
 mod paintstudio;
+/// Recording a replay the mod is flying, so nobody has to run OBS beside the game.
+mod replayrec;
 mod trackbuild;
 mod tracklayout;
 mod trackground;
@@ -127,7 +129,10 @@ fn main() {
         // saved from here never re-dressed the bike on screen.
         .manage(mxb_core::paintwatch::PaintWatcher::default())
         .manage(mxb_core::paintwatch::SourceWatcher::default())
+        // The replay recorder: one child encoder at a time, and what it last said.
+        .manage(replayrec::Recorder::default())
         .plugin(tauri_plugin_log::Builder::new().build())
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_process::init())
@@ -244,6 +249,29 @@ fn main() {
             mxb_core::viewer::unpack_pkz,
             mxb_core::viewer::watch_paint_files,
             mxb_core::viewer::watch_viewer_source,
+            // Paid plugins. The licence is bought, installed and updated in MXB App; the
+            // panels run here, because a plugin's panel is a creator's tool.
+            mxb_core::plugins::plugin_list,
+            mxb_core::plugins::plugin_runtime,
+            mxb_core::plugins::plugin_read_file,
+            mxb_core::plugins::plugin_write_file,
+            mxb_core::plugins::plugin_list_dir,
+            mxb_core::plugins::plugin_delete_file,
+            mxb_core::plugins::plugin_install_payload,
+            // The Replay Mod's half that lives out here: the camera paths on disk, and the
+            // recorder that keeps what the mod flies.
+            replayrec::replay_status,
+            replayrec::replay_check,
+            replayrec::replay_slots,
+            replayrec::replay_settings,
+            replayrec::replay_save_settings,
+            replayrec::replay_record,
+            replayrec::replay_stop,
+            replayrec::replay_recordings,
+            replayrec::replay_delete,
+            replayrec::replay_out_dir,
+            replayrec::replay_fetch_ffmpeg,
+            initial_view,
         ])
         .setup(|app| {
             // The estate gate, first: refuse a blocked install now (offline-proof), and ask the
@@ -272,6 +300,11 @@ fn main() {
                 tracktex::set_dir(data.join("track-textures"));
                 trackground::set_dir(data.join("track-ground"));
             }
+            // Watch for a take the Replay Mod is flying, and keep it. Started here rather
+            // than when the Replay screen opens: the point of the feature is that a rider who
+            // never opens this window still comes back to the recording.
+            replayrec::watch(app.handle().clone());
+            replayrec::bind_hotkey(app.handle());
             let _ = app;
             Ok(())
         })
@@ -288,6 +321,30 @@ fn main() {
         })
         .run(tauri::generate_context!())
         .expect("error while running Frost's Studio");
+}
+
+/// Which screen the Studio was asked to open on, if it was asked.
+///
+/// `frost-studio --view replay` — what MXB App passes when somebody presses **Open in
+/// Studio** on the Plugins page, so a plugin whose panels moved out of the manager is one
+/// click away rather than one click and a hunt through the rail.
+///
+/// Read from argv rather than a deep link: this is one app starting another it just found on
+/// disk, and a URL scheme would mean registering a handler with the OS to say a word to
+/// ourselves. Unknown names are answered as themselves and the frontend ignores what it does
+/// not recognise — nothing here should fail to start over a stale flag.
+#[tauri::command]
+fn initial_view() -> Option<String> {
+    let mut args = std::env::args().skip(1);
+    while let Some(arg) = args.next() {
+        if let Some(rest) = arg.strip_prefix("--view=") {
+            return Some(rest.to_string());
+        }
+        if arg == "--view" {
+            return args.next();
+        }
+    }
+    None
 }
 
 /// Count something the creator did.

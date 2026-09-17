@@ -8,6 +8,7 @@ import PaintStudio from "../PaintStudio/PaintStudio";
 import RiderStudio from "../Rider/RiderStudio";
 import PoseStudio from "../Rider/PoseStudio";
 import Diagnose from "./Diagnose/Diagnose";
+import ReplayStudio from "../Replay/ReplayStudio";
 import TrackStudio from "./TrackStudio/TrackStudio";
 import RiderKitProvider from "../Rider/RiderKit";
 
@@ -30,6 +31,7 @@ export type StudioTab =
   | "rider"
   | "pose"
   | "track"
+  | "replay"
   | "diagnose";
 
 interface StudioProps {
@@ -84,6 +86,11 @@ export default function Studio({
       {visited.has("track") && (
         <Pane active={tab === "track"}>
           <TrackStudio />
+        </Pane>
+      )}
+      {visited.has("replay") && (
+        <Pane active={tab === "replay"}>
+          <ReplayStudio />
         </Pane>
       )}
       {visited.has("diagnose") && (
