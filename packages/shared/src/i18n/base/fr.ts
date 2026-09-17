@@ -210,4 +210,28 @@ export const fr: Record<keyof typeof en, string> = {
   "overlay.tab.setup": "Réglages",
   "overlay.tab.cues": "Indications en direct",
   "overlay.tab.hud": "HUD",
+
+  // ── Sondage ────────────────────────────────────────────────────────────────
+  "survey.eyebrow": "Une question rapide",
+  "survey.mood.ask": "Comment se passe {{app}} ?",
+  "survey.mood.bad": "Mal",
+  "survey.mood.fine": "Correct",
+  "survey.mood.good": "Bien",
+  "survey.followUp.whatHappened": "Que s'est-il passé ?",
+  "survey.followUp.anythingElse": "Quelque chose à ajouter ?",
+  "survey.reason.crash": "L'appli a planté ou s'est figée",
+  "survey.reason.slow": "Trop lente",
+  "survey.reason.confusing": "Difficile de trouver les choses",
+  "survey.reason.broken": "Quelque chose n'a pas marché",
+  "survey.reason.missing": "Il manque quelque chose",
+  "survey.reason.other": "Autre chose",
+  "survey.note.placeholder": "Quelque chose à ajouter ? (facultatif)",
+  "survey.note.hint":
+    "Envoyé tel que vous l'écrivez : n'y mettez rien de personnel.",
+  "survey.send": "Envoyer",
+  "survey.skip": "Passer",
+  "survey.thanks": "Merci — ça nous aide.",
+  "survey.setting.label": "Questions occasionnelles",
+  "survey.setting.desc":
+    "Permet à l'appli de vous demander de temps en temps comment ça se passe et ce que vous pensez d'une nouveauté. Désactivé, elle ne demande jamais.",
 };

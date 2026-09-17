@@ -130,6 +130,16 @@ Running through all of it:
   no names and no install id; the control plane holds one back until distinct networks have
   independently seen it in the game's own list, because a list that tells thousands of apps
   where to send a datagram cannot take anybody's word for it.
+- **The app asks, rarely.** A small card in the corner: *How's it going? Bad · Fine · Good*,
+  one tap. Answer badly and it asks what happened, with chips to pick from and a box you can
+  type a line into if you feel like it; after the other answers it asks that only now and
+  then. The same card can carry a question about something new — the questions are written
+  on the control plane rather than built into the app, so one can be asked while it still
+  matters rather than a release later. Nothing for the first three days after installing,
+  nothing in the first five minutes of a run, at most one card a day, and closing it three
+  times in a row stops it for half a year. Switched off in Settings, and off already for
+  anyone who turned the anonymous counters off — an answer carries the same install id, so
+  being asked is never a way round having said no to being counted.
 - **Live reload.** A debounced watcher on `<modsPath>/mods` signals FrostMod to
   reload the game when mods are added — including ones installed outside the app.
   Off Windows that means the game's own Wine prefix — Proton's

@@ -4,6 +4,7 @@ import { FolderOpen, Monitor } from "lucide-react";
 import { getVersion } from "@tauri-apps/api/app";
 import { open } from "@tauri-apps/plugin-dialog";
 import { revealInExplorer } from "@frost/shared/api/mods";
+import SurveySetting from "@frost/shared/Components/Survey/SurveySetting";
 import { Button } from "@frost/shared/Components/ui/button";
 import { Switch } from "@frost/shared/Components/ui/switch";
 import HotkeyField from "@frost/shared/Components/HotkeyField";
@@ -266,6 +267,12 @@ export default function Settings() {
             {version && <span className="font-mono text-[12px] text-muted-foreground">v{version}</span>}
           </div>
         </div>
+      </div>
+
+      {/* Whether Coach may ask anything. The same row MXB App and the Studio show, and it
+          carries its own label, so it needs no section heading over it. */}
+      <div className="mt-8 border border-border bg-card px-4 py-4">
+        <SurveySetting />
       </div>
 
       <div className="mt-8">

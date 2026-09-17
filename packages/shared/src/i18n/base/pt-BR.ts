@@ -210,4 +210,28 @@ export const ptBR: Record<keyof typeof en, string> = {
   "overlay.tab.setup": "Acerto",
   "overlay.tab.cues": "Avisos ao vivo",
   "overlay.tab.hud": "HUD",
+
+  // ── Pesquisa ───────────────────────────────────────────────────────────────
+  "survey.eyebrow": "Pergunta rápida",
+  "survey.mood.ask": "Como o {{app}} está indo?",
+  "survey.mood.bad": "Ruim",
+  "survey.mood.fine": "Mais ou menos",
+  "survey.mood.good": "Bom",
+  "survey.followUp.whatHappened": "O que aconteceu?",
+  "survey.followUp.anythingElse": "Quer acrescentar algo?",
+  "survey.reason.crash": "Travou ou fechou sozinho",
+  "survey.reason.slow": "Lento demais",
+  "survey.reason.confusing": "Difícil achar as coisas",
+  "survey.reason.broken": "Algo não funcionou",
+  "survey.reason.missing": "Falta alguma coisa",
+  "survey.reason.other": "Outra coisa",
+  "survey.note.placeholder": "Quer acrescentar algo? (opcional)",
+  "survey.note.hint":
+    "É enviado exatamente como você escreve, então não inclua nada pessoal.",
+  "survey.send": "Enviar",
+  "survey.skip": "Pular",
+  "survey.thanks": "Obrigado — isso ajuda.",
+  "survey.setting.label": "Perguntas ocasionais",
+  "survey.setting.desc":
+    "Deixa o app perguntar de vez em quando como está indo e o que você achou de alguma novidade. Desligado, ele nunca pergunta.",
 };

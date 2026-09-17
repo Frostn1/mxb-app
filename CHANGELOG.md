@@ -75,6 +75,29 @@
 - Moving a point no longer leaves a new point underneath it.
 - A place whose ground and picture come from the same survey is credited once rather than twice.
 
+## Unreleased — MXB App, Frost's Studio and MXB Coach
+
+### Added
+- The app asks, rarely: **How's it going? Bad · Fine · Good** — one tap, on a small card in the
+  corner. Answer "bad" and it asks what happened, with chips to pick from (crashed, too slow,
+  hard to find things, something didn't work, something's missing) and a box you can type a line
+  into if you want to. After the other answers it asks that only now and then, so it never turns
+  into a form. Until now there was no way to tell a feature nobody uses from one nobody has
+  mentioned, and no way at all to ask whether any of it was any good.
+- The same card can carry a question about something new — "tried Race mode yet?" and its
+  answers — which is written on the website rather than built into the app, so a question can be
+  asked while it still matters instead of waiting for the next release to reach you.
+- It is deliberately rare: nothing for the first three days after installing, nothing in the
+  first five minutes of a session, at most one card a day whatever is being asked, and the
+  standing question comes back only every few weeks. Close it three times in a row and it stops
+  asking for half a year.
+- Settings has a switch for it — Occasional questions — in all three apps. Turning anonymous
+  counts off turns the questions off with them.
+- What is sent is the same anonymous install id the counters use, the app, its version, your OS
+  and which title is active, plus which answer you tapped. The one thing that travels as typed
+  is the optional note, which the card says so plainly; it is capped, stripped of addresses,
+  links and folder paths on arrival, and deleted months before the answer it came with.
+
 ## Unreleased — MXB Coach
 
 ### Added

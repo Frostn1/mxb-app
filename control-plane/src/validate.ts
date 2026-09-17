@@ -461,3 +461,39 @@ export type ProbeReason = (typeof PROBE_REASONS)[number];
 export function isProbeReason(value: unknown): value is ProbeReason {
   return typeof value === "string" && (PROBE_REASONS as readonly string[]).includes(value);
 }
+
+/**
+ * A survey poll id — the slug a question is written under, and what every answer carries.
+ *
+ * Held to a plain slug because it is a grouping key on the dashboard and part of an answer's
+ * primary key: a poll id with a space or a dot in it would group beside its own near-twin and
+ * nobody would notice. Lower-case, digits and hyphens, so `race-mode-2026-09` is a name and
+ * `Race Mode!` is not.
+ */
+export function isPollId(value: unknown): value is string {
+  return typeof value === "string" && /^[a-z0-9][a-z0-9-]{0,47}$/.test(value);
+}
+
+/**
+ * A choice or reason id, as an answer carries it.
+ *
+ * Same rules as a poll id, and for the same reason: these are counted by grouping on them, and
+ * two spellings of one answer are two answers. The label the player actually reads is a
+ * separate field and may be anything — see `survey.ts`.
+ */
+export function isChoiceId(value: unknown): value is string {
+  return typeof value === "string" && /^[a-z0-9][a-z0-9-]{0,31}$/.test(value);
+}
+
+/** Reason chips one answer may carry. More than this is a client that is not asking a question. */
+export const MAX_REASONS_PER_ANSWER = 8;
+
+/**
+ * The longest note a player may send.
+ *
+ * Short on purpose. The box exists to catch the sentence a set of chips cannot ("it crashes
+ * when I open the locker with 400 mods"), not to be a support channel — a field that invites
+ * an essay collects one, and every character of it is free text this deployment then has to
+ * be responsible for.
+ */
+export const MAX_NOTE_CHARS = 280;
