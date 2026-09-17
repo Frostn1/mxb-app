@@ -22,7 +22,8 @@ pub const MAGIC: u32 = 0x4593_53C8;
 const CURRENT: u16 = 0x0116;
 const OLD: u16 = 0x0115;
 const BIKE_ID: std::ops::Range<usize> = 0x06..0x26;
-/// The setup version a fresh file carries; every bike the coach has seen wants this one.
+/// What the game uses when a bike's cfg doesn't name a `setup_version` of its own — the exe
+/// defaults to this and writes the bike's value when there is one.
 pub const SETUP_VERSION: u16 = 0x0100;
 /// Settings before the gearbox.
 const BEFORE_GEARS: usize = 20;
@@ -142,7 +143,11 @@ impl Setup {
 
     /// A setup file built from scratch: the header the bike wants, then one index per slot.
     /// For a rider who has never saved one, so there is nothing of theirs to copy.
-    pub fn build(bike_id: &str, gears: usize, slots: &[u32]) -> Result<Setup, String> {
+    /// `version` is the bike's own `setup_version` from its cfg, which is what the game writes
+    /// and what it checks a file against. Hardcoding 0x0100 was right only for a bike that
+    /// doesn't declare one — the exe defaults to 0x0100 in exactly that case, and writes the
+    /// bike's value otherwise, so a bike that declares its own would reject the file.
+    pub fn build(bike_id: &str, gears: usize, slots: &[u32], version: u16) -> Result<Setup, String> {
         if bike_id.len() >= BIKE_ID.len() {
             return Err("that bike's name is too long for a setup file".into());
         }
@@ -154,7 +159,7 @@ impl Setup {
         let mut id = [0u8; 32];
         id[..bike_id.len()].copy_from_slice(bike_id.as_bytes());
         b.extend_from_slice(&id);
-        b.extend_from_slice(&SETUP_VERSION.to_le_bytes());
+        b.extend_from_slice(&version.to_le_bytes());
         for v in slots {
             b.extend_from_slice(&v.to_le_bytes());
         }
@@ -291,6 +296,31 @@ pub fn setup_dirs(profiles: &Path) -> Vec<PathBuf> {
     all
 }
 
+/// Every folder that can hold this bike's setups for one place, deepest first.
+///
+/// The game uses `setups\<track>\<layout>\<bike>` on a track that has layouts and
+/// `setups\<track>\<bike>` on one that doesn't — two different paths, picked at run time.
+/// `setups\common\<bike>` never has a layout level. Looking only at the shallow one missed
+/// every setup on a layout track, and wrote `default.ini` a directory above where the game
+/// reads it, which is the same silent miss as saving to the wrong folder.
+fn bike_dirs(setups: &Path, place: &str, bike: &str) -> Vec<PathBuf> {
+    let here = setups.join(place);
+    let mut out = Vec::new();
+    // A layout is a folder under the track that holds the bike's folder, so it is told apart
+    // from the bike's own folder by what is inside it rather than by name.
+    for layout in std::fs::read_dir(&here).into_iter().flatten().flatten() {
+        let d = layout.path().join(bike);
+        if d.is_dir() {
+            out.push(d);
+        }
+    }
+    let shallow = here.join(bike);
+    if shallow.is_dir() || out.is_empty() {
+        out.push(shallow);
+    }
+    out
+}
+
 /// Every setup the rider has for this bike, the most useful first: this track, then the ones
 /// for every track, then any other track's. Newest first within each, so a copy starts from
 /// the tune they last worked on.
@@ -306,12 +336,14 @@ pub fn setups_for_bike(profiles: &Path, track: &str, bike: &str) -> Vec<PathBuf>
                 if !pick(&name) {
                     continue;
                 }
-                let files = std::fs::read_dir(place.path().join(bike)).into_iter().flatten().flatten();
-                for f in files {
-                    let p = f.path();
-                    if p.extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("stp")) {
-                        let when = f.metadata().and_then(|m| m.modified()).unwrap_or(std::time::UNIX_EPOCH);
-                        found.push((when, p));
+                for dir in bike_dirs(setups, &name, bike) {
+                    let files = std::fs::read_dir(&dir).into_iter().flatten().flatten();
+                    for f in files {
+                        let p = f.path();
+                        if p.extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("stp")) {
+                            let when = f.metadata().and_then(|m| m.modified()).unwrap_or(std::time::UNIX_EPOCH);
+                            found.push((when, p));
+                        }
                     }
                 }
             }
@@ -331,7 +363,9 @@ pub fn fresh_dir(profiles: &Path, track: &str, bike: &str) -> Option<PathBuf> {
     let dirs = setup_dirs(profiles);
     let holds_setups = |d: &PathBuf| std::fs::read_dir(d).into_iter().flatten().flatten().next().is_some();
     let home = dirs.iter().find(|d| holds_setups(d)).or_else(|| dirs.first())?;
-    Some(home.join(track).join(bike))
+    // Beside the rider's own where they have any here, which is what settles the layout level
+    // without having to know the layout's name: the game already put them in the right place.
+    Some(bike_dirs(home, track, bike).into_iter().next().unwrap_or_else(|| home.join(track).join(bike)))
 }
 
 /// Where a recorded setup lives. The plugin reports the name only: a leading ':' means a
@@ -342,7 +376,10 @@ pub fn locate(profiles: &Path, name: &str, track: &str, bike: &str) -> Option<Pa
         Some(n) => (true, n),
         None => (false, name),
     };
-    if name.is_empty() || name.starts_with('*') || name.eq_ignore_ascii_case("default") {
+    // `*` is a `.stt`, and a leading backslash is a setup shipped inside the bike itself
+    // (`bikes\<bike>\setups\`), which is not under the profile at all. Neither is a file
+    // this looks for, and building a path from one gave a wrong path rather than a clean miss.
+    if name.is_empty() || name.starts_with('*') || name.starts_with('\\') || name.eq_ignore_ascii_case("default") {
         return None;
     }
     let file = format!("{name}.stp");
@@ -350,9 +387,11 @@ pub fn locate(profiles: &Path, name: &str, track: &str, bike: &str) -> Option<Pa
     let all = setup_dirs(profiles);
     for place in places {
         for setups in &all {
-            let p = setups.join(place).join(bike).join(&file);
-            if p.is_file() {
-                return Some(p);
+            for dir in bike_dirs(setups, place, bike) {
+                let p = dir.join(&file);
+                if p.is_file() {
+                    return Some(p);
+                }
             }
         }
     }
@@ -431,13 +470,13 @@ pub(crate) mod tests {
         let mut all = vec![0u32, 5];
         all.extend_from_slice(&SAND_85[..SAND_85.len() - 1]);
         assert_eq!(all.len(), SLOTS + 6);
-        let s = Setup::build("2027_K85M", 6, &all).unwrap();
+        let s = Setup::build("2027_K85M", 6, &all, SETUP_VERSION).unwrap();
         assert_eq!(s.bytes(), file("2027_K85M", &SAND_85).as_slice(), "byte for byte what the game writes");
         assert_eq!(s.gears, 6);
         assert_eq!(s.get(Field::RearSprocket), 5);
         // A gear count the slots don't fill is refused rather than written short.
-        assert!(Setup::build("2027_K85M", 5, &all).is_err());
-        assert!(Setup::build(&"x".repeat(40), 6, &all).is_err());
+        assert!(Setup::build("2027_K85M", 5, &all, SETUP_VERSION).is_err());
+        assert!(Setup::build(&"x".repeat(40), 6, &all, SETUP_VERSION).is_err());
     }
 
     #[test]
@@ -555,5 +594,62 @@ pub(crate) mod tests {
         assert_eq!(track_dir(&mine.join("wet.stp"), "otherplace"), Some(setups.join("otherplace").join("2027_K85M")));
         assert_eq!(reference(&common, "frost-race"), ":frost-race");
         assert_eq!(reference(&mine, "frost-race (coach)"), "frost-race (coach)");
+    }
+
+    /// A track with layouts keeps its setups one folder deeper —
+    /// `setups\\<track>\\<layout>\\<bike>` — and the game picks that path at run time. Looking
+    /// only at the shallow one found none of the rider's setups there and wrote `default.ini`
+    /// a directory above where the game reads it: the same silent miss as the wrong folder.
+    #[test]
+    fn a_track_with_layouts_keeps_its_setups_one_deeper() {
+        let root = std::env::temp_dir().join(format!("coach-layouts-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let profiles = root.join("profiles");
+        let setups = profiles.join("me").join("setups");
+        let deep = setups.join("hangtown").join("national").join("2027_K85M");
+        std::fs::create_dir_all(&deep).unwrap();
+        std::fs::write(deep.join("race.stp"), file("2027_K85M", &[0; SLOTS + 6])).unwrap();
+
+        let found = locate(&profiles, "race", "hangtown", "2027_K85M").expect("a setup under the layout");
+        assert_eq!(found, deep.join("race.stp"), "found through the layout folder");
+        let all = setups_for_bike(&profiles, "hangtown", "2027_K85M");
+        assert!(all.contains(&deep.join("race.stp")), "listed too: {all:?}");
+        // A coach copy goes beside it, not a directory above where the game never looks.
+        assert_eq!(fresh_dir(&profiles, "hangtown", "2027_K85M").unwrap(), deep, "the copy lands beside it");
+
+        // A track with no layouts still uses the shallow path.
+        let flat = setups.join("indiana").join("2027_K85M");
+        std::fs::create_dir_all(&flat).unwrap();
+        std::fs::write(flat.join("race.stp"), file("2027_K85M", &[0; SLOTS + 6])).unwrap();
+        assert_eq!(locate(&profiles, "race", "indiana", "2027_K85M").unwrap(), flat.join("race.stp"));
+        assert_eq!(fresh_dir(&profiles, "indiana", "2027_K85M").unwrap(), flat);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A name the game hands over with a leading backslash is a setup shipped inside the bike
+    /// (`bikes\\<bike>\\setups\\`), not one under the profile. Joining it built a
+    /// drive-root-relative path — a wrong path rather than a clean miss.
+    #[test]
+    fn a_setup_that_came_with_the_bike_is_not_looked_for_in_the_profile() {
+        let root = std::env::temp_dir().join(format!("coach-bundled-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let profiles = root.join("profiles");
+        std::fs::create_dir_all(profiles.join("me").join("setups")).unwrap();
+        assert!(locate(&profiles, "\\stock", "indiana", "2027_K85M").is_none());
+        assert!(locate(&profiles, "*telemetry", "indiana", "2027_K85M").is_none());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The game writes the bike's own `setup_version` and refuses a file that disagrees. It
+    /// only uses 0x0100 when the bike's cfg doesn't name one, so a bike that does would have
+    /// rejected every file the coach built.
+    #[test]
+    fn a_built_file_carries_the_bikes_own_setup_version() {
+        let all = vec![0u32; SLOTS + 6];
+        let s = Setup::build("2027_K85M", 6, &all, 0x0102).unwrap();
+        let b = s.bytes();
+        assert_eq!(u16::from_le_bytes([b[0x26], b[0x27]]), 0x0102, "the bike's version, not a constant");
+        let plain = Setup::build("2027_K85M", 6, &all, SETUP_VERSION).unwrap();
+        assert_eq!(u16::from_le_bytes([plain.bytes()[0x26], plain.bytes()[0x27]]), SETUP_VERSION);
     }
 }

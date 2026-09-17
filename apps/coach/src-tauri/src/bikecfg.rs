@@ -112,6 +112,17 @@ fn find_num(n: &CfgNode, key: &str) -> Option<u32> {
 
 /// What the bike itself sets each setting to. This is the setup a rider is on before they
 /// save one of their own, and what a setup built from nothing has to start from.
+/// The setup version this bike's cfg declares, which the game writes into a setup file and
+/// checks a file against. Absent, the game uses `stp::SETUP_VERSION`.
+pub fn setup_version(root: &CfgNode) -> Option<u16> {
+    let raw = root.get("setup_version")?.trim().to_string();
+    let hex = raw.strip_prefix("0x").or_else(|| raw.strip_prefix("0X"));
+    match hex {
+        Some(h) => u16::from_str_radix(h, 16).ok(),
+        None => raw.parse().ok(),
+    }
+}
+
 pub fn defaults(root: &CfgNode) -> HashMap<Field, u32> {
     let mut out = HashMap::new();
     let at = |path: &[&str], key: &str| block_at(root, path).and_then(|n| num(n, key));
@@ -336,7 +347,7 @@ rear_suspension
 
         let slots = default_slots(&root, 6).expect("a six-speed's defaults");
         assert_eq!(slots.len(), crate::stp::SLOTS + 6);
-        let s = crate::stp::Setup::build("2027_K85M", 6, &slots).expect("a setup file");
+        let s = crate::stp::Setup::build("2027_K85M", 6, &slots, crate::stp::SETUP_VERSION).expect("a setup file");
         assert_eq!(s.get(Field::FrontSprocket), 2);
         assert_eq!(s.get(Field::ForkSpring), 5);
         assert_eq!(s.get(Field::ShockPreload), 12);
