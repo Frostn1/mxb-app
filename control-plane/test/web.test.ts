@@ -2,6 +2,9 @@ import { describe, expect, it, vi } from "vitest";
 import { adminAssets } from "../src/assets";
 import { landingSite, safeNext, webRoutes } from "../src/web";
 import { adminSteamIds } from "../src/webadmin";
+import { SIGNUP_CLOSED } from "../src/creators";
+import { addBan, BANNED } from "../src/bans";
+import { guidFromSteamId } from "../src/steam";
 import {
   LEGACY_SESSION_COOKIE,
   LOGIN_COOKIE,
@@ -196,6 +199,8 @@ describe("Steam sign-in", () => {
       linked: true,
       locks: { usedToday: 0, perDay: 10, remaining: 10 },
       admin: false,
+      // Closed unless the deployment opens it, which `deployment()` does not.
+      creatorSignup: "closed",
     });
   });
 
@@ -416,7 +421,8 @@ describe("creators on /admin/assets", () => {
   });
 
   it("signs a rider up as a creator on the spot, and remembers it was their own doing", async () => {
-    const env = await deployment();
+    // With the front door open, which is a deployment choice and no longer the default.
+    const env = await deployment({ MXB_CREATOR_SIGNUP: "open" });
     const NEWCOMER = "76561198000000077";
     const cookie = await cookieFor(NEWCOMER);
 
@@ -449,6 +455,64 @@ describe("creators on /admin/assets", () => {
     const forged = await web(env, req("POST", "/v1/web/creator", { cookie, origin: null, contentType: "text/plain" }));
     expect(forged.status).toBe(403);
     expect(await (await web(env, req("GET", "/v1/web/me", { cookie }))).json()).toMatchObject({ creator: false });
+  });
+
+  it("takes no new creators when the door is shut, and says so in words", async () => {
+    // The default: no `MXB_CREATOR_SIGNUP` at all. A deployment that was never told either way
+    // does not hold the door open.
+    const env = await deployment();
+    const NEWCOMER = "76561198000000077";
+    const cookie = await cookieFor(NEWCOMER);
+
+    const shut = await web(env, req("POST", "/v1/web/creator", { cookie, body: {} }));
+    expect(shut.status).toBe(403);
+    expect(await shut.json()).toMatchObject({ error: SIGNUP_CLOSED });
+    // Refused, and nothing left behind: no standing, and no web-only account made for one.
+    expect(await (await web(env, req("GET", "/v1/web/me", { cookie }))).json()).toMatchObject({
+      creator: false,
+      creatorSignup: "closed",
+    });
+    expect(
+      (await env.DB.prepare("SELECT COUNT(*) AS n FROM accounts WHERE steam_id = ?").bind(NEWCOMER).first<{ n: number }>())?.n,
+    ).toBe(0);
+    // And the locking routes are shut with it, which is the point of the door.
+    expect((await assets(env, req("POST", "/admin/assets", { cookie, body: { title: "First" } }))).status).toBe(403);
+  });
+
+  it("takes nothing from the creators who are already through it", async () => {
+    const env = await deployment();
+    const cookie = await cookieFor(CREATOR);
+    // A reload, or a browser retrying the post: they are a creator, and the shut door says so
+    // rather than telling them they may not be what they already are.
+    const again = await web(env, req("POST", "/v1/web/creator", { cookie, body: {} }));
+    expect(again.status).toBe(200);
+    expect(await again.json()).toMatchObject({ creator: true, already: true });
+    expect(again.headers.get("cache-control")).toBe("no-store");
+    expect(await (await web(env, req("GET", "/v1/web/me", { cookie }))).json()).toMatchObject({ creator: true });
+    expect((await assets(env, req("POST", "/admin/assets", { cookie, body: { title: "Still" } }))).status).toBe(201);
+  });
+
+  it("opens only for the exact word, so a typo leaves it shut", async () => {
+    const cookie = await cookieFor("76561198000000077");
+    for (const value of ["", "1", "yes", "OPEN ", "Open", "closed"]) {
+      const env = await deployment({ MXB_CREATOR_SIGNUP: value });
+      const said = await web(env, req("POST", "/v1/web/creator", { cookie, body: {} }));
+      // "OPEN " and "Open" are the word, trimmed and case-folded; the rest are not.
+      const opens = value.trim().toLowerCase() === "open";
+      expect([value, said.status]).toEqual([value, opens ? 201 : 403]);
+    }
+  });
+
+  it("refuses a banned rider before it refuses anybody for the door being shut", async () => {
+    // Both refusals are 403; which one they are told matters. "Banned" is the honest answer the
+    // website owes them, and "we aren't taking creators" would send them to ask us by hand.
+    const env = await deployment({ MXB_CREATOR_SIGNUP: "open" });
+    const BANNED_STEAM = "76561198000000077";
+    await addBan(env, { guid: guidFromSteamId(BANNED_STEAM), reason: "unlocked and shared protected content" }, CREATOR);
+    const cookie = await cookieFor(BANNED_STEAM);
+    const said = await web(env, req("POST", "/v1/web/creator", { cookie, body: {} }));
+    expect(said.status).toBe(403);
+    expect(await said.json()).toMatchObject({ error: BANNED });
   });
 
   it("says what is left of today's ceiling, and says the owner has none", async () => {

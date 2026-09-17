@@ -16,6 +16,8 @@
  * columns — `steam_links` for the Steam identity, `guid_claims` for the GUID:
  *
  * - the GUID in front of us, if we were handed one;
+ * - the GUID a Steam identity *is*, derived from the SteamID64 (`guidFromSteamId`), because for
+ *   a Steam copy the two are one value and the derivation needs no row to exist;
  * - every GUID the calling account holds or has ever claimed;
  * - every account that shares the caller's Steam identity, now or in the link log, and every
  *   GUID *those* accounts hold or have ever claimed.
@@ -52,6 +54,7 @@
  * something to match would mean identifying everybody else too.
  */
 
+import { guidFromSteamId } from "./steam";
 import { isGuid } from "./validate";
 
 /** A live ban, as the gates and the admin page read it. */
@@ -169,10 +172,14 @@ export async function rememberGuid(env: Env, accountId: string, raw: unknown): P
  * It widens in one hop and then stops: `seed` is the accounts named directly, `steams` the Steam
  * identities those accounts hold or have held, `ids` every account reachable through them, and
  * `guids` every GUID any of those accounts hold or have ever claimed, plus the one we were
- * handed. The hop matters for the most common caller of all — a bearer token, so only an account
- * id — because without it a second account on a banned Steam login would resolve to nothing but
- * its own fresh GUID. The final select is a primary-key hit per candidate against a table with a
- * handful of rows in it.
+ * handed, plus `?4`, the GUID the Steam identity itself derives to. The hop matters for the most
+ * common caller of all — a bearer token, so only an account id — because without it a second
+ * account on a banned Steam login would resolve to nothing but its own fresh GUID. `?4` matters
+ * for the caller with no row at all: somebody signing in to the website on a banned Steam
+ * account that never had an MXB App profile, or no longer has one, resolves through nothing in
+ * the database — and for a Steam copy their GUID is a pure function of the SteamID Valve just
+ * confirmed, so it is known without being stored. The final select is a primary-key hit per
+ * candidate against a table with a handful of rows in it.
  */
 const RESOLVE =
   "WITH seed AS (" +
@@ -188,6 +195,7 @@ const RESOLVE =
   "  UNION SELECT account_id FROM steam_links WHERE steam_id IN (SELECT steam_id FROM steams)" +
   "), guids AS (" +
   "  SELECT ?3 AS guid WHERE ?3 IS NOT NULL" +
+  "  UNION SELECT ?4 WHERE ?4 IS NOT NULL" +
   "  UNION SELECT UPPER(TRIM(guid)) FROM accounts WHERE guid IS NOT NULL AND id IN (SELECT account_id FROM ids)" +
   "  UNION SELECT guid FROM guid_claims WHERE account_id IN (SELECT account_id FROM ids)" +
   ")" +
@@ -210,8 +218,11 @@ export async function banFor(env: Env, who: Who): Promise<Ban | null> {
   // nulls, which would scan for a GUID that is nobody's.
   if (!accountId && !steamId && !guid) return null;
 
+  // For a Steam copy the GUID is the SteamID written in hex (`0039_derive_guids.sql`), so a
+  // banned Steam login is a banned GUID with or without a row to join through.
+  const derived = steamId ? guidFromSteamId(steamId) : null;
   const row = await env.DB.prepare(RESOLVE)
-    .bind(accountId, steamId, guid)
+    .bind(accountId, steamId, guid, derived)
     .first<{
       guid: string;
       reason: string;

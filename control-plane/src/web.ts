@@ -15,7 +15,7 @@
 import { allowedOrigin, assetOrigins, cors, lockAllowance, refuseCrossSiteWrite } from "./assets";
 import { tokenMatches } from "./auth";
 import { BANNED, banFor, isBanned } from "./bans";
-import { makeCreator } from "./creators";
+import { creatorSignupOpen, makeCreator, SIGNUP_CLOSED } from "./creators";
 import { repairBySteamId } from "./steamlink";
 import { steamResult } from "./page";
 import { isWebAdmin, isWebAdminPath, webAdminRoutes } from "./webadmin";
@@ -169,6 +169,10 @@ export async function webRoutes(
         // So the site knows whether to offer the dashboards at all. Never the gate itself —
         // every admin route checks the session again, and a client flag decides nothing.
         admin: isWebAdmin(session.steamId, env),
+        // Whether to draw the sign-up button or the closed door. Same rule: the client flag
+        // decides nothing, `POST /v1/web/creator` checks it again. It is here so somebody who
+        // cannot join is told so by the page rather than by a failed click.
+        creatorSignup: creatorSignupOpen(env) ? "open" : "closed",
       }),
       origin,
     );
@@ -182,10 +186,13 @@ export async function webRoutes(
   /**
    * `POST /v1/web/creator` — the signed-in Steam account becomes a creator.
    *
-   * This is mxbsecure's front door. It used to be a line in the admin page; a creator is now
-   * anyone who signs in with Steam and asks, because the invite list was gatekeeping a tool
-   * whose real protection is elsewhere — every asset is still tied to the account that made
-   * it, and `MXB_ASSETS_PER_DAY` caps what that account can mint in a day.
+   * This is mxbsecure's front door, and it is shut unless `MXB_CREATOR_SIGNUP` is `"open"`
+   * (`creators.ts` says why). It stood open on the argument that the invite list gatekept a
+   * tool whose real protection is elsewhere — every asset tied to the account that made it, and
+   * `MXB_ASSETS_PER_DAY` capping what that account mints in a day. That argument answers the
+   * wrong question for the people this is closed against: a ceiling limits what a fresh Steam
+   * account can do here, and the point is that it should not be here at all. Closed, new
+   * creators arrive through the creators page, where a person adds them.
    *
    * Idempotent, and it takes no body: the Steam account in the cookie is the whole request,
    * so there is nothing here to get wrong and nothing to forge that isn't the session itself.
@@ -200,6 +207,19 @@ export async function webRoutes(
     // has to remember to clear if the ban is ever lifted for other reasons.
     if (await isBanned(env, { steamId: session.steamId })) {
       return cors(json(403, { error: BANNED }), origin);
+    }
+    // Shut, but never on somebody already through it: a creator who reloads the page, or whose
+    // browser retries the post, must not be told the door is closed to them. Asked as "are they
+    // already one" rather than skipped, so closing the door takes nothing from anyone who has
+    // it — closing is not a removal, and removal is the creators page's own button.
+    if (!creatorSignupOpen(env)) {
+      const standing = await env.DB.prepare("SELECT creator_at FROM accounts WHERE steam_id = ?")
+        .bind(session.steamId)
+        .first<{ creator_at: number | null }>();
+      if (!standing?.creator_at) return cors(json(403, { error: SIGNUP_CLOSED }), origin);
+      const kept = cors(json(200, { creator: true, already: true }), origin);
+      kept.headers.set("Cache-Control", "no-store");
+      return kept;
     }
     const made = await makeCreator(env, session.steamId, "self");
     const said = cors(json(made.already ? 200 : 201, { creator: true, already: made.already }), origin);

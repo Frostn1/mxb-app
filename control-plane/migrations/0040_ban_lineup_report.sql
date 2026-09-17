@@ -1,4 +1,4 @@
--- Five more installs, from the report of 2026-09-17, and what that report added about two that
+-- Six more installs, from the report of 2026-09-17, and what that report added about two that
 -- `0038_guid_bans.sql` had already banned.
 --
 -- Seeded in a migration for the same reason the first six were: this is the switch that refuses
@@ -9,6 +9,10 @@
 -- The report describes one group around one unlocking tool: the install that shared the tool,
 -- the install that made the Discord leak it spread through, the install selling a drive of
 -- unlocked content (already banned here, with its second install), and two more that took part.
+-- One more is not part of that group and is here for a heavier reason: it builds cheating
+-- clients, and unlocks locked content with them. That is the one offence on this list that is
+-- both of the things this company exists to stop — the anti-cheat's problem and the locking's,
+-- in one install — so it is written as both rather than filed under the group above.
 -- Each is banned on what was said about it, and the roles are kept apart in `reason` rather than
 -- flattened into one sentence, because `reason` is what the rider is shown on the website and
 -- what an appeal is argued against. The install at the head of the list is the one the operator
@@ -38,6 +42,9 @@ WITH seed(guid, reason, evidence) AS (VALUES
   ('FF011000015900502F',
    'took part in unlocking protected content and passing it around',
    'reported 2026-09-17: named among those taking part in the group above'),
+  ('FF01100001423F97F0',
+   'builds cheating clients, and unlocks protected content with them',
+   'reported 2026-09-17: named as the author of cheating clients and as unlocking locked content. Not part of the group above; banned on its own account'),
   ('FF011000012E746802',
    'unlocked protected content and shared it, across the whole of what this report describes',
    'reported 2026-09-17: named at the head of the list as the one involved throughout rather than in a single act; the operator holds the evidence and an appeal is judged on it')

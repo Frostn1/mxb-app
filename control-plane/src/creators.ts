@@ -8,14 +8,46 @@
  * assets stay theirs, and their API keys stop working because key auth checks it too.
  *
  * `creator_source` says where the standing came from — 'self' for a signup on the site, 'admin'
- * for the creators page — so the list can be read at a glance now that anyone may join. It
- * decides nothing: every gate reads `creator_at` and only that.
+ * for the creators page — so the list can be read at a glance. It decides nothing: every gate
+ * reads `creator_at` and only that.
+ *
+ * Whether the site takes signups at all is `creatorSignupOpen` below, and it is off unless the
+ * deployment says otherwise.
  */
 
 import { resolveSteamAccount } from "./assets";
 import { hashToken, newToken } from "./auth";
 import { steamPersonaName } from "./steam";
 import { repairBySteamId } from "./steamlink";
+
+/**
+ * Whether anyone signed in with Steam may make themselves a creator.
+ *
+ * Open signup was the right default while the problem was reach: the invite list gatekept a tool
+ * whose real protection is the daily ceiling, not the door. The problem now is the other one —
+ * people who unlock protected content and pass it around, who are banned by install and Steam
+ * login and whose next move is a fresh Steam account and the same front door. A ban that can be
+ * walked around by clicking "sign up" is a ban with a waiting period, not a ban.
+ *
+ * So the door is shut by default and opened by a var. Closed does not mean nobody new can sell
+ * here: the creators page still adds them by hand, which is the invite list again, and which
+ * puts a person between a new Steam account and the right to mint keys. That person is the
+ * whole of the change.
+ *
+ * `"open"` and nothing else opens it, so a typo, an empty string or a forgotten var all leave it
+ * closed rather than open — the failure that costs us nothing.
+ */
+export function creatorSignupOpen(env: Env): boolean {
+  return (env.MXB_CREATOR_SIGNUP ?? "").trim().toLowerCase() === "open";
+}
+
+/**
+ * What the site says when the door is shut. Honest, and it names the way through, because this
+ * is mxbsecure.com — where a person who has something to sell should be told how to sell it, not
+ * left at a button that fails.
+ */
+export const SIGNUP_CLOSED =
+  "mxbsecure isn't taking new creators at the moment. Ask us and we'll add you by hand.";
 
 /** How an account came by its creator standing. Null on the creators from before signup opened. */
 export type CreatorSource = "self" | "admin";
