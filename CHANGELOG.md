@@ -113,7 +113,8 @@
 - The app tidies up your saved lap files while the game is closed. MX Bikes writes a few bytes of
   leftover memory into them after the bike's name, and those bytes have been linked to the game
   closing or hanging while a track loads. The app clears them and puts the original in your
-  recycle bin. Your laps are untouched. The file and the repair were worked out by Thomas Malt.
+  recycle bin. Your laps are untouched. The file and the repair were worked out by Thomas, the
+  developer of MXBMRP3.
 
 ### Added and changed
 - MX Bikes closing to desktop is finally something we can see. When the game goes down,
