@@ -719,34 +719,34 @@ pub fn coach_review(
 }
 
 /// Where a setup the coach saves goes, and what it is called. It never writes over a file.
-enum Save {
-    /// Beside the rider's own setup, numbered off its name.
-    Beside(PathBuf),
-    /// Under this track, named after it. The rider rode the game's default, so there is no
-    /// name of theirs to build on.
-    Fresh(PathBuf, String),
+///
+/// Always this track's folder, whatever folder the setup it was built from came out of. A copy
+/// of a `common` setup used to go back into `common`, where the game reads no record of which
+/// setup to load: it went on loading the rider's old one, so the next lap named that setup
+/// again and left another copy behind, and the copies piled up.
+struct Save {
+    /// `<profile>\setups\<track>\<bike>`.
+    dir: PathBuf,
+    /// The names to try, in order.
+    names: Vec<String>,
 }
 
 impl Save {
-    fn dir(&self) -> &Path {
-        match self {
-            Save::Beside(f) => f.parent().unwrap_or(Path::new(".")),
-            Save::Fresh(d, _) => d,
-        }
+    /// A copy of a setup of the rider's own, numbered off its name and kept in their profile.
+    fn beside(file: &Path, track: &str) -> Option<Save> {
+        let names = crate::stp::coach_names(&setup_base(file)).collect();
+        Some(Save { dir: crate::stp::track_dir(file, track)?, names })
     }
 
-    /// The names to try, in order.
-    fn names(&self) -> Vec<String> {
-        match self {
-            Save::Beside(f) => crate::stp::coach_names(&setup_base(f)).collect(),
-            Save::Fresh(_, track) => crate::stp::fresh_names(track).collect(),
-        }
+    /// One the coach built for a rider who rode the game's default: there is no name of theirs
+    /// to build on, so it is named after the track.
+    fn fresh(dir: PathBuf, track: &str) -> Save {
+        Save { names: crate::stp::fresh_names(track).collect(), dir }
     }
 
     /// The first name nothing has taken.
     fn free(&self) -> Option<String> {
-        let dir = self.dir();
-        self.names().into_iter().find(|n| !dir.join(format!("{n}.stp")).exists())
+        self.names.iter().find(|n| !self.dir.join(format!("{n}.stp")).exists()).cloned()
     }
 }
 
@@ -791,7 +791,7 @@ fn rider_setup(app: &AppHandle, rec: &Recording) -> RiderSetup {
     // own for this bike, which keeps every slot the coach doesn't model at a value the game
     // itself wrote; failing that, the bike's own defaults out of its cfg.
     let (setup, save) = match file.as_deref().and_then(read) {
-        Some(s) => (Some(s), file.clone().map(Save::Beside)),
+        Some(s) => (Some(s), file.as_deref().and_then(|f| Save::beside(f, &e.track_id))),
         None => {
             let donor = crate::stp::setups_for_bike(&profiles, &e.track_id, &e.bike_id).into_iter().find_map(|p| read(&p));
             let built = || {
@@ -802,7 +802,7 @@ fn rider_setup(app: &AppHandle, rec: &Recording) -> RiderSetup {
             let s = donor.or_else(built);
             let where_to = crate::stp::fresh_dir(&profiles, &e.track_id, &e.bike_id);
             let save = match (&s, where_to) {
-                (Some(_), Some(d)) => Some(Save::Fresh(d, e.track_id.clone())),
+                (Some(_), Some(d)) => Some(Save::fresh(d, &e.track_id)),
                 _ => None,
             };
             (s, save)
@@ -865,8 +865,9 @@ pub struct SetupPlan {
     /// The setup the rider had on.
     pub name: String,
     pub file: Option<String>,
-    /// The name a saved copy gets: the next free "(coach)", "(coach 2)" … beside the rider's
-    /// own, or "Coach <track>" when they rode the game's default and have none here.
+    /// The name a saved copy gets: the next free "(coach)", "(coach 2)" … off the rider's own
+    /// name, or "Coach <track>" when they rode the game's default and have none here. It is
+    /// saved under this track either way.
     pub save_as: Option<String>,
     /// Why the coach can't make the changes itself, when it can't.
     pub why: Option<String>,
@@ -903,30 +904,51 @@ pub struct SavedSetup {
     /// Named rather than counted, so the rider can check each one in the garage. A setting two
     /// tips wanted opposite ways is not in here, and was never claimed as a change either.
     pub changed: Vec<crate::stp::Field>,
-    /// The game is pointed at it for practice on this track.
+    /// The game's own record now names it, so practice on this track loads it.
     pub selected: bool,
-    /// It wasn't, because MX Bikes is open. The rider can pick it in the garage now, or press
-    /// Select once the game is closed.
+    /// It doesn't, because MX Bikes is open. The rider can pick it in the garage now, or press
+    /// Select once the game is closed. Neither of these set means the record was written and
+    /// didn't come back out naming the setup: saved, but the game will load something else.
     pub game_open: bool,
 }
 
-/// Point the game at a setup for practice on this track, by writing its own `default.ini`
-/// beside the setups (see `stp::select_default`).
+/// What came of pointing the game at a setup.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Picked {
+    /// The game's own record names it.
+    Done,
+    /// Not tried: MX Bikes is open.
+    GameOpen,
+    /// The record was written and doesn't name it. Nothing to tell the rider but the truth.
+    Missed,
+}
+
+/// Point the game at a setup for practice on this track.
 ///
 /// Only with the game closed. MX Bikes holds the garage in memory and writes this file itself
 /// when it closes, so a change made while it runs is silently undone — which would be worse
 /// than not making it, because the rider would be told it had worked.
-fn select(dir: &Path, name: &str, wet: bool) -> Result<bool, String> {
+fn select(file: &Path, track: &str, wet: bool) -> Result<Picked, String> {
     if mxb_core::gamewindow::is_game_running() {
-        return Ok(false);
+        return Ok(Picked::GameOpen);
     }
-    crate::stp::select_default(dir, name, wet)?;
-    Ok(true)
+    point_at(file, track, wet)
 }
 
-/// Saves a lap's setup fixes as a new setup — beside the rider's own, or as one of their own
-/// when they rode the game's default — and points the game at it. Never overwrites a file, and
-/// only the practice keys of `default.ini` are touched.
+/// Writes the game's own record for this track and reads it back (see `stp::select_default`).
+/// The rider is told what the record says, not what the coach meant to put in it.
+fn point_at(file: &Path, track: &str, wet: bool) -> Result<Picked, String> {
+    let dir = crate::stp::track_dir(file, track).ok_or("The setup's folder couldn't be found.")?;
+    let name = file.file_stem().and_then(|s| s.to_str()).ok_or("The setup's name couldn't be read.")?;
+    let want = crate::stp::reference(file.parent().unwrap_or(&dir), name);
+    crate::stp::select_default(&dir, &want, wet)?;
+    let got = crate::stp::selected_default(&dir);
+    Ok(if got.as_deref() == Some(want.as_str()) { Picked::Done } else { Picked::Missed })
+}
+
+/// Saves a lap's setup fixes as a new setup under this track — named after the rider's own, or
+/// after the track when they rode the game's default — and points the game at it. Never
+/// overwrites a file, and only the practice keys of `default.ini` are touched.
 #[tauri::command]
 pub fn coach_save_setup(app: AppHandle, path: String, skills: Vec<String>) -> Result<SavedSetup, String> {
     let rec = load(&path)?;
@@ -939,17 +961,18 @@ pub fn coach_save_setup(app: AppHandle, path: String, skills: Vec<String>) -> Re
     if changed.is_empty() {
         return Err("There's nothing in this setup the coach can change.".into());
     }
-    let dir = save.dir().to_path_buf();
-    fs::create_dir_all(&dir).map_err(err)?;
-    for name in save.names() {
-        match fs::OpenOptions::new().write(true).create_new(true).open(dir.join(format!("{name}.stp"))) {
+    fs::create_dir_all(&save.dir).map_err(err)?;
+    for name in &save.names {
+        let path = save.dir.join(format!("{name}.stp"));
+        match fs::OpenOptions::new().write(true).create_new(true).open(&path) {
             Ok(mut f) => {
                 std::io::Write::write_all(&mut f, out.bytes()).map_err(err)?;
                 // A setup the rider has to go and find in the garage is a setup they ride
                 // without. Failing to select it is not failing to save it, so it is reported
                 // rather than raised.
-                let selected = select(&dir, &name, rec.session.conditions == 2).unwrap_or(false);
-                return Ok(SavedSetup { name, changed, selected, game_open: !selected });
+                let picked = select(&path, &rec.event.track_id, rec.session.conditions == 2).unwrap_or(Picked::Missed);
+                let (selected, game_open) = (picked == Picked::Done, picked == Picked::GameOpen);
+                return Ok(SavedSetup { name: name.clone(), changed, selected, game_open });
             }
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
             Err(e) => return Err(err(e)),
@@ -968,10 +991,9 @@ pub fn coach_select_setup(app: AppHandle, path: String, name: String) -> Result<
     // Through `locate`, so the coach can only ever select a setup that is really there.
     let file = crate::stp::locate(&cfg.profiles_dir(), &name, &e.track_id, &e.bike_id)
         .ok_or_else(|| format!("\"{name}\" isn't in your profiles folder any more."))?;
-    let dir = file.parent().ok_or("The setup's folder couldn't be found.")?;
-    let selected = select(dir, &name, rec.session.conditions == 2)?;
+    let picked = select(&file, &e.track_id, rec.session.conditions == 2)?;
     // Nothing was written to the setup itself here: this only points the game at one.
-    Ok(SavedSetup { name, changed: Vec::new(), selected, game_open: !selected })
+    Ok(SavedSetup { name, changed: Vec::new(), selected: picked == Picked::Done, game_open: picked == Picked::GameOpen })
 }
 
 #[derive(Serialize)]
@@ -1523,5 +1545,66 @@ mod tests {
         );
         assert_ne!(coach.join("cues"), moved.join("mxbcoach").join("cues"), "not the unused candidate");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A profile with one setup kept for every track, which is how the rider in the report had
+    /// theirs saved.
+    fn common_setup(tag: &str) -> (PathBuf, PathBuf) {
+        let root = std::env::temp_dir().join(format!("coach-{tag}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let common = root.join("Frost").join("setups").join("common").join("2027_K85M");
+        fs::create_dir_all(&common).unwrap();
+        let file = common.join("frost-race.stp");
+        fs::write(&file, b"x").unwrap();
+        (root, file)
+    }
+
+    /// A copy of a setup kept for every track goes under the track the rider rode. Left in
+    /// `common` it could never be loaded, and the next lap would name the old setup again and
+    /// leave another copy behind.
+    #[test]
+    fn a_copy_of_a_common_setup_is_saved_under_the_track() {
+        let (root, mine) = common_setup("common-save");
+        let track = root.join("Frost").join("setups").join("indiana").join("2027_K85M");
+        let save = Save::beside(&mine, "indiana").expect("somewhere to save");
+        assert_eq!(save.dir, track, "under the track, not beside the setup it came from");
+        assert_eq!(save.free().as_deref(), Some("frost-race (coach)"), "still named off the rider's own");
+        // A setup already under a track stays where it is.
+        let theirs = track.join("wet.stp");
+        assert_eq!(Save::beside(&theirs, "indiana").unwrap().dir, track);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// The record goes where the game reads it, and says what the coach thinks it says.
+    #[test]
+    fn the_game_is_pointed_at_the_copy_and_says_so_itself() {
+        let (root, mine) = common_setup("common-point");
+        let save = Save::beside(&mine, "indiana").expect("somewhere to save");
+        let copy = save.dir.join("frost-race (coach).stp");
+        fs::create_dir_all(&save.dir).unwrap();
+        fs::write(&copy, b"x").unwrap();
+
+        assert_eq!(point_at(&copy, "indiana", false), Ok(Picked::Done));
+        assert!(save.dir.join(crate::stp::DEFAULT_INI).is_file(), "where the game reads it");
+        let beside_it = mine.parent().unwrap().join(crate::stp::DEFAULT_INI);
+        assert!(!beside_it.exists(), "nothing is written into common, where the game reads nothing");
+        // Read back through the game's own record: a setup under the track is named plainly.
+        assert_eq!(crate::stp::selected_default(&save.dir).as_deref(), Some("frost-race (coach)"));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// Selecting an older coach setup that is still in `common`: the record is under the track
+    /// all the same, and names it the way the game names a setup kept for every track.
+    #[test]
+    fn a_common_setup_is_named_with_the_colon_the_game_uses() {
+        let (root, mine) = common_setup("common-colon");
+        let track = root.join("Frost").join("setups").join("indiana").join("2027_K85M");
+        assert_eq!(point_at(&mine, "indiana", true), Ok(Picked::Done));
+        assert_eq!(crate::stp::selected_default(&track).as_deref(), Some(":frost-race"));
+        let text = fs::read_to_string(track.join(crate::stp::DEFAULT_INI)).unwrap();
+        let keys = crate::ini::read_section(&text, "setup");
+        assert_eq!(crate::ini::get(&keys, "wet_testing"), Some(":frost-race"), "a wet session too");
+        assert_eq!(crate::ini::get(&keys, "race"), None, "the rider's race pick is theirs");
+        let _ = fs::remove_dir_all(&root);
     }
 }

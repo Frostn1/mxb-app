@@ -202,10 +202,12 @@ export default function SetupFixes({ path, findings }: { path: string; findings:
       setSaved(out);
       // Named, so the rider can check each one in the garage rather than take our word for it.
       const list = out.changed.map((f) => t(`setupField.${f}` as TKey)).join(", ");
-      // Saved either way; the game only picks it up when it isn't running.
-      toast.success(out.selected ? t("setup.selected", { name: out.name }) : t("setup.savedGameOpen", { name: out.name }), {
-        description: list ? t("setup.savedChanged", { list }) : undefined,
-      });
+      const body = { description: list ? t("setup.savedChanged", { list }) : undefined };
+      // Saved either way. Whether the game will load it is its own record's answer, not ours,
+      // so the rider hears which of the three it is.
+      if (out.selected) toast.success(t("setup.selected", { name: out.name }), body);
+      else if (out.gameOpen) toast.success(t("setup.savedGameOpen", { name: out.name }), body);
+      else toast.warning(t("setup.savedNotSelected", { name: out.name }), body);
     } catch (e) {
       toast.error(String(e));
     } finally {
@@ -221,7 +223,8 @@ export default function SetupFixes({ path, findings }: { path: string; findings:
       const out = await coachSelectSetup(path, saved.name);
       setSaved(out);
       if (out.selected) toast.success(t("setup.selectDone", { name: out.name }));
-      else toast.error(t("setup.selectGameOpen"));
+      else if (out.gameOpen) toast.error(t("setup.selectGameOpen"));
+      else toast.error(t("setup.selectMissed"));
     } catch (e) {
       toast.error(String(e));
     } finally {
@@ -239,10 +242,14 @@ export default function SetupFixes({ path, findings }: { path: string; findings:
             {writes ? (
               <div className="space-y-2">
                 <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
-                  <Button size="sm" onClick={save} disabled={saving}>
+                  {/* Once per lap read: pressing it again writes the same setup under the next
+                      free name, which is how a rider ends up with a pile of them. */}
+                  <Button size="sm" onClick={save} disabled={saving || saved != null}>
                     {t("setup.save", { name: plan.saveAs ?? "" })}
                   </Button>
-                  <span className="min-w-0 flex-1 text-[12px] text-muted-foreground">{summary || t("setup.saveHint")}</span>
+                  <span className="min-w-0 flex-1 text-[12px] text-muted-foreground">
+                    {saved ? t("setup.savedOnce", { name: saved.name }) : summary || t("setup.saveHint")}
+                  </span>
                 </div>
                 {/* The game holds the file open while it runs, so offer the pick separately. */}
                 {saved && !saved.selected && (

@@ -368,14 +368,15 @@ export const coachSetupPlan = (path: string, skills: string[]) =>
 export interface SavedSetup {
   name: string;
   changed: SetupField[];
-  /** The game is pointed at it for practice on this track. */
+  /** The game's own record names it, so practice on this track loads it. */
   selected: boolean;
-  /** It isn't, because MX Bikes is open: the file is the game's, and it rewrites it on exit. */
+  /** It doesn't, because MX Bikes is open: the file is the game's, and it rewrites it on exit.
+   *  Neither set means the record was written and didn't come back naming the setup. */
   gameOpen: boolean;
 }
 
-/** Saves those changes as a new setup — beside the rider's own, or as one of their own when
- *  they rode the game's default — and points the game at it. */
+/** Saves those changes as a new setup for this track — named off the rider's own, or after the
+ *  track when they rode the game's default — and points the game at it. */
 export const coachSaveSetup = (path: string, skills: string[]) =>
   invoke<SavedSetup>("coach_save_setup", { path, skills });
 /** Points the game at a setup the coach already saved. Only works with MX Bikes closed. */

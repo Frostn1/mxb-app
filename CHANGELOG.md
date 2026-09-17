@@ -2,6 +2,23 @@
 
 ## Unreleased — MXB App, Frost's Studio and MXB Coach
 
+### Fixed
+- The live cues change as you ride. They were the same every lap and every session, for two
+  reasons: the recorder read the sheet once when the session started and never looked again, and
+  Coach only picked new calls while the Live cues panel was actually on screen — riding with the
+  app on any other tab wrote nothing at all. The recorder now takes a newer sheet at the line,
+  and Coach keeps the sheet following your laps wherever you are in the app.
+- A call you have already heard gives up its place. It was only scored down, which still left it
+  ahead of a smaller one, so on a short sheet the same calls came back forever. It now stands
+  aside while there is anything else worth saying, and comes back only when there isn't.
+- Corners are called corners. A jump on a curved piece of track — ordinary motocross — used to
+  delete the turn completely: you got "Rhythm 2" where the corner is, and the braking zone
+  before it came back as a "Straight". The jump now belongs to the corner, and its advice still
+  fires there.
+- Sweeping corners are found. Anything wider than a 45 m radius could never be a corner however
+  far round it went, so long fast turns were read as straights. The limit is now about how far a
+  corner turns rather than how tight it is.
+
 ### Added
 - The whole lineup can be locked to a Steam sign-in. When turned on for the deployment, MXB App,
   Frost's Studio and MXB Coach each show a "Sign in with Steam" wall at startup and won't run
@@ -13,6 +30,8 @@
   verified" rather than the truth.
 
 ### Changed
+- Secured content that isn't available on this PC is now shown plainly, in Settings and in the
+  prompt, without a reason attached to it.
 - The security that was in MXB App now covers Studio and Coach the same way, from one shared
   place: the debugger guard, the startup gate and the Steam-link flow all live in the shared core
   so the three apps can't drift, and the release build already strips symbols, dissolves the call
@@ -45,6 +64,14 @@
   ground built from your laps instead of the track you were riding. It has never worked.
 - The Servers tab in MXB App had the same fault: it read your installed tracks as missing, and
   offered to sell you tracks you already own.
+- A setup MXB Coach saves is saved for the track you rode, and the game is set to load it there.
+  If the setup you were on was one you keep for every track, the copy was kept the same way — and
+  the game doesn't read which setup to load from there, so it went on loading your old one and
+  every lap you read left another copy behind.
+- The Save button waits for the next lap once it has written a setup, so pressing it twice no
+  longer leaves you two copies of the same thing.
+- After setting a setup, the coach reads the game's own choice back and says plainly when the
+  game will still load something else, instead of telling you it worked.
 - Reviewing your fastest lap gives you something. It was being held against a slower lap of
   yours, and a lap that is quicker everywhere has nothing to point at, so the review came back
   empty without saying why. It now tells you it is your fastest lap here and offers your ideal
@@ -74,7 +101,7 @@
   only decides how high to hang your lines over the ground, and says so if they might sit a
   little off.
 
-## Unreleased - Frost's Studio
+## 2026-09-16 — Frost's Studio v0.2.0 — Tracks from real ground, and supercross
 
 ### Added
 - Build a track from a real place. Type a track's name or its coordinates and Studio fetches
@@ -104,6 +131,46 @@
   people. Where the files go, how to find your coordinates, what good and bad survey data look
   like, what each resolution is actually good for, what to do when your country has no laser
   survey, and the credit each source asks for.
+- Track Studio draws random tracks as MX, SX or SMX. SX is a short, flat stadium lap of
+  parallel lanes and 180° turns with a 22-gate start, and SMX is a flatter, tighter outdoor lap.
+  Writing a track from a brief follows the same switch.
+- SX and SMX laps are built out of real sections now, lane by lane: rhythm lanes, a set of
+  whoops, triples, doubles, tabletops, and a stretch of sand you can both see and feel. The lap
+  finishes over a triple.
+- A supercross track is built in a stadium, with a wall round the floor and tiered stands
+  behind it. Or not: Venue in Track Studio puts the same lap out in the open air instead, in a
+  field with the trees, the bank and the sponsor wall an outdoor round gets, and a fence round
+  the site where the stadium wall would have stood.
+- Choose what lines the lane borders in Track Studio: soft tuff blocks you ride through, solid
+  ones you don't, a printed banner wall the way a stadium lane is lined, or nothing at all.
+- SX and SMX laps carry as much as a real round does. A lane used to get one set of jumps and
+  then a long run of flat ground to the next corner. Now the rest of the lane gets jumps too,
+  so there is something to ride the whole way down it.
+- How packed the lap is, in Track Studio: a slider from sparse to packed, sitting by default
+  where a real round sits. It shows for SX and SMX, which are the ones it changes.
+- Pick what a track looks like, apart from what it rides like. The ground buttons still set the
+  ride, and a new Look row sets the paint: Soil, Sand, Grass, or Stadium for a supercross floor
+  of dark trucked-in dirt with nothing growing beyond the lanes. Leave it on Ride and the look
+  follows the ground, the way it always has.
+- Use your own images for the ground. Four slots in Track Studio, under Look: the riding
+  surface, the line, the ruts, and whatever lies beyond the track. Pick a picture off your own
+  disk and the Studio copies it in, so the track still builds after you have moved or deleted
+  the original. It says what is wrong with an image it cannot take.
+- The ground comes back down between jumps. A row of hills used to sit on a shelf, so the dips
+  never reached the ground either side and it rode as one long wave instead of a row of lips you
+  pick a line through. Now each hill lands back at grade, and the hills stand as tall as the ones
+  on a real round.
+- Ask for a supercross in the brief. Write "a supercross round in a stadium" or "an SMX playoff
+  round" and that is what you get, without touching the MX / SX / SMX switch first. Set the
+  switch yourself and it still decides. The switch moves to whatever came back, so you can see
+  which kind of track you were given.
+- The supercross words in a brief reach the track. Say no whoops and the lap is built without a
+  set; say sand and there is sand in it, rather than the one round in two that carries it. How
+  packed you ask for still sets how much the lanes carry.
+
+### Changed
+- The Studio reports anonymous usage from the same fixed list of names as the app, for the same
+  reason.
 
 ## 2026-09-16 — Code, testing, ideas
 
@@ -237,50 +304,6 @@
 - Live cues can be spoken. Turn on Speak the cues and set the volume. It needs the recorder from
   FrostMod 0.22 or newer.
 - With MXB App running too, the two share one shortcut, and each overlay shows the other's tabs.
-
-## Unreleased — Frost's Studio
-
-### Added
-- Track Studio draws random tracks as MX, SX or SMX. SX is a short, flat stadium lap of
-  parallel lanes and 180° turns with a 22-gate start, and SMX is a flatter, tighter outdoor lap.
-  Writing a track from a brief follows the same switch.
-- SX and SMX laps are built out of real sections now, lane by lane: rhythm lanes, a set of
-  whoops, triples, doubles, tabletops, and a stretch of sand you can both see and feel. The lap
-  finishes over a triple.
-- A supercross track is built in a stadium, with a wall round the floor and tiered stands
-  behind it. Or not: Venue in Track Studio puts the same lap out in the open air instead, in a
-  field with the trees, the bank and the sponsor wall an outdoor round gets, and a fence round
-  the site where the stadium wall would have stood.
-- Choose what lines the lane borders in Track Studio: soft tuff blocks you ride through, solid
-  ones you don't, a printed banner wall the way a stadium lane is lined, or nothing at all.
-- SX and SMX laps carry as much as a real round does. A lane used to get one set of jumps and
-  then a long run of flat ground to the next corner. Now the rest of the lane gets jumps too,
-  so there is something to ride the whole way down it.
-- How packed the lap is, in Track Studio: a slider from sparse to packed, sitting by default
-  where a real round sits. It shows for SX and SMX, which are the ones it changes.
-- Pick what a track looks like, apart from what it rides like. The ground buttons still set the
-  ride, and a new Look row sets the paint: Soil, Sand, Grass, or Stadium for a supercross floor
-  of dark trucked-in dirt with nothing growing beyond the lanes. Leave it on Ride and the look
-  follows the ground, the way it always has.
-- Use your own images for the ground. Four slots in Track Studio, under Look: the riding
-  surface, the line, the ruts, and whatever lies beyond the track. Pick a picture off your own
-  disk and the Studio copies it in, so the track still builds after you have moved or deleted
-  the original. It says what is wrong with an image it cannot take.
-- The ground comes back down between jumps. A row of hills used to sit on a shelf, so the dips
-  never reached the ground either side and it rode as one long wave instead of a row of lips you
-  pick a line through. Now each hill lands back at grade, and the hills stand as tall as the ones
-  on a real round.
-- Ask for a supercross in the brief. Write "a supercross round in a stadium" or "an SMX playoff
-  round" and that is what you get, without touching the MX / SX / SMX switch first. Set the
-  switch yourself and it still decides. The switch moves to whatever came back, so you can see
-  which kind of track you were given.
-- The supercross words in a brief reach the track. Say no whoops and the lap is built without a
-  set; say sand and there is sand in it, rather than the one round in two that carries it. How
-  packed you ask for still sets how much the lanes carry.
-
-### Changed
-- The Studio reports anonymous usage from the same fixed list of names as the app, for the same
-  reason.
 
 ## Unreleased — MXB App
 
