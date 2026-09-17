@@ -43,6 +43,9 @@ consequences fall out of that, and they're baked into the schema:
 | POST | `/v1/bmac/webhook` | HMAC signature | Buy Me a Coffee announcing a supporter. Posted on to Discord. |
 | POST | `/v1/usage` | — | Anonymous usage counters from an install. Unauthenticated because most people who run the app never claim an invite; bounded by body size, event count and a per-address daily cap. |
 | GET | `/v1/usage/stats` | `ADMIN_KEY` | The same numbers as JSON, for anything that scripts them |
+| GET | `/v1/survey/polls` | — | The questions the apps should be asking. Carries no install id and is the same for everybody, so it is cacheable. |
+| POST | `/v1/survey` | — | One install's answer to one question. Unauthenticated for the same reason as `/v1/usage`; bounded by size, a closed answer vocabulary and a per-address daily cap. |
+| GET | `/v1/survey/stats` | `ADMIN_KEY` | What people answered, as JSON |
 | POST | `/v1/master-status` | — | One install saying whether it could reach MX Bikes' own master server. Unauthenticated for the same reason as `/v1/usage`; one row per install per minute. |
 | GET | `/v1/status` | — | Is the master answering? Public, CORS-open and cacheable — it is what mxbsecure.com/status renders and what a Discord bot answering `!timeout` reads. |
 | POST | `/v1/roster` | — | Addresses an app saw in the game's own master list. Held back until distinct networks agree — see below; without that this would be a reflection amplifier. |
@@ -270,6 +273,39 @@ so what keeps a figure worth deciding from is a stack of bounds rather than a cr
 None of that makes a field unforgeable — `version`, `os` and `game` are still whatever the
 caller said, and they are what "can I stop shipping 0.8.x" and "is GP Bikes worth carrying"
 are read off. Together the bounds make forging one cost more than the decision it would move.
+
+### Asking the player
+
+The counters above say what people open. They have never said whether any of it is any good —
+a feature with high reach is one people *find* — so the apps also ask, rarely, on a card in the
+corner: **How's it going? Bad · Fine · Good**, and a follow-up ("what happened?") always after
+the answers a question names, and otherwise on a weighted coin.
+
+**The questions live in the database, not in the client.** `survey_polls` is a row per
+question, written at mxbsecure.com/admin/survey and picked up by every install on its next
+fetch. That is the whole point: "have you tried Race mode" is worth asking for three weeks, and
+a question baked into a release needs one release to start asking, another to stop, and a month
+in between for either to reach anybody. A poll carries its text as a locale map, so it can be
+written in one language or six; the standing mood poll carries none at all, because the apps
+draw and translate its three answers themselves.
+
+An answer carries the same install id the counters use, the app, its version, the OS, the
+title, a poll id and a choice id. Storage is `survey_answers`, one row per install per poll per
+day, so a retry replaces rather than votes twice.
+
+**The note is the one free-text field in this deployment**, and worth naming rather than
+burying. The follow-up may offer a box the player types into; a poll that has no use for prose
+sets `note = 0` and collects chips alone. What arrives is capped at 280 characters, scrubbed of
+addresses, links and user-folder paths (`scrubNote` — best effort, not a promise about a
+sentence somebody typed), cleared by the sweep after 120 days while the answer itself is kept
+400, and deletable one at a time from the dashboard.
+
+The app's side is `crates/core/src/survey.rs`, shared by all three. It is gated on the counters'
+consent as well as its own switch — an answer carries the install id, so being asked cannot be
+a way round having said no to being counted — leaves a fresh install alone for three days,
+never asks inside the first five minutes of a run, shows at most one card a day across every
+question, and stops asking for half a year after three dismissals in a row. `MXB_NO_SURVEY=1`
+turns it off for a run.
 
 ### The GUID is the Steam identity, and cannot be spoofed
 

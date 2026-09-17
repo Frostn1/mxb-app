@@ -6804,6 +6804,10 @@ fn main() {
             // Anonymous counters. Started last of the startup tasks and after the config
             // work above, because the install id it mints is saved into that same config.
             usage::start(handle, usage::MANAGER);
+            // The survey prompt. Started beside the counters and gated on the same consent:
+            // it answers the question counters cannot, which is whether any of this is any
+            // good. Nothing is fetched or asked when either switch is off.
+            mxb_core::survey::start(handle, usage::MANAGER);
             // Warm an empty address book from the shared one, once, before anybody needs it.
             // The Servers tab already rebuilds its whole list with `GETINFO` when the master
             // won't answer — but only from addresses this install has been told about, so on a
@@ -6980,6 +6984,11 @@ fn main() {
             set_run_in_background,
             set_analytics_enabled,
             track_event,
+            mxb_core::survey::survey_due,
+            mxb_core::survey::survey_shown,
+            mxb_core::survey::survey_answer,
+            mxb_core::survey::survey_dismiss,
+            mxb_core::survey::set_survey_enabled,
             set_launch_at_startup,
             set_auto_run_frostmod,
             set_queue_restart_game,

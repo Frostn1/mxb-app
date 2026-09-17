@@ -211,4 +211,28 @@ export const de: Record<keyof typeof en, string> = {
   "overlay.tab.setup": "Setup",
   "overlay.tab.cues": "Live-Hinweise",
   "overlay.tab.hud": "HUD",
+
+  // ── Umfrage ────────────────────────────────────────────────────────────────
+  "survey.eyebrow": "Kurze Frage",
+  "survey.mood.ask": "Wie läuft {{app}} bei dir?",
+  "survey.mood.bad": "Schlecht",
+  "survey.mood.fine": "Geht so",
+  "survey.mood.good": "Gut",
+  "survey.followUp.whatHappened": "Was ist passiert?",
+  "survey.followUp.anythingElse": "Möchtest du etwas ergänzen?",
+  "survey.reason.crash": "Abgestürzt oder eingefroren",
+  "survey.reason.slow": "Zu langsam",
+  "survey.reason.confusing": "Schwer, etwas zu finden",
+  "survey.reason.broken": "Etwas hat nicht funktioniert",
+  "survey.reason.missing": "Etwas fehlt",
+  "survey.reason.other": "Etwas anderes",
+  "survey.note.placeholder": "Möchtest du etwas ergänzen? (optional)",
+  "survey.note.hint":
+    "Wird genau so gesendet, wie du es schreibst — bitte nichts Persönliches.",
+  "survey.send": "Senden",
+  "survey.skip": "Überspringen",
+  "survey.thanks": "Danke — das hilft uns.",
+  "survey.setting.label": "Gelegentliche Fragen",
+  "survey.setting.desc":
+    "Erlaubt der App, ab und zu zu fragen, wie es läuft und was du von etwas Neuem hältst. Aus heißt: sie fragt nie.",
 };

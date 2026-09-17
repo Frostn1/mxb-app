@@ -36,6 +36,7 @@ import { TrackBuildProvider } from "./Context/TrackBuild";
 import { UpdateProvider } from "./Context/Update";
 import UpdateBanner from "./Components/Shell/UpdateBanner";
 import SigninGate from "@frost/shared/Components/SigninGate/SigninGate";
+import SurveyPrompt from "@frost/shared/Components/Survey/SurveyPrompt";
 import { parsePluginView, usePlugins } from "@frost/shared/lib/usePlugins";
 import { initialView } from "@frost/shared/api/mods";
 import { toast } from "sonner";
@@ -336,6 +337,8 @@ export default function App() {
           <Shell />
           {/* The Steam sign-in wall, shown only when the estate gate requires one. */}
           <SigninGate />
+          {/* The survey prompt. Rare, and on its own schedule — see `crates/core/src/survey.rs`. */}
+          <SurveyPrompt />
         </UpdateProvider>
       </I18nProvider>
     </ThemeProvider>

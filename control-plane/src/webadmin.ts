@@ -42,6 +42,16 @@ import {
 import { batchCodes, keyQuery, licenseQuery } from "./pluginspage";
 import { paintThumb } from "./pntthumb";
 import { isSteamId64 } from "./steam";
+import {
+  clearNote,
+  collectSurvey,
+  deletePoll,
+  parsePoll,
+  savePoll,
+  setPollLive,
+  windowDays as surveyDays,
+  windowPoll,
+} from "./survey";
 import { collectStats, windowApp, windowDays } from "./usage";
 import { webSession } from "./websession";
 
@@ -87,6 +97,15 @@ export async function webAdminRoutes(
     switch (path) {
       case "/v1/web/admin/usage":
         return said(200, await collectStats(env, windowDays(url), Date.now(), windowApp(url)));
+
+      // What people said when they were asked. The poll definitions ride along with the
+      // figures because the page cannot label a choice id without them, and a second round
+      // trip for the labels would mean the two could disagree about which polls exist.
+      case "/v1/web/admin/survey":
+        return said(
+          200,
+          await collectSurvey(env, surveyDays(url), Date.now(), windowApp(url), windowPoll(url)),
+        );
 
       // The overview carries the rules as well: they are four rows in the same read, and a
       // second endpoint for them would be a second round trip for a tab switch.
@@ -228,6 +247,51 @@ export async function webAdminRoutes(
           ? said(200, { ok: true, account: result.account, expires: result.expires })
           : said(400, { error: result.error ?? "nothing was granted" });
       }
+      default:
+        return said(400, { error: "no such action" });
+    }
+  }
+
+  // Writing the questions. The one admin write whose effect is felt by every install rather
+  // than by one account: a poll saved here is on screen in the field within a flush interval,
+  // so it is held to the same cross-site check as the rest and validated as strictly as the
+  // form can manage — a badly-written question wastes every answer it collects.
+  if (request.method === "POST" && path === "/v1/web/admin/survey") {
+    const refused = refuseCrossSiteWrite(request, env);
+    if (refused) return cors(refused, origin);
+    let body: Record<string, unknown>;
+    try {
+      body = (await request.json()) as Record<string, unknown>;
+    } catch {
+      return said(400, { error: "that was not JSON" });
+    }
+    const field = (name: string) => String(body[name] ?? "");
+    switch (field("action")) {
+      case "save": {
+        const poll = parsePoll(body.poll);
+        if (typeof poll === "string") return said(400, { error: poll });
+        await savePoll(env, poll);
+        return said(200, { ok: true, id: poll.id });
+      }
+      case "retire":
+      case "revive": {
+        const live = field("action") === "revive";
+        return (await setPollLive(env, field("id"), live))
+          ? said(200, { ok: true })
+          : said(404, { error: "no such poll" });
+      }
+      case "delete": {
+        const done = await deletePoll(env, field("id"));
+        if (done === "ok") return said(200, { ok: true });
+        return done === "answered"
+          ? said(409, { error: "people have answered that one — retire it instead" })
+          : said(404, { error: "no such poll" });
+      }
+      // The button that makes offering a free-text box defensible at all.
+      case "note-clear":
+        return (await clearNote(env, body.handle))
+          ? said(200, { ok: true })
+          : said(404, { error: "no such note" });
       default:
         return said(400, { error: "no such action" });
     }
