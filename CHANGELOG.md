@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- Signing in with Steam on a second PC works. Until now the sign-in wall would send you to
+  Steam, Steam would confirm who you are, and the app would sit there for good: your Steam
+  account was already spoken for by your other install, so the new one was refused an identity —
+  and the wall only comes down for an install that has one. The same thing happened after a
+  reinstall that lost its settings. Every install of yours now signs in, and they are all the
+  same you: the same mods, the same bans, the same GUID.
+- The sign-in wall says what happened instead of waiting forever. If the service can't be
+  reached, it says so; if Steam never comes back, it says to check the browser tab that opened
+  rather than leaving "Waiting for Steam to confirm it's you…" on screen with nothing behind it.
+  It also waits the full ten minutes the sign-in is good for, so a Steam Guard prompt no longer
+  outlasts it, and the button comes back either way.
+- Reloading the Steam tab after you'd already signed in said "Already linked — this Steam
+  account is linked to another MXB App profile", which described a problem you didn't have. It
+  now says the sign-in was already used.
+
 ## 2026-09-17 — Frost's Studio v0.3.0 — Make the track, and point at it on a photo
 
 ### Added

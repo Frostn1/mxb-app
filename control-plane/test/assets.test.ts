@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 import { unwrapContentKey } from "../src/assetkey";
 import { adminAssets, parseSteamInput } from "../src/assets";
 import { hashToken } from "../src/auth";
+import { guidFromSteamId } from "../src/steam";
+import { steamIdFor } from "../src/steamlink";
 import { sealToken, SESSION_COOKIE } from "../src/websession";
 import { addAccount, d1 } from "./d1sqlite";
 
@@ -899,13 +901,27 @@ describe("a creator who started on the site", () => {
     expect(await env.DB.prepare("SELECT steam_id FROM accounts WHERE id = ?").bind(web!.id).first()).toEqual({ steam_id: null });
   });
 
-  it("still refuses a Steam account that's on another app profile", async () => {
+  it("links a second install of the same person without moving the column", async () => {
     const env = await deployment({ MXB_WEB_SESSION_KEY: "session-secret", MXB_SITE_ORIGIN: SITE });
     await addAccount(env.DB, "acc_holder", "Holder", STEAM);
+    // The second PC, or a reinstall that lost the config: a fresh device account, same person.
     await addAccount(env.DB, "acc_app", "Rider");
+
     const res = await linkInApp(env, "acc_app", STEAM);
-    expect(res.headers.get("Location")).toBe(`${SITE}/steam?r=already-linked`);
+    // Refusing this used to leave the second install with no identity at all — and so, under
+    // MXB_REQUIRE_STEAM, behind a sign-in wall that could never come down.
+    expect(res.headers.get("Location")).toBe(`${SITE}/steam?r=linked`);
+    // The unique column stays where it was; the link is recorded on the pair.
     expect(await env.DB.prepare("SELECT id FROM accounts WHERE steam_id = ?").bind(STEAM).first()).toEqual({ id: "acc_holder" });
+    expect(
+      await env.DB.prepare("SELECT steam_id FROM steam_links WHERE account_id = 'acc_app'").first(),
+    ).toEqual({ steam_id: STEAM });
+    // Which is the whole point: the new install now has an identity to be let in on.
+    expect(await steamIdFor(env, { id: "acc_app", steam_id: null })).toBe(STEAM);
+    // And the ban resolution follows it, so this is not a way around one.
+    expect(
+      await env.DB.prepare("SELECT guid FROM guid_claims WHERE account_id = 'acc_app'").first<{ guid: string }>(),
+    ).toEqual({ guid: guidFromSteamId(STEAM) });
   });
 });
 
@@ -933,7 +949,9 @@ describe("the branded hop into Steam", () => {
     const env = await deployment({ MXB_SITE_ORIGIN: SITE });
     const used = crypto.randomUUID();
     await env.DB.prepare("INSERT INTO steam_logins (id, account_id, created_at, consumed_at) VALUES (?, ?, ?, ?)").bind(used, OWNER, Date.now(), Date.now()).run();
-    expect((await call(env, new Request(`https://cp.test/v1/steam/start?login=${used}`))).headers.get("Location")).toBe(`${SITE}/steam?r=already-linked`);
+    // A spent sign-in, not a claim about whose Steam account it is — the same answer the
+    // return half gives for the same row.
+    expect((await call(env, new Request(`https://cp.test/v1/steam/start?login=${used}`))).headers.get("Location")).toBe(`${SITE}/steam?r=expired`);
     expect((await call(env, new Request("https://cp.test/v1/steam/start?login=nope"))).headers.get("Location")).toBe(`${SITE}/steam?r=expired`);
   });
 });

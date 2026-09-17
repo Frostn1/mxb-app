@@ -551,7 +551,12 @@ async function steamStart(url: URL, env: Env): Promise<Response> {
     .bind(loginId)
     .first<{ consumed_at: number | null }>();
   if (!login) return steamResult(site, "expired");
-  if (login.consumed_at !== null) return steamResult(site, "already-linked");
+  // A sign-in that has already been through Valve, usually because the tab was reloaded after
+  // it finished. Same answer [`steamReturn`] gives the same condition: it is a spent sign-in,
+  // not a statement about whose Steam account this is. It said `already-linked` before, which
+  // on the site reads "this Steam account belongs to another profile" — a sentence that sent
+  // people looking for an account problem they did not have.
+  if (login.consumed_at !== null) return steamResult(site, "expired");
 
   const origin = url.origin;
   const returnTo = `${origin}/v1/steam/return?login=${loginId}`;
@@ -610,12 +615,34 @@ async function steamReturn(request: Request, url: URL, env: Env): Promise<Respon
     ]);
   } catch (err) {
     if (!String(err).includes("UNIQUE")) throw err;
-    // Held by a web-only profile made when this person locked something on mxbsecure.com. Steam
-    // just confirmed it's them, so the app profile takes over the Steam link and their assets.
     const held = await env.DB.prepare("SELECT id, kind, creator_at, creator_source FROM accounts WHERE steam_id = ?")
       .bind(result.steamId)
       .first<{ id: string; kind: string; creator_at: number | null; creator_source: string | null }>();
-    if (held?.kind !== "web") return steamResult(site, "already-linked");
+    // Nobody is holding the identity, so the conflict was about something else. Don't guess.
+    if (!held) throw err;
+
+    // Held by another *app* profile — the same person on a second machine, or after a reinstall
+    // that lost the config and claimed a fresh device account. This used to end here with
+    // `already-linked`, and under `MXB_REQUIRE_STEAM` that is a dead end nobody can get out of:
+    // the sign-in wall only comes down for an account with a Valve-confirmed identity, and this
+    // one could now never have one. A rider with two PCs could not open MXB App, the Studio or
+    // Coach on the second — having just proved to Valve exactly who they are.
+    //
+    // `accounts.steam_id` is a single unique cell, so it stays with the account already holding
+    // it. The link goes where a link is allowed to exist twice: `steam_links`, keyed on the
+    // pair. `steamIdFor` answers from it, so this install has an identity, and the ban
+    // resolution already widens through it — "an alt is refused without a row of its own" is
+    // this same fact read from the other side, so nothing escapes by coming this way. The GUID
+    // column is left where it is rather than dragged between two installs of one person; the
+    // claim is logged, which is what the resolution actually follows.
+    if (held.kind !== "web") {
+      await rememberLink(env, login.account_id, result.steamId).run();
+      await rememberGuid(env, login.account_id, guidFromSteamId(result.steamId));
+      return steamResult(site, "linked");
+    }
+
+    // Held by a web-only profile made when this person locked something on mxbsecure.com. Steam
+    // just confirmed it's them, so the app profile takes over the Steam link and their assets.
     await env.DB.batch([
       env.DB.prepare("UPDATE assets SET creator_id = ? WHERE creator_id = ?").bind(login.account_id, held.id),
       env.DB.prepare("UPDATE accounts SET steam_id = NULL WHERE id = ?").bind(held.id),

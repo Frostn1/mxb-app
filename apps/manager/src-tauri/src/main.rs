@@ -2350,8 +2350,10 @@ async fn steam_link_status(app: tauri::AppHandle) -> Result<Option<String>, Stri
         .send()
         .await
         .map_err(|e| format!("couldn't reach the control plane: {e}"))?;
+    // Shown to the person when the sign-in wall gives up, so it has to read as a sentence
+    // rather than as a log line.
     if !resp.status().is_success() {
-        return Err(format!("control plane error ({})", resp.status()));
+        return Err(format!("couldn't check the sign-in ({})", resp.status()));
     }
     #[derive(serde::Deserialize)]
     struct Ent {

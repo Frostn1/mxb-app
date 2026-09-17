@@ -220,8 +220,10 @@ pub async fn steam_link_status(app: &AppHandle) -> Result<Option<String>, String
         .send()
         .await
         .map_err(|e| format!("couldn't reach the service: {e}"))?;
+    // Shown to the person when the wall gives up, so it has to read as a sentence rather than
+    // as a log line.
     if !resp.status().is_success() {
-        return Err(format!("the service error ({})", resp.status()));
+        return Err(format!("couldn't check the sign-in ({})", resp.status()));
     }
     #[derive(Deserialize)]
     struct Ent {

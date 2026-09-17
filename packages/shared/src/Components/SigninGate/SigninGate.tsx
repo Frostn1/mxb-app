@@ -42,35 +42,53 @@ export default function SigninGate() {
   }, []);
 
   const signIn = async () => {
+    // Nothing to start while a poll is already running, and returning from the middle of the
+    // old flow left `busy` set for good — a wall with a button that never came back.
+    if (polling.current) return;
     setBusy(true);
     setNote("Opening Steam in your browser…");
+    polling.current = true;
     try {
       const url = await invoke<string>("steam_link_start");
       await openUrl(url);
       setNote("Waiting for Steam to confirm it's you…");
-      // Poll until the link lands, then let the gate have the final word.
-      if (polling.current) return;
-      polling.current = true;
-      for (let i = 0; i < 150; i++) {
+      // Poll until the link lands, then let the gate have the final word. The ceiling matches
+      // the control plane's own ten-minute sign-in window: stopping at five left a sign-in that
+      // was still perfectly valid — a Steam Guard prompt, a password typed slowly — with
+      // nothing watching for it.
+      let linked: string | null = null;
+      let lastError: string | null = null;
+      for (let i = 0; i < 300 && !linked; i++) {
         await new Promise((r) => setTimeout(r, 2000));
-        let linked: string | null = null;
         try {
           linked = await invoke<string | null>("steam_link_status");
-        } catch {
-          /* transient — keep waiting */
-        }
-        if (linked) {
-          setNote("Signed in. Getting you in…");
-          await invoke("recheck_gate").catch(() => {});
-          break;
+          lastError = null;
+        } catch (e) {
+          // One failed poll is nothing — the service is a network away. A run of them is the
+          // reason the wall is still up, so the last one is kept and said out loud below.
+          lastError = typeof e === "string" ? e : null;
         }
       }
-      polling.current = false;
-      setBusy(false);
+      if (linked) {
+        setNote("Signed in. Getting you in…");
+        await invoke("recheck_gate").catch(() => {});
+      } else if (lastError) {
+        setNote(`${lastError}. Try again.`);
+      } else {
+        // The old flow ended here with "Waiting for Steam to confirm it's you…" still on
+        // screen and nothing further ever happening, which is indistinguishable from the app
+        // being broken. The browser tab is where the answer is, and it is the half that can
+        // fail on its own — so say so, rather than going quiet.
+        setNote(
+          "Steam hasn't come back. Check the browser tab that opened: if it says the sign-in " +
+            "expired or couldn't be confirmed, start it again here.",
+        );
+      }
     } catch (e) {
+      setNote(typeof e === "string" ? e : "Couldn't start the sign-in. Try again.");
+    } finally {
       polling.current = false;
       setBusy(false);
-      setNote(typeof e === "string" ? e : "Couldn't start the sign-in. Try again.");
     }
   };
 
