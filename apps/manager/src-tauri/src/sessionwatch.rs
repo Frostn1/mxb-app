@@ -33,6 +33,18 @@ pub fn start(app: &AppHandle) {
         {
             let cfg = crate::config::load_or_detect(&app).unwrap_or_default();
             send_crash_reports(&app, &cfg).await;
+            // And the crash the game has not had yet: a trainer file carrying leftover
+            // memory takes it down at track load. Before the first launch of this run is
+            // the moment to clear it.
+            //
+            // Only while the game is down. A running game holds its own idea of these
+            // files and rewrites them when it exits, so repairing underneath it would be
+            // both undone and, for the file it has open, a rename it could fight. The app
+            // is normally started before the game; when it is not, the session-end pass
+            // below catches everything anyway.
+            if !gameproc::is_game_running() {
+                crate::trainerfix::repair_and_report(&app, &cfg);
+            }
         }
 
         let mut was_running = false;
@@ -105,6 +117,9 @@ pub fn start(app: &AppHandle) {
                 // first moment it can be sent: the game is gone, so the file is finished and
                 // nothing is competing for the disk.
                 send_crash_reports(&app, &cfg).await;
+                // The session just wrote its trainers, and that write is where the damage
+                // gets in. Clear it now rather than on the load screen that would crash.
+                crate::trainerfix::repair_and_report(&app, &cfg);
             }
 
             tokio::time::sleep(POLL).await;

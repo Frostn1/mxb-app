@@ -6,6 +6,7 @@ mod bikeswap;
 mod bundle;
 mod cancel;
 pub(crate) use mxb_core::cfg;
+mod trainerfix;
 mod trashbin;
 
 pub(crate) use mxb_core::cloudfiles;

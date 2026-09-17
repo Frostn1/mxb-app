@@ -16,6 +16,7 @@ import {
   crashDumpsOffered,
   crashDumpsWaiting,
   onModsDehydrated,
+  onTrainersRepaired,
   shareLogs,
 } from "@frost/shared/api/mods";
 import type { ModsDehydrated } from "@frost/shared/types";
@@ -72,6 +73,19 @@ export default function RuntimeBanner() {
     });
     return () => void stop.then((off) => off());
   }, []);
+
+  // Repaired, not asked about: the file was going to crash the game and it is already in
+  // the recycle bin if they want it back. A toast says what happened and gets out of the way.
+  useEffect(() => {
+    const stop = onTrainersRepaired((info) => {
+      toast.success(t("trainers.repaired", { count: String(info.count) }), {
+        description: info.examples.length
+          ? t("trainers.repairedDesc", { what: info.examples.join(", ") })
+          : t("trainers.repairedPlain"),
+      });
+    });
+    return () => void stop.then((off) => off());
+  }, [t]);
 
   useEffect(() => {
     void crashDumpsWaiting()

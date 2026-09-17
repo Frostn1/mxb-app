@@ -4,6 +4,7 @@ import type {
   SharePreview,
   Attachment,
   ModsDehydrated,
+  TrainersRepaired,
   BikeModels,
   BikeSounds,
   DropCommitItem,
@@ -2755,6 +2756,18 @@ export function onModsDehydrated(
   cb: (info: ModsDehydrated) => void,
 ): Promise<UnlistenFn> {
   return listen<ModsDehydrated>("mods-dehydrated", (e) => cb(e.payload));
+}
+
+/** Subscribe to trainer repairs.
+ *
+ *  The game writes a trainer file with uninitialised memory after the bike name, then crashes
+ *  reading it back at track load — the most common MX Bikes crash there is. The app clears
+ *  that slack when the game is closed, sends the original to the recycle bin, and says so
+ *  here. Fires only when something was actually repaired. */
+export function onTrainersRepaired(
+  cb: (info: TrainersRepaired) => void,
+): Promise<UnlistenFn> {
+  return listen<TrainersRepaired>("trainers-repaired", (e) => cb(e.payload));
 }
 
 /** Toggle watching the mods folder to reload the game on external changes. */

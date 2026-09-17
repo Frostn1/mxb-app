@@ -252,6 +252,11 @@ export const it: Translation = {
   "crash.sentDesc": "Grazie. È l'unica cosa che non possiamo avere in altro modo.",
   "crash.failed": "Invio non riuscito",
   "crash.failedDesc": "Nelle Impostazioni c'è un pulsante Invia log che fa la stessa cosa.",
+  "trainers.repaired": "Riparati {{count}} file dei giri",
+  "trainers.repairedDesc":
+    "I tuoi giri salvati per {{what}} erano danneggiati, cosa che fa crashare MX Bikes mentre carica una pista. Gli originali sono nel cestino.",
+  "trainers.repairedPlain":
+    "Erano danneggiati, cosa che fa crashare MX Bikes mentre carica una pista. Gli originali sono nel cestino.",
   "cloud.genericProvider":
     "uno strumento di sincronizzazione cloud",
   "cloud.evictedBody":

@@ -247,6 +247,11 @@ export const en = {
   "crash.sentDesc": "Thanks. That's the one thing we couldn't get any other way.",
   "crash.failed": "Couldn't send it",
   "crash.failedDesc": "Settings has a Send logs button that does the same thing.",
+  "trainers.repaired": "Fixed {{count}} lap file(s)",
+  "trainers.repairedDesc":
+    "Your saved laps for {{what}} had damage that crashes MX Bikes while a track loads. The originals are in your recycle bin.",
+  "trainers.repairedPlain":
+    "They had damage that crashes MX Bikes while a track loads. The originals are in your recycle bin.",
   "cloud.genericProvider":
     "a cloud sync tool",
   "cloud.evictedBody":
