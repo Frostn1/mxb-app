@@ -24,9 +24,19 @@ const G: f32 = 9.81;
 const KMH: f32 = 3.6;
 
 mod th {
-    pub const CORNER_CURVATURE: f32 = 1.0 / 45.0; // tighter than a 45 m radius
+    /// Curved enough to be worth looking at, as a noise gate rather than a definition of a
+    /// corner: 100 m radius.
+    ///
+    /// It used to be 1/45 — tighter than a 45 m radius, held every single metre. Most real
+    /// sweepers are 45-100 m, so they could never be corners however far round they went, and
+    /// came back as "Straight" because that is simply the leftover where nothing was found.
+    /// What makes a corner is how far it turns, which is `CORNER_MIN_DEG`, and that could never
+    /// rescue a sweeper because the sum is taken only over metres already past this gate.
+    pub const CORNER_CURVATURE: f32 = 1.0 / 100.0;
     pub const CORNER_MIN_DEG: f32 = 35.0;
-    pub const CORNER_MERGE_M: usize = 8;
+    /// A gap this long inside a corner doesn't end it. Generous enough to bridge a jump's
+    /// flight, and a bump or rut that straightens the bike for a moment.
+    pub const CORNER_MERGE_M: usize = 30;
     pub const CORNER_ENTRY_M: usize = 70; // room for the braking zone
     pub const CORNER_EXIT_M: usize = 25;
     pub const JUMP_MIN_AIR_S: f32 = 0.3;
@@ -555,6 +565,15 @@ impl Feature {
     }
 }
 
+/// Whether an air feature sits inside a corner rather than merely touching its edge. A jump
+/// leaving a corner, or landing into one, is its own feature; one taken mid-corner is part of it.
+fn mostly_within(air: &Feature, corner: &Feature) -> bool {
+    let lo = air.a.max(corner.a);
+    let hi = air.b.min(corner.b);
+    let overlap = hi.saturating_sub(lo);
+    overlap * 2 >= (air.b - air.a).max(1)
+}
+
 fn features(tr: &Trace) -> Vec<Feature> {
     let n = tr.len();
     let mut feats = Vec::new();
@@ -583,16 +602,27 @@ fn features(tr: &Trace) -> Vec<Feature> {
     }
     flush(&mut group, &mut feats);
 
-    let k = curvature(tr);
+    // Curvature, with the flights taken out of it. In the air the bike travels straight in plan
+    // view, so a jump through a corner read as no curvature at all for its whole length — far
+    // more than `CORNER_MERGE_M` — which split the corner into two halves that each fell under
+    // the minimum and were both thrown away. The ground either side of a flight is one corner.
+    let mut k = curvature(tr);
+    for i in 0..n.min(k.len()) {
+        if tr.pts[i].air {
+            k[i] = f32::NAN;
+        }
+    }
     let mut cores: Vec<(usize, usize, f32)> = Vec::new();
     let mut i = 0;
     while i < n {
-        if k[i].abs() <= th::CORNER_CURVATURE {
+        if !(k[i].abs() > th::CORNER_CURVATURE) {
             i += 1;
             continue;
         }
         let (s, sign) = (i, k[i].signum());
-        while i < n && k[i].abs() > th::CORNER_CURVATURE && k[i].signum() == sign {
+        // A flight, or a metre of straightening, doesn't end the corner: keep walking while the
+        // ground still turns the same way, and let the merge below join what it skipped.
+        while i < n && (k[i].is_nan() || (k[i].abs() > th::CORNER_CURVATURE && k[i].signum() == sign)) {
             i += 1;
         }
         match cores.last_mut() {
@@ -601,12 +631,35 @@ fn features(tr: &Trace) -> Vec<Feature> {
         }
     }
     for (a, b, sign) in cores {
-        let turned = k[a..=b].iter().sum::<f32>().abs() * STEP_M * 180.0 / PI;
-        let in_jump = feats.iter().any(|f| f.kind != Kind::Corner && a <= f.b && f.a <= b);
-        if turned >= th::CORNER_MIN_DEG && !in_jump {
+        // Only the ground counts towards how far it turned.
+        let turned = k[a..=b].iter().filter(|v| !v.is_nan()).sum::<f32>().abs() * STEP_M * 180.0 / PI;
+        if turned >= th::CORNER_MIN_DEG {
             feats.push(Feature { kind: Kind::Corner, a, b, dir: sign as i8, runs: Vec::new() });
         }
     }
+    // A jump that sits inside a corner belongs to the corner. It used to delete it outright:
+    // any overlap at all and the corner was never built, so a jump on a curved piece of track —
+    // ordinary motocross — came back as "Rhythm 2" with the braking zone before it orphaned into
+    // a "Straight". The air feature is folded in instead, so the corner keeps its name and its
+    // jumps keep their advice.
+    // Corners first, so every corner is there to fold into: the air features are built before
+    // them above, and folding in list order would always see an empty list.
+    let (mut folded, air): (Vec<Feature>, Vec<Feature>) =
+        std::mem::take(&mut feats).into_iter().partition(|f| f.kind == Kind::Corner);
+    for f in air {
+        let inside = folded
+            .iter_mut()
+            .find(|c| c.a <= f.b && f.a <= c.b && mostly_within(&f, c));
+        match inside {
+            Some(c) => {
+                c.a = c.a.min(f.a);
+                c.b = c.b.max(f.b);
+                c.runs.extend(f.runs);
+            }
+            None => folded.push(f),
+        }
+    }
+    feats = folded;
     feats.sort_by_key(|f| f.a);
     feats
 }
@@ -2701,5 +2754,27 @@ pub(crate) mod tests {
     fn taking_off_to_one_side_names_the_jump_line() {
         let rv = review(&lap(&FAST), &lap(&FAST), BIKE);
         assert!(!skills(section(&rv, "Jump 1")).contains(&"jump_line"), "the same line says nothing");
+    }
+
+    /// A jump on a curved piece of track is ordinary motocross, and it used to delete the
+    /// corner: any overlap at all and the corner was never built, so the rider got "Rhythm 2"
+    /// where the turn is, and the braking zone before it orphaned into a "Straight". The
+    /// fixture has only ever put its jump on a straight, so nothing caught this.
+    #[test]
+    fn a_jump_through_a_corner_is_still_a_corner() {
+        // Turn 1 runs 200 m to 200 + pi*R (about 263 m). Put the jump in the middle of it.
+        let over = lap(&Style { jump: (215.0, 235.0, 3.0), ..FAST });
+        let secs = sections(&over);
+        let names: Vec<&str> = secs.iter().map(|s| s.name.as_str()).collect();
+        assert!(names.contains(&"Turn 1"), "the corner survived its jump: {names:?}");
+        let t1 = secs.iter().find(|s| s.name == "Turn 1").unwrap();
+        assert_eq!(t1.kind, Kind::Corner);
+        assert_eq!(t1.dir, 1, "and it is still a right-hander");
+        // The jump is folded into the corner, so its advice still fires there rather than the
+        // whole thing being renamed.
+        assert!(!t1.runs.is_empty(), "the corner carries the jump's air run: {names:?}");
+        // The symptom the rider reported: the turn coming back named after the jump on it.
+        assert!(!names.iter().any(|n| n.starts_with("Rhythm")), "the turn was renamed: {names:?}");
+        assert!(!names.iter().any(|n| n.starts_with("Jump")), "the jump is part of the turn, not beside it: {names:?}");
     }
 }

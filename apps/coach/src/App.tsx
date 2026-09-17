@@ -10,6 +10,7 @@ import { I18nProvider, setAmbientVars, useT } from "@/i18n";
 import Sessions from "./Components/Sessions/Sessions";
 import Settings from "./Components/Settings/Settings";
 import UpdateBanner from "./Components/UpdateBanner";
+import CueKeeper from "./CueKeeper";
 import { track } from "@/lib/analytics";
 import { UpdateProvider } from "./Context/Update";
 import SigninGate from "@frost/shared/Components/SigninGate/SigninGate";
@@ -114,6 +115,10 @@ export default function App() {
       <I18nProvider>
         <UpdateProvider>
           <Shell />
+          {/* Keeps the cue sheet following the rider's laps wherever they are in the app.
+              It used to live inside the Live cues panel, so it only ran while that panel was
+              on screen — which is why the cues never changed. */}
+          <CueKeeper />
           {/* The Steam sign-in wall, shown only when the estate gate requires one. */}
           <SigninGate />
         </UpdateProvider>
