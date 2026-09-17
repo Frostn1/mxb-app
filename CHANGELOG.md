@@ -39,6 +39,13 @@
   a Steam copy the MX Bikes GUID *is* the Steam account written in hex, so the ban is recognised
   from the sign-in alone — deleting an account, or never having made one, is not a way round it.
 
+## 2026-09-17 — v0.17.1 — Signing in with Steam works
+
+A hotfix. v0.16.0 put a Steam sign-in in front of the whole lineup and the wall it
+was meant to raise mostly never appeared — so people were told they had to sign in
+and given no way to do it. Everything here is that, and the ways it went wrong for
+the people who did reach it.
+
 ### Fixed
 - The "Sign in with Steam" wall now always appears when it is needed. It was announced by the
   app the moment the service answered — which on a cold start is usually before the window has
