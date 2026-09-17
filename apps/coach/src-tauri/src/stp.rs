@@ -236,6 +236,27 @@ pub fn select_default(dir: &Path, name: &str, wet: bool) -> Result<(), String> {
     crate::ini::write(&dir.join(DEFAULT_INI), SETUP_SECTION, &keys)
 }
 
+/// Where the game reads the record for this track, given any setup of the same bike in the
+/// same profile: `<profile>\setups\<track>\<bike>`.
+///
+/// There is no record beside a `common` setup — the game only ever reads one under a track —
+/// so a copy of one has to be pointed at from here.
+pub fn track_dir(file: &Path, track: &str) -> Option<PathBuf> {
+    let bike = file.parent()?;
+    let setups = bike.parent()?.parent()?;
+    Some(setups.join(track).join(bike.file_name()?))
+}
+
+/// How the record names the setup in `dir`: plainly for one under a track, and with the ':'
+/// the game marks a `common` setup by (see `locate`), which is the spelling the plugin hands
+/// back when the rider is riding it.
+pub fn reference(dir: &Path, name: &str) -> String {
+    match dir.parent().and_then(|p| p.file_name()) {
+        Some(place) if place.eq_ignore_ascii_case("common") => format!(":{name}"),
+        _ => name.to_string(),
+    }
+}
+
 /// Which setup `dir` currently loads for practice, if it says.
 pub fn selected_default(dir: &Path) -> Option<String> {
     let text = std::fs::read_to_string(dir.join(DEFAULT_INI)).ok()?;
@@ -520,5 +541,19 @@ pub(crate) mod tests {
         assert_eq!(locate(&root, "Default", "indiana", "2027_K85M"), None);
         assert_eq!(locate(&root, ":missing", "indiana", "2027_K85M"), None);
         std::fs::remove_dir_all(&root).ok();
+    }
+
+    /// The record lives under the track even for a setup kept for every track, and names a
+    /// `common` setup the way the game does.
+    #[test]
+    fn the_record_for_a_common_setup_is_still_under_the_track() {
+        let setups = Path::new("C:/profiles/Frost/setups");
+        let common = setups.join("common").join("2027_K85M");
+        let mine = setups.join("indiana").join("2027_K85M");
+        assert_eq!(track_dir(&common.join("frost-race.stp"), "indiana"), Some(mine.clone()));
+        assert_eq!(track_dir(&mine.join("wet.stp"), "indiana"), Some(mine.clone()));
+        assert_eq!(track_dir(&mine.join("wet.stp"), "otherplace"), Some(setups.join("otherplace").join("2027_K85M")));
+        assert_eq!(reference(&common, "frost-race"), ":frost-race");
+        assert_eq!(reference(&mine, "frost-race (coach)"), "frost-race (coach)");
     }
 }

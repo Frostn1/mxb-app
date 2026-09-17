@@ -41,6 +41,14 @@
   ground built from your laps instead of the track you were riding. It has never worked.
 - The Servers tab in MXB App had the same fault: it read your installed tracks as missing, and
   offered to sell you tracks you already own.
+- A setup MXB Coach saves is saved for the track you rode, and the game is set to load it there.
+  If the setup you were on was one you keep for every track, the copy was kept the same way — and
+  the game doesn't read which setup to load from there, so it went on loading your old one and
+  every lap you read left another copy behind.
+- The Save button waits for the next lap once it has written a setup, so pressing it twice no
+  longer leaves you two copies of the same thing.
+- After setting a setup, the coach reads the game's own choice back and says plainly when the
+  game will still load something else, instead of telling you it worked.
 
 ## 2026-09-16 — MXB Coach v0.1.15-beta.15
 
