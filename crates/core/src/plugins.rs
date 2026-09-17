@@ -272,9 +272,31 @@ pub struct Manifest {
     /// Minimum app version this plugin needs, e.g. "0.12.4".
     #[serde(rename = "minAppVersion", default)]
     pub min_app_version: Option<String>,
+    /// Which window the panels belong in. See [`Host`].
+    #[serde(default)]
+    pub host: Host,
     /// Nav rows the plugin contributes.
     #[serde(default)]
     pub panels: Vec<PanelDecl>,
+}
+
+/// The app a plugin's panels open in.
+///
+/// Both binaries can mount a plugin — the licence, the bundle and the file sandbox are all in
+/// this crate — so a plugin says where its panels belong rather than the answer being "the
+/// binary that happens to be running". The Replay Mod is why: cutting a replay is the same
+/// errand as painting a bike or building a track, and none of it is mod management, so it
+/// belongs beside those in the Studio and not in a rail row of the mod manager.
+///
+/// **Studio is the default**, including for a manifest written before this field existed. A
+/// panel is a creator's tool until it says otherwise; the mod manager's own job — buying,
+/// installing and updating the plugin — is not a panel and happens there either way.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Host {
+    #[default]
+    Studio,
+    Manager,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -643,6 +665,43 @@ mod tests {
         assert!(dir.join("replaycam/payload/frostreplay.dll").exists());
     }
 
+    /// Where a plugin's panels open, when its manifest does not say.
+    ///
+    /// The Replay Mod's bundle was written before the field existed and its panels belong in
+    /// the Studio, so silence has to mean Studio — reading it as Manager would put the mod
+    /// back in the app the move took it out of, without a line of it changing.
+    #[test]
+    fn a_manifest_that_names_no_host_opens_in_the_studio() {
+        let dir = tempdir();
+        let zip_bytes = build_zip(&[
+            (
+                "manifest.json",
+                br#"{"id":"replaycam","name":"Replay","version":"1.0.0","entry":"ui.js"}"#.to_vec(),
+            ),
+            ("ui.js", b"export default 1;".to_vec()),
+        ]);
+        let sha = sha256_hex(&zip_bytes);
+        let m = install_bundle(&dir, "replaycam", &zip_bytes, Some(&sha), "0.12.4").unwrap();
+        assert_eq!(m.host, Host::Studio);
+    }
+
+    /// And a plugin that really does belong in the mod manager can still say so.
+    #[test]
+    fn a_manifest_can_ask_for_the_manager_instead() {
+        let dir = tempdir();
+        let zip_bytes = build_zip(&[
+            (
+                "manifest.json",
+                br#"{"id":"p","name":"P","version":"1.0.0","entry":"ui.js","host":"manager"}"#
+                    .to_vec(),
+            ),
+            ("ui.js", b"export default 1;".to_vec()),
+        ]);
+        let sha = sha256_hex(&zip_bytes);
+        let m = install_bundle(&dir, "p", &zip_bytes, Some(&sha), "0.12.4").unwrap();
+        assert_eq!(m.host, Host::Manager);
+    }
+
     #[test]
     fn install_refuses_a_bundle_claiming_to_be_another_plugin() {
         let dir = tempdir();
@@ -798,6 +857,10 @@ pub struct PluginView {
     pub installed_version: Option<String>,
     /// True when a license is live and the installed build is the one on offer.
     pub ready: bool,
+    /// Which app this plugin's panels open in, from the manifest on disk. [`Host::Studio`]
+    /// until a build is installed and says otherwise — so the Plugins page can send someone
+    /// to the right window before they go looking for a row that was never going to be here.
+    pub host: Host,
 }
 
 #[derive(Deserialize)]
@@ -830,7 +893,7 @@ struct LicenseRow {
 /// whole point of a signed license is that being offline is not a licensing failure.
 #[tauri::command]
 pub async fn plugin_list(app: tauri::AppHandle) -> Result<Vec<PluginView>, String> {
-    let base = crate::paintsync::control_plane();
+    let base = crate::names::control_plane();
     let client = reqwest::Client::new();
 
     // The catalogue is public, so this half works before enrolment.
@@ -882,6 +945,7 @@ pub async fn plugin_list(app: tauri::AppHandle) -> Result<Vec<PluginView>, Strin
         };
         out.push(PluginView {
             ready: status == Status::Live && up_to_date,
+            host: installed_manifest(&app, &p.id).map(|m| m.host).unwrap_or_default(),
             id: p.id.clone(),
             name: p.name,
             summary: p.summary,
@@ -903,7 +967,7 @@ pub async fn plugin_redeem(app: tauri::AppHandle, code: String) -> Result<String
     let resp = reqwest::Client::new()
         .post(format!(
             "{}/v1/plugins/redeem",
-            crate::paintsync::control_plane()
+            crate::names::control_plane()
         ))
         .bearer_auth(&tok)
         .json(&serde_json::json!({ "code": code }))
@@ -954,7 +1018,7 @@ pub async fn plugin_install(app: tauri::AppHandle, id: String) -> Result<String,
     let resp = reqwest::Client::new()
         .get(format!(
             "{}/v1/plugins/{id}/bundle",
-            crate::paintsync::control_plane()
+            crate::names::control_plane()
         ))
         .bearer_auth(&tok)
         .send()
@@ -1009,6 +1073,17 @@ pub async fn plugin_remove(app: tauri::AppHandle, id: String) -> Result<(), Stri
 pub struct PluginRuntime {
     pub manifest: Manifest,
     pub source: String,
+}
+
+/// The manifest of an installed build, without checking the licence.
+///
+/// Read-only and about placement, not permission: the Plugins page uses it to say which
+/// window a plugin's panels open in, and a lapsed licence does not move them.
+pub fn installed_manifest(app: &tauri::AppHandle, id: &str) -> Option<Manifest> {
+    let root = plugins_dir(app).ok()?.join(id);
+    std::fs::read(root.join("manifest.json"))
+        .ok()
+        .and_then(|b| serde_json::from_slice(&b).ok())
 }
 
 #[tauri::command]

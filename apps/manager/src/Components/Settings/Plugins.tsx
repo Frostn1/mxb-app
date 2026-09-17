@@ -1,6 +1,15 @@
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
-import { CheckCircle2, Download, Loader2, Lock, RefreshCw, Trash2, WifiOff } from "lucide-react";
+import {
+  CheckCircle2,
+  Download,
+  ExternalLink,
+  Loader2,
+  Lock,
+  RefreshCw,
+  Trash2,
+  WifiOff,
+} from "lucide-react";
 import { Button } from "@frost/shared/Components/ui/button";
 import { Input } from "@frost/shared/Components/ui/input";
 import { cn } from "@frost/shared/lib/utils";
@@ -10,8 +19,9 @@ import {
   redeemPluginKey,
   removePlugin,
   type PluginView,
-} from "@/api/plugins";
-import { mountPlugin, unmountPlugin } from "@/lib/pluginHost";
+} from "@frost/shared/api/plugins";
+import { mountPlugin, unmountPlugin } from "@frost/shared/lib/pluginHost";
+import { launchStudio } from "@frost/shared/api/mods";
 import { useT, type TFunc, type TKey } from "@/i18n";
 
 /** `1756598400` -> `30 September`. Whole days: nobody renews to the minute. */
@@ -97,16 +107,22 @@ const PluginRow = ({
   busy,
   onInstall,
   onRemove,
+  onOpenStudio,
 }: {
   plugin: PluginView;
   busy: boolean;
   onInstall: () => void;
   onRemove: () => void;
+  onOpenStudio: () => void;
 }) => {
   const t = useT();
   const { tone, title, detail } = describe(t, plugin);
   const Icon = TONE_ICON[tone];
   const canInstall = plugin.published && (plugin.status === "live") && !plugin.ready;
+  // A working plugin whose panels are in the other window. Saying where it went is the
+  // whole job here: somebody who has just installed the Replay Mod and finds no new row in
+  // this app has been told the install worked and shown nothing to prove it.
+  const inStudio = plugin.ready && plugin.host === "studio";
 
   return (
     <div className="flex items-start gap-3 rounded-lg border p-3">
@@ -125,8 +141,17 @@ const PluginRow = ({
           <span className={cn("font-medium", TONE_CLASS[tone])}>{title}</span>
           <span className="text-muted-foreground"> — {detail}</span>
         </p>
+        {inStudio && (
+          <p className="mt-1 text-sm text-muted-foreground">{t("plugins.inStudio")}</p>
+        )}
       </div>
       <div className="flex shrink-0 gap-2">
+        {inStudio && (
+          <Button size="sm" variant="outline" onClick={onOpenStudio} disabled={busy}>
+            <ExternalLink className="size-3.5" />
+            {t("plugins.openStudio")}
+          </Button>
+        )}
         {canInstall && (
           <Button size="sm" onClick={onInstall} disabled={busy}>
             {busy && <Loader2 className="size-3.5 animate-spin" />}
@@ -194,19 +219,39 @@ const Plugins = () => {
     setBusyId(p.id);
     try {
       const name = await installPlugin(p.id);
-      // Mount straight away: an install that needs a restart to show up reads as an install
-      // that did not work.
-      try {
-        await mountPlugin(p.id);
-      } catch (e) {
-        toast.error(String(e));
+      // Where it went is only knowable after the install: the manifest that says so arrives
+      // inside the bundle. So the list is re-read here rather than after the toast.
+      const rows = await listPlugins().catch(() => [] as PluginView[]);
+      if (rows.length) setPlugins(rows);
+      const row = rows.find((r) => r.id === p.id);
+      const studio = (row?.host ?? "studio") === "studio";
+      // Mount straight away, when this is the window it belongs in: an install that needs a
+      // restart to show up reads as an install that did not work.
+      if (!studio) {
+        try {
+          await mountPlugin(p.id);
+        } catch (e) {
+          toast.error(String(e));
+        }
       }
-      toast.success(t("plugins.installed", { name }));
-      await refresh();
+      toast.success(
+        studio ? t("plugins.installedStudio", { name }) : t("plugins.installed", { name }),
+      );
     } catch (e) {
       toast.error(String(e));
     } finally {
       setBusyId(null);
+    }
+  };
+
+  // Hand over to the window the panels are actually in, naming the plugin so it opens on one
+  // of its own rather than on whatever the Studio shows first. A studio that isn't installed
+  // says so in the toast — the Studio card on the dashboard is where it gets installed.
+  const openStudio = async (p: PluginView) => {
+    try {
+      await launchStudio(p.id);
+    } catch (e) {
+      toast.error(String(e));
     }
   };
 
@@ -280,6 +325,7 @@ const Plugins = () => {
             busy={busyId === p.id}
             onInstall={() => void install(p)}
             onRemove={() => void remove(p)}
+            onOpenStudio={() => void openStudio(p)}
           />
         ))}
       </div>

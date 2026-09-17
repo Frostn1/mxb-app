@@ -3832,7 +3832,19 @@ export function studioInstall(): Promise<StudioInstall | null> {
   return invoke<StudioInstall | null>("studio_install");
 }
 
-/** Start Frost's Studio. Rejects with a real reason when it can't. */
-export function launchStudio(): Promise<void> {
-  return invoke<void>("launch_studio");
+/**
+ * Start Frost's Studio, optionally on a named screen (`"replay"`).
+ *
+ * The screen name is how a plugin whose panels live in the Studio is opened from here: the
+ * manager still sells, installs and updates it, and hands the person straight to the window
+ * its panels are actually in. Rejects with a real reason when the Studio can't be started.
+ */
+export function launchStudio(view?: string): Promise<void> {
+  return invoke<void>("launch_studio", { view: view ?? null });
+}
+
+/** Which screen this Studio was started on, from `--view`. Null when nobody asked.
+ *  Registered by Frost's Studio only — it is how the manager's handoff arrives. */
+export function initialView(): Promise<string | null> {
+  return invoke<string | null>("initial_view");
 }
