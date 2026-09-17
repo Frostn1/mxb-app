@@ -271,6 +271,14 @@ pub const KNOWN_EVENTS: &[&str] = &[
     // Lifecycle, from every app.
     "app.start",
     "app.update",
+    // The survey prompt, from every app. What the player actually answered goes to a different
+    // endpoint ([`crate::survey`]); these three are the funnel around it — how often the prompt
+    // was put up, answered and waved away. Without the rate, a share of answers is unreadable:
+    // a figure of 72% good means one thing when nearly everybody answered and another when nine
+    // in ten dismissed it.
+    "survey.shown",
+    "survey.answer",
+    "survey.dismiss",
     // The manager's pages. One name per tab; `view.plugin` is every plugin panel together,
     // because naming each one would be unbounded cardinality.
     "view.browse",
@@ -306,7 +314,17 @@ pub const KNOWN_EVENTS: &[&str] = &[
     "view.studio.pose",
     "view.studio.track",
     "view.studio.diagnose",
+    "view.studio.replay",
     "view.studio.settings",
+    // The replay recorder. How a recording started is the question worth answering: the
+    // feature exists to make the automatic one the usual answer, and only a count can say
+    // whether it is. Nothing about what was recorded is counted — a track name is not a
+    // counter. (No quoted phrase in this comment, deliberately: `usage.test.ts` reads every
+    // double-quoted string inside this block as a name, so one here is a name that does not
+    // exist and the drift check fails on it.)
+    "replay.record.auto",
+    "replay.record.manual",
+    "replay.ffmpeg.fetch",
     "track.generate",
     "track.settings",
     "track.build.install",
@@ -402,7 +420,12 @@ pub async fn flush(app: &AppHandle) {
 }
 
 /// The header a signed report carries, matching the control plane's `SIGNATURE_HEADER`.
-const SIGNATURE_HEADER: &str = "X-MXB-Usage";
+///
+/// `pub(crate)` because the survey posts ([`crate::survey`]) are signed the same way with the
+/// same build key and checked by the same function on the other side. One construction, one
+/// header, one place to change it — the name is a historical accident rather than a claim that
+/// only counters travel under it.
+pub(crate) const SIGNATURE_HEADER: &str = "X-MXB-Usage";
 
 /// The XOR pad `build.rs` obfuscates the build key with before baking it in. MUST match
 /// `USAGE_PAD` there.
@@ -465,7 +488,7 @@ fn decode_key(baked: Option<&str>) -> Option<Vec<u8>> {
 /// per-address cap buys nothing because every visitor brings a fresh one.
 ///
 /// The timestamp is what bounds replay; see the endpoint for how far out it may be.
-fn signature(body: &str) -> Option<String> {
+pub(crate) fn signature(body: &str) -> Option<String> {
     signature_with(build_key().as_deref(), body)
 }
 

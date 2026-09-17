@@ -91,6 +91,13 @@ declare global {
      *  accounts as before. A var in `wrangler.jsonc`, so switching it is a reviewable diff — and
      *  a switch, not a build, because it locks out anyone without a Steam copy (see README). */
     MXB_REQUIRE_STEAM?: string;
+    /** Whether mxbsecure.com takes new creators. `"open"` leaves the front door open to anyone
+     *  signed in with Steam; anything else, **including unset**, closes it. Closed is the
+     *  default on purpose: this is the door an unlocker walks back through with a fresh Steam
+     *  account, and a deployment that was never told either way should not be holding it open.
+     *  The admin page still adds creators by hand, which is what "closed" means — invite-only,
+     *  not shut. A var in `wrangler.jsonc`, so opening it is a reviewable diff. */
+    MXB_CREATOR_SIGNUP?: string;
     /** Rate limit on `/v1/web/steam/login` and `/return`, per client address (`ratelimits` in
      *  `wrangler.jsonc`). Optional so tests and a bare `wrangler dev` run without it. */
     SIGNIN_LIMITER?: RateLimit;

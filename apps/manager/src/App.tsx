@@ -25,6 +25,7 @@ import { setAmbientVars } from "@/i18n";
 import { UpdateProvider } from "./Context/Update";
 import RuntimeBanner from "./Components/RuntimeBanner/RuntimeBanner";
 import SigninGate from "@frost/shared/Components/SigninGate/SigninGate";
+import SurveyPrompt from "@frost/shared/Components/Survey/SurveyPrompt";
 import UpdateBanner from "./Components/UpdateBanner/UpdateBanner";
 import type { Config, GameId, GameInfo } from "@frost/shared/types";
 
@@ -208,6 +209,10 @@ const App = () => {
             {/* Offer to register loose model-swap folders once the app is set up and the
                 intro tour is out of the way. */}
             {ready && config && !showWelcome && <LooseSwapPrompt />}
+            {/* The survey prompt. Shows itself rarely and on its own schedule — the decision
+                is in `crates/core/src/survey.rs`, not here. Mounted last so it sits over the
+                shell and under the sign-in wall. */}
+            <SurveyPrompt />
           </UpdateProvider>
         </TooltipProvider>
       </FrostmodProvider>

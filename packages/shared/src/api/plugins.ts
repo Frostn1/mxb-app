@@ -10,6 +10,15 @@ import { invoke } from "@tauri-apps/api/core";
  */
 export type PluginStatus = "live" | "stale" | "expired";
 
+/**
+ * Which app a plugin's panels open in.
+ *
+ * Studio unless a manifest says otherwise, including for a bundle written before the field
+ * existed: a panel is a creator's tool. The licence is still bought, installed and updated in
+ * MXB App either way — that half is not a panel.
+ */
+export type PluginHost = "studio" | "manager";
+
 export interface PluginView {
   id: string;
   name: string;
@@ -24,6 +33,9 @@ export interface PluginView {
   installedVersion: string | null;
   /** Licensed, installed, and on the current build — the only state that runs. */
   ready: boolean;
+  /** Where this plugin's panels open. Read from the manifest of the installed build, so it
+   *  is `"studio"` until there is one to read. */
+  host: PluginHost;
 }
 
 export interface PluginManifest {
@@ -32,6 +44,9 @@ export interface PluginManifest {
   version: string;
   entry: string;
   minAppVersion?: string | null;
+  /** Which app the panels belong in. Absent in a manifest written before the Replay Mod
+   *  moved to the Studio, which reads as `"studio"` — see `PluginHost`. */
+  host?: PluginHost;
   panels: { id: string; label: string; icon?: string | null }[];
 }
 

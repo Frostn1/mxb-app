@@ -150,6 +150,14 @@ export const KNOWN_EVENTS: Readonly<Record<string, readonly AppId[]>> = {
   "app.start": EVERY,
   "app.update": EVERY,
 
+  // The survey prompt, from all three. The funnel it draws is the only way to read an answer
+  // honestly: "72% said good" means one thing when nearly everyone answered and another when
+  // nine in ten waved it away, and the rate itself is what says whether the prompt has become
+  // furniture. `survey.ts` holds the answers; these three only count the asking.
+  "survey.shown": EVERY,
+  "survey.answer": EVERY,
+  "survey.dismiss": EVERY,
+
   // The manager's pages. `view.plugin` is every plugin panel in one bucket, because naming
   // each one would be unbounded cardinality.
   "view.browse": MANAGER,
@@ -189,7 +197,14 @@ export const KNOWN_EVENTS: Readonly<Record<string, readonly AppId[]>> = {
   "view.studio.pose": STUDIO,
   "view.studio.track": STUDIO,
   "view.studio.diagnose": STUDIO,
+  "view.studio.replay": STUDIO,
   "view.studio.settings": STUDIO,
+  // The replay recorder. How a recording started is the question worth answering — the feature
+  // exists to make the automatic one the usual answer, and only a count can say whether it is.
+  "replay.record.auto": STUDIO,
+  "replay.record.manual": STUDIO,
+  "replay.ffmpeg.fetch": STUDIO,
+
   "track.generate": STUDIO,
   "track.settings": STUDIO,
   "track.build.install": STUDIO,

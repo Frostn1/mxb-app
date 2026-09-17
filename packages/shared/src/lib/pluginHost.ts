@@ -2,7 +2,8 @@ import { invoke } from "@tauri-apps/api/core";
 import type { ComponentType } from "react";
 import * as React from "react";
 
-import { pluginRuntime, type PluginManifest } from "@/api/plugins";
+import { pluginRuntime, type PluginHost, type PluginManifest } from "../api/plugins";
+import type { ReplayStatus } from "../api/replay";
 
 /**
  * Loading and mounting a paid plugin's UI.
@@ -44,9 +45,40 @@ export interface PluginFiles {
   remove(path: string): Promise<void>;
 }
 
+/**
+ * The replay recorder, handed to a plugin whose panels run in the Studio.
+ *
+ * Here rather than left to `invoke` because it is the one thing the Replay Mod's panels
+ * cannot do for themselves and the app can: a child encoder against the game's window. A
+ * panel that wants a **Record** button of its own uses this; a panel that does nothing gets
+ * the recording anyway, because the mod's own take signal starts one without the window
+ * being open at all.
+ *
+ * Only in the Studio. In the mod manager every method rejects — the commands behind them are
+ * registered by one binary, and that is the binary the panels are in.
+ */
+export interface PluginRecorder {
+  status(): Promise<ReplayStatus>;
+  /** Start recording now. Resolves with the file being written. */
+  start(): Promise<string>;
+  /** Stop. Resolves with the finished file, or null if nothing was recording. */
+  stop(): Promise<string | null>;
+  /** Called whenever the recorder's state moves. Returns an unsubscribe. */
+  onChange(fn: (status: ReplayStatus) => void): () => void;
+}
+
 export interface PluginApi {
-  /** Format version of this surface. A plugin should refuse a major it does not know. */
+  /**
+   * Format version of this surface. A plugin should refuse a major it does not know.
+   *
+   * Still 1 after the move to the Studio, deliberately: everything that arrived with it —
+   * `host`, `recorder` — is additive, and a bundle that checks `version === 1` and knows
+   * nothing about either still loads and still works.
+   */
   readonly version: 1;
+  /** Which app this panel is running in. `"studio"` for everything but a plugin that asked
+   *  for the manager in its manifest. */
+  readonly host: PluginHost;
   /** React itself, so a plugin bundle carries no copy of its own and hooks work. */
   readonly react: typeof React;
   /**
@@ -63,6 +95,8 @@ export interface PluginApi {
    * opposed to a paid panel, gets installed. Resolves with the filenames written.
    */
   installPayload(): Promise<string[]>;
+  /** Record the game while the mod flies a shot — see [`PluginRecorder`]. */
+  readonly recorder: PluginRecorder;
   /** Register the panels this plugin contributes. Called once, from the entry module. */
   registerPanels(panels: PluginPanel[]): void;
 }
@@ -70,6 +104,32 @@ export interface PluginApi {
 export interface LoadedPlugin {
   manifest: PluginManifest;
   panels: PluginPanel[];
+}
+
+/**
+ * The recorder handed to panels, and how the app that has one provides it.
+ *
+ * Injected rather than imported, because only one binary registers those commands. Importing
+ * them here would put `replay_record` in the mod manager's bundle as well, where it is a call
+ * that can only ever fail — and the repo's command census would rightly call that a command
+ * the app reaches but does not register.
+ *
+ * The default is what a plugin gets in an app without a recorder: a refusal that says which
+ * window has one, rather than a "command not found" from the backend.
+ */
+const absent = (): Promise<never> =>
+  Promise.reject(new Error("The replay recorder only runs in Frost's Studio."));
+
+let recorder: PluginRecorder = {
+  status: absent,
+  start: absent,
+  stop: absent,
+  onChange: () => () => {},
+};
+
+/** Called once by the app that owns the recorder, before any plugin mounts. */
+export function providePluginRecorder(r: PluginRecorder): void {
+  recorder = r;
 }
 
 /** Plugins mounted this session, by id. A second mount of the same id is a no-op. */
@@ -109,6 +169,7 @@ export async function mountPlugin(id: string): Promise<LoadedPlugin> {
   const panels: PluginPanel[] = [];
   const api: PluginApi = {
     version: 1,
+    host: manifest.host ?? "studio",
     react: React,
     invoke: <T,>(command: string, args?: Record<string, unknown>) =>
       invoke<T>(command, args),
@@ -119,6 +180,7 @@ export async function mountPlugin(id: string): Promise<LoadedPlugin> {
       remove: (path) => invoke<void>("plugin_delete_file", { id, path }),
     },
     installPayload: () => invoke<string[]>("plugin_install_payload", { id }),
+    recorder,
     registerPanels: (p) => panels.push(...p),
   };
 

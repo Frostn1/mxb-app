@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState, type Ref } from "react";
 import { Settings as SettingsIcon, Play, Gamepad2, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@frost/shared/lib/utils";
-import type { LoadedPlugin } from "@/lib/pluginHost";
+import type { LoadedPlugin } from "@frost/shared/lib/pluginHost";
 import { useConfig } from "@frost/shared/Context/Config";
 import { useGameRunning } from "../../lib/useGameRunning";
 import { useT } from "@/i18n";

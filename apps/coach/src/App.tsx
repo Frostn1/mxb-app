@@ -14,6 +14,7 @@ import CueKeeper from "./CueKeeper";
 import { track } from "@/lib/analytics";
 import { UpdateProvider } from "./Context/Update";
 import SigninGate from "@frost/shared/Components/SigninGate/SigninGate";
+import SurveyPrompt from "@frost/shared/Components/Survey/SurveyPrompt";
 
 type View = "sessions" | "settings";
 
@@ -121,6 +122,8 @@ export default function App() {
           <CueKeeper />
           {/* The Steam sign-in wall, shown only when the estate gate requires one. */}
           <SigninGate />
+          {/* The survey prompt. Rare, and on its own schedule — see `crates/core/src/survey.rs`. */}
+          <SurveyPrompt />
         </UpdateProvider>
       </I18nProvider>
     </ThemeProvider>

@@ -49,8 +49,10 @@ pub(crate) use mxb_core::paint;
 pub(crate) use mxb_core::paintwatch;
 mod peident;
 pub(crate) use mxb_core::pkz;
-/// Paid plugins: what this install may run, and how it proves it offline.
-mod plugins;
+/// Paid plugins: what this install may run, and how it proves it offline. Shared, because a
+/// plugin's panels now open in Frost's Studio while its licence is still bought, installed
+/// and updated here — one licence check, compiled into both binaries.
+pub(crate) use mxb_core::plugins;
 /// What the running game has loaded, reported for diagnostics.
 mod procmods;
 mod roster;
@@ -6828,6 +6830,10 @@ fn main() {
             // Anonymous counters. Started last of the startup tasks and after the config
             // work above, because the install id it mints is saved into that same config.
             usage::start(handle, usage::MANAGER);
+            // The survey prompt. Started beside the counters and gated on the same consent:
+            // it answers the question counters cannot, which is whether any of this is any
+            // good. Nothing is fetched or asked when either switch is off.
+            mxb_core::survey::start(handle, usage::MANAGER);
             // Warm an empty address book from the shared one, once, before anybody needs it.
             // The Servers tab already rebuilds its whole list with `GETINFO` when the master
             // won't answer — but only from addresses this install has been told about, so on a
@@ -7005,6 +7011,11 @@ fn main() {
             set_run_in_background,
             set_analytics_enabled,
             track_event,
+            mxb_core::survey::survey_due,
+            mxb_core::survey::survey_shown,
+            mxb_core::survey::survey_answer,
+            mxb_core::survey::survey_dismiss,
+            mxb_core::survey::set_survey_enabled,
             set_launch_at_startup,
             set_auto_run_frostmod,
             set_queue_restart_game,
@@ -8648,25 +8659,45 @@ fn studio_install(app: tauri::AppHandle) -> Option<StudioInstall> {
     }
 }
 
-/// Start Frost's Studio.
+/// Start Frost's Studio, optionally on a named screen.
 ///
 /// Spawned directly rather than through `plugin-shell`'s `open()`: that hands the path to the
 /// OS default handler, which on Linux is `xdg-open` and will not run an AppImage, and is the
 /// wrong thing entirely for a macOS bundle path. Doing it here also means a real error
 /// string for the toast.
+///
+/// `view` is passed through as `--view <name>` and is how the Plugins page opens a plugin
+/// whose panels moved to the Studio. It is filtered to a plain identifier before it goes
+/// anywhere near a command line: the name reaches here from the window, and a value with a
+/// space or a quote in it is an argument list nobody intended.
 #[tauri::command]
-fn launch_studio(app: tauri::AppHandle) -> Result<(), String> {
+fn launch_studio(app: tauri::AppHandle, view: Option<String>) -> Result<(), String> {
     let found = studio_install(app).ok_or("Frost's Studio isn't installed")?;
     let path = std::path::PathBuf::from(&found.path);
+    let view = view.filter(|v| {
+        !v.is_empty()
+            && v.len() <= 40
+            && v.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    });
 
     #[cfg(target_os = "macos")]
     let mut cmd = {
         let mut c = std::process::Command::new("open");
         c.arg(&path);
+        // `open` takes the app's own arguments after `--args`, and only there.
+        if let Some(v) = &view {
+            c.arg("--args").arg("--view").arg(v);
+        }
         c
     };
     #[cfg(not(target_os = "macos"))]
-    let mut cmd = std::process::Command::new(&path);
+    let mut cmd = {
+        let mut c = std::process::Command::new(&path);
+        if let Some(v) = &view {
+            c.arg("--view").arg(v);
+        }
+        c
+    };
 
     cmd.spawn().map(|_| ()).map_err(|e| format!("couldn't start Frost's Studio: {e}"))
 }

@@ -128,22 +128,46 @@ const ban = (env: Env, guid: string, reason = "unlocked and shared protected con
   addBan(env, { guid, reason }, BOSS);
 
 describe("the ban list the deployment ships with", () => {
-  it("bans the six reported installs, and nothing else", async () => {
+  it("bans the twelve reported installs, and nothing else", async () => {
     const env = await deployment();
     const rows = await listBans(env);
     expect(rows.map((r) => r.guid).sort()).toEqual([
+      // The six of 0038.
       "FF011000012B467ED8",
       "FF011000012D2FBD46",
       "FF01100001308ED7FA",
       "FF0110000162638666",
       "FF0110000164B7DCE8",
       "FF011000016EAE6204",
-    ]);
-    expect(rows.every((r) => r.liftedAt === null && r.bannedBy === "seed:0038")).toBe(true);
-    // The one stated relationship is recorded; none is invented for the rest.
+      // The six the 2026-09-17 report added, in 0040.
+      "FF011000012E746802",
+      "FF01100001423F97F0",
+      "FF011000012F987D96",
+      "FF011000015900502F",
+      "FF011000015B9B8606",
+      "FF011000016112EBE7",
+    ].sort());
+    expect(rows.every((r) => r.liftedAt === null)).toBe(true);
+    // Every one of them arrived in a deploy, and each names the deploy it arrived in.
+    expect(rows.filter((r) => r.bannedBy === "seed:0038")).toHaveLength(6);
+    expect(rows.filter((r) => r.bannedBy === "seed:0040")).toHaveLength(6);
+    // Each 0040 row carries the role it was banned for, not one sentence copied across six.
+    expect(new Set(rows.filter((r) => r.bannedBy === "seed:0040").map((r) => r.reason)).size).toBe(5);
+    // The one banned for building cheating clients says so: it is not the group's offence.
+    expect(rows.find((r) => r.guid === "FF01100001423F97F0")?.reason).toContain("cheating clients");
+    // The stated relationships are recorded, and none is invented for the rest: the alt chain
+    // the two reports describe, and nothing else.
     expect(rows.find((r) => r.guid === "FF011000016EAE6204")?.altOf).toBe("FF0110000162638666");
-    expect(rows.filter((r) => r.altOf !== null)).toHaveLength(1);
+    expect(rows.find((r) => r.guid === "FF011000012B467ED8")?.altOf).toBe("FF011000016EAE6204");
+    expect(rows.filter((r) => r.altOf !== null)).toHaveLength(2);
+    // The newer report is appended to what 0038 held, never written over it.
+    const seller = rows.find((r) => r.guid === "FF011000016EAE6204");
+    expect(seller?.evidence).toContain("reported 2026-09-16");
+    expect(seller?.evidence).toContain("selling a drive of unlocked content");
+    // The date they were first banned on is not moved by the second report.
+    expect(seller?.bannedBy).toBe("seed:0038");
     expect(await banFor(env, { guid: "FF011000012B467ED8" })).not.toBeNull();
+    expect(await banFor(env, { guid: "FF011000015B9B8606" })).not.toBeNull();
     expect(await banFor(env, { guid: "FF0110000100000000" })).toBeNull();
   });
 });
@@ -185,6 +209,24 @@ describe("which identities a ban resolves through", () => {
       .bind("acc_first", BUYER, Date.now())
       .run();
     expect(await banFor(env, { steamId: BUYER })).not.toBeNull();
+  });
+
+  it("follows a Steam login with no account at all, because the GUID is the login in hex", async () => {
+    // The website's caller: signed in with Steam, no MXB App profile, so nothing in the
+    // database to join through. The ban is on the GUID that Steam ID derives to, and the
+    // derivation is ours to compute — which is what keeps the site's front door shut on
+    // somebody who deleted their account, or never made one.
+    const env = await deployment();
+    const derived = guidFromSteamId(BUYER)!;
+    await ban(env, derived);
+    expect(
+      (await env.DB.prepare("SELECT COUNT(*) AS n FROM accounts WHERE steam_id = ?").bind(BUYER).first<{ n: number }>())?.n,
+    ).toBe(0);
+
+    expect(await banFor(env, { steamId: BUYER })).not.toBeNull();
+    expect(await banFor(env, { steamId: CLEAN })).toBeNull();
+    // A non-Steam (Piboso) copy has no derivation, and is not caught by accident.
+    expect(await banFor(env, { steamId: "not-a-steam-id" })).toBeNull();
   });
 
   it("cannot move a Steam account's GUID off a ban — it is derived, not chosen", async () => {

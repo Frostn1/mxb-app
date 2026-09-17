@@ -160,6 +160,10 @@ fn main() {
             // decision about whether to keep building it was being made from the one source the
             // rollups were meant to replace.
             usage::start(app.handle(), usage::COACH);
+            // The survey prompt. Started beside the counters and gated on the same consent:
+            // it answers the question counters cannot, which is whether any of this is any
+            // good. Nothing is fetched or asked when either switch is off.
+            mxb_core::survey::start(app.handle(), usage::COACH);
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -236,6 +240,11 @@ fn main() {
             overlay::overlay_handoff,
             overlay::overlay_peer,
             track_event,
+            mxb_core::survey::survey_due,
+            mxb_core::survey::survey_shown,
+            mxb_core::survey::survey_answer,
+            mxb_core::survey::survey_dismiss,
+            mxb_core::survey::set_survey_enabled,
         ])
         .build(tauri::generate_context!())
         .expect("error while running MXB Coach")

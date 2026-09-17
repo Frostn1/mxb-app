@@ -216,4 +216,29 @@ export const en = {
   "overlay.tab.setup": "Setup",
   "overlay.tab.cues": "Live cues",
   "overlay.tab.hud": "HUD",
+
+  // ── Survey prompt ──────────────────────────────────────────────────────────
+  // The standing question names the app through the ambient `{{app}}` variable, so one
+  // string reads correctly in MXB App, the Studio and Coach.
+  "survey.eyebrow": "Quick question",
+  "survey.mood.ask": "How's {{app}} doing?",
+  "survey.mood.bad": "Bad",
+  "survey.mood.fine": "Fine",
+  "survey.mood.good": "Good",
+  "survey.followUp.whatHappened": "What happened?",
+  "survey.followUp.anythingElse": "Anything you'd add?",
+  "survey.reason.crash": "It crashed or froze",
+  "survey.reason.slow": "Too slow",
+  "survey.reason.confusing": "Hard to find things",
+  "survey.reason.broken": "Something didn't work",
+  "survey.reason.missing": "Something's missing",
+  "survey.reason.other": "Something else",
+  "survey.note.placeholder": "Anything you'd like to add? (optional)",
+  "survey.note.hint": "Sent exactly as you type it, so leave out anything personal.",
+  "survey.send": "Send",
+  "survey.skip": "Skip",
+  "survey.thanks": "Thanks — that helps.",
+  "survey.setting.label": "Occasional questions",
+  "survey.setting.desc":
+    "Lets the app ask, now and then, how it's going and what you think of something new. Off means it never asks.",
 } as const;

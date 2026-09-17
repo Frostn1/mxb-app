@@ -4,6 +4,7 @@ import { revealInExplorer } from "@frost/shared/api/mods";
 import { Button } from "@frost/shared/Components/ui/button";
 import { Segmented } from "@frost/shared/Components/ui/segmented";
 import { useConfig } from "@frost/shared/Context/Config";
+import SurveySetting from "@frost/shared/Components/Survey/SurveySetting";
 import { useTheme, type ThemeMode } from "@frost/shared/Context/Theme";
 import { APP_NAME, LOCALE_OPTIONS, useI18n, useT } from "@/i18n";
 import TrackModelSettings from "./TrackModelSettings";
@@ -110,6 +111,11 @@ export default function Settings() {
               </option>
             ))}
           </select>
+        </div>
+
+        {/* Whether the Studio may ask anything. The same row MXB App and Coach show. */}
+        <div className="mt-10">
+          <SurveySetting />
         </div>
 
         <TrackModelSettings />

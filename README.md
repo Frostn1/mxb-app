@@ -55,7 +55,8 @@ Get it from **[mxbsecure.com/app](https://mxbsecure.com/app)**, or straight from
   cues while you ride.
 - **[Frost's Studio](https://mxbsecure.com/studio)**: paints, tracks and the Designer.
 - **[FrostMod](https://mxbsecure.com/frostmod)**: the in-game companion.
-- **[Replay Mod](https://mxbsecure.com/replay)**: cameras and cuts for replays.
+- **[Replay Mod](https://mxbsecure.com/replay)**: cameras and cuts for replays, recorded
+  for you — its panels open in Frost's Studio.
 
 Builds are unsigned, so Windows SmartScreen / macOS Gatekeeper will warn on
 first launch — choose _Run anyway_ / right-click _Open_.
@@ -87,8 +88,8 @@ Each of these is a tab in the app.
   won't load it says whether that is MX Bikes' own master server or something at your
   end, rather than showing a bare error — see "Is MX Bikes down, or is it you?" below.
 - **Studio** — opens [Frost's Studio](https://mxbsecure.com/studio), or gets it for
-  you. The Designer, the Paint, Track and Rider studios and content locking are all
-  there now, in their own app ([`apps/studio`](apps/studio/)). Both apps read the same
+  you. The Designer, the Paint, Track and Rider studios, Replay and content locking are
+  all there now, in their own app ([`apps/studio`](apps/studio/)). Both apps read the same
   folders, so nothing moves.
 - **Race mode** — MX Bikes loads every mod in the folder at startup, so a preset
   names the track it races on and everything else steps aside into a holding
@@ -129,6 +130,16 @@ Running through all of it:
   no names and no install id; the control plane holds one back until distinct networks have
   independently seen it in the game's own list, because a list that tells thousands of apps
   where to send a datagram cannot take anybody's word for it.
+- **The app asks, rarely.** A small card in the corner: *How's it going? Bad · Fine · Good*,
+  one tap. Answer badly and it asks what happened, with chips to pick from and a box you can
+  type a line into if you feel like it; after the other answers it asks that only now and
+  then. The same card can carry a question about something new — the questions are written
+  on the control plane rather than built into the app, so one can be asked while it still
+  matters rather than a release later. Nothing for the first three days after installing,
+  nothing in the first five minutes of a run, at most one card a day, and closing it three
+  times in a row stops it for half a year. Switched off in Settings, and off already for
+  anyone who turned the anonymous counters off — an answer carries the same install id, so
+  being asked is never a way round having said no to being counted.
 - **Live reload.** A debounced watcher on `<modsPath>/mods` signals FrostMod to
   reload the game when mods are added — including ones installed outside the app.
   Off Windows that means the game's own Wine prefix — Proton's
@@ -140,7 +151,12 @@ Running through all of it:
   v0.11.0.
 - **Plugins.** Paid add-ons load at runtime and contribute their own nav rows. A
   license is an Ed25519-signed statement the app checks locally, so a plugin keeps
-  working offline for a week between checks.
+  working offline for a week between checks. **Their panels open in Frost's Studio**,
+  because a plugin panel is a creator's tool — the Replay Mod is one, and cutting a
+  replay is the same errand as painting a bike. This app keeps the half that is its own:
+  buying the licence, installing the bundle, updating it, and an **Open in Studio**
+  button on Settings → Plugins. A manifest can ask for a row here instead
+  (`"host": "manager"`); saying nothing means the Studio.
 - **Downloads** are resolved per host — MediaFire and Google Drive (folder links
   included), MEGA single-file links fetched and decrypted, everything else taken
   as a direct link. MEGA *folder* links and Proton Drive shares are the
@@ -173,11 +189,12 @@ Running through all of it:
 | Path | What it is |
 | --- | --- |
 | [`apps/manager/`](apps/manager/) | **MXB App** — browse, install, manage, launch. React frontend, Rust backend. |
-| [`apps/studio/`](apps/studio/) | **Frost's Studio** — the paint Designer, Paint Studio, Track Studio and the rider rig. Ships from [`Frostn1/frost-studio`](https://github.com/Frostn1/frost-studio). |
+| [`apps/studio/`](apps/studio/) | **Frost's Studio** — the paint Designer, Paint Studio, Track Studio, the rider rig, the Replay recorder and every paid plugin's panels. Ships from [`Frostn1/frost-studio`](https://github.com/Frostn1/frost-studio). |
 | [`crates/core/`](crates/core/) | Shared Rust: the game's own file formats, and the model pipeline both apps draw with. |
 | [`packages/shared/`](packages/shared/) | Shared TypeScript: the 3D viewer, the UI primitives, the API client and the base dictionary. |
 | [`control-plane/`](control-plane/) | The Cloudflare Worker paint sync, plugin licensing and server registration talk to. |
 | [`server-agent/`](server-agent/) | The Rust agent that runs on a dedicated-server box. |
+| [`docs/replay/`](docs/replay/) | How the Replay Mod and the Studio's recorder agree on a take — the contract the in-game DLL writes to. |
 | [`scripts/`](scripts/) | Release plumbing — changelog sections, Discord notes, the Linux AppImage fix-up. |
 | [`site/`](site/) | The landing page published by [`pages.yml`](.github/workflows/pages.yml). |
 

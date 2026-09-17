@@ -43,13 +43,16 @@ consequences fall out of that, and they're baked into the schema:
 | POST | `/v1/bmac/webhook` | HMAC signature | Buy Me a Coffee announcing a supporter. Posted on to Discord. |
 | POST | `/v1/usage` | — | Anonymous usage counters from an install. Unauthenticated because most people who run the app never claim an invite; bounded by body size, event count and a per-address daily cap. |
 | GET | `/v1/usage/stats` | `ADMIN_KEY` | The same numbers as JSON, for anything that scripts them |
+| GET | `/v1/survey/polls` | — | The questions the apps should be asking. Carries no install id and is the same for everybody, so it is cacheable. |
+| POST | `/v1/survey` | — | One install's answer to one question. Unauthenticated for the same reason as `/v1/usage`; bounded by size, a closed answer vocabulary and a per-address daily cap. |
+| GET | `/v1/survey/stats` | `ADMIN_KEY` | What people answered, as JSON |
 | POST | `/v1/master-status` | — | One install saying whether it could reach MX Bikes' own master server. Unauthenticated for the same reason as `/v1/usage`; one row per install per minute. |
 | GET | `/v1/status` | — | Is the master answering? Public, CORS-open and cacheable — it is what mxbsecure.com/status renders and what a Discord bot answering `!timeout` reads. |
 | POST | `/v1/roster` | — | Addresses an app saw in the game's own master list. Held back until distinct networks agree — see below; without that this would be a reflection amplifier. |
 | GET | `/v1/roster` | — | The shared server book. Public and cacheable; the app seeds its own address book from it. |
 | POST | `/v1/roster/mine` | bearer (invited) | A server's own operator adding it, which needs no corroborating: the account is the corroboration. |
 | GET | `/v1/web/me` | Steam sign-in | Who is signed in on mxbsecure.com, whether they are a creator, and what is left of today's lock ceiling. Never cached. |
-| POST | `/v1/web/creator` | Steam sign-in | Signing up as a creator, which is what opens `/admin/assets*`. Anyone signed in may; `MXB_ASSETS_PER_DAY` is what bounds them afterwards. |
+| POST | `/v1/web/creator` | Steam sign-in | Signing up as a creator, which is what opens `/admin/assets*`. Shut unless `MXB_CREATOR_SIGNUP` is `"open"` — see **The front door, and why it is shut**. An existing creator still gets `already: true`, never a refusal. |
 | GET | `/v1/web/lockweb/*` | Steam sign-in | The WebAssembly locker. It cannot live on the static site, which serves everything it holds to everybody. Any signed-in rider gets it: the GUID lock is for all of them. |
 | GET/POST | `/v1/web/admin/*` | Steam sign-in + `MXB_ADMIN_STEAM_IDS` | The dashboards at mxbsecure.com/admin — usage, diagnostics, paint sync, plugin keys, creators, bans |
 | GET | `/v1/plugins` | — | The paid-plugin catalogue. Public: what is on offer is not a secret. |
@@ -271,6 +274,39 @@ None of that makes a field unforgeable — `version`, `os` and `game` are still 
 caller said, and they are what "can I stop shipping 0.8.x" and "is GP Bikes worth carrying"
 are read off. Together the bounds make forging one cost more than the decision it would move.
 
+### Asking the player
+
+The counters above say what people open. They have never said whether any of it is any good —
+a feature with high reach is one people *find* — so the apps also ask, rarely, on a card in the
+corner: **How's it going? Bad · Fine · Good**, and a follow-up ("what happened?") always after
+the answers a question names, and otherwise on a weighted coin.
+
+**The questions live in the database, not in the client.** `survey_polls` is a row per
+question, written at mxbsecure.com/admin/survey and picked up by every install on its next
+fetch. That is the whole point: "have you tried Race mode" is worth asking for three weeks, and
+a question baked into a release needs one release to start asking, another to stop, and a month
+in between for either to reach anybody. A poll carries its text as a locale map, so it can be
+written in one language or six; the standing mood poll carries none at all, because the apps
+draw and translate its three answers themselves.
+
+An answer carries the same install id the counters use, the app, its version, the OS, the
+title, a poll id and a choice id. Storage is `survey_answers`, one row per install per poll per
+day, so a retry replaces rather than votes twice.
+
+**The note is the one free-text field in this deployment**, and worth naming rather than
+burying. The follow-up may offer a box the player types into; a poll that has no use for prose
+sets `note = 0` and collects chips alone. What arrives is capped at 280 characters, scrubbed of
+addresses, links and user-folder paths (`scrubNote` — best effort, not a promise about a
+sentence somebody typed), cleared by the sweep after 120 days while the answer itself is kept
+400, and deletable one at a time from the dashboard.
+
+The app's side is `crates/core/src/survey.rs`, shared by all three. It is gated on the counters'
+consent as well as its own switch — an answer carries the install id, so being asked cannot be
+a way round having said no to being counted — leaves a fresh install alone for three days,
+never asks inside the first five minutes of a run, shows at most one card a day across every
+question, and stops asking for half a year after three dismissals in a row. `MXB_NO_SURVEY=1`
+turns it off for a run.
+
 ### The GUID is the Steam identity, and cannot be spoofed
 
 A rider's MX Bikes GUID is not a separate fact we collect and trust — for a Steam copy of the
@@ -315,6 +351,35 @@ A Piboso owner has no Steam identity to confirm and cannot pass the wall, so ena
 deliberate "Steam players only" decision the deployment makes and can reverse — not something
 baked into a release.
 
+### The front door, and why it is shut
+
+Becoming a creator was one click for anyone with a Steam account: sign in, `POST
+/v1/web/creator`, start locking. The argument for that was sound as far as it went — the invite
+list gatekept a tool whose real protection is elsewhere, since every asset is tied to the
+account that made it and `MXB_ASSETS_PER_DAY` caps what that account mints in a day.
+
+It answers the wrong question for the people the ban list is about. A ban follows an install,
+the Steam login behind it and every account either has held; what it cannot follow is a brand
+new Steam account, which is a new identity by every measure we have. That is a deliberate
+limit — but while the front door was a button, it was also the whole of the work required to
+come back. A ceiling on what a fresh account can mint is not an answer to an account that
+should not be minting anything.
+
+So `MXB_CREATOR_SIGNUP` (`wrangler.jsonc`) decides, `"open"` and nothing else opens it, and
+unset is closed — a deployment that was never told should not be holding the door open. Closed:
+
+- `POST /v1/web/creator` answers 403 with `SIGNUP_CLOSED`, which is honest and names the way
+  in, because mxbsecure.com is where somebody with real work to sell turns up;
+- `GET /v1/web/me` carries `creatorSignup`, so the site draws the closed door rather than a
+  button that fails;
+- **existing creators are untouched.** They keep `creator_at`, keep locking, and a second POST
+  still answers `already: true` rather than telling them the door is shut. Closing is not
+  removing; removing is the creators page's own button.
+
+New creators arrive through the creators page instead (`addCreator`, `creator_source = 'admin'`),
+which is the invite list again, on purpose: it puts a person between a fresh Steam account and
+the right to mint keys. Reopening is a one-line diff when the ban list stops being the reason.
+
 ### Banning a rider
 
 Every other revocation here is about *content*: a creator withdraws an asset, we take one down,
@@ -330,9 +395,12 @@ free to mint (our account ids) nor replaceable for the price of a second purchas
 
 **Resolved through every identity we can tie to it**, which is what makes it worth more than a
 reinstall. `banFor` asks "is any identity this caller can be tied to a banned one", following
-the GUID in front of it, every GUID the calling account holds *or has ever claimed*
-(`guid_claims`), every account on the same Steam identity now or in the link log
-(`steam_links`), and every GUID those accounts have used. So a second account on the same Steam
+the GUID in front of it, the GUID a Steam identity *derives to* (`guidFromSteamId` — for a Steam
+copy the two are one value, so a banned Steam login needs no row in the database to be refused,
+which is the website's caller: signed in with Steam and possibly with no MXB App account at
+all), every GUID the calling account holds *or has ever claimed* (`guid_claims`), every account
+on the same Steam identity now or in the link log (`steam_links`), and every GUID those accounts
+have used. So a second account on the same Steam
 login, a fresh GUID claimed by a banned account, and a fresh Steam account on a banned install
 all resolve back to the ban. `guid_claims` exists for exactly the reason `steam_links` does:
 `accounts.guid` is a single mutable cell, and a ban that only read it would end at a rename.
@@ -388,10 +456,18 @@ its own shape rather than by who is asking). There is nothing there to match a b
 
 **Reversible, and reviewable.** A ban carries a reason (shown to the rider), the evidence, and
 the admin who applied it; lifting one is a timestamp, never a delete, so an upheld appeal stays
-readable and the same stale report cannot re-ban off it. The six installs the deployment ships
-banned arrived in the migration on purpose — this is the switch that refuses a paying customer,
-so turning it on leaves a diff somebody can review and revert. Later ones go through
-mxbsecure.com/admin/bans (`GET`/`POST /v1/web/admin/bans`), which records who pressed it.
+readable and the same stale report cannot re-ban off it. The twelve installs the deployment
+ships banned arrived in migrations on purpose (`0038_guid_bans.sql`, and
+`0040_ban_lineup_report.sql` for the six a later report added) — this is the switch that
+refuses a paying customer, so turning it on leaves a diff somebody can review and revert. A
+seeded ban is inserted `ON CONFLICT DO NOTHING`, so a redeploy cannot quietly re-ban one that
+has since been lifted. Later ones go through mxbsecure.com/admin/bans (`GET`/`POST
+/v1/web/admin/bans`), which records who pressed it.
+
+A seed carries the GUID, the reason and the evidence, and never the handle the report used:
+this repository is public, and a GUID identifies an install to us without publishing an
+accusation against a named person. Who each banned GUID was reported to be is kept privately,
+with the rest of the evidence.
 
 ## Security notes
 
