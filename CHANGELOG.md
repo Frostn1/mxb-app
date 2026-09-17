@@ -62,6 +62,10 @@
   login on the same PC is refused with it, and protected files already unlocked there stop
   opening — the app deletes those keys on its next pass. Nobody else is affected in any way, and
   a ban can be lifted.
+- The "Line and track" notes are called out on the first page of the lap review, with a link
+  through to the track view they sit on, instead of waiting on the last tab. Clicking one keeps
+  you on the 3D view rather than moving you off it.
+- "Your best ever here" says when the lap it picks is slower than the one you are looking at.
 
 ### Fixed
 - MXB Coach finds your tracks. It was looking for them in a folder that doesn't exist, so every
@@ -77,6 +81,19 @@
   longer leaves you two copies of the same thing.
 - After setting a setup, the coach reads the game's own choice back and says plainly when the
   game will still load something else, instead of telling you it worked.
+- Reviewing your fastest lap gives you something. It was being held against a slower lap of
+  yours, and a lap that is quicker everywhere has nothing to point at, so the review came back
+  empty without saying why. It now tells you it is your fastest lap here and offers your ideal
+  lap — your own best sections added up — in one click.
+- A section with no tips under it says why: you lose no time there, so there is nothing to pick
+  out.
+- The line notes read your whole session. Going out, coming back in and going out again writes
+  a recording each time, and the notes only ever looked at one of them — so a session with
+  plenty of laps in it was judged on a handful. Comparing one line with another needs several
+  laps through the same corner, and now it has them.
+- Where there is nothing to say about your lines, the review says what was missing: too few
+  whole laps in the session, or that you rode alone, since where the track will rut is read off
+  the other riders' lines.
 
 ## 2026-09-16 — MXB Coach v0.1.15-beta.15
 

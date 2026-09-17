@@ -99,6 +99,11 @@ export default function RefPicker({
   const choices = useMemo(() => {
     const mine = sessions.filter((s) => s.trackId === trackId);
     const best = bestEver(mine, bikeId, { path, lap });
+    // This lap's own time, so "your best ever here" can own up to being the slower of the two.
+    // It is excluded from the best, so on the rider's fastest lap that option silently picks a
+    // slower one and the review then has nothing to say.
+    const thisMs = mine.flatMap((s) => s.laps).find((l) => l.path === path && l.num === lap)?.timeMs ?? 0;
+    const bestSlower = best != null && thisMs > 0 && best.l.timeMs >= thisMs;
     const out: { value: Reference; label: string }[] = [
       {
         value: BEST,
@@ -108,6 +113,7 @@ export default function RefPicker({
               lapTime(best.l.timeMs),
               started(stintStart(best.s, best.l.path)),
               best.s.bikeId !== bikeId ? best.s.bikeName : "",
+              bestSlower ? t("review.slowerThanThis") : "",
             ]
               .filter(Boolean)
               .join(" · ")

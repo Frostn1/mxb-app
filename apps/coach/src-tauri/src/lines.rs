@@ -26,6 +26,8 @@ const ALT_S: f32 = 0.25;
 /// Corners this close, metres from one's end to the next one's start, set each other up: the
 /// line out of the first is the line into the second, so they're judged together.
 const LINK_M: usize = 30;
+/// Laps through a corner needed before one line can be told from another.
+const MIN_LAPS_LINE: usize = 4;
 /// Other riders' positions through a corner needed to say where it'll wear.
 const BUSY_PASSES: usize = 30;
 /// The crowd this far from the fast line rides a line of its own.
@@ -33,10 +35,20 @@ const BUSY_M: f32 = 1.0;
 /// A position this far from the fast line isn't on it at all: off track, or another part of it.
 const BESIDE_M: f32 = 8.0;
 
+/// Which lap of the session this is. The game starts counting at lap 1 again in every stint,
+/// and a session is every stint of one event, so the number alone doesn't name a lap.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LapId {
+    pub lap: i32,
+    pub stint: i32,
+}
+
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LapLine {
-    pub lap: i32,
+    #[serde(flatten)]
+    pub id: LapId,
     pub time: f32,
     /// World x/z every metre.
     pub path: Vec<[f32; 2]>,
@@ -47,7 +59,8 @@ pub struct LapLine {
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SectionLine {
-    pub lap: i32,
+    #[serde(flatten)]
+    pub id: LapId,
     /// Metres to the right of the fast line, averaged over the section's core.
     pub offset: f32,
     pub time: f32,
@@ -72,6 +85,13 @@ pub struct Lines {
     /// Per section, one row per lap.
     pub offsets: Vec<Vec<SectionLine>>,
     pub notes: Vec<Note>,
+    /// Nobody else was on track. Where the track will rut is read off the other riders' lines,
+    /// so riding alone there is nothing to read it from — the page says so rather than leaving
+    /// the rider to wonder why that kind of note never appears.
+    pub alone: bool,
+    /// Enough whole laps in the session for one line to be told from another. Under this, no
+    /// line note is possible however the rider rode.
+    pub enough_laps: bool,
 }
 
 /// Mean distance to the right of the reference line over `a..=b`.
@@ -94,7 +114,7 @@ fn ground(lap: &Trace, a: usize, b: usize) -> Option<f32> {
 }
 
 struct Row {
-    lap: i32,
+    id: LapId,
     offset: f32,
     time: f32,
     ground: Option<f32>,
@@ -108,12 +128,37 @@ fn mean_of(xs: &[f32]) -> f32 {
     xs.iter().sum::<f32>() / xs.len().max(1) as f32
 }
 
-/// `laps` in the order they were ridden; `reference` decides the sections and the fast line.
-/// `others` is every other rider's world x/z the recorder saw, for where the track will wear.
-pub fn lines(laps: &[(i32, Trace)], reference: &Trace, others: &[[f32; 2]]) -> Lines {
+/// The laps a note points at, named the way the session names them. Every stint starts
+/// counting at lap 1 again, so once a note reaches across stints the number alone would send
+/// the rider to the wrong lap; `stints` says whether the session has more than one.
+fn which(ids: &[LapId], stints: bool) -> String {
+    let mut ids = ids.to_vec();
+    ids.sort_unstable_by_key(|i| (i.stint, i.lap));
+    let join = |xs: &[String]| xs.join(", ");
+    if !stints {
+        return join(&ids.iter().map(|i| (i.lap + 1).to_string()).collect::<Vec<_>>());
+    }
+    let mut groups: Vec<(i32, Vec<String>)> = Vec::new();
+    for i in &ids {
+        let num = (i.lap + 1).to_string();
+        match groups.iter_mut().find(|(st, _)| *st == i.stint) {
+            Some((_, g)) => g.push(num),
+            None => groups.push((i.stint, vec![num])),
+        }
+    }
+    groups.iter().map(|(st, g)| format!("{} of stint {}", join(g), st + 1)).collect::<Vec<_>>().join(" and ")
+}
+
+/// `laps` in the order they were ridden, across every stint of the session; `reference` decides
+/// the sections and the fast line. `others` is every other rider's world x/z the recorder saw,
+/// for where the track will wear.
+pub fn lines(laps: &[(LapId, Trace)], reference: &Trace, others: &[[f32; 2]]) -> Lines {
     let secs = sections(reference);
     let mut offsets = Vec::with_capacity(secs.len());
     let mut notes = Vec::new();
+    // A session ridden in several stints numbers its laps from 1 in each, so a note that names
+    // one has to say which stint it was in.
+    let stints = laps.first().is_some_and(|(f, _)| laps.iter().any(|(id, _)| id.stint != f.stint));
 
     // Corners close enough to set each other up are judged as a pair first. Where the pair
     // decides, the first corner's own note would point the wrong way, so it's left out.
@@ -129,13 +174,13 @@ pub fn lines(laps: &[(i32, Trace)], reference: &Trace, others: &[[f32; 2]]) -> L
             .iter()
             .filter(|(_, t)| b.end < t.len())
             .map(|(n, t)| ComboRow {
-                lap: *n,
+                id: *n,
                 off: [offset(t, reference, a.core.0, a.core.1), offset(t, reference, b.core.0, b.core.1)],
                 first: t.span(a.start, a.end),
                 both: t.span(a.start, b.end),
             })
             .collect();
-        if let Some(mut note) = combo((&a.name, a.dir as i32), (&b.name, b.dir as i32), &recs) {
+        if let Some(mut note) = combo((&a.name, a.dir as i32), (&b.name, b.dir as i32), &recs, stints) {
             note.section = i;
             paired[i] = true;
             notes.push(note);
@@ -147,17 +192,17 @@ pub fn lines(laps: &[(i32, Trace)], reference: &Trace, others: &[[f32; 2]]) -> L
         let rows: Vec<Row> = laps
             .iter()
             .filter(|(_, t)| s.end < t.len())
-            .map(|(n, t)| Row { lap: *n, offset: offset(t, reference, a, b), time: t.span(s.start, s.end), ground: ground(t, a, b) })
+            .map(|(n, t)| Row { id: *n, offset: offset(t, reference, a, b), time: t.span(s.start, s.end), ground: ground(t, a, b) })
             .collect();
-        offsets.push(rows.iter().map(|r| SectionLine { lap: r.lap, offset: r.offset, time: r.time }).collect());
+        offsets.push(rows.iter().map(|r| SectionLine { id: r.id, offset: r.offset, time: r.time }).collect());
 
-        if s.kind == Kind::Corner && rows.len() >= 4 && !paired[si] {
-            if let Some(note) = line_that_pays(si, s, &rows) {
+        if s.kind == Kind::Corner && rows.len() >= MIN_LAPS_LINE && !paired[si] {
+            if let Some(note) = line_that_pays(si, s, &rows, stints) {
                 notes.push(note);
             }
         }
         if rows.len() >= MIN_LAPS_CUT {
-            if let Some(note) = cutting_up(si, s, &rows) {
+            if let Some(note) = cutting_up(si, s, &rows, stints) {
                 notes.push(note);
             }
         }
@@ -172,7 +217,7 @@ pub fn lines(laps: &[(i32, Trace)], reference: &Trace, others: &[[f32; 2]]) -> L
         laps: laps
             .iter()
             .map(|(n, t)| LapLine {
-                lap: *n,
+                id: *n,
                 time: t.time(),
                 path: t.pts.iter().step_by(STEP).map(|q| [q.x, q.z]).collect(),
                 heights: t.pts.iter().step_by(STEP).map(|q| q.y).collect(),
@@ -181,6 +226,8 @@ pub fn lines(laps: &[(i32, Trace)], reference: &Trace, others: &[[f32; 2]]) -> L
         sections: secs,
         offsets,
         notes,
+        alone: others.is_empty(),
+        enough_laps: laps.len() >= MIN_LAPS_LINE,
     }
 }
 
@@ -289,7 +336,7 @@ fn other_side(side: &str) -> &'static str {
 }
 
 /// The laps split into two lines through a corner, and one of them is clearly quicker.
-fn line_that_pays(si: usize, s: &Section, rows: &[Row]) -> Option<Note> {
+fn line_that_pays(si: usize, s: &Section, rows: &[Row], stints: bool) -> Option<Note> {
     let mut sorted: Vec<&Row> = rows.iter().collect();
     sorted.sort_by(|x, y| x.offset.total_cmp(&y.offset));
     let (at, width) = (1..sorted.len())
@@ -314,9 +361,7 @@ fn line_that_pays(si: usize, s: &Section, rows: &[Row]) -> Option<Note> {
     } else {
         String::new()
     };
-    let mut which: Vec<i32> = fast.iter().map(|r| r.lap + 1).collect();
-    which.sort_unstable();
-    let which: Vec<String> = which.iter().map(|n| n.to_string()).collect();
+    let on = which(&fast.iter().map(|r| r.id).collect::<Vec<_>>(), stints);
     Some(Note {
         section: si,
         name: s.name.clone(),
@@ -325,7 +370,7 @@ fn line_that_pays(si: usize, s: &Section, rows: &[Row]) -> Option<Note> {
         detail: format!(
             "On laps {} you took the {way} line, about {:.1} m off the other one, and were {:.2} s quicker through \
              {}. Keep that line.{second}",
-            which.join(", "),
+            on,
             apart.abs(),
             gap,
             s.name
@@ -336,7 +381,7 @@ fn line_that_pays(si: usize, s: &Section, rows: &[Row]) -> Option<Note> {
 /// One lap through two linked corners: its line in each (metres right of the fast line), its
 /// time through the first, and through both.
 struct ComboRow {
-    lap: i32,
+    id: LapId,
     off: [f32; 2],
     first: f32,
     both: f32,
@@ -353,8 +398,8 @@ fn split(mut offs: Vec<f32>) -> Option<f32> {
 /// Two linked corners: the line that's quicker through the first on its own can leave you
 /// badly placed for the second. Says so when the pair of lines that's quickest over both
 /// corners isn't the one the first corner alone would pick. Corners are (name, direction).
-fn combo(a: (&str, i32), b: (&str, i32), recs: &[ComboRow]) -> Option<Note> {
-    if recs.len() < 4 {
+fn combo(a: (&str, i32), b: (&str, i32), recs: &[ComboRow], stints: bool) -> Option<Note> {
+    if recs.len() < MIN_LAPS_LINE {
         return None;
     }
     let cut = [split(recs.iter().map(|r| r.off[0]).collect())?, split(recs.iter().map(|r| r.off[1]).collect())?];
@@ -388,9 +433,7 @@ fn combo(a: (&str, i32), b: (&str, i32), recs: &[ComboRow]) -> Option<Note> {
     }
     // Right of the fast lap is the inside of a right-hander.
     let way = |right_side: bool, dir: i32| side_word((right_side as i32 * 2 - 1) as f32, dir as i8);
-    let mut which: Vec<i32> = best.1.iter().map(|r| r.lap + 1).collect();
-    which.sort_unstable();
-    let which: Vec<String> = which.iter().map(|n| n.to_string()).collect();
+    let on = which(&best.1.iter().map(|r| r.id).collect::<Vec<_>>(), stints);
     let first = way(best.0 .0, a.1);
     let first = first[..1].to_uppercase() + &first[1..];
     Some(Note {
@@ -407,13 +450,13 @@ fn combo(a: (&str, i32), b: (&str, i32), recs: &[ComboRow]) -> Option<Note> {
             a.0,
             way(best.0 .1, b.1),
             b.0,
-            which.join(", ")
+            on
         ),
     })
 }
 
 /// The ground under the same line sits lower late in the session than early: ruts forming.
-fn cutting_up(si: usize, s: &Section, rows: &[Row]) -> Option<Note> {
+fn cutting_up(si: usize, s: &Section, rows: &[Row], stints: bool) -> Option<Note> {
     let third = (rows.len() / 3).max(2);
     let (early, late) = (&rows[..third], &rows[rows.len() - third..]);
     if (mean(early, |r| r.offset) - mean(late, |r| r.offset)).abs() >= SAME_LINE_M {
@@ -435,12 +478,9 @@ fn cutting_up(si: usize, s: &Section, rows: &[Row]) -> Option<Note> {
             (alt.len() >= 2).then(|| {
                 let d = alt.iter().map(|r| r.offset).sum::<f32>() / alt.len() as f32 - mean(late, |r| r.offset);
                 let way = side_word(d, s.dir);
-                let mut laps: Vec<i32> = alt.iter().map(|r| r.lap + 1).collect();
-                laps.sort_unstable();
-                let laps: Vec<String> = laps.iter().map(|n| n.to_string()).collect();
                 format!(
                     " On laps {} you took the {way} line, about {:.1} m off it: try that as the ruts deepen.",
-                    laps.join(", "),
+                    which(&alt.iter().map(|r| r.id).collect::<Vec<_>>(), stints),
                     d.abs()
                 )
             })
@@ -454,9 +494,9 @@ fn cutting_up(si: usize, s: &Section, rows: &[Row]) -> Option<Note> {
         detail: format!(
             "By lap {} the ground on your line is about {:.0} cm lower than on lap {}. Ruts are forming: \
              ride in the rut rather than across it, or find fresh ground beside it.{other}",
-            late[late.len() - 1].lap + 1,
+            which(&[late[late.len() - 1].id], stints),
             drop * 100.0,
-            early[0].lap + 1
+            which(&[early[0].id], stints)
         ),
     })
 }
@@ -470,9 +510,14 @@ mod tests {
         l.notes.iter().map(|n| n.title.clone()).collect()
     }
 
+    /// Lap `n` of the session's first stint.
+    fn id(n: i32) -> LapId {
+        LapId { lap: n, stint: 0 }
+    }
+
     #[test]
     fn the_same_lap_over_and_over_says_nothing() {
-        let laps: Vec<(i32, Trace)> = (0..6).map(|n| (n, lap(&FAST))).collect();
+        let laps: Vec<(LapId, Trace)> = (0..6).map(|n| (id(n), lap(&FAST))).collect();
         let out = lines(&laps, &lap(&FAST), &[]);
         assert!(out.notes.is_empty(), "{:?}", titles(&out));
         assert_eq!(out.laps.len(), 6);
@@ -482,7 +527,7 @@ mod tests {
     #[test]
     fn a_line_that_pays_is_named() {
         let wide = Style { wide: 2.5, corner_v: 11.0, ..FAST };
-        let laps = vec![(0, lap(&FAST)), (1, lap(&FAST)), (2, lap(&wide)), (3, lap(&wide))];
+        let laps = vec![(id(0), lap(&FAST)), (id(1), lap(&FAST)), (id(2), lap(&wide)), (id(3), lap(&wide))];
         let out = lines(&laps, &lap(&FAST), &[]);
         let t1 = out.notes.iter().find(|n| n.kind == "line" && n.name == "Turn 1").unwrap_or_else(|| panic!("{:?}", titles(&out)));
         assert!(t1.title.contains("outside"), "{}", t1.title);
@@ -491,19 +536,19 @@ mod tests {
     }
 
     fn row(lap: i32, off: [f32; 2], first: f32, both: f32) -> ComboRow {
-        ComboRow { lap, off, first, both }
+        ComboRow { id: id(lap), off, first, both }
     }
 
     #[test]
     fn a_second_line_nearly_as_quick_is_kept_for_passing() {
         let wide = Style { wide: 2.5, corner_v: 10.2, ..FAST };
-        let laps = vec![(0, lap(&FAST)), (1, lap(&FAST)), (2, lap(&wide)), (3, lap(&wide))];
+        let laps = vec![(id(0), lap(&FAST)), (id(1), lap(&FAST)), (id(2), lap(&wide)), (id(3), lap(&wide))];
         let out = lines(&laps, &lap(&FAST), &[]);
         let t1 = out.notes.iter().find(|n| n.kind == "line" && n.name == "Turn 1").unwrap_or_else(|| panic!("{:?}", titles(&out)));
         assert!(t1.detail.contains("inside line is only") && t1.detail.contains("for passing"), "{}", t1.detail);
         // A line that's much slower isn't offered as a second one.
         let far = Style { wide: 2.5, corner_v: 11.0, ..FAST };
-        let laps = vec![(0, lap(&FAST)), (1, lap(&FAST)), (2, lap(&far)), (3, lap(&far))];
+        let laps = vec![(id(0), lap(&FAST)), (id(1), lap(&FAST)), (id(2), lap(&far)), (id(3), lap(&far))];
         let out = lines(&laps, &lap(&FAST), &[]);
         assert!(!out.notes.iter().any(|n| n.detail.contains("for passing")), "{:?}", titles(&out));
     }
@@ -518,7 +563,7 @@ mod tests {
             row(2, [-2.0, 2.0], 5.2, 11.6),
             row(3, [-2.1, 2.1], 5.2, 11.6),
         ];
-        let note = combo(("Turn 3", 1), ("Turn 4", 1), &recs).unwrap();
+        let note = combo(("Turn 3", 1), ("Turn 4", 1), &recs, false).unwrap();
         assert_eq!(note.title, "Turn 3 and Turn 4 go together");
         assert!(note.detail.contains("alone the inside line is quicker"), "{}", note.detail);
         assert!(note.detail.contains("Outside into Turn 3, then inside through Turn 4, is 0.40 s"), "{}", note.detail);
@@ -534,15 +579,15 @@ mod tests {
             row(2, [-2.0, -2.0], 5.2, 11.9),
             row(3, [-2.1, -2.1], 5.2, 11.9),
         ];
-        assert!(combo(("Turn 3", 1), ("Turn 4", 1), &recs).is_none());
+        assert!(combo(("Turn 3", 1), ("Turn 4", 1), &recs, false).is_none());
     }
 
     #[test]
     fn a_corner_that_sinks_over_the_session_is_cutting_up() {
-        let laps: Vec<(i32, Trace)> = [0.0, 0.0, 0.02, 0.05, 0.1, 0.12]
+        let laps: Vec<(LapId, Trace)> = [0.0, 0.0, 0.02, 0.05, 0.1, 0.12]
             .iter()
             .enumerate()
-            .map(|(n, &sink)| (n as i32, lap(&Style { sink, ..FAST })))
+            .map(|(n, &sink)| (id(n as i32), lap(&Style { sink, ..FAST })))
             .collect();
         let out = lines(&laps, &lap(&FAST), &[]);
         let cut = out.notes.iter().find(|n| n.kind == "cut").unwrap_or_else(|| panic!("{:?}", titles(&out)));
@@ -587,12 +632,12 @@ mod tests {
         let wide = Style { wide: 2.5, corner_v: 11.0, ..FAST };
         let sunk = Style { wide: 2.5, corner_v: 10.2, ..FAST };
         let laps = vec![
-            (0, lap(&FAST)),
-            (1, lap(&FAST)),
-            (2, lap(&wide)),
-            (3, lap(&wide)),
-            (4, lap(&sunk)),
-            (5, lap(&sunk)),
+            (id(0), lap(&FAST)),
+            (id(1), lap(&FAST)),
+            (id(2), lap(&wide)),
+            (id(3), lap(&wide)),
+            (id(4), lap(&sunk)),
+            (id(5), lap(&sunk)),
         ];
         let out = lines(&laps, &lap(&FAST), &[]);
         assert!(!out.notes.is_empty(), "nothing to check");
@@ -604,6 +649,46 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// A session is every stint of one event and the game starts counting at lap 1 again in
+    /// each, so a note that named a lap by its number alone would send the rider to the wrong
+    /// one. Reading the whole session is what makes the notes reachable at all — one stint of
+    /// three laps never has enough of them.
+    #[test]
+    fn a_note_names_the_stint_a_lap_was_ridden_in() {
+        let wide = Style { wide: 2.5, corner_v: 11.0, ..FAST };
+        let laps = vec![
+            (LapId { lap: 0, stint: 0 }, lap(&FAST)),
+            (LapId { lap: 1, stint: 0 }, lap(&FAST)),
+            (LapId { lap: 0, stint: 1 }, lap(&wide)),
+            (LapId { lap: 1, stint: 1 }, lap(&wide)),
+        ];
+        let out = lines(&laps, &lap(&FAST), &[]);
+        let t1 = out.notes.iter().find(|n| n.kind == "line" && n.name == "Turn 1").unwrap_or_else(|| panic!("{:?}", titles(&out)));
+        assert!(t1.detail.contains("laps 1, 2 of stint 2"), "{}", t1.detail);
+    }
+
+    #[test]
+    fn laps_are_named_by_their_stint_only_when_there_is_more_than_one() {
+        let ids = [LapId { lap: 2, stint: 0 }, LapId { lap: 0, stint: 1 }];
+        assert_eq!(which(&ids, false), "3, 1");
+        assert_eq!(which(&ids, true), "3 of stint 1 and 1 of stint 2");
+    }
+
+    /// No note at all is the usual answer for a short session ridden alone, and the page says
+    /// which of the two it was rather than showing an empty panel.
+    #[test]
+    fn a_session_with_no_notes_says_what_it_was_missing() {
+        let few: Vec<(LapId, Trace)> = (0..2).map(|n| (id(n), lap(&FAST))).collect();
+        let out = lines(&few, &lap(&FAST), &[]);
+        assert!(out.notes.is_empty(), "{:?}", titles(&out));
+        assert!(!out.enough_laps, "two laps can't tell one line from another");
+        assert!(out.alone, "nobody else was on track");
+        let many: Vec<(LapId, Trace)> = (0..MIN_LAPS_LINE as i32).map(|n| (id(n), lap(&FAST))).collect();
+        let out = lines(&many, &lap(&FAST), &[[0.0, 0.0]]);
+        assert!(out.enough_laps);
+        assert!(!out.alone);
     }
 
     /// Inside and outside are the corner's own sides, not the rider's left and right: the

@@ -21,7 +21,7 @@ import {
   type Theme,
 } from "@/api/coach";
 import { gap, lapTime, lossColor, started } from "@/lib/format";
-import { ALONE, refArgs, rememberRef, rememberedRef, type Reference } from "@/lib/reference";
+import { ALONE, IDEAL, refArgs, rememberRef, rememberedRef, type Reference } from "@/lib/reference";
 import Page, { Label } from "../Page";
 import RefPicker, { ReferenceLine } from "./RefPicker";
 import TrackMap from "./TrackMap";
@@ -35,6 +35,9 @@ import HudPanel from "./HudPanel";
 /** The page is a lot to take in at once, so it's split: the lap, the sections, the bike, what
  *  the game shows, and the track itself. */
 const TABS = ["lap", "sections", "setup", "ingame", "track"] as const;
+/** Under this a section cost nothing, and `analysis.rs` keeps no tips for it — see `th::WORTH_S`.
+ *  The page needs the same number to say why a section has nothing under it. */
+const WORTH_S = 0.05;
 type Tab = (typeof TABS)[number];
 const TAB_KEY = "coach-review-tab";
 
@@ -139,11 +142,13 @@ export default function Review({
   }, [path, lap, compare]);
 
   const count = data?.review.sections.length ?? 0;
-  // Picking a section anywhere goes to the tab that shows it.
+  // Picking a section anywhere goes to the tab that shows it — except on the track, which
+  // already shows it. Clicking a line note there used to throw the rider off the 3D view and
+  // onto the sections tab, which is the one place the note is about.
   const pick = (i: number) => {
     setSelected(i);
     setWhole(false);
-    setTab("sections");
+    if (tab !== "track") setTab("sections");
   };
   // The arrow keys walk the sections, but only where a section is on screen.
   useEffect(() => {
@@ -193,7 +198,9 @@ export default function Review({
     const times = lines.laps.map((l) => l.time);
     const [lo, hi] = [Math.min(...times), Math.max(...times)];
     return lines.laps
-      .filter((l) => l.lap !== lap)
+      // The lines cover every stint of the session, and each stint starts counting at lap 1
+      // again: it takes both to leave out the lap that's already drawn in blue.
+      .filter((l) => !(l.lap === lap && l.stint === lines.stint))
       .map((l) => ({ path: l.path, colour: `hsl(${Math.round(120 * (1 - (l.time - lo) / Math.max(hi - lo, 0.01)))} 65% 55%)` }));
   })();
   const canAll = lines != null && lines.laps.length > 1;
@@ -202,6 +209,18 @@ export default function Review({
     const i = review.sections.findIndex((s) => s.name === name);
     if (i >= 0) pick(i);
   };
+  // Held against a lap that isn't faster, every section is a gain, `analysis.rs` keeps only the
+  // safety tips and the page goes blank. That happens on exactly the lap a rider is most likely
+  // to open — their fastest — so say why, and offer the one comparison a best lap still has
+  // something to take from: their own best sections added up.
+  const nothing: { title?: TKey; why: TKey; ideal: boolean } | null =
+    solo || total > 0
+      ? null
+      : reference.kind === "ideal"
+        ? { why: "review.idealBeaten", ideal: false }
+        : data.bestHere
+          ? { title: "review.bestLapTitle", why: "review.bestLapWhy", ideal: true }
+          : { title: "review.refSlowerTitle", why: "review.refSlowerWhy", ideal: true };
   const allLaps = canAll && (
     <Segmented
       size="sm"
@@ -241,6 +260,18 @@ export default function Review({
       onBack={onBack}
       backLabel={back}
     >
+      {nothing && (
+        <div className="mb-4 border border-primary/40 bg-card px-4 py-3">
+          {nothing.title && <div className="text-[13px] font-semibold">{t(nothing.title)}</div>}
+          <div className="mt-0.5 text-[12.5px] leading-snug text-muted-foreground">{t(nothing.why)}</div>
+          {nothing.ideal && (
+            <Button size="sm" variant="outline" className="mt-2.5" onClick={() => pickRef(IDEAL)}>
+              {t("review.useIdeal")}
+            </Button>
+          )}
+        </div>
+      )}
+
       <Tabs value={tab} onValueChange={(v) => setTab(v as Tab)}>
         <TabsList className="mb-4">
           {TABS.map((id) => (
@@ -263,6 +294,17 @@ export default function Review({
             <Overall themes={review.overall} solo={solo} onPick={bySection} />
             <Focus review={review} worth={worth} selected={selected} solo={solo} onPick={pick} />
           </div>
+          {/* The line notes and the track itself sit on the last tab, which a rider landing
+              here never opens. A line to say they are there, rather than moving them. */}
+          {lines && lines.notes.length > 0 && (
+            <button
+              onClick={() => setTab("track")}
+              className="flex w-full items-center justify-between gap-3 border border-border bg-card px-4 py-2.5 text-left hover:border-foreground/30"
+            >
+              <span className="text-[12.5px]">{t("review.linesHere", { count: lines.notes.length })}</span>
+              <span className="shrink-0 text-[12px] font-medium text-primary">{t("review.linesOpen")}</span>
+            </button>
+          )}
         </TabsContent>
 
         {/* One section at a time, with the map to find it on. */}
@@ -326,31 +368,63 @@ export default function Review({
             </p>
           )}
           <div className="grid gap-6 lg:grid-cols-2">
-            {lines && lines.notes.length > 0 && (
-              <div>
-                <Label>{t("review.linesTitle")}</Label>
-                <div className="space-y-1">
-                  {lines.notes.map((n, k) => (
-                    <button
-                      key={k}
-                      onClick={() => bySection(n.name)}
-                      className={cn(
-                        "w-full border bg-card px-4 py-3 text-left",
-                        sel?.name === n.name ? "border-primary/60" : "border-border hover:border-foreground/30",
-                      )}
-                    >
-                      <div className="text-[13px] font-semibold">{n.title}</div>
-                      <div className="mt-0.5 text-[12.5px] leading-snug text-muted-foreground">{n.detail}</div>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
+            {lines && <LineNotes lines={lines} selected={sel?.name ?? null} onPick={bySection} />}
             <Rivals rivals={data.rivals ?? []} />
           </div>
         </TabsContent>
       </Tabs>
     </Page>
+  );
+}
+
+/** The lines the rider took and how the track changed under them — and, where there are none,
+ *  why there are none. Every note here needs either several laps through the same corner or
+ *  other riders to watch, so a short session ridden alone can't produce one however it was
+ *  ridden; an empty panel reads as the coach having nothing to say about the riding. */
+export function LineNotes({
+  lines,
+  selected = null,
+  onPick,
+}: {
+  lines: Lines;
+  /** The section on show, so its note stands out. */
+  selected?: string | null;
+  /** Where a note can be clicked through to its section; a page without sections leaves it out. */
+  onPick?: (section: string) => void;
+}) {
+  const t = useT();
+  return (
+    <div>
+      <Label>{t("review.linesTitle")}</Label>
+      {lines.notes.length > 0 ? (
+        <div className="space-y-1">
+          {lines.notes.map((n, k) => (
+            <button
+              key={k}
+              onClick={onPick ? () => onPick(n.name) : undefined}
+              disabled={!onPick}
+              className={cn(
+                "w-full border bg-card px-4 py-3 text-left",
+                selected === n.name ? "border-primary/60" : "border-border",
+                onPick && "hover:border-foreground/30",
+              )}
+            >
+              <div className="text-[13px] font-semibold">{n.title}</div>
+              <div className="mt-0.5 text-[12.5px] leading-snug text-muted-foreground">{n.detail}</div>
+            </button>
+          ))}
+        </div>
+      ) : (
+        <div className="border border-border bg-card px-4 py-3 text-[12.5px] text-muted-foreground">
+          <p>{t("review.linesNone")}</p>
+          <ul className="mt-1.5 list-disc space-y-1 pl-4 text-faint">
+            {!lines.enoughLaps && <li>{t("review.linesFewLaps", { count: lines.laps.length })}</li>}
+            {lines.alone && <li>{t("review.linesAlone")}</li>}
+            {lines.enoughLaps && !lines.alone && <li>{t("review.linesSame")}</li>}
+          </ul>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -510,7 +584,11 @@ function SectionPanel({ s, solo, onPrev, onNext }: { s: SectionReview; solo: boo
       </div>
       <div className="px-4 py-3">
         {!head ? (
-          <p className="text-[12.5px] text-muted-foreground">{t("review.nothingHere")}</p>
+          // A section that cost nothing has no tips by design — say that, rather than leaving
+          // "Nothing to fix here" to read as a verdict on a section that was never judged.
+          <p className="text-[12.5px] text-muted-foreground">
+            {t(!solo && s.lost <= WORTH_S ? "review.nothingLost" : "review.nothingHere")}
+          </p>
         ) : (
           <>
             <div className="flex gap-2.5">
