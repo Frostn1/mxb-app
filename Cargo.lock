@@ -2085,7 +2085,7 @@ dependencies = [
 
 [[package]]
 name = "frost-studio"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "ab_glyph",
  "anyhow",
@@ -2111,6 +2111,7 @@ dependencies = [
  "tauri-plugin-process",
  "tauri-plugin-shell",
  "tauri-plugin-updater",
+ "tiff",
  "tokio",
  "walkdir",
  "zip 2.4.2",
@@ -3693,7 +3694,7 @@ dependencies = [
 
 [[package]]
 name = "mxb-app"
-version = "0.15.0"
+version = "0.15.1"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -3756,7 +3757,7 @@ dependencies = [
 
 [[package]]
 name = "mxb-coach"
-version = "0.1.11"
+version = "0.1.15"
 dependencies = [
  "anyhow",
  "dirs-next",
@@ -3768,15 +3769,17 @@ dependencies = [
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",
+ "tauri-plugin-global-shortcut",
  "tauri-plugin-log",
  "tauri-plugin-process",
  "tauri-plugin-shell",
+ "tauri-plugin-single-instance",
  "tauri-plugin-updater",
 ]
 
 [[package]]
 name = "mxb-core"
-version = "0.15.0"
+version = "0.15.1"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -3784,6 +3787,7 @@ dependencies = [
  "dirs-next",
  "flate2",
  "getrandom 0.2.17",
+ "hmac",
  "image",
  "log",
  "md-5",
@@ -3797,6 +3801,8 @@ dependencies = [
  "serde_json",
  "sha2",
  "tauri",
+ "tauri-plugin-dialog",
+ "tauri-plugin-global-shortcut",
  "tauri-plugin-updater",
  "tokio",
  "uuid",

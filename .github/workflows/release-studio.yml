@@ -46,7 +46,11 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: npm
+
+      # bun installs the workspace from bun.lock, and tauri-action runs the app's
+      # beforeBuildCommand (`bun run build`) with it too.
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -77,7 +81,7 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install dependencies
-        run: npm ci
+        run: bun install --frozen-lockfile
 
       # The studio's Protect tab needs the same private module the manager does; without it
       # the tab hides itself rather than failing, so a fork still builds.
@@ -101,6 +105,13 @@ jobs:
           raw="${{ github.ref_type == 'tag' && github.ref_name || format('studio-v0.0.{0}', github.run_number) }}"
           echo "name=${raw#studio-}" >> "$GITHUB_OUTPUT"
 
+      # UPX for the Windows binary pack (scripts/pack-binary.sh runs as the app's
+      # beforeBundleCommand). Windows leg only; the script no-ops without it and without MXB_PACK.
+      - name: Install UPX (Windows)
+        if: startsWith(matrix.platform, 'windows')
+        shell: bash
+        run: choco install upx -y
+
       - name: Build and publish release
         uses: tauri-apps/tauri-action@v0
         env:
@@ -108,8 +119,18 @@ jobs:
           # GITHUB_TOKEN: that cannot write to another repository.
           GITHUB_TOKEN: ${{ secrets.STUDIO_RELEASE_TOKEN }}
           VITE_APP_NAME: "Frost's Studio"
+          # Pack the Windows binary with UPX via the beforeBundleCommand (scripts/pack-binary.sh).
+          # Windows leg only; empty elsewhere so the hook no-ops. See the script for the AV caveat.
+          MXB_PACK: ${{ startsWith(matrix.platform, 'windows') && '1' || '' }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.STUDIO_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.STUDIO_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # Signs this build's anonymous usage reports, so the control plane can tell a report
+          # from one of our builds from a report from a script. Obfuscated into the binary by
+          # crates/core/build.rs — not secrecy, since anyone can download the build and read
+          # the pad, but it keeps the key off a `strings` dump. Unset expands to empty, which
+          # build.rs drops, so a fork builds an unsigned variant rather than failing; the
+          # endpoint takes unsigned reports until MXB_USAGE_REQUIRE_SIGNATURE is turned on.
+          MXB_USAGE_KEY: ${{ secrets.MXB_USAGE_KEY }}
         with:
           owner: Frostn1
           repo: frost-studio

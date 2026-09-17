@@ -770,7 +770,10 @@ export const it: Translation = {
   "join.joining": "Connessione…",
   "join.launching": "Connessione a {{address}}…",
   "join.alreadyRunning":
-    "Chiudi prima {{game}} — un gioco già avviato non può essere collegato a un server.",
+    "{{game}} è già aperto — chiudilo, poi entra da qui.",
+  "join.gameOpen":
+    "{{game}} è già aperto. L'app lo ha avviato, quindi si trova dietro questa finestra. Chiudi il gioco, poi entra da qui.",
+  "join.showGame": "Mostra il gioco",
   "join.failed": "Impossibile entrare in quel server",
   "join.manual": "Entra in un server non elencato",
   "join.noServers": "Nessun server elencato per ora — digita un indirizzo che ti è stato dato.",
@@ -962,6 +965,33 @@ export const it: Translation = {
   "serverBrowser.viewList": "Elenco",
   "serverBrowser.waitingCount": "{{count}} in coda",
   "serverBrowser.queueHint": "Pieno. MXB App entra per te quando si libera un posto.",
+
+  // ── È il master server o sei tu? ──────────────────────────────────
+  "connection.checking": "Controllo se il problema è solo tuo…",
+  "connection.notYou": "I server di MX Bikes non rispondono",
+  "connection.likelyYou": "Tutti gli altri ci riescono",
+  "connection.failed": "L'elenco dei server non si è caricato",
+  "connection.failingFor": "Non risponde da almeno {{minutes}} min",
+  "connection.runCheck": "Controlla la mia connessione",
+  "connection.verdict.upstream": "È il master server di MX Bikes, non la tua connessione. Non c'è nulla da sistemare da parte tua: di solito torna nel giro di qualche minuto.",
+  "connection.verdict.local": "In questo momento tutti gli altri ci riescono, quindi è qualcosa su questo computer o su questa rete.",
+  "connection.verdict.fine": "Funziona tutto. Qualunque cosa fosse, è passata.",
+  "connection.verdict.unknown": "Non basta per dirlo: troppe poche app hanno controllato di recente. Riprova fra un minuto.",
+  "connection.check.internet": "Internet",
+  "connection.check.dns": "Indirizzo del master server",
+  "connection.check.udp": "UDP in uscita",
+  "connection.check.master": "Elenco dei server",
+  "connection.check.others": "Tutti gli altri",
+  "connection.checkFootnote": "L'UDP in uscita dice solo che il datagramma è potuto uscire, non che qualcuno abbia risposto.",
+
+  "registerServer.action": "Aggiungi il tuo server",
+  "registerServer.title": "Aggiungi il tuo server all'elenco condiviso",
+  "registerServer.blurb": "Così l'app ricorda il tuo server anche quando i server di MX Bikes non rispondono.",
+  "registerServer.note": "Serve solo per un server che non compare nell'elenco: uno nuovo, o uno privato. Tutto ciò che il gioco elenca viene già ricordato da sé.",
+  "registerServer.submit": "Aggiungi",
+  "registerServer.done": "{{address}} è nell'elenco condiviso",
+  "registerServer.failed": "Impossibile aggiungere quel server",
+
   "queue.banner": "#{{position}} in coda per {{name}}",
   "queue.turnBanner": "Tocca a te: entra in {{name}}",
   "queue.launchingBanner": "Entro in {{name}}",
@@ -1567,16 +1597,10 @@ export const it: Translation = {
   "voice.proximity": "Senti i piloti da dove si trovano",
   "voice.proximityDesc": "Un pilota accanto a te è forte e dal suo lato; uno a due curve di distanza è debole. Disattivalo per sentire tutti allo stesso volume. Torna da solo al volume piatto quando il gioco non comunica le posizioni.",
 
-  "overlay.pressKeys": "Premi i tasti…",
-  "overlay.needModifier": "Aggiungi un modificatore",
-  "overlay.needModifierDesc": "Tieni premuto Ctrl, Alt o Shift, così la scorciatoia non scatta mentre scrivi.",
   "overlay.shortcutUpdated": "Scorciatoia overlay aggiornata",
   "overlay.shortcutRejected": "Impossibile usare questa scorciatoia",
+  "overlay.coachLinked": "MXB Coach è collegato: le sue schede compaiono nell'overlay e questa scorciatoia apre entrambi.",
   "overlay.registerFailed": "Impossibile registrare la scorciatoia dell'overlay",
-  "overlay.toClose": "{{hotkey}} per chiudere",
-  "overlay.closeTitle": "Chiudi overlay (Esc)",
-  "overlay.openMain": "Apri l'app completa",
-  "overlay.openMainTitle": "Chiudi l'overlay e apri la finestra principale di {{app}}",
   "overlay.needsSetup": "Completa prima la configurazione di {{app}} nella finestra principale — deve sapere dov'è la tua cartella {{game}}.",
   "overlay.fullscreenBlocked": "L'overlay non può apparire sopra il fullscreen esclusivo",
   "overlay.fullscreenBlockedDesc": "Imposta {{game}} senza bordi o in finestra in Options → Video, poi riprova con la scorciatoia.",
@@ -1603,8 +1627,6 @@ export const it: Translation = {
     "I preset Feeling ora salvano come risponde ogni comando, come zona morta, guadagno e smussatura dell'acceleratore. I tuoi pulsanti e assi restano come sono.",
   "showcase.v0150.hub":
     "MXB Hub si carica di nuovo quando lo shop chiede una verifica anti-robot: l'app la risolve in background, oppure apre lo shop perché tu la completi.",
-  "showcase.v0150.secured":
-    "I contenuti protetti seguono l'accesso che hai davvero. Se un creatore ti rimuove dagli acquirenti, smettono di aprirsi la prossima volta che l'app è online, e l'app ti dice perché.",
   "showcase.v0140.hero.title":
     "Frost's Mod Manager, e uno Studio tutto suo",
   "showcase.v0140.hero.body":
@@ -2037,6 +2059,14 @@ export const it: Translation = {
   "supporters.contributors": "Collaboratori",
   "supporters.contributorsDesc":
     "Chi ha migliorato l'app con idee, test e feedback.",
+  "supporters.kind.code": "Contributi di codice",
+  "supporters.kind.codeDesc":
+    "Codice scritto da loro, che gira nella build che stai usando.",
+  "supporters.kind.testing": "Test",
+  "supporters.kind.testingDesc":
+    "Hanno rotto l'app di proposito, su build che nessun altro aveva.",
+  "supporters.kind.ideas": "Idee e feedback",
+  "supporters.kind.ideasDesc": "Hanno proposto qualcosa che è finito nell'app.",
   "reshade.needsGameFolder":
     "ReShade sta nella tua cartella di {{game}} — impostala in Cartella di gioco, oppure puntala direttamente qui.",
   "reshade.folder": "Sto guardando nella tua cartella di {{game}}:",

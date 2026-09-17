@@ -136,6 +136,48 @@ pub mod corpus {
     pub const LAP_CLIMB_M: (f32, f32) = (2.0, 70.0);
     /// Steepest grade along the riding line at the ninetieth. Measured 9.1–22.5°.
     pub const GRADE_P90_DEG: (f32, f32) = (7.0, 26.0);
+
+    /// The bands review holds a lap to, per discipline: `tracklayout::Rules::review`.
+    #[derive(Clone, Copy, Debug)]
+    pub struct Bands {
+        pub width_m: (f32, f32),
+        pub lap_m: (f32, f32),
+        pub lips_per_km: (f32, f32),
+        /// Not checked yet: review does not measure a lap's climb.
+        pub lap_climb_m: (f32, f32),
+        pub segments: (f32, f32),
+        pub arc_fraction: (f32, f32),
+        pub total_turn_deg: (f32, f32),
+        pub turns: (f32, f32),
+        pub turn_radius_m: (f32, f32),
+        /// The landscape's relief amplitude, metres.
+        pub amplitude_m: (f32, f32),
+        pub lap_avg_kmh: (f32, f32),
+        pub relief_m: (f32, f32),
+        pub slope_p99_deg: (f32, f32),
+        pub straight_m: f32,
+        pub straight_with_obstacle_m: f32,
+    }
+
+    /// Motocross: the published tracks above.
+    pub const MX: Bands = Bands {
+        width_m: WIDTH_M,
+        lap_m: LAP_M,
+        lips_per_km: LIPS_PER_KM,
+        lap_climb_m: LAP_CLIMB_M,
+        segments: SEGMENTS,
+        arc_fraction: ARC_FRACTION,
+        total_turn_deg: TOTAL_TURN_DEG,
+        turns: TURNS,
+        turn_radius_m: TURN_RADIUS_M,
+        // Half the published corpus climbs more than 20 m.
+        amplitude_m: (4.0, 30.0),
+        lap_avg_kmh: LAP_AVG_KMH,
+        relief_m: RELIEF_M,
+        slope_p99_deg: SLOPE_P99_DEG,
+        straight_m: STRAIGHT_M,
+        straight_with_obstacle_m: STRAIGHT_WITH_OBSTACLE_M,
+    };
 }
 
 /// One round trip: what the model was last told, and what was wrong with what it sent.
@@ -325,8 +367,9 @@ fn repair(prog: &mut TrackProgram) -> Vec<String> {
     //
     //    After the closing, because rotating a lap that doesn't meet itself moves the part
     //    that comes after the seam by however far the gap is.
-    if prog.opening_straight() < crate::trackprog::START_STRAIGHT_M {
-        let need = crate::trackprog::START_STRAIGHT_M;
+    let rules = prog.discipline.rules();
+    if prog.opening_straight() < rules.start_straight_m {
+        let need = rules.start_straight_m;
         let features = prog.features.clone();
         // Nothing built on the stretch a start needs. Forty riders leave the gate abreast and
         // reach the first jump in a pack, so a start straight is bare ground — and a jump that
@@ -395,7 +438,7 @@ fn repair(prog: &mut TrackProgram) -> Vec<String> {
                     elevation: Vec::new(),
                     ..prog.clone()
                 };
-                let reach = tracksynth::START_FAN_HALF_M + 12.0;
+                let reach = rules.fan_half_m() + 12.0;
                 for q in walk.stations(4.0) {
                     lo_x = lo_x.min(q.x - reach);
                     hi_x = hi_x.max(q.x + reach);
@@ -589,22 +632,19 @@ fn repair(prog: &mut TrackProgram) -> Vec<String> {
         // The speed halfway down the window, which is about where the lip ends up.
         let lip_at = from + room * 0.5;
         let mut built = None;
-        let mut height = crate::trackprog::FINISH_JUMP_M.1;
-        while height >= crate::trackprog::FINISH_JUMP_M.0 - 1e-3 {
+        let mut height = rules.finish_jump_m.1;
+        while height >= rules.finish_jump_m.0 - 1e-3 {
             let ramp = crate::trackprog::face_run(
                 height,
                 crate::trackprog::JUMP_FACE_DEG,
                 crate::trackprog::JUMP_FACE_MIN_M,
             )
-            .max(crate::trackprog::FINISH_FACE_M);
+            .max(rules.finish_face_m);
             let deg = crate::trackprog::takeoff_lip_deg(height, ramp);
             // A deck no longer than the run at it carries: a tabletop nobody can get over the
             // top of is a hill with a flat bit on it, and this is the one everybody lands on.
-            let deck = speed.carry(lip_at, deg).clamp(
-                crate::trackprog::TABLETOP_DECK_M,
-                crate::trackprog::FINISH_DECK_MAX_M,
-            );
-            let length = crate::trackprog::finish_jump_length(height, deck);
+            let deck = speed.carry(lip_at, deg).clamp(rules.finish_deck_m.0, rules.finish_deck_m.1);
+            let length = crate::trackprog::finish_jump_length(height, deck, rules.finish_face_m);
             if length <= room {
                 built = Some((height, deck, length, from + (room - length) * 0.5));
                 break;
@@ -612,31 +652,58 @@ fn repair(prog: &mut TrackProgram) -> Vec<String> {
             height -= 0.1;
         }
         if let Some((height, deck, length, at)) = built {
+            // A stadium round finishes over a triple, not a table — 22.6–25.3 m crest to crest
+            // at a 30° lip on all seven of the measured laps. Built at the span the run-up
+            // carries, which `deck` already is: see `tracklayout::triple_span` for why that
+            // and the measured median are not the same number.
+            let jump = if rules.finish_triple {
+                crate::tracklayout::finish_triple(at, height, deck)
+            } else {
+                Feature::Tabletop {
+                    at,
+                    length,
+                    height,
+                    lip: rules.finish_face_m,
+                    // Left untagged on purpose. This is the automatic placement, and it should
+                    // keep being found by measurement — tagging is what a person does to
+                    // overrule it, and a tag nobody asked for is one they would have to find
+                    // and undo.
+                    finish: false,
+                }
+            };
             // Whatever stood on that ground goes. Two jumps blended into each other are one
             // shape with a dip in it, and the finish jump is the one that stands.
+            //
+            // Measured against the triple's own footprint, because a triple is a different
+            // size from the table this used to be and clearing only the table's ground left
+            // whatever sat on the rest of the triple standing in it.
+            //
+            // The tabletop keeps the window it has always had. `Feature::length` reports a
+            // table's *ramp-inclusive* footprint, which is longer than the stated `length`, so
+            // measuring that one the same way would clear ground on motocross laps that has
+            // never been cleared — a change nobody asked for, on laps already signed off.
+            let (ja, jb) = if rules.finish_triple {
+                (jump.at(), jump.at() + jump.length())
+            } else {
+                (at, at + length)
+            };
             let taken = prog
                 .features
                 .iter()
-                .filter(|f| f.at() + f.length() > at && f.at() < at + length)
+                .filter(|f| f.at() + f.length() > ja && f.at() < jb)
                 .map(|f| f.name())
                 .collect::<Vec<_>>()
                 .join(", ");
-            prog.features
-                .retain(|f| f.at() + f.length() <= at || f.at() >= at + length);
-            prog.features.push(Feature::Tabletop {
-                at,
-                length,
-                height,
-                lip: crate::trackprog::FINISH_FACE_M,
-                // Left untagged on purpose. This is the automatic placement, and it should
-                // keep being found by measurement — tagging is what a person does to overrule
-                // it, and a tag nobody asked for is one they would have to find and undo.
-                finish: false,
-            });
+            prog.features.retain(|f| f.at() + f.length() <= ja || f.at() >= jb);
+            let what = if rules.finish_triple {
+                format!("{height:.1} m triple, {deck:.0} m crest to crest")
+            } else {
+                format!("{height:.1} m tabletop {length:.0} m across a {deck:.0} m deck")
+            };
+            prog.features.push(jump);
             prog.features.sort_by(|a, b| a.at().total_cmp(&b.at()));
             done.push(format!(
-                "built the finish jump at {at:.0} m: a {height:.1} m tabletop {length:.0} m \
-                 across a {deck:.0} m deck, taken at {:.0} km/h{}",
+                "built the finish jump at {at:.0} m: a {what}, taken at {:.0} km/h{}",
                 speed.at(lip_at) * 3.6,
                 if taken.is_empty() {
                     String::new()
@@ -813,6 +880,39 @@ pub async fn ask_settings(brief: &str, ask: &impl Ask) -> Result<TrackSettings> 
     bail!("the model's settings didn't parse twice; last time: {last}")
 }
 
+/// Whether a brief asks for a stadium discipline, near enough to route on.
+///
+/// Which protocol to ask is decided before anything is asked, and it cannot be the model's
+/// call because the model has not been asked yet. It is also not a *judgement*: a supercross
+/// lap is laid out by `tracklayout`'s own stadium walker, and a model writing segments one at
+/// a time has no way to build one. So a brief that names a stadium discipline is asked for
+/// settings, whatever model is configured, and the model still says which discipline it
+/// really is.
+///
+/// Deliberately only the discipline's own names — nothing about jumps, rhythm or whoops,
+/// which an outdoor national has too. It is allowed to be wrong in one direction: a brief
+/// that says "supercross-style outdoor track" routes here, comes back `mx`, and is drawn by
+/// the walker rather than written by the model. That is the path most models take anyway and
+/// it measures against the same corpus. Wrong the other way — a supercross brief reaching the
+/// program path — cannot produce a supercross at all, which is the fault this exists to stop.
+pub fn brief_names_a_stadium(brief: &str) -> bool {
+    let lower = brief.to_lowercase();
+    // Spelt-out names, which can sit inside a longer word ("supercross-style").
+    const SPELT: [&str; 6] = [
+        "supercross", "super cross", "supermotocross", "super motocross", "arenacross",
+        "arena cross",
+    ];
+    if SPELT.iter().any(|w| lower.contains(w)) {
+        return true;
+    }
+    // And the short ones, which have to be words of their own: "sx" is inside "ASX" and
+    // "sxs", and "indoor" is not a word anybody uses about a field.
+    const WORDS: [&str; 5] = ["sx", "smx", "stadium", "indoor", "indoors"];
+    lower
+        .split(|c: char| !c.is_alphanumeric())
+        .any(|w| WORDS.contains(&w))
+}
+
 /// Draw a lap from settings, with the walker rather than the model.
 ///
 /// Settings at their extremes draw less often, so a lap that won't come on any of 24 seeds is
@@ -874,6 +974,8 @@ pub fn validate(prog: &TrackProgram) -> Vec<String> {
 }
 
 pub fn review(prog: &TrackProgram) -> Review {
+    let rules = prog.discipline.rules();
+    let bands = &rules.review;
     let mut out = Vec::new();
     let mut notes = Vec::new();
     let between = |what: &str, v: f32, (lo, hi): (f32, f32), unit: &str, out: &mut Vec<String>| {
@@ -904,7 +1006,7 @@ pub fn review(prog: &TrackProgram) -> Review {
     // track ships with its gates on the lap itself.
     let opening = prog.opening_straight();
     if prog.start_line().is_none() {
-        let need = crate::trackprog::START_STRAIGHT_M;
+        let need = rules.start_straight_m;
         let longest = prog
             .straight_runs()
             .into_iter()
@@ -918,7 +1020,7 @@ pub fn review(prog: &TrackProgram) -> Review {
     } else if let Some(line) = prog.start_line() {
         // It fits the lap; does it fit the ground? The synthesiser drops a start straight that
         // hangs off the plot, and a track with no gates is worth saying out loud.
-        let reach = tracksynth::START_FAN_HALF_M + 12.0;
+        let reach = rules.fan_half_m() + 12.0;
         let (sx, sz) = (prog.terrain.size_x, prog.terrain.size_z);
         let walk = TrackProgram {
             start: line.start,
@@ -934,8 +1036,8 @@ pub fn review(prog: &TrackProgram) -> Review {
                 "the start straight runs off the ground: it stands {:.0} m to the side of the \
                  lap and is {:.0} m wide across the gate row, and the plot is {sx:.0} x {sz:.0} \
                  m. Give the track more ground, or move the lap away from that edge.",
-                crate::trackprog::START_OFFSET_M,
-                tracksynth::START_FAN_HALF_M * 2.0,
+                rules.start_offset_m,
+                rules.fan_half_m() * 2.0,
             ));
         }
     }
@@ -943,12 +1045,7 @@ pub fn review(prog: &TrackProgram) -> Review {
     // so reaching here without one means there was none — which is the layout's business and
     // not a number anything can fix.
     if prog.finish_jump().is_none() {
-        let need = crate::trackprog::FINISH_RUNUP_M
-            + crate::trackprog::finish_jump_length(
-                crate::trackprog::FINISH_JUMP_M.0,
-                crate::trackprog::TABLETOP_DECK_M,
-            )
-            + crate::trackprog::FINISH_RUNOUT_M;
+        let need = crate::trackprog::finish_straight_m(rules);
         notes.push(format!(
             "the lap has no finish jump: the main straight runs {opening:.0} m and one needs \
              about {need:.0} m — the corner exit, the jump itself, and somewhere to land \
@@ -1004,8 +1101,8 @@ pub fn review(prog: &TrackProgram) -> Review {
             prog.width
         ));
     }
-    between("the riding line", prog.width, corpus::WIDTH_M, " m", &mut notes);
-    between("the lap", prog.lap_length(), corpus::LAP_M, " m", &mut notes);
+    between("the riding line", prog.width, bands.width_m, " m", &mut notes);
+    between("the lap", prog.lap_length(), bands.lap_m, " m", &mut notes);
 
     // Only worth saying once there is something to count. A lap with nothing built on it is
     // The layout, against what published tracks' own centrelines say. Notes rather than
@@ -1027,10 +1124,10 @@ pub fn review(prog: &TrackProgram) -> Review {
         .sum();
     let corners = crate::trackprog::turns(&prog.segments);
     let real: Vec<&(f32, f32)> = corners.iter().filter(|t| t.0 >= 25.0).collect();
-    between("the lap", prog.segments.len() as f32, corpus::SEGMENTS, " segments", &mut notes);
+    between("the lap", prog.segments.len() as f32, bands.segments, " segments", &mut notes);
     if !prog.segments.is_empty() {
         let fraction = arcs as f32 / prog.segments.len() as f32;
-        if fraction < corpus::ARC_FRACTION.0 {
+        if fraction < bands.arc_fraction.0 {
             notes.push(format!(
                 "the lap is {arcs} arcs and {} straights — {:.0}% arcs, where published tracks                  run 61–91%. A circuit is a chain of corners with a few straights in it, not                  straights joined by corners: Indiana is 109 arcs against 11 straights.",
                 prog.segments.len() - arcs,
@@ -1038,25 +1135,25 @@ pub fn review(prog: &TrackProgram) -> Review {
             ));
         }
     }
-    between("the lap's total turning", turning, corpus::TOTAL_TURN_DEG, "°", &mut notes);
+    between("the lap's total turning", turning, bands.total_turn_deg, "°", &mut notes);
     // How much of a hill it is. A generated lap lands on flat by default — the landscape
     // amplitude is the only thing that decides it, and a track on a field rides nothing like
     // a track on a hillside. Half the published corpus climbs more than 20 m.
     between(
         "the landscape's amplitude",
         prog.terrain.relief.amplitude,
-        (4.0, 30.0),
+        bands.amplitude_m,
         " m",
         &mut notes,
     );
-    between("the lap", real.len() as f32, corpus::TURNS, " corners", &mut notes);
+    between("the lap", real.len() as f32, bands.turns, " corners", &mut notes);
     if !real.is_empty() {
         let mut r: Vec<f32> = real.iter().map(|t| t.1).collect();
         r.sort_by(f32::total_cmp);
         between(
             "the median corner's tightest radius",
             r[r.len() / 2],
-            corpus::TURN_RADIUS_M,
+            bands.turn_radius_m,
             " m",
             &mut notes,
         );
@@ -1066,7 +1163,7 @@ pub fn review(prog: &TrackProgram) -> Review {
     if !prog.features.is_empty() {
         let lips: usize = prog.features.iter().map(|f| f.lips()).sum();
         let per_km = lips as f32 * 1000.0 / prog.lap_length().max(1.0);
-        between("feature density", per_km, corpus::LIPS_PER_KM, " per km", &mut notes);
+        between("feature density", per_km, bands.lips_per_km, " per km", &mut notes);
     }
 
     // Straights, against the only length limit any federation states. The FFM allows the
@@ -1079,9 +1176,9 @@ pub fn review(prog: &TrackProgram) -> Review {
             .iter()
             .any(|f| f.at() >= at - 1.0 && f.at() <= at + 15.0);
         let cap = if obstacle {
-            corpus::STRAIGHT_WITH_OBSTACLE_M
+            bands.straight_with_obstacle_m
         } else {
-            corpus::STRAIGHT_M
+            bands.straight_m
         };
         if len > cap {
             out.push(format!(
@@ -1140,7 +1237,7 @@ pub fn review(prog: &TrackProgram) -> Review {
                 .min_by(|a, b| (a.s - lip).abs().total_cmp(&(b.s - lip).abs()))
                 .map(|st| st.curvature.abs())
                 .unwrap_or(0.0);
-            if k > 0.0 && 1.0 / k < corpus::TURN_RADIUS_M.0 * 2.0 {
+            if k > 0.0 && 1.0 / k < bands.turn_radius_m.0 * 2.0 {
                 notes.push(format!(
                     "the {} at {:.0} m takes off inside a {:.0} m corner — a rider cannot \
                      leave the ground square out of a turn that tight",
@@ -1150,8 +1247,12 @@ pub fn review(prog: &TrackProgram) -> Review {
                 ));
             }
         }
+        // A sand section stands nothing up — it is what the ground is made of over a stretch,
+        // like a rut — so the jump-height band has nothing to say about it.
         let h = f.height().abs();
-        if h < corpus::FEATURE_HEIGHT_M.0 || h > corpus::FEATURE_HEIGHT_M.1 {
+        if !matches!(f, Feature::Sand { .. })
+            && (h < corpus::FEATURE_HEIGHT_M.0 || h > corpus::FEATURE_HEIGHT_M.1)
+        {
             out.push(format!(
                 "a feature at {:.0} m stands {h:.1} m; jumps run {:.1}–{:.1} m",
                 f.at(),
@@ -1213,7 +1314,7 @@ pub fn review(prog: &TrackProgram) -> Review {
         }
         if time > 1.0 {
             let kmh = prog.lap_length() / time * 3.6;
-            between("the lap's average speed", kmh, corpus::LAP_AVG_KMH, " km/h", &mut notes);
+            between("the lap's average speed", kmh, bands.lap_avg_kmh, " km/h", &mut notes);
         }
     }
 
@@ -1239,8 +1340,8 @@ pub fn review(prog: &TrackProgram) -> Review {
     // Both of these measure what was *built* on the ground, so an empty lap has nothing to
     // say about them either.
     if !prog.features.is_empty() {
-        between("the built relief", c.feature_relief_m.p90, corpus::RELIEF_M, " m", &mut notes);
-        between("the steepest ground", c.slope_deg.p99, corpus::SLOPE_P99_DEG, "°", &mut notes);
+        between("the built relief", c.feature_relief_m.p90, bands.relief_m, " m", &mut notes);
+        between("the steepest ground", c.slope_deg.p99, bands.slope_p99_deg, "°", &mut notes);
     }
     if c.largest_component_fraction < 0.95 {
         out.push(format!(
@@ -1478,13 +1579,159 @@ mod tests {
         assert_eq!(written, props(feature));
     }
 
+    /// The discipline is in one of the two schemas and not the other, on purpose.
+    ///
+    /// It used to be in neither: it was the switch on screen, so a brief could not ask for a
+    /// supercross round at all. It is a *settings* field now — the model reads the brief and
+    /// says which kind of racing it is, and `tracklayout` draws that discipline's lap.
+    ///
+    /// It is still not a **program** field, and that is not an oversight either. A program is
+    /// the lap itself, segment by segment, and a stadium lap is laid out by `walk_stadium`
+    /// from a measured floor: a model writing segments cannot build one, and a program tagged
+    /// `sx` would then be measured against supercross's review bands it never aimed at. So a
+    /// motocross program is the program schema exactly, and a walked SX lap adds that one key
+    /// on the way out.
+    #[test]
+    fn a_discipline_is_the_settings_schemas_and_not_the_programs() {
+        let program = Protocol::Program.schema();
+        assert!(program["properties"].get("discipline").is_none(), "the model does not draw a stadium");
+        let knobs = LayoutKnobs::for_discipline(crate::trackprog::Discipline::Sx);
+        let sx = (0..8u64).find_map(|n| draw_with(n, &knobs)).expect("an SX lap");
+        let mut want = props(&program);
+        want.insert("discipline".into());
+        assert_eq!(keys(&serde_json::to_value(&sx).unwrap()), want);
+        let mx: TrackProgram = serde_json::from_str(EXAMPLE).unwrap();
+        assert_eq!(keys(&serde_json::to_value(&mx).unwrap()), props(&program));
+
+        // And the settings schema names every one of them, spelt the way serde reads them.
+        let settings = Protocol::Settings.schema();
+        let values = settings["properties"]["discipline"]["enum"].as_array().unwrap();
+        let read: Vec<crate::trackprog::Discipline> = values
+            .iter()
+            .map(|d| serde_json::from_value(d.clone()).expect("a discipline the app knows"))
+            .collect();
+        use crate::trackprog::Discipline::{Mx, Smx, Sx};
+        assert_eq!(read, vec![Mx, Sx, Smx]);
+        assert!(settings["required"].as_array().unwrap().iter().any(|r| r == "discipline"));
+    }
+
     #[test]
     fn the_settings_serialise_with_the_names_the_schema_uses() {
         let schema = Protocol::Settings.schema();
         let v = serde_json::to_value(TrackSettings::default()).unwrap();
         assert_eq!(keys(&v), props(&schema));
+        // Every required name is one serde writes, and every name serde writes is required:
+        // an optional field is an alternative in the compiled grammar, and this schema has
+        // never had one. See `control-plane/src/trackgen.ts`.
+        let required: std::collections::BTreeSet<String> = schema["required"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|r| r.as_str().unwrap().to_string())
+            .collect();
+        assert_eq!(required, keys(&v));
         for surface in schema["properties"]["surface"]["enum"].as_array().unwrap() {
             serde_json::from_value::<crate::trackprog::Surface>(surface.clone()).unwrap();
+        }
+    }
+
+    /// The settings schema is small enough that its enums cost nothing: what the grammar
+    /// charges for is alternatives, and this one has no optional field and no union in it.
+    /// Two `enum`s of three values apiece is the whole of it.
+    #[test]
+    fn the_settings_schema_has_no_unions_in_it() {
+        let text = serde_json::to_string(&Protocol::Settings.schema()).unwrap();
+        for costly in ["anyOf", "oneOf", "allOf", "null"] {
+            assert!(!text.contains(costly), "the settings schema grew a {costly}");
+        }
+    }
+
+    /// A brief that names a stadium discipline is asked for settings; one that merely sounds
+    /// jumpy is not. See `brief_names_a_stadium` for why the line is drawn there.
+    #[test]
+    fn a_stadium_brief_is_read_off_the_words_it_uses() {
+        for yes in [
+            "a supercross round in a stadium",
+            "Supercross, Anaheim 1",
+            "an SX track",
+            "SMX playoff round",
+            "a SuperMotocross lap",
+            "arenacross, tight and indoors",
+            "an indoor track",
+            "supercross-style, built as a real SX round",
+        ] {
+            assert!(brief_names_a_stadium(yes), "{yes:?} names a stadium");
+        }
+        for no in [
+            "a sandy national",
+            "a jumpy rhythm track with whoops",
+            "a hillside track like Millville",
+            "a fast flowing grasstrack",
+            // Not a word of its own, so it is not the discipline.
+            "the ASX circuit at Essex",
+        ] {
+            assert!(!brief_names_a_stadium(no), "{no:?} is not a stadium");
+        }
+    }
+
+    /// The brief's own discipline draws that discipline's lap, without the switch on screen.
+    #[test]
+    fn a_brief_can_ask_for_a_supercross() {
+        use crate::trackprog::Discipline;
+        let picked = TrackSettings { discipline: Discipline::Sx, ..TrackSettings::default() };
+        let answer = serde_json::to_string(&picked).unwrap();
+        // The model's whole answer, through the loop the app runs.
+        let got = block_on(ask_settings("a supercross round", &Canned::new(&[&answer]))).unwrap();
+        assert_eq!(got.discipline, Discipline::Sx);
+        let prog = draw_from_settings(&got, 7).unwrap();
+        assert_eq!(prog.discipline, Discipline::Sx);
+        let r = review(&prog);
+        assert!(r.fatal.is_empty() && r.problems.is_empty(), "{:?} {:?}", r.fatal, r.problems);
+        // And it is a stadium lap, not a national drawn short.
+        let sx = crate::tracklayout::SX_RULES;
+        assert!((sx.lap_m.0..=sx.lap_m.1).contains(&prog.lap_length()), "{}", prog.lap_length());
+    }
+
+    /// The stadium words a brief uses reach the lap: whoops asked for or left out, and sand
+    /// laid rather than rolled for.
+    #[test]
+    fn the_stadium_vocabulary_moves_the_lap() {
+        use crate::trackprog::{Discipline, Feature, Surface};
+        let sx = |f: fn(&mut TrackSettings)| {
+            let mut s = TrackSettings { discipline: Discipline::Sx, ..TrackSettings::default() };
+            f(&mut s);
+            let knobs = LayoutKnobs::from_settings(&s);
+            (0..24u64)
+                .filter_map(|n| draw_with(n, &knobs))
+                .take(8)
+                .collect::<Vec<_>>()
+        };
+
+        // "No whoops in it": the set the seed rolled is not built.
+        let none = sx(|s| s.waves = 0);
+        assert!(!none.is_empty(), "no SX laps drew");
+        for p in &none {
+            assert!(
+                !p.features.iter().any(|f| matches!(f, Feature::Whoops { .. })),
+                "{} kept a whoops set with waves 0",
+                p.name
+            );
+        }
+        // And left alone it still builds them — otherwise the check above proves nothing.
+        let some = sx(|_| {});
+        assert!(
+            some.iter().any(|p| p.features.iter().any(|f| matches!(f, Feature::Whoops { .. }))),
+            "no supercross lap built whoops at all"
+        );
+
+        // "A sandy supercross": sand every time, not the corpus's coin flip.
+        let sandy = sx(|s| s.surface = Surface::Sand);
+        for p in &sandy {
+            assert!(
+                p.features.iter().any(|f| matches!(f, Feature::Sand { .. })),
+                "{} was asked for sand and has none",
+                p.name
+            );
         }
     }
 
@@ -1517,7 +1764,7 @@ mod tests {
         // It is drawn starting halfway round a corner, which is where the gate row used to
         // end up. Repairing it has to have moved the start onto a straight.
         assert!(
-            p.opening_straight() >= crate::trackprog::START_STRAIGHT_M,
+            p.opening_straight() >= crate::tracklayout::MX_RULES.start_straight_m,
             "the lap opens with {:.0} m of straight",
             p.opening_straight()
         );
@@ -1934,7 +2181,7 @@ mod tests {
             "the finish jump is a tabletop, not a {}: everybody lands on it",
             f.name()
         );
-        let (lo, hi) = crate::trackprog::FINISH_JUMP_M;
+        let (lo, hi) = crate::tracklayout::MX_RULES.finish_jump_m;
         assert!(
             f.height() >= lo && f.height() <= hi,
             "it stands {:.1} m against {lo:.1}–{hi:.1}",

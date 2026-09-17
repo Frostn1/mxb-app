@@ -1,12 +1,23 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import type { UnlistenFn } from "@tauri-apps/api/event";
+import { RefreshCw } from "lucide-react";
 import { Badge } from "@frost/shared/Components/ui/badge";
 import { Button } from "@frost/shared/Components/ui/button";
 import { useT } from "@/i18n";
-import { coachLines, coachSession, coachSessions, type Lines, type SessionDetail, type SessionSummary } from "@/api/coach";
+import {
+  coachLines,
+  coachSession,
+  coachSessions,
+  onSessionsChanged,
+  type Lines,
+  type SessionDetail,
+  type SessionSummary,
+} from "@/api/coach";
 import { gap, lapTime, started } from "@/lib/format";
 import Page, { Label } from "../Page";
 
-/** One stint on track: its laps, the lap they're compared with, and the ideal lap. */
+/** One session: every stint of the event, its laps, the lap they're compared with, and the
+ *  ideal lap. */
 export default function SessionView({
   path,
   onBack,
@@ -14,8 +25,9 @@ export default function SessionView({
 }: {
   path: string;
   onBack: () => void;
-  /** `solo` reviews the lap on its own, with no faster lap to compare with. */
-  onReview: (lap: number, solo: boolean) => void;
+  /** The lap's own recording and number. `solo` reviews it with no faster lap to compare with;
+   *  the track comes along because the review remembers its reference per track. */
+  onReview: (path: string, lap: number, solo: boolean, trackId: string) => void;
 }) {
   const t = useT();
   const [detail, setDetail] = useState<SessionDetail | null>(null);
@@ -23,11 +35,26 @@ export default function SessionView({
   const [lines, setLines] = useState<Lines | null>(null);
   const [all, setAll] = useState<SessionSummary[]>([]);
 
-  useEffect(() => {
+  // Re-read rather than replace: a lap finished while this page is open should just appear.
+  const load = useCallback(() => {
     coachSession(path).then(setDetail).catch((e) => setError(String(e)));
     coachLines(path).then(setLines).catch(() => {});
     coachSessions().then(setAll).catch(() => {});
   }, [path]);
+  useEffect(() => load(), [load]);
+
+  useEffect(() => {
+    let live = true;
+    let off: UnlistenFn | undefined;
+    onSessionsChanged(load).then((stop) => {
+      if (live) off = stop;
+      else stop();
+    });
+    return () => {
+      live = false;
+      off?.();
+    };
+  }, [load]);
 
   if (error || !detail) {
     return (
@@ -41,13 +68,23 @@ export default function SessionView({
   const best = s.bestMs;
   const idealMs = ideal ? ideal.time * 1000 : null;
   const setups = compareSetups(all.filter((o) => o.trackId === s.trackId && o.bikeId === s.bikeId));
+  // Several stints in one session: the lap numbers start again in each, so they're named.
+  const multi = s.stints.length > 1;
 
   return (
     <Page
       title={s.trackName || s.trackId}
-      sub={`${s.bikeName || s.bikeId} · ${started(s.started)}`}
+      sub={[s.bikeName || s.bikeId, started(s.started), multi ? t("session.stints", { n: s.stints.length }) : ""]
+        .filter(Boolean)
+        .join(" · ")}
       onBack={onBack}
       backLabel={t("sessions.title")}
+      actions={
+        <Button variant="outline" size="sm" onClick={load}>
+          <RefreshCw className="size-3.5" />
+          {t("common.refresh")}
+        </Button>
+      }
     >
       <div className="grid gap-3 sm:grid-cols-3">
         <Stat label={t("session.best")} value={lapTime(best)} />
@@ -73,11 +110,12 @@ export default function SessionView({
             const comparable = l.whole && !l.invalid;
             return (
               <div
-                key={l.num}
-                className="grid grid-cols-[60px_110px_90px_1fr_auto] items-center gap-3 border-b border-border px-4 py-2 text-[12.5px] last:border-b-0"
+                key={`${l.path}-${l.num}`}
+                className="grid grid-cols-[130px_110px_90px_1fr_auto] items-center gap-3 border-b border-border px-4 py-2 text-[12.5px] last:border-b-0"
               >
                 <span className="text-muted-foreground">
                   {t("session.lap")} {l.num + 1}
+                  {multi && <span className="ml-1.5 text-faint">{t("session.stintTag", { n: l.stint + 1 })}</span>}
                 </span>
                 <span className={l.timeMs ? "font-mono tabular-nums" : "font-mono tabular-nums text-muted-foreground"}>
                   {lapTime(l.timeMs || l.riddenMs)}
@@ -91,7 +129,7 @@ export default function SessionView({
                   {l.crashed && <Badge>{t("session.crashed")}</Badge>}
                 </span>
                 {/* A lap that can't be held against another is still worth a look on its own. */}
-                <Button size="sm" variant="outline" onClick={() => onReview(l.num, !comparable || !reference)}>
+                <Button size="sm" variant="outline" onClick={() => onReview(l.path, l.num, !comparable || !reference, s.trackId)}>
                   {t("session.review")}
                 </Button>
               </div>
@@ -147,22 +185,29 @@ export default function SessionView({
         <div className="mt-8">
           <Label>{t("session.sections")}</Label>
           <div className="border border-border">
-            {ideal.sections.map((b, i) => (
-              <div
-                key={b.name + i}
-                className="grid grid-cols-[1fr_100px_70px_110px] items-center gap-3 border-b border-border px-4 py-2 text-[12.5px] last:border-b-0"
-              >
-                <span className="flex items-center gap-2">
-                  {b.name}
-                  {ideal.leastConsistent === i && <Badge>{t("session.leastConsistent")}</Badge>}
-                </span>
-                <span className="font-mono tabular-nums">{b.best.toFixed(3)}</span>
-                <span className="text-muted-foreground">
-                  {t("session.lap")} {b.lap + 1}
-                </span>
-                <span className="text-right text-muted-foreground">±{b.spread.toFixed(2)} s</span>
-              </div>
-            ))}
+            {ideal.sections.map((b, i) => {
+              // The best is keyed by where the lap sits in this session, not by its number.
+              const from = s.laps[b.lap];
+              return (
+                <div
+                  key={b.name + i}
+                  className="grid grid-cols-[1fr_100px_130px_110px] items-center gap-3 border-b border-border px-4 py-2 text-[12.5px] last:border-b-0"
+                >
+                  <span className="flex items-center gap-2">
+                    {b.name}
+                    {ideal.leastConsistent === i && <Badge>{t("session.leastConsistent")}</Badge>}
+                  </span>
+                  <span className="font-mono tabular-nums">{b.best.toFixed(3)}</span>
+                  <span className="text-muted-foreground">
+                    {t("session.lap")} {(from?.num ?? b.lap) + 1}
+                    {multi && from && (
+                      <span className="ml-1.5 text-faint">{t("session.stintTag", { n: from.stint + 1 })}</span>
+                    )}
+                  </span>
+                  <span className="text-right text-muted-foreground">±{b.spread.toFixed(2)} s</span>
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
@@ -175,9 +220,13 @@ export default function SessionView({
 function compareSetups(sessions: SessionSummary[]) {
   const times = new Map<string, number[]>();
   for (const x of sessions) {
-    const list = times.get(x.setup) ?? [];
-    for (const l of x.laps) if (l.whole && !l.invalid && l.timeMs > 0) list.push(l.timeMs);
-    times.set(x.setup, list);
+    // Each stint of a session can be on its own setup, so every lap is counted under its own.
+    const setupOf = new Map(x.stints.map((st) => [st.path, st.setup]));
+    for (const l of x.laps) {
+      if (!l.whole || l.invalid || l.timeMs <= 0) continue;
+      const name = setupOf.get(l.path) ?? x.setup;
+      times.set(name, [...(times.get(name) ?? []), l.timeMs]);
+    }
   }
   return [...times.entries()]
     .filter(([, list]) => list.length > 0)

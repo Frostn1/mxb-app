@@ -54,6 +54,10 @@ mod th {
     pub const MIN_SPEED_RATIO: f32 = 0.95;
     pub const LEAN_DEG: f32 = 5.0;
     pub const LINE_M: f32 = 1.5;
+    /// How much higher or lower the bike has to be riding, at the same point of the lap, before
+    /// it counts as a different line up or down the ground rather than the same one. A berm or
+    /// a rut is a good half metre; suspension and the odd bump are not.
+    pub const HEIGHT_M: f32 = 0.35;
     pub const COAST_S: f32 = 0.3;
     pub const THROTTLE_ON: f32 = 0.3;
     pub const THROTTLE_HOLD_M: usize = 5;
@@ -746,6 +750,9 @@ pub struct Review {
     pub setup: Vec<Finding>,
     /// Reviewed on its own, with no faster lap to compare with.
     pub solo: bool,
+    /// There is a reference lap to draw: its traces are in `channels` and its line in `paths`.
+    /// False against the ideal lap, which is a time per section and was never ridden whole.
+    pub traced: bool,
     pub channels: Channels,
     pub paths: Paths,
 }
@@ -943,6 +950,7 @@ pub fn review(lap: &Trace, reference: &Trace, bike: Bike) -> Review {
         focus: order,
         setup,
         solo: false,
+        traced: true,
         channels: channels(p, r, 2),
         paths: paths(p, r),
     }
@@ -1103,11 +1111,40 @@ fn corner(c: &mut Ctx) {
     let offset = dx * heading.cos() - dz * heading.sin(); // + is right of the fast line
     if offset.abs() > th::LINE_M && s.dir != 0 {
         let tighter = offset * s.dir as f32 > 0.0;
-        c.add("line", 0.75, apex_r, if tighter { "Take a wider line" } else { "Take a tighter line" }, format!(
-            "At the apex of {name} you are {:.1} m {} the fast lap. Pick its line before you brake.",
+        // Named as the rider would say it, not as a direction of travel: "wider" on its own
+        // reads as advice about effort, "the outside line" is a place on the track.
+        c.add("line", 0.75, apex_r, if tighter { "Take the outside line" } else { "Take the inside line" }, format!(
+            "At the apex of {name} you are {:.1} m {} the fast lap. Run {} through here, and pick that \
+             line before you brake.",
             offset.abs(),
-            if tighter { "inside" } else { "outside" }
+            if tighter { "inside" } else { "outside" },
+            if tighter { "the outside line" } else { "the inside line" }
         ));
+    }
+    // High or low: the same corner ridden up on the berm or down in the rut. The bike's own
+    // height at the apex says which, with no terrain needed — both laps are at the same point
+    // of the lap, so what is left between them is the ground each chose.
+    if !p.pts[apex_p].air && !r.pts[apex_r].air {
+        let up = p.pts[apex_p].y - r.pts[apex_r].y;
+        if up.abs() > th::HEIGHT_M {
+            let (yours, theirs) = if up > 0.0 { ("high", "low") } else { ("low", "high") };
+            c.add(
+                "height",
+                0.55,
+                apex_r,
+                if up > 0.0 { "Come down off the high line" } else { "Use the high line" },
+                format!(
+                    "Through {name} you ride the {yours} line, about {:.1} m {} the fast lap's — it takes the                      {theirs} line here. {}",
+                    up.abs(),
+                    if up > 0.0 { "above" } else { "below" },
+                    if up > 0.0 {
+                        "Up on the bank carries less speed unless it's holding a rut. Drop in and let the                          berm turn the bike."
+                    } else {
+                        "There is more to lean on higher up. Use the bank and let it hold the bike through                          the turn."
+                    }
+                ),
+            );
+        }
     }
     let coast = |t: &Trace| t.time_where(start..end, |q| q.brake() < 0.05 && q.throttle < 0.15 && !q.air);
     let (cp, cr) = (coast(p), coast(r));
@@ -1232,6 +1269,30 @@ fn jumps(c: &mut Ctx) {
     let name = s.name.clone();
     let mine = air_runs(p, s.start..s.end + 1);
     let theirs = s.runs.len();
+
+    // Which line over it. The line tip in `corner` needs a corner's handedness to say inside
+    // or outside, so it never fired on a jump at all — and "which line do you take over this
+    // jump" is one of the first things a rider asks. Here there is no inside: it is which side
+    // of the face you leave, named as left or right of the lap you're held against.
+    if let Some(&(take, _)) = s.runs.first() {
+        let heading = r.bearing(take);
+        let at = take.min(p.pts.len() - 1);
+        let (dx, dz) = (p.pts[at].x - r.pts[take].x, p.pts[at].z - r.pts[take].z);
+        let across = dx * heading.cos() - dz * heading.sin(); // + is right of the fast lap
+        if across.abs() > th::LINE_M {
+            let (yours, theirs_side) = if across > 0.0 { ("right", "left") } else { ("left", "right") };
+            c.add(
+                "jump_line",
+                0.6,
+                take,
+                format!("Take {name} on the {theirs_side}").as_str(),
+                format!(
+                    "You leave the face of {name} about {:.1} m to the {yours} of the fast lap, which takes                      the {theirs_side}. Line it up before the face: where you take off decides where you                      land, and the way out of {name} is set by then.",
+                    across.abs()
+                ),
+            );
+        }
+    }
 
     // Taken in a different number of jumps, the jumps can't be paired one by one: that is
     // what reads as landing short and overjumping in the same breath. Say the one thing.
@@ -1681,9 +1742,71 @@ pub fn solo(lap: &Trace, bike: Bike) -> Review {
         focus: order,
         setup,
         solo: true,
+        traced: false,
         channels: channels(p, p, 2),
         paths: paths(p, p),
     }
+}
+
+/// A lap against a target time for each section, rather than against another lap's trace.
+///
+/// This is how the ideal lap is ridden against: the rider's own best sections added up, a time
+/// that is real section by section but was never ridden whole. So the section times here are
+/// held against the targets, while the advice is the lap's own — the same rules [`solo`] uses,
+/// because there is no faster trace to say where the difference came from — and there is no
+/// reference line to draw.
+pub fn against_targets(lap: &Trace, secs: &[Section], targets: &[f32], bike: Bike) -> Review {
+    let mut p = lap.clone();
+    let travel = p.fill_travel(bike.travel);
+    let p = &p;
+    // A lap shorter than the grid the targets were measured on can't be timed over every
+    // section; it keeps the ones it reaches rather than reading off the end.
+    let last = p.len().saturating_sub(1);
+    let pairs: Vec<(Section, f32)> =
+        secs.iter().cloned().zip(targets.iter().copied()).filter(|(s, _)| s.end <= last).collect();
+    let secs: Vec<Section> = pairs.iter().map(|(s, _)| s.clone()).collect();
+    let setup = setup(p, None, &secs, bike, travel);
+    let out: Vec<SectionReview> = pairs
+        .into_iter()
+        .map(|(s, target)| {
+            let lap_time = p.span(s.start, s.end);
+            // No target for a section nobody has a clean time in: it can only be itself.
+            let ref_time = if target > 0.0 { target } else { lap_time };
+            let mut c = Ctx { p, r: p, s: &s, bike, travel, out: Vec::new() };
+            alone(&mut c);
+            let mut findings = dedupe(c.out, s.kind != Kind::Corner);
+            findings.sort_by(|a, b| b.weight.total_cmp(&a.weight));
+            let lost = ((lap_time - ref_time) * 1000.0).round() / 1000.0;
+            SectionReview { section: s, lap_time, ref_time, lost, findings, soil: None }
+        })
+        .collect();
+    let mut order: Vec<usize> = (0..out.len()).filter(|&i| out[i].lost > th::WORTH_S).collect();
+    order.sort_by(|&a, &b| out[b].lost.total_cmp(&out[a].lost));
+    order.truncate(th::FOCUS);
+    Review {
+        lap_time: p.time(),
+        ref_time: out.iter().map(|s| s.ref_time).sum(),
+        overall: overall(&out, false),
+        sections: out,
+        focus: order,
+        setup,
+        solo: false,
+        traced: false,
+        channels: one_sided(p),
+        paths: Paths { reference: Vec::new(), reference_y: Vec::new(), ..paths(p, p) },
+    }
+}
+
+/// The lap's own traces with nothing beside them: there is no reference lap to draw.
+fn one_sided(p: &Trace) -> Channels {
+    let mut c = channels(p, p, 2);
+    c.delta.clear();
+    for ch in
+        [&mut c.speed, &mut c.throttle, &mut c.brake, &mut c.lean, &mut c.gear, &mut c.height, &mut c.fork, &mut c.shock]
+    {
+        ch.reference.clear();
+    }
+    c
 }
 
 /// The rules that need no faster lap.
@@ -1934,7 +2057,7 @@ fn straight(c: &mut Ctx) {
 pub struct SectionBest {
     pub name: String,
     pub best: f32,
-    /// The lap it came from.
+    /// The lap it came from, as the caller keys its laps.
     pub lap: i32,
     /// Standard deviation over the session's laps, seconds.
     pub spread: f32,
@@ -2018,19 +2141,16 @@ pub(crate) fn cue_points(r: &Trace, secs: &[Section]) -> Vec<CuePoint> {
                             add(off, cue::OFF_BRAKES);
                         }
                     }
-                    // A gear lower by the apex: down on the brakes.
-                    if let Some(i) = (on..apex).find(|&i| r.pts[i + 1].gear < r.pts[i].gear && r.pts[i + 1].gear > 0) {
-                        add(i, cue::DOWNSHIFT);
-                    }
                 }
                 add(a, cue::SIT);
                 let held = |i: usize| (i..(i + th::THROTTLE_HOLD_M).min(end)).all(|j| r.pts[j].throttle > th::THROTTLE_ON);
                 if let Some(g) = (apex..end).find(|&i| held(i)) {
                     add(g, cue::THROTTLE);
                 }
-                if let Some(i) = (apex..end).find(|&i| r.pts[i + 1].gear > r.pts[i].gear && r.pts[i].gear > 0) {
-                    add(i, cue::UPSHIFT);
-                }
+                // No shift cue here. Where the fast lap happens to change gear says nothing
+                // about whether the rider's gear is costing them anything, and "shift earlier"
+                // called at a corner a rider is carrying speed through reads as "go slower".
+                // Shift cues come from the gearing rules instead, in `cues::pick`.
             }
             Kind::Jump | Kind::Rhythm => {
                 if s.kind == Kind::Rhythm {
@@ -2147,6 +2267,29 @@ pub(crate) mod tests {
         // Sitting like the fast lap, or no stance recorded: nothing to say.
         assert!(!called(&review(&with(&slow, stance::SIT), &with(&FAST, stance::SIT), BIKE)));
         assert!(!called(&review(&with(&slow, stance::UNKNOWN), &with(&FAST, stance::SIT), BIKE)));
+    }
+
+    /// The ideal lap is a target time per section and no lap at all, so the times are held
+    /// against it while the charts have nothing to draw beside this lap.
+    #[test]
+    fn a_lap_against_targets_is_timed_on_them_and_draws_no_reference() {
+        let slow = lap(&Style { corner_v: 9.0, ..FAST });
+        let fast = lap(&FAST);
+        let secs = sections(&fast);
+        let targets: Vec<f32> = secs.iter().map(|s| fast.span(s.start, s.end)).collect();
+        let rv = against_targets(&slow, &secs, &targets, BIKE);
+        assert_eq!(rv.sections.len(), secs.len());
+        assert!(!rv.solo, "the times are real, so it isn't a lap reviewed on its own");
+        assert!(!rv.traced, "but nobody rode the ideal lap, so there's no line to draw");
+        assert!(rv.paths.reference.is_empty() && rv.paths.reference_y.is_empty());
+        assert!(rv.channels.speed.reference.is_empty() && rv.channels.delta.is_empty());
+        assert!(!rv.paths.lap.is_empty(), "this lap is still drawn");
+        assert!((rv.ref_time - targets.iter().sum::<f32>()).abs() < 1e-3);
+        let lost: f32 = rv.sections.iter().map(|s| s.lost).sum();
+        assert!(lost > 0.0, "a slower lap loses time to the target: {lost}");
+        // A section nobody has a clean time in can only be itself.
+        let rv = against_targets(&slow, &secs, &vec![0.0; secs.len()], BIKE);
+        assert!(rv.sections.iter().all(|s| s.lost == 0.0));
     }
 
     #[test]
@@ -2523,5 +2666,40 @@ pub(crate) mod tests {
         assert!(ideal.time <= fast.time() + 1e-3 && ideal.time <= slow.time());
         let t1 = secs.iter().position(|s| s.name == "Turn 1").unwrap();
         assert_eq!(ideal.sections[t1].lap, 2);
+    }
+
+    /// "High line or low line" is one of the first things a rider asks about a corner, and it
+    /// needs no terrain: both laps are at the same point of the lap, so what is left between
+    /// their heights is the ground each of them chose.
+    #[test]
+    fn riding_lower_through_a_corner_is_the_low_line() {
+        // Down in a rut through Turn 1, against a lap that stays up on the bank. Slower with
+        // it: a section that costs nothing is dropped before any tip in it is read.
+        let low = lap(&Style { sink: 0.8, corner_v: 9.0, ..FAST });
+        let rv = review(&low, &lap(&FAST), BIKE);
+        let t1 = section(&rv, "Turn 1");
+        assert!(skills(t1).contains(&"height"), "{:?}", skills(t1));
+        let f = t1.findings.iter().find(|f| f.skill == "height").unwrap();
+        assert!(f.title.contains("Use the high line"), "{}", f.title);
+        assert!(f.detail.contains("you ride the low line"), "{}", f.detail);
+
+        // The other way round names the other line: now the slow lap is the reference, and
+        // the rider is the one up on the bank.
+        let rv = review(&lap(&Style { corner_v: 9.0, ..FAST }), &lap(&Style { sink: 0.8, ..FAST }), BIKE);
+        let f = section(&rv, "Turn 1").findings.iter().find(|f| f.skill == "height").unwrap();
+        assert!(f.title.contains("Come down off the high line"), "{}", f.title);
+        assert!(f.detail.contains("you ride the high line"), "{}", f.detail);
+
+        // The same line on both laps says nothing: suspension and a bump are not a line.
+        let rv = review(&lap(&Style { sink: 0.1, corner_v: 9.0, ..FAST }), &lap(&FAST), BIKE);
+        assert!(!skills(section(&rv, "Turn 1")).contains(&"height"));
+    }
+
+    /// The line tip needs a corner's handedness to say inside or outside, so it never fired on
+    /// a jump at all — and which side of the face you leave decides where you land.
+    #[test]
+    fn taking_off_to_one_side_names_the_jump_line() {
+        let rv = review(&lap(&FAST), &lap(&FAST), BIKE);
+        assert!(!skills(section(&rv, "Jump 1")).contains(&"jump_line"), "the same line says nothing");
     }
 }

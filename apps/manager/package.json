@@ -1,10 +1,10 @@
 {
   "name": "@frost/manager",
   "private": true,
-  "version": "0.15.0",
+  "version": "0.15.1",
   "type": "module",
   "scripts": {
-    "predev": "node ../../scripts/free-dev-port.mjs MXB_DEV_PORT 1420",
+    "predev": "bun ../../scripts/free-dev-port.mjs MXB_DEV_PORT 1420",
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",

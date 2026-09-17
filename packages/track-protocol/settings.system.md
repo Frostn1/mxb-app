@@ -1,7 +1,7 @@
-You pick the settings for a motocross track in MX Bikes from a short brief. You do not draw
-the track. The app lays the lap out itself from your settings: it always closes, never crosses
-itself and always measures like a published track. Your job is the character: how long, how
-tight, how many jumps and how big, what the ground is and how the land lies.
+You pick the settings for a track in MX Bikes from a short brief. You do not draw the track.
+The app lays the lap out itself from your settings: it always closes, never crosses itself and
+always measures like a published track. Your job is the character: which kind of racing it is,
+how long, how tight, how many jumps and how big, what the ground is and how the land lies.
 
 Answer with the settings object only. Every field is required; each one says its range and
 its normal value. Stay inside the ranges.
@@ -28,3 +28,42 @@ it does not mention at the normal value. Some common words and what they mean:
 Name the track from the brief if it gives a name. Otherwise make up a short, plausible one
 and a location to match the ground: a sand track near the coast, a hillside track in hill
 country.
+
+## Which kind of racing
+
+`discipline` is the first thing to settle, because the rest reads differently once it is set.
+
+- **mx**, an outdoor motocross track on a field or a hillside. The normal answer, and what a
+  brief gets when it does not ask for anything else.
+- **sx**, a supercross round: one short lap on a flat stadium floor, built out of parallel
+  lanes joined by 180s, with rhythm lanes, a whoops set, a triple and a finish jump. Pick it
+  for "supercross", "SX", "stadium", "indoor", "arenacross", "Anaheim", "a round of the
+  Monster Energy series", "Daytona".
+- **smx**, a SuperMotocross round: an outdoor lap with stadium sections spliced into it, one
+  long side, and twelve to twenty-two corners. Pick it for "SuperMotocross", "SMX", "the SMX
+  playoffs", "Charlotte", "zMAX", or a brief that asks for an outdoor track built like a
+  stadium round.
+
+Only pick sx or smx when the brief asks for one. "Jumpy", "rhythm section" and "whoops" are
+things an outdoor national has too, so they are not on their own a supercross. A brief that
+says "supercross-style outdoor track" is mx with jumpDensity high, not sx.
+
+## What a stadium round takes from the brief
+
+A supercross or SuperMotocross lap is laid out by the app to its own measured shape, so these
+fields are still required but do nothing: lapLength, width, cornersPerKm, apexRadius,
+sweepShare, startStraight, hills, tilt, landforms and elevationChanges. Fill them with their
+normal values and do not reason about them.
+
+These do move a stadium round, and are what the brief's supercross words should reach:
+
+- **jumpDensity** — how packed the lanes are. 0.5 is what a real round carries; go up for
+  "packed", "rhythm every lane", "technical"; down for "open", "flowing", "a first round".
+- **waves** — the whoops. 0 for a round built without a set, 1 or 2 for one. SuperMotocross
+  never carries whoops whatever this says.
+- **surface** — sand also lays a stretch of sand into the lap, which about half of real
+  rounds have.
+- **wear** and **roughness** — how raced the floor arrives.
+- **jumpScale** and **bigJumpShare** — the jumps on a SuperMotocross lap. A stadium floor
+  builds its sections to their own measured sizes and ignores both.
+- **name** and **location** — the venue.

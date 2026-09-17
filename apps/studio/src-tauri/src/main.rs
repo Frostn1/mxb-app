@@ -8,8 +8,9 @@
 //! binaries build off one core, and that a command registered by path across a crate
 //! boundary actually reaches the webview.
 
-// Refuse to run under a debugger in release builds — the runtime half of the binary hardening.
-mod antidebug;
+// Refuse to run under a debugger in release builds — the runtime half of the binary hardening,
+// shared by the whole lineup from `mxb_core`.
+use mxb_core::antidebug;
 
 // The studio's own modules: making a track, packing a paint, sealing content for a buyer.
 mod edfwrite;
@@ -21,6 +22,7 @@ mod trackline;
 mod trackllm;
 mod trackmodel;
 mod trackobjects;
+mod trackplace;
 mod trackprog;
 mod trackprops;
 mod trackscenery;
@@ -28,6 +30,7 @@ mod trackshot;
 mod trackspeed;
 mod trackstats;
 mod tracksynth;
+mod tracktex;
 mod trackvenue;
 mod winefetch;
 
@@ -97,6 +100,23 @@ async fn save_track_props(
     .map_err(|e| format!("save_track_props task failed: {e}"))?
 }
 
+/// The Steam-link round trip and the gate re-check the sign-in wall drives. Thin wrappers over
+/// the shared `mxb_core::appgate`, so the studio's wall behaves exactly like the manager's.
+#[tauri::command]
+async fn steam_link_start(app: tauri::AppHandle) -> Result<String, String> {
+    mxb_core::appgate::steam_link_start(&app).await
+}
+
+#[tauri::command]
+async fn steam_link_status(app: tauri::AppHandle) -> Result<Option<String>, String> {
+    mxb_core::appgate::steam_link_status(&app).await
+}
+
+#[tauri::command]
+async fn recheck_gate(app: tauri::AppHandle) {
+    mxb_core::appgate::check(app).await;
+}
+
 fn main() {
     // As early as possible: refuse to run under a debugger in release builds. No-op in debug.
     antidebug::guard();
@@ -114,6 +134,9 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             mxb_core::viewer::app_platform,
             track_event,
+            steam_link_start,
+            steam_link_status,
+            recheck_gate,
             // The studio's own: making a track, packing a paint, sealing content.
             preview_model_swap,
             log_client,
@@ -150,7 +173,6 @@ fn main() {
             set_track_model,
             clear_track_model,
             test_track_model,
-            base_track_program,
             random_track_program,
             bake_prop_library,
             blank_track_program,
@@ -161,6 +183,9 @@ fn main() {
             export_track_source,
             save_track_project,
             open_track_project,
+            import_track_texture,
+            list_track_textures,
+            forget_track_texture,
             track_tools_status,
             download_track_tools,
             build_track,
@@ -170,6 +195,16 @@ fn main() {
             paint_studio_save,
             paint_studio_extract,
             read_track_placeable,
+            // Turning a real place into ground a track can be built on.
+            trackplace::place_find,
+            trackplace::place_coverage,
+            trackplace::place_fetch,
+            trackplace::place_list,
+            trackplace::place_forget,
+            trackplace::place_paths,
+            trackplace::place_layers,
+            trackplace::place_save_trace,
+            trackplace::place_import_dem,
             load_track_prop,
             save_track_props,
             // Reading a track, and the archive metadata behind it. The studio previews the
@@ -203,6 +238,10 @@ fn main() {
             mxb_core::viewer::watch_viewer_source,
         ])
         .setup(|app| {
+            // The estate gate, first: refuse a blocked install now (offline-proof), and ask the
+            // server afresh in the background — the same lock as MXB App, from one shared core.
+            mxb_core::appgate::enforce_marker(app.handle());
+            tauri::async_runtime::spawn(mxb_core::appgate::check(app.handle().clone()));
             // The window is frameless with a custom title bar (see `TitleBar.tsx`), so the app
             // draws its own File menu. macOS keeps its global menu bar at the top of the screen —
             // that's the native home there — so the native menu is set on macOS only; elsewhere
@@ -214,6 +253,12 @@ fn main() {
             // a machine with only the studio on it reports nothing rather than inventing a
             // second identity for a computer the manager would also call one install.
             usage::start(app.handle(), usage::STUDIO);
+            // Where a rider's own ground images are kept. Set here rather than passed down,
+            // because a track is generated from a program and nothing else, and a program
+            // names its sheets rather than carrying them.
+            if let Ok(data) = tauri::Manager::path(app).app_data_dir() {
+                tracktex::set_dir(data.join("track-textures"));
+            }
             let _ = app;
             Ok(())
         })
@@ -279,20 +324,41 @@ struct Generated {
 /// Ask a model for a track, and keep asking until it measures like one.
 ///
 /// A model of the user's own is asked directly when one is saved, see `trackmodel`; our
-/// control plane otherwise, which holds our key. `mode` "settings" asks only for the
-/// character and has `tracklayout` draw the lap; anything else asks for the whole lap.
-/// Everything that comes back is built and measured before this returns.
+/// control plane otherwise, which holds our key. Everything that comes back is built and
+/// measured before this returns.
+///
+/// There are two ways to ask, and which one works is a fact about the model rather than a
+/// preference, so it is decided here instead of on screen: writing a whole lap that closes is
+/// beyond a small or free model, and one of those is asked only for the track's character —
+/// `tracklayout` then draws the lap, which is geometry and needs no model at all. `mode`
+/// forces it either way for anything that still wants to say.
 #[tauri::command]
 async fn generate_track(
     app: tauri::AppHandle,
     brief: String,
     mode: Option<String>,
+    discipline: Option<trackprog::Discipline>,
 ) -> Result<Generated, String> {
-    let settings_only = mode.as_deref() == Some("settings");
     let own = mxb_core::config::data_dir(&app).and_then(|d| trackmodel::load(&d));
+    let discipline = discipline.unwrap_or_default();
+    let settings_only = match mode.as_deref() {
+        // A whole lap is written against the motocross corpus. Any other discipline is drawn
+        // by its own walker, so the model is asked only for the track's character.
+        _ if !discipline.is_mx() => true,
+        Some("settings") => true,
+        Some("program") => false,
+        // And the switch left where it starts does not mean the brief wants a national: a
+        // brief that asks for a stadium round is asked for settings too, because only the
+        // walker builds one. See `trackllm::brief_names_a_stadium`.
+        _ if trackllm::brief_names_a_stadium(brief.trim()) => true,
+        // Ours is Claude and writes the lap. One of the user's own is trusted with it only
+        // when it is an Anthropic model too; everything else is asked for the character.
+        _ => own.as_ref().is_some_and(|m| m.kind != trackmodel::Kind::Anthropic),
+    };
     let out = match own {
         Some(model) => {
-            generate_with(&trackmodel::Direct { model }, brief.trim(), settings_only).await
+            generate_with(&trackmodel::Direct { model }, brief.trim(), settings_only, discipline)
+                .await
         }
         None => {
             let cfg = config::load_or_detect(&app).unwrap_or_default();
@@ -310,7 +376,7 @@ async fn generate_track(
                 );
             }
             let ask = trackllm::ControlPlane { base, token: cfg.cp_token.clone() };
-            generate_with(&ask, brief.trim(), settings_only).await
+            generate_with(&ask, brief.trim(), settings_only, discipline).await
         }
     }
     .map_err(|e| format!("{e:#}"))?;
@@ -322,6 +388,7 @@ async fn generate_with(
     ask: &impl trackllm::Ask,
     brief: &str,
     settings_only: bool,
+    discipline: trackprog::Discipline,
 ) -> anyhow::Result<Generated> {
     if !settings_only {
         // Four attempts: one to write it, one to fix the numbers, one for the thing the fix
@@ -331,7 +398,13 @@ async fn generate_with(
         let program = trackllm::generate(brief, ask, 4).await?;
         return Ok(Generated { program, settings: None });
     }
-    let settings = trackllm::ask_settings(brief, ask).await?;
+    let mut settings = trackllm::ask_settings(brief, ask).await?;
+    // The switch on screen is an explicit choice and wins. Left where it starts — motocross,
+    // which is also what somebody who never touched it has — the brief gets to ask, and a
+    // brief that says "a supercross round" comes back `sx`.
+    if !discipline.is_mx() {
+        settings.discipline = discipline;
+    }
     let seed = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_nanos() as u64)
@@ -418,18 +491,6 @@ async fn test_track_model(
     trackmodel::check(&m).await.map_err(|e| format!("{e:#}"))
 }
 
-/// A track to start from, without asking anyone for one.
-///
-/// The studio's first screen used to be a prompt and nothing else, which is a bad place to
-/// start from when the model isn't configured — and a worse one when you just want to change
-/// two jumps on something that already works.
-#[tauri::command]
-async fn base_track_program() -> Result<serde_json::Value, String> {
-    serde_json::from_str::<trackprog::TrackProgram>(trackprog::EXAMPLE)
-        .and_then(|p| serde_json::to_value(&p))
-        .map_err(|e| format!("the built-in track didn't load: {e}"))
-}
-
 /// A whole track from a number, with no model in it.
 ///
 /// The shape of a lap is geometry and geometry is checkable — it either closes, stays off
@@ -446,6 +507,8 @@ async fn base_track_program() -> Result<serde_json::Value, String> {
 async fn random_track_program(
     seed: Option<u64>,
     scale: Option<trackprog::TrackScale>,
+    discipline: Option<trackprog::Discipline>,
+    density: Option<f32>,
 ) -> Result<serde_json::Value, String> {
     let from = seed.unwrap_or_else(|| {
         std::time::SystemTime::now()
@@ -453,8 +516,15 @@ async fn random_track_program(
             .map(|d| d.as_nanos() as u64)
             .unwrap_or(1)
     });
+    let mut knobs = tracklayout::LayoutKnobs::for_discipline(discipline.unwrap_or_default());
+    // How packed the lap is. Left out it stays at what the corpus measures, which is what the
+    // slider defaults to — so a caller that never heard of it gets a real supercross track.
+    if let Some(d) = density {
+        knobs.density = d.clamp(tracklayout::DENSITY_RANGE.0, tracklayout::DENSITY_RANGE.1);
+    }
     let prog = tauri::async_runtime::spawn_blocking(move || {
-        let mut prog = (0..24u64).find_map(|i| tracklayout::draw(from.wrapping_add(i)))?;
+        let mut prog =
+            (0..24u64).find_map(|i| tracklayout::draw_with(from.wrapping_add(i), &knobs))?;
         prog.at_scale(scale.unwrap_or_default());
         Some(prog)
     })
@@ -636,6 +706,32 @@ async fn export_track_source(
     })
     .await
     .map_err(|e| format!("export_track_source task failed: {e}"))?
+}
+
+/// Take an image off the rider's own disk into the Studio's ground store.
+///
+/// The path comes from the file picker and nowhere else: no image is ever fetched, and the
+/// Studio has no list of ground to download. What it holds is what someone chose.
+#[tauri::command]
+async fn import_track_texture(path: String) -> Result<tracktex::OwnTexture, String> {
+    tauri::async_runtime::spawn_blocking(move || tracktex::import(std::path::Path::new(&path)))
+        .await
+        .map_err(|e| format!("importing that image failed: {e}"))?
+}
+
+/// Every image already imported, so the picker offers them again rather than making someone
+/// find the same file twice.
+#[tauri::command]
+async fn list_track_textures() -> Result<Vec<tracktex::OwnTexture>, String> {
+    tauri::async_runtime::spawn_blocking(tracktex::list)
+        .await
+        .map_err(|e| format!("reading your images failed: {e}"))
+}
+
+/// Drop one. A track still naming it falls back to the ground it stood in for.
+#[tauri::command]
+async fn forget_track_texture(id: String) -> Result<(), String> {
+    tracktex::forget(&id)
 }
 
 /// What a saved track project says it is, so a future format change can tell old files apart.
@@ -2096,14 +2192,7 @@ async fn preview_model_swap(
 /// Frontend log lines, into the same file the Rust side writes.
 #[tauri::command]
 fn log_client(level: String, message: String) {
-    // A log line is not a transport for arbitrary payloads. Trim rather than reject: a
-    // truncated fact still reads, and a dropped one is a support thread that goes nowhere.
-    let msg: String = message.chars().take(2000).collect();
-    match level.as_str() {
-        "error" => log::error!("[webview] {msg}"),
-        "warn" => log::warn!("[webview] {msg}"),
-        _ => log::info!("[webview] {msg}"),
-    }
+    mxb_core::clientlog::record(&level, &message);
 }
 
 /// Remember which tyres the 3D preview should wear.

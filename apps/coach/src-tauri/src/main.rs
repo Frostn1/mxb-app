@@ -13,8 +13,13 @@ mod coach;
 mod cues;
 mod fixes;
 mod ground;
+mod hud;
+mod hudsheet;
+mod imports;
+mod ini;
 mod lines;
 mod others;
+mod overlay;
 mod sag;
 mod soil;
 mod stp;
@@ -22,7 +27,8 @@ mod surface;
 mod telemetry;
 mod tyres;
 
-use mxb_core::{config, game};
+use mxb_core::{config, game, usage};
+use tauri::{Manager, WindowEvent};
 
 #[tauri::command]
 fn get_config(app: tauri::AppHandle) -> config::AppConfig {
@@ -38,13 +44,7 @@ fn list_games() -> Vec<game::GameInfo> {
 /// its renderer through this.
 #[tauri::command]
 fn log_client(level: String, message: String) {
-    // A log line is not a transport for arbitrary payloads: trim rather than reject.
-    let msg: String = message.chars().take(2000).collect();
-    match level.as_str() {
-        "error" => log::error!("[webview] {msg}"),
-        "warn" => log::warn!("[webview] {msg}"),
-        _ => log::info!("[webview] {msg}"),
-    }
+    mxb_core::clientlog::record(&level, &message);
 }
 
 /// Show a file in the OS file manager, selected. Core's, as the manager and studio wrap it.
@@ -93,20 +93,88 @@ fn register_secure_opener() {
     }));
 }
 
+/// The Steam-link round trip and the gate re-check the sign-in wall drives. Thin wrappers over
+/// the shared `mxb_core::appgate`, so Coach's wall behaves exactly like MXB App's and Studio's.
+#[tauri::command]
+async fn steam_link_start(app: tauri::AppHandle) -> Result<String, String> {
+    mxb_core::appgate::steam_link_start(&app).await
+}
+
+#[tauri::command]
+async fn steam_link_status(app: tauri::AppHandle) -> Result<Option<String>, String> {
+    mxb_core::appgate::steam_link_status(&app).await
+}
+
+#[tauri::command]
+async fn recheck_gate(app: tauri::AppHandle) {
+    mxb_core::appgate::check(app).await;
+}
+
 fn main() {
+    // Refuse to run under a debugger in release builds — the runtime half of the binary
+    // hardening, shared by the whole lineup from `mxb_core`.
+    mxb_core::antidebug::guard();
     #[cfg(mxbsecure)]
     register_secure_opener();
-    tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    // A second launch shows the window already running rather than starting another Coach
+    // (and another overlay key). Release only, so a dev run starts beside the installed one.
+    #[cfg(not(debug_assertions))]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+        overlay::show_main(app);
+    }));
+    builder
         .plugin(tauri_plugin_log::Builder::new().build())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        // The overlay's hotkey has to fire while MX Bikes holds keyboard focus.
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        // The sessions folders, watched while the app is open: the recorder writes all through
+        // a stint, and the list used to need the rider to leave the page and come back.
+        .manage(coach::SessionWatch::default())
+        .setup(|app| {
+            // The estate gate, first: refuse a blocked install now (offline-proof), and ask the
+            // server afresh in the background — the same lock as MXB App and Studio, one core.
+            mxb_core::appgate::enforce_marker(app.handle());
+            tauri::async_runtime::spawn(mxb_core::appgate::check(app.handle().clone()));
+            overlay::start(app.handle());
+            coach::watch_sessions(app.handle());
+            // Anonymous counters, under the same switch and the same config file as the manager's
+            // — which is also where the install id comes from. Coach does not mint one (no
+            // `mint-install-id` feature, exactly as the studio), so a machine with only Coach on
+            // it reports nothing rather than inventing a second identity for one computer.
+            //
+            // Until this existed Coach was a shipped app the numbers could not see at all: every
+            // decision about whether to keep building it was being made from the one source the
+            // rollups were meant to replace.
+            usage::start(app.handle(), usage::COACH);
+            Ok(())
+        })
+        .on_window_event(|window, event| {
+            if window.label() != overlay::LABEL {
+                return;
+            }
+            match event {
+                // Clicking back into the game puts the overlay away.
+                WindowEvent::Focused(false) => overlay::on_focus_lost(window.app_handle()),
+                // Closing it parks it, so the next press doesn't rebuild the webview.
+                WindowEvent::CloseRequested { api, .. } => {
+                    api.prevent_close();
+                    let _ = mxb_core::overlay::hide(window.app_handle());
+                }
+                _ => {}
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             // What the shared shell calls: the platform, the config, the titles.
             mxb_core::viewer::app_platform,
             get_config,
             list_games,
+            steam_link_start,
+            steam_link_status,
+            recheck_gate,
             // ── Coach commands ─────────────────────────────────────────────────────
             // Register the coach's own commands below this line.
             coach::coach_status,
@@ -118,7 +186,12 @@ fn main() {
             coach::coach_ground,
             coach::coach_setup_plan,
             coach::coach_save_setup,
+            coach::coach_select_setup,
             coach::coach_write_cues,
+            // The trainer laps: another rider's recordings, kept apart from the rider's own.
+            imports::coach_imports,
+            imports::coach_import_laps,
+            imports::coach_remove_import,
             check_coach_update,
             reveal_in_explorer,
             open_folder,
@@ -135,8 +208,43 @@ fn main() {
             mxb_core::trackview::load_track_ground_layers,
             mxb_core::trackview::read_track_placements,
             coach::coach_install_plugin,
+            coach::coach_refresh_plugin,
+            coach::coach_set_game_dir,
             coach::coach_uninstall_plugin,
+            hud::coach_hud,
+            hud::coach_set_hud,
+            hud::coach_set_cue_pos,
+            hud::coach_voice,
+            hud::coach_set_voice,
+            overlay::overlay_toggle,
+            overlay::overlay_hide,
+            overlay::overlay_state,
+            overlay::set_overlay_enabled,
+            overlay::set_overlay_hotkey,
+            overlay::overlay_open_main,
+            overlay::overlay_handoff,
+            overlay::overlay_peer,
+            track_event,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running MXB Coach");
+        .build(tauri::generate_context!())
+        .expect("error while running MXB Coach")
+        .run(|app, event| {
+            if let tauri::RunEvent::Exit = event {
+                overlay::stop(app);
+                // The last counters, on the way out. This is the right exit point rather than a
+                // `Destroyed` window event: the window handler above is the overlay's, and the
+                // overlay parking itself is not this app finishing.
+                usage::flush_on_exit(app);
+            }
+        });
+}
+
+/// Count something the rider did.
+///
+/// A name and nothing else, exactly as in the manager and the studio: the backend holds the
+/// switch, the buffer and the vocabulary (`usage::KNOWN_EVENTS`), so there is no payload here to
+/// accidentally put a session path or a rider name into.
+#[tauri::command]
+fn track_event(name: String) {
+    usage::track(&name);
 }

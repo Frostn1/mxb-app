@@ -193,4 +193,21 @@ export const es: Record<keyof typeof en, string> = {
   "trackViewer.whyDetails": "¿Por qué?",
   "trackViewer.copyDetails": "Copiar detalles",
   "trackViewer.copied": "Copiado",
+
+  // ── Overlay frame and hotkey field ─────────────────────────────────────────
+  "overlay.pressKeys": "Pulsa las teclas…",
+  "overlay.needModifier": "Añade un modificador",
+  "overlay.needModifierDesc": "Mantén Ctrl, Alt o Shift para que el atajo no salte mientras escribes.",
+  "overlay.toClose": "{{hotkey}} para cerrar",
+  "overlay.closeTitle": "Cerrar overlay (Esc)",
+  "overlay.openMain": "Abrir la app completa",
+  "overlay.openMainTitle": "Cierra el overlay y abre la ventana principal de {{app}}",
+  "overlay.tab.presets": "Presets",
+  "overlay.tab.locker": "Taquilla",
+  "overlay.tab.browse": "Explorar",
+  "overlay.tab.manage": "Modo carrera",
+  "overlay.tab.tips": "Consejos",
+  "overlay.tab.setup": "Reglaje",
+  "overlay.tab.cues": "Avisos en vivo",
+  "overlay.tab.hud": "HUD",
 };

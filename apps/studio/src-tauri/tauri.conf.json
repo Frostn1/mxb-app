@@ -2,11 +2,12 @@
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Frost Studio",
   "mainBinaryName": "Frost Studio",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "identifier": "com.frost.froststudio",
   "build": {
-    "beforeDevCommand": "npm run dev",
-    "beforeBuildCommand": "npm run build",
+    "beforeDevCommand": "bun run dev",
+    "beforeBuildCommand": "bun run build",
+    "beforeBundleCommand": "bash ../../scripts/pack-binary.sh",
     "devUrl": "http://localhost:1430",
     "frontendDist": "../dist"
   },

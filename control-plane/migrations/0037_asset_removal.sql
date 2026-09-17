@@ -1,0 +1,25 @@
+-- A creator removing an asset they locked, and what that means for the people holding it.
+--
+-- Withdrawing is reversible and says so — it stops new unlocks and can be put back. What was
+-- missing was the other thing a creator asks for: a mod locked by mistake, or one whose sale is
+-- over, off their list. That can't be a `DELETE FROM assets`. The audit ledger
+-- (`entitlement_grants`) names the asset by id and is the record of who unlocked what, buyers'
+-- entitlements cascade, and a row that vanishes makes `/v1/assets/status` answer "not ours to
+-- judge" about a file a PC is still holding a key for — which is exactly the answer that leaves
+-- the key in place. So removal is a timestamp, like every other revocation here, and the row
+-- stays: the creator still sees it, marked removed, with its buyers and its usage log intact.
+--
+-- The two halves are separate columns because they are separate decisions, and the site asks
+-- which one is meant:
+--
+-- * `deleted_at` — off the creator's active list. Nothing about it can be changed again: no
+--   buyers added or removed, no withdrawal, no second removal. Read-only history.
+-- * `keys_revoked_at` — the half that reaches the buyers. Set only when the creator asks for the
+--   keys back: every entitlement is revoked and `wrapped_key` is destroyed, so the packed file
+--   never opens again for anyone, and each buyer's app deletes its copy of the key on the next
+--   `/v1/assets/status` poll. Irreversible, and nothing in this schema can undo it.
+--
+-- Removing without it leaves every buyer exactly as they were — their keys keep opening the
+-- file, and a buyer on a new PC can still be given one — which is the whole point of asking.
+ALTER TABLE assets ADD COLUMN deleted_at INTEGER;
+ALTER TABLE assets ADD COLUMN keys_revoked_at INTEGER;

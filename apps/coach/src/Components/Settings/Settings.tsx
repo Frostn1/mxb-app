@@ -1,15 +1,31 @@
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
-import { FolderOpen } from "lucide-react";
+import { FolderOpen, Monitor } from "lucide-react";
 import { getVersion } from "@tauri-apps/api/app";
 import { open } from "@tauri-apps/plugin-dialog";
 import { revealInExplorer } from "@frost/shared/api/mods";
 import { Button } from "@frost/shared/Components/ui/button";
 import { Switch } from "@frost/shared/Components/ui/switch";
+import HotkeyField from "@frost/shared/Components/HotkeyField";
+import {
+  getOverlayState,
+  overlayToggle,
+  setOverlayEnabled,
+  setOverlayHotkey,
+  type OverlayState,
+} from "@frost/shared/api/overlay";
 import { betaUpdates, setBetaUpdates, useUpdate } from "@/Context/Update";
 import { useConfig } from "@frost/shared/Context/Config";
-import { useT } from "@/i18n";
-import { coachStatus, installRecorder, openFolder, removeRecorder, type CoachStatus } from "@/api/coach";
+import { useT, type TKey } from "@/i18n";
+import {
+  coachStatus,
+  installRecorder,
+  openFolder,
+  refreshRecorder,
+  removeRecorder,
+  setGameDir,
+  type CoachStatus,
+} from "@/api/coach";
 import Page, { Label } from "../Page";
 
 /** The folder a file sits in. */
@@ -29,6 +45,79 @@ function Row({ label, value, onOpen }: { label: string; value: string; onOpen?: 
           {t("coachSettings.open")}
         </Button>
       )}
+    </div>
+  );
+}
+
+const OVERLAY_POLL_MS = 5000;
+
+/** The overlay: on or off, its shortcut, and who holds the shortcut right now. */
+function Overlay() {
+  const t = useT();
+  const [state, setState] = useState<OverlayState | null>(null);
+  const refresh = useCallback(() => {
+    getOverlayState().then(setState).catch(() => {});
+  }, []);
+  useEffect(() => {
+    refresh();
+    const id = setInterval(refresh, OVERLAY_POLL_MS);
+    return () => clearInterval(id);
+  }, [refresh]);
+
+  const run = async (job: () => Promise<void>, fail: TKey, done?: TKey) => {
+    try {
+      await job();
+      if (done) toast.success(t(done));
+    } catch (e) {
+      toast.error(t(fail), { description: String(e) });
+    } finally {
+      refresh();
+    }
+  };
+
+  const enabled = state?.enabled ?? true;
+  return (
+    <div className="border border-border bg-card px-4 py-4">
+      <div className="flex items-center justify-between gap-4">
+        <div>
+          <div className="text-[13px] font-semibold">{t("overlay.enable")}</div>
+          <p className="mt-0.5 text-[12.5px] text-muted-foreground">{t("overlay.enableDesc")}</p>
+        </div>
+        <Switch
+          checked={enabled}
+          disabled={!state}
+          onCheckedChange={(on) => void run(() => setOverlayEnabled(on), "overlay.registerFailed")}
+        />
+      </div>
+      <div className="mt-4 flex items-start justify-between gap-6 border-t border-border pt-4">
+        <div>
+          <div className="text-[13px] font-semibold">{t("overlay.shortcut")}</div>
+          <p className="mt-0.5 text-[12.5px] text-muted-foreground">{t("overlay.shortcutDesc")}</p>
+        </div>
+        <HotkeyField
+          value={state?.hotkey ?? "CommandOrControl+Shift+X"}
+          disabled={!enabled}
+          onCapture={(combo) => void run(() => setOverlayHotkey(combo), "overlay.shortcutRejected", "overlay.shortcutUpdated")}
+        />
+      </div>
+      {state?.deferred && (
+        <p className="mt-3 text-[12px] text-muted-foreground">{t(`overlay.deferred.${state.deferred}` as TKey)}</p>
+      )}
+      {/* Said plainly rather than left to look like a hotkey fault: with no link Coach keeps
+          its own key, so the shortcut works — it is the sharing that doesn't. */}
+      {state?.linkDown && <p className="mt-3 text-[12px] text-warning">{t("overlay.linkDown")}</p>}
+      {state?.hotkeyError && (
+        <div className="mt-3 text-[12px] text-warning">
+          <div className="font-semibold">{t("overlay.hotkeyTaken")}</div>
+          <div>{t("overlay.hotkeyTakenDesc")}</div>
+        </div>
+      )}
+      <div className="mt-4">
+        <Button size="sm" variant="outline" disabled={!enabled} onClick={() => void run(overlayToggle, "overlay.showFailed")}>
+          <Monitor className="size-3.5" />
+          {t("overlay.showNow")}
+        </Button>
+      </div>
     </div>
   );
 }
@@ -64,6 +153,20 @@ export default function Settings() {
     }
   };
 
+  const pickGame = async () => {
+    const dir = await open({ directory: true });
+    if (typeof dir !== "string") return;
+    setBusy(true);
+    try {
+      setStatus(await setGameDir(dir));
+      toast.success(t("recorder.gameFolderSet"));
+    } catch (e) {
+      toast.error(String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const fromFile = async () => {
     const f = await open({ filters: [{ name: "MX Bikes plugin", extensions: ["dlo"] }] });
     if (typeof f === "string") await run(() => installRecorder(f), t("recorder.installed"));
@@ -71,6 +174,23 @@ export default function Settings() {
 
   const show = (job: Promise<void>) => job.catch((e) => toast.error(String(e)));
   const plugin = status?.pluginPath ?? "";
+
+  // Keep the recorder current without being asked. Nothing has ever refreshed `mxbcoach.dlo`,
+  // so a rider installed it once and kept it — and a recorder older than the app it serves
+  // draws nothing and, before 0.23, could not even say its own version.
+  useEffect(() => {
+    void refreshRecorder()
+      .then((v) => {
+        if (v) {
+          toast.success(t("recorder.refreshed", { version: v }));
+          load();
+        }
+      })
+      .catch(() => {});
+    // Once per visit to Settings; the button beside it is there for any other time. `load` and
+    // `t` are deliberately not dependencies: re-running this would re-download the recorder.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <Page title={t("coachSettings.title")}>
@@ -92,8 +212,35 @@ export default function Settings() {
               {t("recorder.remove")}
             </Button>
           )}
+          {status?.recorderVersion && (
+            <span className="self-center font-mono text-[12px] text-muted-foreground">
+              {t("recorder.version", { version: status.recorderVersion })}
+            </span>
+          )}
         </div>
-        {status && !status.gameDir && <p className="mt-3 text-[12px] text-warning">{t("recorder.noGame")}</p>}
+        {status && !status.recorderVersion && (
+          <p className="mt-3 text-[12px] text-muted-foreground">{t("recorder.versionUnknown")}</p>
+        )}
+        {status?.recorderOutdated && <p className="mt-3 text-[12px] text-warning">{t("recorder.updateIt")}</p>}
+        <div className="mt-4 border-t border-border pt-3">
+          <div className="text-[12.5px] font-semibold">{t("recorder.gameFolder")}</div>
+          <p className="mt-0.5 font-mono text-[12px] text-muted-foreground">
+            {status?.gameDir || t("recorder.gameFolderNone")}
+          </p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            <Button size="sm" variant="outline" disabled={busy} onClick={() => void pickGame()}>
+              {t("recorder.gameFolderPick")}
+            </Button>
+          </div>
+          {status && !status.gameDir && (
+            <p className="mt-2 text-[12px] text-warning">{t("recorder.noGame")}</p>
+          )}
+        </div>
+      </div>
+
+      <div className="mt-8">
+        <Label>{t("overlay.section")}</Label>
+        <Overlay />
       </div>
 
       <div className="mt-8">

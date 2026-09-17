@@ -15,6 +15,7 @@ import {
   ChevronUp,
   ChevronDown,
   Globe,
+  ServerCog,
   UserCheck,
   Hourglass,
   LayoutGrid,
@@ -54,6 +55,8 @@ import { REGION_LABEL_KEY, REGION_ORDER, canonicalRegion, type RegionKey } from 
 import JoinServerDialog from "../Shell/JoinServerDialog";
 import ServerDetail from "./ServerDetail";
 import ServerCard from "./ServerCard";
+import ConnectionCheck from "./ConnectionCheck";
+import RegisterServerDialog from "./RegisterServerDialog";
 
 type ViewMode = "tiles" | "list";
 const VIEW_KEY = "mxb:serversView:v1";
@@ -112,6 +115,7 @@ const Servers = () => {
   const [joining, setJoining] = useState<string | null>(null);
   const queue = useServerQueue();
   const [joinOpen, setJoinOpen] = useState(false);
+  const [registerOpen, setRegisterOpen] = useState(false);
   const [detail, setDetail] = useState<MasterServer | null>(null);
   // Spam and cheat-advertising servers are marked by the backend, not dropped, so this can
   // reveal them. Off by default: the whole point is not to have to read past them.
@@ -203,11 +207,15 @@ const Servers = () => {
     if (inFlight.current) return;
     inFlight.current = true;
     setLoading(true);
-    setError(null);
+    // The error is cleared when the next fetch *succeeds*, not when it starts. Clearing it here
+    // dropped the failure screen for as long as the retry took — which meant the connection
+    // check under it was unmounted, and its results thrown away, every time somebody pressed
+    // Try again. The spinner on the button already says a retry is happening.
     listMasterServers()
       .then((list) => {
         onScreen.current = list;
         setServers(list);
+        setError(null);
         // After the list, never with it: the browser has to draw whether or not the control
         // plane answers, and badges arriving a moment later is the right trade for that.
         serversWithPaintSync(
@@ -521,10 +529,24 @@ const Servers = () => {
           <Plug className="size-3.5" />
           {t("join.title")}
         </Button>
+        {/* Putting your own server on the shared address book. Almost nobody needs it — a
+            server the master lists gets there on its own, off everyone's sweeps — so it is a
+            quiet button rather than anything louder. It is for the two it can't reach: one
+            nobody has found yet, and one that was never in that list to be seen in. */}
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => setRegisterOpen(true)}
+          title={t("registerServer.blurb")}
+        >
+          <ServerCog className="size-3.5" />
+          {t("registerServer.action")}
+        </Button>
         <HelpHint title={t("servers.title")} description={t("serverBrowser.help")} />
       </ContextBarRight>
 
       <JoinServerDialog open={joinOpen} onOpenChange={setJoinOpen} onJoined={load} />
+      <RegisterServerDialog open={registerOpen} onOpenChange={setRegisterOpen} />
       <ServerDetail
         server={detail}
         onOpenChange={(open) => !open && setDetail(null)}
@@ -541,15 +563,12 @@ const Servers = () => {
             <p className="text-[13px] text-faint">{t("serverBrowser.loading")}</p>
           </Centered>
         ) : error && servers.length === 0 ? (
+          // Not the bare error this used to be. A failed list is nearly always the master
+          // server having gone quiet, which looks identical from one machine to a firewall
+          // problem — so the app asks how many other people are failing the same fetch and
+          // leads with that, rather than leaving somebody to debug a machine that is fine.
           <Centered>
-            <ServerOff className="size-6 text-faint" />
-            <p className="max-w-[420px] text-center text-[13px] text-muted-foreground">
-              {error}
-            </p>
-            <Button variant="outline" size="sm" onClick={load}>
-              <RefreshCw className="size-3.5" />
-              {t("serverBrowser.retry")}
-            </Button>
+            <ConnectionCheck error={error} onRetry={load} />
           </Centered>
         ) : shown.length === 0 ? (
           <Centered>

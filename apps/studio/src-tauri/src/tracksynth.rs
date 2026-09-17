@@ -707,6 +707,11 @@ const FIELD_DETAIL_HEIGHT_M: f32 = 0.045;
 /// at +0.97: the jump is a hump between two scoops.
 /// How far below the highest point so far the profile must drop to end a crest.
 const CREST_DROP_M: f32 = 0.15;
+
+/// How far into a whoop section its drawn shape is eased back over the blended one, metres.
+const WHOOP_EASE_M: f32 = 1.0;
+/// How far out from a whoop section a neighbour's hollow is eased back in, metres.
+const WHOOP_FLOOR_EASE_M: f32 = 6.0;
 const JUMP_HOLLOW: f32 = 0.30;
 const JUMP_HOLLOW_M: f32 = 22.0;
 
@@ -840,6 +845,10 @@ pub struct Synth {
     pub spur: Option<StartSpur>,
     pub spur_dist: Vec<f32>,
     pub spur_arc: Vec<f32>,
+    /// The stretches of lap laid with sand, metres round it. Carried here because both the
+    /// exported mask and the `.map` writer have to read the same list — two mask paths that
+    /// disagree is how a track once shipped ground no picture of it had ever shown.
+    pub sand: Vec<(f32, f32)>,
     /// What the terrain actually used of its budget, and what the budget was.
     pub used_m: f32,
     pub budget_m: f32,
@@ -1049,7 +1058,7 @@ pub fn place_on_ground(prog: &TrackProgram) -> Option<Placement> {
     // The start needs more of it than the rest of the lap: the opening straight fans out to
     // hold a 48 m gate row, and a fan hanging off the edge of the plot is gates in the void.
     let run = prog.opening_straight();
-    let fan_margin = margin.max(START_FAN_HALF_M + SHOULDER_M);
+    let fan_margin = margin.max(prog.discipline.rules().fan_half_m() + SHOULDER_M);
 
     let score = |turn: f32, dx: f32, dz: f32| -> Option<(f32, f32, f32)> {
         let (c, s) = (turn.cos(), turn.sin());
@@ -1201,7 +1210,14 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
         &mut turn.v,
         (prog.blend.max(0.0) / PROFILE_STEP).round() as usize,
     );
-    let feat = feature_profile(&prog.features, lap, prog.blend.max(0.0));
+    // Whether this discipline's lanes abut one another.
+    //
+    // A stadium floor stands its lanes 12–14 m apart with a 9.5 m line between them, so a
+    // jump's side mound and a drawn run of hills both have to answer to the ground there
+    // really is. Out on a national neither does — the seam is far away and the blend is what
+    // shaped every lap the rider has signed off — so motocross keeps exactly what it had.
+    let lanes_abut = prog.discipline.rules().sections.is_some();
+    let feat = feature_profile(&prog.features, lap, prog.blend.max(0.0), lanes_abut);
     let feat_side = side_profile(&prog.features, lap, prog.blend.max(0.0));
     let chords = jump_chords(&prog.features, &stations);
     let feat_soft = {
@@ -1398,8 +1414,23 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
         let f = feat.at(fs);
         let f = f + (feat_soft.at(fs) - f) * soft;
         if f != 0.0 {
-            let reach = fd + seam[i] - SEAM_CLEAR_M;
-            heights[i] += f * lateral(fd, half, f, reach) * one_side(ft, feat_side.at(fs));
+            // Short of the seam — but never short by more than a quarter of the way to it.
+            //
+            // Two supercross lanes sit twelve metres apart with a nine-and-a-half metre line
+            // between them, so the seam is barely two metres past the track edge and a flat
+            // two-metre clearance leaves the spill nowhere to go at all. The ground between
+            // two lanes *is* the jumps' own mound, and the two sides are meant to meet at its
+            // foot. Out on a national the seam is far enough that this is still the flat two.
+            let reach = if lanes_abut {
+                // Short of the seam, but never short by more than a quarter of the way to it:
+                // two lanes sit twelve metres apart with a nine-and-a-half metre line between
+                // them, so a flat two-metre clearance leaves the spill nowhere to go at all.
+                fd + seam[i] - SEAM_CLEAR_M.min(seam[i] * 0.25)
+            } else {
+                // Exactly what a national has always had: a flat two metres.
+                fd + seam[i] - SEAM_CLEAR_M
+            };
+            heights[i] += f * lateral(fd, half, f, reach, lanes_abut) * one_side(ft, feat_side.at(fs));
         }
         // A berm stands on the outside of the corner, which is the side away from the turn.
         // Whatever the program asked for, plus what the corner would have grown on its own:
@@ -2098,7 +2129,7 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
             // forty lines, deepest a few metres off the row and gone by the time the pack has
             // spread. The one piece of ground on a track whose ruts are laid out in a comb.
             let from_gate = s - spur.gate_at();
-            let row = GRID_STALLS as f32 * GRID_LANE_M * 0.5;
+            let row = spur.gates as f32 * GRID_LANE_M * 0.5;
             if from_gate > -1.0 && from_gate < GATE_RUT_M && t.abs() < row {
                 let along = smoothstep(1.0 - (from_gate.max(0.0) / GATE_RUT_M));
                 let lane = (t / GRID_LANE_M) * std::f32::consts::TAU;
@@ -2279,6 +2310,14 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
         spur,
         spur_dist,
         spur_arc,
+        sand: prog
+            .features
+            .iter()
+            .filter_map(|f| match f {
+                Feature::Sand { at, length } => Some((*at, at + length)),
+                _ => None,
+            })
+            .collect(),
         used_m: used,
         budget_m: budget,
     };
@@ -2729,7 +2768,7 @@ const SIDE_FADE_M: f32 = 5.0;
 ///
 /// The riding surface stays level. Crowning it tilted every face and deck under the wheels,
 /// and a table is the safe jump because you can land anywhere on its top.
-fn lateral(d: f32, half: f32, h: f32, reach: f32) -> f32 {
+fn lateral(d: f32, half: f32, h: f32, reach: f32, cap_wins: bool) -> f32 {
     let full = half * FEATURE_FULL;
     if d <= full {
         return 1.0;
@@ -2738,8 +2777,22 @@ fn lateral(d: f32, half: f32, h: f32, reach: f32) -> f32 {
     // meet at the same slope and the skirt lands flat.
     let (s, k) = (FEATURE_SIDE_DEG.to_radians().tan(), FEATURE_SIDE_KNEE);
     let (top, skirt) = (2.0 * (1.0 - k) * h.abs() / s, 3.0 * k * h.abs() / s);
-    // Scaled whole: never narrower than the old fixed fade, never past `reach`.
-    let width = (top + skirt).min(reach - full).max(half * (FEATURE_EDGE - FEATURE_FULL));
+    // Scaled whole, and which of the two clamps wins is the discipline's call.
+    //
+    // Where lanes abut, the cap wins: it is the one that says how much dirt is actually there
+    // to spill onto. On a supercross lane — 12 m centre to centre with a 9.5 m line — a 1.5 m
+    // hill spilled 8.3 m off its own centreline with the next lane's edge 7.3 m away, so every
+    // rhythm hill stood a metre deep on the lane beside it.
+    //
+    // Out on a national the fade floor wins instead. Not a leftover: that is the order every
+    // lap the rider has signed off was built with, and turning the cap up out there moves
+    // Northgate's ground — measured, 10,285 cells of it and 0.74 m at the worst.
+    let floor = half * (FEATURE_EDGE - FEATURE_FULL);
+    let width = if cap_wins {
+        (top + skirt).max(floor).min((reach - full).max(0.0)).max(1e-4)
+    } else {
+        (top + skirt).min(reach - full).max(floor)
+    };
     let scale = width / (top + skirt).max(1e-4);
     let (top, skirt) = (top * scale, skirt * scale);
     let u = d - full;
@@ -3119,7 +3172,11 @@ fn built_ground(features: &[Feature], lap: f32) -> (Profile, Profile) {
             Feature::Custom { length, side, .. } => {
                 mark(at, at + length, if side == 0.0 { 1.0 } else { 0.4 }, 1.0)
             }
-            Feature::StepUp { .. } | Feature::Berm { .. } | Feature::Rut { .. } => {}
+            // None of these is built on the line, so none of them holds the rut field back.
+            Feature::StepUp { .. }
+            | Feature::Berm { .. }
+            | Feature::Rut { .. }
+            | Feature::Sand { .. } => {}
         }
     }
     (focus, damp)
@@ -3274,10 +3331,22 @@ fn resample(st: &[Station], vals: &[f32], lap: f32) -> Profile {
 }
 
 /// Height added by everything built on the line, along the lap.
-fn feature_profile(features: &[Feature], lap: f32, blend: f32) -> Profile {
+fn feature_profile(features: &[Feature], lap: f32, blend: f32, restore_drawn: bool) -> Profile {
     let mut out = Profile::blank(lap);
+    // A drawn run of hills: built as one shape with the ground coming back to grade between
+    // its hills, so it is neither dug a hollow nor rounded off the way a single jump is.
+    //
+    // Gated on `restore_drawn` for the same reason the restore below is: motocross draws its
+    // wave sections as one `Custom` of five to seven humps, which clears the four-lip bar.
+    // Ungated, this stopped digging a national's waves a hollow and moved Northgate's ground
+    // in 49,619 cells — measured, not guessed at.
+    let drawn_run = |f: &Feature| match f {
+        Feature::Whoops { .. } => true,
+        Feature::Custom { .. } => restore_drawn && f.lips() >= 4,
+        _ => false,
+    };
     for f in features {
-        if matches!(f, Feature::StepUp { .. } | Feature::Berm { .. }) {
+        if matches!(f, Feature::StepUp { .. } | Feature::Berm { .. } | Feature::Sand { .. }) {
             continue;
         }
         let (at, len) = (f.at(), f.length());
@@ -3302,7 +3371,18 @@ fn feature_profile(features: &[Feature], lap: f32, blend: f32) -> Profile {
     // what the hollow lowers is the ground between jumps, not the jumps.
     let mut dig = vec![0.0f32; out.v.len()];
     for f in features {
-        if matches!(f, Feature::StepUp { .. } | Feature::Berm { .. } | Feature::Rut { .. }) {
+        if matches!(
+            f,
+            Feature::StepUp { .. }
+                | Feature::Berm { .. }
+                | Feature::Rut { .. }
+                | Feature::Sand { .. }
+        ) || drawn_run(f)
+        {
+            // A run of hills is not a jump dug out of the ground. Measured on all seven rounds
+            // a real one's troughs sit at grade, 0.01–0.03 m off the floor beside them; given a
+            // hollow at each end the whole run stands proud of that floor, its troughs never
+            // come back down, and neighbouring hills merge into one stretch of raised ground.
             continue;
         }
         let h = f.height().abs();
@@ -3334,6 +3414,28 @@ fn feature_profile(features: &[Feature], lap: f32, blend: f32) -> Profile {
                 let bowl = (x * std::f32::consts::PI).sin().powf(0.8);
                 dig[i] = dig[i].max(h * JUMP_HOLLOW * bowl);
             }
+        }
+    }
+    // And nothing else digs under one either. A rhythm hill's hollow reaches 22 m past its own
+    // foot, which is far enough to scoop the end of the whoop set next door and stand it on
+    // the same pad. Eased back in rather than cut off, so the ground still meets the hollow
+    // either side of the set without a step at the entry.
+    for f in features {
+        if !drawn_run(f) {
+            continue;
+        }
+        let (at, len) = (f.at(), f.length());
+        let lo = (((at - WHOOP_FLOOR_EASE_M) / PROFILE_STEP).floor().max(0.0) as usize).min(dig.len() - 1);
+        let hi = (((at + len + WHOOP_FLOOR_EASE_M) / PROFILE_STEP).ceil() as usize).min(dig.len() - 1);
+        for i in lo..=hi {
+            let s = i as f32 * PROFILE_STEP;
+            // Nothing across the set itself, all of it a few metres out from either end.
+            let w = smoothstep(
+                ((at - s) / WHOOP_FLOOR_EASE_M)
+                    .max((s - at - len) / WHOOP_FLOOR_EASE_M)
+                    .clamp(0.0, 1.0),
+            );
+            dig[i] *= w;
         }
     }
     for i in 0..out.v.len() {
@@ -3372,6 +3474,37 @@ fn feature_profile(features: &[Feature], lap: f32, blend: f32) -> Profile {
         }
     }
 
+    // And whoops keep the shape they were drawn with.
+    //
+    // The blend smooths over 2.4 m and a whoop's pitch is 5.4, which is a box filter taking a
+    // third of the height off every crest: asked for 0.55 m the ground came out at 0.38, and
+    // a set nobody can time is what "ours are not built right" means. A whoop section is not
+    // two jumps that need rounding into each other — it is one drawn shape, and its troughs
+    // are already a cosine — so the drawn profile goes back over it, eased in over a metre at
+    // each end so the lead-in still meets the ground either side.
+    for f in features {
+        // Whoops, and any drawn shape that is a run of hills rather than a jump: a rhythm lane
+        // of five or six at a ten-metre pitch loses a tenth of its height to the same filter,
+        // and the hills are the whole of what a rhythm lane is. Three crests is a triple,
+        // whose dips *should* be rounded, so the bar sits above it.
+        let drawn = drawn_run(f);
+        if !drawn {
+            continue;
+        }
+        let (at, len) = (f.at(), f.length());
+        let lo = ((at / PROFILE_STEP).floor().max(0.0) as usize).min(out.v.len() - 1);
+        let hi = (((at + len) / PROFILE_STEP).ceil() as usize).min(out.v.len() - 1);
+        for i in lo..=hi {
+            let s = i as f32 * PROFILE_STEP;
+            let w = smoothstep(
+                ((s - at) / WHOOP_EASE_M)
+                    .min((at + len - s) / WHOOP_EASE_M)
+                    .clamp(0.0, 1.0),
+            );
+            out.v[i] += (raw[i] - out.v[i]) * w;
+        }
+    }
+
     // And no knuckle before the lip.
     //
     // Ridden: "a lot of them were smooth, and had like a knuckle just before the tip". The
@@ -3381,7 +3514,13 @@ fn feature_profile(features: &[Feature], lap: f32, blend: f32) -> Profile {
     // moment. A face rises. So each feature's approach is made non-decreasing to its crest
     // and its landing non-increasing away from it.
     for f in features {
-        if matches!(f, Feature::StepUp { .. } | Feature::Berm { .. } | Feature::Rut { .. }) {
+        if matches!(
+            f,
+            Feature::StepUp { .. }
+                | Feature::Berm { .. }
+                | Feature::Rut { .. }
+                | Feature::Sand { .. }
+        ) {
             continue;
         }
         let (at, len) = (f.at(), f.length());
@@ -3758,7 +3897,11 @@ fn longitudinal(f: &Feature, t: f32, u: f32) -> f32 {
         }
         // Both are applied elsewhere: a step-up moves the elevation profile, and a berm
         // and a rut are shaped across the track rather than along it.
-        Feature::StepUp { .. } | Feature::Berm { .. } | Feature::Rut { .. } => 0.0,
+        // Sand joins them: it is what the ground is made of over a stretch, not a shape on it.
+        Feature::StepUp { .. }
+        | Feature::Berm { .. }
+        | Feature::Rut { .. }
+        | Feature::Sand { .. } => 0.0,
         Feature::Custom { .. } => unreachable!("handled above"),
     }
 }
@@ -4066,13 +4209,18 @@ pub fn write_source(prog: &TrackProgram, syn: &Synth, dir: &Path) -> Result<Vec<
     // What the 3D grass is coloured by. Terrain-wide, like the density map it sits beside in
     // the same block, rather than tiled like the blade sprite: the two `*map` keys are
     // siblings and read the ground the same way.
-    let turf = ground_looks(prog.terrain.surface).turf;
+    let turf = ground_looks_of(&prog.terrain).turf;
     let grass_color = mask_rect(syn, MASK_DIM, MASK_DIM, |_, _, x, z| {
         // One channel is enough to carry the variation; the tint itself is written below.
         (140.0 + 90.0 * fbm(x * 0.02, z * 0.02, seed ^ 0x4B12)).clamp(0.0, 255.0) as u8
     });
 
     put("mask_grass.tga", tga_alpha(MASK_DIM, MASK_DIM, &grass), &mut wrote)?;
+    // The sand section, where the lap carries one. Named off `layers` so the two cannot drift.
+    if bands.iter().any(|l| l.mask == Some("mask_sand.tga")) {
+        let sand = band_of(BandMask::Sand);
+        put("mask_sand.tga", tga_alpha(MASK_DIM, MASK_DIM, &sand), &mut wrote)?;
+    }
     put(
         "grass_color.tga",
         tga_tinted(MASK_DIM, MASK_DIM, &grass_color, turf.base),
@@ -4235,6 +4383,9 @@ fn feature_id(f: &Feature) -> u32 {
         Feature::Berm { .. } => 205,
         Feature::Rut { .. } => 206,
         Feature::Custom { .. } => 207,
+        // Its own material rather than a feature colour: a sand section really is sand, and a
+        // preview that draws it as such is drawing what the track has.
+        Feature::Sand { .. } => 5,
     }
 }
 
@@ -4551,12 +4702,12 @@ fn line_id(s: Surface, preview: bool) -> u32 {
 ///
 /// Untested against the game — nothing here has been loaded by MX Bikes. The structure is
 /// right; whether every field means what it looks like is not something a macOS box can say.
-/// How many gates the row holds, and how wide a lane each one gets.
+/// How wide a lane each gate gets. How many gates the row holds is the discipline's
+/// (`tracklayout::Rules::gates`).
 ///
-/// Forty at 1.2 m, because that is what every modern track ships: Indiana, Millville,
-/// Washougal, Maryland and the GP tracks all say 40, and their lane widths run 1.1 to 1.3.
-const GRID_STALLS: usize = 40;
-const GRID_LANE_M: f32 = 1.2;
+/// 1.2 m, because that is what every modern track ships: Indiana, Millville, Washougal,
+/// Maryland and the GP tracks all run 1.1 to 1.3.
+pub(crate) const GRID_LANE_M: f32 = 1.2;
 
 /// Where the finish line sits, in metres round the lap.
 ///
@@ -4576,6 +4727,11 @@ pub(crate) fn finish_at(prog: &TrackProgram) -> f32 {
             crate::trackprog::Feature::Double { height, lip, .. } => {
                 crate::trackprog::double_faces(*height, *lip).ramp
             }
+            // A stadium lap finishes over a triple, which is a drawn shape: its take-off is the
+            // run into its first crest, and the line goes on top of that like any other.
+            crate::trackprog::Feature::Custom { length, shape, .. } => {
+                custom_takeoff(shape).map_or(0.0, |(_, _, c_u, _)| c_u * length)
+            }
             _ => 0.0,
         };
         return (f.at() + face).clamp(10.0, (run - 2.0).max(10.0));
@@ -4586,13 +4742,10 @@ pub(crate) fn finish_at(prog: &TrackProgram) -> f32 {
     (run * 0.4).clamp(10.0, 40.0)
 }
 
-/// How wide the start fans out, as a half-width in metres.
-///
-/// The gate row is 48 m across and it stands *on the track*, so the track has to be that wide
-/// where it stands. This is not the riding line being too wide: a start straight is a fan
-/// that funnels into turn one, and the published tracks measure 13 to 15 m at the finish line
-/// with a 45 to 53 m row of gates on the start.
-pub const START_FAN_HALF_M: f32 = GRID_STALLS as f32 * GRID_LANE_M * 0.5 + 3.0;
+// How wide the start fans out is `tracklayout::Rules::fan_half_m`: the gate row stands *on
+// the track*, so the track is that wide where it stands. A start straight is a fan that
+// funnels into turn one; published tracks measure 13 to 15 m at the finish line with a 45 to
+// 53 m row of gates on the start.
 
 /// How far back from the gate row the fan reaches, metres. The lap's last corner feeds onto
 /// the start straight, so the width has somewhere to come from.
@@ -4626,6 +4779,8 @@ pub struct StartSpur {
     /// How far the sprint runs before the fan has narrowed to the riding line.
     funnel: f32,
     len: f32,
+    /// Gates in the row.
+    pub gates: usize,
 }
 
 /// How far past the gate row its grooves run, and how deep they are at their deepest.
@@ -4646,8 +4801,8 @@ const MERGE_TAIL_M: f32 = 12.0;
 /// The whole gate row until its grooves run out, then narrowing to the track by the end of the
 /// sprint, so it meets turn one the width of the lap it joins. Held full width for the whole
 /// sprint, the pad's back half lay over the main straight and folded into a blob in the turn.
-fn pad_half(half: f32, line_half: f32, s: f32) -> f32 {
-    let (from, to) = (GATE_INSET_M + 15.0, crate::trackprog::START_SPRINT_M);
+fn pad_half(half: f32, line_half: f32, s: f32, sprint: f32) -> f32 {
+    let (from, to) = (GATE_INSET_M + 15.0, sprint);
     let u = ((s - from) / (to - from).max(1.0)).clamp(0.0, 1.0);
     half + (line_half - half) * smoothstep(u)
 }
@@ -4716,7 +4871,9 @@ impl StartSpur {
         // the plot is benched to ground that isn't there — and a lap with no room beside it
         // for a start is a lap that gets none, which `trackllm::review` says out loud rather
         // than quietly building something broken.
-        let margin = START_FAN_HALF_M + SHOULDER_M * START_BANK;
+        let rules = prog.discipline.rules();
+        let fan_half = rules.fan_half_m();
+        let margin = fan_half + SHOULDER_M * START_BANK;
         let (sx, sz) = (prog.terrain.size_x, prog.terrain.size_z);
         if stations.iter().any(|q| {
             q.x < margin || q.z < margin || q.x > sx - margin || q.z > sz - margin
@@ -4758,10 +4915,10 @@ impl StartSpur {
                 .sum::<f32>()
                 / n as f32
         };
-        let half = START_FAN_HALF_M.max(prog.width * 0.5);
+        let half = fan_half.max(prog.width * 0.5);
         // The same width the pad comes out — see `at`, which this has to agree with or the
         // level is taken across ground the start does not cover.
-        let wide_at = |s: f32| pad_half(half, prog.width * 0.5, s);
+        let wide_at = |s: f32| pad_half(half, prog.width * 0.5, s, rules.start_sprint_m);
         let mut deck: Vec<f32> = stations.iter().map(|q| across(q, wide_at(q.s))).collect();
         smooth_along(&mut deck, (BENCH_SMOOTH_M * 2.0 / STATION_STEP) as usize);
         // And where it comes near the lap, it takes the lap's height rather than the ground's.
@@ -4796,10 +4953,11 @@ impl StartSpur {
             line,
             stations,
             deck,
-            half: START_FAN_HALF_M.max(prog.width * 0.5),
+            half: fan_half.max(prog.width * 0.5),
             line_half: prog.width * 0.5,
-            funnel: crate::trackprog::START_SPRINT_M,
+            funnel: rules.start_sprint_m,
             len,
+            gates: rules.gates,
         })
     }
 
@@ -4827,7 +4985,7 @@ impl StartSpur {
     /// is why a start straight reads as a wide slab with a funnel on the end of it rather than
     /// as a wedge.
     pub fn at(&self, s: f32) -> f32 {
-        pad_half(self.half, self.line_half, s)
+        pad_half(self.half, self.line_half, s, self.funnel)
     }
 
     pub fn length(&self) -> f32 {
@@ -4983,7 +5141,7 @@ fn rdf(prog: &TrackProgram, syn: &Synth) -> String {
     //
     // `posx`/`posz` is one *end* of the row, not its middle, so the anchor sits half a
     // row-width across and the gates come out centred on the line they stand on.
-    let grid = GRID_STALLS;
+    let grid = prog.discipline.rules().gates;
     let lane = GRID_LANE_M;
     let span = grid as f32 * lane;
     let (gate, gate_at) = match spur {
@@ -5382,9 +5540,11 @@ fn map(prog: &TrackProgram, syn: &Synth) -> Vec<u8> {
 ///
 /// Every published track ships one of these beside its `.map`, and the shape is the same on
 /// all of them — a ground colour, then a colour per surface the game can spray. Ours follows
-/// what the track is made of, so a sand national roosts sand rather than the default loam.
+/// what the track is *painted* with rather than what it is made of, because roost is dirt a
+/// rider can see: a sand national roosts sand, and a track re-skinned to look like a stadium
+/// floor roosts the dark stuff it now looks like.
 fn gfx_cfg(prog: &TrackProgram) -> String {
-    let (ground, line) = ground_palette(prog.terrain.surface);
+    let (ground, line) = ground_palette(&prog.terrain);
     let rgb = |c: [u8; 3]| {
         format!(
             "\t\tred = {:.2}\n\t\tgreen = {:.2}\n\t\tblue = {:.2}\n",
@@ -5791,6 +5951,11 @@ enum BandMask {
     Patches,
     /// The main lines, by how used the ground is.
     Worn,
+    /// The stretches laid with sand, out past the track edge and eased in along the lap.
+    ///
+    /// Read off [`Synth::sand`] rather than off the features, because a band has to be drawn
+    /// by the same code the exported `.tga` is — see the two mask paths that once disagreed.
+    Sand,
 }
 
 /// How much of the plot [`BandMask::Patches`] covers, near enough — Indiana 59.9%,
@@ -5892,7 +6057,44 @@ fn band_mask(
             }
             out
         }
+        BandMask::Sand => sand_mask(syn, half, seed, mw, mh),
     }
+}
+
+/// How far past the track edge a sand section spills, and how far it eases in — both along the
+/// lap at its ends and across it at the edges.
+///
+/// It runs onto the shoulder on purpose. Sand cut dead at the white line reads as paint; a
+/// real section is dumped over the lane and spreads where the machine pushed it.
+const SAND_SPILL_M: f32 = 2.0;
+const SAND_FADE_M: f32 = 4.0;
+
+/// The stretches of lap laid with sand.
+fn sand_mask(syn: &Synth, half: f32, seed: u32, mw: usize, mh: usize) -> Vec<u8> {
+    if syn.sand.is_empty() {
+        return vec![0u8; mw * mh];
+    }
+    mask_across(syn, mw, mh, |c| {
+        let across = soft_edge(half + SAND_SPILL_M, SAND_FADE_M, c.lat.abs()) as f32 / 255.0;
+        if across <= 0.0 {
+            return 0;
+        }
+        // Eased in and out over a few metres at each end: sand is trucked in and tails off
+        // into the dirt rather than starting at a line drawn across the track.
+        let along = syn
+            .sand
+            .iter()
+            .map(|&(a, b)| {
+                smoothstep(
+                    ((c.s - a) / SAND_FADE_M)
+                        .min((b - c.s) / SAND_FADE_M)
+                        .clamp(0.0, 1.0),
+                )
+            })
+            .fold(0.0f32, f32::max);
+        let grain = 0.86 + 0.14 * fbm(c.x / 7.0, c.z / 7.0, seed ^ 0x5A4D);
+        (across * along * grain * 255.0).clamp(0.0, 255.0) as u8
+    })
 }
 
 /// The racing line: the strip the tyres actually pack down, damp and dark.
@@ -5929,7 +6131,8 @@ fn start_rut(syn: &Synth, i: usize, seed: u32) -> Option<u8> {
     if !(-1.0..GATE_RUT_M).contains(&from_gate) {
         return Some(0);
     }
-    let row = GRID_STALLS as f32 * GRID_LANE_M * 0.5;
+    let gates = syn.spur.as_ref().map_or(0, |s| s.gates);
+    let row = gates as f32 * GRID_LANE_M * 0.5;
     if d > row {
         return Some(0);
     }
@@ -6353,11 +6556,11 @@ struct GroundLook {
     /// of it lands both — Indiana's dark soil measures a spread of 21 grey levels about a
     /// mean of 39, and its light soil only 28 about a mean of 142.
     contrast: f32,
-    /// The published sheet this band is painted with — see [`photo`].
+    /// The sheet this band is painted with — see [`photo`].
     ///
     /// Ground is a photograph. Everything above draws one instead, and only gets the chance
     /// when the asset will not decode.
-    photo: Option<&'static str>,
+    photo: Option<Sheet>,
     /// What to multiply that photograph by, so a sand track comes out sand.
     ///
     /// `[1.0; 3]` on soil, which is what the sheets were shot on.
@@ -6395,6 +6598,42 @@ fn ground_texture(dim: usize, look: &GroundLook, seed: u32) -> Vec<u8> {
 /// ruts wear down to, and its grass. [`ground_pixels`] draws ground instead of photographing
 /// it, and is the fallback behind these.
 ///
+/// Which photograph a band paints with: one of ours, or one the rider brought.
+///
+/// A rider's own image stands *in place of* a built-in one rather than beside it, and carries
+/// the name of the sheet it replaced, because the rest of the pipeline still has to know
+/// whether it is looking at soil or at grass — the normal map and the specular that go under
+/// a band are picked off that name, and there is no way to derive them from a photograph.
+#[derive(Clone)]
+enum Sheet {
+    /// One of the built-in ground photographs, by name — see [`photo`].
+    Named(&'static str),
+    /// The rider's own, already decoded. See `tracktex`.
+    Own {
+        /// The built-in it stands in for.
+        of: &'static str,
+        px: std::sync::Arc<(usize, Vec<u8>)>,
+    },
+}
+
+impl Sheet {
+    /// The built-in ground this band is, whether or not a rider's image is painting it.
+    fn name(&self) -> &'static str {
+        match self {
+            Sheet::Named(n) => n,
+            Sheet::Own { of, .. } => of,
+        }
+    }
+}
+
+/// A sheet's pixels, `(dim, rgba)`, whichever kind it is.
+fn sheet_pixels(s: &Sheet) -> Option<&(usize, Vec<u8>)> {
+    match s {
+        Sheet::Named(n) => photo(n),
+        Sheet::Own { px, .. } => Some(px.as_ref()),
+    }
+}
+
 /// Returns `(dim, rgba)`; the sheets are square.
 fn photo(name: &str) -> Option<&'static (usize, Vec<u8>)> {
     macro_rules! sheet_of {
@@ -6434,7 +6673,7 @@ fn photo(name: &str) -> Option<&'static (usize, Vec<u8>)> {
 /// Used rather than a normal derived from the sheet's luma, which came out far flatter than
 /// a published track's and rode as "texture too flat".
 fn photo_normal(look: &GroundLook, dim: usize) -> Option<Vec<u8>> {
-    let (name, spec) = match look.photo? {
+    let (name, spec) = match look.photo.as_ref()?.name() {
         "grass" => ("grass_normal", "grass_spec"),
         _ => ("soil_normal", "soil_spec"),
     };
@@ -6455,7 +6694,7 @@ fn photo_normal(look: &GroundLook, dim: usize) -> Option<Vec<u8>> {
 /// The one place a band's pixels come from — the exported `.tga`, the sheet baked into the
 /// `.map` and every picture drawn of the ground all come through here.
 fn band_pixels(dim: usize, look: &GroundLook, seed: u32) -> Vec<u8> {
-    let Some((sheet_dim, src)) = look.photo.and_then(photo) else {
+    let Some((sheet_dim, src)) = look.photo.as_ref().and_then(sheet_pixels) else {
         return ground_pixels(dim, look, seed);
     };
     let mut px = flatten_tile(resample_sheet(src, *sheet_dim, dim), dim);
@@ -7055,8 +7294,8 @@ fn ground_pixels(dim: usize, look: &GroundLook, seed: u32) -> Vec<u8> {
 /// the ground it came off, and a `GroundLook`'s base is what goes *into* the renderer —
 /// shading takes about a quarter of it back out, so quoting the base here would spray dirt
 /// visibly lighter than the dirt it came from. A small tile costs nothing and cannot drift.
-fn ground_palette(s: Surface) -> ([u8; 3], [u8; 3]) {
-    let g = ground_looks(s);
+fn ground_palette(t: &crate::trackprog::Terrain) -> ([u8; 3], [u8; 3]) {
+    let g = ground_looks_of(t);
     let (field, ridden) = (g.field, g.ridden);
     let mean = |look: &GroundLook| -> [u8; 3] {
         const DIM: usize = 256;
@@ -7088,6 +7327,8 @@ struct Grounds {
     loose: GroundLook,
     /// The turf over the top.
     turf: GroundLook,
+    /// Whether that turf grows 3D blades. False on a stadium floor, which has none.
+    turf_grows: bool,
 }
 
 /// The grounds, from what the track says it is made of.
@@ -7097,11 +7338,17 @@ struct Grounds {
 /// is not one band but three — the base, the packed line inside it and the loose stuff at its
 /// edges — and they are spread far enough apart in tone to tell apart at speed.
 fn ground_looks(surface: Surface) -> Grounds {
-    // Read off Indiana's own sheets rather than picked. `soil_light_c` averages (172, 134,
-    // 99) and `soil_dark_c` (50, 36, 24) — a bright tan field against a nearly black riding
-    // line, and the gap between them is far wider than any two colours anyone would guess.
-    // These are the numbers *before* shading, which lands around three quarters of them.
-    let (base, line): ([f32; 3], [f32; 3]) = match surface {
+    looks(surface_palette(surface))
+}
+
+/// The two colours a look is built out of: the field's and the riding line's.
+///
+/// Read off Indiana's own sheets rather than picked. `soil_light_c` averages (172, 134, 99)
+/// and `soil_dark_c` (50, 36, 24) — a bright tan field against a nearly black riding line,
+/// and the gap between them is far wider than any two colours anyone would guess. These are
+/// the numbers *before* shading, which lands around three quarters of them.
+fn surface_palette(surface: Surface) -> ([f32; 3], [f32; 3]) {
+    match surface {
         // The line is lighter than Indiana's own (50, 36, 24) on purpose. That figure is what
         // a sheet averages under a photographer's light; in the game, with the track's sky
         // over it and its own shadows on it, a line that dark stops reading as a line at all —
@@ -7112,7 +7359,16 @@ fn ground_looks(surface: Surface) -> Grounds {
         Surface::Sand => ([214.0, 193.0, 152.0], [176.0, 152.0, 114.0]),
         // Worn turf rather than soil, so a grasstrack's line is not a dirt one.
         Surface::Grass => ([174.0, 142.0, 100.0], [86.0, 80.0, 50.0]),
-    };
+    }
+}
+
+/// Every band of ground, built out of a field colour and a line colour.
+///
+/// The arithmetic below is the whole of what a look is, and it is the same arithmetic for
+/// every one of them — only the two colours going in change. Nothing here re-tones a sheet
+/// that a preset did not already re-tone: `tone` is a ratio against the soil the photographs
+/// were shot on, and for soil it is one.
+fn looks((base, line): ([f32; 3], [f32; 3])) -> Grounds {
     // The sheets were shot on Indiana, which is soil, so a soil track takes them as they are
     // and a sand or grass one pulls them to its own palette by the ratio of the two bases.
     let soil = |b: [f32; 3], of: [f32; 3]| -> [f32; 3] {
@@ -7123,7 +7379,7 @@ fn ground_looks(surface: Surface) -> Grounds {
     let line_tone = soil(line, soil_line);
     let field = GroundLook {
         base,
-        photo: Some("soil_light"),
+        photo: Some(Sheet::Named("soil_light")),
         // Knocked back: a whole plot of bright tan reads ugly from the seat.
         tone: [
             ground_tone[0] * FIELD_DARKEN,
@@ -7144,7 +7400,7 @@ fn ground_looks(surface: Surface) -> Grounds {
     };
     let ridden = GroundLook {
         base: line,
-        photo: Some("soil_dark"),
+        photo: Some(Sheet::Named("soil_dark")),
         tone: line_tone,
         // 22.5 measured, where Indiana's grittiest sheet is 18.2 and Southwick's 16.9 — and
         // it sits next to the rut, so the corridor jumped from heavy grit to smooth over a
@@ -7172,7 +7428,7 @@ fn ground_looks(surface: Surface) -> Grounds {
             base[1] * 1.04 + 5.0,
             base[2] * 1.02 + 4.0,
         ],
-        photo: Some("soil_light"),
+        photo: Some(Sheet::Named("soil_light")),
         tone: [
             ground_tone[0] * 0.80 * FIELD_DARKEN,
             ground_tone[1] * 0.79 * FIELD_DARKEN,
@@ -7192,7 +7448,7 @@ fn ground_looks(surface: Surface) -> Grounds {
     };
     let grass = GroundLook {
         base: [100.0, 114.0, 62.0],
-        photo: Some("grass"),
+        photo: Some(Sheet::Named("grass")),
         tone: [1.0; 3],
         grain_tint: (0.55, 1.32),
         fleck: [126.0, 132.0, 78.0],
@@ -7223,7 +7479,7 @@ fn ground_looks(surface: Surface) -> Grounds {
         // Indiana ships that as its own photograph. Toned down, because that photograph is
         // *lighter* than the dark soil of the line — 61 against 50 — and a groove painted
         // lighter than the line it is cut into is a groove nobody can find.
-        photo: Some("packed"),
+        photo: Some(Sheet::Named("packed")),
         tone: [
             line_tone[0] * RUT_FLOOR_DARKEN,
             line_tone[1] * RUT_FLOOR_DARKEN,
@@ -7260,7 +7516,7 @@ fn ground_looks(surface: Surface) -> Grounds {
         // soil put dark blotches over light ground in no pattern anybody could read. What is
         // thrown off a line and never driven on again dries out and goes lighter than what is
         // around it.
-        photo: Some("soil_light"),
+        photo: Some(Sheet::Named("soil_light")),
         tone: [
             ground_tone[0] * LOOSE_DRY,
             ground_tone[1] * LOOSE_DRY,
@@ -7281,7 +7537,7 @@ fn ground_looks(surface: Surface) -> Grounds {
     // The line is the corridor's own soil, worn down to what a published track paints its
     // riding line with. The corridor around it is lifted off that: a track from above is a
     // dark brown ribbon with a darker line down it, not a pale one with a black stripe.
-    let line_band = GroundLook { tone: line_tone, ..ridden };
+    let line_band = GroundLook { tone: line_tone, ..ridden.clone() };
     let ridden = GroundLook {
         tone: [
             line_tone[0] * CORRIDOR_LIFT,
@@ -7290,7 +7546,73 @@ fn ground_looks(surface: Surface) -> Grounds {
         ],
         ..ridden
     };
-    Grounds { field, ridden, line: line_band, shoulder, rut, loose, turf: grass }
+    Grounds { field, ridden, line: line_band, shoulder, rut, loose, turf: grass, turf_grows: true }
+}
+
+/// A stadium floor: trucked-in dirt over the whole place, and nothing green beyond it.
+///
+/// Composed out of the soil look rather than graded to a palette of its own. The ground
+/// photographs belong to a published track and are not ours to re-tone, so a stadium is made
+/// by putting the bands the generator already has in different places — the dark worked soil
+/// on the riding surface where the tan normally goes, and the tan on the floor outside the
+/// lanes where the grass normally goes — instead of by inventing a colour grade over someone
+/// else's art. New looks arrive with art of our own.
+fn stadium_looks() -> Grounds {
+    let g = ground_looks(Surface::Soil);
+    Grounds {
+        // The lanes: dark trucked-in dirt, not a dry outdoor national's tan.
+        field: g.ridden.clone(),
+        // And the floor beyond them is the same stuff, lighter where nobody rides.
+        turf: g.shoulder.clone(),
+        turf_grows: false,
+        ..g
+    }
+}
+
+/// The grounds a program actually paints with.
+///
+/// The one place the look is decided, and the only place that knows the look is a separate
+/// question from the ride. Left at its default this is exactly [`ground_looks`] of the
+/// surface, expression for expression, which is what keeps a motocross track that nobody
+/// re-skinned building the bytes it built before.
+fn ground_looks_of(t: &crate::trackprog::Terrain) -> Grounds {
+    use crate::trackprog::{SheetSlot, TexturePreset};
+    if t.texture.is_default() {
+        return ground_looks(t.surface);
+    }
+    let mut g = match t.texture.preset {
+        TexturePreset::Ride => ground_looks(t.surface),
+        TexturePreset::Soil => ground_looks(Surface::Soil),
+        TexturePreset::Sand => ground_looks(Surface::Sand),
+        TexturePreset::Grass => ground_looks(Surface::Grass),
+        TexturePreset::Stadium => stadium_looks(),
+    };
+    for own in &t.texture.sheets {
+        // An id nothing is stored under paints with the built-in it stands in for. A track
+        // carried to another machine looks ordinary; it does not fail to build.
+        let Some(px) = crate::tracktex::sheet(&own.id) else { continue };
+        let put = |look: &mut GroundLook| {
+            let of = look.photo.as_ref().map(Sheet::name).unwrap_or("soil_light");
+            look.photo = Some(Sheet::Own { of, px: px.clone() });
+        };
+        match own.slot {
+            // The riding surface, and the loose stuff thrown off it, which is the same dirt
+            // seen dry — they share a sheet in every look the generator has.
+            SheetSlot::Ground => {
+                put(&mut g.field);
+                put(&mut g.shoulder);
+                put(&mut g.loose);
+            }
+            // The dark soil: the whole site under the track, and the corridor over it.
+            SheetSlot::Line => {
+                put(&mut g.ridden);
+                put(&mut g.line);
+            }
+            SheetSlot::Rut => put(&mut g.rut),
+            SheetSlot::Grass => put(&mut g.turf),
+        }
+    }
+    g
 }
 
 /// The blade sprite the grass layer scatters. Alpha-cut, like every foliage sheet in the
@@ -7971,11 +8293,12 @@ struct Layer {
 /// line-and-field is a brown ribbon on a green sheet, and the shoulder — the worked ground
 /// either side of the ribbon — is most of what is actually in front of a rider.
 fn layers(prog: &TrackProgram) -> Vec<Layer> {
-    // Ground follows what the track is made of, so a sand national exports sand.
-    let Grounds { field, ridden, line, shoulder, rut, loose, turf } =
-        ground_looks(prog.terrain.surface);
+    // Ground follows the look the track was given, which is what the track is made of until
+    // somebody says otherwise — so a sand national still exports sand.
+    let Grounds { field, ridden, line, shoulder, rut, loose, turf, turf_grows } =
+        ground_looks_of(&prog.terrain);
     let (_, shoulder_scale) = ground(prog.terrain.surface);
-    vec![
+    let mut bands = vec![
         // Dark soil over the whole site, and the riding line painted *light* on top of it.
         //
         // The way round a published track has it. Indiana lays `soil_dark_c` (49, 35, 23)
@@ -8105,6 +8428,27 @@ fn layers(prog: &TrackProgram) -> Vec<Layer> {
         // along the middle of the track, and no published track has one: Indiana lays its
         // dark soil over the whole site and lets the *shape* of the ruts do the work. The
         // groove is still cut into the ground; it is simply not painted on.
+        // The sand a section is laid with, over the top of the riding surface and out onto the
+        // shoulder. Only where the lap carries one — an empty band would have TerrainEd
+        // looking for a mask nothing wrote.
+        //
+        // Here and nowhere else. The exported `.tga` comes off this list too, so a band added
+        // anywhere but `layers` is ground the game gets and no picture of the track shows.
+        Layer {
+            name: "sand_deep_c",
+            sheet: "sandband_c",
+            band: BandMask::Sand,
+            look: ground_looks(Surface::Sand).loose,
+            salt: 0x5A47,
+            tile_m: TILE_LOOSE_M,
+            mask: Some("mask_sand.tga"),
+            thickness: Some(0.18),
+            spec: 16,
+            shininess: 10,
+            wet: true,
+            grass: false,
+            gloss: 0,
+        },
         Layer {
             name: "hm_grass",
             sheet: "grass_c",
@@ -8117,10 +8461,21 @@ fn layers(prog: &TrackProgram) -> Vec<Layer> {
             spec: 14,
             shininess: 8,
             wet: false,
-            grass: true,
+            // Blades, unless the look says there is nothing growing out there.
+            grass: turf_grows,
             gloss: 0,
         },
-    ]
+    ];
+    // And the sand band only where the lap actually carries a sand section.
+    //
+    // It was going out on every track: a motocross national paid for an eighth band and an
+    // all-zero `mask_sand.tga`, and because [`tht`] counts its material layers off the
+    // features instead, the picture of the ground and the stuff the ground is made of
+    // disagreed about whether there was any sand on the track at all.
+    if !prog.features.iter().any(|f| matches!(f, Feature::Sand { .. })) {
+        bands.retain(|l| !matches!(l.band, BandMask::Sand));
+    }
+    bands
 }
 
 fn hmf(prog: &TrackProgram, syn: &Synth) -> String {
@@ -8254,6 +8609,12 @@ struct Dig {
     /// The packed racing line: a firm crust over softer ground, which is what a line worn
     /// into a track actually is.
     packed: (&'static str, f32),
+    /// A stretch trucked in and laid with sand, where the lap carries one.
+    ///
+    /// Deep, because that is the whole of what a sand section is: half a metre of it is the
+    /// difference between riding through one and riding over a patch of different-coloured
+    /// ground. Indiana carries 0.5 m of masked sand beside its 0.35 m of soft soil.
+    sand: (&'static str, f32),
 }
 
 fn dig(s: Surface) -> Dig {
@@ -8268,6 +8629,7 @@ fn dig(s: Surface) -> Dig {
             top: ("soft soil", 0.35),
             loose: ("soft soil", 0.20),
             packed: ("soil", 0.02),
+            sand: ("sand", 0.45),
         },
         // Sand is deep everywhere, and that is the whole character of a sand national — the
         // ruts are what you ride, not what you avoid.
@@ -8277,6 +8639,8 @@ fn dig(s: Surface) -> Dig {
             top: ("sand", 0.35),
             loose: ("sand", 0.45),
             packed: ("sand", 0.05),
+            // Already sand everywhere; a section of it is only deeper still.
+            sand: ("sand", 0.50),
         },
         // A grasstrack barely cuts up at all: root-bound ground over firm soil.
         Surface::Grass => Dig {
@@ -8285,6 +8649,7 @@ fn dig(s: Surface) -> Dig {
             top: ("soft soil", 0.12),
             loose: ("soft soil", 0.15),
             packed: ("soil", 0.02),
+            sand: ("sand", 0.35),
         },
     }
 }
@@ -8312,7 +8677,11 @@ fn tht(prog: &TrackProgram, syn: &Synth) -> String {
         b
     };
 
-    s.push_str("num_material_layers = 6\n\n");
+    // A sand section is a seventh layer, masked to the stretch it covers. Both halves of a
+    // sand section have to be here or it is only a colour: the band in `layers` is what it
+    // looks like and this is what it rides like.
+    let sand = prog.features.iter().any(|f| matches!(f, Feature::Sand { .. }));
+    s.push_str(&format!("num_material_layers = {}\n\n", 6 + usize::from(sand)));
     // The base carries no thickness, which is what makes it the floor.
     s.push_str(&format!("material_layer0\n{{\n\tmaterial = {}\n}}\n\n", d.base));
     // Two unmasked layers over the whole plot, as the example has. This is the change that
@@ -8323,6 +8692,9 @@ fn tht(prog: &TrackProgram, syn: &Synth) -> String {
     s.push_str(&layer(3, d.loose, Some("mask_loose.tga")));
     s.push_str(&layer(4, d.packed, Some("mask_rut.tga")));
     s.push_str(&layer(5, ("grass", 0.01), Some("mask_grass.tga")));
+    if sand {
+        s.push_str(&layer(6, d.sand, Some("mask_sand.tga")));
+    }
     s
 }
 
@@ -8376,7 +8748,7 @@ fn start_tcl(prog: &TrackProgram) -> Option<String> {
 /// the code that made it. Bump it with every change to what a program builds into: minor for
 /// a new feature, patch for a fix. 0.x until the generator is finished. History in
 /// `apps/studio/FROST_ALGORITHM.md`.
-pub const FROST_ALGORITHM_VERSION: &str = "0.34.0";
+pub const FROST_ALGORITHM_VERSION: &str = "0.41.0";
 
 /// The stamp every built track carries in `<slug>/frost-algorithm.ini`.
 ///
@@ -9413,6 +9785,7 @@ mod tests {
                     landform_height: 12.0,
                                 },
                 surface: crate::trackprog::Surface::Soil,
+                texture: Default::default(),
                 wear: crate::trackprog::default_wear(),
                 roughness: crate::trackprog::default_roughness(),
             },
@@ -9430,6 +9803,9 @@ mod tests {
             width: 12.0,
             blend: crate::trackprog::default_blend(),
             elevation: Vec::new(),
+            discipline: Default::default(),
+            border: Default::default(),
+            venue: Default::default(),
             features: vec![
                 Feature::Tabletop { at: 30.0, length: 22.0, height: 2.4, lip: 0.0, finish: false },
                 Feature::Double { at: 70.0, height: 2.0, gap: 9.0, lip: 6.0, finish: false },
@@ -9437,6 +9813,172 @@ mod tests {
                 Feature::Berm { at: 165.0, length: 80.0, height: 1.6 },
             ],
         }
+    }
+
+    /// Whoops come out of the ground at the height they were drawn at.
+    ///
+    /// Measured on the built heightfield, because that is the only place the fault showed. The
+    /// blend averages over 2.4 m and a whoop's pitch is 5.4, which is a box filter taking a
+    /// third off every crest: asked for 0.55 m the ground came out at 0.38, and a set nobody
+    /// can time is what "ours are not built right" meant. See the drawn-shape restore in
+    /// `feature_profile`.
+    #[test]
+    fn whoops_are_built_at_the_height_they_were_drawn() {
+        let (count, spacing, height) = (9u32, 5.4f32, 0.55f32);
+        let mut p = oval();
+        // A flat floor and unworn ground, so what is measured is the whoops and not the
+        // landscape they sit on or the ruts cut into them.
+        p.terrain.relief.amplitude = 0.0;
+        p.terrain.relief.tilt = 0.0;
+        p.terrain.relief.landforms = 0;
+        p.terrain.wear = 0.0;
+        p.features = vec![Feature::Whoops { at: 40.0, count, spacing, height }];
+        let s = synthesise(&p).expect("synthesise");
+
+        // The ground down the middle of the lane, the way the corpus measures it.
+        let st = p.stations(0.25);
+        let along = |at: f32| -> f32 {
+            let q = st[((at / 0.25) as usize).min(st.len() - 1)];
+            let (rx, rz) = crate::trackprog::right_vector(q.heading);
+            let mut v: Vec<f32> = (-6..=6)
+                .map(|k| {
+                    let u = k as f32 * 0.25;
+                    sample_smooth(&s.heights, s.gw, s.gh, (q.x + rx * u) / s.mps, (q.z + rz * u) / s.mps)
+                })
+                .collect();
+            v.sort_by(f32::total_cmp);
+            v[v.len() / 2]
+        };
+
+        // Crest to trough within each whoop, which is what a rider feels — and immune to any
+        // drift in the ground the set stands on.
+        let mut amps: Vec<f32> = Vec::new();
+        for k in 0..count {
+            let from = 40.0 + k as f32 * spacing;
+            let (mut hi, mut lo) = (f32::MIN, f32::MAX);
+            let mut at = from;
+            while at < from + spacing {
+                let v = along(at);
+                hi = hi.max(v);
+                lo = lo.min(v);
+                at += 0.1;
+            }
+            amps.push(hi - lo);
+        }
+        amps.sort_by(f32::total_cmp);
+        let built = amps[amps.len() / 2];
+        println!("whoops drawn {height:.2} m, built {built:.2} m (each: {amps:?})");
+        assert!(
+            (built - height).abs() < 0.12,
+            "whoops drawn at {height:.2} m came out {built:.2} m on the ground"
+        );
+    }
+
+    /// And the ground a whoop set stands on is the ground beside it.
+    ///
+    /// Every jump is dug out of a hollow at each of its ends. A whoop set was being given one
+    /// of its own and taking the hollow of the jump next door as well, so the set stood on a
+    /// pad: measured the way the corpus measures, its crests read 0.87 m over the floor beside
+    /// them where all seven rounds read 0.55, and the entry had a scoop in it nobody asked for.
+    #[test]
+    fn a_whoop_set_stands_on_the_ground_beside_it() {
+        let (count, spacing, height) = (9u32, 5.4f32, 0.55f32);
+        let mut p = oval();
+        p.terrain.relief.amplitude = 0.0;
+        p.terrain.relief.tilt = 0.0;
+        p.terrain.relief.landforms = 0;
+        p.terrain.wear = 0.0;
+        // A rhythm-sized hill close enough in front that its hollow reaches into the set.
+        p.features = vec![
+            Feature::Tabletop { at: 8.0, length: 20.0, height: 1.5, lip: 0.0, finish: false },
+            Feature::Whoops { at: 40.0, count, spacing, height },
+        ];
+        let s = synthesise(&p).expect("synthesise");
+
+        let st = p.stations(0.25);
+        let along = |at: f32| -> f32 {
+            let q = st[((at / 0.25) as usize).min(st.len() - 1)];
+            let (rx, rz) = crate::trackprog::right_vector(q.heading);
+            let mut v: Vec<f32> = (-6..=6)
+                .map(|k| {
+                    let u = k as f32 * 0.25;
+                    sample_smooth(&s.heights, s.gw, s.gh, (q.x + rx * u) / s.mps, (q.z + rz * u) / s.mps)
+                })
+                .collect();
+            v.sort_by(f32::total_cmp);
+            v[v.len() / 2]
+        };
+
+        // The floor well clear of both, which is what a rolling percentile would find.
+        let mut bare: Vec<f32> = (120..160).map(|m| along(m as f32)).collect();
+        bare.sort_by(f32::total_cmp);
+        let bare = bare[bare.len() / 2];
+
+        // The troughs and crests of the set itself, skipping the eased first and last whoop.
+        let (mut troughs, mut crests) = (Vec::new(), Vec::new());
+        for k in 1..count - 1 {
+            let from = 40.0 + k as f32 * spacing;
+            let (mut hi, mut lo) = (f32::MIN, f32::MAX);
+            let mut at = from;
+            while at < from + spacing {
+                let v = along(at);
+                hi = hi.max(v);
+                lo = lo.min(v);
+                at += 0.1;
+            }
+            troughs.push(lo);
+            crests.push(hi);
+        }
+        troughs.sort_by(f32::total_cmp);
+        crests.sort_by(f32::total_cmp);
+        let (trough, crest) = (troughs[troughs.len() / 2], crests[crests.len() / 2]);
+        println!(
+            "bare {bare:.2} m, whoop trough {trough:.2} m ({:+.2}), crest {crest:.2} m ({:+.2} over bare)",
+            trough - bare,
+            crest - bare
+        );
+        assert!(
+            (trough - bare).abs() < 0.12,
+            "a whoop set's troughs stand {:+.2} m off the ground beside it",
+            trough - bare
+        );
+        // And so its crests read the height they were drawn at, not half again that.
+        //
+        // Tight on purpose: the blend keeps a section's mean, so with the drawn shape not
+        // restored the crests sit about 0.44 m over the floor rather than 0.55, and a looser
+        // bar than this passes that too — which it did, until the bar came down.
+        assert!(
+            (crest - bare - height).abs() < 0.10,
+            "whoops drawn at {height:.2} m read {:.2} m over the floor beside them",
+            crest - bare
+        );
+    }
+
+    /// A jump's side mound never spills past the ground there is for it.
+    ///
+    /// The cap and the fade floor were the other way round, and the floor quietly won: on a
+    /// supercross lane — 12 m centre to centre with a 9.5 m line — a 1.5 m hill reached 8.3 m
+    /// off its own centreline with the next lane's edge 7.3 m away, so every rhythm hill stood
+    /// a metre deep on the lane beside it.
+    #[test]
+    fn a_jumps_mound_stops_short_of_the_ground_it_has() {
+        let half = 4.75;
+        for reach in [5.0f32, 5.5, 6.0, 7.0, 8.0, 1000.0] {
+            let mut last = 1.0f32;
+            for step in 0..600 {
+                let d = step as f32 * 0.05;
+                let v = lateral(d, half, 1.5, reach, true);
+                assert!((0.0..=1.0).contains(&v), "mound {v} at {d} m");
+                // It only ever falls away from the deck.
+                assert!(v <= last + 1e-4, "mound rises again at {d:.2} m: {last} -> {v}");
+                last = v;
+                if d > reach {
+                    assert_eq!(v, 0.0, "a mound reaches {d:.2} m with {reach:.1} m of room");
+                }
+            }
+        }
+        // And out in a field it still spreads: the cap is a cap, not a new fade.
+        assert!(lateral(7.0, half, 1.5, 1000.0, true) > 0.0, "a mound in the open stops at 7 m");
     }
 
     #[test]
@@ -9504,7 +10046,7 @@ mod tests {
         let p = oval();
         let s = synthesise(&p).unwrap();
         let spur = s.spur.as_ref().expect("a lap with a straight has a start");
-        let span = GRID_STALLS as f32 * GRID_LANE_M;
+        let span = crate::tracklayout::MX_RULES.gates as f32 * GRID_LANE_M;
         let gate = spur.gate_at();
         // The widest cell on the row, measured off the start line the way the game measures a
         // stall's `lat`.
@@ -9570,7 +10112,7 @@ mod tests {
             let along = long - q.s;
             placed.push((q.x + fx * along + rx * lat, q.z + fz * along + rz * lat));
         }
-        assert_eq!(placed.len(), GRID_STALLS);
+        assert_eq!(placed.len(), crate::tracklayout::MX_RULES.gates);
 
         // Every gate on one straight line: fit the row's own direction from its ends and check
         // nothing wanders off it.
@@ -9631,7 +10173,7 @@ mod tests {
             let (rx, rz) = crate::trackprog::right_vector(q.heading);
             placed.push((q.x + rx * lat, q.z + rz * lat));
         }
-        assert_eq!(placed.len(), GRID_STALLS, "every gate is written");
+        assert_eq!(placed.len(), crate::tracklayout::MX_RULES.gates, "every gate is written");
 
         // Each one on the start straight, and none of them on the lap.
         let line = p.start_line().expect("a start line");
@@ -9667,7 +10209,7 @@ mod tests {
             .map(|q| ((q.x - gate.x).powi(2) + (q.z - gate.z).powi(2)).sqrt())
             .fold(f32::MAX, f32::min);
         assert!(
-            nearest > crate::trackprog::START_OFFSET_M * 0.5,
+            nearest > crate::tracklayout::MX_RULES.start_offset_m * 0.5,
             "the lap passes {nearest:.0} m from the gate row"
         );
     }
@@ -10391,7 +10933,7 @@ mod tests {
             "the start line is the whole lap again"
         );
         assert!(
-            (value("length") - crate::trackprog::START_SPRINT_M).abs() < 0.01,
+            (value("length") - crate::tracklayout::MX_RULES.start_sprint_m).abs() < 0.01,
             "the sprint is {} m",
             value("length")
         );
@@ -10929,7 +11471,7 @@ mod tests {
                     "{name}: start straight {:.0} m off the lap, {:.0} m long in {} segments, \
                      {:.0} m wide at the gates against a {:.0} m track; joins the lap at \
                      {:.0} m of {:.0}",
-                    crate::trackprog::START_OFFSET_M,
+                    crate::tracklayout::MX_RULES.start_offset_m,
                     spur.length(),
                     line.segments.len(),
                     spur.width_m(),
@@ -11114,7 +11656,8 @@ mod tests {
     fn every_band_is_painted_with_a_published_sheet() {
         let p: TrackProgram = serde_json::from_str(DEMO).unwrap();
         for l in layers(&p) {
-            let name = l.look.photo.unwrap_or_else(|| panic!("{} names no sheet", l.name));
+            let sheet = l.look.photo.unwrap_or_else(|| panic!("{} names no sheet", l.name));
+            let name = sheet.name();
             let (dim, px) = photo(name)
                 .unwrap_or_else(|| panic!("{}'s sheet {name} did not decode", l.name));
             assert_eq!(*dim, GROUND_TEXTURE_DIM, "{name} is {dim} and the bands go out at 1024");
@@ -12679,7 +13222,7 @@ mod tests {
             lo_x.min(lo_z).min(p.terrain.size_x - hi_x).min(p.terrain.size_z - hi_z)
         );
         println!("  a spur needs {:.0} m of clear ground beside the opening straight",
-                 START_FAN_HALF_M + SHOULDER_M * START_BANK);
+                 crate::tracklayout::MX_RULES.fan_half_m() + SHOULDER_M * START_BANK);
     }
 }
 
@@ -13234,6 +13777,270 @@ mod game_light {
             let path = format!("{dir}/game_light.png");
             image::RgbImage::from_raw((n * 2) as u32, n as u32, img).unwrap().save(&path).unwrap();
             println!("wrote {path}");
+        }
+    }
+}
+
+/// A plain track, for a test in another module to hang a look on.
+#[cfg(test)]
+pub(crate) fn oval_for_test() -> TrackProgram {
+    tests::oval()
+}
+
+/// One band's pixels, for a test that has to look at the ground itself rather than at what
+/// the ground says it is. Returns nothing for a band this track doesn't carry.
+#[cfg(test)]
+pub(crate) fn band_for_test(prog: &TrackProgram, band: &str) -> Option<Vec<u8>> {
+    let l = layers(prog).into_iter().find(|l| l.name == band)?;
+    Some(band_pixels(64, &l.look, l.salt))
+}
+
+/// The look and the ride, which used to be the same field.
+#[cfg(test)]
+mod look_and_ride {
+    use super::tests::oval;
+    use super::*;
+    use crate::trackprog::{OwnSheet, SheetSlot, Surface, TexturePreset, TextureSet};
+
+    /// What every band is painted with: its name, the sheet under it, and the tone over that.
+    /// Two tracks with the same fingerprint are painted the same.
+    fn painted(p: &TrackProgram) -> Vec<(&'static str, &'static str, [f32; 3], bool)> {
+        layers(p)
+            .iter()
+            .map(|l| {
+                let sheet = l.look.photo.as_ref().map(Sheet::name).unwrap_or("drawn");
+                (l.name, sheet, l.look.tone, l.grass)
+            })
+            .collect()
+    }
+
+    /// Every thickness the surface stack declares, in order: how the track rides.
+    fn rides(p: &TrackProgram) -> Vec<String> {
+        let syn = synthesise(p).expect("synthesise");
+        tht(p, &syn)
+            .lines()
+            .filter(|l| {
+                let l = l.trim();
+                l.starts_with("material = ") || l.starts_with("thickness = ")
+            })
+            .map(|l| l.trim().to_string())
+            .collect()
+    }
+
+    fn with(surface: Surface, texture: TextureSet) -> TrackProgram {
+        let mut p = oval();
+        p.terrain.surface = surface;
+        p.terrain.texture = texture;
+        p
+    }
+
+    /// The whole point. A track can look like one thing and ride like another.
+    #[test]
+    fn a_look_can_be_picked_without_moving_the_ride() {
+        let sand = with(Surface::Sand, TextureSet::default());
+        let looks_like_soil = with(
+            Surface::Sand,
+            TextureSet { preset: TexturePreset::Soil, sheets: Vec::new() },
+        );
+        assert_eq!(rides(&sand), rides(&looks_like_soil), "the look moved the material stack");
+        assert_ne!(painted(&sand), painted(&looks_like_soil), "the look changed nothing");
+        // And it is soil's own paint, not a third thing.
+        let soil = with(Surface::Soil, TextureSet::default());
+        assert_eq!(painted(&soil), painted(&looks_like_soil));
+    }
+
+    /// And the other way round.
+    #[test]
+    fn a_ride_can_be_picked_without_moving_the_look() {
+        let soil = with(
+            Surface::Soil,
+            TextureSet { preset: TexturePreset::Soil, sheets: Vec::new() },
+        );
+        let rides_like_sand = with(
+            Surface::Sand,
+            TextureSet { preset: TexturePreset::Soil, sheets: Vec::new() },
+        );
+        assert_eq!(painted(&soil), painted(&rides_like_sand), "the ride moved the paint");
+        assert_ne!(rides(&soil), rides(&rides_like_sand), "the ride changed nothing");
+    }
+
+    /// A track nobody re-skinned is painted with exactly what its surface always painted it
+    /// with — which is the whole of why motocross output does not move.
+    #[test]
+    fn a_track_with_no_look_of_its_own_paints_what_it_always_did() {
+        for s in [Surface::Soil, Surface::Sand, Surface::Grass] {
+            let plain = with(s, TextureSet::default());
+            let ride = with(s, TextureSet { preset: TexturePreset::Ride, sheets: Vec::new() });
+            assert_eq!(painted(&plain), painted(&ride), "{s:?} moved");
+            let g = ground_looks(s);
+            let of = ground_looks_of(&plain.terrain);
+            assert_eq!(g.field.tone, of.field.tone, "{s:?}'s field moved");
+            assert_eq!(g.turf.base, of.turf.base, "{s:?}'s turf moved");
+            assert!(of.turf_grows);
+        }
+    }
+
+    /// A stadium floor is dirt to the wall, with nothing growing out of it.
+    #[test]
+    fn a_stadium_has_no_grass_on_it() {
+        let p = with(
+            Surface::Soil,
+            TextureSet { preset: TexturePreset::Stadium, sheets: Vec::new() },
+        );
+        let turf = painted(&p).into_iter().find(|b| b.0 == "hm_grass").expect("the outer band");
+        assert!(!turf.3, "a stadium grew grass");
+        assert_ne!(turf.1, "grass", "a stadium floor is painted with turf");
+        // And the riding surface is the dark trucked-in stuff, not an outdoor national's tan.
+        let soil = with(Surface::Soil, TextureSet::default());
+        assert_ne!(painted(&soil), painted(&p));
+        // The ride is untouched: a stadium is a look and nothing else.
+        assert_eq!(rides(&soil), rides(&p));
+    }
+
+    /// An image that isn't in the store — a project opened on another machine, or one whose
+    /// image has been deleted — paints with our own ground rather than failing to build.
+    #[test]
+    fn an_image_the_studio_never_stored_falls_back_to_our_own_ground() {
+        let missing = TextureSet {
+            preset: TexturePreset::Ride,
+            sheets: vec![OwnSheet {
+                slot: SheetSlot::Ground,
+                id: "00000000000000000000000000000000".into(),
+            }],
+        };
+        let p = with(Surface::Soil, missing);
+        let plain = with(Surface::Soil, TextureSet::default());
+        assert_eq!(painted(&plain), painted(&p));
+    }
+
+    /// The look travels in the file only when somebody picked one, so every project saved
+    /// before this existed opens and builds unchanged.
+    #[test]
+    fn a_look_nobody_picked_is_not_written_to_the_file() {
+        let plain = with(Surface::Soil, TextureSet::default());
+        let v = serde_json::to_value(&plain).unwrap();
+        assert!(v["terrain"].get("texture").is_none(), "{}", v["terrain"]);
+        let picked = with(
+            Surface::Soil,
+            TextureSet { preset: TexturePreset::Stadium, sheets: Vec::new() },
+        );
+        let v = serde_json::to_value(&picked).unwrap();
+        assert_eq!(v["terrain"]["texture"]["preset"], "stadium");
+        // And it reads back.
+        let back: TrackProgram = serde_json::from_value(v).unwrap();
+        assert_eq!(back.terrain.texture.preset, TexturePreset::Stadium);
+    }
+
+    /// A rider's own image reaches the band it was picked for, and only that band.
+    #[test]
+    fn an_imported_image_paints_the_slot_it_was_picked_for() {
+        // Straight into the look, so the test is about the wiring rather than about the
+        // store having a file in it.
+        let px = std::sync::Arc::new((4usize, vec![200u8; 4 * 4 * 4]));
+        let mut g = ground_looks(Surface::Soil);
+        let was = g.turf.photo.as_ref().map(Sheet::name).unwrap();
+        g.turf.photo = Some(Sheet::Own { of: was, px: px.clone() });
+        assert_eq!(g.turf.photo.as_ref().unwrap().name(), "grass", "it lost what it stands for");
+        let pixels = sheet_pixels(g.turf.photo.as_ref().unwrap()).unwrap();
+        assert_eq!(pixels.0, 4);
+        // And the soil bands beside it are untouched.
+        assert_eq!(g.field.photo.as_ref().unwrap().name(), "soil_light");
+    }
+}
+
+/// The motocross proof: Northgate, seed 103, written out as the collision terrain it compiles
+/// to, so a branch can be diffed against `main` cell by cell.
+///
+/// Motocross output is not allowed to move unless someone changed the look of the track, and
+/// "all the tests still pass" is not that proof — a change once moved 49,619 cells with the
+/// whole suite green. This writes the bytes; `cmp` reads them.
+///
+/// ```text
+/// FROST_OUT=/tmp/northgate.trh \
+///   cargo test -p frost-studio --bin frost-studio -- --ignored --nocapture northgate_trh
+/// ```
+#[cfg(test)]
+mod mx_proof {
+    #[test]
+    #[ignore = "writes a file — set FROST_OUT"]
+    fn northgate_trh() {
+        let p = match crate::tracklayout::search(103, 1) {
+            Ok(m) => m.program,
+            Err(v) => v[0].program.clone(),
+        };
+        let syn = super::synthesise(&p).expect("Northgate synthesises");
+        let out = std::path::PathBuf::from(std::env::var("FROST_OUT").expect("set FROST_OUT"));
+        std::fs::create_dir_all(&out).expect("made the output folder");
+        let bytes = super::trh(&p, &syn, true);
+        std::fs::write(out.join("northgate.trh"), &bytes).expect("wrote the .trh");
+        // And every source file the track compiles from, so a change to the *paint* shows up
+        // too: the collision terrain carries heights and surface ids and nothing about sheets.
+        let wrote = super::write_source(&p, &syn, &out).expect("wrote the source");
+        println!("{} bytes of .trh and {} source files", bytes.len(), wrote.len());
+    }
+}
+
+/// The stadium disciplines' proof: a batch of supercross and SuperMotocross laps, each printed
+/// as what it is made of, so a change meant to be a no-op at the default settings can be shown
+/// to be one rather than said to be one.
+///
+/// The same trap `mx_proof` is here for, one discipline over. A supercross lap is drawn, laid
+/// out, synthesised and dressed, and what comes out is a line a run on another branch can be
+/// diffed against: the lap's shape, what the layout put on it, every scenery tally, and a hash
+/// over the bytes of every model the track ships. The hash is the part that matters — a tally
+/// says how many blocks stood and the hash says they stood in the same places.
+///
+/// ```text
+/// cargo test -p frost-studio --bin frost-studio -- --ignored --nocapture sx_batch
+/// ```
+#[cfg(test)]
+mod sx_proof {
+    use crate::trackprog::{Discipline, Feature};
+
+    /// FNV-1a over a run of bytes. Not a checksum anybody has to trust — just a short thing to
+    /// compare two runs by.
+    fn hash(bytes: &[u8], h: &mut u64) {
+        for b in bytes {
+            *h ^= *b as u64;
+            *h = h.wrapping_mul(0x0000_0100_0000_01B3);
+        }
+    }
+
+    #[test]
+    #[ignore = "slow — synthesises and dresses twelve laps"]
+    fn sx_batch() {
+        for d in [Discipline::Sx, Discipline::Smx] {
+            let knobs = crate::tracklayout::LayoutKnobs::for_discipline(d);
+            for seed in 200u64..206 {
+                let Some(p) = crate::tracklayout::draw_with(seed, &knobs) else {
+                    println!("{d:?} {seed}: no lap");
+                    continue;
+                };
+                let p = crate::tracksynth::with_fitted_budget(&p).expect("a budget");
+                let syn = super::synthesise(&p).expect("it synthesises");
+                let sc = crate::trackscenery::build(&p, &syn);
+                let mut h = 0xcbf2_9ce4_8422_2325u64;
+                for (name, bytes) in &sc.files {
+                    hash(name.as_bytes(), &mut h);
+                    hash(bytes, &mut h);
+                }
+                let kind = |k: &str| p.features.iter().filter(|f| f.name() == k).count();
+                let sand = p.features.iter().any(|f| matches!(f, Feature::Sand { .. }));
+                let mut tally = sc.tally.clone();
+                tally.sort_by_key(|(k, _)| *k);
+                println!(
+                    "{d:?} {seed}: lap {:.0} m, width {:.1}, {} features \
+                     (double {}, whoops {}, table {}, sand {}), scenery {tally:?}, models {} @ {h:016x}",
+                    p.lap_length(),
+                    p.width,
+                    p.features.len(),
+                    kind("double"),
+                    kind("whoop section"),
+                    kind("tabletop"),
+                    sand as usize,
+                    sc.files.len(),
+                );
+            }
         }
     }
 }

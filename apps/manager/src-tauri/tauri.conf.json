@@ -2,11 +2,12 @@
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "MXB App",
   "mainBinaryName": "MXB App",
-  "version": "0.15.0",
+  "version": "0.15.1",
   "identifier": "com.frost.mxbikes",
   "build": {
-    "beforeDevCommand": "npm run dev",
-    "beforeBuildCommand": "npm run build",
+    "beforeDevCommand": "bun run dev",
+    "beforeBuildCommand": "bun run build",
+    "beforeBundleCommand": "bash ../../scripts/pack-binary.sh",
     "devUrl": "http://localhost:1420",
     "frontendDist": "../dist"
   },

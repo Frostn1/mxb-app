@@ -778,7 +778,10 @@ export const de: Translation = {
   "join.joining": "Verbinden…",
   "join.launching": "Verbinde mit {{address}}…",
   "join.alreadyRunning":
-    "Schließe zuerst {{game}} — ein laufendes Spiel kann nicht zu einem Server geschickt werden.",
+    "{{game}} läuft bereits — schließe es und tritt dann von hier aus bei.",
+  "join.gameOpen":
+    "{{game}} läuft bereits. Die App hat es gestartet, es liegt also hinter diesem Fenster. Schließe das Spiel und tritt dann von hier aus bei.",
+  "join.showGame": "Spiel anzeigen",
   "join.failed": "Diesem Server konnte nicht beigetreten werden",
   "join.manual": "Einem nicht gelisteten Server beitreten",
   "join.noServers": "Noch keine Server gelistet — tippe eine Adresse ein, die du bekommen hast.",
@@ -970,6 +973,33 @@ export const de: Translation = {
   "serverBrowser.viewList": "Liste",
   "serverBrowser.waitingCount": "{{count}} warten",
   "serverBrowser.queueHint": "Voll. MXB App verbindet dich, sobald ein Platz frei wird.",
+
+  // ── Liegt es am Master-Server oder an dir? ──────────────────────
+  "connection.checking": "Wird geprüft, ob es nur an dir liegt…",
+  "connection.notYou": "Die Server von MX Bikes antworten nicht",
+  "connection.likelyYou": "Bei allen anderen klappt es",
+  "connection.failed": "Die Serverliste ließ sich nicht laden",
+  "connection.failingFor": "Fällt seit mindestens {{minutes}} Min aus",
+  "connection.runCheck": "Meine Verbindung prüfen",
+  "connection.verdict.upstream": "Das ist der Master-Server von MX Bikes, nicht deine Verbindung. Bei dir gibt es nichts zu reparieren — meist ist er nach ein paar Minuten wieder da.",
+  "connection.verdict.local": "Bei allen anderen klappt es gerade, also liegt es an diesem Rechner oder diesem Netzwerk.",
+  "connection.verdict.fine": "Es funktioniert alles. Was auch immer das war, es ist vorbei.",
+  "connection.verdict.unknown": "Reicht noch nicht für eine Aussage — zuletzt haben zu wenige Apps geprüft. Versuch es gleich noch einmal.",
+  "connection.check.internet": "Internet",
+  "connection.check.dns": "Adresse des Master-Servers",
+  "connection.check.udp": "Ausgehendes UDP",
+  "connection.check.master": "Serverliste",
+  "connection.check.others": "Alle anderen",
+  "connection.checkFootnote": "Ausgehendes UDP zeigt nur, dass das Datagramm raus durfte — nicht, dass etwas geantwortet hat.",
+
+  "registerServer.action": "Eigenen Server hinzufügen",
+  "registerServer.title": "Füge deinen Server zur gemeinsamen Liste hinzu",
+  "registerServer.blurb": "Damit die App deinen Server auch dann kennt, wenn die Server von MX Bikes nicht antworten.",
+  "registerServer.note": "Nötig nur für einen Server, der nicht in der Liste auftaucht — einen neuen oder einen privaten. Alles, was das Spiel auflistet, wird ohnehin von selbst gemerkt.",
+  "registerServer.submit": "Hinzufügen",
+  "registerServer.done": "{{address}} steht auf der gemeinsamen Liste",
+  "registerServer.failed": "Dieser Server konnte nicht hinzugefügt werden",
+
   "queue.banner": "#{{position}} in der Warteschlange für {{name}}",
   "queue.turnBanner": "Du bist dran: {{name}} beitreten",
   "queue.launchingBanner": "Verbinde mit {{name}}",
@@ -1584,16 +1614,10 @@ export const de: Translation = {
   "voice.proximity": "Fahrer von dort hören, wo sie sind",
   "voice.proximityDesc": "Ein Fahrer neben dir ist laut und auf seiner Seite; einer zwei Kurven zurück ist leise. Ausschalten, um alle gleich laut zu hören. Fällt von selbst auf flach zurück, wenn das Spiel keine Positionen meldet.",
 
-  "overlay.pressKeys": "Tasten drücken…",
-  "overlay.needModifier": "Modifikator hinzufügen",
-  "overlay.needModifierDesc": "Halte Ctrl, Alt oder Shift, damit das Kürzel nicht beim Tippen auslöst.",
   "overlay.shortcutUpdated": "Overlay-Tastenkürzel aktualisiert",
   "overlay.shortcutRejected": "Dieses Tastenkürzel geht nicht",
+  "overlay.coachLinked": "MXB Coach ist verbunden: Seine Tabs erscheinen im Overlay, und dieses Kürzel öffnet beide.",
   "overlay.registerFailed": "Overlay-Tastenkürzel konnte nicht registriert werden",
-  "overlay.toClose": "{{hotkey}} zum Schließen",
-  "overlay.closeTitle": "Overlay schließen (Esc)",
-  "overlay.openMain": "Vollständige App öffnen",
-  "overlay.openMainTitle": "Overlay schließen und das Hauptfenster von {{app}} öffnen",
   "overlay.needsSetup": "Richte {{app}} zuerst im Hauptfenster fertig ein — sie muss wissen, wo dein {{game}}-Ordner liegt.",
   "overlay.fullscreenBlocked": "Das Overlay kann nicht über exklusivem Vollbild erscheinen",
   "overlay.fullscreenBlockedDesc": "Stelle {{game}} unter Options → Video auf randlos oder Fenstermodus und drücke das Kürzel erneut.",
@@ -1620,8 +1644,6 @@ export const de: Translation = {
     "Fahrgefühl-Presets speichern jetzt, wie sich jede Steuerung anfühlt, etwa Totzone, Verstärkung und Glättung des Gases. Deine Tasten und Achsen bleiben, wie sie sind.",
   "showcase.v0150.hub":
     "MXB Hub lädt wieder, wenn der Shop eine Roboterprüfung verlangt: Die App beantwortet sie im Hintergrund oder öffnet den Shop, damit du sie selbst abschließt.",
-  "showcase.v0150.secured":
-    "Gesicherte Inhalte folgen dem Zugang, den du wirklich hast. Entfernt dich ein Ersteller als Käufer, öffnen sie sich nicht mehr, sobald die App das nächste Mal online ist, und die App sagt dir, warum.",
   "showcase.v0140.hero.title":
     "Frost's Mod Manager, und ein eigenes Studio",
   "showcase.v0140.hero.body":
@@ -2055,6 +2077,15 @@ export const de: Translation = {
   "supporters.contributors": "Mitwirkende",
   "supporters.contributorsDesc":
     "Leute, die die App mit Ideen, Tests und Feedback besser gemacht haben.",
+  "supporters.kind.code": "Code-Beiträge",
+  "supporters.kind.codeDesc":
+    "Code, den sie geschrieben haben — und der in deinem Build läuft.",
+  "supporters.kind.testing": "Tests",
+  "supporters.kind.testingDesc":
+    "Haben absichtlich kaputt gemacht, was sonst noch niemand hatte.",
+  "supporters.kind.ideas": "Ideen & Feedback",
+  "supporters.kind.ideasDesc":
+    "Haben etwas vorgeschlagen, das es in die App geschafft hat.",
   "reshade.needsGameFolder":
     "ReShade liegt in deinem {{game}}-Ordner — lege den unter Spielordner fest, oder zeige hier direkt darauf.",
   "reshade.folder": "Gesucht wird in deinem {{game}}-Ordner:",

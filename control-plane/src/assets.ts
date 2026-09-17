@@ -2,10 +2,11 @@
  * Secured assets, managed from the website.
  *
  * mxbsecure.com is where assets are created and where the list of who may open each one is
- * kept. Those are the two admin writes here: minting an asset (a fresh content key, stored
- * wrapped, handed back once) and changing its grants. Everything downstream — the check and
- * the key release in `index.ts` — already reads these same rows, so a grant made here is
- * honoured by `/v1/keys/grant` with nothing else to wire.
+ * kept. Those are the admin writes here: minting an asset (a fresh content key, stored wrapped,
+ * handed back once), changing its grants, and removing it — on its own, or taking the buyers'
+ * keys back with it. Everything downstream — the check and the key release in `index.ts` —
+ * already reads these same rows, so a grant made here is honoured by `/v1/keys/grant` with
+ * nothing else to wire.
  *
  * Behind `ADMIN_KEY` like the rest of `/admin`, and the only admin routes with CORS: the site
  * calls them from a browser, so the browser has to be told it may. Nothing else gets the
@@ -14,6 +15,7 @@
 
 import { currentMasterVersion, wrapContentKey } from "./assetkey";
 import { hashToken, newToken, tokenMatches } from "./auth";
+import { BANNED, isBanned } from "./bans";
 import { repairBySteamId } from "./steamlink";
 import { isSteamId64, steamPersonaName } from "./steam";
 import { adminAllowed } from "./usage";
@@ -42,12 +44,19 @@ export function allowedOrigin(request: Request, env: Env): string | null {
  * sites out but not a sibling subdomain: a page there could send a plain-text POST, with no
  * preflight, and the cookie would ride along. It can't send our Origin, and a JSON content type
  * would need a preflight we refuse.
+ *
+ * The content type is asked of `POST` alone, because `POST` is the only write a page can send
+ * without one: every browser preflights a `PATCH` or a `DELETE`, and the preflight from an
+ * origin not on the list is already refused. Asking a bodyless `DELETE` to declare a body's
+ * type would buy nothing and trip up every client that doesn't send one.
  */
 export function refuseCrossSiteWrite(request: Request, env: Env): Response | null {
   if (request.method === "GET" || request.method === "HEAD") return null;
+  const offSite = json(403, { error: "that request didn't come from mxbsecure.com" });
+  if (!allowedOrigin(request, env)) return offSite;
+  if (request.method !== "POST") return null;
   const type = (request.headers.get("Content-Type") ?? "").split(";")[0].trim().toLowerCase();
-  if (allowedOrigin(request, env) && type === "application/json") return null;
-  return json(403, { error: "that request didn't come from mxbsecure.com" });
+  return type === "application/json" ? null : offSite;
 }
 
 /**
@@ -156,6 +165,11 @@ async function authorize(request: Request, url: URL, env: Env): Promise<Scope | 
       .bind(await hashToken(apiKey))
       .first<{ id: string; account_id: string; last_used_at: number | null; steam_id: string | null }>();
     if (!row) return json(401, { error: "that API key isn't valid" });
+    // A banned creator's key is as dead as their sign-in. Checked before the key's "last used"
+    // is touched, so a refused call doesn't read as a live integration on the dashboard.
+    if (await isBanned(env, { accountId: row.account_id, steamId: row.steam_id })) {
+      return json(403, { error: BANNED });
+    }
     const now = Date.now();
     // At most one write an hour per key: enough for the dashboard's "last used".
     if (!row.last_used_at || now - row.last_used_at > 60 * 60 * 1000) {
@@ -165,8 +179,10 @@ async function authorize(request: Request, url: URL, env: Env): Promise<Scope | 
   }
   const session = await webSession(request, env);
   if (session) {
-    // Creators can lock and sell, and only creators: `creator_at` is set by hand for an
-    // affiliated creator, so a Steam sign-in on its own opens nothing here.
+    // Creators can lock and sell, and only creators. Signing up is a click on the site now
+    // (`POST /v1/web/creator`), but it is still a step somebody takes: signing in with Steam
+    // proves who they are, never on its own that they publish anything. Keeping the two apart
+    // is what gives every asset an account behind it, and what the daily ceiling counts against.
     const find = () =>
       env.DB.prepare("SELECT id, creator_at FROM accounts WHERE steam_id = ?")
         .bind(session.steamId)
@@ -174,11 +190,16 @@ async function authorize(request: Request, url: URL, env: Env): Promise<Scope | 
     // A creator whose `steam_id` has been lost looks exactly like a stranger here, and would be
     // turned away from their own dashboard. Retried once against the link log before that.
     const account = (await find()) ?? ((await repairBySteamId(env, session.steamId)) ? await find() : null);
-    // A Steam sign-in proves who someone is, never that they may sell. `creator_at` is set by
-    // hand, for an affiliated creator, and is the only thing that opens this: there is
-    // deliberately no path where signing in is enough.
     if (!account?.creator_at) {
-      return json(403, { error: "mxbsecure is invite only, for affiliated creators" });
+      return json(403, { error: CREATOR_SIGNUP_NEEDED });
+    }
+    // Banned from mxbsecure means banned from the half of it that makes new locked files, not
+    // only from opening them. Somebody who shares other people's content unlocked has no
+    // business shipping their own through the same system — and a ban that left the lock page
+    // working would let them go on minting asset ids and grants we would then have to refuse
+    // one by one.
+    if (await isBanned(env, { accountId: account.id, steamId: session.steamId })) {
+      return json(403, { error: BANNED });
     }
     return { kind: "creator", accountId: account.id, steamId: session.steamId, via: "cookie" };
   }
@@ -224,14 +245,11 @@ async function handle(
     if (method === "POST") {
       if (scope.kind === "admin") return createAsset(request, env, env.MXB_OWNER_ACCOUNT_ID!);
       const owner = scope.accountId;
-      if (owner !== env.MXB_OWNER_ACCOUNT_ID) {
-        const limit = assetsPerDay(env);
-        const made = await env.DB.prepare("SELECT COUNT(*) AS n FROM assets WHERE creator_id = ? AND created_at > ?")
-          .bind(owner, Date.now() - DAY_MS)
-          .first<{ n: number }>();
-        if ((made?.n ?? 0) >= limit) {
-          return json(429, { error: `You can lock ${limit} new files a day. Try again tomorrow.` });
-        }
+      // The ceiling is the whole of what open signup costs us: anyone may sign up, so what
+      // stops a signup minting keys all afternoon is this count, not the door.
+      const allowance = await lockAllowance(env, owner);
+      if (allowance.remaining === 0) {
+        return json(429, { error: `You can lock ${allowance.perDay} new files a day. Try again tomorrow.` });
       }
       return createAsset(request, env, owner);
     }
@@ -241,24 +259,61 @@ async function handle(
   if (scope.kind === "creator" && !(scope.accountId && (await ownedBy(assetId, scope.accountId, env)))) {
     return json(404, { error: "no such asset" });
   }
+  // A removed asset is history to its creator: it still reads — they keep its buyers and its
+  // usage log — and nothing about it changes again. Not to us, though. A removal that kept the
+  // keys goes on releasing them, so a takedown has to be able to land on one.
+  const closed = async () => scope.kind !== "admin" && (await removedAt(assetId, env)) !== null;
   if (sub === "grants") {
     if (method === "GET") return listGrants(assetId, env, names);
-    if (method === "POST") return changeGrants(request, assetId, env, fetchImpl);
+    if (method === "POST") {
+      return (await closed()) ? json(409, { error: "that asset has been removed" }) : changeGrants(request, assetId, env, fetchImpl);
+    }
   } else if (sub === "usage") {
     if (method === "GET") return assetUsage(assetId, env, names);
   } else if (method === "PATCH") {
-    return updateAsset(request, assetId, env, scope);
+    return (await closed()) ? json(409, { error: "that asset has been removed" }) : updateAsset(request, assetId, env, scope);
+  } else if (method === "DELETE") {
+    return removeAsset(url, assetId, env, scope);
   }
   return json(405, { error: "method not allowed" });
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
+/** What a signed-in Steam account that hasn't signed up yet is told. */
+export const CREATOR_SIGNUP_NEEDED = "sign up as a creator on mxbsecure.com first";
+
 /** New assets a creator may make a day (batch locking makes one per file): `MXB_ASSETS_PER_DAY`,
  *  10 when unset. The owner account has no ceiling. */
-function assetsPerDay(env: Env): number {
+export function assetsPerDay(env: Env): number {
   const n = Number(env.MXB_ASSETS_PER_DAY);
   return Number.isInteger(n) && n > 0 ? n : 10;
+}
+
+/** How many assets this account has made in the last 24 hours. */
+async function assetsMadeToday(env: Env, accountId: string, now = Date.now()): Promise<number> {
+  const made = await env.DB.prepare("SELECT COUNT(*) AS n FROM assets WHERE creator_id = ? AND created_at > ?")
+    .bind(accountId, now - DAY_MS)
+    .first<{ n: number }>();
+  return made?.n ?? 0;
+}
+
+/**
+ * What's left of today's ceiling for one creator, as the site shows it.
+ *
+ * `perDay` and `remaining` are null for the owner account, which has no ceiling — the site
+ * reads that as "no number to show" rather than as zero, which is the one way to get this
+ * wrong that stops somebody locking.
+ */
+export async function lockAllowance(
+  env: Env,
+  accountId: string,
+  now = Date.now(),
+): Promise<{ usedToday: number; perDay: number | null; remaining: number | null }> {
+  const usedToday = await assetsMadeToday(env, accountId, now);
+  if (accountId === env.MXB_OWNER_ACCOUNT_ID) return { usedToday, perDay: null, remaining: null };
+  const perDay = assetsPerDay(env);
+  return { usedToday, perDay, remaining: Math.max(0, perDay - usedToday) };
 }
 
 /** A creator API key in the Authorization header, else null. */
@@ -343,6 +398,14 @@ async function ownedBy(assetId: string, accountId: string, env: Env): Promise<bo
   return row !== null;
 }
 
+/** When the creator removed this asset, or null while it is still live. */
+async function removedAt(assetId: string, env: Env): Promise<number | null> {
+  const row = await env.DB.prepare("SELECT deleted_at FROM assets WHERE id = ?")
+    .bind(assetId)
+    .first<{ deleted_at: number | null }>();
+  return row?.deleted_at ?? null;
+}
+
 /**
  * `PATCH /admin/assets/:id` — `{ blobSha256?, withdrawn?, takenDown? }`.
  *
@@ -404,6 +467,56 @@ async function updateAsset(request: Request, assetId: string, env: Env, scope: S
 }
 
 /**
+ * `DELETE /admin/assets/:id?keys=revoke|keep` — the creator taking what they locked off the site.
+ *
+ * Withdrawing is the reversible one: it stops new unlocks and can be put back. This is the other
+ * thing a creator asks for — a file locked by mistake, or one whose selling is over, off their
+ * list. The row stays and is flagged, so they keep its buyers and its usage log; what they lose
+ * is the ability to change any of it, removal included. It is one-way.
+ *
+ * `keys` is the question the site puts to them, and there is no default for it because there is
+ * no safe guess:
+ *
+ * - `keep` — nothing about the buyers changes. Their keys go on opening the file, and a buyer on
+ *   a new PC can still be handed one. The asset is simply off the list.
+ * - `revoke` — every entitlement is revoked and the content key is destroyed, so the packed file
+ *   never opens again for anyone, the creator included, and each buyer's app deletes the key it
+ *   holds on the next `/v1/assets/status` poll (which is why the row is kept rather than dropped:
+ *   an asset we no longer knew would read as "can't tell", and the keys would stay). Selling it
+ *   again means locking the file again, as a new asset with a new key. Nothing undoes this.
+ *
+ * A taken-down asset is ours, not theirs: a creator can't remove one, so the takedown — with its
+ * ledger — stays where an operator can see it.
+ */
+async function removeAsset(url: URL, assetId: string, env: Env, scope: Scope): Promise<Response> {
+  const keys = url.searchParams.get("keys");
+  if (keys !== "revoke" && keys !== "keep") {
+    return json(400, { error: "keys must be revoke or keep" });
+  }
+  const asset = await env.DB.prepare("SELECT deleted_at, taken_down_at FROM assets WHERE id = ?")
+    .bind(assetId)
+    .first<{ deleted_at: number | null; taken_down_at: number | null }>();
+  if (!asset) return json(404, { error: "no such asset" });
+  if (asset.deleted_at !== null) return json(409, { error: "that asset has already been removed" });
+  if (asset.taken_down_at !== null && scope.kind !== "admin") {
+    return json(403, { error: "that asset has been taken down; only mxbsecure can remove it" });
+  }
+  const now = Date.now();
+  const statements = [env.DB.prepare("UPDATE assets SET deleted_at = ? WHERE id = ?").bind(now, assetId)];
+  if (keys === "revoke") {
+    statements.push(
+      // `withdrawn_at` alongside, so a reader that has never heard of removal refuses it anyway.
+      env.DB.prepare(
+        "UPDATE assets SET keys_revoked_at = ?, withdrawn_at = COALESCE(withdrawn_at, ?), wrapped_key = NULL WHERE id = ?",
+      ).bind(now, now, assetId),
+      env.DB.prepare("UPDATE entitlements SET revoked_at = ? WHERE asset_id = ? AND revoked_at IS NULL").bind(now, assetId),
+    );
+  }
+  await env.DB.batch(statements);
+  return json(200, { assetId, deletedAt: now, keysRevokedAt: keys === "revoke" ? now : null });
+}
+
+/**
  * `POST /admin/assets` — a new asset and its content key.
  *
  * The key is 32 random bytes, stored only wrapped under the master key. The raw bytes are in
@@ -440,12 +553,16 @@ async function createAsset(request: Request, env: Env, owner: string): Promise<R
 /**
  * `GET /admin/assets` — newest first, with how many hold each one now, whether its file hash is
  * registered, and when a buyer's app last asked for its key. A creator sees only their own.
+ *
+ * Removed assets are on it too, carrying `deletedAt` and `keysRevokedAt`: a removal is not a
+ * disappearance, and the creator keeps a record of what they locked and what became of it.
  */
 async function listAssets(env: Env, scope: Scope): Promise<Response> {
   const mine = scope.kind === "creator";
   if (mine && !scope.accountId) return json(200, { assets: [] });
   const statement = env.DB.prepare(
-    "SELECT a.id, a.title, a.created_at, a.withdrawn_at, a.taken_down_at, a.blob_sha256 IS NOT NULL AS hashed," +
+    "SELECT a.id, a.title, a.created_at, a.withdrawn_at, a.taken_down_at, a.deleted_at, a.keys_revoked_at," +
+      " a.blob_sha256 IS NOT NULL AS hashed," +
       " (SELECT COUNT(*) FROM entitlements e WHERE e.asset_id = a.id AND e.revoked_at IS NULL) AS buyers," +
       ` (SELECT MAX(g.issued_at) FROM entitlement_grants g WHERE g.asset_id = a.id AND ${isSteamIdSql("g.steam_id")})` +
       " AS last_request_at" +
@@ -457,6 +574,8 @@ async function listAssets(env: Env, scope: Scope): Promise<Response> {
     created_at: number;
     withdrawn_at: number | null;
     taken_down_at: number | null;
+    deleted_at: number | null;
+    keys_revoked_at: number | null;
     hashed: number;
     buyers: number;
     last_request_at: number | null;
@@ -468,6 +587,8 @@ async function listAssets(env: Env, scope: Scope): Promise<Response> {
       createdAt: r.created_at,
       withdrawnAt: r.withdrawn_at,
       takenDownAt: r.taken_down_at,
+      deletedAt: r.deleted_at,
+      keysRevokedAt: r.keys_revoked_at,
       buyers: r.buyers,
       hashed: !!r.hashed,
       lastRequestAt: r.last_request_at,
@@ -739,7 +860,7 @@ async function assetExists(assetId: string, env: Env): Promise<boolean> {
  * CORS headers for an allowed origin; always `Vary: Origin`, since the answer depends on it.
  * Credentials are allowed so the sign-in cookie rides along from the site.
  */
-export function cors(response: Response, origin: string | null, preflight = false, methods = "GET, POST, PATCH, OPTIONS"): Response {
+export function cors(response: Response, origin: string | null, preflight = false, methods = "GET, POST, PATCH, DELETE, OPTIONS"): Response {
   const out = new Response(response.body, response);
   out.headers.append("Vary", "Origin");
   if (origin) {

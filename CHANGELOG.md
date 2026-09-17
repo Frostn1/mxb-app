@@ -1,12 +1,332 @@
 # Changelog
 
+## Unreleased — MXB App, Frost's Studio and MXB Coach
+
+### Added
+- The whole lineup can be locked to a Steam sign-in. When turned on for the deployment, MXB App,
+  Frost's Studio and MXB Coach each show a "Sign in with Steam" wall at startup and won't run
+  until you've signed in once — one click, through Steam, and it remembers. It makes every
+  account a confirmed identity, which is what keeps a ban from being walked around and a GUID from
+  being anyone else's. Off unless the service turns it on, and it needs a Steam copy of the game.
+- A ban now reaches every app, not just the one holding secured content: a banned install is
+  refused across MXB App, Studio and Coach, and told the same mundane "this copy couldn't be
+  verified" rather than the truth.
+
+### Changed
+- Secured content that isn't available on this PC is now shown plainly, in Settings and in the
+  prompt, without a reason attached to it.
+- The security that was in MXB App now covers Studio and Coach the same way, from one shared
+  place: the debugger guard, the startup gate and the Steam-link flow all live in the shared core
+  so the three apps can't drift, and the release build already strips symbols, dissolves the call
+  structure (fat LTO) and drops debug info for every one of them. The Windows builds are now
+  UPX-packed on top of that.
+
+### Changed
+- Your MX Bikes GUID is found automatically from your signed-in Steam account, the instant the
+  app starts — no more waiting to be seen on a server for it to fill in. It's the same value the
+  game and the leaderboards use, and it can't be set to someone else's: for a Steam copy the GUID
+  is your Steam identity written in hex, confirmed by Steam sign-in, so the service derives it and
+  ignores any other value. A non-Steam (Piboso) copy still enters its GUID as before.
+- Riders banned for unlocking protected content and sharing it are refused across everything
+  mxbsecure runs, not only the locking: the app itself will not open, and paint sync, voice,
+  presence, the server queue, the server registry, the paid plugins and every key grant are all
+  refused. The app checks at startup and, for a blocked install, shows a plain "this copy
+  couldn't be verified" and closes — a blocked install stays blocked even offline. A ban follows
+  the MX Bikes install rather than the account, so a second account, a new GUID or another Steam
+  login on the same PC is refused with it, and protected files already unlocked there stop
+  opening — the app deletes those keys on its next pass. Nobody else is affected in any way, and
+  a ban can be lifted.
+
+### Fixed
+- MXB Coach finds your tracks. It was looking for them in a folder that doesn't exist, so every
+  track you have installed came back as "isn't in your mods" — which is why the 3D view showed
+  ground built from your laps instead of the track you were riding. It has never worked.
+- The Servers tab in MXB App had the same fault: it read your installed tracks as missing, and
+  offered to sell you tracks you already own.
+
+## 2026-09-16 — MXB Coach v0.1.15-beta.15
+
+### Added
+- The lap review says whether you rode the high line or the low one through a corner — up on
+  the bank or down in the rut — and which one the fast lap took.
+- And which line you took over a jump. Tips about the line only ever worked on corners, so the
+  one place where you take off decides where you land said nothing at all.
+
+### Changed
+- The 3D view shows your track whenever the track can be read, the same as MXB App does. It
+  used to hide the track and draw the ground built from your laps instead whenever your laps
+  didn't sit steadily enough above its terrain — which is most rutted tracks. The check now
+  only decides how high to hang your lines over the ground, and says so if they might sit a
+  little off.
+
+## Unreleased - Frost's Studio
+
+### Added
+- Build a track from a real place. Type a track's name or its coordinates and Studio fetches
+  the public laser survey of that ground, plus an aerial photo of the same patch to trace the
+  lap on. It works out of the box in the United States, France, the Netherlands and England,
+  and the French and Dutch surveys are half-metre, finer than the American one.
+- Studio tells you what has actually been surveyed before it downloads anything. These map
+  services will happily stretch coarse data to look fine, so Studio asks first and says plainly
+  when the best available is 10 metres and your jumps will not be in it.
+- Bring your own ground. Any north-up GeoTIFF you downloaded from your own country's mapping
+  service can be imported and used exactly like a fetched one, which is how the rest of the
+  world gets in.
+- Every place records where its ground came from, when it was flown and under what licence, and
+  carries that through to the lap file. A venue rebuilt every year means a track built from a
+  2017 survey is a 2017 snapshot, and now the file says so.
+- A guide for building a track from a real place, in docs, written for riders rather than map
+  people. Where the files go, how to find your coordinates, what good and bad survey data look
+  like, what each resolution is actually good for, what to do when your country has no laser
+  survey, and the credit each source asks for.
+
+## 2026-09-16 — Code, testing, ideas
+
+### Changed
+- The Contributors list in Settings → Supporters now says what each person actually did. Code
+  contributions, testing and ideas each get their own heading and mark, so a pull request that
+  shipped reads as one and a suggestion that shipped reads as the other. Somebody who did two
+  of them is credited under both, and anyone not sorted yet stays in the list as before.
+
+## 2026-09-16 — MXB Coach v0.1.14-beta.14
+
+### Added
+- Coach keeps the recorder up to date by itself. Opening Settings puts the newest one in place
+  if what you have is older or missing, so there is no more updating FrostMod in MXB App,
+  closing it and coming back. Nothing had ever refreshed the recorder before, so whatever you
+  installed the first time is what you kept — and a recorder older than the app it serves draws
+  nothing and says nothing about why.
+- Coach can find MX Bikes on its own. If it isn't where Coach looks, choose the folder in
+  Settings instead of being sent to MXB App to set it there.
+
+### Fixed
+- The live cue and the blue trail appear in the game. Coach was writing them to a different
+  folder from the one it writes the HUD settings to, so on any setup where those two folders
+  differ the recorder never found them: the HUD switches worked while the cue and the trail
+  showed nothing at all, with no message to say why.
+- Turning on the blue trail turns the track map on with it. The recorder draws the trail inside
+  the map, so with the map off the switch could never do anything — and the map starts off
+  wherever MXBMRP3 is installed.
+- The 3D view shows your actual track far more often. The check that decides whether a track's
+  own terrain belongs to your laps was strict enough to refuse the tracks you most want to
+  look at: the track file has none of the ruts cut into it over a session, and big jumps get
+  rounded off when its terrain is read, both of which make your laps sit unevenly above it. It
+  now allows for that, and still refuses a track that genuinely isn't the one you rode.
+- MXB App and MXB Coach get on when they're both open. They share one settings file, and MXB
+  App wrote it in place — so a read by Coach landing in that moment saw an empty file, forgot
+  where the game was, and greyed out the buttons that needed it. It is written safely now.
+- Coach keeps its own overlay shortcut when it can't reach MXB App. If the local link between
+  the two never comes up — a firewall or antivirus blocking it is the usual cause — Coach used
+  to hand the key over to an MXB App that wasn't taking it, and then say an older MXB App was
+  running even when it was up to date. It now holds the key itself and says plainly that the
+  two apps aren't linked.
+
+### Changed
+- The cues send themselves. There is no "Send to the game" button any more: Coach writes them
+  when you open a lap, again whenever you change the level or how much coaching you want, and
+  it keeps them following you as you ride. Changes reach the game the next time you go out.
+- The lap notes name the line. "Take the fast line" said nothing you could act on; every note
+  about a line now says inside or outside, at the corner — which one the other riders are on,
+  which one paid on your own laps, and which one to move to when the busy one ruts.
+- Where the other riders split into two lines through a corner, Coach says so: the two ruts,
+  which side each is on, how far apart they are, how many riders are in each, and which one
+  you are riding.
+- While the track loads, the 3D view says so over the picture instead of in small print under
+  it, and when it can't use the track at all it says that plainly, with the reason — how far
+  your laps sat off its terrain, or how little of them landed on it. The ground built from your
+  laps looks finished, so it was easy to take it for the real thing.
+
+## 2026-09-15 — MXB Coach v0.1.13-beta.13
+
+### Added
+- Compare a lap with more than the session you're in. "Compare with" now offers your best ever
+  lap on the track — whenever you set it, and on whichever bike, which it tells you — and your
+  ideal lap, your own best sections across every session added up. You can also import another
+  rider's recording, a trainer lap, and ride against that: the coach shows whose lap it is and
+  which bike, and keeps imported laps apart from your own so they never count towards your bests.
+- The lap you compare with is remembered for each track, and the live cues and the in-game HUD
+  take it from there too, so the gap and the ghost are against the lap you picked.
+- A numbered post stands on the 3D track where each tip happens, so a call like "the rear spins
+  out of turn 2" is somewhere you can see, with a key for your line and the fast lap.
+- The in-game HUD switches are on the review page too, under In game beside the live cues.
+- Saving a setup now sets it as the one practice loads on that track, so it's on the bike when
+  you go out. Close MX Bikes first and it happens on save; otherwise there's a Select button
+  for when the game is closed. Your other setups, and your race and qualifying picks, are left
+  alone.
+- Move the live cue. Pick any of nine places on screen in the HUD panel, and the section line
+  follows it.
+- Choose who speaks the cues: a woman's voice or a man's.
+- Two new things the recorder can draw: suspension bars for each end, with a mark when it
+  bottoms, and a blue trail ahead of you on the map showing the line to take. Both start off.
+- The newest settings say when your recorder is older than the FrostMod 0.24 they need.
+- Coach counts anonymous usage the way the app and the Studio already do — which pages get
+  opened, and how many sessions get reviewed. Same switch (Settings → General), same config, and
+  the same nothing-about-you payload: no rider name, no paths, no session files. Coach never
+  mints an identifier of its own, so a machine with only Coach on it counts nothing at all.
+- On the game's default setup the coach now writes you a setup of your own, named after the
+  track, instead of asking you to go and save one in the garage first. It starts from another
+  setup you have for that bike where there is one, and from the bike's own settings where there
+  isn't. Your own setups are never written over.
+- The session list and the laps in an open session keep up with the recorder while you ride, so
+  a lap you have just finished shows up without leaving the page and coming back. Both pages
+  have a Refresh button too.
+- Settings shows which recorder the game actually ran. It appears after you've started MX Bikes
+  once with the recorder installed.
+- Speak the cues and the in-game HUD say which recorder they need when yours is older than that.
+
+### Changed
+- The lap review is split into tabs — Lap, Sections, Setup, In game and Track — so each one is a
+  short read instead of one long scroll. It opens on the tab you used last.
+- "How does the bike feel?" is a bike now. Each thing you can say sits at the part it's about:
+  the fork and front wheel, the shock and rear, the chassis, and the engine and gearbox.
+- The setup card leads with the copy it would save and one line saying what that changes, then
+  lists every change the coach found from your laps, grouped, with the reason under each.
+- The live cues move on. Once you've sent them, the coach keeps them up to date as you ride: it
+  drops what you've taken and calls what's costing you time now, instead of repeating the same
+  lap's calls every lap.
+- Cues say what to do and where: "Go inside here", "Stay wide", "Brake here". Line tips name the
+  inside or the outside line in those words.
+- A shift is only called where your gear is really costing you time on the exit, and it names
+  the gear to be in rather than telling you to change earlier.
+- The track map switch is a plain on/off that the game always obeys. With MXBMRP3 installed it
+  says so, since that draws a map of its own.
+- Where two tips want one setting opposite ways — sand wants a tooth more on the rear, the rev
+  limiter a tooth less — the coach says so and leaves that setting to you, rather than listing
+  it as a change it will make. Saving a setup now names the settings it changed.
+- One session per event. Go out, come in and go out again, and it's all one session with every
+  lap you rode: your best lap and your ideal lap count all of them, and each lap says which
+  stint it came from.
+- The HUD and the spoken cues are written where the recorder reads them, wherever your MX Bikes
+  user folder is.
+
+## 2026-09-15 — MXB Coach v0.1.12-beta.12
+
+### Added
+- In-game HUD: sending cues to the game now also sends what the recorder's HUD needs, your fast
+  lap for the gap and the ghost on the map, and each section's name and tip. Needs the recorder
+  from FrostMod 0.22 or newer.
+- An in-game overlay. Press Ctrl+Shift+X in the game to see your last lap's tips, setup fixes,
+  live cues and HUD settings without leaving it. Turn it on or pick another shortcut in Settings.
+- The overlay can switch the recorder's HUD parts on and off: the live cue, section and tip, gap
+  to your fast lap, sit or stand, the track map and the setup card.
+- Live cues can be spoken. Turn on Speak the cues and set the volume. It needs the recorder from
+  FrostMod 0.22 or newer.
+- With MXB App running too, the two share one shortcut, and each overlay shows the other's tabs.
+
+## Unreleased — Frost's Studio
+
+### Added
+- Track Studio draws random tracks as MX, SX or SMX. SX is a short, flat stadium lap of
+  parallel lanes and 180° turns with a 22-gate start, and SMX is a flatter, tighter outdoor lap.
+  Writing a track from a brief follows the same switch.
+- SX and SMX laps are built out of real sections now, lane by lane: rhythm lanes, a set of
+  whoops, triples, doubles, tabletops, and a stretch of sand you can both see and feel. The lap
+  finishes over a triple.
+- A supercross track is built in a stadium, with a wall round the floor and tiered stands
+  behind it. Or not: Venue in Track Studio puts the same lap out in the open air instead, in a
+  field with the trees, the bank and the sponsor wall an outdoor round gets, and a fence round
+  the site where the stadium wall would have stood.
+- Choose what lines the lane borders in Track Studio: soft tuff blocks you ride through, solid
+  ones you don't, a printed banner wall the way a stadium lane is lined, or nothing at all.
+- SX and SMX laps carry as much as a real round does. A lane used to get one set of jumps and
+  then a long run of flat ground to the next corner. Now the rest of the lane gets jumps too,
+  so there is something to ride the whole way down it.
+- How packed the lap is, in Track Studio: a slider from sparse to packed, sitting by default
+  where a real round sits. It shows for SX and SMX, which are the ones it changes.
+- Pick what a track looks like, apart from what it rides like. The ground buttons still set the
+  ride, and a new Look row sets the paint: Soil, Sand, Grass, or Stadium for a supercross floor
+  of dark trucked-in dirt with nothing growing beyond the lanes. Leave it on Ride and the look
+  follows the ground, the way it always has.
+- Use your own images for the ground. Four slots in Track Studio, under Look: the riding
+  surface, the line, the ruts, and whatever lies beyond the track. Pick a picture off your own
+  disk and the Studio copies it in, so the track still builds after you have moved or deleted
+  the original. It says what is wrong with an image it cannot take.
+- The ground comes back down between jumps. A row of hills used to sit on a shelf, so the dips
+  never reached the ground either side and it rode as one long wave instead of a row of lips you
+  pick a line through. Now each hill lands back at grade, and the hills stand as tall as the ones
+  on a real round.
+- Ask for a supercross in the brief. Write "a supercross round in a stadium" or "an SMX playoff
+  round" and that is what you get, without touching the MX / SX / SMX switch first. Set the
+  switch yourself and it still decides. The switch moves to whatever came back, so you can see
+  which kind of track you were given.
+- The supercross words in a brief reach the track. Say no whoops and the lap is built without a
+  set; say sand and there is sand in it, rather than the one round in two that carries it. How
+  packed you ask for still sets how much the lanes carry.
+
+### Changed
+- The Studio reports anonymous usage from the same fixed list of names as the app, for the same
+  reason.
+
+## Unreleased — MXB App
+
+### Fixed
+- The overlay shortcut always belongs to someone. With no MX Bikes folder set, MXB App told
+  MXB Coach it was holding the key for both and then never bound it, so the shortcut opened
+  nothing in either app.
+
+### Added
+- The 3D track view now shows the game's own tracks in full, with their ground, their markings,
+  their scenery and their sky, the same as a track you downloaded. This covers the 3D view in
+  MXB Coach too.
+- With MXB Coach running, the overlay shows Coach's tabs next to yours and one shortcut opens
+  both.
+- When the server list won't load, the Servers tab now says whether it's MX Bikes' own servers
+  or something at your end. The game answers a dead master server with "connection timeout" and
+  nothing else — the same thing it says for a firewall or a router problem — so the app asks
+  how many other apps failed the same fetch in the last ten minutes and leads with that.
+- Check my connection, on that screen: it tests your internet, whether the master server's
+  address resolves, whether outbound UDP is being blocked, and the server list itself, then says
+  whose problem it is. The same numbers are public at mxbsecure.com/status.
+- Add your server, on the Servers tab: puts a server on the shared book by hand, for one the
+  game's own list never carries — a brand-new box, or a private league one. Anything the game
+  does list is remembered on its own and needs none of this.
+- A shared server book. The Servers tab already rebuilt its list by asking each server directly
+  when the master wouldn't answer, but only from addresses you had already seen — so on a fresh
+  install it had nothing to work from, which is exactly who an outage catches out. The app now
+  seeds that book from a pooled one and adds what it sees, so the fallback is ready before the
+  outage instead of after it.
+
+### Fixed
+- "Is MX Bikes down" could say the servers were fine while they were down. When the master
+  didn't answer and the app rebuilt the list from its own address book, it reported the list
+  rather than the master — so every install with a warm book voted "working" through an outage
+  it was itself routing around.
+
+### Changed
+- The app reports anonymous usage from a fixed list of names and nothing else. A plugin shares
+  the app's window, and so could count whatever it liked under any name it liked — including
+  filling the buffer with invented ones, which quietly stopped real counters being recorded
+  until the next send.
+
+## 2026-09-15 — v0.15.1 — Small fixes
+
+### Changed
+- Clearer wording in a few places, in all six languages.
+
+## 2026-09-15 — Frost's Studio v0.1.10 — Track Studio asks you less
+
+### Changed
+- Random tracks come in Easy, Normal and Pro. Pro is what ARL was — the same big, rough, raced
+  build, under a name that says what it is. A track you saved at that size still opens.
+- The size now sits against the Random track button, because that is the button it changes.
+  Next to the brief it looked like it shaped the track you were describing, which it never did.
+- Writing a track no longer asks whether to write the whole lap or only its settings. Which one
+  works is a fact about the model, not a preference: ours writes the whole lap, and a small or
+  free model of your own is asked for the track's character while the app draws the lap itself.
+  The app picks and gets on with it, and still tells you what the model chose when it went that
+  second way.
+
+### Removed
+- The Base track button. Random track also hands you a finished track to ride and tweak, and a
+  different one every time, so there were two buttons doing one job.
+
 ## 2026-09-15 — MXB Coach v0.1.11-beta.11
 
 ### Changed
 - Other riders: the coach now finds you among them by your rider name, the one the game shows
   everyone. Two riders with the same name are told apart by where each bike is.
 
-## 2026-09-15 — v0.15.0 — Secured content follows your access
+## 2026-09-15 — v0.15.0 — Install & join, and MXB Hub loads again
 
 ### Added
 - Server tiles show the track's picture even when you don't have it, with a mark over it so
@@ -25,12 +345,6 @@
   Farm14 and Farm 14.
 
 ### Fixed
-- Secured content now follows the access you actually have. If a creator removes you as a
-  buyer, the app picks that up the next time it's online — you launch the game, open the
-  Library, sign in, or press Restore keys — and that content stops opening on this PC. The
-  Secured content list marks it "Access removed" and the app says so when it happens, so
-  content no longer showing up in game doesn't look like the app breaking. Nothing changes
-  while you're offline, or if the check can't be made for any reason.
 - MXB Hub's robot check can now be finished by hand. The app still answers it quietly in the
   background, and when that doesn't work it opens the store in a window so you can complete the
   check yourself. Before, the catalogue just never loaded.

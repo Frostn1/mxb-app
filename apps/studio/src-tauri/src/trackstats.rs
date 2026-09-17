@@ -1687,12 +1687,15 @@ mod tests {
             terrain: crate::trackprog::Terrain {
                 size_x: 1000.0, size_z: 1000.0, samples: 513, scale: 100.0,
                 relief: Default::default(), surface: Default::default(),
+                texture: Default::default(),
                 wear: crate::trackprog::default_wear(),
                 roughness: crate::trackprog::default_roughness(),
             },
             start: crate::trackprog::Start { x: lap.start.0, z: lap.start.1, angle: lap.heading },
             segments: lap.program_segments(), width: 12.0, features: Vec::new(),
-            blend: 1.2, elevation: Vec::new(),
+            blend: 1.2, elevation: Vec::new(), discipline: Default::default(),
+            border: Default::default(),
+            venue: Default::default(),
         };
         let st = prog.stations(1.0);
         let place = |long: f32, lat: f32| -> (f32, f32) {
@@ -1801,12 +1804,15 @@ mod tests {
                 size_x: mps * (gw - 1) as f32, size_z: mps * (gh - 1) as f32,
                 samples: 513, scale: 100.0,
                 relief: Default::default(), surface: Default::default(),
+                texture: Default::default(),
                 wear: Default::default(),
                 roughness: crate::trackprog::default_roughness(),
             },
             start: crate::trackprog::Start { x: lap.start.0, z: lap.start.1, angle: lap.heading },
             segments: lap.program_segments(), width: 12.0, features: Vec::new(),
-            blend: 1.2, elevation: Vec::new(),
+            blend: 1.2, elevation: Vec::new(), discipline: Default::default(),
+            border: Default::default(),
+            venue: Default::default(),
         };
         let lap_st = prog.stations(1.0);
 

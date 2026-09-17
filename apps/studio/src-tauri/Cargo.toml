@@ -2,7 +2,7 @@
 # Cargo target names cannot hold a space, so this is as close to `mainBinaryName` as it
 # gets. The description is what Windows Task Manager shows in its Processes tab.
 name = "frost-studio"
-version = "0.1.9"
+version = "0.1.10"
 description = "Frost's Studio — MX Bikes content studio"
 authors = ["Frost"]
 edition = "2021"
@@ -56,6 +56,9 @@ image = { version = "0.25", default-features = false, features = [
 ] }
 # The track's name on a generated track's picture.
 ab_glyph = "0.2"
+# Reading the GeoTIFFs public elevation surveys are published as. The `image` crate above
+# is built without TIFF on purpose, and a DEM needs float cells and GeoTIFF tags anyway.
+tiff = "0.11"
 
 [features]
 # Matches the manager's. `tauri build` turns it on; a dev run leaves it off.

@@ -40,6 +40,15 @@ declare global {
      *  the right default: a deployment that was never given a key has no admin surface
      *  rather than an open one. */
     ADMIN_KEY?: string;
+    /** Keys the build signature on `POST /v1/usage`, matching the key compiled into the apps.
+     *  Not authentication — the key ships inside a binary anyone can download — but it puts a
+     *  reverse-engineering step between the endpoint and a script. Unset means reports are not
+     *  checked. A secret. */
+    USAGE_SIGNING_KEY?: string;
+    /** `"1"` refuses an unsigned usage report. Not a secret — a var in `wrangler.jsonc`, so
+     *  turning it on is a reviewable diff. Leave it off until signed builds are the ones in the
+     *  field: switching early drops everybody's numbers and says nothing. */
+    MXB_USAGE_REQUIRE_SIGNATURE?: string;
     /** Keys the daily digest of a signup's IP address. Without it the digest is a plain
      *  hash, which is reversible for IPv4 — set it before open signup carries real load. */
     IP_HASH_SECRET?: string;
@@ -73,10 +82,15 @@ declare global {
     /** "1" lets a local build of the site (localhost:5173, 127.0.0.1:5173) call the site's routes
      *  and land sign-in there. For `.dev.vars` only — never set it in production. */
     MXB_ALLOW_DEV_ORIGINS?: string;
-    /** "open" lets any Steam account on mxbsecure.com start locking and selling. Unset means
-     *  only accounts that are already creators can; nobody loses creator standing either way. */
-    /** New assets a creator may make a day. 10 when unset; the owner account has no ceiling. */
+    /** New assets a creator may make a day — the whole of what keeps open signup from being a
+     *  key-minting service. 10 when unset; the owner account has no ceiling. Not a secret: a
+     *  var in `wrangler.jsonc`, so changing the ceiling is a reviewable diff. */
     MXB_ASSETS_PER_DAY?: string;
+    /** Require a Valve-confirmed Steam sign-in before the desktop apps will run. `"1"` turns it
+     *  on for every install; unset (the default) leaves the apps open to invite/self-serve
+     *  accounts as before. A var in `wrangler.jsonc`, so switching it is a reviewable diff — and
+     *  a switch, not a build, because it locks out anyone without a Steam copy (see README). */
+    MXB_REQUIRE_STEAM?: string;
     /** Rate limit on `/v1/web/steam/login` and `/return`, per client address (`ratelimits` in
      *  `wrangler.jsonc`). Optional so tests and a bare `wrangler dev` run without it. */
     SIGNIN_LIMITER?: RateLimit;

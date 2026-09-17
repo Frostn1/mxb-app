@@ -13,6 +13,7 @@
  */
 
 import { cors, refuseCrossSiteWrite } from "./assets";
+import { addBan, liftBan, listBans } from "./bans";
 import { addCreator, listCreators, removeCreator } from "./creators";
 import { addRule, collectAdminView, deleteRule } from "./diagnostics";
 import {
@@ -153,6 +154,9 @@ export async function webAdminRoutes(
 
       case "/v1/web/admin/creators":
         return said(200, { creators: await listCreators(env, fetchImpl) });
+
+      case "/v1/web/admin/bans":
+        return said(200, { bans: await listBans(env) });
     }
   }
 
@@ -238,6 +242,37 @@ export async function webAdminRoutes(
         return (await removeCreator(env, field("account")))
           ? said(200, { ok: true })
           : said(404, { error: "that account isn't a creator" });
+      default:
+        return said(400, { error: "no such action" });
+    }
+  }
+
+  // Who is shut out of mxbsecure. The heaviest button on the site: it refuses content somebody
+  // paid for, on every machine they own, so both halves record the admin who pressed it
+  // (`session.steamId`) and neither is a DELETE.
+  if (request.method === "POST" && path === "/v1/web/admin/bans") {
+    const refused = refuseCrossSiteWrite(request, env);
+    if (refused) return cors(refused, origin);
+    let body: Record<string, unknown>;
+    try {
+      body = (await request.json()) as Record<string, unknown>;
+    } catch {
+      return said(400, { error: "that was not JSON" });
+    }
+    const field = (name: string) => String(body[name] ?? "");
+    switch (field("action")) {
+      case "ban": {
+        const result = await addBan(
+          env,
+          { guid: body.guid, reason: body.reason, evidence: body.evidence, altOf: body.altOf },
+          session.steamId,
+        );
+        return result.ok ? said(200, result) : said(400, { error: result.error });
+      }
+      case "lift": {
+        const result = await liftBan(env, body.guid, session.steamId, body.note);
+        return result.ok ? said(200, result) : said(404, { error: result.error });
+      }
       default:
         return said(400, { error: "no such action" });
     }

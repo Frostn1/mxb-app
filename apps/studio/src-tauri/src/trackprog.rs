@@ -74,6 +74,101 @@ pub struct TrackProgram {
     /// rather than as a run of instructions, which is the form you can take hold of.
     #[serde(default)]
     pub elevation: Vec<Knot>,
+    /// Motocross, supercross or SuperMotocross: which rules the lap is drawn and judged by.
+    /// Left out for motocross, so a project saved before this existed reads as one.
+    #[serde(default, skip_serializing_if = "Discipline::is_mx")]
+    pub discipline: Discipline,
+    /// What lines a lane's borders. Per track, and only placed where the discipline asks for
+    /// them. Left out when they are the soft blocks, which is the default, so a project saved
+    /// before this existed reads the same — and a project saved when this was still called
+    /// `tuff`, which is what the alias is for.
+    #[serde(default, alias = "tuff", skip_serializing_if = "LaneBorder::is_default")]
+    pub border: LaneBorder,
+    /// Whether a supercross lap is laid inside a stadium or out in the open air. Ignored by
+    /// the outdoor disciplines, which never had a stadium to leave out. Left out when it is
+    /// the stadium, which is what a supercross track has always built.
+    #[serde(default, skip_serializing_if = "VenueKind::is_default")]
+    pub venue: VenueKind,
+}
+
+/// What lines a lane's borders.
+///
+/// All four, because a real lane has been every one of them. A supercross lane is bordered by
+/// foam-and-vinyl blocks that a rider goes through rather than into, and PiBoSo's engine has
+/// objects for exactly that — a model whose name begins `SOFT` is passed through with a
+/// penalty instead of stopping the bike. Plenty of tracks line their lanes with something that
+/// does stop you, and a border you can ride straight over is a border nobody respects. And a
+/// stadium round mostly does not use blocks at all down the long lanes: it runs a low printed
+/// banner wall, which is the same sponsors' plastic the lap's own hoarding is made of.
+#[derive(serde::Deserialize, serde::Serialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum LaneBorder {
+    /// PiBoSo's pass-through objects: ride through them, lose time, stay on the bike.
+    #[default]
+    Soft,
+    /// Our own cuboid, solid like a bale.
+    Solid,
+    /// A low printed banner wall on stakes, the way a stadium lane is lined.
+    Banners,
+    /// Nothing. The lanes are marked by the dirt and by what is beyond them.
+    None,
+}
+
+impl LaneBorder {
+    pub fn is_default(&self) -> bool {
+        *self == LaneBorder::Soft
+    }
+}
+
+/// Whether a supercross lap stands in a stadium or in the open.
+///
+/// A supercross track has always built a bowl round itself: a wall ring round the floor, tiered
+/// stands behind it, and none of the field a national gets. That is right for a stadium round
+/// and wrong for the supercross-shaped lap somebody wants to ride in a field — so it is a
+/// choice rather than a consequence of the discipline. Open air is not the stadium deleted: it
+/// is the outdoor venue the other two disciplines already get, with a fence round the site
+/// where the wall stood.
+#[derive(serde::Deserialize, serde::Serialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum VenueKind {
+    /// The bowl: wall, stands, no field beyond them.
+    #[default]
+    Stadium,
+    /// A field: the trees, the bank, the paddock and the sponsor wall, inside a site fence.
+    Open,
+}
+
+impl VenueKind {
+    pub fn is_default(&self) -> bool {
+        *self == VenueKind::Stadium
+    }
+}
+
+/// Which kind of racing a track is for. See [`crate::tracklayout::Rules`].
+#[derive(serde::Deserialize, serde::Serialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum Discipline {
+    /// An outdoor national: a field, a long lap, a start spur beside it.
+    #[default]
+    Mx,
+    /// A stadium floor: a short flat lap of lanes, the gates on the start straight.
+    Sx,
+    /// The SuperMotocross hybrid: an outdoor-style lap, flatter and tighter.
+    Smx,
+}
+
+impl Discipline {
+    pub fn is_mx(&self) -> bool {
+        *self == Discipline::Mx
+    }
+
+    pub fn rules(self) -> &'static crate::tracklayout::Rules {
+        match self {
+            Discipline::Mx => &crate::tracklayout::MX_RULES,
+            Discipline::Sx => &crate::tracklayout::SX_RULES,
+            Discipline::Smx => &crate::tracklayout::SMX_RULES,
+        }
+    }
 }
 
 /// One point on the lap's height curve.
@@ -106,10 +201,19 @@ pub struct Terrain {
     pub scale: f32,
     #[serde(default)]
     pub relief: Relief,
-    /// What the ground is. Decides the surfaces painted either side of the riding line, and
-    /// with them what the track looks like.
+    /// What the ground is made of: how deep it cuts, how wide the shoulder runs, what the
+    /// tyres are on. This is the *ride*.
     #[serde(default)]
     pub surface: Surface,
+    /// And what the ground looks like, which is a separate question.
+    ///
+    /// These two used to be one field. A track made of soil was painted with soil sheets and
+    /// dug a soil stack, and there was no way to say "this rides like a sand national but it
+    /// is the dark trucked-in dirt of a stadium floor" — which is most of what a supercross
+    /// track is. Left at its default the look follows [`Terrain::surface`] exactly as it
+    /// always did, so a project saved before this existed reads and builds the same.
+    #[serde(default, skip_serializing_if = "TextureSet::is_default")]
+    pub texture: TextureSet,
     /// How raced the ground arrives, 0 to 1.
     ///
     /// A generated track used to ship one state of ground: fully raced. The corner grooves,
@@ -153,6 +257,78 @@ pub enum Surface {
     Sand,
     /// Grass right up to the riding line — a grasstrack or an early-season circuit.
     Grass,
+}
+
+/// What a track's ground looks like: a look to start from, and the rider's own images over
+/// the top of it.
+///
+/// Deliberately not the same thing as [`Surface`]. The surface decides the material stack the
+/// game deforms and the shoulder the track is graded into; this decides only which sheets get
+/// painted, so the two can be picked apart.
+#[derive(serde::Deserialize, serde::Serialize, Clone, Debug, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct TextureSet {
+    #[serde(default)]
+    pub preset: TexturePreset,
+    /// The rider's own ground, one image per slot. A slot named twice takes the last.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sheets: Vec<OwnSheet>,
+}
+
+impl TextureSet {
+    /// Whether this is the look the surface already implies, which is what gets left out of
+    /// the file.
+    pub fn is_default(&self) -> bool {
+        *self == TextureSet::default()
+    }
+}
+
+/// The look a texture set starts from.
+#[derive(serde::Deserialize, serde::Serialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum TexturePreset {
+    /// Whatever the surface implies — the look and the ride move together, as they always
+    /// have.
+    #[default]
+    Ride,
+    /// Worked dirt with grass beyond it, whatever the track rides like.
+    Soil,
+    /// Pale sand.
+    Sand,
+    /// Turf to the edge of the line.
+    Grass,
+    /// A stadium floor: trucked-in dirt over the whole place and nothing green beyond it.
+    Stadium,
+}
+
+/// One of the rider's own images, standing in for a built-in ground sheet.
+#[derive(serde::Deserialize, serde::Serialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct OwnSheet {
+    pub slot: SheetSlot,
+    /// The image's name in the Studio's own `track-textures` folder. Images are copied in
+    /// when they are imported and addressed by their contents, so a project still builds
+    /// after the file it was imported from has moved or gone.
+    pub id: String,
+}
+
+/// Which ground an image replaces.
+#[derive(serde::Deserialize, serde::Serialize, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[serde(rename_all = "camelCase")]
+pub enum SheetSlot {
+    /// The riding surface: the dry worked dirt the track is ridden on.
+    Ground,
+    /// The darker soil the line is worn into, and the whole site under it.
+    Line,
+    /// The packed bottom of a rut.
+    Rut,
+    /// Whatever lies beyond the track.
+    Grass,
+}
+
+impl SheetSlot {
+    pub const ALL: [SheetSlot; 4] =
+        [SheetSlot::Ground, SheetSlot::Line, SheetSlot::Rut, SheetSlot::Grass];
 }
 
 fn default_samples() -> u32 {
@@ -458,6 +634,16 @@ pub fn air_face_run(height: f32) -> f32 {
 pub const JUMP_AIR_LIP_DEG: f32 = 24.0;
 pub const JUMP_AIR_FACE_MIN_M: f32 = 6.0;
 
+/// The face a take-off needs to leave its lip at `deg`, metres.
+///
+/// [`air_face_run`] with the angle handed in rather than fixed at [`JUMP_AIR_LIP_DEG`]. A
+/// stadium round's lips measure 21° at the median and 30 at the ninetieth, and its finish
+/// jump is built at 30 — the spread is the thing, so the angle has to be an argument.
+pub fn lip_face_run(height: f32, deg: f32) -> f32 {
+    let lip = deg.to_radians().tan() * (1.0 - TAKEOFF_TRANSITION / 2.0);
+    (height.abs() / lip.max(1e-4)).max(JUMP_AIR_FACE_MIN_M)
+}
+
 pub fn face_run(height: f32, deg: f32, min_m: f32) -> f32 {
     let half = (deg * 0.5).to_radians().tan().max(1e-4);
     (height.abs() / half).max(min_m)
@@ -745,24 +931,8 @@ pub fn tabletop_faces(height: f32, length: f32, lip: f32) -> (f32, f32, f32) {
     (up, top, down)
 }
 
-/// How tall the finish jump is built, metres.
-///
-/// The jump the lap ends and begins on, and on a national it is one of the biggest on the
-/// track — a long tabletop on the main straight with the line painted past its landing. The
-/// range is the top of the published spread rather than the middle of it: this is the one
-/// jump a track is photographed on.
-// Full size: at three quarters it rode too small for the one jump a track is known by.
-pub const FINISH_JUMP_M: (f32, f32) = (2.4, 3.0);
-
-/// The longest deck a finish jump gets, metres. Published tabletop decks run six to twelve,
-/// and the finish one is at the long end because it is the one everybody lands on.
-// Past the published twelve: at 3 m, the regulated ceiling, the finish jump still rode small, and
-// a longer deck is the way to make it bigger without making it taller.
-pub const FINISH_DECK_MAX_M: f32 = 20.0;
-
-/// How far the finish jump's take-off runs, metres. Longer and gentler than the angle gives a
-/// 3 m face on its own (9 m, 37 degrees at the lip): at 13 it leaves at 26.
-pub const FINISH_FACE_M: f32 = 16.0;
+// The finish jump's height, deck and take-off are per discipline: see
+// `tracklayout::Rules::finish_jump_m`, `finish_deck_m` and `finish_face_m`.
 
 /// Bare ground off the last corner before the finish jump's face, metres. A takeoff at the
 /// corner exit is a takeoff nobody has any drive at.
@@ -776,45 +946,32 @@ pub const FINISH_RUNOUT_M: f32 = 10.0;
 /// rider comes down on, so it sits just off the end of the ramp rather than on it.
 pub const FINISH_LINE_PAST_M: f32 = 4.0;
 
-/// The whole footprint of a finish jump of this height with this deck, metres.
+/// The whole footprint of a finish jump of this height with this deck and take-off, metres.
 ///
 /// A tabletop's ramps are the longer of an angle and a fraction of the stated length, so the
 /// length and the faces define each other. Solved by iterating: the fraction is 0.44 at
 /// worst, so it converges geometrically and eight passes is far past the millimetre.
-pub fn finish_jump_length(height: f32, deck: f32) -> f32 {
+pub fn finish_jump_length(height: f32, deck: f32, face: f32) -> f32 {
     let deck = deck.max(TABLETOP_DECK_M);
     let mut len = height.abs() + deck;
     for _ in 0..8 {
-        let (up, _, down) = tabletop_faces(height, len, FINISH_FACE_M);
+        let (up, _, down) = tabletop_faces(height, len, face);
         len = up + deck + down;
     }
     len
 }
 
-/// The shortest straight a start will fit beside, metres.
-///
-/// A motocross start is a gate row and a sprint at the first turn, all of it in a line,
-/// because forty gates cannot be laid round a bend. The lap needs a straight this long for
-/// the start to run alongside.
-pub const START_STRAIGHT_M: f32 = 60.0;
+/// The main straight a finish jump needs under a discipline's rules: the corner exit, the
+/// smallest finish jump, and somewhere to land before the next corner.
+pub fn finish_straight_m(rules: &crate::tracklayout::Rules) -> f32 {
+    FINISH_RUNUP_M
+        + finish_jump_length(rules.finish_jump_m.0, rules.finish_deck_m.0, rules.finish_face_m)
+        + FINISH_RUNOUT_M
+}
 
-/// How far off the lap the gate row stands, metres.
-///
-/// Measured off six published tracks, whose start lines are carried in their own height
-/// files: Indiana 37.9, SandPoint 36.4, Briarcliff 41.0, I40 47.2, SFDR 48.9, Smokey Pines
-/// 34.0. The start is *not* part of the lap on any of them — it is a spur that runs beside it
-/// and merges in, so a rider on a flying lap never crosses the gates.
-pub const START_OFFSET_M: f32 = 40.0;
-
-/// How long the gate straight is before it starts turning in, metres.
-///
-/// Published start lines run 79–91 m of straight before their first corner, and 67–208 m all
-/// told. Shorter than the middle of that on purpose: ridden, 85 m of sprint and 90 m of
-/// turn-in is a long way to the first corner, and the whole point of a start straight is that
-/// it ends at one.
-// Ridden at 80 m as a long drag with nothing to do; shorter, so the pack arrives at turn one
-// still bunched and has to brake for it.
-pub const START_SPRINT_M: f32 = 55.0;
+// The shortest start straight, how far off the lap the gate row stands and how long its
+// sprint is are per discipline: `tracklayout::Rules::start_straight_m`, `start_offset_m` and
+// `start_sprint_m`.
 
 /// How far the start straight is angled towards the lap, degrees. Over the sprint it closes
 /// about a fifth of the offset, which leaves one corner to do the rest.
@@ -826,12 +983,8 @@ pub const START_CONVERGE_DEG: f32 = 3.0;
 /// corner rather than only its apex.
 pub const TURN_ONE_RADIUS_M: f32 = 60.0;
 
-/// Half the width of the start pad, metres: the gate row plus a margin.
-///
-/// Forty gates at 1.2 m is 48 m across, and the pad has to hold it. Stated here rather than
-/// in the synthesiser because the *layout* needs it — a start line whose centreline clears
-/// the lap by fifteen metres still lays its pad straight over it.
-pub const START_FAN_HALF_M: f32 = 27.0;
+// Half the start pad's width comes from the discipline's gate count:
+// `tracklayout::Rules::fan_half_m`.
 
 /// How much a start line is expected to turn on its way onto the lap. Published ones sweep
 /// 100–180°, and what that buys is a pack that arrives *in* the corner.
@@ -865,8 +1018,8 @@ pub struct StartLine {
 impl StartLine {
     /// The room its gate row needs beside the opening straight: the offset out, the fan's half
     /// width, and the lap's own half width on the far side.
-    pub fn room_needed(width: f32) -> f32 {
-        START_OFFSET_M + crate::tracksynth::START_FAN_HALF_M + width * 0.5
+    pub fn room_needed(rules: &crate::tracklayout::Rules, width: f32) -> f32 {
+        rules.start_offset_m + rules.fan_half_m() + width * 0.5
     }
 
     pub fn length(&self) -> f32 {
@@ -1048,6 +1201,13 @@ pub enum Feature {
     /// A groove worn into the line by everyone riding it. Corners grow their own — this is
     /// for putting one somewhere a corner wouldn't.
     Rut { at: f32, length: f32, depth: f32 },
+    /// A stretch of lap laid with sand: half a metre of it under the wheels and a sand band
+    /// painted over the ground.
+    ///
+    /// Ground rather than an obstacle, like a [`Feature::Rut`] — it stands nothing up and
+    /// digs nothing out, so the profile ignores it and the masks and the material stack are
+    /// the only things that read it.
+    Sand { at: f32, length: f32 },
     /// A shape drawn by hand: heights along the feature, from its start to its end.
     ///
     /// Its own kind rather than a field on the others, because once a jump has been shaped
@@ -1098,6 +1258,7 @@ impl Feature {
             | Feature::StepUp { at, .. }
             | Feature::Berm { at, .. }
             | Feature::Rut { at, .. }
+            | Feature::Sand { at, .. }
             | Feature::Custom { at, .. } => *at,
         }
     }
@@ -1113,6 +1274,7 @@ impl Feature {
             | Feature::StepUp { at, .. }
             | Feature::Berm { at, .. }
             | Feature::Rut { at, .. }
+            | Feature::Sand { at, .. }
             | Feature::Custom { at, .. } => at,
         }
     }
@@ -1131,6 +1293,7 @@ impl Feature {
             | Feature::StepUp { length, .. }
             | Feature::Berm { length, .. }
             | Feature::Rut { length, .. }
+            | Feature::Sand { length, .. }
             | Feature::Custom { length, .. } => *length,
             // Ramp, lip's back, gap, landing face, landing run-off. The lengths come from
             // `double_faces` rather than being written out again here: they used to be, and
@@ -1156,6 +1319,7 @@ impl Feature {
             Feature::StepUp { .. } => "step-up",
             Feature::Berm { .. } => "berm",
             Feature::Rut { .. } => "rut",
+            Feature::Sand { .. } => "sand section",
             Feature::Custom { .. } => "shape",
         }
     }
@@ -1181,6 +1345,8 @@ impl Feature {
             | Feature::Berm { height, .. } => *height,
             // A rut goes down rather than up, and its depth is the figure that matters.
             Feature::Rut { depth, .. } => -*depth,
+            // Ground, not an obstacle: it stands nothing up at all.
+            Feature::Sand { .. } => 0.0,
             // The tallest point it was drawn with.
             Feature::Custom { shape, .. } => shape
                 .iter()
@@ -1193,7 +1359,7 @@ impl Feature {
     /// triple is three, a table with a single after it two, a roller or a step one.
     pub fn lips(&self) -> usize {
         match self {
-            Feature::Rut { .. } | Feature::Berm { .. } => 0,
+            Feature::Rut { .. } | Feature::Berm { .. } | Feature::Sand { .. } => 0,
             Feature::Whoops { count, .. } => *count as usize,
             Feature::Custom { shape, .. } => shape
                 .windows(3)
@@ -1205,33 +1371,36 @@ impl Feature {
     }
 }
 
-/// How big a random track is built: Easy for learning, ARL for a raced pro track.
+/// How big a random track is built: Easy for learning, Pro for a raced pro track.
 #[derive(serde::Deserialize, Clone, Copy, Debug, Default, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub enum TrackScale {
     Easy,
     #[default]
     Normal,
-    Arl,
+    /// `arl` is what this was called before it was named after what it is, and a project
+    /// saved then still asks for it by that name.
+    #[serde(alias = "arl")]
+    Pro,
 }
 
 /// Easy: jumps at 70%, on fresher, smoother ground so the ruts come out shallower.
 const EASY_JUMP_SHARE: f32 = 0.7;
 const EASY_WEAR: f32 = 0.25;
 const EASY_ROUGHNESS: f32 = 0.6;
-/// ARL: the recipe the raced builds have always used (`FROST_ROUGH=2`).
-const ARL_ROUGHNESS: f32 = 2.0;
-const ARL_JUMP_GROWTH: f32 = 1.35;
+/// Pro: the recipe the raced ARL builds have always used (`FROST_ROUGH=2`).
+const PRO_ROUGHNESS: f32 = 2.0;
+const PRO_JUMP_GROWTH: f32 = 1.35;
 
 impl TrackProgram {
     /// Set a freshly drawn track to a scale. Normal leaves it as drawn.
     pub fn at_scale(&mut self, scale: TrackScale) {
         match scale {
             TrackScale::Normal => {}
-            TrackScale::Arl => {
-                self.terrain.roughness = ARL_ROUGHNESS;
-                self.name = format!("{} ARL", self.name);
-                self.bigger_jumps(ARL_JUMP_GROWTH);
+            TrackScale::Pro => {
+                self.terrain.roughness = PRO_ROUGHNESS;
+                self.name = format!("{} Pro", self.name);
+                self.bigger_jumps(PRO_JUMP_GROWTH);
             }
             TrackScale::Easy => {
                 self.terrain.wear = EASY_WEAR;
@@ -1292,11 +1461,20 @@ mod scale_tests {
     }
 
     #[test]
-    fn arl_is_the_raced_build() {
+    fn pro_is_the_raced_build() {
         let mut p = drawn();
-        p.at_scale(TrackScale::Arl);
-        assert_eq!(p.terrain.roughness, ARL_ROUGHNESS);
-        assert!(p.name.ends_with(" ARL"));
+        p.at_scale(TrackScale::Pro);
+        assert_eq!(p.terrain.roughness, PRO_ROUGHNESS);
+        assert!(p.name.ends_with(" Pro"));
+    }
+
+    /// A project saved when this scale was called ARL still opens.
+    #[test]
+    fn arl_still_names_the_pro_scale() {
+        assert_eq!(
+            serde_json::from_str::<TrackScale>("\"arl\"").unwrap(),
+            TrackScale::Pro,
+        );
     }
 }
 
@@ -1855,8 +2033,11 @@ impl TrackProgram {
     /// `None` when the lap has no straight to run beside — the gates would have nothing to
     /// line up against, and [`crate::trackllm::review`] says so.
     pub fn start_line(&self) -> Option<StartLine> {
+        let rules = self.discipline.rules();
+        let (offset, sprint, fan_half) =
+            (rules.start_offset_m, rules.start_sprint_m, rules.fan_half_m());
         let run = self.opening_straight();
-        if run < START_SPRINT_M * 0.5 || self.segments.is_empty() {
+        if run < sprint * 0.5 || self.segments.is_empty() {
             return None;
         }
         let st = self.stations(4.0);
@@ -1896,7 +2077,7 @@ impl TrackProgram {
             .map(|q| -q.curvature.signum())
             .unwrap_or(0.0);
         let side = if outside != 0.0
-            && (if outside > 0.0 { room_r } else { room_l }) > START_OFFSET_M * 1.15
+            && (if outside > 0.0 { room_r } else { room_l }) > offset * 1.15
         {
             outside
         } else if room_r >= room_l {
@@ -1913,8 +2094,8 @@ impl TrackProgram {
         // have: Indiana's straight runs 90 m and then turns *once*, through 170°, onto the
         // racing line.
         let start = Start {
-            x: self.start.x + rx * side * START_OFFSET_M,
-            z: self.start.z + rz * side * START_OFFSET_M,
+            x: self.start.x + rx * side * offset,
+            z: self.start.z + rz * side * offset,
             angle: self.start.angle - side * START_CONVERGE_DEG,
         };
         // Where turn one is: the first station past the opening straight that is properly
@@ -1944,7 +2125,7 @@ impl TrackProgram {
         // lap; failing that, land anywhere it can without crossing; failing that, take the
         // shortest merge there is. A track whose ground will not hold the ideal start still
         // gets one, and it is the same search each time.
-        let after = end_pose(start, &[Segment::Straight { length: START_SPRINT_M, rise: 0.0 }]);
+        let after = end_pose(start, &[Segment::Straight { length: sprint, rise: 0.0 }]);
         let search = |aim_at_the_corner: bool, keep_clear: bool| -> Option<(f32, Vec<Segment>, f32)> {
         let mut best: Option<(f32, Vec<Segment>, f32)> = None;
         for q in st.iter().filter(|q| q.s >= run * 0.5 && q.s <= corner_end + 120.0) {
@@ -2037,8 +2218,8 @@ impl TrackProgram {
                     // Against the *pad*, not the centreline: the start is 54 m across at the
                     // gates and still twenty by the middle of the merge, and a line that
                     // clears the lap by fifteen metres lays its pad straight over it.
-                    let taper = (a.s / (START_SPRINT_M * 0.9).max(1.0)).clamp(0.0, 1.0);
-                    let pad = START_FAN_HALF_M + (self.width * 0.5 - START_FAN_HALF_M) * taper;
+                    let taper = (a.s / (sprint * 0.9).max(1.0)).clamp(0.0, 1.0);
+                    let pad = fan_half + (self.width * 0.5 - fan_half) * taper;
                     // The riding line has to stay outside the pad — that is what "crossing"
                     // means here. Anything more generous is unsatisfiable on a lap that folds
                     // back on itself every eighty metres.
@@ -2074,7 +2255,7 @@ impl TrackProgram {
         let (_, merge, joins_at) = search(true, true)
             .or_else(|| search(false, true))
             .or_else(|| search(false, false))?;
-        let mut segments = vec![Segment::Straight { length: START_SPRINT_M, rise: 0.0 }];
+        let mut segments = vec![Segment::Straight { length: sprint, rise: 0.0 }];
         segments.extend(merge.into_iter().filter(|s| s.length() > 0.5));
         Some(StartLine { start, segments, joins_at, side, room })
     }
@@ -2087,6 +2268,7 @@ impl TrackProgram {
     /// front of them. Otherwise it ends at the shorter of the straight's own end and where
     /// the start spur merges back in, for the same reason.
     pub fn finish_window(&self) -> Option<(f32, f32)> {
+        let rules = self.discipline.rules();
         let run = self.opening_straight();
         let line = self.start_line()?;
         let mut to = run - FINISH_RUNOUT_M;
@@ -2094,7 +2276,9 @@ impl TrackProgram {
             to = line.joins_at - 5.0;
         }
         let from = FINISH_RUNUP_M;
-        (to - from >= finish_jump_length(FINISH_JUMP_M.0, TABLETOP_DECK_M)).then_some((from, to))
+        let least =
+            finish_jump_length(rules.finish_jump_m.0, rules.finish_deck_m.0, rules.finish_face_m);
+        (to - from >= least).then_some((from, to))
     }
 
     /// The finish jump: the one that was named, or failing that the tallest jump standing in
@@ -2114,10 +2298,19 @@ impl TrackProgram {
             return Some(named);
         }
         let (from, to) = self.finish_window()?;
+        let rules = self.discipline.rules();
         self.features
             .iter()
-            .filter(|f| matches!(f, Feature::Tabletop { .. } | Feature::Double { .. }))
-            .filter(|f| f.height() >= FINISH_JUMP_M.0 - 0.1)
+            .filter(|f| match f {
+                Feature::Tabletop { .. } | Feature::Double { .. } => true,
+                // A stadium lap ends over a triple, and a triple is a drawn shape. Only where
+                // the discipline says so: a national's lap is full of them mid-lap, and
+                // letting one count would stop `repair` building the tabletop that belongs
+                // on the main straight.
+                Feature::Custom { side, .. } => rules.finish_triple && *side == 0.0,
+                _ => false,
+            })
+            .filter(|f| f.height() >= rules.finish_jump_m.0 - 0.1)
             .filter(|f| f.at() >= from - 1.0 && f.at() + f.length() <= to + 1.0)
             .max_by(|a, b| a.height().total_cmp(&b.height()))
     }
@@ -2347,6 +2540,7 @@ mod tests {
                 scale: 20.0,
                 relief: Relief::default(),
                 surface: Surface::default(),
+                texture: Default::default(),
                 wear: default_wear(),
                 roughness: crate::trackprog::default_roughness(),
             },
@@ -2360,6 +2554,9 @@ mod tests {
             features: Vec::new(),
             blend: default_blend(),
             elevation: Vec::new(),
+            discipline: Discipline::Mx,
+            border: LaneBorder::default(),
+            venue: VenueKind::default(),
         }
     }
 
@@ -2477,7 +2674,7 @@ mod tests {
     fn the_example_starts_on_a_straight_long_enough_for_a_start() {
         let p: TrackProgram = serde_json::from_str(EXAMPLE).unwrap();
         assert!(
-            p.opening_straight() >= START_STRAIGHT_M,
+            p.opening_straight() >= crate::tracklayout::MX_RULES.start_straight_m,
             "the example opens with {:.0} m of straight",
             p.opening_straight()
         );
@@ -2496,7 +2693,7 @@ mod tests {
         p.check().expect("and it validates");
         assert!(p.closes(), "and it meets itself");
         assert!(
-            p.opening_straight() >= START_STRAIGHT_M,
+            p.opening_straight() >= crate::tracklayout::MX_RULES.start_straight_m,
             "and it has room for a start: {:.0} m",
             p.opening_straight()
         );

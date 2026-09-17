@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 /** Mirrors `coach.rs` and `analysis.rs`. */
 
@@ -7,10 +8,18 @@ export interface CoachStatus {
   pluginPath: string | null;
   pluginInstalled: boolean;
   sessionDirs: string[];
+  /** The recorder's own version, as it wrote it the last time the game ran it. */
+  recorderVersion: string | null;
+  /** The recorder that ran is older than the HUD and the spoken cues need. */
+  recorderOutdated: boolean;
 }
 
 export interface LapSummary {
   num: number;
+  /** The recording this lap is in: a session is every stint of one event. */
+  path: string;
+  /** Which stint it was ridden in, from 0. Every stint counts its laps from the start. */
+  stint: number;
   timeMs: number;
   invalid: boolean;
   /** Started and finished at the line: it can be compared. */
@@ -22,9 +31,18 @@ export interface LapSummary {
   riddenMs: number;
 }
 
-export interface SessionSummary {
+/** One stint on track: one recording. A session is every stint of one event. */
+export interface Stint {
   path: string;
-  /** `yyyymmdd-hhmmss-mmm`, local time. */
+  started: string;
+  /** The setup it was ridden on, as the game names it. */
+  setup: string;
+}
+
+export interface SessionSummary {
+  /** The first stint's file. Every stint is in `stints`. */
+  path: string;
+  /** `yyyymmdd-hhmmss-mmm`, local time the first stint started. */
   started: string;
   rider: string;
   trackId: string;
@@ -32,21 +50,35 @@ export interface SessionSummary {
   bikeId: string;
   bikeName: string;
   category: string;
+  /** 1 = testing, 2 = race, 4 = straight rhythm. */
+  eventType: number;
   trackLength: number;
   limiter: number;
   complete: boolean;
   laps: LapSummary[];
   bestMs: number | null;
-  /** The setup it was ridden on, as the game names it. */
+  /** The setup the last stint was ridden on, as the game names it. */
   setup: string;
+  /** Every stint this session was ridden in, oldest first. */
+  stints: Stint[];
 }
 
+/** Where a reference lap came from: one of your own, one you imported from another rider, or
+ *  your ideal lap, which is a time per section and was never ridden whole. */
+export type RefKind = "own" | "imported" | "ideal";
+
+/** A lap somewhere on disk — or the ideal lap, which is nowhere: no file, no lap number. */
 export interface LapRef {
   path: string;
   lap: number;
   timeMs: number;
   started: string;
   bikeName: string;
+  /** The bike it was ridden on: a 250 and a 450 don't take a corner the same way. */
+  bikeId: string;
+  /** Whose lap it is, as the recorder saved it. */
+  rider: string;
+  kind: RefKind;
 }
 
 export interface SectionBest {
@@ -127,6 +159,9 @@ export interface Review {
   setup: Finding[];
   /** Reviewed on its own, with no faster lap to compare with. */
   solo: boolean;
+  /** There is a reference lap to draw: its traces are in `channels`, its line in `paths`.
+   *  False against the ideal lap, which nobody ever rode whole. */
+  traced: boolean;
   channels: Channels;
   /** Both laps' world x/z every `step` metres, with the bike's height at each point. */
   paths: { step: number; lap: [number, number][]; reference: [number, number][]; lapY: number[]; referenceY: number[] };
@@ -148,6 +183,8 @@ export interface ReviewOut {
   lap: LapRef;
   reference: LapRef;
   review: Review;
+  /** How many of your own laps the ideal lap was stitched from, when that's the reference. */
+  idealFrom: number | null;
   /** Other riders in the session worth comparing with. */
   rivals: Rival[];
 }
@@ -201,6 +238,9 @@ export interface Ground {
   name: string;
   /** How high the bike rides above this terrain, metres. */
   lift: number;
+  /** The laps didn't sit steadily above it, so `lift` is a best guess and the lines may float
+   *  or sink a little. The track itself is drawn either way. */
+  roughFit: boolean;
 }
 
 export const coachStatus = () => invoke<CoachStatus>("coach_status");
@@ -215,10 +255,34 @@ export const coachGround = (path: string) => invoke<GroundAnswer>("coach_ground"
 export const coachLines = (path: string) => invoke<Lines | null>("coach_lines", { path });
 export const coachSurface = (path: string) => invoke<Surface | null>("coach_surface", { path });
 export const coachSessions = () => invoke<SessionSummary[]>("coach_sessions");
+/** Fires when the recorder writes a session or adds to the one being ridden now. */
+export const onSessionsChanged = (run: () => void): Promise<UnlistenFn> =>
+  listen("coach-sessions-changed", () => run());
+
+/** The whole session the recording belongs to: every stint of that event, with all its laps. */
 export const coachSession = (path: string) => invoke<SessionDetail>("coach_session", { path });
-/** `solo` reviews the lap on its own; so does the backend when there's nothing to compare with. */
-export const coachReview = (path: string, lap: number, refPath?: string, refLap?: number, solo?: boolean) =>
-  invoke<ReviewOut>("coach_review", { path, lap, refPath: refPath ?? null, refLap: refLap ?? null, solo: solo ?? false });
+/** What a lap is held against. Nothing given means the fastest lap on the track. */
+export interface RefArgs {
+  /** One particular lap: the recording it's in, and its number. An imported lap is one of these. */
+  refPath?: string;
+  refLap?: number;
+  /** Review it on its own, with nothing to compare with. */
+  solo?: boolean;
+  /** Your own best sections on this track, added up: the ideal lap. */
+  ideal?: boolean;
+}
+
+/** Reviews a lap against the reference asked for; the backend reviews it on its own when
+ *  there's nothing to compare with. */
+export const coachReview = (path: string, lap: number, ref: RefArgs = {}) =>
+  invoke<ReviewOut>("coach_review", {
+    path,
+    lap,
+    refPath: ref.refPath ?? null,
+    refLap: ref.refLap ?? null,
+    solo: ref.solo ?? false,
+    ideal: ref.ideal ?? false,
+  });
 export type SetupField =
   | "forkOffset"
   | "swingarmLength"
@@ -254,6 +318,8 @@ export interface SetupChange {
   toValue: string | null;
   /** The coach can make this change in a copy of the setup. */
   writes: boolean;
+  /** Another tip wants this setting the other way, so the coach leaves it to the rider. */
+  conflict: boolean;
 }
 
 export interface SetupFix {
@@ -279,9 +345,25 @@ export interface SetupPlan {
 /** The changes behind a lap's setup tips, against the setup the rider had on. */
 export const coachSetupPlan = (path: string, skills: string[]) =>
   invoke<SetupPlan>("coach_setup_plan", { path, skills });
-/** Saves those changes as a new setup beside the rider's own. Resolves to its name. */
+
+/** A setup the coach wrote: its name, the settings it really changed, and whether the game
+ *  will load it. */
+export interface SavedSetup {
+  name: string;
+  changed: SetupField[];
+  /** The game is pointed at it for practice on this track. */
+  selected: boolean;
+  /** It isn't, because MX Bikes is open: the file is the game's, and it rewrites it on exit. */
+  gameOpen: boolean;
+}
+
+/** Saves those changes as a new setup — beside the rider's own, or as one of their own when
+ *  they rode the game's default — and points the game at it. */
 export const coachSaveSetup = (path: string, skills: string[]) =>
-  invoke<string>("coach_save_setup", { path, skills });
+  invoke<SavedSetup>("coach_save_setup", { path, skills });
+/** Points the game at a setup the coach already saved. Only works with MX Bikes closed. */
+export const coachSelectSetup = (path: string, name: string) =>
+  invoke<SavedSetup>("coach_select_setup", { path, name });
 export type CueLevel = "new" | "intermediate" | "subPro" | "pro";
 export type CueAmount = "few" | "normal" | "lots";
 
@@ -298,13 +380,112 @@ export interface CueOut {
 export interface CuesOut {
   file: string;
   cues: CueOut[];
+  /** The lap the in-game HUD's gap and ghost run against. It's the reference you picked
+   *  wherever somebody rode that lap; the ideal lap nobody did, so there the HUD races your
+   *  fastest lap on the track instead. */
+  ghost: LapRef;
 }
 
 /** Picks this lap's live cues for a rider's level and how much coaching they want, and writes
- *  them where the recorder reads them. */
-export const coachWriteCues = (path: string, lap: number, level: CueLevel, amount: CueAmount) =>
-  invoke<CuesOut>("coach_write_cues", { path, lap, level, amount });
+ *  them — and the HUD sheet beside them — where the recorder reads them. The cues come from the
+ *  same reference the review is against.
+ *
+ *  The calls move on each time: what the last sheets said is remembered, so a cue the rider
+ *  has been hearing for a few laps rests and whatever is costing time now takes its place.
+ *  `latest` picks from the newest lap on this track and bike rather than the one on screen,
+ *  which is what to ask for while the rider is still out. The reference still applies: it is
+ *  the lap they chose to be held against, not the lap being reviewed. */
+export const coachWriteCues = (
+  path: string,
+  lap: number,
+  level: CueLevel,
+  amount: CueAmount,
+  ref: RefArgs = {},
+  latest?: boolean,
+) =>
+  invoke<CuesOut>("coach_write_cues", {
+    path,
+    lap,
+    level,
+    amount,
+    refPath: ref.refPath ?? null,
+    refLap: ref.refLap ?? null,
+    ideal: ref.ideal ?? false,
+    latest: latest ?? false,
+  });
+
+/** A recording that couldn't be imported, and why. */
+export interface Skipped {
+  file: string;
+  why: string;
+}
+
+export interface Imported {
+  /** How many recordings went in. */
+  added: number;
+  skipped: Skipped[];
+}
+
+/** Laps imported from other riders. They're kept apart from your own sessions, so they never
+ *  count towards your bests. */
+export const coachImports = () => invoke<SessionSummary[]>("coach_imports");
+/** Copies recordings in: the files picked, or every recording in a folder picked. */
+export const coachImportLaps = (paths: string[]) => invoke<Imported>("coach_import_laps", { paths });
+export const coachRemoveImport = (path: string) => invoke<void>("coach_remove_import", { path });
+
 /** Downloads the recorder, or copies it from `from`. Resolves to where it went. */
 export const installRecorder = (from?: string) =>
   invoke<string>("coach_install_plugin", { from: from ?? null });
 export const removeRecorder = () => invoke<void>("coach_uninstall_plugin");
+/** Put the newest recorder in place if what's there is older, or missing. Returns the version
+ *  it installed, or null when nothing needed doing. */
+export const refreshRecorder = () => invoke<string | null>("coach_refresh_plugin");
+/** Point Coach at the MX Bikes folder itself, rather than sending the rider to MXB App. */
+export const setGameDir = (dir: string) => invoke<CoachStatus>("coach_set_game_dir", { dir });
+
+/** One thing the recorder can draw over the game. Labels come from `hud.rs`. */
+export interface HudPart {
+  key: string;
+  label: string;
+  on: boolean;
+  /** The recorder this part needs, e.g. "0.24" for the newest ones. */
+  needs: string;
+}
+
+/** `hud.ini` as the recorder will read it: missing keys are on, except the map when MXBMRP3
+ *  is installed — `parts` already says what the recorder will really do. */
+export interface Hud {
+  enabled: boolean;
+  parts: HudPart[];
+  file: string;
+  /** MXBMRP3 sits beside the recorder and draws a track map of its own. */
+  mxbmrp3: boolean;
+  /** Where the live cue sits: the box's centre across, its top edge down, as fractions. */
+  cuePos: [number, number];
+  /** The recorder that last ran is older than the newest settings need. */
+  preExtras: boolean;
+}
+
+export const coachHud = () => invoke<Hud>("coach_hud");
+/** Turn one part on or off, or the whole HUD with `enabled`. Always written out, so the
+ *  recorder does what the switch says even when another plugin would decide for it. */
+export const coachSetHud = (key: string, on: boolean) => invoke<Hud>("coach_set_hud", { key, on });
+/** Move the live cue: `x` is the box's centre across the screen, `y` its top edge down it.
+ *  FrostMod 0.24 reads them; older recorders leave the cue where it was. */
+export const coachSetCuePos = (x: number, y: number) => invoke<Hud>("coach_set_cue_pos", { x, y });
+
+/** Whether the recorder speaks its cues (`cues/voice.ini`), how loud, 0–100, and in which voice. */
+export interface Voice {
+  enabled: boolean;
+  volume: number;
+  voice: CueVoice;
+  /** The recorder that last ran is older than the voice choice needs. */
+  preExtras: boolean;
+}
+
+/** The voices the recorder has clips for. */
+export type CueVoice = "female" | "male";
+
+export const coachVoice = () => invoke<Voice>("coach_voice");
+export const coachSetVoice = (enabled: boolean, volume: number, voice: CueVoice) =>
+  invoke<Voice>("coach_set_voice", { enabled, volume: Math.round(volume), voice });

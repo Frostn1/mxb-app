@@ -1,7 +1,7 @@
 {
   "name": "frost-monorepo",
   "private": true,
-  "version": "0.15.0",
+  "version": "0.15.1",
   "type": "module",
   "workspaces": [
     "packages/shared",
@@ -10,15 +10,15 @@
     "apps/coach"
   ],
   "scripts": {
-    "dev": "cd apps/manager && npm run dev",
-    "start-dev": "cd apps/manager && npm run start-dev",
-    "build-prod": "cd apps/manager && npm run build-prod",
-    "tauri": "cd apps/manager && npm run tauri",
-    "build": "npm run build --workspaces --if-present",
-    "typecheck": "npm run typecheck --workspaces --if-present",
+    "dev": "cd apps/manager && bun run dev",
+    "start-dev": "cd apps/manager && bun run start-dev",
+    "build-prod": "cd apps/manager && bun run build-prod",
+    "tauri": "cd apps/manager && bun run tauri",
+    "build": "bun run --filter '*' build",
+    "typecheck": "bun run --filter '*' typecheck",
     "lint": "eslint .",
-    "dev:studio": "cd apps/studio && npm run dev",
-    "tauri:studio": "cd apps/studio && npm run tauri",
+    "dev:studio": "cd apps/studio && bun run dev",
+    "tauri:studio": "cd apps/studio && bun run tauri",
     "dev:coach": "cd apps/coach && bun run dev",
     "tauri:coach": "cd apps/coach && bun run tauri"
   },

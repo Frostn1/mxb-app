@@ -10,7 +10,9 @@ import { I18nProvider, setAmbientVars, useT } from "@/i18n";
 import Sessions from "./Components/Sessions/Sessions";
 import Settings from "./Components/Settings/Settings";
 import UpdateBanner from "./Components/UpdateBanner";
+import { track } from "@/lib/analytics";
 import { UpdateProvider } from "./Context/Update";
+import SigninGate from "@frost/shared/Components/SigninGate/SigninGate";
 
 type View = "sessions" | "settings";
 
@@ -33,6 +35,12 @@ function Shell() {
   const [config, setConfig] = useState<Config>({ modsPath: "" });
   const [games, setGames] = useState<GameInfo[]>([MXB_FALLBACK]);
   const [view, setView] = useState<View>("sessions");
+  // Which page is open. Derived and counted by an effect rather than inside the rail's handler,
+  // for the reason the manager does the same: plenty of things move the view without going
+  // through it. `view.settings` is deliberately the manager's name — it is the same page.
+  useEffect(() => {
+    track(`view.${view}`);
+  }, [view]);
 
   const reloadConfig = useCallback(async () => setConfig(await getConfig()), []);
 
@@ -106,6 +114,8 @@ export default function App() {
       <I18nProvider>
         <UpdateProvider>
           <Shell />
+          {/* The Steam sign-in wall, shown only when the estate gate requires one. */}
+          <SigninGate />
         </UpdateProvider>
       </I18nProvider>
     </ThemeProvider>

@@ -27,7 +27,6 @@ import {
   detectGamePath,
   exportLogs,
   getModsRoot,
-  getOverlayState,
   logsInfo,
   onLogsShareProgress,
   openLogsFolder,
@@ -36,7 +35,6 @@ import {
   type LogsInfo,
   type LogsKind,
   type LogsShare,
-  overlayToggle,
   presetsListProfiles,
   setAutoRunFrostmod,
   setQueueRestartGame,
@@ -45,8 +43,6 @@ import {
   setInstantRefresh,
   setLaunchAtStartup,
   setModsPath,
-  setOverlayEnabled,
-  setOverlayHotkey,
   setProfilesPath,
   setRunInBackground,
   setWatchModsReload,
@@ -56,7 +52,6 @@ import {
   setWineRunner,
   wineHostInfo,
   type WineHostInfo,
-  type OverlayState,
   experimentalState as experimentalStateApi,
   type ExperimentalState,
   voiceDevices,
@@ -88,6 +83,14 @@ import {
   type VoiceDevices,
   type VoiceStatus,
 } from "@frost/shared/api/mods";
+import {
+  getOverlayState,
+  overlayToggle,
+  setOverlayEnabled,
+  setOverlayHotkey,
+  type OverlayState,
+} from "@frost/shared/api/overlay";
+import HotkeyField from "@frost/shared/Components/HotkeyField";
 import { useUpdate } from "../../Context/Update";
 import { usePlatform } from "@frost/shared/lib/usePlatform";
 import { useConfig } from "@frost/shared/Context/Config";
@@ -115,7 +118,6 @@ import {
   type DownloadPrefs,
 } from "@frost/shared/lib/downloadPrefs";
 import { useFrostmod } from "../../Context/FrostmodContext";
-import { prettyHotkey } from "../../lib/hotkey";
 import { formatBytes, formatDateShort } from "@frost/shared/lib/mods";
 import { copyText } from "../../lib/clipboard";
 import { UploadBar } from "../Share/TransferBar";
@@ -222,81 +224,6 @@ const DEVICE_DEFAULT = "__system_default__";
  *  Settings is on screen. Slow enough to be free, quick enough that alt-tabbing out of
  *  a race and looking here shows what the game is actually doing. */
 const OVERLAY_POLL_MS = 4000;
-
-/** Turn a `KeyboardEvent.code` into the token Tauri's accelerator parser expects. */
-function acceleratorKey(code: string): string | null {
-  if (/^Key[A-Z]$/.test(code)) return code.slice(3);
-  if (/^Digit[0-9]$/.test(code)) return code.slice(5);
-  if (/^F([1-9]|1[0-9]|2[0-4])$/.test(code)) return code;
-  return null;
-}
-
-/** Modifier-plus-key capture field for the overlay hotkey.
- *
- * A modifier is required: a bare `M` would be swallowed globally, including while the
- * player is typing a server chat message. */
-function HotkeyField({
-  value,
-  onCapture,
-  disabled,
-}: {
-  value: string;
-  onCapture: (accelerator: string) => void;
-  disabled?: boolean;
-}) {
-  const { t } = useI18n();
-  const [recording, setRecording] = useState(false);
-  const isMac = usePlatform() === "macos";
-
-  const pretty = prettyHotkey(value, isMac);
-
-  const onKeyDown = (e: React.KeyboardEvent) => {
-    e.preventDefault();
-    if (e.code === "Escape") {
-      setRecording(false);
-      return;
-    }
-    const key = acceleratorKey(e.code);
-    if (!key) return; // a modifier on its own — keep waiting for the real key
-    const mods: string[] = [];
-    // Cmd on macOS and Ctrl elsewhere are the same accelerator token. The Windows key
-    // is its own thing, so it must not be folded into it.
-    if (e.ctrlKey || (isMac && e.metaKey)) mods.push("CommandOrControl");
-    if (!isMac && e.metaKey) mods.push("Super");
-    if (e.altKey) mods.push("Alt");
-    if (e.shiftKey) mods.push("Shift");
-    if (mods.length === 0) {
-      toast.error(t("overlay.needModifier"), {
-        description: t("overlay.needModifierDesc"),
-      });
-      return;
-    }
-    setRecording(false);
-    onCapture([...mods, key].join("+"));
-  };
-
-  return (
-    <button
-      disabled={disabled}
-      onClick={(e) => {
-        // WebKit doesn't focus a button on click, and an unfocused button never sees
-        // the keydown we're about to wait for.
-        e.currentTarget.focus();
-        setRecording(true);
-      }}
-      onBlur={() => setRecording(false)}
-      onKeyDown={recording ? onKeyDown : undefined}
-      className={cn(
-        "min-w-[148px] cursor-default rounded-lg border px-3 py-1.5 text-center font-mono text-[12px] transition-colors disabled:opacity-50",
-        recording
-          ? "border-primary text-primary"
-          : "border-white/[0.09] text-foreground/85 hover:bg-foreground/[0.05]",
-      )}
-    >
-      {recording ? t("overlay.pressKeys") : pretty}
-    </button>
-  );
-}
 
 interface SettingsProps {
   /** Section to scroll to on open — set when something sent the player here for a
@@ -1679,6 +1606,10 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
                 <Monitor className="size-3.5" /> {t("overlay.showNow")}
               </Button>
             </div>
+
+            {overlayLive?.peer && (
+              <span className="text-[11.5px] text-muted-foreground">{t("overlay.coachLinked")}</span>
+            )}
 
             {/* The hotkey never bound — almost always another app holding the combo.
                 Named here because the overlay can't report it when it fails to open. */}

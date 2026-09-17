@@ -755,7 +755,10 @@ export const en = {
   "join.joining": "Joining…",
   "join.launching": "Joining {{address}}…",
   "join.alreadyRunning":
-    "Close {{game}} first — a running game can't be sent to a server.",
+    "{{game}} is already open — close it, then join from here.",
+  "join.gameOpen":
+    "{{game}} is already open. The app started it, so it's sitting behind this window. Close the game, then join from here.",
+  "join.showGame": "Show me the game",
   "join.failed": "Couldn't join that server",
   "join.manual": "Join a server that isn't listed",
   "join.noServers": "No servers listed yet — type an address you were given instead.",
@@ -948,6 +951,33 @@ export const en = {
   "serverBrowser.viewList": "List",
   "serverBrowser.waitingCount": "{{count}} waiting in line",
   "serverBrowser.queueHint": "Full. MXB App joins for you when a slot opens.",
+
+  // ── Is it the master server, or is it you? ──────────────────────────
+  "connection.checking": "Working out whether it's just you…",
+  "connection.notYou": "MX Bikes' own servers aren't answering",
+  "connection.likelyYou": "Everyone else is getting through",
+  "connection.failed": "The server list wouldn't load",
+  "connection.failingFor": "Failing for at least {{minutes}} min",
+  "connection.runCheck": "Check my connection",
+  "connection.verdict.upstream": "This is MX Bikes' own master server, not your connection. There's nothing to fix at your end — it usually comes back within a few minutes.",
+  "connection.verdict.local": "Everyone else is getting through right now, so this is something on this machine or this network.",
+  "connection.verdict.fine": "Everything is working. Whatever that was, it's over.",
+  "connection.verdict.unknown": "Not enough to say either way yet — too few apps have checked recently. Worth trying again in a minute.",
+  "connection.check.internet": "Internet",
+  "connection.check.dns": "Master server address",
+  "connection.check.udp": "Outbound UDP",
+  "connection.check.master": "Server list",
+  "connection.check.others": "Everyone else",
+  "connection.checkFootnote": "Outbound UDP only shows the datagram was allowed out, not that anything answered it.",
+
+  "registerServer.action": "Add your server",
+  "registerServer.title": "Add your server to the shared list",
+  "registerServer.blurb": "So the app remembers your server even when MX Bikes' own servers are down.",
+  "registerServer.note": "You only need this for a server that doesn't show up in the list — a new one, or a private one. Anything the game lists already gets remembered on its own.",
+  "registerServer.submit": "Add it",
+  "registerServer.done": "{{address}} is on the shared list",
+  "registerServer.failed": "Couldn't add that server",
+
   "queue.banner": "#{{position}} in line for {{name}}",
   "queue.turnBanner": "Your turn: join {{name}}",
   "queue.launchingBanner": "Joining {{name}}",
@@ -1544,16 +1574,10 @@ export const en = {
   "voice.unmute": "Unmute",
   "voice.proximity": "Hear riders from where they are",
   "voice.proximityDesc": "A rider beside you is loud and on that side; one two corners back is faint. Turn it off to hear everyone flat and equally loud. Falls back to flat on its own when the game isn't reporting positions.",
-  "overlay.pressKeys": "Press keys…",
-  "overlay.needModifier": "Add a modifier",
-  "overlay.needModifierDesc": "Hold Ctrl, Alt or Shift so the shortcut can't fire while you type.",
   "overlay.shortcutUpdated": "Overlay shortcut updated",
   "overlay.shortcutRejected": "Couldn't use that shortcut",
+  "overlay.coachLinked": "MXB Coach is linked: its tabs show in the overlay, and this shortcut opens both.",
   "overlay.registerFailed": "Overlay hotkey couldn't be registered",
-  "overlay.toClose": "{{hotkey}} to close",
-  "overlay.closeTitle": "Close overlay (Esc)",
-  "overlay.openMain": "Open full app",
-  "overlay.openMainTitle": "Close the overlay and open the main {{app}} window",
   "overlay.needsSetup": "Finish setting up {{app}} in its main window first — it needs to know where your {{game}} folder is.",
   "overlay.fullscreenBlocked": "The overlay can't show over exclusive fullscreen",
   "overlay.fullscreenBlockedDesc": "Set {{game}} to borderless or windowed in Options → Video, then try the shortcut again.",
@@ -1580,8 +1604,6 @@ export const en = {
     "Feel presets now carry how each control feels, like the throttle's dead zone, gain and smoothing. Your buttons and axes stay as they are.",
   "showcase.v0150.hub":
     "MXB Hub loads again when the store asks for a robot check: the app answers it quietly, or opens the store so you can finish it yourself.",
-  "showcase.v0150.secured":
-    "Secured content follows the access you actually have. If a creator removes you as a buyer, it stops opening the next time the app is online, and the app tells you why.",
   "showcase.v0140.hero.title":
     "Frost's Mod Manager, and a Studio of its own",
   "showcase.v0140.hero.body":
@@ -2015,6 +2037,13 @@ export const en = {
   "supporters.contributors": "Contributors",
   "supporters.contributorsDesc":
     "People who made the app better with ideas, testing and feedback.",
+  "supporters.kind.code": "Code contributions",
+  "supporters.kind.codeDesc": "Code they wrote, running in the build you're using.",
+  "supporters.kind.testing": "Testing",
+  "supporters.kind.testingDesc":
+    "Broke it on purpose, on builds nobody else had yet.",
+  "supporters.kind.ideas": "Ideas & feedback",
+  "supporters.kind.ideasDesc": "Suggested something that ended up shipping.",
   "reshade.needsGameFolder":
     "ReShade sits in your {{game}} folder — set that under Game folder, or point straight at it here.",
   "reshade.folder": "Looking in your {{game}} folder:",

@@ -23,8 +23,15 @@ export interface TrackProgram {
     /** The whole height budget, metres — everything is quantised against it. */
     scale: number;
     relief: { amplitude: number; wavelength: number; seed: number; texture: number };
-    /** What the ground is, which decides the surfaces either side of the line. */
+    /**
+     * What the ground is made of: how deep it cuts, how wide the shoulder runs. The *ride*.
+     */
     surface: "soil" | "sand" | "grass";
+    /**
+     * And what it looks like, which is a separate question. Left out the look follows
+     * `surface`, exactly as it always did.
+     */
+    texture?: TextureSet;
   };
   /** Degrees: 0 looks down +z, increasing clockwise towards +x. */
   start: { x: number; z: number; angle: number };
@@ -41,7 +48,93 @@ export interface TrackProgram {
    * follows the ground it crosses.
    */
   elevation: { at: number; height: number }[];
+  /** Which rules the lap is drawn and judged by. Left out for motocross. */
+  discipline?: Discipline;
+  /** What lines a lane's borders. Only a stadium discipline lays any; left out for soft. */
+  border?: LaneBorder;
+  /**
+   * What this was called before it grew banners and none. A project saved back then still
+   * carries it, and Rust still reads it, so the picker falls back to it rather than showing
+   * an old track the wrong answer.
+   *
+   * @deprecated read `border`.
+   */
+  tuff?: LaneBorder;
+  /**
+   * Whether a supercross lap stands in a stadium or in the open air. Ignored by the outdoor
+   * disciplines; left out for the stadium.
+   */
+  venue?: VenueKind;
 }
+
+/** Motocross, supercross or SuperMotocross. Mirrors `Discipline` in `trackprog.rs`. */
+export type Discipline = "mx" | "sx" | "smx";
+
+/**
+ * What a track's ground looks like: a look to start from, and the rider's own images over
+ * the top of it. Mirrors `TextureSet` in `trackprog.rs`.
+ */
+export interface TextureSet {
+  preset: TexturePreset;
+  sheets?: OwnSheet[];
+}
+
+/** `ride` follows the surface, which is what the look always did. */
+export type TexturePreset = "ride" | "soil" | "sand" | "grass" | "stadium";
+
+/** One of the rider's own images, standing in for a built-in ground sheet. */
+export interface OwnSheet {
+  slot: SheetSlot;
+  /** What the Studio stored it as — see `importTrackTexture`. */
+  id: string;
+}
+
+/** Which ground an image replaces. */
+export type SheetSlot = "ground" | "line" | "rut" | "grass";
+
+/** The four, in the order the picker shows them. */
+export const SHEET_SLOTS: SheetSlot[] = ["ground", "line", "rut", "grass"];
+
+/** An image the rider imported, as the picker shows it. Mirrors `OwnTexture`. */
+export interface OwnTexture {
+  id: string;
+  /** The file it came from, so it can be recognised. */
+  name: string;
+  /** A small PNG as a `data:` URL. */
+  thumb: string;
+}
+
+/**
+ * Take an image off the rider's own disk into the Studio's ground store.
+ *
+ * The path comes from the file picker. Nothing is ever fetched: the Studio has no list of
+ * ground to download and never asks anyone for one.
+ */
+export function importTrackTexture(path: string): Promise<OwnTexture> {
+  return invoke<OwnTexture>("import_track_texture", { path });
+}
+
+/** Everything already imported, so nobody has to find the same file twice. */
+export function listTrackTextures(): Promise<OwnTexture[]> {
+  return invoke<OwnTexture[]>("list_track_textures");
+}
+
+/** Drop one. A track still naming it paints with the ground it stood in for. */
+export function forgetTrackTexture(id: string): Promise<void> {
+  return invoke<void>("forget_track_texture", { id });
+}
+
+/**
+ * What lines a supercross lane: padded blocks a rider rides through, solid ones that stop the
+ * bike, a printed banner wall, or nothing. Mirrors `LaneBorder` in `trackprog.rs`.
+ */
+export type LaneBorder = "soft" | "solid" | "banners" | "none";
+
+/**
+ * Whether a supercross lap is laid in a stadium or out in a field. Mirrors `VenueKind` in
+ * `trackprog.rs`.
+ */
+export type VenueKind = "stadium" | "open";
 
 export type TrackSegment =
   /** `rise` is metres climbed over the segment; negative drops, zero follows the ground. */
@@ -87,6 +180,9 @@ export interface TrackPreview {
  * What a model is asked for. `program` is the whole lap, drawn by the model and measured by
  * the app, and only a strong model manages it. `settings` is the character only, and the
  * app's own walker draws the lap, so any model can do it, a free one included.
+ *
+ * Not a choice anyone is asked to make: which one works is a fact about the model that is
+ * configured, so `generate_track` picks it. Left here because the command still takes it.
  */
 export type GenerateMode = "program" | "settings";
 
@@ -111,6 +207,13 @@ export interface TrackSettings {
   tilt: number;
   landforms: number;
   elevationChanges: number;
+  /**
+   * Which kind of racing the brief asked for.
+   *
+   * The model's to pick, unless the switch on screen is set to something other than
+   * motocross — an explicit choice is not a brief's to overrule.
+   */
+  discipline: Discipline;
 }
 
 /** A generated track, and the settings it was drawn from when that was the mode. */
@@ -124,10 +227,16 @@ export interface Generated {
  *
  * Slow on purpose — the model lays out a lap that has to close, and the app builds and
  * measures every answer before accepting it, retrying with the measurements when it doesn't
- * land. Minutes, not seconds. Settings mode is seconds.
+ * land. Minutes, not seconds, unless the model can only be asked for settings, which is.
+ *
+ * `mode` is left to the app unless something has a reason to force it.
  */
-export function generateTrack(brief: string, mode: GenerateMode): Promise<Generated> {
-  return invoke<Generated>("generate_track", { brief, mode });
+export function generateTrack(
+  brief: string,
+  mode?: GenerateMode,
+  discipline: Discipline = "mx",
+): Promise<Generated> {
+  return invoke<Generated>("generate_track", { brief, mode, discipline });
 }
 
 /** Which API shape a model of the user's own speaks. */
@@ -171,11 +280,6 @@ export function testTrackModel(
   return invoke<void>("test_track_model", { kind, baseUrl, model, key });
 }
 
-/** A track to start from, with no model involved. */
-export function baseTrackProgram(): Promise<TrackProgram> {
-  return invoke<TrackProgram>("base_track_program");
-}
-
 /** A lap with nothing on it, to start from scratch. */
 export function blankTrackProgram(): Promise<TrackProgram> {
   return invoke<TrackProgram>("blank_track_program");
@@ -190,12 +294,21 @@ export function blankTrackProgram(): Promise<TrackProgram> {
 export function randomTrackProgram(
   seed?: number,
   scale: TrackScale = "normal",
+  discipline: Discipline = "mx",
+  density?: number,
 ): Promise<TrackProgram> {
-  return invoke<TrackProgram>("random_track_program", { seed, scale });
+  return invoke<TrackProgram>("random_track_program", { seed, scale, discipline, density });
 }
 
-/** Easy: smaller jumps, shallower ruts. ARL: the bigger, rougher raced build. */
-export type TrackScale = "easy" | "normal" | "arl";
+/**
+ * How packed a lap is, as a multiple of what a real round carries. 1 is the measured density.
+ *
+ * Only the stadium disciplines read it — a national spaces its jumps by a different rule.
+ */
+export const DENSITY_RANGE = { min: 0.65, max: 1.35, step: 0.05, reference: 1 } as const;
+
+/** Easy: smaller jumps, shallower ruts. Pro: the bigger, rougher raced build. */
+export type TrackScale = "easy" | "normal" | "pro";
 
 /**
  * Give the track a height budget that fits it.

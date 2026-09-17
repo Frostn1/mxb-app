@@ -28,8 +28,9 @@ consequences fall out of that, and they're baked into the schema:
 | POST | `/v1/enroll` | invite code | Trade an invite for an account and a bearer token |
 | GET | `/v1/servers` | — | Server registry. Public: it is the app's join picker, and the people who most need it are the ones with no account yet. `agent_url` is not returned. |
 | POST | `/v1/servers/:id/hello` | agent token | A provisioned box announcing that it is up. Its address is taken from `cf-connecting-ip`, never from the body, so a box cannot register somebody else's. |
-| GET | `/v1/me` | bearer | Account, and a per-bike summary of what is stored for it |
-| PUT | `/v1/me/guid` | bearer | Claim a GUID. First-come. |
+| GET | `/v1/me` | bearer | Account, and a per-bike summary of what is stored for it. Looks ordinary to a banned install on purpose — see below. |
+| GET | `/v1/app/gate` | bearer | The desktop apps' startup gate. `{status:"ok"}` to run; `{status:"signin"}` when `MXB_REQUIRE_STEAM` is on and the account has no confirmed Steam link (the app shows a sign-in wall); `{status:"unsupported"}` for a banned install (a mundane untruth, never the word "ban"). |
+| PUT | `/v1/me/guid` | bearer | Claim a GUID. Derived from the linked Steam identity and pinned (the client's value is ignored) for a Steam account; first-come for a non-Steam one; refused if banned. |
 | PUT | `/v1/loadout` | bearer | Replace **one bike's** loadout. Kept for clients older than per-bike storage. |
 | PUT | `/v1/loadouts` | bearer | Replace the whole look, every bike at once. Returns `missing` — the blobs still to upload. |
 | GET | `/v1/roster?server=<id>` | bearer | Riders and their paints, for the sync. De-duplicated by destination. |
@@ -42,7 +43,15 @@ consequences fall out of that, and they're baked into the schema:
 | POST | `/v1/bmac/webhook` | HMAC signature | Buy Me a Coffee announcing a supporter. Posted on to Discord. |
 | POST | `/v1/usage` | — | Anonymous usage counters from an install. Unauthenticated because most people who run the app never claim an invite; bounded by body size, event count and a per-address daily cap. |
 | GET | `/v1/usage/stats` | `ADMIN_KEY` | The same numbers as JSON, for anything that scripts them |
-| GET/POST | `/v1/web/admin/*` | Steam sign-in + `MXB_ADMIN_STEAM_IDS` | The dashboards at mxbsecure.com/admin — usage, diagnostics, paint sync, plugin keys |
+| POST | `/v1/master-status` | — | One install saying whether it could reach MX Bikes' own master server. Unauthenticated for the same reason as `/v1/usage`; one row per install per minute. |
+| GET | `/v1/status` | — | Is the master answering? Public, CORS-open and cacheable — it is what mxbsecure.com/status renders and what a Discord bot answering `!timeout` reads. |
+| POST | `/v1/roster` | — | Addresses an app saw in the game's own master list. Held back until distinct networks agree — see below; without that this would be a reflection amplifier. |
+| GET | `/v1/roster` | — | The shared server book. Public and cacheable; the app seeds its own address book from it. |
+| POST | `/v1/roster/mine` | bearer (invited) | A server's own operator adding it, which needs no corroborating: the account is the corroboration. |
+| GET | `/v1/web/me` | Steam sign-in | Who is signed in on mxbsecure.com, whether they are a creator, and what is left of today's lock ceiling. Never cached. |
+| POST | `/v1/web/creator` | Steam sign-in | Signing up as a creator, which is what opens `/admin/assets*`. Anyone signed in may; `MXB_ASSETS_PER_DAY` is what bounds them afterwards. |
+| GET | `/v1/web/lockweb/*` | Steam sign-in | The WebAssembly locker. It cannot live on the static site, which serves everything it holds to everybody. Any signed-in rider gets it: the GUID lock is for all of them. |
+| GET/POST | `/v1/web/admin/*` | Steam sign-in + `MXB_ADMIN_STEAM_IDS` | The dashboards at mxbsecure.com/admin — usage, diagnostics, paint sync, plugin keys, creators, bans |
 | GET | `/v1/plugins` | — | The paid-plugin catalogue. Public: what is on offer is not a secret. |
 | GET | `/v1/me/plugins` | bearer | What this account holds, each with a freshly signed license |
 | POST | `/v1/plugins/redeem` | bearer | Trade a key for months on a license |
@@ -81,8 +90,8 @@ The route takes no bearer token, because BMAC has no account here. Its credentia
 before it is verified. Two secrets, neither in the repository:
 
 ```sh
-npx wrangler secret put BMAC_WEBHOOK_SECRET          # shown by BMAC when the webhook is made
-npx wrangler secret put DISCORD_DONATION_WEBHOOK_URL # the channel webhook — a credential itself
+bunx wrangler secret put BMAC_WEBHOOK_SECRET          # shown by BMAC when the webhook is made
+bunx wrangler secret put DISCORD_DONATION_WEBHOOK_URL # the channel webhook — a credential itself
 ```
 
 Without them the route answers 503, the same way provisioning does without its AWS key.
@@ -123,6 +132,77 @@ spending the code, and granting is refused rather than silently changing nothing
 putting someone right. `scripts/mint-plugin-key.ts` still prints SQL for a machine that
 cannot reach the page.
 
+### Is MX Bikes down, or is it you?
+
+MX Bikes answers a dead master server with `connection timeout` and nothing else — the
+identical string it prints for a firewall rule, a broken DNS server, a captive portal or a
+router that wants power-cycling. So the commonest failure in the game is the one failure it
+gives a player no way at all to place. It reaches the Discord as several people each debugging
+a machine that is working perfectly, and by the time anyone works out the master was down for
+ten minutes it is already back.
+
+**This service cannot check for itself.** The master speaks its own protocol over UDP; a Worker
+has no datagram socket, and the protocol is not in the public tree to put in one. A TCP probe
+of the port would answer a different question, and answer it wrong.
+
+So the check is the apps. Every MXB App already talks to the master whenever somebody opens the
+Servers tab, and each one `POST`s whether its own fetch worked — an install id, worked-or-didn't,
+and one word from `PROBE_REASONS` saying why not. That is the whole payload: no address, no
+rider name, no server, no path. It turns out to be a *better* signal than a probe of our own
+rather than a substitute for one, because "is it up from one Cloudflare colo" was never the
+question anybody was asking. "Are the other twenty people who tried in the last ten minutes
+also failing" is.
+
+`GET /v1/status` folds the last ten minutes into one answer, each install counted once by its
+**most recent** minute. Latest-wins matters: an "ever succeeded in the window" rule reads `up`
+through the first ten minutes of every outage, because each affected install was working right
+up until the master stopped — which is exactly the window people are in the channel asking
+about. Below `MIN_INSTALLS` the answer is `unknown` rather than a guess; a status page that
+guesses in the quiet hours is one nobody believes in the loud ones.
+
+Rows live in `master_probes`, one per install per minute (so one person hammering Refresh counts
+once, not twenty times), and are swept after an hour on the same cron as everything else.
+Reporting rides on the app's anonymous-stats setting; reading does not, because the reason to
+withhold a report is privacy and the reason to read the answer is that your game is broken.
+
+### The shared server book
+
+MXB App already survives a dead master server, and the mechanism matters because this is only
+its missing half. The master is the sole source of **discovery** — the only thing that can tell
+you a server exists — but it is the source of nothing else: a server answers `GETINFO` to
+whoever asks, with no account, no ticket and no challenge, and that reply carries the name, the
+riders, the seats and the whole event blob. So the app keeps a book of every address it has been
+told about and, when the master won't answer, rebuilds the entire list by asking the servers
+themselves.
+
+That works, and it works for the wrong people. The book is per-install and starts empty, so it is
+worth nothing to a fresh install and nothing to anyone who had not opened the Servers tab before
+the outage began — which is the population an outage lands on hardest. `/v1/roster` pools it, so
+the fallback is in place before the outage rather than after it.
+
+**Addresses, and nothing else.** No names, no locations, no operator free text. `GETINFO` already
+carries all of it, so a stored copy would only ever be staler — and an unauthenticated endpoint
+that takes free text from anonymous clients and serves it to every install is a content-injection
+channel this does not need.
+
+**Why an address has to be corroborated.** This list tells thousands of apps where to send a
+datagram, so an endpoint that served whatever it was handed would be a reflection amplifier with
+a public API: one POST naming a victim's `host:port`, and every MXB App probes them on the next
+outage. Two things stop that. `isPublicGameAddress` refuses loopback, private space, carrier NAT,
+link-local (where cloud metadata lives) and multicast before anything is stored; and an address is
+only *served* once `MIN_REPORTERS` distinct reporters have independently seen it in the game's own
+master list **on the same day**. A reporter is the day-salted digest of the caller's address that
+open signup already computes — never an install id, which one machine can mint at will — and the
+same-day rule is forced by that salt: the same network hashes differently tomorrow, so counting
+across days would read one persistent reporter as several and hand the injection straight back.
+
+Storage is `server_roster` (one row per address, `corroborated_at` sticky once earned) and
+`server_sightings` (evidence, swept the next day). A report takes the cheap path for every address
+already corroborated — a `last_seen` bump and nothing else — which in the steady state is the
+whole list, so contributing 300 servers every few minutes stays a couple of statements rather than
+six hundred. Servers in our own registry are folded into the answer, so a caller does not have to
+know we keep two lists.
+
 ### Usage counters
 
 How many people run the app, and which parts they open — the question release downloads and
@@ -148,9 +228,170 @@ Read them at mxbsecure.com/admin, signed in with a Steam account listed in
 bunx wrangler secret put ADMIN_KEY   # without it /v1/usage/stats answers 503, not 401
 ```
 
-The app's side is `src-tauri/src/usage.rs`. It is off in debug builds unless
-`MXB_ANALYTICS_DEV=1`, off for a run with `MXB_NO_ANALYTICS=1`, and off for good from the
-switch in Settings → General.
+The app's side is `crates/core/src/usage.rs`, shared by all three apps. It is off in debug
+builds unless `MXB_ANALYTICS_DEV=1`, off for a run with `MXB_NO_ANALYTICS=1`, and off for good
+from the switch in Settings → General. The names it may send are a closed list there
+(`KNOWN_EVENTS`), mirrored by the one here; `usage.test.ts` reads the Rust file and fails if
+the two drift.
+
+#### What holds the numbers up
+
+The endpoint cannot authenticate — a token for every install would itself be an identifier —
+so what keeps a figure worth deciding from is a stack of bounds rather than a credential:
+
+- **`application/json` is required.** Without it a report is a CORS *simple request*, which
+  means any web page can have its visitors post one from their own address — and the
+  per-address cap buys nothing when every visitor brings a fresh address. Insisting on a type
+  that needs a preflight, on a route that answers no CORS headers, is what closes that.
+- **Row ceilings.** Reports accumulate onto a `(install, app, day)` row, and nothing used to
+  bound the total: reports that each looked honest could put thousands of days of wall clock
+  inside one day. A row now stops at `MAX_DAY_MINUTES` / `MAX_DAY_SESSIONS`.
+- **A build signature**, where a deployment turns it on. Optional and **off by default**, and
+  it must stay off until signed builds are the ones in the field — switching early throws
+  everybody's numbers away silently.
+
+  Rolling it out is three steps, **in this order**:
+
+  ```sh
+  # 1. The same value on both sides. Set the repo secret MXB_USAGE_KEY in mxb-app first —
+  #    the release workflows already pass it to the builds.
+  bunx wrangler secret put USAGE_SIGNING_KEY
+  # 2. Tag a release of each app, and wait for signed builds to actually be out there.
+  # 3. Only then: "MXB_USAGE_REQUIRE_SIGNATURE": "1" in wrangler.jsonc.
+  ```
+
+  The apps pick the key up at build time from `MXB_USAGE_KEY`, and `crates/core/build.rs`
+  XOR-obfuscates it before baking it in so it is not a `strings` hit. A build without it —
+  which is what a fork and the public repo produce — signs nothing and is accepted while the
+  switch is off. The key still ships inside a downloadable binary, so this is **not**
+  authentication: it raises the floor from "anyone with a terminal" to "someone willing to
+  reverse a binary", which is the whole of the ambition.
+
+None of that makes a field unforgeable — `version`, `os` and `game` are still whatever the
+caller said, and they are what "can I stop shipping 0.8.x" and "is GP Bikes worth carrying"
+are read off. Together the bounds make forging one cost more than the decision it would move.
+
+### The GUID is the Steam identity, and cannot be spoofed
+
+A rider's MX Bikes GUID is not a separate fact we collect and trust — for a Steam copy of the
+game it *is* the Steam account, written differently: `FF` followed by the SteamID64 as sixteen
+uppercase hex digits (`guidFromSteamId` in `steam.ts`). The game derives it that way, mxb-ranked
+keys a rider page on it, and so do we.
+
+That matters because the Steam half is the one we can prove. `accounts.steam_id` is only ever set
+by the Valve OpenID round trip (`/v1/steam/return`, `verifyAssertion`) — no endpoint trusts a
+client-posted Steam ID — so once an account is linked, its identity is Valve's word, not the
+app's. From that we **derive** the GUID and **pin** it (`pinGuidFromSteam` in `steamlink.ts`):
+
+- On every Steam link, the derived GUID is written to the account, and if any other row was
+  holding it — a stale first-come claim, or a spoofer who grabbed the victim's GUID — that row is
+  dispossessed in the same batch. Valve's word beats first-come.
+- `PUT /v1/me/guid` from a Steam-linked account ignores whatever the app sent and stores the
+  derived value. A Steam player's only valid GUID is the one their identity maps to, so this both
+  auto-corrects an honest stale value and refuses a spoof, with the same answer.
+- `0039_derive_guids.sql` backfills every already-linked account at deploy and clears the GUIDs
+  that were only guesses or spoofs.
+
+The app doesn't have to *observe* its own GUID any more either — it derives it from the signed-in
+Steam account (`mxb_core::steamid::local_guid`) the moment it starts, rather than watching a
+dedicated-server log the way it used to. Auto-found, and the same value the server will accept.
+
+A non-Steam (Piboso) copy has no SteamID64 to derive from, so its GUID stays opaque and
+first-come, corroborated by the sightings other installs report. That is the one identity a ban
+still leans on the claim log for; a Steam identity is nailed down by Valve.
+
+#### Requiring a Steam sign-in for the whole estate
+
+`MXB_REQUIRE_STEAM` (a var in `wrangler.jsonc`, `"1"` to enable, off by default) turns the
+startup gate into a hard wall: an account with no Valve-confirmed Steam link gets `signin`
+instead of `ok`, and the app shows "Sign in with Steam" and will not run until the OpenID round
+trip lands (`steam_link_start` → the browser → `/v1/steam/return`), which sets `steam_id` and
+pins the derived GUID. A ban still wins over the requirement.
+
+Turned on, every install becomes a proven identity — which is what makes the GUID and the ban
+unspoofable for the whole estate rather than only for the accounts that happened to link. It is a
+switch and not a build for one reason: it locks out anyone without a **Steam** copy of the game.
+A Piboso owner has no Steam identity to confirm and cannot pass the wall, so enabling this is a
+deliberate "Steam players only" decision the deployment makes and can reverse — not something
+baked into a release.
+
+### Banning a rider
+
+Every other revocation here is about *content*: a creator withdraws an asset, we take one down,
+a removal takes the buyers' keys back. A ban is the other direction — somebody who unlocked
+protected content and passed it around, refused across everything we run. MXB App, Studio,
+Coach, FrostMod and mxbsecure are one brand, so a ban is a ban from all of it, not from the
+locking system alone. `src/bans.ts` is the whole of it, and `0038_guid_bans.sql` says why it is
+keyed the way it is.
+
+**Keyed on the MX Bikes GUID.** It is the identity the game issues per install, it is what a
+report about cracked content carries, and it is the one of the three we hold that is neither
+free to mint (our account ids) nor replaceable for the price of a second purchase (a Steam ID).
+
+**Resolved through every identity we can tie to it**, which is what makes it worth more than a
+reinstall. `banFor` asks "is any identity this caller can be tied to a banned one", following
+the GUID in front of it, every GUID the calling account holds *or has ever claimed*
+(`guid_claims`), every account on the same Steam identity now or in the link log
+(`steam_links`), and every GUID those accounts have used. So a second account on the same Steam
+login, a fresh GUID claimed by a banned account, and a fresh Steam account on a banned install
+all resolve back to the ban. `guid_claims` exists for exactly the reason `steam_links` does:
+`accounts.guid` is a single mutable cell, and a ban that only read it would end at a rename.
+
+**Asked at three doors, never per feature**, so a product added later inherits it:
+
+| Door | What it covers |
+|---|---|
+| `route`, straight after `authenticate` | Every bearer-token endpoint in the estate: voice, paint sync, presence, the queue, the server registry, provisioning, the paid plugins, the key grants. They are all below that line, so a route added below it is covered without anybody remembering to ask. |
+| `authorize` in `assets.ts` | The creator surface, which arrives on a sign-in cookie or a creator API key: no locking, no selling, no new asset ids, no API keys. |
+| `web.ts` | mxbsecure.com — the signed-in identity, the creator signup, and the locker download. |
+
+A closed list (`bannedMayUse`) names the few endpoints that stay open to a banned account, and
+each is there because refusing it outright would work against the ban:
+
+- `GET /v1/app/gate` is the one that stops the apps opening. A banned install reaches it and is
+  told `{status:"unsupported"}` with a plausible, false reason ("this copy couldn't be verified,
+  reinstall"); the app then refuses to run. It is disguised on purpose — see **The app is lied
+  to** below.
+- `GET /v1/me` still answers, and still looks ordinary. The app is never told here that it is
+  banned; the gate above turns it away instead, so `/v1/me` staying unremarkable is part of the
+  disguise.
+- `PUT /v1/diagnostics` still observes, and still answers `{ ok: true }` whatever it made of the
+  report. Refusing it would blind us to the install we most want to watch.
+- `POST /v1/steam/login` still links an identity, which is the plumbing an appeal is decided on.
+- `POST /v1/assets/status` still answers, with `revoked: true` for every secured file on the
+  machine — this is what makes the app delete the keys it already holds, and a blanket 403 there
+  would read as "we don't know", which keeps them. It carries no ban flag: the per-asset
+  `revoked` reads exactly like the creator having removed the buyer, which is the disguise. And
+  `.mxbkey` opens offline forever, so without this a ban would leave the banned install playing
+  everything it had already unlocked.
+- `POST /v1/keys/grant` and `POST /v1/entitlements/check` still answer, and still write the
+  denial to `entitlement_grants` as `banned` — a banned install walking the catalogue is only
+  visible if the "no"s are recorded. What the app *sees* is the disguised failure (the grant) or
+  a plain `"unavailable"` (the check), never the word.
+
+#### The app is lied to; the website is not
+
+The website (`/v1/web/me`, the lock pages, the dashboard) tells a banned creator plainly that
+they are banned and why, because mxbsecure.com is where an appeal starts. The desktop apps are
+told the opposite — a verification/integrity failure — and it is deliberate. The app is not a
+place to argue; it is a place a content thief is trying to keep using. "Banned" only tells them
+to make another account, the honest message is the exact next-step coaching they would act on,
+and the reinstall the disguise names cannot help them, because a ban follows the GUID, the Steam
+login and the install, never the files. We always know it is a ban — the ledger, the admin page
+and the internal `reason` all say so. The machine in front of the person does not. The app side
+of the gate — the marker that keeps a blocked install blocked even offline — lives in
+`mxb-app`'s `gate.rs`.
+
+What a ban cannot reach is what carries no identity: the anonymous usage counters, the
+master-server probe, the shared server book, a live share code, and track generation (capped by
+its own shape rather than by who is asking). There is nothing there to match a ban against.
+
+**Reversible, and reviewable.** A ban carries a reason (shown to the rider), the evidence, and
+the admin who applied it; lifting one is a timestamp, never a delete, so an upheld appeal stays
+readable and the same stale report cannot re-ban off it. The six installs the deployment ships
+banned arrived in the migration on purpose — this is the switch that refuses a paying customer,
+so turning it on leaves a diff somebody can review and revert. Later ones go through
+mxbsecure.com/admin/bans (`GET`/`POST /v1/web/admin/bans`), which records who pressed it.
 
 ## Security notes
 
@@ -166,12 +407,12 @@ switch in Settings → General.
 ## Development
 
 ```sh
-npm install
-npx wrangler types                                              # regenerate Env
-npx tsc --noEmit
-npx vitest run
-for m in migrations/*.sql; do npx wrangler d1 execute mxb-control-plane --local --file "$m"; done
-npx wrangler dev
+bun install
+bunx wrangler types                                              # regenerate Env
+bunx tsc --noEmit
+bunx vitest run
+for m in migrations/*.sql; do bunx wrangler d1 execute mxb-control-plane --local --file "$m"; done
+bunx wrangler dev
 ```
 
 ### Pointing the app at it
@@ -181,7 +422,7 @@ a shipped binary always uses the baked-in URL, because responses from here becom
 into the game's mods folder and a redirectable target is a way to put content on a player's disk.
 
 ```sh
-MXB_EXPERIMENTAL=1 MXB_CONTROL_PLANE=http://127.0.0.1:8799 npm run start-dev
+MXB_EXPERIMENTAL=1 MXB_CONTROL_PLANE=http://127.0.0.1:8799 bun run start-dev
 ```
 
 The paint-sync round trip has a live test that needs both:
@@ -192,5 +433,5 @@ MXB_CONTROL_PLANE=http://127.0.0.1:8799 MXB_TEST_TOKEN=<token from /v1/enroll> \
   cargo test --locked live_sync -- --ignored --nocapture
 ```
 
-Deploy with `npx wrangler deploy`. Resources already provisioned in the personal account:
+Deploy with `bunx wrangler deploy`. Resources already provisioned in the personal account:
 D1 `mxb-control-plane` (WEUR) and R2 `mxb-paints` (WEUR).

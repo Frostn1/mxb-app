@@ -12,8 +12,10 @@
  * — who would then be signed in as them.
  */
 
-import { allowedOrigin, assetOrigins, cors, refuseCrossSiteWrite } from "./assets";
+import { allowedOrigin, assetOrigins, cors, lockAllowance, refuseCrossSiteWrite } from "./assets";
 import { tokenMatches } from "./auth";
+import { BANNED, banFor, isBanned } from "./bans";
+import { makeCreator } from "./creators";
 import { repairBySteamId } from "./steamlink";
 import { steamResult } from "./page";
 import { isWebAdmin, isWebAdminPath, webAdminRoutes } from "./webadmin";
@@ -63,7 +65,10 @@ export async function webRoutes(
   const origin = allowedOrigin(request, env);
   const key = env.MXB_WEB_SESSION_KEY;
 
-  if (method === "OPTIONS" && (path === "/v1/web/me" || path === "/v1/web/logout" || isWebAdminPath(path))) {
+  if (
+    method === "OPTIONS" &&
+    (path === "/v1/web/me" || path === "/v1/web/logout" || path === "/v1/web/creator" || isWebAdminPath(path))
+  ) {
     if (request.headers.get("Origin") && !origin) return cors(json(403, { error: "origin not allowed" }), null);
     return cors(new Response(null, { status: 204 }), origin, true, "GET, POST, OPTIONS");
   }
@@ -134,20 +139,33 @@ export async function webRoutes(
     const session = await webSession(request, env);
     if (!session) return cors(json(401, { error: "not signed in" }), origin);
     const find = () =>
-      env.DB.prepare("SELECT rider_name, kind, creator_at FROM accounts WHERE steam_id = ?")
+      env.DB.prepare("SELECT id, rider_name, kind, creator_at FROM accounts WHERE steam_id = ?")
         .bind(session.steamId)
-        .first<{ rider_name: string; kind: string; creator_at: number | null }>();
+        .first<{ id: string; rider_name: string; kind: string; creator_at: number | null }>();
     // Same retry as `/admin/assets`: a lost `steam_id` would otherwise report a linked creator
     // as neither linked nor a creator, which is the confusing half of the failure.
     const account = (await find()) ?? ((await repairBySteamId(env, session.steamId)) ? await find() : null);
     // A web-only profile (made for a creator on the site) isn't an MXB App profile.
     const app = account && account.kind !== "web" ? account : null;
+    // Said plainly, and said here, because this is the answer every page on the site draws
+    // itself from. A banned account that was only ever refused at the moment it tried to lock
+    // something would read as a site that is broken; it is not broken, it is closed to them.
+    const ban = await banFor(env, { accountId: account?.id, steamId: session.steamId });
+    // How much of today's ceiling is left, so the lock page can say so before somebody picks a
+    // 600 MB file and finds out from a 429. Counted only for a creator: nobody else has one.
+    const locks = account?.creator_at ? await lockAllowance(env, account.id) : null;
     const me = cors(
       json(200, {
         steamId: session.steamId,
         name: session.name || app?.rider_name || "",
-        creator: !!account?.creator_at,
+        // A banned account is not a creator as far as the site is concerned: `assets.ts`
+        // refuses every lock, so drawing the dashboard for them would be a page of buttons
+        // that all fail. The `creator_at` timestamp itself is left alone — the ban is not a
+        // removal, and lifting it puts them back exactly where they were.
+        creator: !!account?.creator_at && !ban,
         linked: !!app,
+        ...(ban ? { banned: true, banReason: ban.reason } : {}),
+        ...(locks && !ban ? { locks } : {}),
         // So the site knows whether to offer the dashboards at all. Never the gate itself —
         // every admin route checks the session again, and a client flag decides nothing.
         admin: isWebAdmin(session.steamId, env),
@@ -159,6 +177,36 @@ export async function webRoutes(
     // long after they are, with nothing on the page to suggest the answer is old.
     me.headers.set("Cache-Control", "no-store");
     return me;
+  }
+
+  /**
+   * `POST /v1/web/creator` — the signed-in Steam account becomes a creator.
+   *
+   * This is mxbsecure's front door. It used to be a line in the admin page; a creator is now
+   * anyone who signs in with Steam and asks, because the invite list was gatekeeping a tool
+   * whose real protection is elsewhere — every asset is still tied to the account that made
+   * it, and `MXB_ASSETS_PER_DAY` caps what that account can mint in a day.
+   *
+   * Idempotent, and it takes no body: the Steam account in the cookie is the whole request,
+   * so there is nothing here to get wrong and nothing to forge that isn't the session itself.
+   */
+  if (method === "POST" && path === "/v1/web/creator") {
+    const refused = refuseCrossSiteWrite(request, env);
+    if (refused) return cors(refused, origin);
+    const session = await webSession(request, env);
+    if (!session) return cors(json(401, { error: "not signed in" }), origin);
+    // The front door is open to everyone except the people we shut it on. Refused here as well
+    // as in `assets.ts` so a ban doesn't leave a `creator_at` timestamp behind it that somebody
+    // has to remember to clear if the ban is ever lifted for other reasons.
+    if (await isBanned(env, { steamId: session.steamId })) {
+      return cors(json(403, { error: BANNED }), origin);
+    }
+    const made = await makeCreator(env, session.steamId, "self");
+    const said = cors(json(made.already ? 200 : 201, { creator: true, already: made.already }), origin);
+    // Same reason `/v1/web/me` is never cached: this is the answer that changes what somebody
+    // may do, at the moment they do it.
+    said.headers.set("Cache-Control", "no-store");
+    return said;
   }
 
   if (method === "POST" && path === "/v1/web/logout") {
@@ -190,16 +238,20 @@ const LOCKWEB_FILES: Record<string, string> = {
 };
 
 /**
- * The in-browser locker, handed to affiliated creators and to nobody else.
+ * The in-browser locker, handed to any signed-in Steam account.
  *
  * It cannot live on the site. mxbsecure.com is static assets, so everything it serves is
  * public — committing the locker there would publish the packer to anyone who guessed the
  * URL, gate or no gate, because the gate only decides what the page draws. It is served from
  * here because this is the host the `__Host-` session cookie is bound to: mxbsecure.com never
- * receives that cookie and so could not check a creator even if it wanted to.
+ * receives that cookie and so could not tell one visitor from another even if it wanted to.
  *
- * Being a creator is `creator_at`, set by hand for an affiliated creator. A Steam sign-in
- * alone gets a 403 here, exactly as it does on `/admin/assets`.
+ * The gate is the sign-in, not creator standing. The same WebAssembly does both locks, and the
+ * GUID lock is for every rider sending a track to a friend — asking those people to declare
+ * themselves creators of something they aren't would be a lie told to a form. Creator standing
+ * is a click away in any case (`POST /v1/web/creator`), so gating the file on it would stop
+ * nobody and only make the refusal harder to read. What the sign-in still buys is a Steam
+ * account behind every fetch of it, which is what keeps this from being a public download.
  */
 async function lockweb(request: Request, url: URL, env: Env, origin: string | null): Promise<Response> {
   const name = url.pathname.slice("/v1/web/lockweb/".length);
@@ -207,15 +259,12 @@ async function lockweb(request: Request, url: URL, env: Env, origin: string | nu
   if (!type) return cors(json(404, { error: "no such file" }), origin);
 
   const session = await webSession(request, env);
-  if (!session) return cors(json(401, { error: "not signed in" }), origin);
-
-  const find = () =>
-    env.DB.prepare("SELECT creator_at FROM accounts WHERE steam_id = ?")
-      .bind(session.steamId)
-      .first<{ creator_at: number | null }>();
-  const account = (await find()) ?? ((await repairBySteamId(env, session.steamId)) ? await find() : null);
-  if (!account?.creator_at) {
-    return cors(json(403, { error: "mxbsecure is invite only, for affiliated creators" }), origin);
+  if (!session) return cors(json(401, { error: "sign in with Steam to lock a file" }), origin);
+  // The locker is the packer. Handing it to somebody banned for unlocking other people's
+  // content would be handing them the one file on this host worth taking — and they would keep
+  // it, sign-in or no sign-in, long after the ban.
+  if (await isBanned(env, { steamId: session.steamId })) {
+    return cors(json(403, { error: BANNED }), origin);
   }
 
   const object = await env.LOCKWEB.get(name);

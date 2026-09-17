@@ -38,6 +38,7 @@ import { Input } from "@frost/shared/Components/ui/input";
 import { TrackViewer } from "@frost/shared/Components/Viewer/TrackViewer";
 import BuildCard from "./BuildCard";
 import LapPlan from "./LapPlan";
+import RealPlace from "./RealPlace";
 import ElevationCurve from "./ElevationCurve";
 import { Switch } from "@frost/shared/Components/ui/switch";
 import { Segmented } from "@frost/shared/Components/ui/segmented";
@@ -48,9 +49,9 @@ import { isRunning, useTrackBuild } from "../../../Context/TrackBuild";
 import { UnsavedRegistry } from "../../Shell/ContextBar";
 import { cn } from "@frost/shared/lib/utils";
 import {
-  baseTrackProgram,
   blankTrackProgram,
   randomTrackProgram,
+  DENSITY_RANGE,
   closeTrackLap,
   fitTrackBudget,
   checkTrack,
@@ -59,8 +60,6 @@ import {
   saveTrackProject,
   TRACK_PROJECT_EXT,
   generateTrack,
-  getTrackModel,
-  type GenerateMode,
   lapLength,
   FEATURE_COLOUR,
   elevationAt,
@@ -76,12 +75,20 @@ import {
   roomiestGap,
   setTrackTools,
   trackToolsStatus,
+  SHEET_SLOTS,
+  importTrackTexture,
+  listTrackTextures,
+  type OwnTexture,
+  type SheetSlot,
+  type TexturePreset,
+  type TextureSet,
   type LapStep,
   type TrackFeature,
   type TrackFeatureKind,
   type TrackPreview,
   type TrackProgram,
   type TrackScale,
+  type Discipline,
   type TrackSegment,
   type TrackToolsStatus,
 } from "../../../api/trackgen";
@@ -100,6 +107,8 @@ import {
 export default function TrackStudio() {
   const t = useT();
   const [brief, setBrief] = useState("");
+  // Whether the real-place panel is open. Its own state, because it replaces the whole tab.
+  const [fromPlace, setFromPlace] = useState(false);
   const [working, setWorking] = useState<"generate" | "preview" | "export" | null>(null);
   // The build itself lives above this component — see `Context/TrackBuild` — so that leaving
   // the tab doesn't take the bar with it. To everything here that asks "is the studio busy?"
@@ -179,13 +188,32 @@ export default function TrackStudio() {
   // Rebuilding a two-thousand-square terrain on every drag is real work, so this is a choice
   // rather than the default. With it on, an edit settles and then the view catches up.
   const [live, setLive] = useState(false);
-  // The size a random track is drawn at.
+  // The size a random track is drawn at. It belongs to Random, so it sits against it.
   const [scale, setScale] = useState<TrackScale>("normal");
-  const scales = (["easy", "normal", "arl"] as const).map((value) => ({
+  const scales = (["easy", "normal", "pro"] as const).map((value) => ({
     value,
     label: t(`track.scale.${value}`),
   }));
-  const randomAtScale = () => randomTrackProgram(undefined, scale);
+  // Motocross, supercross or SuperMotocross: which walker draws the lap, and what it is held to.
+  const [discipline, setDiscipline] = useState<Discipline>("mx");
+  // How packed the next random lap is. Starts where a real round sits, so the rider has to
+  // ask for something other than the real thing rather than ask for the real thing.
+  const [density, setDensity] = useState<number>(DENSITY_RANGE.reference);
+  const disciplines = (["mx", "sx", "smx"] as const).map((value) => ({
+    value,
+    label: t(`track.discipline.${value}`),
+  }));
+  // Not a switch for Random like the two above: these are the loaded track's own, so they
+  // are read off the program and settled back into it.
+  const borders = (["soft", "solid", "banners", "none"] as const).map((value) => ({
+    value,
+    label: t(`track.border.${value}`),
+  }));
+  const venues = (["stadium", "open"] as const).map((value) => ({
+    value,
+    label: t(`track.venue.${value}`),
+  }));
+  const randomAtScale = () => randomTrackProgram(undefined, scale, discipline, density);
   const rebuild = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [tools, setTools] = useState<TrackToolsStatus | null>(null);
 
@@ -315,37 +343,6 @@ export default function TrackStudio() {
     };
   }
 
-  // Which half the model does. Remembered once picked; until then, settings when the saved
-  // model is one of the user's own that isn't Claude, because a free or local model can't
-  // draw a whole lap.
-  const [mode, setMode] = useState<GenerateMode>(() => {
-    try {
-      return localStorage.getItem(MODE_KEY) === "settings" ? "settings" : "program";
-    } catch {
-      return "program";
-    }
-  });
-  useEffect(() => {
-    try {
-      if (localStorage.getItem(MODE_KEY)) return;
-    } catch {
-      // No storage: fall through to the default.
-    }
-    getTrackModel()
-      .then((m) => {
-        if (m && m.kind !== "anthropic") setMode("settings");
-      })
-      .catch(() => {});
-  }, []);
-  function pickMode(next: GenerateMode) {
-    setMode(next);
-    try {
-      localStorage.setItem(MODE_KEY, next);
-    } catch {
-      // Remembered for this session only.
-    }
-  }
-
   async function onGenerate() {
     if (!brief.trim() || busy) return;
     setWorking("generate");
@@ -353,8 +350,18 @@ export default function TrackStudio() {
     setFatal([]);
     setProblems([]);
     try {
-      const { program: next, settings } = await generateTrack(brief.trim(), mode);
+      // Whole lap or settings only is decided in `generate_track`, by what the configured
+      // model can actually do — see the comment there. `settings` coming back is how the
+      // studio learns which way it went, and the toast says so.
+      const { program: next, settings } = await generateTrack(
+        brief.trim(),
+        undefined,
+        discipline,
+      );
       await settle(next, { fresh: true });
+      // A brief can ask for a supercross round, so the switch follows what came back rather
+      // than sitting on motocross beside a stadium lap.
+      setDiscipline(next.discipline ?? "mx");
       // Minutes of generating is work worth asking about before it's dropped.
       setTouched(true);
       setFile(null);
@@ -835,29 +842,20 @@ export default function TrackStudio() {
     setFocus(positionAt(program!, at));
   }
 
+  // The real-place panel takes the whole tab while it is open: tracing a lap wants every
+  // pixel, and there is nothing useful to look at behind it.
+  if (fromPlace) return <RealPlace onClose={() => setFromPlace(false)} />;
+
   return (
     <div ref={rootRef} className="flex h-full min-h-0 flex-col">
       {!program ? (
         /* Nothing loaded yet. One line describes a track and the schema does the rest, and
-           two starting points sit beside it for when the model isn't the answer. */
+           a few starting points sit under it for when the model isn't the answer. */
         <div className="flex min-h-0 flex-1 items-center justify-center px-4">
           <div className="w-full max-w-[560px]">
-            <div className="flex items-center">
-              <h2 className="text-[11px] font-semibold uppercase tracking-[0.09em] text-faint">
-                {t("track.briefTitle")}
-              </h2>
-              <div className="ml-auto">
-                <Segmented
-                  size="sm"
-                  value={mode}
-                  onChange={(v) => pickMode(v as GenerateMode)}
-                  options={[
-                    { value: "program", label: t("track.ask.program") },
-                    { value: "settings", label: t("track.ask.settings") },
-                  ]}
-                />
-              </div>
-            </div>
+            <h2 className="text-[11px] font-semibold uppercase tracking-[0.09em] text-faint">
+              {t("track.briefTitle")}
+            </h2>
             <div className="mt-3 flex items-center gap-2">
               <Input
                 value={brief}
@@ -876,26 +874,34 @@ export default function TrackStudio() {
               </Button>
             </div>
             <p className="mt-3 text-[12.5px] leading-relaxed text-muted-foreground">
-              {busy === "generate"
-                ? t(mode === "settings" ? "track.generatingSettingsHint" : "track.generatingHint")
-                : t("track.empty")}
+              {busy === "generate" ? t("track.generatingHint") : t("track.empty")}
             </p>
+            {/* Or start from a track instead of a sentence. Random leads, because it is the
+                one that hands you something to ride, and the size sits against it: the size is
+                Random's, and sat across the row from the brief it read as the brief's. */}
             <div className="mt-4 flex flex-wrap items-center gap-2">
-              <Segmented size="sm" options={scales} value={scale} onChange={setScale} />
-              <Button
-                variant="outline"
-                onClick={() => void onLoad(randomAtScale)}
-                disabled={busy !== null}
-              >
-                {t("track.random")}
-              </Button>
-              <Button
-                variant="outline"
-                onClick={() => void onLoad(baseTrackProgram)}
-                disabled={busy !== null}
-              >
-                {t("track.base")}
-              </Button>
+              <div className="flex items-center gap-1.5">
+                <Button
+                  variant="outline"
+                  onClick={() => void onLoad(randomAtScale)}
+                  disabled={busy !== null}
+                >
+                  {t("track.random")}
+                </Button>
+                <Segmented size="sm" options={scales} value={scale} onChange={setScale} />
+                <Segmented
+                  size="sm"
+                  options={disciplines}
+                  value={discipline}
+                  onChange={setDiscipline}
+                />
+                {discipline !== "mx" && (
+                  <DensitySlider value={density} onChange={setDensity} />
+                )}
+              </div>
+              <span aria-hidden className="text-faint">
+                ·
+              </span>
               <Button
                 variant="ghost"
                 onClick={() => void onLoad(blankTrackProgram)}
@@ -905,6 +911,13 @@ export default function TrackStudio() {
               </Button>
               <Button variant="ghost" onClick={() => void onOpen()} disabled={busy !== null}>
                 {t("track.open")}
+              </Button>
+              <Button
+                variant="ghost"
+                onClick={() => setFromPlace(true)}
+                disabled={busy !== null}
+              >
+                {t("place.title")}
               </Button>
             </div>
           </div>
@@ -1575,6 +1588,48 @@ export default function TrackStudio() {
                       ))}
                     </div>
                   </div>
+                  {/* And what it looks like, which the surface used to decide too. */}
+                  <GroundLook
+                    value={program.terrain.texture}
+                    onChange={(v) => settleTerrain({ texture: v })}
+                  />
+                  {/* Only a stadium discipline lines its lanes, so nothing else is asked. The
+                      value falls back to `tuff`, which is what this was called before it grew
+                      banners and none, so an old project still shows its own answer. */}
+                  {(program.discipline === "sx" || program.discipline === "smx") && (
+                    <div>
+                      <div className="font-cond text-[10px] font-semibold uppercase tracking-[0.22em] text-faint">
+                        {t("track.border")}
+                      </div>
+                      <div className="mt-2">
+                        <Segmented
+                          size="sm"
+                          options={borders}
+                          value={program.border ?? program.tuff ?? "soft"}
+                          onChange={(v) =>
+                            void settle({ ...program, border: v, tuff: undefined })
+                          }
+                        />
+                      </div>
+                    </div>
+                  )}
+                  {/* And whether there is a stadium round it at all, which only supercross
+                      builds: SuperMotocross is an outdoor round either way. */}
+                  {program.discipline === "sx" && (
+                    <div>
+                      <div className="font-cond text-[10px] font-semibold uppercase tracking-[0.22em] text-faint">
+                        {t("track.venue")}
+                      </div>
+                      <div className="mt-2">
+                        <Segmented
+                          size="sm"
+                          options={venues}
+                          value={program.venue ?? "stadium"}
+                          onChange={(v) => void settle({ ...program, venue: v })}
+                        />
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* Measured, not claimed — the same figures taken of published tracks. */}
@@ -1596,21 +1651,26 @@ export default function TrackStudio() {
                   <span className="font-cond text-[10px] font-semibold uppercase tracking-[0.22em] text-faint">
                     {t("track.startOver")}
                   </span>
-                  <Segmented size="sm" options={scales} value={scale} onChange={setScale} />
-                  <button
-                    onClick={() => void onLoad(randomAtScale)}
-                    disabled={busy !== null}
-                    className="cursor-default font-cond text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground hover:text-foreground disabled:opacity-40"
-                  >
-                    {t("track.random")}
-                  </button>
-                  <button
-                    onClick={() => void onLoad(baseTrackProgram)}
-                    disabled={busy !== null}
-                    className="cursor-default font-cond text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground hover:text-foreground disabled:opacity-40"
-                  >
-                    {t("track.base")}
-                  </button>
+                  {/* The size is Random's, so it travels with it here too. */}
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => void onLoad(randomAtScale)}
+                      disabled={busy !== null}
+                      className="cursor-default font-cond text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground hover:text-foreground disabled:opacity-40"
+                    >
+                      {t("track.random")}
+                    </button>
+                    <Segmented size="sm" options={scales} value={scale} onChange={setScale} />
+                    <Segmented
+                      size="sm"
+                      options={disciplines}
+                      value={discipline}
+                      onChange={setDiscipline}
+                    />
+                    {discipline !== "mx" && (
+                      <DensitySlider value={density} onChange={setDensity} />
+                    )}
+                  </div>
                   <button
                     onClick={() => void onLoad(blankTrackProgram)}
                     disabled={busy !== null}
@@ -1820,9 +1880,6 @@ export default function TrackStudio() {
 
 /** How far back undo reaches. A program is small; a hundred of them is still nothing. */
 const UNDO_DEPTH = 100;
-
-/** Where the Whole lap / Settings only choice is remembered. */
-const MODE_KEY = "frost.track.generateMode";
 
 const KIND_KEY = {
   tabletop: "track.kind.tabletop",
@@ -2083,6 +2140,172 @@ function Stat({ value, unit, label }: { value: string; unit?: string; label: str
         {label}
       </div>
     </div>
+  );
+}
+
+/**
+ * What the ground looks like, which is not the same question as what it is made of.
+ *
+ * The surface buttons above decide the ride — how deep the ground cuts, how wide the shoulder
+ * runs. This decides only the paint, so a lap can ride like a sand national and look like a
+ * stadium floor. Left on "ride" the two move together, exactly as they always did.
+ *
+ * The images are the rider's own, off their own disk through the file picker. Nothing is
+ * downloaded and there is no list of ground to browse: the Studio only ever paints with what
+ * it ships and what somebody handed it.
+ */
+function GroundLook({
+  value,
+  onChange,
+}: {
+  value: TextureSet | undefined;
+  onChange: (v: TextureSet | undefined) => void;
+}) {
+  const t = useT();
+  const [own, setOwn] = useState<OwnTexture[]>([]);
+  const [busy, setBusy] = useState<SheetSlot | null>(null);
+  const preset = value?.preset ?? "ride";
+  const sheets = value?.sheets ?? [];
+
+  // What has already been imported, so a slot filled by a saved project shows its picture
+  // rather than a hash.
+  useEffect(() => {
+    void listTrackTextures().then(setOwn).catch(() => setOwn([]));
+  }, []);
+
+  /** Nothing picked at all is left out of the file, so an untouched track saves as before. */
+  function put(next: TextureSet) {
+    onChange(next.preset === "ride" && next.sheets?.length === 0 ? undefined : next);
+  }
+
+  function setPreset(p: TexturePreset) {
+    put({ preset: p, sheets });
+  }
+
+  async function pick(slot: SheetSlot) {
+    const path = await openDialog({
+      multiple: false,
+      filters: [{ name: t("track.look.images"), extensions: ["png", "jpg", "jpeg", "webp", "bmp", "tga"] }],
+    });
+    if (typeof path !== "string") return;
+    setBusy(slot);
+    try {
+      const added = await importTrackTexture(path);
+      setOwn((was) => [added, ...was.filter((o) => o.id !== added.id)]);
+      put({ preset, sheets: [...sheets.filter((s) => s.slot !== slot), { slot, id: added.id }] });
+    } catch (e) {
+      // Why, not "failed": every refusal from the store says what was wrong with the file.
+      toast.error(String(e));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  function clear(slot: SheetSlot) {
+    put({ preset, sheets: sheets.filter((s) => s.slot !== slot) });
+  }
+
+  const presets: TexturePreset[] = ["ride", "soil", "sand", "grass", "stadium"];
+  return (
+    <div>
+      <div className="font-cond text-[10px] font-semibold uppercase tracking-[0.22em] text-faint">
+        {t("track.look")}
+      </div>
+      <div className="mt-2 grid grid-cols-5 border border-border">
+        {presets.map((p, i) => (
+          <button
+            key={p}
+            onClick={() => setPreset(p)}
+            className={cn(
+              "h-7 cursor-default truncate px-1 font-cond text-[10px] font-semibold uppercase transition-colors",
+              i > 0 && "border-l border-border",
+              preset === p
+                ? "bg-primary text-primary-foreground"
+                : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            {t(`track.look.${p}` as "track.look.ride")}
+          </button>
+        ))}
+      </div>
+      <div className="mt-2.5 font-cond text-[10px] font-semibold uppercase tracking-[0.22em] text-faint">
+        {t("track.look.own")}
+      </div>
+      <div className="mt-1.5 grid grid-cols-4 gap-1.5">
+        {SHEET_SLOTS.map((slot) => {
+          const id = sheets.find((s) => s.slot === slot)?.id;
+          const img = own.find((o) => o.id === id);
+          return (
+            <div key={slot}>
+              <div className="relative">
+                <button
+                  onClick={() => void pick(slot)}
+                  disabled={busy !== null}
+                  title={img?.name ?? t("track.look.add")}
+                  className={cn(
+                    "flex aspect-square w-full cursor-default items-center justify-center border text-[16px] leading-none transition-colors",
+                    id
+                      ? "border-primary text-transparent"
+                      : "border-dashed border-border text-faint hover:text-foreground",
+                  )}
+                  style={
+                    img
+                      ? { backgroundImage: `url(${img.thumb})`, backgroundSize: "cover" }
+                      : undefined
+                  }
+                >
+                  {busy === slot ? "…" : id ? "" : "+"}
+                </button>
+                {id && (
+                  <button
+                    onClick={() => clear(slot)}
+                    title={t("track.look.clear")}
+                    className="absolute -right-1 -top-1 h-4 w-4 cursor-default border border-border bg-background text-[10px] leading-none text-muted-foreground hover:text-foreground"
+                  >
+                    ×
+                  </button>
+                )}
+              </div>
+              <div className="mt-1 truncate text-center text-[10px] text-faint">
+                {t(`track.slot.${slot}` as "track.slot.ground")}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * How packed the lap is, for the disciplines that are built lane by lane.
+ *
+ * A stadium lap is drawn section by section, so this says how much of each lane carries jumps
+ * — the middle of the slider is what a real round measures. A national spaces its jumps by a
+ * different rule and never reads it, so it only appears where it does something.
+ */
+function DensitySlider({ value, onChange }: { value: number; onChange: (v: number) => void }) {
+  const t = useT();
+  const span = DENSITY_RANGE.max - DENSITY_RANGE.min;
+  const word = value < 0.9 ? "sparse" : value > 1.1 ? "packed" : "real";
+  return (
+    <label className="flex items-center gap-2">
+      <span className="font-cond text-[10px] font-semibold uppercase tracking-[0.22em] text-faint">
+        {t("track.density")}
+      </span>
+      <input
+        type="range"
+        min={DENSITY_RANGE.min}
+        max={DENSITY_RANGE.max}
+        step={DENSITY_RANGE.step}
+        value={value}
+        onChange={(e) => onChange(Number(e.target.value))}
+        style={{ ["--fill" as string]: `${((value - DENSITY_RANGE.min) / span) * 100}%` }}
+        className="w-[104px]"
+        aria-label={t("track.density")}
+      />
+      <span className="w-[52px] text-[11px] text-faint">{t(`track.density.${word}`)}</span>
+    </label>
   );
 }
 

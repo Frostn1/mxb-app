@@ -41,9 +41,9 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: npm
 
-      # The app's beforeBuildCommand is `bun run build`.
+      # bun installs the workspace from bun.lock, and tauri-action runs the app's
+      # beforeBuildCommand (`bun run build`) with it too.
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
 
@@ -72,9 +72,8 @@ jobs:
           shared-key: release
           save-if: false
 
-      # The lockfile is npm's; the workspace install is the same one CI uses.
       - name: Install dependencies
-        run: npm ci
+        run: bun install --frozen-lockfile
 
       # The locked-content reader, as MXB App and Studio build with it: a GUID-locked track's
       # terrain and scenery then open for the 3D view. A fork builds without it, and the coach
@@ -105,14 +104,31 @@ jobs:
         shell: bash
         run: echo "name=${GITHUB_REF_NAME#coach-}" >> "$GITHUB_OUTPUT"
 
+      # UPX for the Windows binary pack (scripts/pack-binary.sh runs as the app's
+      # beforeBundleCommand). Windows leg only; the script no-ops without it and without MXB_PACK.
+      - name: Install UPX (Windows)
+        if: startsWith(matrix.platform, 'windows')
+        shell: bash
+        run: choco install upx -y
+
       - name: Build and publish pre-release
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VITE_APP_NAME: "MXB Coach"
+          # Pack the Windows binary with UPX via the beforeBundleCommand (scripts/pack-binary.sh).
+          # Windows leg only; empty elsewhere so the hook no-ops. See the script for the AV caveat.
+          MXB_PACK: ${{ startsWith(matrix.platform, 'windows') && '1' || '' }}
           # The coach's own key, not the manager's: a leak here can't sign a manager update.
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.COACH_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.COACH_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # Signs this build's anonymous usage reports, so the control plane can tell a report
+          # from one of our builds from a report from a script. Obfuscated into the binary by
+          # crates/core/build.rs — not secrecy, since anyone can download the build and read
+          # the pad, but it keeps the key off a `strings` dump. Unset expands to empty, which
+          # build.rs drops, so a fork builds an unsigned variant rather than failing; the
+          # endpoint takes unsigned reports until MXB_USAGE_REQUIRE_SIGNATURE is turned on.
+          MXB_USAGE_KEY: ${{ secrets.MXB_USAGE_KEY }}
         with:
           projectPath: apps/coach
           tagName: ${{ github.ref_name }}

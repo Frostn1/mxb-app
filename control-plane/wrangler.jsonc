@@ -41,11 +41,21 @@
     "MXB_OWNER_ACCOUNT_ID": "f72db68a-9541-4814-ae09-6096b497abc9",
     // Where Steam sign-in on mxbsecure.com lands afterwards.
     "MXB_SITE_ORIGIN": "https://mxbsecure.com",
+    // Refuses a usage report that carries no valid build signature. Off, and it must stay off
+    // until signed builds are the ones in the field — turning it on early drops everybody's
+    // numbers and says nothing. The key itself is a secret; see `src/env.d.ts`.
+    "MXB_USAGE_REQUIRE_SIGNATURE": "0",
     // The Steam accounts that may read the dashboards at mxbsecure.com/admin, comma
     // separated. Empty means nobody, which is the right default: this is the credential that
     // reads everybody's numbers, so granting it should be a diff. `ADMIN_KEY` still opens the
     // rendered /admin pages on this host either way.
-    "MXB_ADMIN_STEAM_IDS": "76561198174305985"
+    "MXB_ADMIN_STEAM_IDS": "76561198174305985",
+    // Require a Valve-confirmed Steam sign-in before any app in the lineup will run. On:
+    // MXB App, Studio and Coach show a "Sign in with Steam" wall at startup, every install
+    // becomes a proven identity, and a ban has no fresh-account escape. This shuts out anyone
+    // without a Steam copy of the game (a Piboso owner has no Steam identity to confirm), so it
+    // is a deliberate "Steam players only" decision — flip to "0" to reopen the apps.
+    "MXB_REQUIRE_STEAM": "1"
   },
 
   // The idle reaper. Every five minutes it asks each running server who is connected and

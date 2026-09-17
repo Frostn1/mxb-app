@@ -1,7 +1,7 @@
 // Do the ready-made poses do what their labels say?
 //
 //   MXB_EDF_FILE=<rider.edf> cargo test rig_json -- --ignored --nocapture | grep '^\[' > sm.json
-//   npx esbuild scripts/pose-moves-check.mjs --bundle --format=esm --platform=node \
+//   bunx esbuild scripts/pose-moves-check.mjs --bundle --format=esm --platform=node \
 //     --outfile=/tmp/check.mjs && node /tmp/check.mjs sm.json [more.json...]
 //
 // Every move used to be a fixed turn in degrees on a bone's own axes, and a bone's axes are

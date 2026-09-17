@@ -1,5 +1,6 @@
 //! The venue beyond the lap: a fenced paddock with a rig per team, the road to the pits,
-//! and the sponsor wall behind the gate row.
+//! and the sponsor wall behind the gate row. A supercross lap gets [`stadium`] instead — a
+//! wall round its floor and stands rising behind it, which is the venue that racing has.
 
 #![allow(dead_code)]
 
@@ -1893,6 +1894,198 @@ pub fn dress(
     kinds.extend(v.kinds);
 }
 
+/// The stadium a supercross lap is laid inside: the wall round its floor, and its height and
+/// thickness. Low enough to see the racing over, high enough to stop a bike.
+const SX_WALL_M: (f32, f32) = (1.3, 0.3);
+/// How far outside the lap's own extent the wall stands, and how near any leg of the lap
+/// anything here may come. The floor is sized off the lap, not fitted to its shape: a stadium
+/// is a bowl the track is built in, not a fence that follows it.
+const SX_OUT_M: f32 = 12.0;
+const SX_CLEAR_M: f32 = 6.0;
+/// The stands behind the wall: how many tiers, and how deep and how much higher each is than
+/// the one below it.
+const SX_TIERS: usize = 6;
+const SX_TIER_M: (f32, f32) = (2.5, 1.0);
+/// The most boxes a kind here is allowed. A cuboid is 24 vertices, so this holds a mesh under
+/// `trackscenery`'s 48,000 split and well under the 65,535 a model may draw at all; the steps
+/// are stretched to suit a big plot rather than the count let run.
+const SX_MAX_BOXES: usize = 1_800;
+
+/// Boxes laid nose to tail round the rectangle `(x0, z0, x1, z1)`, each `size` (tall, deep) and
+/// about `step` long, stood on the ground under it. A piece that would fall off the plot or
+/// come within `SX_CLEAR_M` of a leg of the lap is left out: a closed ring is never worth a
+/// wall across the riding surface.
+fn sx_ring(prog: &TrackProgram, syn: &Synth, r: (f32, f32, f32, f32), step: f32, size: (f32, f32), into: &mut Mesh) -> usize {
+    let (x0, z0, x1, z1) = r;
+    let corners = [(x0, z0), (x1, z0), (x1, z1), (x0, z1)];
+    let mut laid = 0;
+    for k in 0..4 {
+        let (a, b) = (corners[k], corners[(k + 1) % 4]);
+        let len = (b.0 - a.0).hypot(b.1 - a.1);
+        if len < step {
+            continue;
+        }
+        let n = (len / step).round().max(1.0) as usize;
+        let run = len / n as f32;
+        let d = ((b.0 - a.0) / len, (b.1 - a.1) / len);
+        let deg = deg_along(d);
+        for i in 0..n {
+            let t = (i as f32 + 0.5) * run;
+            let (cx, cz) = (a.0 + d.0 * t, a.1 + d.1 * t);
+            // Every corner of the piece, not its middle alone: what the ring promises is that no
+            // part of a box it lays comes within `SX_CLEAR_M` of a leg of the lap, and a corner
+            // stands half a run along and half a depth across from the centre it is stood on.
+            let along = (d.0 * (run + 0.1) * 0.5, d.1 * (run + 0.1) * 0.5);
+            let across = (-d.1 * size.1 * 0.5, d.0 * size.1 * 0.5);
+            let clear = [-1.0f32, 0.0, 1.0].iter().all(|&e| {
+                [-1.0f32, 1.0].iter().all(|&f| {
+                    let (x, z) = (cx + along.0 * e + across.0 * f, cz + along.1 * e + across.1 * f);
+                    on_plot(prog, x, z, 1.0) && dist(syn, x, z) > prog.width * 0.5 + SX_CLEAR_M
+                })
+            });
+            if !clear {
+                continue;
+            }
+            // A touch longer than its run, so the ring reads as one wall and not as a row.
+            into.append(&stand(&edfwrite::cuboid(run + 0.1, size.0, size.1), cx, cz, deg, syn));
+            laid += 1;
+        }
+    }
+    laid
+}
+
+/// The floor wall's print: a dark board with a bright rail along its top. A cuboid's side face
+/// puts v 0 at its top edge, so the rail is drawn at the top of the sheet.
+fn stadium_wall_sheet() -> Texture {
+    let n = 64u32;
+    let mut px = Vec::with_capacity((n * n * 4) as usize);
+    for y in 0..n {
+        for x in 0..n {
+            let (u, v) = (x as f32 / n as f32, y as f32 / n as f32);
+            let c = if v < 0.16 {
+                [20, 70, 170]
+            } else if v < 0.2 || (u * 4.0).fract() < 0.03 {
+                [16, 16, 18]
+            } else {
+                let k = 0.9 + 0.1 * vnoise(u * 12.0, v * 12.0, 0x5D01);
+                [(52.0 * k) as u8, (54.0 * k) as u8, (60.0 * k) as u8]
+            };
+            px.extend_from_slice(&[c[0], c[1], c[2], 255]);
+        }
+    }
+    Texture { name: "stadium_wall_c".into(), width: n, height: n, rgba: px }
+}
+
+/// The stands: poured concrete, a darker line along the nose of each step, which is the top
+/// edge of every tier's box and so v 0 again.
+fn stadium_stand_sheet() -> Texture {
+    let n = 64u32;
+    let mut px = Vec::with_capacity((n * n * 4) as usize);
+    for y in 0..n {
+        for x in 0..n {
+            let (u, v) = (x as f32 / n as f32, y as f32 / n as f32);
+            let k = if v < 0.08 { 0.62 } else { 0.9 + 0.12 * vnoise(u * 9.0, v * 9.0, 0x5D02) };
+            let c = [(148.0 * k) as u8, (146.0 * k) as u8, (140.0 * k) as u8];
+            px.extend_from_slice(&[c[0], c[1], c[2], 255]);
+        }
+    }
+    Texture { name: "stadium_stand_c".into(), width: n, height: n, rgba: px }
+}
+
+/// The fence round an outdoor supercross site: how tall it stands and how thick a panel is.
+///
+/// Where the stadium's wall would have been, and for the same reason. A supercross lap is a
+/// hundred and twenty metres across on a plot with room for a national, so its own hoarding
+/// stops well short of the plot's edge and nothing else says where the venue ends. Tall enough
+/// to read as the boundary of a site from the seat, and netting rather than board so it does
+/// not wall the racing off from whatever is behind it.
+const SX_FENCE_M: (f32, f32) = (2.2, 0.06);
+
+/// The venue an open-air supercross lap gets on top of the field's own: one ring of site fence
+/// where the stadium's wall stood, and no stands behind it.
+///
+/// Laid by the same [`sx_ring`] the stadium's wall is, at the same offset, under the same rule
+/// that a piece coming near a leg of the lap is left out rather than a closed ring bought at
+/// the price of a fence across the track.
+pub fn open_air(prog: &TrackProgram, syn: &Synth) -> Venue {
+    let (lo, hi) = lap_extent(prog);
+    let rect = grown_to_plot(prog, lo, hi, SX_OUT_M);
+    let perim = 2.0 * ((rect.2 - rect.0) + (rect.3 - rect.1));
+    let mut v = Venue { kinds: Vec::new(), tally: Vec::new(), paddock: None, road: Vec::new(), wall: None };
+    let mut fence = Mesh::default();
+    let step = (perim / SX_MAX_BOXES as f32).max(4.0);
+    let panels = sx_ring(prog, syn, rect, step, SX_FENCE_M, &mut fence);
+    debug_assert!(fence.vertex_count() < 65_536, "a site fence past what a model may draw");
+    if panels > 0 {
+        // Solid: it is the edge of the venue, and a rider who reaches it has left the track.
+        v.kinds.push(("site_fence".into(), fence, net_sheet(), true));
+    }
+    v.tally.push(("site fence", panels));
+    v
+}
+
+/// The lap's own extent, corner to corner.
+fn lap_extent(prog: &TrackProgram) -> ((f32, f32), (f32, f32)) {
+    let (mut lo, mut hi) = ((f32::MAX, f32::MAX), (f32::MIN, f32::MIN));
+    for q in prog.stations(2.0) {
+        lo = (lo.0.min(q.x), lo.1.min(q.z));
+        hi = (hi.0.max(q.x), hi.1.max(q.z));
+    }
+    (lo, hi)
+}
+
+/// That extent grown by `out` on every side and clamped inside the plot. Growing the box is
+/// what keeps a ring off the track: every side of it stands `out` from the furthest the lap
+/// reaches that way.
+fn grown_to_plot(prog: &TrackProgram, lo: (f32, f32), hi: (f32, f32), out: f32) -> (f32, f32, f32, f32) {
+    (
+        (lo.0 - out).max(4.0),
+        (lo.1 - out).max(4.0),
+        (hi.0 + out).min(prog.terrain.size_x - 4.0),
+        (hi.1 + out).min(prog.terrain.size_z - 4.0),
+    )
+}
+
+/// The venue a supercross track gets instead of the paddock and the sponsor wall: the wall round
+/// the stadium floor and the tiered stands rising behind it. Built where `trackscenery` would
+/// otherwise call [`build`], so a stadium lap is never given a field's paddock.
+pub fn stadium(prog: &TrackProgram, syn: &Synth) -> Venue {
+    let (lo, hi) = lap_extent(prog);
+    // The floor: the lap's extent grown by the clearance, and never off the plot — see
+    // [`grown_to_plot`].
+    let grown = |out: f32| grown_to_plot(prog, lo, hi, out);
+    let wall_rect = grown(SX_OUT_M);
+    let perim = 2.0 * ((wall_rect.2 - wall_rect.0) + (wall_rect.3 - wall_rect.1));
+    let mut v = Venue { kinds: Vec::new(), tally: Vec::new(), paddock: None, road: Vec::new(), wall: None };
+
+    // Steps sized off the ring's own length, so a big plot stretches the pieces rather than
+    // multiplying them past what one model may hold.
+    let mut wall = Mesh::default();
+    let step = (perim / SX_MAX_BOXES as f32).max(4.0);
+    let pieces = sx_ring(prog, syn, wall_rect, step, SX_WALL_M, &mut wall);
+
+    let (deep, rise) = SX_TIER_M;
+    let mut tiers = Mesh::default();
+    let mut boxes = 0;
+    let step = (perim * SX_TIERS as f32 / SX_MAX_BOXES as f32).max(8.0);
+    for k in 0..SX_TIERS {
+        // Each tier stepped back from the one below and standing that much higher: seen from
+        // the floor it is a staircase, which is all a plain grandstand is.
+        let out = SX_OUT_M + SX_WALL_M.1 + deep * (k as f32 + 0.5);
+        boxes += sx_ring(prog, syn, grown(out), step, (SX_WALL_M.0 + rise * (k + 1) as f32, deep), &mut tiers);
+    }
+
+    debug_assert!(wall.vertex_count() < 65_536 && tiers.vertex_count() < 65_536, "a stadium kind past what a model may draw");
+    if pieces > 0 {
+        v.kinds.push(("stadium_wall".into(), wall, stadium_wall_sheet(), true));
+    }
+    if boxes > 0 {
+        v.kinds.push(("stadium_tiers".into(), tiers, stadium_stand_sheet(), true));
+    }
+    v.tally.extend([("stadium wall", pieces), ("stadium tiers", boxes)]);
+    v
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1904,6 +2097,21 @@ mod tests {
         static N: std::sync::OnceLock<(TrackProgram, Synth)> = std::sync::OnceLock::new();
         N.get_or_init(|| {
             let mut p = match crate::tracklayout::search(103, 1) { Ok(m) => m.program, Err(v) => v[0].program.clone() };
+            p.terrain.surface = serde_json::from_str("\"soil\"").unwrap();
+            let p = crate::tracksynth::with_fitted_budget(&p).unwrap();
+            let s = crate::tracksynth::synthesise(&p).unwrap();
+            (p, s)
+        })
+    }
+
+    /// A supercross lap, built the way the app builds one. The stadium is judged on this rather
+    /// than on Northgate: an outdoor lap all but fills its own plot, so a floor grown round it
+    /// would clamp against the plot's edge and the ring would come out in pieces.
+    fn sx_track() -> &'static (TrackProgram, Synth) {
+        static S: std::sync::OnceLock<(TrackProgram, Synth)> = std::sync::OnceLock::new();
+        S.get_or_init(|| {
+            let knobs = crate::tracklayout::LayoutKnobs::for_discipline(crate::trackprog::Discipline::Sx);
+            let mut p = (0..40).find_map(|i| crate::tracklayout::draw_with(200 + i, &knobs)).expect("a supercross lap");
             p.terrain.surface = serde_json::from_str("\"soil\"").unwrap();
             let p = crate::tracksynth::with_fitted_budget(&p).unwrap();
             let s = crate::tracksynth::synthesise(&p).unwrap();
@@ -2294,6 +2502,35 @@ mod tests {
         let w = v.wall.expect("our own wall");
         assert!(!w.lifted);
         assert!(v.kinds.iter().any(|k| k.0 == "sponsor_wall" && k.2.name == "sponsor_wall_c"));
+    }
+
+    /// The stadium encloses the floor without ever standing on it: every vertex of the wall and
+    /// of the stands keeps its clearance off the centreline and stays on the plot. And each kind
+    /// is one model the game will draw — a mesh past 65,535 vertices silently does not.
+    #[test]
+    fn the_stadium_wall_never_stands_on_the_riding_surface() {
+        let (p, s) = sx_track();
+        let v = stadium(p, s);
+        let half = p.width * 0.5;
+        assert!(v.paddock.is_none() && v.road.is_empty() && v.wall.is_none(), "a stadium has no paddock");
+        for (name, m, t, solid) in &v.kinds {
+            assert!(*solid, "{name} is not solid");
+            assert!(m.vertex_count() < 65_536, "{name} has {} vertices and would not draw", m.vertex_count());
+            assert_eq!(t.rgba.len(), (t.width * t.height * 4) as usize, "{name}'s sheet");
+            for q in m.positions.chunks_exact(3) {
+                let d = dist(s, q[0], q[2]);
+                // `sx_ring` reads its clearance at the corners, so all that is left to allow for
+                // is the grid the distance field is sampled on.
+                assert!(d > half + SX_CLEAR_M - 1.5, "{name} stands {d:.1} m from the centreline");
+                assert!(on_plot(p, q[0], q[2], 0.0), "{name} stands off the plot");
+            }
+        }
+        let n = |k: &str| v.tally.iter().find(|t| t.0 == k).map(|t| t.1).unwrap_or(0);
+        assert!(n("stadium wall") > 40, "{} wall pieces is not a ring", n("stadium wall"));
+        assert!(n("stadium tiers") > 40, "{} tier boxes is not a grandstand", n("stadium tiers"));
+        let tiers = v.kinds.iter().find(|k| k.0 == "stadium_tiers").expect("the stands");
+        let (lo, hi) = tiers.1.bounds();
+        assert!(hi[1] - lo[1] > SX_TIER_M.1 * SX_TIERS as f32, "the stands rise {:.1} m", hi[1] - lo[1]);
     }
 
     /// A tree in the paddock goes; one out in the field stays.

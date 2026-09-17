@@ -1,18 +1,29 @@
 import { describe, expect, it } from "vitest";
 
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
+
 import {
   adminAllowed,
   collectStats,
+  KNOWN_EVENTS,
+  knownFor,
+  MAX_DAY_MINUTES,
+  MAX_DAY_SESSIONS,
   MAX_REPORT_BYTES,
   MAX_REPORTS_PER_DAY,
+  MAX_SIGNATURE_SKEW_SECONDS,
   MAX_WINDOW_DAYS,
   parseReport,
   reportUsage,
   RETENTION_DAYS,
+  SIGNATURE_HEADER,
   usageStats,
   windowDays,
 } from "../src/usage";
-import { MAX_EVENTS_PER_REPORT } from "../src/validate";
+import { APPS, MAX_EVENTS_PER_REPORT } from "../src/validate";
+import { d1 } from "./d1sqlite";
 
 const INSTALL = "6f1f2b6c-0f6d-4a5e-9f3a-2b7c4d5e6f70";
 
@@ -145,8 +156,9 @@ describe("the endpoint", () => {
     await reportUsage(post(body()), { DB: db } as unknown as Env);
 
     const daily = db.statements.find((s) => s.sql.includes("INTO usage_daily"))!;
-    expect(daily.sql).toContain("sessions = sessions + excluded.sessions");
-    expect(daily.sql).toContain("minutes = minutes + excluded.minutes");
+    // Added to, but never past what a day can hold — see `MAX_DAY_MINUTES`.
+    expect(daily.sql).toContain(`sessions = MIN(${MAX_DAY_SESSIONS}, sessions + excluded.sessions)`);
+    expect(daily.sql).toContain(`minutes = MIN(${MAX_DAY_MINUTES}, minutes + excluded.minutes)`);
     const event = db.statements.find((s) => s.sql.includes("INTO usage_events"))!;
     expect(event.sql).toContain("count = count + excluded.count");
   });
@@ -283,7 +295,7 @@ describe("reading it back", () => {
   it("survives an empty database, which is what the first day looks like", async () => {
     const stats = await collectStats({ DB: stubDb() } as unknown as Env, 30);
 
-    expect(stats.active).toEqual({ day: 0, week: 0, month: 0 });
+    expect(stats.active).toEqual({ day: 0, week: 0, month: 0, window: 0 });
     expect(stats.events).toEqual([]);
     expect(stats.currentVersions).toEqual([]);
     // Everything the app can report is listed as untouched, rather than the page being blank.
@@ -351,3 +363,257 @@ function answering(rows: Record<string, unknown[]>) {
     },
   };
 }
+
+describe("what a report has to arrive as", () => {
+  /**
+   * The vector this closes.
+   *
+   * A `text/plain` POST is a CORS simple request: a web page can have every visitor deliver one
+   * from their own address, and does not care that it cannot read the reply. The per-address cap
+   * is no answer to that — each visitor brings a fresh address. Insisting on a content type that
+   * needs a preflight, on a route that answers no CORS headers, is.
+   */
+  it("refuses a body that did not declare itself as JSON", async () => {
+    const db = stubDb();
+    const req = new Request("https://cp.test/v1/usage", {
+      method: "POST",
+      headers: { "content-type": "text/plain;charset=UTF-8" },
+      body: JSON.stringify(body()),
+    });
+
+    expect((await reportUsage(req, { DB: db } as unknown as Env)).status).toBe(415);
+    expect(db.statements).toHaveLength(0);
+  });
+
+  it("takes the type with a charset on it, which is what a client actually sends", async () => {
+    const db = stubDb();
+    const req = new Request("https://cp.test/v1/usage", {
+      method: "POST",
+      headers: { "content-type": "application/json; charset=utf-8" },
+      body: JSON.stringify(body()),
+    });
+
+    expect((await reportUsage(req, { DB: db } as unknown as Env)).status).toBe(202);
+  });
+});
+
+describe("the ceilings on a day's row", () => {
+  it("clamps what one report may add, so a day cannot hold more than a day", async () => {
+    const db = stubDb();
+    await reportUsage(
+      post(body({ sessions: 1000, minutes: 1440 })),
+      { DB: db } as unknown as Env,
+    );
+
+    const daily = db.statements.find((s) => s.sql.includes("INTO usage_daily"))!;
+    expect(daily.args[6]).toBeLessThanOrEqual(MAX_DAY_SESSIONS);
+    expect(daily.args[7]).toBeLessThanOrEqual(MAX_DAY_MINUTES);
+  });
+
+  /** The one that matters: the row, not the report. Reports accumulate onto it. */
+  it("stops the row climbing however many reports land on it", async () => {
+    const db = d1();
+    const env = { DB: db } as unknown as Env;
+    // Every one of these is a report the endpoint would accept on its own terms.
+    for (let i = 0; i < 50; i++) {
+      await reportUsage(post(body({ sessions: 1000, minutes: 1440, events: [] })), env);
+    }
+
+    const row = await db
+      .prepare("SELECT sessions, minutes FROM usage_daily WHERE install_id = ?")
+      .bind(INSTALL)
+      .first<{ sessions: number; minutes: number }>();
+    expect(row!.minutes).toBe(MAX_DAY_MINUTES);
+    expect(row!.sessions).toBe(MAX_DAY_SESSIONS);
+  });
+});
+
+describe("a signed report", () => {
+  const KEY = "a-build-key";
+
+  async function sign(raw: string, seconds: number): Promise<string> {
+    const key = await crypto.subtle.importKey(
+      "raw",
+      new TextEncoder().encode(KEY),
+      { name: "HMAC", hash: "SHA-256" },
+      false,
+      ["sign"],
+    );
+    const mac = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(`v1.${seconds}.${raw}`));
+    const hex = [...new Uint8Array(mac)].map((b) => b.toString(16).padStart(2, "0")).join("");
+    return `v1 ${seconds} ${hex}`;
+  }
+
+  function signed(raw: string, header: string): Request {
+    return new Request("https://cp.test/v1/usage", {
+      method: "POST",
+      headers: { "content-type": "application/json", [SIGNATURE_HEADER]: header },
+      body: raw,
+    });
+  }
+
+  /** The default, and the only safe one until signed builds are the ones in the field. */
+  it("is not asked for unless the deployment asks for it", async () => {
+    const db = stubDb();
+    const res = await reportUsage(post(body()), { DB: db, USAGE_SIGNING_KEY: KEY } as unknown as Env);
+
+    expect(res.status).toBe(202);
+  });
+
+  it("is refused when it is required and absent", async () => {
+    const db = stubDb();
+    const env = { DB: db, USAGE_SIGNING_KEY: KEY, MXB_USAGE_REQUIRE_SIGNATURE: "1" } as unknown as Env;
+
+    expect((await reportUsage(post(body()), env)).status).toBe(401);
+    expect(db.statements).toHaveLength(0);
+  });
+
+  it("is taken when it is required and right", async () => {
+    const db = stubDb();
+    const env = { DB: db, USAGE_SIGNING_KEY: KEY, MXB_USAGE_REQUIRE_SIGNATURE: "1" } as unknown as Env;
+    const raw = JSON.stringify(body());
+    const res = await reportUsage(signed(raw, await sign(raw, Math.floor(Date.now() / 1000))), env);
+
+    expect(res.status).toBe(202);
+  });
+
+  it("is refused when the body it signed is not the body that arrived", async () => {
+    const db = stubDb();
+    const env = { DB: db, USAGE_SIGNING_KEY: KEY, MXB_USAGE_REQUIRE_SIGNATURE: "1" } as unknown as Env;
+    const header = await sign(JSON.stringify(body()), Math.floor(Date.now() / 1000));
+    const tampered = JSON.stringify(body({ sessions: 999 }));
+
+    expect((await reportUsage(signed(tampered, header), env)).status).toBe(401);
+  });
+
+  /**
+   * The vector `crates/core/src/usage.rs` also checks.
+   *
+   * The construction is written twice, in two languages, and joined by nothing but agreement.
+   * If they drift, a signed build reports nothing the moment a deployment requires a signature,
+   * and the only sign of it is numbers quietly going flat.
+   */
+  it("is rebuilt the way the client builds it", async () => {
+    expect(await sign('{"installId":"x"}', 1_700_000_000)).toBe(
+      "v1 1700000000 78626f503fcdc861e76c223f96c36373bdd848c8e9aeacca28ee27d41e40db86",
+    );
+  });
+
+  /** What bounds replay: a captured report is good for the skew window and no longer. */
+  it("is refused once its clock is further out than the skew allows", async () => {
+    const db = stubDb();
+    const env = { DB: db, USAGE_SIGNING_KEY: KEY, MXB_USAGE_REQUIRE_SIGNATURE: "1" } as unknown as Env;
+    const raw = JSON.stringify(body());
+    const stale = Math.floor(Date.now() / 1000) - MAX_SIGNATURE_SKEW_SECONDS - 60;
+
+    expect((await reportUsage(signed(raw, await sign(raw, stale)), env)).status).toBe(401);
+  });
+});
+
+describe("counting installs rather than rows", () => {
+  const OTHER = "7a2e3c4d-5b6f-4a7e-8f9a-0b1c2d3e4f50";
+
+  /** A row per app per day, so `COUNT(*)` was counting apps and calling them installs. */
+  async function twoAppsOneMachine(db: Env["DB"], day: string): Promise<void> {
+    for (const [install, app] of [
+      [INSTALL, "manager"],
+      [INSTALL, "studio"],
+      [OTHER, "manager"],
+    ] as const) {
+      await db
+        .prepare(
+          "INSERT INTO usage_daily (install_id, app, day, version, os, game, sessions, minutes, first_seen, updated_at)" +
+            " VALUES (?, ?, ?, '0.13.5', 'windows', 'mxb', 1, 10, 0, 0)",
+        )
+        .bind(install, app, day)
+        .run();
+    }
+  }
+
+  it("draws a machine that runs both apps as one install on the daily chart", async () => {
+    const db = d1();
+    const now = Date.now();
+    await twoAppsOneMachine(db, new Date(now).toISOString().slice(0, 10));
+    const stats = await collectStats({ DB: db } as unknown as Env, 30, now);
+
+    // Two machines, three rows. The tile beside the chart has always said two.
+    expect(stats.daily.at(-1)!.installs).toBe(2);
+    expect(stats.active.day).toBe(2);
+  });
+
+  it("counts the window's actives, which is the denominator every other figure needs", async () => {
+    const db = d1();
+    const now = Date.now();
+    const old = new Date(now - 60 * 86_400_000).toISOString().slice(0, 10);
+    await twoAppsOneMachine(db, old);
+    const stats = await collectStats({ DB: db } as unknown as Env, 90, now);
+
+    // Inside a 90-day window, outside the fixed 30-day month. Dividing the window's sessions
+    // by `active.month` is what made "Sessions per install" a different number per range.
+    expect(stats.active.window).toBe(2);
+    expect(stats.active.month).toBe(0);
+  });
+
+  /**
+   * "Installs seen" says "over {retentionDays} days" on the page. It used to be `WHERE 1 = 1`,
+   * and was only ever that number because the sweep happened to have deleted the rest — so a
+   * sweep that failed for a week silently changed what the tile meant.
+   */
+  it("bounds 'installs seen' by the retention window it claims to be", async () => {
+    const db = d1();
+    const now = Date.now();
+    const rows: [string, number][] = [
+      [INSTALL, 10],
+      [OTHER, RETENTION_DAYS + 30],
+    ];
+    for (const [install, back] of rows) {
+      await db
+        .prepare(
+          "INSERT INTO usage_daily (install_id, app, day, version, os, game, sessions, minutes, first_seen, updated_at)" +
+            " VALUES (?, 'manager', ?, '0.13.5', 'windows', 'mxb', 1, 10, 0, 0)",
+        )
+        .bind(install, new Date(now - back * 86_400_000).toISOString().slice(0, 10))
+        .run();
+    }
+    const stats = await collectStats({ DB: db } as unknown as Env, 30, now);
+
+    // The row past the prune is still on disk — the sweep has not run — and is still not counted.
+    expect(stats.installsEver).toBe(1);
+  });
+});
+
+describe("the vocabulary", () => {
+  it("only offers a name to the app that can send it", () => {
+    const studio = knownFor("studio");
+
+    expect(studio).toContain("view.studio.paints");
+    // The manager's pages are not the studio's silence.
+    expect(studio).not.toContain("view.browse");
+    expect(studio).not.toContain("game.launch");
+    expect(knownFor("all")).toEqual(Object.keys(KNOWN_EVENTS));
+  });
+
+  it("names an app that reports", () => {
+    for (const [name, apps] of Object.entries(KNOWN_EVENTS)) {
+      expect(apps.length, `${name} is reported by nothing`).toBeGreaterThan(0);
+      for (const app of apps) expect(APPS).toContain(app);
+    }
+  });
+
+  /**
+   * The two halves of this feature are written in two languages and held together by nothing
+   * but agreement. A name the apps send that this list has never heard of cannot turn up in
+   * "Never touched" — which is the one panel whose whole job is to name an absence — so the
+   * drift is invisible in exactly the place it matters.
+   */
+  it("says the same thing the client does", () => {
+    const here = dirname(fileURLToPath(import.meta.url));
+    const rust = readFileSync(join(here, "..", "..", "crates", "core", "src", "usage.rs"), "utf8");
+    const block = /pub const KNOWN_EVENTS: &\[&str\] = &\[([\s\S]*?)\];/.exec(rust);
+    expect(block, "the client's KNOWN_EVENTS is not where this test expects it").not.toBeNull();
+
+    const client = [...block![1].matchAll(/"([^"]+)"/g)].map((m) => m[1]).sort();
+    expect(client.length).toBeGreaterThan(0);
+    expect(client).toEqual(Object.keys(KNOWN_EVENTS).sort());
+  });
+});
