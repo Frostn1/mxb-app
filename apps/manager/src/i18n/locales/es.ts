@@ -1642,6 +1642,16 @@ export const es: Translation = {
   "showcase.supporters.title_one": "Posible gracias a {{count}} mecenas",
   "showcase.supporters.title_other": "Posible gracias a {{count}} mecenas",
   "showcase.supporters.more": "+{{count}} más",
+  "showcase.v0170.hero.title":
+    "Encontrar un servidor cuando el juego no puede",
+  "showcase.v0170.hero.body":
+    "La mitad del problema del multijugador de MX Bikes no son los servidores. Es que te diga \"connection timeout\" y nada más. Esta versión arregla el navegador del propio juego y te da una lista que funciona cuando él no.",
+  "showcase.v0170.browser":
+    "La pantalla Browse del juego deja de agotar el tiempo el resto de la tarde después de salir de un servidor. FrostMod lo arregla mientras juegas.",
+  "showcase.v0170.book":
+    "La pestaña Servers sigue funcionando cuando la lista de MX Bikes se cae: pregunta a cada servidor directamente desde una libreta de direcciones compartida.",
+  "showcase.v0170.check":
+    "Cuando la lista no carga, la app dice si son los servidores de MX Bikes o algo tuyo, y comprueba tu conexión por ti.",
   "showcase.v0160.hero.title": "Menos motivos para que el juego se cierre",
   "showcase.v0160.hero.body":
     "Que MX Bikes se cierre solo es de lo que más se queja la gente. Esta versión ataca los dos motivos más comunes y empieza a registrar lo que pasa cuando ocurre.",

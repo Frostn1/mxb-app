@@ -82,6 +82,19 @@ export interface Release {
 
 export const RELEASES: Release[] = [
   {
+    version: "0.17.0",
+    hero: {
+      icon: Globe,
+      title: "showcase.v0170.hero.title",
+      body: "showcase.v0170.hero.body",
+    },
+    highlights: [
+      { icon: RefreshCw, text: "showcase.v0170.browser" },
+      { icon: Users, text: "showcase.v0170.book" },
+      { icon: Zap, text: "showcase.v0170.check" },
+    ],
+  },
+  {
     version: "0.16.0",
     hero: {
       icon: Shield,

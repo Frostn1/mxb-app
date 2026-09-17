@@ -342,7 +342,7 @@
   FrostMod 0.22 or newer.
 - With MXB App running too, the two share one shortcut, and each overlay shows the other's tabs.
 
-## Unreleased — MXB App
+## 2026-09-17 — v0.17.0 — The server list, fixed at both ends
 
 ### Fixed
 - MX Bikes' own Browse screen stops saying "connection timeout" for the rest of the evening.
@@ -354,8 +354,12 @@
 - The overlay shortcut always belongs to someone. With no MX Bikes folder set, MXB App told
   MXB Coach it was holding the key for both and then never bound it, so the shortcut opened
   nothing in either app.
+- "Is MX Bikes down" could say the servers were fine while they were down. When the master
+  didn't answer and the app rebuilt the list from its own address book, it reported the list
+  rather than the master — so every install with a warm book voted "working" through an outage
+  it was itself routing around.
 
-### Added
+### Added and changed
 - The 3D track view now shows the game's own tracks in full, with their ground, their markings,
   their scenery and their sky, the same as a track you downloaded. This covers the 3D view in
   MXB Coach too.
@@ -376,14 +380,6 @@
   install it had nothing to work from, which is exactly who an outage catches out. The app now
   seeds that book from a pooled one and adds what it sees, so the fallback is ready before the
   outage instead of after it.
-
-### Fixed
-- "Is MX Bikes down" could say the servers were fine while they were down. When the master
-  didn't answer and the app rebuilt the list from its own address book, it reported the list
-  rather than the master — so every install with a warm book voted "working" through an outage
-  it was itself routing around.
-
-### Changed
 - The app reports anonymous usage from a fixed list of names and nothing else. A plugin shares
   the app's window, and so could count whatever it liked under any name it liked — including
   filling the buffer with invented ones, which quietly stopped real counters being recorded
