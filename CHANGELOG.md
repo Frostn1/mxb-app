@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased — MXB Coach
+## 2026-09-16 — MXB Coach v0.1.15-beta.15
 
 ### Added
 - The lap review says whether you rode the high line or the low one through a corner — up on
