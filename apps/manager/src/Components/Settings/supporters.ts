@@ -39,12 +39,38 @@ export interface Supporter {
   since?: string;
 }
 
-/** Someone who helped build the app rather than fund it: ideas, testing, feedback. */
+/**
+ * What somebody did, when it wasn't money.
+ *
+ * Three kinds because three different things are being claimed, and each one has its
+ * own evidence: `code` is a merged pull request, `testing` is a reproducible report
+ * against a build nobody else had yet, `ideas` is a suggestion that shipped. Somebody
+ * who did two of them is listed twice, under both — picking a "highest" one for them
+ * would drop the other thing they actually did.
+ *
+ * Ordered here as they render. Not a ranking: a fixed order is what stops the list
+ * reshuffling every time the manifest is hand-edited.
+ */
+export const CONTRIBUTOR_KINDS = ["code", "testing", "ideas"] as const;
+
+export type ContributorKind = (typeof CONTRIBUTOR_KINDS)[number];
+
+function asKind(value: unknown): ContributorKind | undefined {
+  return CONTRIBUTOR_KINDS.includes(value as ContributorKind)
+    ? (value as ContributorKind)
+    : undefined;
+}
+
+/** Someone who helped build the app rather than fund it: code, testing, ideas. */
 export interface Contributor {
   /** Display name, as they asked for it. */
   name: string;
   /** What they did, in a few words. Hand-written, so never translated. */
   note?: string;
+  /** Which kind of help. Absent in a manifest written before the split, and in one
+   *  where somebody simply hasn't been sorted yet — both land in a generic group at
+   *  the bottom rather than being guessed into the wrong one. */
+  kind?: ContributorKind;
 }
 
 export interface SupportersManifest {
@@ -80,7 +106,7 @@ export const BUNDLED_SUPPORTERS: SupportersManifest = {
     { name: "Bøddi" },
     { name: "Kelso" },
   ],
-  contributors: [{ name: "Trystan34", note: "Ideas that made the app better" }],
+  contributors: [{ name: "Trystan34", kind: "code" }],
 };
 
 const CACHE_KEY = "mxb:supporters:v1";
@@ -141,7 +167,13 @@ export function parseManifest(raw: unknown): SupportersManifest | null {
     >;
     const name = trimmed(typeof entry === "string" ? entry : fields.name, MAX_NAME_CHARS);
     if (!name) continue;
-    contributors.push({ name, note: trimmed(fields.note, MAX_NOTE_CHARS) });
+    contributors.push({
+      name,
+      note: trimmed(fields.note, MAX_NOTE_CHARS),
+      // An unknown kind is dropped rather than rendered: a heading this build has no
+      // translation for would come out as a raw key.
+      kind: asKind(fields.kind),
+    });
   }
 
   return {
@@ -229,5 +261,33 @@ export function groupByTier(manifest: SupportersManifest): TierGroup[] {
     people: buckets.get(tier) ?? [],
   }));
   if (untiered.length) groups.push({ tier: null, people: untiered });
+  return groups;
+}
+
+export interface ContributorGroup {
+  /** `null` for unsorted contributors — see {@link Contributor.kind}. */
+  kind: ContributorKind | null;
+  people: Contributor[];
+}
+
+/**
+ * Bucket contributors by what they did, in {@link CONTRIBUTOR_KINDS} order.
+ *
+ * Unlike {@link groupByTier} the order is fixed in code rather than read from the
+ * manifest: tiers are the creator's own words on Buy Me a Coffee and can be renamed,
+ * whereas these three are ours and each has a translated heading to match.
+ *
+ * Empty kinds don't render, and unsorted people come last under a generic heading — so
+ * a manifest written before the split still shows one plain list rather than an empty
+ * section. Within a group, people keep the order they're written in.
+ */
+export function groupByKind(manifest: SupportersManifest): ContributorGroup[] {
+  const groups: ContributorGroup[] = [];
+  for (const kind of CONTRIBUTOR_KINDS) {
+    const people = manifest.contributors.filter((c) => c.kind === kind);
+    if (people.length) groups.push({ kind, people });
+  }
+  const unsorted = manifest.contributors.filter((c) => !c.kind);
+  if (unsorted.length) groups.push({ kind: null, people: unsorted });
   return groups;
 }

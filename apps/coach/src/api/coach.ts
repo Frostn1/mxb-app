@@ -238,6 +238,9 @@ export interface Ground {
   name: string;
   /** How high the bike rides above this terrain, metres. */
   lift: number;
+  /** The laps didn't sit steadily above it, so `lift` is a best guess and the lines may float
+   *  or sink a little. The track itself is drawn either way. */
+  roughFit: boolean;
 }
 
 export const coachStatus = () => invoke<CoachStatus>("coach_status");

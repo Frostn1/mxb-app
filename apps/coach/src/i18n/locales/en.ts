@@ -99,6 +99,7 @@ export const en = {
   "review.groundFromLaps": "Ground built from your laps:",
   "review.loadingTrack": "Loading the track\u2026",
   "review.loadingTrackHint": "Reading its terrain and ground. What you can see meanwhile is built from your laps.",
+  "review.linesRough": "Your lines may not sit exactly on the ground:",
   "review.notYourTrack": "This isn't the track \u2014 it's your laps",
   "review.legendYou": "Your line",
   "review.legendRef": "Fast lap",

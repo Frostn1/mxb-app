@@ -2084,6 +2084,15 @@ export const de: Translation = {
   "supporters.contributors": "Mitwirkende",
   "supporters.contributorsDesc":
     "Leute, die die App mit Ideen, Tests und Feedback besser gemacht haben.",
+  "supporters.kind.code": "Code-Beiträge",
+  "supporters.kind.codeDesc":
+    "Code, den sie geschrieben haben — und der in deinem Build läuft.",
+  "supporters.kind.testing": "Tests",
+  "supporters.kind.testingDesc":
+    "Haben absichtlich kaputt gemacht, was sonst noch niemand hatte.",
+  "supporters.kind.ideas": "Ideen & Feedback",
+  "supporters.kind.ideasDesc":
+    "Haben etwas vorgeschlagen, das es in die App geschafft hat.",
   "reshade.needsGameFolder":
     "ReShade liegt in deinem {{game}}-Ordner — lege den unter Spielordner fest, oder zeige hier direkt darauf.",
   "reshade.folder": "Gesucht wird in deinem {{game}}-Ordner:",

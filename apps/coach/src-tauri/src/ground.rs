@@ -161,5 +161,8 @@ mod tests {
         assert!(m.lift.is_none(), "still refuses the wrong terrain");
         assert!(m.spread > MAX_SPREAD_M, "and says how far out it was: {}", m.spread);
         assert_eq!(m.offered, 400);
+        // The median is reported even when the fit is refused: the track is drawn either way
+        // now, and this is the height the lines hang at.
+        assert!(m.median_lift.is_finite() && m.median_lift != 0.0, "a lift to fall back on: {}", m.median_lift);
     }
 }
