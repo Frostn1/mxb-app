@@ -47,6 +47,7 @@ import {
 import {
   closeMap,
   fetchGround,
+  findTracksNear,
   importDem,
   mapZoom,
   pick,
@@ -139,10 +140,8 @@ function BrowsePanel({
   const t = useT();
   // Held outside this component on purpose — see `placeFinder`. A fetch takes minutes and the
   // rider is free to go and look at a lap they traced last week while it runs.
-  const { query, hits, picked, cover, plot, busy, run, map, mapError } = useSyncExternalStore(
-    subscribe,
-    snapshot,
-  );
+  const { query, hits, picked, cover, plot, busy, run, map, mapError, nearOf } =
+    useSyncExternalStore(subscribe, snapshot);
 
   const onImport = async () => {
     const path = await openDialog({
@@ -202,10 +201,31 @@ function BrowsePanel({
             {t("place.searchHint")}
           </p>
 
-          {hits?.length === 0 && (
-            <p className="mt-3 text-[12.5px] text-muted-foreground">{t("place.noHits")}</p>
+          {/* The way out of "I don't know how to get coordinates", and the reason it sits here
+              rather than under the coverage panel: a rider who cannot find their track by name
+              can always find the town next to it, and this turns that into a list of circuits.
+              One press, one request, and only when it is pressed. */}
+          {picked && (
+            <div className="mt-3 flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => void findTracksNear(picked.lat, picked.lon)}
+                disabled={busy !== null}
+              >
+                <MapPin className="size-3.5" />
+                {busy === "near" ? t("place.nearSearching") : t("place.near")}
+              </Button>
+              <span className="text-[12px] text-muted-foreground">{t("place.nearHint")}</span>
+            </div>
           )}
-          {hits && hits.length > 1 && (
+
+          {hits?.length === 0 && (
+            <p className="mt-3 text-[12.5px] leading-relaxed text-muted-foreground">
+              {t(nearOf ? "place.noneNear" : "place.noHits")}
+            </p>
+          )}
+          {hits && (hits.length > 1 || (nearOf && hits.length > 0)) && (
             <ol className="mt-3 border border-border">
               {hits.map((h, i) => (
                 <li key={i}>
@@ -222,6 +242,8 @@ function BrowsePanel({
                       <span className="block truncate text-[12.5px]">{h.label}</span>
                       <span className="block font-mono text-[10.5px] tabular-figures text-faint">
                         {h.lat.toFixed(5)}, {h.lon.toFixed(5)} · {h.kind}
+                        {h.awayKm !== undefined &&
+                          ` · ${t("place.away", { km: h.awayKm.toFixed(h.awayKm < 10 ? 1 : 0) })}`}
                       </span>
                     </span>
                   </button>

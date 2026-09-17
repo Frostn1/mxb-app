@@ -3540,10 +3540,7 @@ fn feature_profile(features: &[Feature], lap: f32, blend: f32, restore_drawn: bo
     // Except at the top of a take-off. Smoothed over the blend distance a lip becomes a rounded
     // crown, and a rounded crown is a knuckle: the face flattens before the edge. Near a lip the
     // drawn shape takes over — concave all the way up, and flush with the deck.
-    for f in features {
-        let Some((lip, face)) = takeoff_of(f) else {
-            continue;
-        };
+    for (lip, face) in features.iter().flat_map(takeoffs_of) {
         // From the foot of the face, where the drawn shape and the smoothed one still agree.
         // Handing over part way up put a steep band in the middle of the face where the
         // smoothed ground climbed back to the drawn one, and a flatter metre before the lip.
@@ -3936,9 +3933,18 @@ fn longitudinal(f: &Feature, t: f32, u: f32) -> f32 {
     // Drawn by hand: eased between the points it was given, which is the same easing the lap's
     // own height curve uses. Nothing else here has a shape someone chose point by point.
     if let Feature::Custom { shape, .. } = f {
-        // The take-off is concave to its crest, the way a tabletop's is. The cubic arrives at a
-        // crest flat, which rounds the top of the face over into a knuckle.
-        if let Some((a_u, a_h, c_u, c_h)) = custom_takeoff(shape) {
+        // Every take-off is concave to its crest, the way a tabletop's is. The cubic arrives at
+        // a crest flat, which rounds the top of the face over into a knuckle.
+        //
+        // Every one, not the first. This used to shape the run into the *first* crest and leave
+        // the rest to the cubic, which is fine for a tabletop and wrong for everything a stadium
+        // lap is made of: a rhythm lane's five or six hills came out with one lip and four
+        // waves, and a triple got a lip onto its first crest and a rounded knuckle onto its far
+        // one. Ridden, that is the report this fixes — "it doesn't have much of a lip, I G out
+        // every time and get sent to the moon": with nothing to leave the ground over, a rider
+        // rolls the crest, drops into the trough compressed, and the next face fires them off
+        // whatever the suspension gives back.
+        for (a_u, a_h, c_u, c_h) in custom_takeoffs(shape) {
             if t >= a_u && t <= c_u {
                 let rise = c_h - a_h;
                 let x = (t - a_u) / (c_u - a_u);
@@ -3995,27 +4001,44 @@ fn longitudinal(f: &Feature, t: f32, u: f32) -> f32 {
     }
 }
 
-/// A hand-drawn shape's take-off: the span into its first crest, as (u, h) at each end.
-fn custom_takeoff(points: &[crate::trackprog::ShapePoint]) -> Option<(f32, f32, f32, f32)> {
+/// A hand-drawn shape's take-offs: every span that rises into a crest, as (u, h) at each end.
+///
+/// A crest is a drawn point higher than the one before it and no lower than the one after, so
+/// a plateau counts at the point it starts — the same rule the first-crest version of this
+/// used, applied all the way along. A run of hills therefore hands back one span per hill, and
+/// a triple hands back three: two crests and the mound between them.
+fn custom_takeoffs(points: &[crate::trackprog::ShapePoint]) -> Vec<(f32, f32, f32, f32)> {
     let mut p: Vec<(f32, f32)> = points.iter().map(|q| (q.u, q.h)).collect();
     p.sort_by(|a, b| a.0.total_cmp(&b.0));
-    let c = (1..p.len()).find(|&i| p[i].1 > p[i - 1].1 && p.get(i + 1).map_or(true, |n| n.1 <= p[i].1))?;
-    let (a, top) = (p[c - 1], p[c]);
-    (top.0 > a.0).then_some((a.0, a.1, top.0, top.1))
+    (1..p.len())
+        .filter(|&i| p[i].1 > p[i - 1].1 && p.get(i + 1).map_or(true, |n| n.1 <= p[i].1))
+        .filter(|&i| p[i].0 > p[i - 1].0)
+        .map(|i| (p[i - 1].0, p[i - 1].1, p[i].0, p[i].1))
+        .collect()
 }
 
-/// Where a feature's take-off lip is, metres round the lap, and how long its face is.
-fn takeoff_of(f: &Feature) -> Option<(f32, f32)> {
+/// A hand-drawn shape's first take-off: the span into its first crest, as (u, h) at each end.
+fn custom_takeoff(points: &[crate::trackprog::ShapePoint]) -> Option<(f32, f32, f32, f32)> {
+    custom_takeoffs(points).into_iter().next()
+}
+
+/// Where a feature's take-off lips are, metres round the lap, and how long each face is.
+///
+/// Plural for the same reason [`custom_takeoffs`] is: a drawn shape has as many take-offs as it
+/// has crests, and the smoothing pass has to be kept off all of them. Protecting only the first
+/// left a triple's far crest rounded over by the blend and a rhythm lane's second hill onwards
+/// reading as a wave.
+fn takeoffs_of(f: &Feature) -> Vec<(f32, f32)> {
     match f {
         Feature::Tabletop { at, length, height, lip, .. } => {
             let (up, _, _) = crate::trackprog::tabletop_faces(*height, *length, *lip);
-            Some((at + up, up))
+            vec![(at + up, up)]
         }
-        Feature::Custom { at, length, shape, .. } => {
-            let (a_u, _, c_u, _) = custom_takeoff(shape)?;
-            Some((at + c_u * length, (c_u - a_u) * length))
-        }
-        _ => None,
+        Feature::Custom { at, length, shape, .. } => custom_takeoffs(shape)
+            .into_iter()
+            .map(|(a_u, _, c_u, _)| (at + c_u * length, (c_u - a_u) * length))
+            .collect(),
+        _ => Vec::new(),
     }
 }
 
@@ -9043,7 +9066,7 @@ fn start_tcl(prog: &TrackProgram) -> Option<String> {
 /// the code that made it. Bump it with every change to what a program builds into: minor for
 /// a new feature, patch for a fix. 0.x until the generator is finished. History in
 /// `apps/studio/FROST_ALGORITHM.md`.
-pub const FROST_ALGORITHM_VERSION: &str = "0.43.1";
+pub const FROST_ALGORITHM_VERSION: &str = "0.43.2";
 
 /// The stamp every built track carries in `<slug>/frost-algorithm.ini`.
 ///
@@ -13216,6 +13239,79 @@ mod tests {
         // And nothing past the lip stands above the deck: no wall, no kick.
         let past = (0..=12).map(|k| h(lip + k as f32 * 0.25)).fold(f32::MIN, f32::max);
         assert!(past < deck[2] + 0.04, "something stands up past the lip: {past:.2} over a deck of {:.2}", deck[2]);
+    }
+
+    #[test]
+    fn every_hill_in_a_rhythm_lane_keeps_its_lip() {
+        // Ridden, on a supercross lap: "the rhythm — if I try to jump it, it doesn't have much
+        // of a lip and I G out every time and get sent to the moon." Only the first crest of a
+        // drawn shape was built as a take-off; the rest arrived at their crests flat, which is
+        // a wave. A rider cannot leave a wave, so they roll it, drop into the trough
+        // compressed, and whatever the suspension gives back is the jump.
+        //
+        // The marks are `tracklayout::rhythm_lane`'s, at the middle of the measured band: four
+        // hills, 10 m pitch, 1.4 m tall, a quarter-pitch lead in and out.
+        let (pitch, h_m, hills) = (10.0f32, 1.4f32, 4usize);
+        let span = pitch * (hills as f32 + 0.5);
+        let mut marks: Vec<(f32, f32)> = vec![(0.0, 0.0)];
+        let mut x = pitch * 0.25;
+        for _ in 0..hills {
+            marks.push((x + pitch * 0.34, h_m));
+            marks.push((x + pitch * 0.50, h_m));
+            marks.push((x + pitch * 0.92, 0.0));
+            x += pitch;
+        }
+        marks.push((span, 0.0));
+        let at = 30.0f32;
+        let mut p = hairpins();
+        p.terrain.relief.amplitude = 0.0;
+        p.features = vec![Feature::Custom {
+            at,
+            length: span,
+            side: 0.0,
+            shape: marks
+                .iter()
+                .map(|(m, h)| crate::trackprog::ShapePoint { u: m / span, h: *h })
+                .collect(),
+        }];
+        let s = synthesise(&p).unwrap();
+        // The ground along the middle of the lane, between the cells — `across` snaps to a
+        // station and reads the nearest one, which turns a 4 m ramp into steps.
+        let ground = |at: f32| {
+            let k = s.stations.iter().position(|st| st.s >= at).unwrap_or(1).max(1);
+            let (a, b) = (s.stations[k - 1], s.stations[k]);
+            let f = ((at - a.s) / (b.s - a.s).max(1e-6)).clamp(0.0, 1.0);
+            let (x, z) = (a.x + (b.x - a.x) * f, a.z + (b.z - a.z) * f);
+            let (rx, rz) = crate::trackprog::right_vector(a.heading);
+            let n = 41;
+            (0..n)
+                .map(|i| {
+                    let t = (i as f32 / (n - 1) as f32 - 0.5) * 3.6;
+                    sample_smooth(&s.heights, s.gw, s.gh, (x + rx * t) / s.mps, (z + rz * t) / s.mps)
+                })
+                .sum::<f32>()
+                / n as f32
+        };
+        // Every hill, not just the first, and each measured against the ramp its own face was
+        // drawn at: the first climbs from the lead-in, the rest from the trough behind them.
+        let mut last_metre: Vec<f32> = Vec::new();
+        for i in 0..hills {
+            let foot = if i == 0 { 0.0 } else { pitch * (i as f32 - 0.75) + pitch * 0.92 };
+            let lip = pitch * (i as f32 + 0.25) + pitch * 0.34;
+            let run = lip - foot;
+            let ramp = crate::trackprog::takeoff_lip_deg(h_m, run).to_radians().tan();
+            let rise = ground(at + lip) - ground(at + lip - 1.0);
+            last_metre.push(rise / ramp);
+        }
+        // 0.75 of the drawn ramp over the last metre before the lip. The grid is 0.39 m here,
+        // so a metre is under three cells and a tenth of it is noise; a crest the cubic rounds
+        // off arrives at a third of this or less.
+        let worst = last_metre.iter().cloned().fold(f32::MAX, f32::min);
+        assert!(
+            worst > 0.75,
+            "a rhythm hill rounds over before its lip — last metre against the drawn ramp, \
+             hill by hill: {last_metre:.2?}"
+        );
     }
 
     #[test]

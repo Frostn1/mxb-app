@@ -219,6 +219,7 @@ fn main() {
             read_track_placeable,
             // Turning a real place into ground a track can be built on.
             trackplace::place_find,
+            trackplace::place_tracks_near,
             trackplace::place_coverage,
             trackplace::place_fetch,
             trackplace::place_list,

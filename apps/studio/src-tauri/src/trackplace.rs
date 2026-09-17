@@ -459,6 +459,10 @@ pub struct PlaceHit {
     /// What OpenStreetMap calls it: `leisure`, `highway`, and so on. Shown so a rider can
     /// tell a motocross circuit from a street with the same name.
     pub kind: String,
+    /// How far this is from the spot a nearby search was run on, kilometres. `None` for a hit
+    /// that came from a name rather than from looking round a point.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub away_km: Option<f64>,
 }
 
 /// What one source has at one spot.
@@ -843,7 +847,7 @@ pub async fn place_find(query: String) -> Result<Vec<PlaceHit>, String> {
     let body = get_bytes(&url, "searching for that place").await?;
     let items: Vec<serde_json::Value> =
         serde_json::from_slice(&body).map_err(|e| format!("the place search answered oddly: {e}"))?;
-    Ok(items
+    let hits: Vec<PlaceHit> = items
         .into_iter()
         .filter_map(|v| {
             let lat = v.get("lat")?.as_str()?.parse().ok()?;
@@ -861,9 +865,186 @@ pub async fn place_find(query: String) -> Result<Vec<PlaceHit>, String> {
                     .and_then(|d| d.as_str())
                     .unwrap_or("")
                     .to_string(),
+                away_km: None,
             })
         })
-        .collect())
+        .collect();
+    if !hits.is_empty() {
+        return Ok(hits);
+    }
+    // A gazetteer knows the places people write addresses about. A motocross circuit is often
+    // not one of them: it is a field with a name the club gave it, mapped as a `sport=motocross`
+    // way with no street and no settlement of its own, and Nominatim's free-text index will not
+    // find it by that name. So when the gazetteer comes back empty, ask the map itself for a
+    // circuit called this — which is the question the rider was asking all along.
+    //
+    // Only then: it costs one Overpass request, and it is still the same button press.
+    //
+    // Its failures are reported rather than swallowed. An empty list means there is no circuit
+    // by that name on the map, which is a fact worth acting on; a busy Overpass means try
+    // again, and quietly turning the second into the first would send a rider off hunting
+    // coordinates for a track that is right there.
+    tracks_named(q).await
+}
+
+// ── Finding a circuit rather than a place ────────────────────────────────────
+//
+// Nominatim answers "where is this name", which is the wrong question for a motocross track
+// half the time. Overpass answers "what is tagged as a motocross circuit here", which is the
+// right one, and it reads the same OpenStreetMap data under the same ODbL terms: what comes
+// back is a name and a coordinate, and a coordinate is a fact.
+//
+// Both entry points are behind a button, like everything else in this module. Overpass is a
+// public server run on donations and its usage policy asks for a handful of requests a minute
+// from a single client; one per press is well inside that.
+
+/// Where the circuit search asks.
+const OVERPASS: &str = "https://overpass-api.de/api/interpreter";
+
+/// The tags a motocross circuit carries in OpenStreetMap.
+///
+/// `sport` is the useful one — `leisure` is `track`, `pitch` or `sports_centre` depending on
+/// who mapped it, and none of those means motocross on their own. The values are matched
+/// case-insensitively and loosely because a venue that hosts more than one discipline holds
+/// them semicolon-separated (`motocross;enduro`). `motorsport` is deliberately not in here:
+/// it is what a kart circuit and a rally stage wear, and a list of those is not what anybody
+/// pressed the button for.
+const CIRCUIT_SPORTS: &str = "motocross|supercross|motorcross|enduro";
+
+/// How far out "tracks near here" looks, kilometres.
+///
+/// Forty, because that is about an hour's drive with a bike in the van and it is the radius a
+/// rider means by "my local track". Wider than this and a busy region answers with fifty
+/// circuits and the list stops being a list.
+const NEAR_KM: f64 = 40.0;
+
+/// The most circuits either search hands back.
+const CIRCUIT_LIMIT: usize = 40;
+
+/// Ask Overpass, and turn what comes back into hits.
+async fn overpass(query: &str, what: &str) -> Result<Vec<serde_json::Value>, String> {
+    let url = format!(
+        "{OVERPASS}?data={}",
+        percent_encoding::utf8_percent_encode(query, percent_encoding::NON_ALPHANUMERIC)
+    );
+    let body = get_bytes(&url, what).await?;
+    let v: serde_json::Value =
+        serde_json::from_slice(&body).map_err(|e| format!("{what}: the answer was not readable: {e}"))?;
+    Ok(v.get("elements")
+        .and_then(|e| e.as_array())
+        .cloned()
+        .unwrap_or_default())
+}
+
+/// Anything in a rider's typing that Overpass would read as a regular expression.
+fn regex_safe(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 8);
+    for c in s.chars() {
+        if "\\^$.|?*+()[]{}\"".contains(c) {
+            out.push('\\');
+        }
+        out.push(c);
+    }
+    out
+}
+
+/// One Overpass element as a place, where it has a name and a position.
+///
+/// A way or a relation has no coordinate of its own, so the query asks for `out center` and
+/// the centre is what comes back — which for a circuit is a point inside it, and that is
+/// exactly what a plot wants to be centred on.
+fn circuit_hit(e: &serde_json::Value) -> Option<PlaceHit> {
+    let tags = e.get("tags")?;
+    let name = tags
+        .get("name")
+        .or_else(|| tags.get("name:en"))
+        .and_then(|n| n.as_str())?;
+    let at = e.get("center").unwrap_or(e);
+    let lat = at.get("lat")?.as_f64()?;
+    let lon = at.get("lon")?.as_f64()?;
+    // Whatever the map knows about where it is, so two circuits of the same name can be told
+    // apart. Often nothing: a field has no address.
+    let where_ = ["addr:city", "addr:town", "addr:county", "addr:state", "addr:country"]
+        .iter()
+        .filter_map(|k| tags.get(*k).and_then(|v| v.as_str()))
+        .collect::<Vec<_>>()
+        .join(", ");
+    Some(PlaceHit {
+        label: if where_.is_empty() { name.to_string() } else { format!("{name}, {where_}") },
+        lat,
+        lon,
+        kind: tags
+            .get("sport")
+            .and_then(|v| v.as_str())
+            .unwrap_or("motocross")
+            .to_string(),
+        away_km: None,
+    })
+}
+
+/// The shortest typing worth asking the whole world about.
+///
+/// "MX" matches a few thousand circuits and none of them usefully, and the server has to read
+/// every one of them to find that out. Three characters is the shortest thing anybody means.
+const CIRCUIT_LEAST_CHARS: usize = 3;
+
+/// Circuits whose name contains what the rider typed, anywhere in the world.
+async fn tracks_named(q: &str) -> Result<Vec<PlaceHit>, String> {
+    if q.chars().count() < CIRCUIT_LEAST_CHARS {
+        return Ok(Vec::new());
+    }
+    let query = format!(
+        "[out:json][timeout:25];nwr[sport~\"{}\",i][name~\"{}\",i];out center {CIRCUIT_LIMIT};",
+        CIRCUIT_SPORTS,
+        regex_safe(q)
+    );
+    let elements = overpass(&query, "looking for a circuit by that name").await?;
+    Ok(elements.iter().filter_map(circuit_hit).take(CIRCUIT_LIMIT).collect())
+}
+
+/// Every motocross circuit within [`NEAR_KM`] of a spot, nearest first.
+///
+/// This is the answer to "I don't know how to get coordinates". Search the nearest town — which
+/// a gazetteer always finds — press this, and pick the track off the list. Nobody has to read a
+/// latitude off a map for their local track ever again.
+#[tauri::command]
+pub async fn place_tracks_near(lat: f64, lon: f64) -> Result<Vec<PlaceHit>, String> {
+    // A degree of latitude is 111.32 km everywhere; a degree of longitude is that times the
+    // cosine of where you are. Near the poles that cosine goes to nothing and the box would
+    // wrap the world, so it is held to a quarter turn either way.
+    let (dlat, dlon) = degrees_per_m(lat);
+    let (dlat, dlon) = (NEAR_KM * 1000.0 * dlat, (NEAR_KM * 1000.0 * dlon).min(90.0));
+    let query = format!(
+        "[out:json][timeout:25];nwr[sport~\"{}\",i]({:.5},{:.5},{:.5},{:.5});out center {};",
+        CIRCUIT_SPORTS,
+        (lat - dlat).max(-90.0),
+        (lon - dlon).max(-180.0),
+        (lat + dlat).min(90.0),
+        (lon + dlon).min(180.0),
+        CIRCUIT_LIMIT * 2,
+    );
+    let elements = overpass(&query, "looking for circuits near there").await?;
+    let mut hits: Vec<PlaceHit> = elements
+        .iter()
+        .filter_map(circuit_hit)
+        .map(|mut h| {
+            h.away_km = Some(km_between(lat, lon, h.lat, h.lon));
+            h
+        })
+        .filter(|h| h.away_km.unwrap_or(f64::MAX) <= NEAR_KM)
+        .collect();
+    hits.sort_by(|a, b| a.away_km.unwrap_or(0.0).total_cmp(&b.away_km.unwrap_or(0.0)));
+    hits.truncate(CIRCUIT_LIMIT);
+    Ok(hits)
+}
+
+/// Great-circle kilometres between two points. Only ever used to sort a short list and to
+/// round a box off to a circle, so the spherical earth is plenty.
+fn km_between(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
+    let (p1, p2) = (lat1.to_radians(), lat2.to_radians());
+    let (dp, dl) = ((lat2 - lat1).to_radians(), (lon2 - lon1).to_radians());
+    let a = (dp / 2.0).sin().powi(2) + p1.cos() * p2.cos() * (dl / 2.0).sin().powi(2);
+    6371.0 * 2.0 * a.sqrt().clamp(0.0, 1.0).asin()
 }
 
 /// `40.008, -86.9291` and the handful of ways people actually write that.
@@ -886,6 +1067,7 @@ fn parse_coords(s: &str) -> Option<PlaceHit> {
         lat,
         lon,
         kind: "coordinates".to_string(),
+        away_km: None,
     })
 }
 
@@ -2598,6 +2780,67 @@ mod tests {
         assert!((hit.lon + 86.9291).abs() < 1e-9);
         assert!(parse_coords("Ironman Raceway").is_none());
         assert!(parse_coords("91.0 0.0").is_none(), "latitude past the pole");
+    }
+
+    /// A circuit comes back off the map as a place, whatever shape it was mapped as.
+    ///
+    /// The three cases are the three ways OpenStreetMap holds a track: a node with its own
+    /// coordinate, a way with a centre because the query asked for one, and a relation the
+    /// same. A way without `out center` has no position at all and must be dropped rather
+    /// than defaulted to a corner of the sea.
+    #[test]
+    fn circuits_are_read_out_of_an_overpass_answer() {
+        let answer = serde_json::json!({
+            "version": 0.6,
+            "elements": [
+                { "type": "node", "id": 1, "lat": 40.008, "lon": -86.9291,
+                  "tags": { "name": "Ironman Raceway", "sport": "motocross", "addr:state": "Indiana" } },
+                { "type": "way", "id": 2, "center": { "lat": 51.1, "lon": 5.2 },
+                  "tags": { "name": "Lommel", "sport": "motocross;enduro" } },
+                { "type": "way", "id": 3, "tags": { "name": "No position", "sport": "motocross" } },
+                { "type": "way", "id": 4, "center": { "lat": 1.0, "lon": 2.0 },
+                  "tags": { "sport": "motocross" } },
+            ]
+        });
+        let hits: Vec<PlaceHit> = answer["elements"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(circuit_hit)
+            .collect();
+        assert_eq!(hits.len(), 2, "kept: {:?}", hits.iter().map(|h| &h.label).collect::<Vec<_>>());
+        assert_eq!(hits[0].label, "Ironman Raceway, Indiana");
+        assert!((hits[0].lat - 40.008).abs() < 1e-9);
+        assert_eq!(hits[0].kind, "motocross");
+        // A way's centre is its position, and a venue with no name is no use in a list.
+        assert_eq!(hits[1].label, "Lommel");
+        assert!((hits[1].lon - 5.2).abs() < 1e-9);
+    }
+
+    /// What a rider types goes into a regular expression, so it cannot be allowed to *be* one.
+    ///
+    /// `Frost's MX (old)` is an ordinary enough name and its brackets are a group; a lone `[`
+    /// or `*` is a syntax error Overpass answers with a 400, which would read to the rider as
+    /// the search being broken.
+    #[test]
+    fn a_typed_name_cannot_break_the_query() {
+        assert_eq!(regex_safe("Frost's MX (old)"), "Frost's MX \\(old\\)");
+        assert_eq!(regex_safe("a\"b"), "a\\\"b");
+        assert_eq!(regex_safe("+*?"), "\\+\\*\\?");
+        assert_eq!(regex_safe("Ironman"), "Ironman");
+    }
+
+    /// The box a nearby search asks over is the radius it promises, and it stays on the planet.
+    #[test]
+    fn a_nearby_box_is_the_radius_it_says() {
+        // Due north of a point, one box-height away, is about the search radius.
+        let (dlat, _) = degrees_per_m(40.0);
+        let north = 40.0 + NEAR_KM * 1000.0 * dlat;
+        let away = km_between(40.0, -86.0, north, -86.0);
+        assert!((away - NEAR_KM).abs() < 1.0, "the box reaches {away:.1} km, not {NEAR_KM}");
+        // And the known distance every map textbook carries: Indianapolis to Chicago is 265 km.
+        let far = km_between(39.7684, -86.1581, 41.8781, -87.6298);
+        assert!((far - 265.0).abs() < 8.0, "{far:.0} km against a known 265");
     }
 
     /// Every failure mode these services have, turned into a sentence.

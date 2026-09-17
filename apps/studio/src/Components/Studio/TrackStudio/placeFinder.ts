@@ -9,6 +9,7 @@ import {
   onPlaceFetchProgress,
   placeCoverage,
   placeMap,
+  tracksNear,
   type CoverageReport,
   type FetchStage,
   type Place,
@@ -50,7 +51,7 @@ export interface FinderState {
   cover: CoverageReport | null;
   /** A full lap is normally 2000 m or more, which does not fit a 470 m plot. */
   plot: number;
-  busy: "search" | "coverage" | "fetch" | "import" | "map" | null;
+  busy: "search" | "near" | "coverage" | "fetch" | "import" | "map" | null;
   /** The fetch running now, or null. */
   run: FetchRun | null;
   /** The aerial picture the rider is picking a spot off, once they have opened one. */
@@ -59,6 +60,8 @@ export interface FinderState {
   mapError: string | null;
   /** A place that finished fetching and has not been opened for tracing yet. */
   fetched: string | null;
+  /** The spot the hits on show are the circuits near, when that is what they are. */
+  nearOf: { lat: number; lon: number } | null;
 }
 
 const EMPTY: FinderState = {
@@ -72,6 +75,7 @@ const EMPTY: FinderState = {
   map: null,
   mapError: null,
   fetched: null,
+  nearOf: null,
 };
 
 let state: FinderState = EMPTY;
@@ -119,11 +123,30 @@ export async function pick(hit: PlaceHit) {
 export async function search() {
   const query = state.query.trim();
   if (!query) return;
-  set({ busy: "search", hits: null, picked: null, cover: null });
+  set({ busy: "search", hits: null, picked: null, cover: null, nearOf: null });
   try {
     const found = await findPlace(query);
     set({ hits: found, busy: null });
     // One answer is not a choice, so it is made.
+    if (found.length === 1) await pick(found[0]);
+  } catch (e) {
+    toast.error(String(e));
+    set({ busy: null });
+  }
+}
+
+/**
+ * The circuits round wherever the rider has got to.
+ *
+ * Separate from `search` and behind its own press, because it is a second request to a second
+ * public server and because it is a different question: the search asks where a name is, this
+ * asks what is *here*. A rider who cannot find their track by name can always find their town.
+ */
+export async function findTracksNear(lat: number, lon: number) {
+  set({ busy: "near" });
+  try {
+    const found = await tracksNear(lat, lon);
+    set({ hits: found, busy: null, nearOf: { lat, lon } });
     if (found.length === 1) await pick(found[0]);
   } catch (e) {
     toast.error(String(e));

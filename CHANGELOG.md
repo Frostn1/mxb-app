@@ -19,6 +19,10 @@
   folder undoes all of it.
 - The Studio can be opened straight onto a screen — `--view replay` — which is what
   **Open in Studio** on MXB App's Plugins page does.
+- **Tracks near here**, in From a real place. Search the nearest town — which a gazetteer
+  always knows — press it, and every motocross circuit within 40 km comes back off
+  OpenStreetMap, nearest first, with how far away each one is. Pick yours and the plot is
+  centred on it. Nobody has to read a latitude off a map for their local track any more.
 
 ### Changed
 - **A paid plugin's panels open in Frost's Studio, not in MXB App.** Cutting a replay is the
@@ -40,6 +44,24 @@
   from the sign-in alone — deleting an account, or never having made one, is not a way round it.
 
 ### Fixed
+- **Every hill in a supercross rhythm lane has a lip.** A jump's take-off is built as a curve
+  at the foot and a straight run to the lip, and a lane of hills was getting that on its first
+  crest only: the rest arrived flat, which is a wave. You cannot leave a wave, so you roll the
+  crest, drop into the trough compressed and get fired off whatever the suspension gives back —
+  which is the G-out and the trip to the moon. The last metre before a hill's lip now holds
+  81–86% of the slope it was drawn at, against 39–41% before: about 25° where it read 12.5°,
+  drawn at 29°. A triple's far crest was the same shape and is fixed by the same change.
+- **A tuff block is one colour again.** Each block was mapped across the whole texture, so
+  every one of them wore the red half and the white half split down its middle, with the grime
+  shaded along its top instead of its foot — a row of them read as popcorn rather than as a
+  border. They now alternate red and white down the row, one colour a block, dirty at the
+  bottom where they actually stand.
+- **A track name the gazetteer has never heard of now finds the track.** Searching a real place
+  asked OpenStreetMap's place index, which knows addresses rather than circuits, and a club's
+  own name for its field is usually not in it — so the search said "try coordinates instead",
+  which is not something anybody wants to go and look up. It now asks the map for a motocross
+  circuit of that name before giving up, and says what to do next when there genuinely isn't
+  one.
 - The "Sign in with Steam" wall now always appears when it is needed. It was announced by the
   app the moment the service answered — which on a cold start is usually before the window has
   finished loading, and an announcement nobody is listening for yet is simply lost. So the first
