@@ -1,7 +1,6 @@
 // Prevents an additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-mod antidebug;
 pub(crate) use mxb_core::bikefiles;
 mod bikeswap;
 mod bundle;
@@ -12,6 +11,7 @@ mod trashbin;
 pub(crate) use mxb_core::cloudfiles;
 pub(crate) use mxb_core::viewer;
 pub(crate) use mxb_core::config;
+pub(crate) use mxb_core::{antidebug, appgate as gate};
 mod cookie_session;
 mod downloads;
 mod dropzone;
@@ -22,7 +22,6 @@ mod frostmod;
 mod frostmod_manage;
 pub(crate) use mxb_core::game;
 mod fileinfo;
-mod gate;
 mod gameproc;
 mod hub_clearance;
 mod hub_session;
@@ -1219,14 +1218,7 @@ async fn uninstall_mod(app: tauri::AppHandle, from_path: String, subpath: String
 /// them.
 #[tauri::command]
 fn log_client(level: String, message: String) {
-    // A log line is not a transport for arbitrary payloads. Trim rather than reject: a
-    // truncated fact still reads, and a dropped one is a support thread that goes nowhere.
-    let msg: String = message.chars().take(2000).collect();
-    match level.as_str() {
-        "error" => log::error!("[webview] {msg}"),
-        "warn" => log::warn!("[webview] {msg}"),
-        _ => log::info!("[webview] {msg}"),
-    }
+    mxb_core::clientlog::record(&level, &message);
 }
 
 /// Where MXB App's own logs are, where the game's are, and what's currently in each.

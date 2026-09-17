@@ -12,6 +12,7 @@ import Settings from "./Components/Settings/Settings";
 import UpdateBanner from "./Components/UpdateBanner";
 import { track } from "@/lib/analytics";
 import { UpdateProvider } from "./Context/Update";
+import SigninGate from "@frost/shared/Components/SigninGate/SigninGate";
 
 type View = "sessions" | "settings";
 
@@ -113,6 +114,8 @@ export default function App() {
       <I18nProvider>
         <UpdateProvider>
           <Shell />
+          {/* The Steam sign-in wall, shown only when the estate gate requires one. */}
+          <SigninGate />
         </UpdateProvider>
       </I18nProvider>
     </ThemeProvider>

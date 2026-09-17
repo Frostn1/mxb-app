@@ -24,7 +24,7 @@ import { useI18n } from "@/i18n";
 import { setAmbientVars } from "@/i18n";
 import { UpdateProvider } from "./Context/Update";
 import RuntimeBanner from "./Components/RuntimeBanner/RuntimeBanner";
-import SigninGate from "./Components/SigninGate/SigninGate";
+import SigninGate from "@frost/shared/Components/SigninGate/SigninGate";
 import UpdateBanner from "./Components/UpdateBanner/UpdateBanner";
 import type { Config, GameId, GameInfo } from "@frost/shared/types";
 

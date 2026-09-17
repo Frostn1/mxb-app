@@ -1,13 +1,22 @@
 # Changelog
 
-## Unreleased — MXB App and MXB Coach
+## Unreleased — MXB App, Frost's Studio and MXB Coach
 
 ### Added
-- MXB App can be locked to a Steam sign-in. When turned on for the deployment, the app shows a
-  "Sign in with Steam" wall at startup and won't run until you've signed in once — one click,
-  through Steam, and it remembers. It makes every account a confirmed identity, which is what
-  keeps a ban from being walked around and a GUID from being anyone else's. Off unless the
-  service turns it on, and it needs a Steam copy of the game.
+- The whole lineup can be locked to a Steam sign-in. When turned on for the deployment, MXB App,
+  Frost's Studio and MXB Coach each show a "Sign in with Steam" wall at startup and won't run
+  until you've signed in once — one click, through Steam, and it remembers. It makes every
+  account a confirmed identity, which is what keeps a ban from being walked around and a GUID from
+  being anyone else's. Off unless the service turns it on, and it needs a Steam copy of the game.
+- A ban now reaches every app, not just the one holding secured content: a banned install is
+  refused across MXB App, Studio and Coach, and told the same mundane "this copy couldn't be
+  verified" rather than the truth.
+
+### Changed
+- The security that was in MXB App now covers Studio and Coach the same way, from one shared
+  place: the debugger guard, the startup gate and the Steam-link flow all live in the shared core
+  so the three apps can't drift, and the release build already strips symbols, dissolves the call
+  structure (fat LTO) and drops debug info for every one of them.
 
 ### Changed
 - Your MX Bikes GUID is found automatically from your signed-in Steam account, the instant the

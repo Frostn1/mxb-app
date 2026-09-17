@@ -44,13 +44,7 @@ fn list_games() -> Vec<game::GameInfo> {
 /// its renderer through this.
 #[tauri::command]
 fn log_client(level: String, message: String) {
-    // A log line is not a transport for arbitrary payloads: trim rather than reject.
-    let msg: String = message.chars().take(2000).collect();
-    match level.as_str() {
-        "error" => log::error!("[webview] {msg}"),
-        "warn" => log::warn!("[webview] {msg}"),
-        _ => log::info!("[webview] {msg}"),
-    }
+    mxb_core::clientlog::record(&level, &message);
 }
 
 /// Show a file in the OS file manager, selected. Core's, as the manager and studio wrap it.
@@ -99,7 +93,27 @@ fn register_secure_opener() {
     }));
 }
 
+/// The Steam-link round trip and the gate re-check the sign-in wall drives. Thin wrappers over
+/// the shared `mxb_core::appgate`, so Coach's wall behaves exactly like MXB App's and Studio's.
+#[tauri::command]
+async fn steam_link_start(app: tauri::AppHandle) -> Result<String, String> {
+    mxb_core::appgate::steam_link_start(&app).await
+}
+
+#[tauri::command]
+async fn steam_link_status(app: tauri::AppHandle) -> Result<Option<String>, String> {
+    mxb_core::appgate::steam_link_status(&app).await
+}
+
+#[tauri::command]
+async fn recheck_gate(app: tauri::AppHandle) {
+    mxb_core::appgate::check(app).await;
+}
+
 fn main() {
+    // Refuse to run under a debugger in release builds — the runtime half of the binary
+    // hardening, shared by the whole lineup from `mxb_core`.
+    mxb_core::antidebug::guard();
     #[cfg(mxbsecure)]
     register_secure_opener();
     let builder = tauri::Builder::default();
@@ -121,6 +135,10 @@ fn main() {
         // a stint, and the list used to need the rider to leave the page and come back.
         .manage(coach::SessionWatch::default())
         .setup(|app| {
+            // The estate gate, first: refuse a blocked install now (offline-proof), and ask the
+            // server afresh in the background — the same lock as MXB App and Studio, one core.
+            mxb_core::appgate::enforce_marker(app.handle());
+            tauri::async_runtime::spawn(mxb_core::appgate::check(app.handle().clone()));
             overlay::start(app.handle());
             coach::watch_sessions(app.handle());
             // Anonymous counters, under the same switch and the same config file as the manager's
@@ -154,6 +172,9 @@ fn main() {
             mxb_core::viewer::app_platform,
             get_config,
             list_games,
+            steam_link_start,
+            steam_link_status,
+            recheck_gate,
             // ── Coach commands ─────────────────────────────────────────────────────
             // Register the coach's own commands below this line.
             coach::coach_status,

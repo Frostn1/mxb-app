@@ -2,10 +2,10 @@ import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open as openUrl } from "@tauri-apps/plugin-shell";
-import { Button } from "@frost/shared/Components/ui/button";
+import { Button } from "../ui/button";
 
 /**
- * The Steam sign-in wall.
+ * The Steam sign-in wall — shared by every app in the lineup.
  *
  * When the deployment requires a Valve-confirmed Steam sign-in (`MXB_REQUIRE_STEAM` on the
  * control plane), the startup gate answers `signin` and the Rust side emits
