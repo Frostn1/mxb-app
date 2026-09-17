@@ -1631,6 +1631,15 @@ export const it: Translation = {
   "showcase.supporters.title_one": "Reso possibile da {{count}} sostenitore",
   "showcase.supporters.title_other": "Reso possibile da {{count}} sostenitori",
   "showcase.supporters.more": "+{{count}} altri",
+  "showcase.v0160.hero.title": "Meno motivi per cui il gioco si chiude",
+  "showcase.v0160.hero.body":
+    "MX Bikes che si chiude da solo è la cosa di cui i piloti si lamentano di più. Questa versione affronta le due cause più comuni e comincia a registrare cosa succede.",
+  "showcase.v0160.trainers":
+    "I tuoi file dei giri salvati vengono ripuliti mentre il gioco è chiuso. Il gioco ci lascia dentro byte residui, collegati a crash e blocchi nella schermata di caricamento.",
+  "showcase.v0160.reports":
+    "Quando il gioco va giù, l'app sa dove ed invia un rapporto breve. Il file di crash resta sul tuo PC finché non premi il pulsante.",
+  "showcase.v0160.steam":
+    "Il tuo GUID di MX Bikes viene trovato dal tuo account Steam appena l'app parte, invece di aspettare di essere visto su un server.",
   "showcase.v0150.hero.title":
     "Installa la pista di un server ed entra, con un clic",
   "showcase.v0150.hero.body":

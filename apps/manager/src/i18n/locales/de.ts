@@ -1648,6 +1648,15 @@ export const de: Translation = {
   "showcase.supporters.title_one": "Ermöglicht durch {{count}} Unterstützer",
   "showcase.supporters.title_other": "Ermöglicht durch {{count}} Unterstützer",
   "showcase.supporters.more": "+{{count}} weitere",
+  "showcase.v0160.hero.title": "Weniger Gründe, warum das Spiel schließt",
+  "showcase.v0160.hero.body":
+    "Dass MX Bikes von selbst schließt, ist das, worüber Fahrer am meisten klagen. Dieser Build nimmt sich die zwei häufigsten Ursachen vor und beginnt aufzuzeichnen, was dabei passiert.",
+  "showcase.v0160.trainers":
+    "Deine gespeicherten Rundendateien werden aufgeräumt, während das Spiel geschlossen ist. Das Spiel lässt darin Bytes zurück, die mit Abstürzen und Hängern im Ladebildschirm in Verbindung stehen.",
+  "showcase.v0160.reports":
+    "Wenn das Spiel abstürzt, weiß die App jetzt wo, und schickt einen kurzen Bericht. Ein Absturzabbild bleibt auf deinem PC, bis du es freigibst.",
+  "showcase.v0160.steam":
+    "Deine MX-Bikes-GUID wird beim Start aus deinem Steam-Konto ermittelt, statt darauf zu warten, dass du auf einem Server gesehen wirst.",
   "showcase.v0150.hero.title":
     "Strecke eines Servers installieren und beitreten, mit einem Klick",
   "showcase.v0150.hero.body":
