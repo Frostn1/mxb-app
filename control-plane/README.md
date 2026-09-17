@@ -388,10 +388,18 @@ its own shape rather than by who is asking). There is nothing there to match a b
 
 **Reversible, and reviewable.** A ban carries a reason (shown to the rider), the evidence, and
 the admin who applied it; lifting one is a timestamp, never a delete, so an upheld appeal stays
-readable and the same stale report cannot re-ban off it. The six installs the deployment ships
-banned arrived in the migration on purpose — this is the switch that refuses a paying customer,
-so turning it on leaves a diff somebody can review and revert. Later ones go through
-mxbsecure.com/admin/bans (`GET`/`POST /v1/web/admin/bans`), which records who pressed it.
+readable and the same stale report cannot re-ban off it. The eleven installs the deployment
+ships banned arrived in migrations on purpose (`0038_guid_bans.sql`, and
+`0040_ban_lineup_report.sql` for the five a later report added) — this is the switch that
+refuses a paying customer, so turning it on leaves a diff somebody can review and revert. A
+seeded ban is inserted `ON CONFLICT DO NOTHING`, so a redeploy cannot quietly re-ban one that
+has since been lifted. Later ones go through mxbsecure.com/admin/bans (`GET`/`POST
+/v1/web/admin/bans`), which records who pressed it.
+
+A seed carries the GUID, the reason and the evidence, and never the handle the report used:
+this repository is public, and a GUID identifies an install to us without publishing an
+accusation against a named person. Who each banned GUID was reported to be is kept privately,
+with the rest of the evidence.
 
 ## Security notes
 
