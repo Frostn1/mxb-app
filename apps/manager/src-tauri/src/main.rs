@@ -4162,6 +4162,25 @@ async fn master_status() -> Option<masterstatus::MasterStatus> {
     masterstatus::fetch(std::time::Duration::from_secs(8)).await
 }
 
+/// Close the game's half-open master session, so its own server browser works again.
+///
+/// The in-game browser says `connection timeout` for the rest of a session after you leave a
+/// server: the game's master login is left half-open and its opener refuses to send anything
+/// while it stays that way. FrostMod recognises that state and clears it unprompted — this is
+/// the manual half, for the cases its rule deliberately sits out (a run that never managed a
+/// login, or one that has used up its automatic resets).
+///
+/// Withheld rather than sent to a FrostMod too old to know the verb: it would drop it silently
+/// and the button would report success for nothing.
+#[tauri::command]
+async fn reset_server_browser(app: tauri::AppHandle) -> frostmod::CommandOutcome {
+    let tag = frostmod_manage::installed_version(&app);
+    if !frostmod::server_browser_reset_supported(tag.as_deref()) {
+        return frostmod::CommandOutcome::Withheld;
+    }
+    frostmod::signal_reset_server_browser()
+}
+
 /// Check this machine's side of the connection, end to end, and say whose problem it is.
 ///
 /// The button under a failed server list. It walks outwards from the machine — internet, the
@@ -7016,6 +7035,7 @@ fn main() {
             list_master_servers,
             master_status,
             connection_selftest,
+            reset_server_browser,
             register_server_address,
             probe_server,
             server_riders,

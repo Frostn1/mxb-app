@@ -3446,6 +3446,30 @@ export function connectionSelfTest(): Promise<ConnectionSelfTest> {
   return invoke<ConnectionSelfTest>("connection_selftest");
 }
 
+/** What came of a command sent to FrostMod. Mirrors `frostmod::CommandOutcome`. */
+export type FrostmodCommandOutcome =
+  | "signaled"
+  | "not_running"
+  | "write_failed"
+  | "unsupported"
+  | "withheld";
+
+/**
+ * Unwedge MX Bikes' own server browser, without restarting the game.
+ *
+ * For the bug where Browse says "connection timeout" for the rest of a session once you have
+ * left a server. The game's master login is left half-open and its opener sends nothing at all
+ * while it stays that way, so the screen times out on a master that is answering everyone else
+ * perfectly well. FrostMod recognises that state and clears it on its own; this is the button
+ * for the cases it deliberately sits out.
+ *
+ * `withheld` means the installed FrostMod predates the verb — it would drop it silently, and
+ * saying so beats reporting a success that never happened.
+ */
+export function resetServerBrowser(): Promise<FrostmodCommandOutcome> {
+  return invoke<FrostmodCommandOutcome>("reset_server_browser");
+}
+
 /**
  * Put a server on the shared address book deliberately, as its own operator.
  *
