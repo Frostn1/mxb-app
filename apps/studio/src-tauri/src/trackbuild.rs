@@ -130,8 +130,8 @@ const PHASES: [(&str, f32); 7] = [
     ("map", 10.7),
     ("trh", 0.5),
     ("centerline", 0.5),
-    ("packaging", 0.5),
-    ("installing", 0.1),
+    (PACKAGING, 0.5),
+    (INSTALLING, 0.1),
 ];
 
 /// What the phases really cost on this machine, per megasample. Empty until a build has
@@ -158,7 +158,7 @@ impl Plan {
             .iter()
             .filter(|(name, _)| match *name {
                 "centerline" => centerline,
-                "installing" => install,
+                n if n == INSTALLING => install,
                 _ => true,
             })
             .map(|(name, per)| (*name, learned.get(name).copied().unwrap_or(*per) * mega))
@@ -289,6 +289,18 @@ pub fn lock_pkz(path: &Path, guid: &str) -> Result<()> {
 /// Everything under `<dir>/<slug>/` and nothing else. The source beside it — the heightmap,
 /// the masks, the sheets and their shaders — is a couple of hundred megabytes the game never
 /// opens, and every published track ships only what is inside the folder named after it.
+///
+/// **Use this rather than a `zip` command, and never repack a built track by hand.** MX Bikes
+/// reads a `.pkz` with its own minimal reader and that reader makes no allowance for a local
+/// header's extra field: it takes an entry's data to start right after the name. Info-ZIP —
+/// the `zip` on every Mac and Linux box — writes a 28-byte `UT`/`ux` timestamp-and-owner extra
+/// into every local header, so every entry in such an archive begins 28 bytes late and decodes
+/// to rubbish. The track then lists nowhere, with nothing wrong in any file inside it; four
+/// lidar builds were lost to exactly that on 2026-09-16. Every track of ours the game does
+/// list was written here, and what makes it readable is that `ZipWriter` with these options
+/// writes no extra field at all. [`packaged_as_the_game_reads_it`] pins that.
+///
+/// Entries go in sorted by name so two builds of the same source produce the same archive.
 pub fn package(dir: &Path, slug: &str, to: &Path) -> Result<u64> {
     let root = dir.join(slug);
     if !root.is_dir() {
@@ -299,7 +311,11 @@ pub fn package(dir: &Path, slug: &str, to: &Path) -> Result<u64> {
     let opts: zip::write::FileOptions<'_, ()> =
         zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
 
-    let mut n = 0usize;
+    // Gathered first and sorted, so the archive doesn't come out in whatever order the
+    // filesystem happened to hand the directory over in. Nothing but a directory entry is
+    // written: the game's reader wants files, and a zero-length folder record is one more
+    // thing for it to have an opinion about.
+    let mut files: Vec<(String, PathBuf)> = Vec::new();
     let mut stack = vec![root.clone()];
     while let Some(at) = stack.pop() {
         for e in std::fs::read_dir(&at)
@@ -317,11 +333,15 @@ pub fn package(dir: &Path, slug: &str, to: &Path) -> Result<u64> {
                 .unwrap_or(&path)
                 .to_string_lossy()
                 .replace('\\', "/");
-            use std::io::Write;
-            zip.start_file(rel, opts)?;
-            zip.write_all(&std::fs::read(&path)?)?;
-            n += 1;
+            files.push((rel, path));
         }
+    }
+    files.sort_by(|a, b| a.0.cmp(&b.0));
+    let n = files.len();
+    for (rel, path) in files {
+        use std::io::Write;
+        zip.start_file(rel, opts)?;
+        zip.write_all(&std::fs::read(&path)?)?;
     }
     zip.finish()?;
     if n == 0 {
@@ -329,6 +349,54 @@ pub fn package(dir: &Path, slug: &str, to: &Path) -> Result<u64> {
     }
     Ok(std::fs::metadata(to).map(|m| m.len()).unwrap_or(0))
 }
+
+/// Everything after the source tree is written: compile, package, install.
+///
+/// One tail for every track the app builds, wherever its ground came from. It exists because
+/// the lidar path grew its own — a shell script that ran the compilers and then called `zip` —
+/// and the four tracks it produced would not list. See [`package`] for what `zip` does that the
+/// game cannot read. Anything that writes a track source finishes here.
+///
+/// `tracks` is the mods folder to install into, or `None` to leave the archive where it was
+/// built. Packaging is skipped when any compile step failed: a `.pkz` missing its `.map` is a
+/// track the game lists and then refuses to load.
+pub fn finish(
+    tools: &Tools,
+    dir: &Path,
+    slug: &str,
+    host: &Host,
+    tracks: Option<&Path>,
+    starting: &mut dyn FnMut(&'static str),
+) -> Result<Built> {
+    let steps = compile(tools, dir, slug, host, starting)?;
+    let mut out = Built { steps, pkz: None, installed: None };
+    if !out.steps.iter().all(|s| s.ok) {
+        return Ok(out);
+    }
+    starting(PACKAGING);
+    let pkz = dir.join(format!("{slug}.pkz"));
+    package(dir, slug, &pkz)?;
+    out.pkz = Some(pkz.clone());
+    if let Some(tracks) = tracks {
+        starting(INSTALLING);
+        out.installed = Some(install(&pkz, tracks)?);
+    }
+    Ok(out)
+}
+
+/// What [`finish`] did.
+#[derive(Debug)]
+pub struct Built {
+    pub steps: Vec<Step>,
+    /// The archive, when every compile step succeeded.
+    pub pkz: Option<PathBuf>,
+    /// Where it was installed, when a mods folder was given.
+    pub installed: Option<PathBuf>,
+}
+
+/// Phase names [`finish`] reports, shared with the progress plan so the two cannot drift.
+pub const PACKAGING: &str = "packaging";
+pub const INSTALLING: &str = "installing";
 
 /// Put the archive where the game lists it.
 ///
@@ -512,6 +580,73 @@ mod tests {
         std::fs::create_dir_all(&inner).unwrap();
         std::fs::write(inner.join("terrained.exe"), b"").unwrap();
         assert!(find(&dir).is_some());
+    }
+
+    /// The one property of a `.pkz` the game actually depends on, pinned.
+    ///
+    /// MX Bikes reads a `.pkz` with a minimal zip reader that takes an entry's bytes to begin
+    /// immediately after its name in the local header — it makes no allowance for the extra
+    /// field the format permits there. Info-ZIP's `zip`, which is what a shell script reaches
+    /// for, writes a 28-byte `UT`/`ux` timestamp-and-owner extra into every local header, and
+    /// the local and central copies of it are not even the same length. An archive built that
+    /// way has every entry starting 28 bytes late: nothing inside it is wrong, `unzip` reads it
+    /// perfectly, and the game lists no track at all. Four lidar builds were lost to that on
+    /// 2026-09-16 before anyone looked at the bytes.
+    ///
+    /// Every track of ours the game does list — Draycott Valley, Granite Peak, both Northgates
+    /// — was written by [`package`], and all eleven entries of each carry a zero-length extra
+    /// field, a zero-length central extra, and version 20 both ways. So that is the shape, and
+    /// this test reads the raw headers rather than asking a zip library, because a zip library
+    /// is exactly the thing that hides the difference.
+    #[test]
+    fn packaged_as_the_game_reads_it() {
+        let dir = scratch("headers");
+        std::fs::create_dir_all(dir.join("mytrack/sub")).unwrap();
+        std::fs::write(dir.join("mytrack/mytrack.map"), vec![7u8; 9000]).unwrap();
+        std::fs::write(dir.join("mytrack/mytrack.ini"), b"[info]\r\nname = My Track\r\n").unwrap();
+        std::fs::write(dir.join("mytrack/sub/deep.tga"), vec![3u8; 64]).unwrap();
+        let pkz = dir.join("mytrack.pkz");
+        package(&dir, "mytrack", &pkz).unwrap();
+        let b = std::fs::read(&pkz).unwrap();
+
+        let u16_at = |o: usize| u16::from_le_bytes(b[o..o + 2].try_into().unwrap());
+        let u32_at = |o: usize| u32::from_le_bytes(b[o..o + 4].try_into().unwrap());
+
+        // Walk the local headers from the front, the way a reader that never opens the central
+        // directory does. Each one has to land exactly on the next.
+        let mut at = 0usize;
+        let mut seen = Vec::new();
+        while at + 4 <= b.len() && b[at..at + 4] == [0x50, 0x4b, 0x03, 0x04] {
+            let (name_len, extra_len) = (u16_at(at + 26) as usize, u16_at(at + 28) as usize);
+            let name = String::from_utf8_lossy(&b[at + 30..at + 30 + name_len]).into_owned();
+            assert_eq!(extra_len, 0, "{name} carries a {extra_len}-byte local extra field");
+            assert_eq!(u16_at(at + 4), 20, "{name} needs an unexpected zip version to extract");
+            // Streamed entries hide their sizes behind a trailing descriptor, which the same
+            // kind of reader also cannot follow. Bit 3 of the flags is that.
+            assert_eq!(u16_at(at + 6) & 0x08, 0, "{name} was written with a data descriptor");
+            assert!(!name.ends_with('/'), "{name} is a directory entry");
+            let comp = u32_at(at + 18) as usize;
+            assert!(comp > 0, "{name} has no data");
+            seen.push(name);
+            at += 30 + name_len + extra_len + comp;
+        }
+        assert_eq!(seen.len(), 3, "walked {seen:?} before losing the thread");
+        // And sorted, so the same source packs to the same archive twice running.
+        let mut want = seen.clone();
+        want.sort();
+        assert_eq!(seen, want, "entries came out in filesystem order");
+
+        // The central directory agrees, and carries no extra field either — the two lengths
+        // disagreeing is the specific thing that makes an Info-ZIP archive unreadable.
+        let end = b.len() - 22;
+        assert_eq!(&b[end..end + 4], b"PK\x05\x06", "no end-of-central-directory where expected");
+        let mut cd = u32_at(end + 16) as usize;
+        for _ in 0..seen.len() {
+            assert_eq!(&b[cd..cd + 4], b"PK\x01\x02");
+            assert_eq!(u16_at(cd + 30), 0, "a central header carries an extra field");
+            let (n, e, c) = (u16_at(cd + 28) as usize, u16_at(cd + 30) as usize, u16_at(cd + 32) as usize);
+            cd += 46 + n + e + c;
+        }
     }
 
     #[test]

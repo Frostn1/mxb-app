@@ -116,6 +116,22 @@
   only decides how high to hang your lines over the ground, and says so if they might sit a
   little off.
 
+## Unreleased - Frost's Studio
+
+### Fixed
+- A track built from a real place now appears in the game's track list, alongside every other
+  track Studio builds.
+- The ground of a track built from a real place is painted exactly where the aerial photo puts
+  it, corner for corner.
+
+### Changed
+- A real place is painted in the tones its own photo carries. Worked dirt, dry field, damp
+  shaded ground and hardstanding each get their own surface, so a venue reads as the venue
+  rather than as one colour across the whole site.
+- Where two surfaces meet, the join follows the edge in the photo.
+- A track's location line is the place again, short enough to read under its name. The survey,
+  the licence and the dates it was flown ship inside the track itself, in `place.txt`.
+
 ## 2026-09-16 — Frost's Studio v0.2.0 — Tracks from real ground, and supercross
 
 ### Added

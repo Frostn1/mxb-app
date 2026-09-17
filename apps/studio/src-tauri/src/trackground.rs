@@ -682,8 +682,15 @@ pub struct Ground {
     pub size_z: f32,
     /// Heights in metres above [`Ground::base_m`], row 0 at world z = 0.
     pub z: Vec<f32>,
-    /// What the aerial photograph says is on each cell: 0 grass, 1 dirt, 2 gravel or pale
-    /// hardstanding. Empty when no imagery was supplied.
+    /// What the aerial photograph says is on each cell, as a [`Cover`] class: vegetation, one
+    /// of three tones of soil, or pale hardstanding. Empty when no imagery was supplied.
+    ///
+    /// Three tones rather than one because one is what a 470 m plot of a single tiling sheet
+    /// looks like, which is nothing like a motocross venue: worked track, dry field and damp
+    /// shaded ground are different colours in the photograph and have to be different
+    /// colours on the ground. The split is by the photograph's own luminance quantiles, so a
+    /// venue shot in flat French light and one shot in Indiana summer sun both come out
+    /// banded rather than one of them coming out uniform.
     ///
     /// This is how a scanned track gets its ground painted without anyone drawing a track on it.
     /// Every mask the generator normally writes is derived from the riding line — the ribbon, the
@@ -694,6 +701,33 @@ pub struct Ground {
     /// What was subtracted to bring the plot's lowest point to zero — the real elevation of the
     /// track's own datum, kept so a height can be quoted back in the units it was measured in.
     pub base_m: f32,
+}
+
+/// What the photograph says is on one cell.
+///
+/// The order is the order the ground layers paint in, darkest soil first, which is what lets
+/// `tracksynth` turn a class straight into a coverage mask without a lookup table in between.
+/// Stored as a byte in the `.fgd`, so the numbers are format, not just names.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[repr(u8)]
+pub enum Cover {
+    /// Grass, scrub or tree canopy. Green, or too dark to be soil in sunlight.
+    Vegetation = 0,
+    /// The darkest soil at the venue: damp, shaded, freshly turned.
+    SoilDark = 1,
+    /// Ordinary worked dirt, which is most of a motocross venue.
+    SoilMid = 2,
+    /// Dry pale soil — a baked field, a graded verge, the dust off a straight.
+    SoilLight = 3,
+    /// Genuinely pale and colourless: concrete, gravel, a hardstanding, a road.
+    Hard = 4,
+}
+
+impl Cover {
+    /// The byte a `.fgd` stores, and the one `tracksynth` compares against.
+    pub const fn id(self) -> u8 {
+        self as u8
+    }
 }
 
 impl Ground {
@@ -742,7 +776,7 @@ impl Ground {
         let span = (hi - lo).max(1e-3);
         let mut out = Vec::with_capacity(36 + self.z.len() * 2);
         out.extend_from_slice(b"FGND");
-        out.extend_from_slice(&3u32.to_le_bytes());
+        out.extend_from_slice(&4u32.to_le_bytes());
         out.extend_from_slice(&(self.dim_x as u32).to_le_bytes());
         out.extend_from_slice(&(self.dim_z as u32).to_le_bytes());
         out.extend_from_slice(&self.size_x.to_le_bytes());
@@ -766,7 +800,10 @@ impl Ground {
         }
         let u32_at = |o: usize| u32::from_le_bytes(bytes[o..o + 4].try_into().unwrap());
         let f32_at = |o: usize| f32::from_le_bytes(bytes[o..o + 4].try_into().unwrap());
-        if u32_at(4) != 3 {
+        // Version 4 is version 3 with a finer cover class in the same byte. A version-3 file
+        // would decode perfectly and paint the wrong ground, so it is refused and re-imported
+        // rather than read: the classes changed meaning, not shape.
+        if u32_at(4) != 4 {
             bail!("stored ground is version {}, which this build doesn't read", u32_at(4));
         }
         let dim_x = u32_at(8) as usize;
@@ -1007,7 +1044,7 @@ pub fn import(tif: &Path, lap: &Path, strength: f32) -> Result<Imported> {
 
     // The aerial photograph of the same ground, classified, so the track can be painted from
     // what is actually there rather than from where we guessed the lap goes.
-    let cover = imagery_cover(tif, lap, dim_x, dim_z);
+    let cover = imagery_cover(tif, lap, &dem, west, north, per, dim_x, dim_z);
     let ground = Ground { dim_x, dim_z, size_x, size_z, z, cover, base_m: base };
 
     let id = {
@@ -1111,22 +1148,46 @@ pub fn looks_blank(pixels: &[u8]) -> bool {
     var.sqrt() < 2.0
 }
 
-/// Classify the orthophoto beside the scan into grass, dirt and gravel, on the plot's own grid.
+/// Classify the orthophoto beside the scan onto the plot's own grid.
 ///
-/// Deliberately crude, and crude is the right amount of clever here: green is grass, pale and
-/// unsaturated is gravel or hardstanding, and what is left is dirt. A motocross venue from the
-/// air is mostly those three things, and the alternative — deriving the ground from the riding
-/// line — is what put a painted track on a scan three times running.
+/// Vegetation is separated by colour — green, or too dark to be soil in sunlight — and what is
+/// left is banded by its own luminance into three tones of soil plus genuinely pale
+/// hardstanding. See [`Cover`] for what each class is and why there are three soils.
 ///
-/// The photograph is expected beside the trace as the `imagery.path` the fetcher records, on the
-/// same extent as the DEM. If it is not there the cover comes back empty and the caller paints
-/// plain dirt, which is honest: we do not know what is where, so we do not pretend to.
-fn imagery_cover(tif: &Path, lap: &Path, dim_x: usize, dim_z: usize) -> Vec<u8> {
+/// **The bands are quantiles of this photograph, not fixed levels.** A threshold measured off
+/// the Ironman NAIP frame calls an IGN ortho of a French circuit uniformly one thing, because
+/// the two are not exposed alike; quantiles put the darkest third of the venue's own soil on
+/// the dark sheet wherever it was shot. Absolute levels are used for one thing only — telling
+/// vegetation from soil — because that is a question about hue, not exposure.
+///
+/// **The photograph is registered to the plot by world coordinates**, which is the other half
+/// of this and was wrong until 2026-09-16: the image covers the DEM tile, the plot is a window
+/// inside that tile, and stretching the whole image across the whole plot put the paint up to
+/// 15 m from the ground it describes — grass over the outside of a berm, dirt over the field
+/// beside it. `dem` gives the tile's extent, and `west`/`north`/`per` the plot's; a trace may
+/// state `imagery.bbox` as `[west, south, east, north]` when its photograph covers something
+/// else.
+///
+/// If no photograph is there the cover comes back empty and the caller paints plain dirt,
+/// which is honest: we do not know what is where, so we do not pretend to.
+fn imagery_cover(
+    tif: &Path,
+    lap: &Path,
+    dem: &Dem,
+    west: f64,
+    north: f64,
+    per: f64,
+    dim_x: usize,
+    dim_z: usize,
+) -> Vec<u8> {
     let Some(dir) = lap.parent() else { return Vec::new() };
-    let named = std::fs::read_to_string(lap)
+    let trace = std::fs::read_to_string(lap)
         .ok()
-        .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
-        .and_then(|v| v.get("imagery").and_then(|i| i.get("path")).and_then(|p| p.as_str().map(str::to_string)));
+        .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok());
+    let imagery = trace.as_ref().and_then(|v| v.get("imagery"));
+    let named = imagery
+        .and_then(|i| i.get("path"))
+        .and_then(|p| p.as_str().map(str::to_string));
     let mut tries: Vec<PathBuf> = Vec::new();
     if let Some(n) = named {
         tries.push(dir.join(n));
@@ -1137,30 +1198,112 @@ fn imagery_cover(tif: &Path, lap: &Path, dim_x: usize, dim_z: usize) -> Vec<u8> 
     }
     let Some(img) = tries.iter().find_map(|p| image::open(p).ok()) else { return Vec::new() };
     let rgb = img.to_rgb8();
-    let (iw, ih) = (rgb.width() as f32, rgb.height() as f32);
-    let mut out = vec![1u8; dim_x * dim_z];
+    let (iw, ih) = (rgb.width() as i64, rgb.height() as i64);
+    if iw < 2 || ih < 2 {
+        return Vec::new();
+    }
+
+    // Where the photograph's own edges are, in the world. The tile's, unless the trace says
+    // otherwise. `dem.origin_e`/`origin_n` are the centre of the first cell, so the edge is
+    // half a cell out.
+    let stated = imagery
+        .and_then(|i| i.get("bbox"))
+        .and_then(|b| b.as_array())
+        .filter(|b| b.len() == 4)
+        .and_then(|b| {
+            let v: Vec<f64> = b.iter().filter_map(serde_json::Value::as_f64).collect();
+            (v.len() == 4).then(|| (v[0], v[1], v[2], v[3]))
+        });
+    let (img_w, img_s, img_e, img_n) = stated.unwrap_or((
+        dem.origin_e - dem.cell * 0.5,
+        dem.origin_n - (dem.h as f64 - 0.5) * dem.cell,
+        dem.origin_e + (dem.w as f64 - 0.5) * dem.cell,
+        dem.origin_n + dem.cell * 0.5,
+    ));
+    let (span_e, span_n) = (img_e - img_w, img_n - img_s);
+    if !(span_e.is_finite() && span_n.is_finite() && span_e > 0.0 && span_n > 0.0) {
+        return Vec::new();
+    }
+
+    // Sample the photograph over each plot cell's own footprint rather than at its centre.
+    // At Ironman the ortho is 0.5 m a pixel and a plot cell is 0.46 m, so this is barely more
+    // than one pixel — but a coarser plot on a finer photograph would otherwise classify from
+    // whichever single pixel it happened to land on, and salt-and-pepper a whole venue.
+    let half_px_e = (per / span_e * iw as f64 * 0.5).max(0.5);
+    let half_px_n = (per / span_n * ih as f64 * 0.5).max(0.5);
+    let mut lum = vec![0i32; dim_x * dim_z];
+    let mut sat = vec![0f32; dim_x * dim_z];
+    let mut veg = vec![false; dim_x * dim_z];
     for y in 0..dim_z {
+        let n = north - y as f64 * per;
+        let cy = (img_n - n) / span_n * ih as f64;
+        let (y0, y1) = window(cy, half_px_n, ih);
         for x in 0..dim_x {
-            let sx = ((x as f32 / (dim_x - 1).max(1) as f32) * (iw - 1.0)).round() as u32;
-            let sy = ((y as f32 / (dim_z - 1).max(1) as f32) * (ih - 1.0)).round() as u32;
-            let p = rgb.get_pixel(sx.min(rgb.width() - 1), sy.min(rgb.height() - 1)).0;
-            let (r, g, b) = (p[0] as i32, p[1] as i32, p[2] as i32);
-            let lum = (r + g + b) / 3;
-            let sat = (r.max(g).max(b) - r.min(g).min(b)) as f32 / lum.max(1) as f32;
-            // Thresholds set against the Ironman ortho rather than guessed. A first pass at
-            // lum > 120 called 42% of the venue gravel, because worked dirt in summer sun is
-            // pale; and requiring g > r + 6 found only 2% grass, because tree canopy in shadow
-            // is dark and barely green. Both are now measured off the image.
-            out[y * dim_x + x] = if lum < 95 || (g > r + 3 && g >= b) {
-                0 // vegetation: grass, or canopy, which is dark and only slightly green
-            } else if lum > 165 && sat < 0.10 {
-                2 // genuinely pale and colourless: concrete, gravel, a hardstanding
-            } else {
-                1 // worked dirt, which is most of a motocross venue and is not grey
-            };
+            let e = west + x as f64 * per;
+            let cx = (e - img_w) / span_e * iw as f64;
+            let (x0, x1) = window(cx, half_px_e, iw);
+            let (mut sr, mut sg, mut sb, mut n_px) = (0i64, 0i64, 0i64, 0i64);
+            for py in y0..=y1 {
+                for px in x0..=x1 {
+                    let p = rgb.get_pixel(px as u32, py as u32).0;
+                    sr += p[0] as i64;
+                    sg += p[1] as i64;
+                    sb += p[2] as i64;
+                    n_px += 1;
+                }
+            }
+            let n_px = n_px.max(1);
+            let (r, g, b) = ((sr / n_px) as i32, (sg / n_px) as i32, (sb / n_px) as i32);
+            let l = (r + g + b) / 3;
+            let i = y * dim_x + x;
+            lum[i] = l;
+            sat[i] = (r.max(g).max(b) - r.min(g).min(b)) as f32 / l.max(1) as f32;
+            // Measured against the Ironman ortho rather than guessed. A first pass at
+            // `lum > 120` called 42% of the venue gravel, because worked dirt in summer sun
+            // is pale; and requiring `g > r + 6` found only 2% grass, because tree canopy in
+            // shadow is dark and barely green.
+            veg[i] = l < 95 || (g > r + 3 && g >= b);
         }
     }
+
+    // The soil's own quantiles. Sorting a million cells once is cheaper than the alternative
+    // of getting the levels wrong at every venue that isn't Indiana.
+    let mut soil: Vec<i32> = lum.iter().zip(&veg).filter(|(_, v)| !**v).map(|(l, _)| *l).collect();
+    soil.sort_unstable();
+    let q = |f: f64| -> i32 {
+        if soil.is_empty() {
+            return i32::MAX;
+        }
+        soil[((soil.len() - 1) as f64 * f).round() as usize]
+    };
+    // A third dark, a third mid, a quarter light, the palest twelfth reserved for hardstanding
+    // — and hardstanding has to be colourless as well as bright, or a dust-blown straight in
+    // full sun comes out as concrete.
+    let (q_dark, q_mid, q_pale) = (q(0.35), q(0.70), q(0.92));
+
+    let mut out = vec![Cover::SoilMid.id(); dim_x * dim_z];
+    for i in 0..out.len() {
+        out[i] = if veg[i] {
+            Cover::Vegetation
+        } else if lum[i] > q_pale && sat[i] < 0.12 {
+            Cover::Hard
+        } else if lum[i] <= q_dark {
+            Cover::SoilDark
+        } else if lum[i] <= q_mid {
+            Cover::SoilMid
+        } else {
+            Cover::SoilLight
+        }
+        .id();
+    }
     out
+}
+
+/// The pixel span a plot cell covers, clamped into the image.
+fn window(centre: f64, half: f64, n: i64) -> (i64, i64) {
+    let lo = (centre - half).floor() as i64;
+    let hi = (centre + half).floor() as i64;
+    (lo.clamp(0, n - 1), hi.clamp(0, n - 1).max(lo.clamp(0, n - 1)))
 }
 
 /// Fill the odd nodata cell from its neighbours, so a puddle in the lidar is not a hole in the
@@ -1554,6 +1697,59 @@ mod scan_build {
         );
         let wrote = crate::tracksynth::write_source(&prog, &syn, &out).expect("wrote the source");
         println!("{} source files in {}", wrote.len(), out.display());
+
+        // Compile, package and install through the app's own path.
+        //
+        // This used to stop at the source tree and a shell script took it the rest of the way,
+        // running the compilers and then `zip -qr`. The four tracks that produced were perfect
+        // inside and the game listed none of them — see `trackbuild::package` for why a `zip`
+        // archive is unreadable to it. There is no second packer now: a scan finishes exactly
+        // where a generated track finishes.
+        let Ok(tools_at) = std::env::var("FROST_TOOLS") else {
+            println!("no FROST_TOOLS, so the source is as far as this goes");
+            return;
+        };
+        let tools = crate::trackbuild::find(std::path::Path::new(&tools_at))
+            .expect("compilers under FROST_TOOLS");
+        // `FROST_PREFIX` names a Wine prefix to run in — the one beside the compilers, on a
+        // machine that keeps them there. Without it a prefix of our own is laid down beside
+        // the build, which works and costs a first boot.
+        let prefix = std::env::var("FROST_PREFIX")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|_| out.join("wine"));
+        let host = crate::trackbuild::host(
+            &std::env::var("FROST_GAME").unwrap_or_default(),
+            &prefix,
+            "",
+        )
+        .expect("a Wine host for the compilers");
+        println!("compilers via {}", host.via());
+        let slug = crate::tracksynth::slug(&prog.name);
+        let tracks = std::env::var("FROST_INSTALL").ok().map(std::path::PathBuf::from);
+        let built = crate::trackbuild::finish(
+            &tools,
+            &out,
+            &slug,
+            &host,
+            tracks.as_deref(),
+            &mut |phase| println!("  {phase}…"),
+        )
+        .expect("it compiles and packages");
+        for st in &built.steps {
+            println!("  {} {}", st.name, if st.ok { "ok" } else { "FAILED" });
+            if !st.ok {
+                println!("{}", st.output);
+            }
+        }
+        let pkz = built.pkz.expect("every step passed, so there is an archive");
+        println!(
+            "packaged {} MB at {}",
+            std::fs::metadata(&pkz).map(|m| m.len()).unwrap_or(0) / 1_048_576,
+            pkz.display()
+        );
+        if let Some(at) = built.installed {
+            println!("installed {}", at.display());
+        }
     }
 }
 
@@ -1693,6 +1889,138 @@ mod tests {
         assert_eq!(geo_key(&[], KEY_PROJECTED_CRS), None);
         // A key whose value lives in another tag is not an EPSG code and is not returned.
         assert_eq!(geo_key(&keys, 1026), None);
+    }
+
+    /// The photograph is registered to the plot by world coordinates, not stretched across it.
+    ///
+    /// This is the fault that made a built scan's ground wrong and could not be seen in any
+    /// statistic: the classified shares were entirely plausible either way. The tile is 500 m,
+    /// the plot is a 470 m window 15 m inside it, and the old code mapped the whole image onto
+    /// the whole plot — so the paint was up to 15 m from the ground it describes, correct in
+    /// the middle and furthest out at the edges, which is exactly the signature that looks like
+    /// "nearly right" in a picture.
+    ///
+    /// A synthetic photograph with one green square in a stated world position settles it: the
+    /// square has to come back over the plot cells that square really covers.
+    #[test]
+    fn the_photograph_lands_where_the_world_says_it_does() {
+        let dir = std::env::temp_dir().join(format!("mxb-cover-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        // A 500 m tile at 1 m, its photograph at 0.5 m a pixel over the same ground.
+        let dem = Dem {
+            w: 500,
+            h: 500,
+            cell: 1.0,
+            origin_e: 1000.5,
+            origin_n: 5000.5 - 0.0,
+            epsg: 26916,
+            z: vec![0.0; 500 * 500],
+        };
+        let (tile_w, tile_n) = (1000.0f64, 5000.5 + 0.5);
+        let (iw, ih) = (1000u32, 1000u32);
+        // Bare dirt everywhere, and one green square from 300 to 340 m east of the tile's west
+        // edge and 100 to 140 m south of its north edge.
+        let mut img = image::RgbImage::from_pixel(iw, ih, image::Rgb([150, 120, 95]));
+        for y in 200..280u32 {
+            for x in 600..680u32 {
+                img.put_pixel(x, y, image::Rgb([40, 120, 40]));
+            }
+        }
+        img.save(dir.join("t.imagery.png")).unwrap();
+        std::fs::write(dir.join("t.lap.json"), br#"{"imagery":{"path":"t.imagery.png"}}"#).unwrap();
+
+        // The plot: 470 m starting 15 m inside the tile's west and north edges.
+        let (west, north, per, dim) = (tile_w + 15.0, tile_n - 15.0, 470.0 / 1024.0, 1025usize);
+        let cover = imagery_cover(
+            &dir.join("t.dem.tif"),
+            &dir.join("t.lap.json"),
+            &dem,
+            west,
+            north,
+            per,
+            dim,
+            dim,
+        );
+        assert_eq!(cover.len(), dim * dim);
+
+        // Where that square falls in plot metres, and so in plot cells.
+        let at = |e: f64, n: f64| -> u8 {
+            let x = ((e - west) / per).round() as usize;
+            let y = ((north - n) / per).round() as usize;
+            cover[y.min(dim - 1) * dim + x.min(dim - 1)]
+        };
+        // Inside the square: vegetation.
+        for (e, n) in [(310.0, 110.0), (330.0, 130.0), (320.0, 120.0)] {
+            let (e, n) = (tile_w + e, tile_n - n);
+            assert_eq!(
+                at(e, n),
+                Cover::Vegetation.id(),
+                "the green square is missing at {e}, {n}"
+            );
+        }
+        // Well outside it, in every direction: not vegetation. A stretched photograph puts the
+        // square about 10 m off here, which these catch.
+        for (e, n) in [(280.0, 120.0), (360.0, 120.0), (320.0, 80.0), (320.0, 160.0)] {
+            let (e, n) = (tile_w + e, tile_n - n);
+            assert_ne!(
+                at(e, n),
+                Cover::Vegetation.id(),
+                "the green square has spread to {e}, {n}"
+            );
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Every soil layer gets a share of the plot, and the shares are the photograph's own.
+    ///
+    /// A scan is painted from the photograph and nothing else, so the one thing that can go
+    /// wrong quietly is the classifier collapsing: one class taking the whole venue leaves a
+    /// 470 m plot tiling a single sheet, which is what shipped on 2026-09-16 and reads as flat
+    /// ground under any amount of good terrain. A gradient is the honest worst case — real
+    /// ground has no hard edges in it — and even that has to come out banded.
+    #[test]
+    fn a_venue_comes_out_in_more_than_one_tone() {
+        let dir = std::env::temp_dir().join(format!("mxb-tone-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let dem = Dem { w: 200, h: 200, cell: 1.0, origin_e: 0.5, origin_n: 199.5, epsg: 26916, z: vec![0.0; 40000] };
+        let (iw, ih) = (400u32, 400u32);
+        let mut img = image::RgbImage::new(iw, ih);
+        for y in 0..ih {
+            for x in 0..iw {
+                // Soil from dim to bright across the frame, one strip of it green.
+                let l = (100 + (x * 120 / iw)) as u8;
+                let p = if y < ih / 5 { image::Rgb([40, 120, 40]) } else { image::Rgb([l, l - 20, l - 40]) };
+                img.put_pixel(x, y, p);
+            }
+        }
+        img.save(dir.join("t.imagery.png")).unwrap();
+        std::fs::write(dir.join("t.lap.json"), b"{}").unwrap();
+        let dim = 257usize;
+        let cover = imagery_cover(
+            &dir.join("t.dem.tif"),
+            &dir.join("t.lap.json"),
+            &dem,
+            0.0,
+            200.0,
+            200.0 / (dim - 1) as f64,
+            dim,
+            dim,
+        );
+        let share = |c: Cover| {
+            cover.iter().filter(|v| **v == c.id()).count() as f32 / cover.len() as f32
+        };
+        assert!(share(Cover::Vegetation) > 0.15, "the green strip went missing");
+        for c in [Cover::SoilDark, Cover::SoilMid, Cover::SoilLight] {
+            assert!(
+                share(c) > 0.05,
+                "{c:?} covers {:.1}% of the plot — the soil came out as one tone",
+                share(c) * 100.0
+            );
+        }
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
