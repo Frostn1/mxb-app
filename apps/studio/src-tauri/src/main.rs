@@ -135,6 +135,11 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             mxb_core::viewer::app_platform,
             track_event,
+            mxb_core::survey::survey_due,
+            mxb_core::survey::survey_shown,
+            mxb_core::survey::survey_answer,
+            mxb_core::survey::survey_dismiss,
+            mxb_core::survey::set_survey_enabled,
             steam_link_start,
             steam_link_status,
             recheck_gate,
@@ -256,6 +261,10 @@ fn main() {
             // a machine with only the studio on it reports nothing rather than inventing a
             // second identity for a computer the manager would also call one install.
             usage::start(app.handle(), usage::STUDIO);
+            // The survey prompt. Started beside the counters and gated on the same consent:
+            // it answers the question counters cannot, which is whether any of this is any
+            // good. Nothing is fetched or asked when either switch is off.
+            mxb_core::survey::start(app.handle(), usage::STUDIO);
             // Where a rider's own ground images are kept. Set here rather than passed down,
             // because a track is generated from a program and nothing else, and a program
             // names its sheets rather than carrying them.

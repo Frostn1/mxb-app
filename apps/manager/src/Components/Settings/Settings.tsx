@@ -134,6 +134,7 @@ import {
   SelectValue,
 } from "@frost/shared/Components/ui/select";
 import { Switch } from "@frost/shared/Components/ui/switch";
+import SurveySetting from "@frost/shared/Components/Survey/SurveySetting";
 import { cn } from "@frost/shared/lib/utils";
 
 const REPO_URL = "https://github.com/Frostn1/mxb-app";
@@ -1356,6 +1357,10 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
               checked={launchAtStartup}
               onChange={toggleStartup}
             />
+            <div className="h-px bg-border" />
+            {/* Whether the app may ask anything. Shared with the Studio and Coach so the
+                switch reads the same wherever it is found — see the component. */}
+            <SurveySetting />
             <div className="h-px bg-border" />
             <ToggleRow
               label={t("settings.instantRefresh")}

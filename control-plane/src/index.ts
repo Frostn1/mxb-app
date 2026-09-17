@@ -64,6 +64,7 @@ import {
 } from "./validate";
 import { claimDeviceAccount, iceServers, voiceRoom } from "./voice";
 import { adminAllowed, pruneUsage, reportUsage, usageStats } from "./usage";
+import { listPolls, pruneSurvey, reportAnswer, surveyStats } from "./survey";
 import { masterStatus, pruneMasterProbes, reportMasterProbe } from "./masterstatus";
 import { claimRoster, pruneRoster, readRoster, reportRoster } from "./roster";
 import { VoiceRoom } from "./voiceroom";
@@ -109,6 +110,7 @@ export default {
         advanceImageBuild(env),
         pruneDeviceClaims(env),
         pruneUsage(env),
+        pruneSurvey(env),
         pruneMasterProbes(env),
         pruneRoster(env),
         pruneReports(env),
@@ -211,6 +213,16 @@ async function route(request: Request, env: Env): Promise<Response> {
   // count and by a per-address daily cap.
   if (method === "POST" && path === "/v1/usage") return reportUsage(request, env);
 
+  // The other half of knowing: what people say when they are asked, rather than what they
+  // happen to click. Unauthenticated for exactly the reason the counters are — a question only
+  // enrolled accounts could answer would be a survey of the people who already talk to us.
+  //
+  // The read carries no install id and is the same for everybody, so it is cacheable; the write
+  // is bounded by size, by a closed answer vocabulary and by a per-address daily cap. The one
+  // free-text field in this deployment arrives here — see `survey.ts` for what happens to it.
+  if (method === "GET" && path === "/v1/survey/polls") return listPolls(url, env);
+  if (method === "POST" && path === "/v1/survey") return reportAnswer(request, env);
+
   // One app saying whether it could reach MX Bikes' own master server, and the answer everyone's
   // reports add up to. Unauthenticated on both halves, for two different reasons.
   //
@@ -245,6 +257,7 @@ async function route(request: Request, env: Env): Promise<Response> {
   // player's endpoint at all: the key belongs to whoever runs the deployment, and an account
   // token must never be enough to read what everybody else is doing.
   if (method === "GET" && path === "/v1/usage/stats") return usageStats(request, url, env);
+  if (method === "GET" && path === "/v1/survey/stats") return surveyStats(request, url, env);
 
   // The dashboards live on mxbsecure.com/admin, behind Steam sign-in (`webadmin.ts`).
 

@@ -210,4 +210,28 @@ export const it: Record<keyof typeof en, string> = {
   "overlay.tab.setup": "Assetto",
   "overlay.tab.cues": "Indicazioni live",
   "overlay.tab.hud": "HUD",
+
+  // ── Sondaggio ──────────────────────────────────────────────────────────────
+  "survey.eyebrow": "Una domanda veloce",
+  "survey.mood.ask": "Come sta andando {{app}}?",
+  "survey.mood.bad": "Male",
+  "survey.mood.fine": "Così così",
+  "survey.mood.good": "Bene",
+  "survey.followUp.whatHappened": "Cos'è successo?",
+  "survey.followUp.anythingElse": "Vuoi aggiungere qualcosa?",
+  "survey.reason.crash": "Si è bloccata o è andata in crash",
+  "survey.reason.slow": "Troppo lenta",
+  "survey.reason.confusing": "Difficile trovare le cose",
+  "survey.reason.broken": "Qualcosa non ha funzionato",
+  "survey.reason.missing": "Manca qualcosa",
+  "survey.reason.other": "Altro",
+  "survey.note.placeholder": "Vuoi aggiungere qualcosa? (facoltativo)",
+  "survey.note.hint":
+    "Viene inviato esattamente come lo scrivi: non includere dati personali.",
+  "survey.send": "Invia",
+  "survey.skip": "Salta",
+  "survey.thanks": "Grazie — ci aiuta molto.",
+  "survey.setting.label": "Domande occasionali",
+  "survey.setting.desc":
+    "Permette all'app di chiederti ogni tanto come sta andando e cosa pensi delle novità. Se disattivi, non chiede più nulla.",
 };

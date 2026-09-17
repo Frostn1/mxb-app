@@ -237,6 +237,16 @@ pub struct AppConfig {
     /// Deliberately not the account id or the GUID — an anonymous count that could be
     /// joined back to a person is not one.
     pub install_id: String,
+    /// Show the occasional survey prompt — see [`crate::survey`].
+    ///
+    /// On by default, and off with its own switch in Settings, separate from the counters
+    /// above because they are different bargains: one is a number nobody notices, the other
+    /// interrupts you to ask something. Turning the counters off turns this off too, and that
+    /// direction is deliberate — an answer carries the same install id, so consenting to be
+    /// asked cannot be a way around having said no to being counted.
+    pub survey_enabled: bool,
+    /// What the prompt has already asked, and when. Never edited by hand.
+    pub survey: SurveyState,
     /// Live share codes this machine publishes, and the key that lets it update each one.
     ///
     /// The key is why this is stored at all: publishing a live share needs no account, so
@@ -318,6 +328,33 @@ pub struct SyncState {
     pub kept_yours: usize,
     /// Destinations two riders disagreed about, so neither was installed.
     pub conflicted: usize,
+}
+
+/// What the survey prompt has already done on this machine — see [`crate::survey`].
+///
+/// Persisted rather than held in memory for the same reason `welcome_seen` is: the app lives
+/// in the tray and is restarted often, and a schedule that reset on every launch would ask
+/// somebody the same question every morning. Written by the survey module; never edited by
+/// hand, and safe to delete — a missing block means "never asked", which is the truth for
+/// every install that predates this.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct SurveyState {
+    /// Unix milliseconds this machine first ran an app that could ask. `0` until the first
+    /// run, and what the settling-in period is measured from: somebody who installed the app
+    /// twenty minutes ago has no opinion of it worth collecting.
+    pub first_run: u64,
+    /// Unix milliseconds the prompt was last put on screen. `0` means never.
+    pub last_shown: u64,
+    /// Dismissals in a row, reset by any answer. Three of these is somebody saying no in the
+    /// only way the prompt offers, and it is taken as an answer.
+    pub dismissals: u32,
+    /// Unix milliseconds before which nothing is asked at all. Set by a dismissal, by the
+    /// third one, and by the settling-in period on a fresh install.
+    pub quiet_until: u64,
+    /// Poll id to the unix milliseconds it was last answered. What keeps a question that has
+    /// been answered from being asked again, and what `againDays` is measured against.
+    pub answered: BTreeMap<String, u64>,
 }
 
 /// Toggle combo used until the player picks another one.
@@ -405,6 +442,8 @@ impl Default for AppConfig {
             sync: SyncState::default(),
             analytics_enabled: true,
             install_id: String::new(),
+            survey_enabled: true,
+            survey: SurveyState::default(),
             published_shares: Vec::new(),
             live_subscriptions: Vec::new(),
             ranked_guid: String::new(),
