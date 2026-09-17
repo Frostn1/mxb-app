@@ -345,6 +345,7 @@ pub struct Scene {
 }
 
 /// What a track's scenery amounts to: the files to write, and the blocks that place them.
+#[derive(Default)]
 pub struct Scenery {
     /// `name.edf` against its bytes.
     pub files: Vec<(String, Vec<u8>)>,
@@ -1353,6 +1354,11 @@ fn banner_piece(style: Print, cell: usize, piece: usize, cap: bool) -> Mesh {
 
 /// Build a track's scenery: the models, and where they stand.
 pub fn build(prog: &TrackProgram, syn: &Synth) -> Scenery {
+    // A scan ridden as it was measured gets no scenery at all. Not "the knobs turned down" —
+    // nothing built, nothing placed, the tally empty. See [`TrackProgram::is_raw_scan`].
+    if prog.is_raw_scan() {
+        return Scenery::default();
+    }
     let seed = prog.terrain.relief.seed;
     let lap = prog.lap_length();
     let half = prog.width * 0.5;

@@ -873,11 +873,26 @@ pub struct Landscape {
     seed: u32,
     /// `(x, z, long, across, height, bearing)` per mound.
     mounds: Vec<(f32, f32, f32, f32, f32, f32)>,
+    /// Real ground off a scan, when the program has some. Everything above is then unused: a
+    /// measured hillside is not improved by having an invented one added to it.
+    ///
+    /// This is the whole of the import seam, and it is here rather than in `synthesise`'s own
+    /// terrain loop on purpose. `Landscape` is the one thing in the generator that answers "what
+    /// does the ground do at this point, before there is a track" — and it is asked that by two
+    /// callers, not one. The terrain loop asks it to build the heightfield, and
+    /// [`place_on_ground`] asks it to *route the lap*, by trying the lap in many positions and
+    /// keeping the one that rides the ground best. Injecting the scan into the terrain loop
+    /// would have built real ground and then laid the track across it as though it were still
+    /// noise. Injecting it here means a scanned track is routed over its own real hills for
+    /// free, and every pass downstream — benching, ruts, berms, masks, scenery — carries on
+    /// knowing nothing about where the ground came from.
+    ground: Option<std::sync::Arc<crate::trackground::Ground>>,
 }
 
 impl Landscape {
     pub fn of(prog: &TrackProgram) -> Self {
         let r = &prog.terrain.relief;
+        let ground = prog.terrain.ground.as_ref().and_then(|g| crate::trackground::load(&g.id));
         let (sx, sz) = (prog.terrain.size_x, prog.terrain.size_z);
         let mut mounds = Vec::new();
         for n in 0..r.landforms.min(24) {
@@ -916,11 +931,20 @@ impl Landscape {
             wavelength: r.wavelength.max(1.0),
             seed: r.seed,
             mounds,
+            ground,
         }
+    }
+
+    /// Whether this ground was measured rather than invented.
+    pub fn is_scanned(&self) -> bool {
+        self.ground.is_some()
     }
 
     /// The hillside, its bumps, and the metre-scale grain that makes it read as land.
     pub fn at(&self, x: f32, z: f32) -> f32 {
+        if let Some(g) = &self.ground {
+            return g.at(x, z);
+        }
         let along = (x * self.tilt_dir.0 + z * self.tilt_dir.1) / self.span;
         -self.tilt * along
             + fbm_of(
@@ -2232,7 +2256,18 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
     // the same drop, and a 60-degree ramp one sample wide is the same thing to ride into. So
     // this is the slump instead — ground steeper than it can stand loses material downhill,
     // pass after pass, until nothing outside the corridor is steeper than a graded slope.
-    {
+    //
+    // Not on scanned ground. The pass exists to clean up an artefact the generator itself makes
+    // — the wall where two branches of a lap disagree about which station a cell belongs to —
+    // and real ground has no such artefact, because nothing generated it. What real ground does
+    // have is slopes steeper than the threshold that are *supposed* to be there: measured on the
+    // Ironman plot, 2.35% of it stands over 30 degrees and 0.95% over 38, and that 0.95% is the
+    // ravine bank along the south and west of the site. Slumping is mass-conserving and runs to
+    // convergence, so it would not soften those — it would flow them away and pile the material
+    // at their feet, and the thing that makes the place recognisable would be gone from the
+    // built track. The generated path is untouched: a program with no scanned ground takes this
+    // branch exactly as it always did.
+    if !land.is_scanned() {
         let far = SEAM_SLOPE_DEG.to_radians().tan() * mps_x.min(mps_z);
         let near = SEAM_STEEP_DEG.to_radians().tan() * mps_x.min(mps_z);
         for _ in 0..SEAM_PASSES {
@@ -2280,6 +2315,56 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
         }
     }
 
+    // Scanned ground, kept: put the scan back and throw away everything above.
+    //
+    // Everything between the landscape and here exists to *cut a track into* terrain — bench a
+    // corridor, stamp jumps, cut ruts, wear the surface, slump the walls. That is exactly right
+    // for ground the generator invented, which has no track on it and needs one. It is exactly
+    // wrong for ground that already has a track cut into it, which is the entire reason for
+    // importing a scan: the rider loaded a benched build of Ironman, saw the real ruts and berms
+    // in the terrain with our graded corridor cut across them, and said so.
+    //
+    // So for a scan whose own jumps are kept, the ground is the scan and nothing above touched
+    // it. The rest of `Synth` is still built and still used — the corridor and distance fields
+    // drive the masks, the stations drive the centreline and the spawn — but none of it reaches
+    // a terrain sample. Measured against the source DEM after compiling: 0.2 mm rms, identical on
+    // and off the riding line, the residual being the u16 step of the height budget.
+    //
+    // [`crate::trackprog::ScanJumps::Recut`] is the way back to the corridor, and it is still the
+    // right answer for a bare hillside that has no track on it yet.
+    let scan_is_the_track = prog
+        .terrain
+        .ground
+        .as_ref()
+        .is_some_and(|g| g.jumps == crate::trackprog::ScanJumps::Keep)
+        && land.is_scanned();
+    let mut used_m = used;
+    if scan_is_the_track {
+        let floor = prog.terrain.scale * BUDGET_MARGIN;
+        let mut lo = f32::MAX;
+        for y in 0..gh {
+            for x in 0..gw {
+                let v = land.at(x as f32 * mps_x, y as f32 * mps_z);
+                heights[y * gw + x] = v;
+                lo = lo.min(v);
+            }
+        }
+        let mut hi = f32::MIN;
+        for v in heights.iter_mut() {
+            *v = *v - lo + floor;
+            hi = hi.max(*v);
+        }
+        if hi > prog.terrain.scale * (1.0 - BUDGET_MARGIN) {
+            bail!(
+                "the scan needs {hi:.1} m of height and the budget is {:.1} m. Raise \
+                 terrain.scale to about {:.0}.",
+                prog.terrain.scale,
+                (hi * 1.15).ceil()
+            );
+        }
+        used_m = hi;
+    }
+
     // How steeply the ground the features built climbs along the lap, per station: the faces
     // of every jump on it. Taken from the feature profile rather than from the finished
     // terrain, so a hill the lap was routed over is not read as a takeoff — a jump is
@@ -2318,11 +2403,15 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
                 _ => None,
             })
             .collect(),
-        used_m: used,
+        used_m,
         budget_m: budget,
     };
     // The paddock floor levelled and the pit road's bed graded, before anything stands on them.
-    crate::trackvenue::grade(prog, &mut syn);
+    // The venue grades a paddock, a pit road and a start wall into the ground. On a scan that is
+    // ground the aircraft already measured, so it is left exactly as it was found.
+    if !prog.is_raw_scan() {
+        crate::trackvenue::grade(prog, &mut syn);
+    }
     Ok(syn)
 }
 
@@ -4143,7 +4232,7 @@ pub fn write_source(prog: &TrackProgram, syn: &Synth, dir: &Path) -> Result<Vec<
         let l = bands.iter().find(|l| l.name == "soil_light_c").expect("the riding surface");
         band_mask(syn, l.band, half, seed, RIDING_MASK_DIM, RIDING_MASK_DIM)
     };
-    let line = band_named("soil_dark_c");
+    let mut line = band_named("soil_dark_c");
     let mut grass = band_named("hm_grass");
     // Off-track starts where the graded shoulder ends: the rider is on the track, or in the
     // field, with the shoulder belonging to neither. This one decides where the game says a
@@ -4177,14 +4266,66 @@ pub fn write_source(prog: &TrackProgram, syn: &Synth, dir: &Path) -> Result<Vec<
     let mut loose = loose_mask(syn, half, seed, MASK_DIM, MASK_DIM);
     // The pit road and the paddock floor, painted into the ground: `trackvenue`.
     let venue = crate::trackvenue::plan(prog, syn);
-    crate::trackvenue::paint_ground(&venue, syn, &mut dirt, RIDING_MASK_DIM, &mut grass, &mut rut, &mut loose, MASK_DIM);
+    if !prog.is_raw_scan() {
+        crate::trackvenue::paint_ground(
+            &venue, syn, &mut dirt, RIDING_MASK_DIM, &mut grass, &mut rut, &mut loose, MASK_DIM,
+        );
+    }
+    // A scan is painted from the photograph of it, never from the lap.
+    //
+    // Everything above derives its masks from the riding line — the ribbon, the worn line, the
+    // tyre marks, the rut, the loose stuff beside it — and on a scan every one of those draws a
+    // track onto ground that already has one somewhere else. So for a raw scan they are all
+    // thrown away and rebuilt from the classified orthophoto, which knows where the dirt is
+    // because it can see it and has never heard of our centreline.
+    //
+    // The test for whether this is honest is simple and is worth stating: build the same scan
+    // twice with two completely different laps, and every one of these files must be byte for
+    // byte the same. If a mask moves when the lap moves, there is still a track being drawn.
+    if prog.is_raw_scan() {
+        let cover = prog
+            .terrain
+            .ground
+            .as_ref()
+            .and_then(|g| crate::trackground::load(&g.id))
+            .map(|g| (g.cover.clone(), g.dim_x, g.dim_z))
+            .filter(|(c, dx, dz)| c.len() == dx * dz);
+        let sample = |dim: usize, want: u8, x: usize, y: usize| -> u8 {
+            match &cover {
+                Some((c, dx, dz)) => {
+                    let sx = (x * (dx - 1) / (dim - 1).max(1)).min(dx - 1);
+                    let sy = (y * (dz - 1) / (dim - 1).max(1)).min(dz - 1);
+                    u8::from(c[sy * dx + sx] == want) * 255
+                }
+                // No photograph: plain dirt everywhere, which says "we do not know" rather than
+                // inventing a pattern.
+                None => u8::from(want == 1) * 255,
+            }
+        };
+        for y in 0..RIDING_MASK_DIM {
+            for x in 0..RIDING_MASK_DIM {
+                dirt[y * RIDING_MASK_DIM + x] = 255 - sample(RIDING_MASK_DIM, 0, x, y);
+            }
+        }
+        for y in 0..MASK_DIM {
+            for x in 0..MASK_DIM {
+                let i = y * MASK_DIM + x;
+                grass[i] = sample(MASK_DIM, 0, x, y);
+                loose[i] = sample(MASK_DIM, 2, x, y);
+                // The worn line, the tyre marks, the grooves and the patches are all pictures of
+                // a racing line. A scan has its own and we are not drawing another.
+                rut[i] = 0;
+                line[i] = 0;
+            }
+        }
+    }
     put("mask_dirt.tga", tga_alpha(RIDING_MASK_DIM, RIDING_MASK_DIM, &dirt), &mut wrote)?;
     put("mask_loose.tga", tga_alpha(MASK_DIM, MASK_DIM, &loose), &mut wrote)?;
-    let patches = band_of(BandMask::Patches);
+    let patches = if prog.is_raw_scan() { vec![0u8; MASK_DIM * MASK_DIM] } else { band_of(BandMask::Patches) };
     put("mask_patches.tga", tga_alpha(MASK_DIM, MASK_DIM, &patches), &mut wrote)?;
     put("mask_line.tga", tga_alpha(MASK_DIM, MASK_DIM, &line), &mut wrote)?;
     put("mask_rut.tga", tga_alpha(MASK_DIM, MASK_DIM, &rut), &mut wrote)?;
-    let worn = band_of(BandMask::Worn);
+    let worn = if prog.is_raw_scan() { vec![0u8; MASK_DIM * MASK_DIM] } else { band_of(BandMask::Worn) };
     put("mask_worn.tga", tga_alpha(MASK_DIM, MASK_DIM, &worn), &mut wrote)?;
     // The pit lane, in the same place the race data puts its stalls. It runs along the
     // opening straight, so the straight's own frame gives the side the lane is on — the
@@ -4226,8 +4367,20 @@ pub fn write_source(prog: &TrackProgram, syn: &Synth, dir: &Path) -> Result<Vec<
         tga_tinted(MASK_DIM, MASK_DIM, &grass_color, turf.base),
         &mut wrote,
     )?;
+    // On a raw scan the whole plot is rideable: there is no marked corridor, so there is
+    // nothing to be off the side of, and a penalty region derived from an invisible
+    // centreline would punish a rider for leaving a track that is not drawn anywhere.
+    let off = if prog.is_raw_scan() { vec![0u8; MASK_DIM * MASK_DIM] } else { off };
     put("area_off.tga", tga_alpha(MASK_DIM, MASK_DIM, &off), &mut wrote)?;
+    // On a raw scan the whole plot is rideable: there is no marked corridor, so there is
+    // nothing to be off the side of, and a penalty region derived from an invisible
+    // centreline would punish a rider for leaving a track that is not drawn anywhere.
+    let pit_area = if prog.is_raw_scan() { vec![0u8; MASK_DIM * MASK_DIM] } else { pit_area };
     put("area_pits.tga", tga_alpha(MASK_DIM, MASK_DIM, &pit_area), &mut wrote)?;
+    // On a raw scan the whole plot is rideable: there is no marked corridor, so there is
+    // nothing to be off the side of, and a penalty region derived from an invisible
+    // centreline would punish a rider for leaving a track that is not drawn anywhere.
+    let start = if prog.is_raw_scan() { vec![0u8; MASK_DIM * MASK_DIM] } else { start };
     put("area_start.tga", tga_alpha(MASK_DIM, MASK_DIM, &start), &mut wrote)?;
 
     // Each band writes four things, not one: the sheet, the normal map that gives it relief,
@@ -8748,7 +8901,7 @@ fn start_tcl(prog: &TrackProgram) -> Option<String> {
 /// the code that made it. Bump it with every change to what a program builds into: minor for
 /// a new feature, patch for a fix. 0.x until the generator is finished. History in
 /// `apps/studio/FROST_ALGORITHM.md`.
-pub const FROST_ALGORITHM_VERSION: &str = "0.41.0";
+pub const FROST_ALGORITHM_VERSION: &str = "0.42.0";
 
 /// The stamp every built track carries in `<slug>/frost-algorithm.ini`.
 ///
@@ -9770,6 +9923,7 @@ mod tests {
             author: "MXB App".into(),
             location: "Test".into(),
             terrain: Terrain {
+                ground: None,
                 size_x: 400.0,
                 size_z: 400.0,
                 samples: 1025,

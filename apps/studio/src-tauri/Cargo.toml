@@ -30,6 +30,9 @@ walkdir = "2"
 rayon = "1"
 md-5 = "0.10"
 sha2 = "0.10"
+# Reading a lidar tile. Already in the tree under `image`, which decodes TIFF with it; named
+# here because `trackground` reads the GeoTIFF tags `image` does not surface.
+tiff = "0.11"
 reqwest = { version = "0.12", default-features = false, features = [
     "rustls-tls",
     "stream",
@@ -58,7 +61,6 @@ image = { version = "0.25", default-features = false, features = [
 ab_glyph = "0.2"
 # Reading the GeoTIFFs public elevation surveys are published as. The `image` crate above
 # is built without TIFF on purpose, and a DEM needs float cells and GeoTIFF tags anyway.
-tiff = "0.11"
 
 [features]
 # Matches the manager's. `tauri build` turns it on; a dev run leaves it off.

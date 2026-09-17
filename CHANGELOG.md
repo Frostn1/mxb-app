@@ -3,6 +3,14 @@
 ## Unreleased — MXB App, Frost's Studio and MXB Coach
 
 ### Fixed
+- The live cues change as you ride. They were the same every lap and every session, for two
+  reasons: the recorder read the sheet once when the session started and never looked again, and
+  Coach only picked new calls while the Live cues panel was actually on screen — riding with the
+  app on any other tab wrote nothing at all. The recorder now takes a newer sheet at the line,
+  and Coach keeps the sheet following your laps wherever you are in the app.
+- A call you have already heard gives up its place. It was only scored down, which still left it
+  ahead of a smaller one, so on a short sheet the same calls came back forever. It now stands
+  aside while there is anything else worth saying, and comes back only when there isn't.
 - Corners are called corners. A jump on a curved piece of track — ordinary motocross — used to
   delete the turn completely: you got "Rhythm 2" where the corner is, and the braking zone
   before it came back as a "Straight". The jump now belongs to the corner, and its advice still
@@ -73,6 +81,16 @@
   the public laser survey of that ground, plus an aerial photo of the same patch to trace the
   lap on. It works out of the box in the United States, France, the Netherlands and England,
   and the French and Dutch surveys are half-metre, finer than the American one.
+- The track now stands on that ground rather than beside it. The laser survey becomes the
+  terrain the circuit is built into, so the banks, the fall of the site and the jumps that were
+  sitting there the day it was flown all come through. Ironman Raceway is the first one built
+  this way.
+- Ground brought in from a survey keeps its steep places. Banks and ravine sides that the
+  generator would have graded flat on a track of its own are left standing, because on a real
+  site they are the thing that makes it that site.
+- A track built from a real place says where it came from. The source, the licence, the dates it
+  was flown and anything the person who traced the lap was unsure of are carried into the built
+  track, so it is clear which year of a place you are riding.
 - Studio tells you what has actually been surveyed before it downloads anything. These map
   services will happily stretch coarse data to look fine, so Studio asks first and says plainly
   when the best available is 10 metres and your jumps will not be in it.
