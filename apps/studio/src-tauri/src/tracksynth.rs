@@ -12715,6 +12715,178 @@ mod tests {
         assert!(!chequer(dim - 1 - y), "the finish line is mirrored");
     }
 
+    /// Look at a supercross lap: its rhythm lanes, from beside them and from above.
+    ///
+    /// A rhythm lane is the one thing on a stadium lap that a number cannot settle. Whether a
+    /// hill has a lip is a question about a shape, and the honest way to answer it is to draw
+    /// the shape — so this writes the lane's own elevation profile alongside the pictures, and
+    /// the profile is the thing to look at first.
+    ///
+    /// ```text
+    /// FROST_SHOT=/tmp/sx [FROST_SEED=7] cargo test -- --ignored --nocapture the_supercross_pictures
+    /// ```
+    #[test]
+    #[ignore = "writes pictures to look at — set FROST_SHOT"]
+    fn the_supercross_pictures() {
+        use crate::tracklayout::{draw_with, LayoutKnobs};
+        use crate::trackprog::Discipline;
+        let dir = std::env::var("FROST_SHOT").expect("set FROST_SHOT");
+        let dir = Path::new(&dir);
+        std::fs::create_dir_all(dir).unwrap();
+        let from: u64 = std::env::var("FROST_SEED").ok().and_then(|v| v.parse().ok()).unwrap_or(7);
+        let knobs = LayoutKnobs::for_discipline(Discipline::Sx);
+        let p = (from..from + 24)
+            .find_map(|n| draw_with(n, &knobs))
+            .expect("a supercross lap");
+        let s = synthesise(&p).unwrap();
+        let sc = crate::trackscenery::build(&p, &s);
+        println!("{}: {:.0} m lap, {} features", p.name, p.lap_length(), p.features.len());
+
+        // The longest run of hills on the lap, which is what a rider means by the rhythm.
+        let lane = p
+            .features
+            .iter()
+            .filter(|f| matches!(f, Feature::Custom { .. }) && f.lips() >= 4)
+            .max_by(|a, b| a.length().total_cmp(&b.length()))
+            .expect("a rhythm lane");
+        println!(
+            "rhythm lane: {:.0}–{:.0} m round the lap, {} lips",
+            lane.at(),
+            lane.at() + lane.length(),
+            lane.lips()
+        );
+
+        // The profile, read off the built ground along the middle of the lane, between the
+        // stations and across the width a bike uses — `height_at_arc` snaps to a station and
+        // to a cell, which turns a four-metre face into eight steps and cannot be read.
+        let ground_at = |at: f32| -> f32 {
+            let k = s.stations.iter().position(|st| st.s >= at).unwrap_or(1).max(1);
+            let (a, b) = (s.stations[k - 1], s.stations[k]);
+            let f = ((at - a.s) / (b.s - a.s).max(1e-6)).clamp(0.0, 1.0);
+            let (x, z) = (a.x + (b.x - a.x) * f, a.z + (b.z - a.z) * f);
+            let (rx, rz) = crate::trackprog::right_vector(a.heading);
+            let n = 41;
+            (0..n)
+                .map(|i| {
+                    let t = (i as f32 / (n - 1) as f32 - 0.5) * 3.6;
+                    sample_smooth(&s.heights, s.gw, s.gh, (x + rx * t) / s.mps, (z + rz * t) / s.mps)
+                })
+                .sum::<f32>()
+                / n as f32
+        };
+        let mut rows = String::new();
+        let mut u = lane.at() - 6.0;
+        while u <= lane.at() + lane.length() + 6.0 {
+            rows.push_str(&format!("{u:.2} {:.4}\n", ground_at(u)));
+            u += 0.1;
+        }
+        std::fs::write(dir.join("sx_rhythm_profile.txt"), rows).unwrap();
+
+        // And the shape it was drawn from, in the same metres, so a picture of the ground can
+        // say where a lip was meant to be rather than guessing it off the ground itself.
+        if let Feature::Custom { at, length, shape, .. } = lane {
+            let marks: String = shape
+                .iter()
+                .map(|q| format!("{:.2} {:.4}\n", at + q.u * length, q.h))
+                .collect();
+            std::fs::write(dir.join("sx_rhythm_marks.txt"), marks).unwrap();
+        }
+
+        // From beside it, low, the way somebody stood on the infield sees a face.
+        let objects: Vec<crate::trackshot::Object> = sc
+            .models
+            .iter()
+            .map(|(mesh, sheet)| crate::trackshot::Object { mesh, sheet })
+            .collect();
+        let adim = (s.gw.max(s.gh) - 1).max(1024);
+        let albedo = ground_sheet(&p, &s, adim);
+        let sun = {
+            let v = [2.0f32, 6.0, -7.0];
+            let l = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
+            [v[0] / l, v[1] / l, v[2] / l]
+        };
+        let half = p.width * 0.5 + 3.0;
+        let ground = |x: f32, z: f32| {
+            let gx = (x / s.mps).round().clamp(0.0, (s.gw - 1) as f32) as usize;
+            let gz = (z / s.mps).round().clamp(0.0, (s.gh - 1) as f32) as usize;
+            s.heights[gz * s.gw + gx]
+        };
+        let mut focus: Vec<[f32; 3]> = Vec::new();
+        for st in &s.stations {
+            if st.s < lane.at() - 4.0 || st.s > lane.at() + lane.length() + 4.0 {
+                continue;
+            }
+            let (hx, hz) = crate::trackprog::heading_vector(st.heading);
+            for side in [-1.0f32, 1.0] {
+                let (x, z) = (st.x - hz * side * half, st.z + hx * side * half);
+                focus.push([x, ground(x, z), z]);
+                focus.push([x, ground(x, z) + 4.0, z]);
+            }
+        }
+        let scene = |tilt: f32, yaw: f32| crate::trackshot::Scene {
+            gw: s.gw,
+            gh: s.gh,
+            mps: s.mps,
+            heights: &s.heights,
+            albedo: &albedo,
+            adim,
+            focus: &focus,
+            objects: &objects,
+            sun,
+            sun_colour: [0.78, 0.72, 0.60],
+            ambient: [0.40, 0.43, 0.50],
+            zenith: ZENITH,
+            horizon: HORIZON,
+            haze: [179.0, 179.0, 217.0],
+            tilt_deg: tilt,
+            yaw_deg: yaw,
+        };
+        for (name, tilt, yaw) in [
+            ("sx_rhythm_low", crate::trackshot::HERO_TILT_DEG, crate::trackshot::HERO_YAW_DEG),
+            ("sx_rhythm_side", 8.0, 0.0),
+            ("sx_rhythm_over", crate::trackshot::TILT_DEG, 20.0),
+        ] {
+            let px = crate::trackshot::render(&scene(tilt, yaw), 900);
+            rgb_to_ppm(&px, 900, &dir.join(format!("{name}.ppm")));
+        }
+
+        // And two hills of it from the side, square on and almost at ground level, which is
+        // the one angle a take-off face can be read off at all.
+        let (from, to) = (lane.at() + lane.length() * 0.25, lane.at() + lane.length() * 0.45);
+        let mut close: Vec<[f32; 3]> = Vec::new();
+        for st in &s.stations {
+            if st.s < from || st.s > to {
+                continue;
+            }
+            let (hx, hz) = crate::trackprog::heading_vector(st.heading);
+            for side in [-1.0f32, 1.0] {
+                let (x, z) = (st.x - hz * side * 5.0, st.z + hx * side * 5.0);
+                close.push([x, ground(x, z), z]);
+                close.push([x, ground(x, z) + 2.4, z]);
+            }
+        }
+        let mut sc_close = scene(4.0, 0.0);
+        sc_close.focus = &close;
+        let px = crate::trackshot::render(&sc_close, 900);
+        rgb_to_ppm(&px, 900, &dir.join("sx_hill_close.ppm"));
+
+        // And the lap it sits on, both ways: what the game lists it by, and the plan.
+        let (map, shot) = ui_images(&p, &s, &sc, UI_IMAGE_DIM);
+        tga_to_ppm(&map, UI_IMAGE_DIM, &dir.join("sx_map.ppm"));
+        tga_to_ppm(&shot, UI_IMAGE_DIM, &dir.join("sx_shot.ppm"));
+        preview(&s, &dir.join("sx_relief.ppm"));
+        println!("wrote the supercross pictures to {}", dir.display());
+    }
+
+    /// A rendered picture — rows from the top — as a `.ppm` a viewer opens.
+    fn rgb_to_ppm(px: &[[u8; 3]], dim: usize, out: &Path) {
+        let mut ppm = format!("P6\n{dim} {dim}\n255\n").into_bytes();
+        for c in px.iter().take(dim * dim) {
+            ppm.extend_from_slice(c);
+        }
+        std::fs::write(out, ppm).unwrap();
+    }
+
     /// Look at the finish jump — the worked example's, or any track program's.
     ///
     /// ```text

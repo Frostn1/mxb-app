@@ -55,7 +55,10 @@
   every one of them wore the red half and the white half split down its middle, with the grime
   shaded along its top instead of its foot — a row of them read as popcorn rather than as a
   border. They now alternate red and white down the row, one colour a block, dirty at the
-  bottom where they actually stand.
+  bottom where they actually stand. They also stand *on* the ground now: a block was sat at
+  the height under its own middle, and since the strip between two lanes is the flank of the
+  mound a jump spills into, one end of every sixth block was up in the air — by a quarter of
+  a metre at the worst. Each one is seated on the lowest ground its own footprint covers.
 - **A track name the gazetteer has never heard of now finds the track.** Searching a real place
   asked OpenStreetMap's place index, which knows addresses rather than circuits, and a club's
   own name for its field is usually not in it — so the search said "try coordinates instead",

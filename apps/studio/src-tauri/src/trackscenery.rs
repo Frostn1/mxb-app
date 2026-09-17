@@ -2143,6 +2143,9 @@ fn lane_border(
     // How wide a piece is across the border line, and how far along to the next one. A banner
     // is a sheet on a frame and its pieces butt; a block is a block and they stand apart.
     let (depth, gap) = if printed { (BANNER_D_M, TILE_W_M) } else { (TUFF_D_M, TUFF_GAP_M) };
+    // And how wide it is along the border line, which is a piece's own width for a banner —
+    // they butt — and the block's own for everything else. Only the seating uses it.
+    let across = if printed { TILE_W_M } else { TUFF_W_M };
     // Just past the bar, not a guessed distance: the near edge has to clear the riding margin
     // or the piece is dropped as standing on the lane.
     let off = half + RIDE_MARGIN_M + depth * 0.5 + TUFF_CLEAR_M;
@@ -2200,10 +2203,14 @@ fn lane_border(
                     if i % 2 == 0 { TUFF_RED_U } else { TUFF_WHITE_U },
                 )
             };
-            let m = edfwrite::moved(
-                &edfwrite::turned(&piece, deg),
-                [x, ground(syn, x, z) - 0.05, z],
-            );
+            // Seated on the lowest ground its own footprint covers, not on the height under
+            // its middle. A block is rigid and the strip between two lanes is the flank of the
+            // mound a jump spills into, so a metre of it is rarely level: sat on its centre,
+            // a sixth of a lap's feet stood clear of the dirt and the worst of them by 0.24 m,
+            // which is what turns a row of borders into a row of ornaments. Five centimetres
+            // under the lowest corner, so the worst it can look is bedded in.
+            let foot = ground_foot(syn, x, z, deg, across, depth).0;
+            let m = edfwrite::moved(&edfwrite::turned(&piece, deg), [x, foot - 0.05, z]);
             if on_riding_surface(syn, half, &m) {
                 continue;
             }
@@ -2339,6 +2346,48 @@ mod tests {
         assert_eq!(tallied(&sc, "lane border"), 0);
         // The rest of the track is still there: no border is a border choice, not a bare lap.
         assert!(tallied(&sc, "stadium wall") > 0, "the stadium went with it");
+    }
+
+    /// No block stands clear of the dirt.
+    ///
+    /// A border is a rigid box on ground that is never level — the strip between two lanes is
+    /// the flank of the mound a jump spills into — so where it is seated matters. Sat on the
+    /// height under its own middle, an end of it lifts by however much the ground falls across
+    /// its width, and a row with daylight under it reads as ornaments rather than as a border.
+    #[test]
+    fn no_lane_border_piece_stands_clear_of_the_ground() {
+        use crate::trackprog::{LaneBorder, VenueKind};
+        let mut p = sx_lap().clone();
+        p.border = LaneBorder::Soft;
+        p.venue = VenueKind::Stadium;
+        let s = crate::tracksynth::synthesise(&p).expect("it synthesises");
+        let (pieces, _, n) = lane_border(&p, &s).expect("a border");
+        assert!(n > 0, "nothing stood");
+        // Every vertex within a few centimetres of the foot of its own piece, against the
+        // ground under that vertex. A box is 0.9 m tall, so the feet are what these are.
+        let mut worst: f32 = 0.0;
+        let mut lifted = 0usize;
+        let mut feet = 0usize;
+        for (_, mesh) in &pieces {
+            let low = mesh.positions.chunks_exact(3).map(|v| v[1]).fold(f32::INFINITY, f32::min);
+            for v in mesh.positions.chunks_exact(3) {
+                // The base of a piece, wherever the piece happens to stand.
+                if v[1] > low + TUFF_H_M * 0.5 {
+                    continue;
+                }
+                feet += 1;
+                let clear = v[1] - ground(&s, v[0], v[2]);
+                if clear > 0.02 {
+                    lifted += 1;
+                }
+                worst = worst.max(clear);
+            }
+        }
+        assert!(feet > 100, "only {feet} foot vertices to measure");
+        assert!(
+            worst < 0.10,
+            "a border piece stands {worst:.3} m clear of the ground ({lifted} of {feet} feet lifted)"
+        );
     }
 
     /// Every kind of border stays inside what one model may draw.
