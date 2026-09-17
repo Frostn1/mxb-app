@@ -317,8 +317,11 @@ pub const KNOWN_EVENTS: &[&str] = &[
     "view.studio.replay",
     "view.studio.settings",
     // The replay recorder. How a recording started is the question worth answering: the
-    // feature exists to make "by itself" the usual answer, and only a count can say whether
-    // it is. Nothing about what was recorded is counted — a track name is not a counter.
+    // feature exists to make the automatic one the usual answer, and only a count can say
+    // whether it is. Nothing about what was recorded is counted — a track name is not a
+    // counter. (No quoted phrase in this comment, deliberately: `usage.test.ts` reads every
+    // double-quoted string inside this block as a name, so one here is a name that does not
+    // exist and the drift check fails on it.)
     "replay.record.auto",
     "replay.record.manual",
     "replay.ffmpeg.fetch",
