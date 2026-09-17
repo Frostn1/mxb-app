@@ -53,7 +53,7 @@ export const FEEL_GROUPS: { part: Part; key: TKey; feels: Feel[] }[] = [
 export const FEELS: Feel[] = FEEL_GROUPS.flatMap((g) => g.feels);
 
 /** Knobbly tyre: a suggestion of blocks round the rim, not every knob. */
-function Knobs({ cx, cy, r, colour, width }: { cx: number; cy: number; r: number; colour: string; width: number }) {
+export function Knobs({ cx, cy, r, colour, width }: { cx: number; cy: number; r: number; colour: string; width: number }) {
   const n = 16;
   return (
     <g stroke={colour} strokeWidth={width}>
@@ -72,7 +72,7 @@ function Knobs({ cx, cy, r, colour, width }: { cx: number; cy: number; r: number
  * long upside-down forks, the mudguard riding well clear of the front wheel, and one near-flat
  * line from the bars to the tail. Each part lights up when a feel beside it is on.
  */
-function Bike({ lit }: { lit: Part[] }) {
+export function Bike({ lit }: { lit: Part[] }) {
   const on = (p: Part) => lit.includes(p);
   const c = (p: Part) => (on(p) ? "var(--primary)" : "currentColor");
   const w = (p: Part, base: number) => (on(p) ? base + 1 : base);

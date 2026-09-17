@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased — MXB Coach
+
+### Added
+- The lap's suspension is shown on a bike. How much of each end's travel the lap used fills down
+  the fork leg and along the shock, with a mark at the deepest it went, instead of two rows in a
+  list. It sits on the Setup tab, above what the coach would change.
+
 ## 2026-09-17 — MXB Coach v0.1.16-beta.16
 
 ### Fixed
