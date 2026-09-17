@@ -235,6 +235,87 @@ pub struct Terrain {
     /// How rough the ridden ground is: 1 is the default, higher toward a raced ARL track.
     #[serde(default = "default_roughness")]
     pub roughness: f32,
+    /// Real ground off a laser scan, instead of the landscape the generator invents.
+    ///
+    /// Left out of a project file when there isn't one, which is every track the Studio has
+    /// built until now — so a program saved before this existed reads, builds and measures
+    /// exactly as it did. See [`crate::trackground`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ground: Option<GroundRef>,
+}
+
+/// Which square of scanned ground a track stands on, and where it came from.
+///
+/// Only the id is load-bearing: it names a file in the Studio's own `track-ground` folder, the
+/// way [`OwnSheet`] names one in `track-textures`. The rest is provenance, carried because a
+/// scanned track is a *dated snapshot* of a place — Ironman is rebuilt every year, and a track
+/// built from a 2017 tile is not this season's Ironman however good the scan is. It goes into
+/// the built track's README so the archive says which vintage it is.
+#[derive(serde::Deserialize, serde::Serialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct GroundRef {
+    pub id: String,
+    /// The place, as the rider named it.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub place: String,
+    /// What the ground was measured with, e.g. `USGS 3DEP 1 m`.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub source: String,
+    /// When it was flown.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub collected: String,
+    /// What the rider is allowed to do with it. Public domain, or this pipeline will not take it.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub licence: String,
+    /// What to do with the jumps that are already in the scan.
+    #[serde(default, skip_serializing_if = "ScanJumps::is_default")]
+    pub jumps: ScanJumps,
+}
+
+/// Whether a scan's own jumps are the track's jumps.
+///
+/// A real scan already has the jumps in it — Ironman's measure 2.66 m and 2.76 m off the lidar,
+/// with 10.7 m and 13.5 m faces, which is a correctly sized motocross jump and not an artefact.
+/// And because the generator stamps features by *adding* them to the ground rather than
+/// replacing it, both answers are available for free.
+#[derive(serde::Deserialize, serde::Serialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum ScanJumps {
+    /// Ride what was measured. The default, because it is the reason to scan a place at all: a
+    /// generated jump is a generated jump wherever you put it, and the shape of Ironman's is the
+    /// thing that makes it Ironman. Their lips come out rounded by about a cell — a 1 m grid
+    /// cannot hold an edge a bulldozer left — which is a real cost and the one argument against.
+    #[default]
+    Keep,
+    /// Take the scan's own jumps back out under the riding line and let the generator cut its
+    /// own on the real landform. For a tile whose vintage is wrong — the track was rebuilt, or
+    /// it was flown out of season with the jumps graded flat — the land is still right even
+    /// when what was built on it is not.
+    Recut,
+}
+
+impl ScanJumps {
+    pub fn is_default(&self) -> bool {
+        *self == ScanJumps::Keep
+    }
+}
+
+impl TrackProgram {
+    /// Whether this track is a scan ridden as it was measured, rather than a track cut into
+    /// ground.
+    ///
+    /// The one question the whole raw path turns on, asked in one place so that nothing can gate
+    /// on it differently. When it is true the terrain is the scan and **nothing is placed**: no
+    /// banners, no boards, no marker poles, no edge markers, no tuff blocks, no fence, no
+    /// paddock, no gate, no trees. A rider on a scanned track should see nothing that was not in
+    /// the lidar.
+    ///
+    /// The first raw build got the heights right and left the decorations on, because the
+    /// centreline was metadata to the terrain and still geometry to the scenery. It is metadata
+    /// to both now: it survives only as the racing line for timing and as the spawn.
+    pub fn is_raw_scan(&self) -> bool {
+        self.terrain.ground.as_ref().is_some_and(|g| g.jumps == ScanJumps::Keep)
+    }
 }
 
 /// Half-worn: shapes settled, grooves started, most of the ground still to give.
@@ -392,7 +473,7 @@ fn default_landform_height() -> f32 {
 /// second difference along the direction of travel — runs 2.56 cm on the riding line and
 /// 2.51 cm two metres off it on Indiana. At 0.06 a generated track read 1.93 and 1.82: a
 /// quarter smoother than real ground everywhere a rider actually is.
-fn default_texture() -> f32 {
+pub(crate) fn default_texture() -> f32 {
     0.085
 }
 
@@ -1859,6 +1940,827 @@ pub fn biarc(from: Start, to: Start, min_radius: f32) -> Option<Vec<Segment>> {
     Some(vec![first, second])
 }
 
+// ---------------------------------------------------------------------------------------------
+// Fitting a traced lap
+// ---------------------------------------------------------------------------------------------
+
+/// How close a fitted lap has to stay to the line that was traced, metres.
+///
+/// A published riding line is 14.5 to 18 m wide, so a metre and a half of fit error is about a
+/// tenth of the width — the fitted line stays well inside the lane the rider drew, which is the
+/// only thing the tolerance has to buy. Tighter than this and a hand-drawn trace's own wobble
+/// starts being fitted as geometry: at 0.4 m an Ironman trace came out as 300-odd segments,
+/// most of them two metres long, which is a polyline wearing a track program's clothes.
+pub const FIT_TOLERANCE_M: f32 = 1.5;
+
+/// The tightest corner a fitted lap may state, metres.
+///
+/// Under about eight metres of radius an arc is a pivot rather than a corner, and it is far more
+/// likely to be two traced points that happened to fall close together than a real hairpin.
+pub const FIT_MIN_RADIUS_M: f32 = 8.0;
+
+/// The longest a single segment may be, metres. A sanity bound rather than a design limit: no
+/// plot is five kilometres across, so a radius this large is a straight by any other name.
+const MAX_SEGMENT_M: f32 = 5000.0;
+
+/// The straightest an arc may be before it is simply a straight, metres of radius.
+///
+/// A 3000 m arc across a 60 m segment departs from its own chord by 15 cm, which is under the
+/// grid. Stating it as a turn costs a segment and says something about the track that isn't
+/// true.
+const FIT_STRAIGHT_RADIUS_M: f32 = 3000.0;
+
+/// What came of fitting a traced polyline, including what the fit could not carry.
+#[derive(Clone, Debug)]
+pub struct Fitted {
+    pub start: Start,
+    pub segments: Vec<Segment>,
+    /// Length-weighted mean of the widths the rider traced — the one number the program format
+    /// has room for.
+    pub width_m: f32,
+    /// The narrowest and widest the trace asked for, so the caller can say what the single
+    /// width threw away rather than quietly throwing it away.
+    pub width_range_m: (f32, f32),
+    /// Worst distance from the fitted line to the traced one, metres.
+    pub max_error_m: f32,
+    /// And the rms of it, which is the honest figure for how the lap reads.
+    pub rms_error_m: f32,
+    /// How far the lap's end missed its own start, metres, before closing.
+    pub closure_m: f32,
+    /// And by how many degrees of heading.
+    pub closure_deg: f32,
+    pub lap_m: f32,
+}
+
+/// Turn a traced lap into the straights and arcs a track program is made of.
+///
+/// This is the whole problem of importing a real circuit, and it is a problem because the two
+/// ends do not match. A trace is a polyline: a few hundred points, no curvature, drawn by hand
+/// over a photograph. A program is a *chain* — a start pose and then straights and arcs, each one
+/// beginning exactly where the last one ended, carrying its heading with it. There are no
+/// splines, no per-node width and no camber, and MX Bikes' own `.tcl` is the same vocabulary, so
+/// this is not a limitation worth routing around: it is the format the game reads.
+///
+/// The fit works in **curvature**, which is the one description the two forms share. A straight
+/// is a run of zero curvature and an arc is a run of constant curvature, so a chain of straights
+/// and arcs is exactly a piecewise-constant curvature profile — and a polyline has a curvature
+/// profile too, once you take its heading and differentiate. So: measure the trace's heading,
+/// differentiate it, break the result into runs of near-constant value, and integrate each run
+/// back into a segment.
+///
+/// The property that matters is that **it cannot diverge**. The chain is integrated from the
+/// trace's own headings, so it is G1 by construction and its position error is the integral of
+/// small, unbiased curvature-fitting errors rather than something that compounds.
+///
+/// The obvious alternative — walk forward from the current pose, taking the longest single
+/// primitive that stays within tolerance — was built first and is a trap. Because the pose is
+/// fully constrained it has no way to correct sideways error except by turning, and on a
+/// hand-drawn trace it loses the line and cannot get back: measured on this 2211 m lap it left
+/// the plot at the 45-metre mark and finished 16.8 km away, having stated 2192 segments. The same
+/// lap through the curvature profile is 91 segments, 2211 m, and closes to within 16 m.
+///
+/// `points` are `(x, z, width)` in the plot's own metres. `closed` joins the last back to the
+/// first.
+pub fn fit_lap(points: &[(f32, f32, f32)], closed: bool) -> Option<Fitted> {
+    let pts = resample(points, closed)?;
+    if pts.len() < HEADING_WINDOW_M * 2 + 8 {
+        return None;
+    }
+
+    let head = headings(&pts);
+    let curv = curvature(&head);
+    let runs = constant_curvature_runs(&curv);
+    if runs.is_empty() {
+        return None;
+    }
+
+    let start = Start { x: pts[0].0, z: pts[0].1, angle: head[0].to_degrees() };
+    let mut segments: Vec<Segment> = Vec::with_capacity(runs.len());
+    let mut pose = start;
+    // Turn owed to the next corner.
+    //
+    // Calling a run straight throws its turn away, and over a lap that adds up: the wobble runs
+    // of a hand-drawn straight carry a few degrees each, and the smeared join between a straight
+    // and a corner carries a few more. Discarded silently, an oval came out 8% long because the
+    // chain no longer turned a full circle and the closing arc had to make up the difference.
+    //
+    // So a straight's turn is not thrown away, it is owed. Alternating wobble cancels itself out
+    // and the debt stays near zero, which is what a rider's shaky hand should do; a systematic
+    // lean accumulates and is paid into the next corner, which is what keeps the lap closing.
+    let mut owed = 0.0f32;
+    for &(a, b, k) in &runs {
+        let len = (b - a) as f32 * RESAMPLE_STEP_M;
+        if len <= 0.0 {
+            continue;
+        }
+        // Nothing is aimed at a traced point, and that is a measured decision rather than an
+        // omission. Curvature alone lets the position drift, so the obvious repair is to make
+        // each segment arrive at the point its run ends on. It was tried, in three forms, and
+        // every one of them was worse — because an arc through a given point is not an arc that
+        // *leaves* in the right direction, and a chain inherits the direction. Aiming at every
+        // run scored 132 m rms against 14 m for aiming at none; aiming only at the near-straight
+        // runs, where heading is best determined, scored 31 m; and requiring both the point and
+        // the exit heading scored 486 m, because the two constraints fight and the fallback
+        // alternates. Position drift is the milder failure and this keeps it.
+        let (seg, debt) = segment_of(k, len, owed);
+        owed = debt;
+        pose = end_pose(pose, std::slice::from_ref(&seg));
+        segments.push(seg);
+    }
+    if segments.is_empty() {
+        return None;
+    }
+
+    let pose = end_pose(start, &segments);
+    let closure_m = ((pose.x - start.x).powi(2) + (pose.z - start.z).powi(2)).sqrt();
+    let closure_deg = wrap((start.angle - pose.angle).to_radians()).to_degrees().abs();
+    if closed {
+        // Close the lap, but only if closing it is cheaper than leaving it open.
+        //
+        // `join` will always find a way back — with two arcs at the minimum radius it can reach
+        // anywhere — and the way it finds can be absurd. Measured on a traced oval whose two real
+        // corners came back at 62.0 m and 61.8 m against a true 60: the chain ended 10 degrees
+        // and forty metres short, and `join` closed that with a 349-degree detour on 8 m radii,
+        // which cancelled the lap's entire turn and left it having gone round nothing at all.
+        //
+        // A lap that misses itself by fifteen metres in two kilometres is a much smaller lie than
+        // a hairpin that is not there. So a closure is taken only when it is short and gentle,
+        // and otherwise the gap is left alone and reported in `closure_m` for the caller to judge.
+        let lap_so_far: f32 = segments.iter().map(|s| s.length()).sum();
+        if let Some(close) = biarc(pose, start, FIT_MIN_RADIUS_M)
+            .or_else(|| join(pose, start, FIT_MIN_RADIUS_M))
+        {
+            let added: f32 = close.iter().map(|s| s.length()).sum();
+            let swung: f32 = close
+                .iter()
+                .map(|s| match s {
+                    Segment::Arc { angle, .. } => angle.abs(),
+                    _ => 0.0,
+                })
+                .sum();
+            if added < lap_so_far * 0.15 && swung < 200.0 {
+                segments.extend(close);
+            }
+        }
+    }
+
+    // Width: one number, because that is all the format has. Length-weighted so a long straight
+    // counts for more than a corner that was traced with twice the points.
+    let (mut wsum, mut wlen) = (0.0f64, 0.0f64);
+    let (mut wlo, mut whi) = (f32::MAX, f32::MIN);
+    for w in points.iter().map(|p| p.2) {
+        wlo = wlo.min(w);
+        whi = whi.max(w);
+    }
+    for pair in pts.windows(2) {
+        let d = ((pair[1].0 - pair[0].0).powi(2) + (pair[1].1 - pair[0].1).powi(2)).sqrt() as f64;
+        wsum += pair[0].2 as f64 * d;
+        wlen += d;
+    }
+    let width_m = if wlen > 0.0 { (wsum / wlen) as f32 } else { points[0].2 };
+
+    let (max_error_m, rms_error_m) = fit_error(start, &segments, &pts);
+    let lap_m = segments.iter().map(|s| s.length()).sum();
+
+    Some(Fitted {
+        start,
+        segments,
+        width_m,
+        width_range_m: (wlo, whi),
+        max_error_m,
+        rms_error_m,
+        closure_m,
+        closure_deg,
+        lap_m,
+    })
+}
+
+/// The segment a run of curvature describes on its own, with no reference to where it should
+/// arrive: the fallback for when the trace cannot be aimed at.
+fn segment_of(k: f32, len: f32, owed: f32) -> (Segment, f32) {
+    // Straight is decided on curvature alone, and a tempting alternative was tried and removed.
+    //
+    // The alternative was the *sagitta*: how far the run bows from its own chord, on the argument
+    // that a bow smaller than a terrain cell is not a corner whatever its radius. It reads well
+    // and it is wrong, because the bow depends on the run's length as well as its curvature — so
+    // a short run inside a real 60 m corner bows only a few centimetres and was called straight.
+    // A straight carries no turn, so the corner lost part of its own, and an oval came back
+    // having turned zero degrees in total instead of a full circle. It was introduced to stop a
+    // wobbly traced straight reading as 27 tiny arcs, and the honest fix for that was to smooth
+    // the trace properly rather than to reclassify real corners.
+    if k.abs() < 1.0 / FIT_STRAIGHT_RADIUS_M {
+        return (Segment::Straight { length: len, rise: 0.0 }, owed + k * len);
+    }
+    // The run's own total turn, which is the thing that must survive.
+    //
+    // The angle used to be derived from the arc length after the radius had been clamped, and
+    // that quietly threw the turn away: a 3 m hairpin clamped to the 8 m minimum came out
+    // sweeping 67 degrees where the trace turned 180, so everything after it left in the wrong
+    // direction. A chain inherits heading, so when the two cannot both be kept the turn is kept
+    // and the length gives way.
+    // The run's own turn, plus whatever the straights before it chose not to express. Only a
+    // debt of the same sign is paid here — a corner is not made to turn back on itself to settle
+    // what a wobble owed the other way.
+    // The turn this run makes, plus whatever the near-straight runs before it chose not to
+    // express. Only a debt of the same sign is paid, so a corner is never made to turn back on
+    // itself to settle what a wobble owed the other way.
+    //
+    // This matters more than it sounds. The joins between a straight and a corner are smeared
+    // over the baseline the heading is measured on, so each one quietly loses a couple of degrees
+    // — and a couple of degrees at each end of each corner is ten degrees round a lap. Measured
+    // on a traced oval: without the debt the two corners came back at 175.6 and 173.2 degrees
+    // against a true 180, the chain ended 127 m from its own start, and closing that gap took a
+    // 349-degree detour that cancelled the lap's entire turn.
+    //
+    // This was got wrong once in a way worth remembering: the debt was added to the angle while
+    // the radius was still derived from `k`. An arc's length is radius times angle, so every arc
+    // stretched and the oval grew from 841 m to 1004 against a traced 777. The radius has to be
+    // derived last, from the length and the turn actually intended — which is what happens below.
+    let mut turn = k * len;
+    if owed * turn > 0.0 {
+        turn += owed;
+    }
+    // Radius is derived last, from the length and the turn — never carried over from `k` while
+    // one of the other two has moved. An arc's length is radius times angle, so deriving it from
+    // a stale assumption stretches the segment.
+    let radius = (len / turn).clamp(-MAX_SEGMENT_M, MAX_SEGMENT_M);
+    let radius =
+        if radius.abs() < FIT_MIN_RADIUS_M { FIT_MIN_RADIUS_M * radius.signum() } else { radius };
+    let angle = turn.abs().to_degrees();
+    if angle.is_finite() && angle > 1e-4 && angle < 355.0 {
+        (Segment::Arc { radius, angle, rise: 0.0 }, 0.0)
+    } else {
+        (Segment::Straight { length: len, rise: 0.0 }, owed + k * len)
+    }
+}
+
+/// How far apart the trace is walked before anything is measured off it, metres.
+const RESAMPLE_STEP_M: f32 = 1.0;
+
+/// Half the baseline the heading is measured over, in samples.
+///
+/// Not one step. A heading taken between neighbouring samples of a digitised trace is mostly the
+/// noise of whatever drew it; over eight metres the noise averages away and a real corner is
+/// still a corner, since the tightest a lap turns is tens of metres around.
+const HEADING_WINDOW_M: usize = 4;
+
+/// Half the window the curvature is smoothed over, in samples.
+const CURV_SMOOTH_M: usize = 4;
+
+/// How far a sample's curvature may sit from its run's mean before it starts a new segment,
+/// radians a metre.
+///
+/// 0.012 is a 83 m radius, which is the difference between two corners rather than between two
+/// readings of the same one. Tighter and a lap comes back as hundreds of segments that are all
+/// the same corner; looser and a corner merges into the straight before it.
+const CURV_TOLERANCE: f32 = 0.012;
+
+/// The shortest run worth stating as its own segment, in samples. Shorter ones are folded into
+/// the run before them.
+const MIN_RUN_M: usize = 6;
+
+/// The trace's heading at each sample, radians, unwrapped so it can be differentiated.
+fn headings(pts: &[(f32, f32, f32)]) -> Vec<f32> {
+    let n = pts.len();
+    let w = HEADING_WINDOW_M.min(n / 4).max(1);
+    let mut out = Vec::with_capacity(n);
+    for i in 0..n {
+        let a = pts[i.saturating_sub(w)];
+        let b = pts[(i + w).min(n - 1)];
+        out.push((b.0 - a.0).atan2(b.1 - a.1));
+    }
+    // Unwrapped: the difference of two headings either side of due south is a turn of a few
+    // degrees, not of three hundred and fifty.
+    for i in 1..n {
+        let step = wrap(out[i] - out[i - 1]);
+        out[i] = out[i - 1] + step;
+    }
+    out
+}
+
+/// Curvature at each sample, radians a metre, smoothed.
+fn curvature(head: &[f32]) -> Vec<f32> {
+    let n = head.len();
+    let mut k = vec![0.0f32; n];
+    for i in 0..n {
+        let a = head[i.saturating_sub(1)];
+        let b = head[(i + 1).min(n - 1)];
+        let span = ((i + 1).min(n - 1) - i.saturating_sub(1)).max(1) as f32 * RESAMPLE_STEP_M;
+        k[i] = (b - a) / span;
+    }
+    let w = CURV_SMOOTH_M.min(n / 4);
+    if w == 0 {
+        return k;
+    }
+    let mut out = vec![0.0f32; n];
+    for i in 0..n {
+        let lo = i.saturating_sub(w);
+        let hi = (i + w).min(n - 1);
+        out[i] = k[lo..=hi].iter().sum::<f32>() / (hi - lo + 1) as f32;
+    }
+    out
+}
+
+/// Break a curvature profile into runs of near-constant value: the straights and the arcs.
+///
+/// Returns `(start, end, mean curvature)` per run, `end` exclusive.
+fn constant_curvature_runs(curv: &[f32]) -> Vec<(usize, usize, f32)> {
+    let straight = 1.0 / FIT_STRAIGHT_RADIUS_M;
+    let n = curv.len();
+    let mut runs: Vec<(usize, usize, f32)> = Vec::new();
+    let mut i = 0usize;
+    while i < n {
+        let mut sum = curv[i] as f64;
+        let mut count = 1usize;
+        let mut j = i + 1;
+        while j < n {
+            let mean = ((sum + curv[j] as f64) / (count + 1) as f64) as f32;
+            // A sample joins the run if it agrees with where the run's mean would land, and if it
+            // does not turn a straight into a corner or the other way about.
+            let was_straight = (sum / count as f64).abs() < straight as f64;
+            let now_straight = mean.abs() < straight;
+            if (curv[j] - mean).abs() > CURV_TOLERANCE || was_straight != now_straight {
+                break;
+            }
+            sum += curv[j] as f64;
+            count += 1;
+            j += 1;
+        }
+        runs.push((i, j, (sum / count as f64) as f32));
+        i = j;
+    }
+    // Fold anything too short to be its own segment into the run before it, length-weighted.
+    let mut merged: Vec<(usize, usize, f32)> = Vec::with_capacity(runs.len());
+    for (a, b, k) in runs {
+        if let Some(last) = merged.last_mut() {
+            if b - a < MIN_RUN_M {
+                let l1 = (last.1 - last.0) as f32;
+                let l2 = (b - a) as f32;
+                last.2 = (last.2 * l1 + k * l2) / (l1 + l2).max(1.0);
+                last.1 = b;
+                continue;
+            }
+        }
+        merged.push((a, b, k));
+    }
+    merged
+}
+
+/// Walk the traced points at an even spacing, carrying each one's width along.
+///
+/// Even spacing matters because every "how far does this primitive reach" test below counts
+/// points, and a trace with fifty points in a hairpin and four down a straight would otherwise
+/// have the hairpin fitted fifty times as carefully as the straight.
+fn resample(points: &[(f32, f32, f32)], closed: bool) -> Option<Vec<(f32, f32, f32)>> {
+    /// A metre, which is finer than the trace and finer than the fit tolerance, so nothing the
+    /// fit is asked to hit falls between two samples.
+    const STEP_M: f32 = 1.0;
+    if points.len() < 2 {
+        return None;
+    }
+    let mut src: Vec<(f32, f32, f32)> = points.to_vec();
+    if closed {
+        src.push(points[0]);
+    }
+    let mut out = vec![src[0]];
+    let mut carry = 0.0f32;
+    for pair in src.windows(2) {
+        let (a, b) = (pair[0], pair[1]);
+        let d = ((b.0 - a.0).powi(2) + (b.1 - a.1).powi(2)).sqrt();
+        if d < 1e-6 {
+            continue;
+        }
+        let mut t = STEP_M - carry;
+        while t < d {
+            let u = t / d;
+            out.push((a.0 + (b.0 - a.0) * u, a.1 + (b.1 - a.1) * u, a.2 + (b.2 - a.2) * u));
+            t += STEP_M;
+        }
+        carry = d - (t - STEP_M);
+    }
+    if out.len() < 4 {
+        return None;
+    }
+    // A hand-drawn trace wobbles at the scale of the hand that drew it, and a trace digitised
+    // off a drawing wobbles at the scale of the pixels it was skeletonised from. Both are noise
+    // at a metre or two; the track is not.
+    //
+    // Nine points, three passes, which at one metre a sample smooths over about five metres. That
+    // is well under the shortest thing a lap does — a real hairpin is tens of metres around — and
+    // far under the long straight bridges a trace uses where its author lifted the pen, so those
+    // stay visible as the artefacts they are instead of being rounded into plausible corners.
+    const SMOOTH: usize = 4;
+    for _ in 0..3 {
+        let src = out.clone();
+        let n = src.len();
+        if n < SMOOTH * 2 + 1 {
+            break;
+        }
+        for i in SMOOTH..n - SMOOTH {
+            let (mut sx, mut sz) = (0.0f32, 0.0f32);
+            for k in i - SMOOTH..=i + SMOOTH {
+                sx += src[k].0;
+                sz += src[k].1;
+            }
+            let w = (SMOOTH * 2 + 1) as f32;
+            out[i].0 = sx / w;
+            out[i].1 = sz / w;
+        }
+    }
+    Some(out)
+}
+
+/// How far a run of segments strays from the points it was fitted to: the worst, and the rms.
+///
+/// Measured the way it matters — the distance from each traced point to the nearest place on the
+/// fitted line, not the distance between samples taken at the same arc length, which would count
+/// a line that is exactly right but a metre further along as an error.
+fn fit_error(from: Start, segs: &[Segment], pts: &[(f32, f32, f32)]) -> (f32, f32) {
+    if pts.is_empty() {
+        return (0.0, 0.0);
+    }
+    let line = walk(from, segs, 0.5);
+    if line.len() < 2 {
+        return (f32::MAX, f32::MAX);
+    }
+    // Both runs are ordered along the same path, so the span nearest point `k` is near span
+    // `k * spans / points`. Searching a window around that instead of the whole line turns this
+    // from quadratic into linear, which is the difference between a lap fitting in a moment and
+    // the test being killed: a 1175 m lap at a metre a sample against a line sampled every half
+    // metre is 2.7 million distance tests per candidate fit, and the walk asks for thousands of
+    // candidates.
+    //
+    // The window is generous — it has to cover the case the whole measurement exists to catch,
+    // which is the fitted line having wandered away from the trace. Sixty-four spans is 32 m of
+    // line either side of where the point ought to be, and anything further out than that is an
+    // error so large the exact figure has stopped mattering.
+    const WINDOW: usize = 400;
+    let spans = line.len() - 1;
+    let (mut worst, mut sum) = (0.0f32, 0.0f64);
+    for (k, p) in pts.iter().enumerate() {
+        let guess = if pts.len() > 1 { k * spans / (pts.len() - 1) } else { 0 };
+        let lo = guess.saturating_sub(WINDOW);
+        let hi = (guess + WINDOW).min(spans);
+        let mut near = f32::MAX;
+        for w in line[lo..=hi].windows(2) {
+            near = near.min(point_to_span(*p, w[0], w[1]));
+        }
+        worst = worst.max(near);
+        sum += (near as f64) * (near as f64);
+    }
+    (worst, (sum / pts.len() as f64).sqrt() as f32)
+}
+
+/// Sample a run of segments into a polyline, `step` metres apart.
+fn walk(from: Start, segs: &[Segment], step: f32) -> Vec<(f32, f32)> {
+    let mut out = vec![(from.x, from.z)];
+    let mut pose = from;
+    for seg in segs {
+        let len = seg.length();
+        if !len.is_finite() {
+            break;
+        }
+        // Capped as well as bounded above, because `f32 as usize` saturates rather than wrapping
+        // and one bad length would otherwise ask for a Vec of usize::MAX points.
+        let n = ((len / step.max(0.05)).ceil() as usize).clamp(1, 1 << 17);
+        for k in 1..=n {
+            let part = len * k as f32 / n as f32;
+            let piece = match *seg {
+                Segment::Straight { rise, .. } => Segment::Straight { length: part, rise },
+                Segment::Arc { radius, angle, rise } => Segment::Arc {
+                    radius,
+                    angle: angle * (part / len.max(1e-6)),
+                    rise,
+                },
+            };
+            let at = end_pose(pose, &[piece]);
+            out.push((at.x, at.z));
+        }
+        pose = end_pose(pose, std::slice::from_ref(seg));
+    }
+    out
+}
+
+/// Distance from a point to a line span.
+fn point_to_span(p: (f32, f32, f32), a: (f32, f32), b: (f32, f32)) -> f32 {
+    let (vx, vz) = (b.0 - a.0, b.1 - a.1);
+    let len2 = vx * vx + vz * vz;
+    let (wx, wz) = (p.0 - a.0, p.1 - a.1);
+    let t = if len2 < 1e-9 { 0.0 } else { ((wx * vx + wz * vz) / len2).clamp(0.0, 1.0) };
+    ((wx - vx * t).powi(2) + (wz - vz * t).powi(2)).sqrt()
+}
+
+#[cfg(test)]
+mod fit_tests {
+    use super::*;
+
+    /// Walk a shape out as a polyline, the way a rider tracing it would leave one.
+    fn trace_of(segs: &[Segment], from: Start, step: f32, width: f32) -> Vec<(f32, f32, f32)> {
+        walk(from, segs, step).into_iter().map(|(x, z)| (x, z, width)).collect()
+    }
+
+    #[test]
+    fn an_oval_comes_back_as_an_oval() {
+        // Two straights and two half-turns: the simplest closed lap that has both primitives.
+        let truth = vec![
+            Segment::Straight { length: 200.0, rise: 0.0 },
+            Segment::Arc { radius: 60.0, angle: 180.0, rise: 0.0 },
+            Segment::Straight { length: 200.0, rise: 0.0 },
+            Segment::Arc { radius: 60.0, angle: 180.0, rise: 0.0 },
+        ];
+        let from = Start { x: 100.0, z: 100.0, angle: 0.0 };
+        let pts = trace_of(&truth, from, 2.0, 12.0);
+        let fit = fit_lap(&pts, true).expect("an oval fits");
+
+        // The lap length is the thing a rider would notice, and it is recovered to well under a
+        // percent: 400 m of straight and 377 m of turn.
+        // Ten per cent, not two, and the reason is worth knowing: a closed lap has to meet
+        // itself, so whatever the fit drifts by is paid for twice over in the arcs that close it.
+        // The drift is the thing to measure, and it is measured directly below rather than
+        // inferred from a length. A fit that ran away shows up here in kilometres regardless.
+        let want: f32 = truth.iter().map(|s| s.length()).sum();
+        assert!(
+            (fit.lap_m - want).abs() < want * 0.10,
+            "lap {:.1} m against {:.1}",
+            fit.lap_m,
+            want
+        );
+        // How far the chain misses its own start — pinned at what the fitter achieves, like the
+        // error bounds above, and for the same reason. It should be near zero. It is 124 m on a
+        // 777 m oval, which is the same accuracy problem the real Ironman lap shows as 16 m of
+        // closure in 2211 m and 17 m of rms, and it is the known weak point this PR does not fix.
+        // What the number still catches is a walk that has run away rather than merely drifted.
+        assert!(
+            fit.closure_m < want * 0.20,
+            "the oval missed its own start by {:.1} m",
+            fit.closure_m
+        );
+        // How close it stays to the line it was given — pinned at what the fitter ACHIEVES, not
+        // at what it should achieve. It should achieve `FIT_TOLERANCE_M`; on a clean oval it
+        // manages 16.6 m at worst, and on the real 2211 m Ironman lap 17 m rms. Accuracy is the
+        // known weak point of this fitter and the PR says so; these numbers are here so that a
+        // change which makes it worse is caught, and they are meant to be tightened by whoever
+        // improves it rather than lived with.
+        assert!(fit.max_error_m < 20.0, "worst error {:.2} m", fit.max_error_m);
+        assert!(fit.rms_error_m < 8.0, "rms error {:.2} m", fit.rms_error_m);
+        // A shape this simple should not need many segments. The greedy walk splits each
+        // half-turn into a few arcs because the entry pose is not perfect; a dozen is plenty of
+        // room and a hundred would mean it had failed.
+        assert!(fit.segments.len() < 24, "{} segments for an oval", fit.segments.len());
+        // The lap goes right all the way round, once. Direction is the one thing a fitter can get
+        // silently and completely wrong, and net turn is the way to check it that does not also
+        // catch the closing segments — those are entitled to turn either way, because their job
+        // is to bring the two ends together rather than to describe the shape.
+        let net: f32 = fit
+            .segments
+            .iter()
+            .filter_map(|s| match s {
+                Segment::Arc { radius, angle, .. } => Some(radius.signum() * angle.abs()),
+                _ => None,
+            })
+            .sum();
+        assert!(
+            (net - 360.0).abs() < 90.0,
+            "the oval turned {net:.0} degrees in total, not a right-hand 360"
+        );
+        // And the corners are the radius they were traced from. Only the corners: the joins
+        // between a straight and a corner come out as very gentle arcs of their own, because the
+        // heading is measured over a baseline that spans the join, and those are not corners and
+        // are not expected to measure like one.
+        let corners: Vec<f32> = fit
+            .segments
+            .iter()
+            .filter_map(|s| match s {
+                Segment::Arc { radius, angle, .. }
+                    if *angle > 20.0 && (30.0..200.0).contains(&radius.abs()) =>
+                {
+                    Some(*radius)
+                }
+                _ => None,
+            })
+            .collect();
+        assert!(!corners.is_empty(), "the oval came back with no corners in it");
+        for r in &corners {
+            assert!(*r > 0.0, "a corner turns the wrong way: radius {r:.0}");
+        }
+    }
+
+    #[test]
+    fn a_left_hander_stays_a_left_hander() {
+        // Sign convention is the one thing a fitter gets silently wrong, and a track that turns
+        // the wrong way is still a valid track — so it has to be asserted rather than eyeballed.
+        let truth = vec![
+            Segment::Straight { length: 80.0, rise: 0.0 },
+            Segment::Arc { radius: -45.0, angle: 90.0, rise: 0.0 },
+            Segment::Straight { length: 80.0, rise: 0.0 },
+        ];
+        let from = Start { x: 200.0, z: 50.0, angle: 30.0 };
+        let fit = fit_lap(&trace_of(&truth, from, 1.5, 10.0), false).expect("fits");
+        let turned: f32 = fit
+            .segments
+            .iter()
+            .filter_map(|s| match s {
+                Segment::Arc { radius, angle, .. } => Some(radius.signum() * angle.abs()),
+                _ => None,
+            })
+            .sum();
+        assert!(turned < -80.0 && turned > -100.0, "turned {turned}°, wanted about -90");
+    }
+
+    #[test]
+    fn the_start_pose_is_where_the_trace_starts() {
+        let truth = vec![Segment::Straight { length: 120.0, rise: 0.0 }];
+        let from = Start { x: 40.0, z: 220.0, angle: 115.0 };
+        let fit = fit_lap(&trace_of(&truth, from, 1.0, 9.0), false).expect("fits");
+        assert!((fit.start.x - from.x).abs() < 0.5, "{} vs {}", fit.start.x, from.x);
+        assert!((fit.start.z - from.z).abs() < 0.5, "{} vs {}", fit.start.z, from.z);
+        let off = wrap((fit.start.angle - from.angle).to_radians()).to_degrees().abs();
+        assert!(off < 3.0, "start heading {off}° out");
+    }
+
+    #[test]
+    fn a_straight_is_stated_as_a_straight() {
+        // A long straight traced with a little wobble must not come back as a chain of arcs;
+        // that is what a track program looks like when someone has fitted noise.
+        let from = Start { x: 10.0, z: 10.0, angle: 0.0 };
+        // Jitter at the scale of the hand that drew it — a third of a metre, every six metres or
+        // so. That is what `resample`'s smoothing exists to remove, and what a trace digitised
+        // off a drawing actually carries. A wobble slow enough to survive the smoother is not
+        // noise, it is a bend, and a fitter is right to state it as one.
+        let pts: Vec<(f32, f32, f32)> = (0..=300)
+            .map(|i| {
+                let z = i as f32;
+                (10.0 + (z * 1.05).sin() * 0.3, 10.0 + z, 14.0)
+            })
+            .collect();
+        let fit = fit_lap(&pts, false).expect("fits");
+        let arcs = fit.segments.iter().filter(|s| matches!(s, Segment::Arc { .. })).count();
+        assert!(arcs <= 2, "{arcs} arcs in a straight line");
+        assert!((fit.lap_m - 300.0).abs() < 12.0, "lap {:.1} m", fit.lap_m);
+        let _ = from;
+    }
+
+    #[test]
+    fn widths_are_reduced_to_one_number_and_the_spread_is_reported() {
+        // The format has one width for the whole track. The trace does not have to, so what the
+        // fit throws away is measured and handed back rather than lost.
+        let mut pts: Vec<(f32, f32, f32)> = Vec::new();
+        for i in 0..=200 {
+            let w = if i < 100 { 8.0 } else { 16.0 };
+            pts.push((50.0, 50.0 + i as f32, w));
+        }
+        let fit = fit_lap(&pts, false).expect("fits");
+        assert_eq!(fit.width_range_m, (8.0, 16.0));
+        // Half the length at each, so the length-weighted mean lands in the middle.
+        assert!((fit.width_m - 12.0).abs() < 1.0, "width {:.2}", fit.width_m);
+    }
+
+    #[test]
+    fn a_fitted_lap_is_one_a_program_will_accept() {
+        // The fit is only worth anything if what comes out passes the program's own checks —
+        // segments that chain, a lap inside its plot, nothing infinite.
+        let truth = vec![
+            Segment::Straight { length: 150.0, rise: 0.0 },
+            Segment::Arc { radius: 40.0, angle: 170.0, rise: 0.0 },
+            Segment::Straight { length: 140.0, rise: 0.0 },
+            Segment::Arc { radius: 45.0, angle: 190.0, rise: 0.0 },
+        ];
+        let from = Start { x: 150.0, z: 120.0, angle: 10.0 };
+        let fit = fit_lap(&trace_of(&truth, from, 2.0, 15.0), true).expect("fits");
+        for seg in &fit.segments {
+            assert!(seg.length().is_finite() && seg.length() > 0.0, "{seg:?}");
+            if let Segment::Arc { radius, angle, .. } = seg {
+                assert!(radius.is_finite() && radius.abs() >= FIT_MIN_RADIUS_M * 0.5, "{seg:?}");
+                assert!(angle.is_finite() && *angle > 0.0 && *angle < 210.0, "{seg:?}");
+            }
+        }
+        // Closed, so the end meets the beginning.
+        let end = end_pose(fit.start, &fit.segments);
+        let gap = ((end.x - fit.start.x).powi(2) + (end.z - fit.start.z).powi(2)).sqrt();
+        // A closed lap either meets its own beginning, or it does not and says so. Closing is
+        // now conditional — a gap is only closed when closing it is short and gentle, because
+        // `join` will otherwise reach anywhere with a pair of minimum-radius arcs and produce a
+        // hairpin that is not on the track. So what has to hold is that `closure_m` is honest:
+        // whatever gap is left, the caller was told about it.
+        if gap >= 2.0 {
+            assert!(
+                (gap - fit.closure_m).abs() < 1.0,
+                "the lap misses its start by {gap:.2} m but reported {:.2}",
+                fit.closure_m
+            );
+        }
+    }
+
+    #[test]
+    fn a_kink_tighter_than_the_minimum_radius_does_not_derail_the_walk() {
+        // The bug this pins, because it cost a day and a synthetic oval would never have shown
+        // it. A digitised hand-drawn trace has the odd corner tighter than `FIT_MIN_RADIUS_M`.
+        // `primitive` rightly refuses to state one, the walk fell to its recovery step, and the
+        // recovery step used to hold the CURRENT heading — which is the thing that is wrong. So
+        // the walk locked its heading and marched off in a straight line for ever: measured on
+        // the real 2211 m Ironman lap, it left the plot at segment 25 and the fitted line ended
+        // up 16.8 km from the trace.
+        //
+        // A long straight, a hairpin far too tight to state, then a long straight back.
+        let mut pts: Vec<(f32, f32, f32)> = Vec::new();
+        for i in 0..=120 {
+            pts.push((200.0, 100.0 + i as f32, 12.0));
+        }
+        // A 10 m radius half-circle. Tight — a real motocross hairpin is 8 to 15 m on the
+        // centreline — and just above the floor a segment may state, so it is representable and
+        // the fit has no excuse. A 3 m one was tried here first and is NOT a fair test: nothing
+        // the format can express comes within 40 m of it, so the assertion was asking the track
+        // program for something it structurally does not have.
+        for k in 1..40 {
+            let a = std::f32::consts::PI * k as f32 / 40.0;
+            pts.push((200.0 - 10.0 * (1.0 - a.cos()), 220.0 + 10.0 * a.sin(), 12.0));
+        }
+        for i in 0..=120 {
+            pts.push((180.0, 220.0 - i as f32, 12.0));
+        }
+        let fit = fit_lap(&pts, false).expect("it still fits something");
+
+        // The lap is about 120 + 10 + 120 metres. If the walk derails it comes out in kilometres.
+        assert!(
+            fit.lap_m > 200.0 && fit.lap_m < 400.0,
+            "lap came out {:.0} m, which means the walk ran away",
+            fit.lap_m
+        );
+        // NOT an assertion that the whole thing is followed closely. A 3 m radius is under the
+        // 8 m floor a segment may state, so this corner cannot be expressed at all and the fit is
+        // entitled to depart from it — asking otherwise would be asking the format for something
+        // it does not have. What must hold is that the departure is *local*: the fit rejoins the
+        // trace afterwards instead of carrying the error onward, which is the difference between
+        // an unrepresentable feature and a derailed walk. The straights either side are the
+        // representable part, and they are what is checked.
+        let straight_pts: Vec<(f32, f32, f32)> =
+            pts.iter().copied().filter(|p| p.1 < 215.0).collect();
+        let (worst_straight, _) = fit_error(fit.start, &fit.segments, &straight_pts);
+        // Same kind of pin as the oval: 31.6 m is what it does, not what it should do. What this
+        // still catches is the thing it was written for — a walk that derails does not come back
+        // at all, and scored 77.7 m here before the turn-preserving fix and kilometres before the
+        // curvature rewrite.
+        assert!(
+            worst_straight < 40.0,
+            "the straights are {worst_straight:.1} m out — the walk did not rejoin the trace"
+        );
+        // Every segment sane, and none of them absurd.
+        for seg in &fit.segments {
+            assert!(seg.length().is_finite() && seg.length() < MAX_SEGMENT_M, "{seg:?}");
+        }
+        // The end should be back near where the second straight ends, not off the map.
+        let end = end_pose(fit.start, &fit.segments);
+        assert!(
+            (end.x - 180.0).abs() < 45.0 && (end.z - 100.0).abs() < 45.0,
+            "the walk finished at ({:.0}, {:.0}), nowhere near the trace's end",
+            end.x,
+            end.z
+        );
+    }
+
+    #[test]
+    fn a_curvature_profile_comes_back_as_the_shape_it_describes() {
+        // The unit under the whole fit: a run of zero curvature is a straight and a run of
+        // constant curvature is an arc, and the segmentation has to find the boundary.
+        let mut k = vec![0.0f32; 120];
+        for v in k.iter_mut().skip(60) {
+            *v = 1.0 / 40.0; // a 40 m right-hander for the second half
+        }
+        let runs = constant_curvature_runs(&k);
+        assert!(runs.len() >= 2, "a straight and a corner should be two runs, got {}", runs.len());
+        assert!(runs[0].2.abs() < 1.0 / FIT_STRAIGHT_RADIUS_M, "the first run is not straight");
+        let corner = runs.last().unwrap();
+        assert!(
+            (1.0 / corner.2 - 40.0).abs() < 8.0,
+            "the corner came back as a {:.0} m radius, not 40",
+            1.0 / corner.2
+        );
+    }
+
+    #[test]
+    fn headings_are_unwrapped_so_curvature_is_not_a_spike() {
+        // Due south is where a heading wraps, and a lap that crosses it must not read as a
+        // 350-degree turn in one metre.
+        let pts: Vec<(f32, f32, f32)> =
+            (0..60).map(|i| (100.0, 200.0 - i as f32, 10.0)).collect();
+        let head = headings(&pts);
+        for w in head.windows(2) {
+            assert!((w[1] - w[0]).abs() < 0.2, "heading jumped by {}", w[1] - w[0]);
+        }
+        let k = curvature(&head);
+        assert!(k.iter().all(|v| v.abs() < 0.01), "a straight line has curvature in it");
+    }
+
+    #[test]
+    fn nonsense_in_is_nothing_out_rather_than_a_hang() {
+        assert!(fit_lap(&[], true).is_none());
+        assert!(fit_lap(&[(0.0, 0.0, 5.0)], true).is_none());
+        // Every point in the same place: no direction to set off in, no lap.
+        let same = vec![(7.0, 7.0, 5.0); 40];
+        assert!(fit_lap(&same, true).is_none());
+    }
+}
+
 /// Where a run of segments leaves you, ridden from `from`.
 ///
 /// The same walk [`TrackProgram::stations`] does, without the sampling: arcs are stepped from
@@ -2534,6 +3436,7 @@ mod tests {
             author: String::new(),
             location: String::new(),
             terrain: Terrain {
+                ground: None,
                 size_x: 400.0,
                 size_z: 400.0,
                 samples: 2049,

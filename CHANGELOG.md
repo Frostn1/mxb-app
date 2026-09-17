@@ -64,6 +64,16 @@
   the public laser survey of that ground, plus an aerial photo of the same patch to trace the
   lap on. It works out of the box in the United States, France, the Netherlands and England,
   and the French and Dutch surveys are half-metre, finer than the American one.
+- The track now stands on that ground rather than beside it. The laser survey becomes the
+  terrain the circuit is built into, so the banks, the fall of the site and the jumps that were
+  sitting there the day it was flown all come through. Ironman Raceway is the first one built
+  this way.
+- Ground brought in from a survey keeps its steep places. Banks and ravine sides that the
+  generator would have graded flat on a track of its own are left standing, because on a real
+  site they are the thing that makes it that site.
+- A track built from a real place says where it came from. The source, the licence, the dates it
+  was flown and anything the person who traced the lap was unsure of are carried into the built
+  track, so it is clear which year of a place you are riding.
 - Studio tells you what has actually been surveyed before it downloads anything. These map
   services will happily stretch coarse data to look fine, so Studio asks first and says plainly
   when the best available is 10 metres and your jumps will not be in it.

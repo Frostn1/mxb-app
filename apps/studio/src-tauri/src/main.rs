@@ -18,6 +18,7 @@ mod gearrepair;
 mod paintstudio;
 mod trackbuild;
 mod tracklayout;
+mod trackground;
 mod trackline;
 mod trackllm;
 mod trackmodel;
@@ -258,6 +259,7 @@ fn main() {
             // names its sheets rather than carrying them.
             if let Ok(data) = tauri::Manager::path(app).app_data_dir() {
                 tracktex::set_dir(data.join("track-textures"));
+                trackground::set_dir(data.join("track-ground"));
             }
             let _ = app;
             Ok(())
