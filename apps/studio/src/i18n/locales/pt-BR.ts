@@ -556,7 +556,7 @@ export const ptBR: Translation = {
   "place.searchPlaceholder": "Ironman Raceway, ou 40.008, -86.9291",
   "place.search": "Buscar",
   "place.searching": "Buscando…",
-  "place.searchHint": "Mire no meio do circuito, não no portão. Nada é baixado até você apertar Baixar.",
+  "place.searchHint": "Mire no meio do circuito, não no portão. Quando achar algo, você pode abrir a foto aérea e apontar para a pista. Nada é baixado até você pedir.",
   "place.noHits": "Nada encontrado com esse nome. Tente coordenadas.",
   "place.checking": "Verificando…",
   "place.coverageTitle": "O que foi levantado aqui",

@@ -558,7 +558,7 @@ export const de: Translation = {
   "place.searchPlaceholder": "Ironman Raceway, oder 40.008, -86.9291",
   "place.search": "Suchen",
   "place.searching": "Suche läuft…",
-  "place.searchHint": "Ziele auf die Mitte der Strecke, nicht auf das Tor. Es wird nichts heruntergeladen, bis du auf Laden drückst.",
+  "place.searchHint": "Ziele auf die Mitte der Strecke, nicht auf das Tor. Sobald etwas gefunden ist, kannst du das Luftbild öffnen und direkt auf die Strecke zeigen. Es wird nichts heruntergeladen, bis du danach fragst.",
   "place.noHits": "Unter diesem Namen nichts gefunden. Versuch es mit Koordinaten.",
   "place.checking": "Wird geprüft…",
   "place.coverageTitle": "Was hier vermessen wurde",

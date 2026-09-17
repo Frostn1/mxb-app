@@ -561,7 +561,7 @@ export const en = {
   "place.searchPlaceholder": "Ironman Raceway, or 40.008, -86.9291",
   "place.search": "Search",
   "place.searching": "Searching…",
-  "place.searchHint": "Aim at the middle of the circuit, not the gate. Nothing is downloaded until you press Fetch.",
+  "place.searchHint": "Aim at the middle of the circuit, not the gate. Once it has found something you can open the aerial photo and point at the circuit itself. Nothing is downloaded until you ask for it.",
   "place.noHits": "Nothing found by that name. Try coordinates instead.",
   "place.checking": "Checking…",
   "place.coverageTitle": "What has been surveyed here",
