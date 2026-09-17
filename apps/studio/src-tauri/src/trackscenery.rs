@@ -2072,13 +2072,31 @@ const TUFF_GAP_M: f32 = 2.6;
 /// 65,535-vertex limit as a lap grows.
 const SOFT_TUFF: [&str; 3] = ["SOFTHAYB", "SOFTBHAYB", "SOFTCHAYB"];
 
+/// The two halves of [`tuff_sheet`], inset off the seam between them.
+///
+/// A block takes one of these, not the whole sheet. Left as it was — every face mapped across
+/// the full 0–1 — each block wore *both* colours, split down its middle, and a lap's worth of
+/// them read from the seat as a row of white lumps rather than a border: "the tough blocks kind
+/// of look like popcorn". The inset is two texels, so a filtered sample at the edge of a half
+/// cannot reach across into the other one.
+const TUFF_RED_U: (f32, f32) = (0.02, 0.48);
+const TUFF_WHITE_U: (f32, f32) = (0.52, 0.98);
+
 fn tuff_sheet() -> Texture {
     sheet("tuff_c", 128, |u, v| {
         // Two colours down the row, and the bottom of every block filthy — they stand in the
         // dirt and get roosted all day, and a clean one reads as plastic tat.
-        let dirt = (1.0 - v).powf(3.0) * 0.55;
+        //
+        // `v` runs *down* — see [`sheet`] — so the foot of a block is `v` at 1, and the grime
+        // was on the wrong end of it: the blocks came out shaded dark along their tops and
+        // clean along the ground, which is the one place dirt never is.
+        let dirt = v.powf(3.0) * 0.55;
         let base = if u < 0.5 { [206.0f32, 46.0, 40.0] } else { [230.0f32, 230.0, 223.0] };
-        let g = 0.9 + 0.1 * grain(u, v, 0x7055, 18.0);
+        // Fine and faint. At eighteen cells across a 128 px sheet each blotch stood a centimetre
+        // wide on the block and survived every mip, which is a speckle rather than the sheen of
+        // a vinyl bag; at sixty it averages away past a couple of metres, which is what grain is
+        // for.
+        let g = 0.96 + 0.04 * grain(u, v, 0x7055, 60.0);
         let c = |k: usize| (base[k] * g * (1.0 - dirt) + 92.0 * dirt).clamp(0.0, 255.0) as u8;
         [c(0), c(1), c(2), 255]
     })
@@ -2125,6 +2143,9 @@ fn lane_border(
     // How wide a piece is across the border line, and how far along to the next one. A banner
     // is a sheet on a frame and its pieces butt; a block is a block and they stand apart.
     let (depth, gap) = if printed { (BANNER_D_M, TILE_W_M) } else { (TUFF_D_M, TUFF_GAP_M) };
+    // And how wide it is along the border line, which is a piece's own width for a banner —
+    // they butt — and the block's own for everything else. Only the seating uses it.
+    let across = if printed { TILE_W_M } else { TUFF_W_M };
     // Just past the bar, not a guessed distance: the near edge has to clear the riding margin
     // or the piece is dropped as standing on the lane.
     let off = half + RIDE_MARGIN_M + depth * 0.5 + TUFF_CLEAR_M;
@@ -2173,12 +2194,23 @@ fn lane_border(
                 // print still tiles across a piece the ground or the lane beside it took out.
                 banner_piece(Print::Tiled, cell, i as usize, last != Some(i - 1))
             } else {
-                block.clone()
+                // One colour a block, alternating down the row, which is how a round stands
+                // them: red, white, red. The mesh is the same box either way — all that
+                // changes is which half of the sheet its faces sample.
+                in_cell(
+                    &block,
+                    (0.0, 1.0),
+                    if i % 2 == 0 { TUFF_RED_U } else { TUFF_WHITE_U },
+                )
             };
-            let m = edfwrite::moved(
-                &edfwrite::turned(&piece, deg),
-                [x, ground(syn, x, z) - 0.05, z],
-            );
+            // Seated on the lowest ground its own footprint covers, not on the height under
+            // its middle. A block is rigid and the strip between two lanes is the flank of the
+            // mound a jump spills into, so a metre of it is rarely level: sat on its centre,
+            // a sixth of a lap's feet stood clear of the dirt and the worst of them by 0.24 m,
+            // which is what turns a row of borders into a row of ornaments. Five centimetres
+            // under the lowest corner, so the worst it can look is bedded in.
+            let foot = ground_foot(syn, x, z, deg, across, depth).0;
+            let m = edfwrite::moved(&edfwrite::turned(&piece, deg), [x, foot - 0.05, z]);
             if on_riding_surface(syn, half, &m) {
                 continue;
             }
@@ -2316,6 +2348,48 @@ mod tests {
         assert!(tallied(&sc, "stadium wall") > 0, "the stadium went with it");
     }
 
+    /// No block stands clear of the dirt.
+    ///
+    /// A border is a rigid box on ground that is never level — the strip between two lanes is
+    /// the flank of the mound a jump spills into — so where it is seated matters. Sat on the
+    /// height under its own middle, an end of it lifts by however much the ground falls across
+    /// its width, and a row with daylight under it reads as ornaments rather than as a border.
+    #[test]
+    fn no_lane_border_piece_stands_clear_of_the_ground() {
+        use crate::trackprog::{LaneBorder, VenueKind};
+        let mut p = sx_lap().clone();
+        p.border = LaneBorder::Soft;
+        p.venue = VenueKind::Stadium;
+        let s = crate::tracksynth::synthesise(&p).expect("it synthesises");
+        let (pieces, _, n) = lane_border(&p, &s).expect("a border");
+        assert!(n > 0, "nothing stood");
+        // Every vertex within a few centimetres of the foot of its own piece, against the
+        // ground under that vertex. A box is 0.9 m tall, so the feet are what these are.
+        let mut worst: f32 = 0.0;
+        let mut lifted = 0usize;
+        let mut feet = 0usize;
+        for (_, mesh) in &pieces {
+            let low = mesh.positions.chunks_exact(3).map(|v| v[1]).fold(f32::INFINITY, f32::min);
+            for v in mesh.positions.chunks_exact(3) {
+                // The base of a piece, wherever the piece happens to stand.
+                if v[1] > low + TUFF_H_M * 0.5 {
+                    continue;
+                }
+                feet += 1;
+                let clear = v[1] - ground(&s, v[0], v[2]);
+                if clear > 0.02 {
+                    lifted += 1;
+                }
+                worst = worst.max(clear);
+            }
+        }
+        assert!(feet > 100, "only {feet} foot vertices to measure");
+        assert!(
+            worst < 0.10,
+            "a border piece stands {worst:.3} m clear of the ground ({lifted} of {feet} feet lifted)"
+        );
+    }
+
     /// Every kind of border stays inside what one model may draw.
     ///
     /// The one that can bite is banner: its pieces butt at a metre and a half where a block
@@ -2374,6 +2448,67 @@ mod tests {
             "{stakes} stakes for a {:.0} m lap, expected about {want}",
             p.lap_length()
         );
+    }
+
+    /// A tuff block is one colour, dirty at the foot.
+    ///
+    /// Ridden: "the tough blocks kind of look like popcorn". Each face was mapped across the
+    /// whole sheet, so every block wore the red half and the white half split down its middle,
+    /// with the grime banded along its top — and a row of those is a row of two-tone lumps
+    /// rather than a border. Two things are checked here: a block's UVs stay inside one half,
+    /// and each half is a colour rather than a mottle.
+    #[test]
+    fn a_tuff_block_wears_one_colour_and_is_dirty_at_the_foot() {
+        let t = tuff_sheet();
+        let px = |u: f32, v: f32| {
+            let (x, y) = ((u * t.width as f32) as u32, (v * t.height as f32) as u32);
+            let o = ((y.min(t.height - 1) * t.width + x.min(t.width - 1)) * 4) as usize;
+            [t.rgba[o] as f32, t.rgba[o + 1] as f32, t.rgba[o + 2] as f32]
+        };
+        // Red on one side of the seam, white on the other, at the clean end of both.
+        let (red, white) = (px(0.25, 0.1), px(0.75, 0.1));
+        assert!(red[0] > red[1] * 2.0 && red[0] > red[2] * 2.0, "the red half reads {red:?}");
+        let spread = white.iter().cloned().fold(f32::MIN, f32::max)
+            - white.iter().cloned().fold(f32::MAX, f32::min);
+        assert!(spread < 24.0 && white[0] > 180.0, "the white half reads {white:?}");
+        // `v` runs down, so the foot is at 1: it is the end that stands in the dirt.
+        for u in [0.25f32, 0.75] {
+            let (top, foot) = (px(u, 0.05), px(u, 0.98));
+            // Grime is the base colour mixed towards the dirt's own grey, so the end that has
+            // it is the end nearer that grey — which is the test, rather than the darker end:
+            // muddying a saturated red barely moves its brightness at all.
+            let off = |c: [f32; 3]| c.iter().map(|k| (k - 92.0).abs()).sum::<f32>();
+            assert!(
+                off(foot) < off(top) * 0.7,
+                "the grime is on the wrong end at u {u}: top {top:?}, foot {foot:?}"
+            );
+        }
+        // And within one half the colour holds: the grain is a sheen, not a speckle. Measured
+        // across a row at the clean end, where nothing but the grain varies.
+        for (u0, u1) in [TUFF_RED_U, TUFF_WHITE_U] {
+            let row: Vec<f32> = (0..40)
+                .map(|i| {
+                    let u = u0 + (u1 - u0) * i as f32 / 39.0;
+                    px(u, 0.1).iter().sum::<f32>() / 3.0
+                })
+                .collect();
+            let hi = row.iter().cloned().fold(f32::MIN, f32::max);
+            let lo = row.iter().cloned().fold(f32::MAX, f32::min);
+            assert!(hi - lo < 14.0, "the half at {u0}–{u1} mottles by {:.0} levels", hi - lo);
+        }
+        // A block takes one half, and the box it is built from has UVs at the corners, so the
+        // whole face lands inside it.
+        let block = edfwrite::cuboid(TUFF_W_M, TUFF_H_M, TUFF_D_M);
+        for (name, (u0, u1)) in [("red", TUFF_RED_U), ("white", TUFF_WHITE_U)] {
+            let m = in_cell(&block, (0.0, 1.0), (u0, u1));
+            for uv in m.uvs.chunks_exact(2) {
+                assert!(
+                    uv[0] >= u0 - 1e-6 && uv[0] <= u1 + 1e-6,
+                    "a {name} block samples u {} — outside its own half",
+                    uv[0]
+                );
+            }
+        }
     }
 
     /// Every panel says something, and no two of them say the same thing in the same place.

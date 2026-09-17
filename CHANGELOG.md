@@ -25,6 +25,10 @@
   folder undoes all of it.
 - The Studio can be opened straight onto a screen — `--view replay` — which is what
   **Open in Studio** on MXB App's Plugins page does.
+- **Tracks near here**, in From a real place. Search the nearest town — which a gazetteer
+  always knows — press it, and every motocross circuit within 40 km comes back off
+  OpenStreetMap, nearest first, with how far away each one is. Pick yours and the plot is
+  centred on it. Nobody has to read a latitude off a map for their local track any more.
 
 ### Changed
 - **A paid plugin's panels open in Frost's Studio, not in MXB App.** Cutting a replay is the
@@ -44,6 +48,30 @@
 - **A banned Steam account is refused on the site even with no MXB App account behind it.** For
   a Steam copy the MX Bikes GUID *is* the Steam account written in hex, so the ban is recognised
   from the sign-in alone — deleting an account, or never having made one, is not a way round it.
+
+### Fixed
+- **Every hill in a supercross rhythm lane has a lip.** A jump's take-off is built as a curve
+  at the foot and a straight run to the lip, and a lane of hills was getting that on its first
+  crest only: the rest arrived flat, which is a wave. You cannot leave a wave, so you roll the
+  crest, drop into the trough compressed and get fired off whatever the suspension gives back —
+  which is the G-out and the trip to the moon. Measured on a stadium lap, the last metre into
+  each lip now stands at 25–29° where it stood at 12–15° — the first hill, the one that always
+  had its lip, is unchanged. A triple's far crest was the same shape and is fixed by the same
+  change.
+- **A tuff block is one colour again.** Each block was mapped across the whole texture, so
+  every one of them wore the red half and the white half split down its middle, with the grime
+  shaded along its top instead of its foot — a row of them read as popcorn rather than as a
+  border. They now alternate red and white down the row, one colour a block, dirty at the
+  bottom where they actually stand. They also stand *on* the ground now: a block was sat at
+  the height under its own middle, and since the strip between two lanes is the flank of the
+  mound a jump spills into, one end of every sixth block was up in the air — by a quarter of
+  a metre at the worst. Each one is seated on the lowest ground its own footprint covers.
+- **A track name the gazetteer has never heard of now finds the track.** Searching a real place
+  asked OpenStreetMap's place index, which knows addresses rather than circuits, and a club's
+  own name for its field is usually not in it — so the search said "try coordinates instead",
+  which is not something anybody wants to go and look up. It now asks the map for a motocross
+  circuit of that name before giving up, and says what to do next when there genuinely isn't
+  one.
 
 ## 2026-09-17 — v0.17.1 — Signing in with Steam works
 

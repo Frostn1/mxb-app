@@ -21,6 +21,8 @@ export interface PlaceHit {
   lon: number;
   /** What OpenStreetMap calls it, so a circuit can be told from a street of the same name. */
   kind: string;
+  /** How far from the spot a nearby search was run on, km. Absent for a hit found by name. */
+  awayKm?: number;
 }
 
 /** What one elevation source has at one spot. */
@@ -145,6 +147,15 @@ export interface PlacePaths {
 
 /** Look a place up by name, or read a pair of coordinates straight off. */
 export const findPlace = (query: string) => invoke<PlaceHit[]>("place_find", { query });
+
+/**
+ * Every motocross circuit within about forty kilometres of a spot, nearest first.
+ *
+ * The way out of "I don't know how to get coordinates": find the nearest town, which a
+ * gazetteer always knows, and take the track off this list.
+ */
+export const tracksNear = (lat: number, lon: number) =>
+  invoke<PlaceHit[]>("place_tracks_near", { lat, lon });
 
 /** What each source has here. Ask before spending anything. */
 export const placeCoverage = (lat: number, lon: number) =>

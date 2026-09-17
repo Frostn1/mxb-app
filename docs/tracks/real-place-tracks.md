@@ -58,10 +58,34 @@ about 2.4 cm, so the difference is smaller than the measurement error. It is the
 
 ---
 
-## Step 1: find your track's coordinates
+## Step 1: find your track
 
 You can type a name into the app and it will look it up. That works for anywhere that is on
 the map by name, which includes most established circuits.
+
+If the name finds nothing, the app then asks the map for a **motocross circuit** of that name
+rather than for a place of that name, which is a different question and often the right one: a
+gazetteer indexes the things addresses are written about, and a club's field with the club's own
+name on it is usually not one of them.
+
+### Tracks near here
+
+If neither finds it, you do not need coordinates. Search the **nearest town** — a gazetteer
+always knows a town — and press **Tracks near here**. Every motocross circuit mapped within 40 km
+of that spot comes back, nearest first, with how far away each one is. Pick yours off the list
+and the plot is centred on it.
+
+This is worth trying before anything else if you do not already know your track's position. It
+costs one request, it is the same OpenStreetMap data the name search reads, and it answers the
+question people actually have, which is "where is my local track" rather than "what is my local
+track's latitude".
+
+It finds a circuit if somebody has mapped it as one — `sport=motocross` and its relatives. Most
+established venues are; a farmer's field that has been ridden for two summers may not be. If
+yours is not there, the next two paragraphs are still open to you, and so is mapping it on
+OpenStreetMap, which takes about ten minutes and helps the next person.
+
+### Reading the coordinates off a map yourself
 
 If the name does not find it, or finds the wrong thing, get the coordinates yourself:
 
@@ -515,7 +539,7 @@ track, so it is on you.
 | **Environment Agency** (England) | Open Government Licence v3.0 | Credit required: `Contains public sector information licensed under the Open Government Licence v3.0. © Environment Agency copyright and/or database right.` |
 | **PDOK Luchtfoto** (Netherlands imagery) | CC BY 4.0 | Credit required: `Luchtfoto: PDOK / Beeldmateriaal Nederland, CC BY 4.0` |
 | **Copernicus GLO-30** | Copernicus open terms | Credit required, and the full ESA/Airbus notice. The app stores it. |
-| **OpenStreetMap** (the place search) | ODbL | Only coordinates are used, which are facts rather than a substantial extract, so nothing travels into your track. Crediting OpenStreetMap is polite. |
+| **OpenStreetMap** (the place search, the circuit search and Tracks near here) | ODbL | Only a name and a coordinate are used, which are facts rather than a substantial extract, so nothing travels into your track. Crediting OpenStreetMap is polite. |
 
 The simplest way to honour all of this is a line in your track's readme naming the source of
 the elevation and the imagery. Copy the strings out of `place.json`; they are exact.
