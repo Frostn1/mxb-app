@@ -987,6 +987,15 @@ pub fn import(tif: &Path, lap: &Path, strength: f32) -> Result<Imported> {
         fill_holes(&mut z, dim_x, dim_z);
     }
 
+    let stretched = stretched_fraction(&z, dim_x);
+    if stretched > STRETCHED_LIMIT {
+        bail!(
+            "{:.0}% of this grid's neighbouring cells are bit-identical, so the service stretched \
+             coarser data to the size that was asked for rather than holding it at that \
+             resolution. Ask its catalogue what it actually has before fetching.",
+            stretched * 100.0
+        );
+    }
     let destripe_rms = destripe(&mut z, dim_x, dim_z, per as f32, true, strength);
 
     // Bring the lowest point to zero: the generator's height budget is a range, not an
@@ -1044,6 +1053,62 @@ pub fn import(tif: &Path, lap: &Path, strength: f32) -> Result<Imported> {
         route_confirmed: trace.route_confirmed,
         known_issues: trace.known_issues.clone(),
     })
+}
+
+/// Whether a grid is really at the resolution it claims, or a coarser one stretched to fit.
+///
+/// **The declared pixel size is not evidence and neither is the nodata pattern.** Both the USGS
+/// and the IGN elevation services will answer a request for any pixel size with a well-formed,
+/// fully valid float grid of exactly that size — and silently fill it by stretching whatever
+/// they actually hold. Measured on IGN's `ELEVATION.ELEVATIONGRIDCOVERAGE.HIGHRES` over a French
+/// motocross circuit: 100% valid cells, a sensible 35 m of relief, and **84.6% of horizontally
+/// adjacent cells exactly equal, with a median run of 7 identical cells** — roughly 3.5 m data
+/// pretending to be half-metre. Every structural check passed and the track would have had no
+/// jump detail at all.
+///
+/// The test that catches it is the fraction of adjacent cells that are bit-identical. Real lidar
+/// is never exactly equal twice in a row: the genuine 0.5 m layer over the same ground measures
+/// 0.0%. Anything over about a fifth means the service is stretching.
+///
+/// It also caught the case a *statistic* got wrong: the stretched layer measured **rougher** than
+/// the real one — 19.7 cm against 14.1 cm after a six-metre detrend — because nearest-neighbour
+/// stairs are high-frequency. Roughness would have picked the fake. The hillshade showed it at a
+/// glance as diagonal terracing, which is why this repo judges ground by rendering it.
+pub fn stretched_fraction(z: &[f32], w: usize) -> f32 {
+    if w < 2 || z.len() < w * 2 {
+        return 0.0;
+    }
+    let (mut same, mut seen) = (0usize, 0usize);
+    for row in z.chunks_exact(w) {
+        for pair in row.windows(2) {
+            if pair[0].to_bits() == pair[1].to_bits() {
+                same += 1;
+            }
+            seen += 1;
+        }
+    }
+    if seen == 0 { 0.0 } else { same as f32 / seen as f32 }
+}
+
+/// The most identical-neighbour fraction a grid may have and still be believed.
+///
+/// A fifth. Genuine lidar measures near zero and a stretched grid measures four fifths, so
+/// anything in between is a judgement that never has to be made in practice.
+pub const STRETCHED_LIMIT: f32 = 0.20;
+
+/// Whether an image came back blank — the shape a wrong axis order takes.
+///
+/// `data.geopf.fr` wants BBOX as easting then northing even under WMS 1.3.0, and asked the other
+/// way round it returns **HTTP 200 with a blank white image** rather than an error. So a fetch
+/// path cannot tell success from failure by the status code, and a blank check belongs in it.
+/// Four probes were wasted on this before the cause was found.
+pub fn looks_blank(pixels: &[u8]) -> bool {
+    if pixels.len() < 64 {
+        return true;
+    }
+    let mean = pixels.iter().map(|&p| p as f64).sum::<f64>() / pixels.len() as f64;
+    let var = pixels.iter().map(|&p| (p as f64 - mean).powi(2)).sum::<f64>() / pixels.len() as f64;
+    var.sqrt() < 2.0
 }
 
 /// Classify the orthophoto beside the scan into grass, dirt and gravel, on the plot's own grid.
@@ -1660,6 +1725,48 @@ mod tests {
         let short = r#"{"points": [[1,2],[3],[5,6],[7,8]]}"#;
         let t: LapTrace = serde_json::from_str(short).unwrap();
         assert!(t.resolved().unwrap_err().to_string().contains("point 1"));
+    }
+
+    #[test]
+    fn a_stretched_grid_is_told_apart_from_a_real_one() {
+        // The fake: 4 m data at 0.5 m, nearest-neighbour, which is what IGN's HIGHRES layer
+        // returns and what every other check passes.
+        let (w, h) = (128usize, 128);
+        let real = bump2(w, h);
+        let mut stretched = vec![0.0f32; w * h];
+        for y in 0..h {
+            for x in 0..w {
+                stretched[y * w + x] = real[(y / 8 * 8) * w + (x / 8 * 8)];
+            }
+        }
+        let f_real = stretched_fraction(&real, w);
+        let f_fake = stretched_fraction(&stretched, w);
+        assert!(f_real < STRETCHED_LIMIT, "real ground read {f_real:.3} stretched");
+        assert!(f_fake > 0.5, "a stretched grid read only {f_fake:.3}");
+
+        // And the trap: the stretched grid is ROUGHER by a six-metre detrend, so roughness would
+        // have chosen it. This pins the reason the identical-neighbour test exists.
+        let hp = |z: &[f32]| {
+            let mut low = z.to_vec();
+            blur_axis(&mut low, w, h, 6.0 / 2.355 / 0.5, true);
+            blur_axis(&mut low, w, h, 6.0 / 2.355 / 0.5, false);
+            let d: f32 = z.iter().zip(&low).map(|(a, b)| (a - b) * (a - b)).sum();
+            (d / z.len() as f32).sqrt()
+        };
+        assert!(
+            hp(&stretched) > hp(&real),
+            "the stretched grid should measure rougher, which is why roughness is the wrong test"
+        );
+    }
+
+    #[test]
+    fn a_blank_answer_is_recognised() {
+        // A wrong axis order returns HTTP 200 and a white image, so blankness is the only signal.
+        assert!(looks_blank(&[255u8; 4096]), "a white image is blank");
+        assert!(looks_blank(&[0u8; 4096]), "a black image is blank");
+        assert!(looks_blank(&[]), "nothing is blank");
+        let varied: Vec<u8> = (0..4096).map(|i| (i % 251) as u8).collect();
+        assert!(!looks_blank(&varied), "a real image is not blank");
     }
 
     #[test]
