@@ -1,12 +1,6 @@
 # Changelog
 
-## Unreleased — MXB App, Frost's Studio and MXB Coach
-
-### Added
-- MX Bikes closing to desktop is finally something we can see. When the game goes down,
-  FrostMod leaves a short report of where it happened, and the app sends that on its own. If
-  a crash dump was written too, the app says so once and asks whether to send it. Nothing
-  that size leaves your PC without you pressing the button.
+## 2026-09-17 — MXB Coach v0.1.16-beta.16
 
 ### Fixed
 - Coach finds and saves setups on tracks that have layouts. Those keep their setups a folder
@@ -15,9 +9,6 @@
 - A setup Coach builds from scratch carries the version the bike itself asks for. It always
   wrote the same one, which the game refuses on any bike that names a different one.
 - A setup that came bundled with the bike is left alone rather than looked for in your profile.
-
-
-### Fixed
 - The live cues change as you ride. They were the same every lap and every session, for two
   reasons: the recorder read the sheet once when the session started and never looked again, and
   Coach only picked new calls while the Live cues panel was actually on screen — riding with the
@@ -33,52 +24,9 @@
 - Sweeping corners are found. Anything wider than a 45 m radius could never be a corner however
   far round it went, so long fast turns were read as straights. The limit is now about how far a
   corner turns rather than how tight it is.
-
-### Added
-- The whole lineup can be locked to a Steam sign-in. When turned on for the deployment, MXB App,
-  Frost's Studio and MXB Coach each show a "Sign in with Steam" wall at startup and won't run
-  until you've signed in once — one click, through Steam, and it remembers. It makes every
-  account a confirmed identity, which is what keeps a ban from being walked around and a GUID from
-  being anyone else's. Off unless the service turns it on, and it needs a Steam copy of the game.
-- A ban now reaches every app, not just the one holding secured content: a banned install is
-  refused across MXB App, Studio and Coach, and told the same mundane "this copy couldn't be
-  verified" rather than the truth.
-
-### Changed
-- Secured content that isn't available on this PC is now shown plainly, in Settings and in the
-  prompt, without a reason attached to it.
-- The security that was in MXB App now covers Studio and Coach the same way, from one shared
-  place: the debugger guard, the startup gate and the Steam-link flow all live in the shared core
-  so the three apps can't drift, and the release build already strips symbols, dissolves the call
-  structure (fat LTO) and drops debug info for every one of them. The Windows builds are now
-  UPX-packed on top of that.
-
-### Changed
-- Your MX Bikes GUID is found automatically from your signed-in Steam account, the instant the
-  app starts — no more waiting to be seen on a server for it to fill in. It's the same value the
-  game and the leaderboards use, and it can't be set to someone else's: for a Steam copy the GUID
-  is your Steam identity written in hex, confirmed by Steam sign-in, so the service derives it and
-  ignores any other value. A non-Steam (Piboso) copy still enters its GUID as before.
-- Riders banned for unlocking protected content and sharing it are refused across everything
-  mxbsecure runs, not only the locking: the app itself will not open, and paint sync, voice,
-  presence, the server queue, the server registry, the paid plugins and every key grant are all
-  refused. The app checks at startup and, for a blocked install, shows a plain "this copy
-  couldn't be verified" and closes — a blocked install stays blocked even offline. A ban follows
-  the MX Bikes install rather than the account, so a second account, a new GUID or another Steam
-  login on the same PC is refused with it, and protected files already unlocked there stop
-  opening — the app deletes those keys on its next pass. Nobody else is affected in any way, and
-  a ban can be lifted.
-- The "Line and track" notes are called out on the first page of the lap review, with a link
-  through to the track view they sit on, instead of waiting on the last tab. Clicking one keeps
-  you on the 3D view rather than moving you off it.
-- "Your best ever here" says when the lap it picks is slower than the one you are looking at.
-
-### Fixed
 - MXB Coach finds your tracks. It was looking for them in a folder that doesn't exist, so every
   track you have installed came back as "isn't in your mods" — which is why the 3D view showed
   ground built from your laps instead of the track you were riding. It has never worked.
-- The Servers tab in MXB App had the same fault: it read your installed tracks as missing, and
-  offered to sell you tracks you already own.
 - A setup MXB Coach saves is saved for the track you rode, and the game is set to load it there.
   If the setup you were on was one you keep for every track, the copy was kept the same way — and
   the game doesn't read which setup to load from there, so it went on loading your old one and
@@ -100,6 +48,51 @@
 - Where there is nothing to say about your lines, the review says what was missing: too few
   whole laps in the session, or that you rode alone, since where the track will rut is read off
   the other riders' lines.
+
+### Changed
+- The "Line and track" notes are called out on the first page of the lap review, with a link
+  through to the track view they sit on, instead of waiting on the last tab. Clicking one keeps
+  you on the 3D view rather than moving you off it.
+- "Your best ever here" says when the lap it picks is slower than the one you are looking at.
+
+## Unreleased — MXB App and Frost's Studio
+
+### Added and changed
+- MX Bikes closing to desktop is finally something we can see. When the game goes down,
+  FrostMod leaves a short report of where it happened, and the app sends that on its own. If
+  a crash dump was written too, the app says so once and asks whether to send it. Nothing
+  that size leaves your PC without you pressing the button.
+- The whole lineup can be locked to a Steam sign-in. When turned on for the deployment, MXB App,
+  Frost's Studio and MXB Coach each show a "Sign in with Steam" wall at startup and won't run
+  until you've signed in once — one click, through Steam, and it remembers. It makes every
+  account a confirmed identity, which is what keeps a ban from being walked around and a GUID from
+  being anyone else's. Off unless the service turns it on, and it needs a Steam copy of the game.
+- A ban now reaches every app, not just the one holding secured content: a banned install is
+  refused across MXB App, Studio and Coach, and told the same mundane "this copy couldn't be
+  verified" rather than the truth.
+- Secured content that isn't available on this PC is now shown plainly, in Settings and in the
+  prompt, without a reason attached to it.
+- The security that was in MXB App now covers Studio and Coach the same way, from one shared
+  place: the debugger guard, the startup gate and the Steam-link flow all live in the shared core
+  so the three apps can't drift, and the release build already strips symbols, dissolves the call
+  structure (fat LTO) and drops debug info for every one of them. The Windows builds are now
+  UPX-packed on top of that.
+- Your MX Bikes GUID is found automatically from your signed-in Steam account, the instant the
+  app starts — no more waiting to be seen on a server for it to fill in. It's the same value the
+  game and the leaderboards use, and it can't be set to someone else's: for a Steam copy the GUID
+  is your Steam identity written in hex, confirmed by Steam sign-in, so the service derives it and
+  ignores any other value. A non-Steam (Piboso) copy still enters its GUID as before.
+- Riders banned for unlocking protected content and sharing it are refused across everything
+  mxbsecure runs, not only the locking: the app itself will not open, and paint sync, voice,
+  presence, the server queue, the server registry, the paid plugins and every key grant are all
+  refused. The app checks at startup and, for a blocked install, shows a plain "this copy
+  couldn't be verified" and closes — a blocked install stays blocked even offline. A ban follows
+  the MX Bikes install rather than the account, so a second account, a new GUID or another Steam
+  login on the same PC is refused with it, and protected files already unlocked there stop
+  opening — the app deletes those keys on its next pass. Nobody else is affected in any way, and
+  a ban can be lifted.
+- The Servers tab in MXB App had the same fault: it read your installed tracks as missing, and
+  offered to sell you tracks you already own.
 
 ## 2026-09-16 — MXB Coach v0.1.15-beta.15
 
