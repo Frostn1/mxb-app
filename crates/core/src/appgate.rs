@@ -21,6 +21,8 @@
 //! calling three functions rather than by copying the machinery and letting it drift.
 
 use std::path::PathBuf;
+use std::sync::{Mutex, OnceLock};
+use std::time::Duration;
 
 use serde::Deserialize;
 use tauri::{AppHandle, Emitter, Manager};
@@ -36,6 +38,19 @@ const FALLBACK_BLOCK: &str =
 
 /// Shown behind the sign-in wall when the server sent no message of its own.
 const FALLBACK_SIGNIN: &str = "Sign in with Steam to continue.";
+
+/// Every request here is one the sign-in wall is waiting on, and `reqwest` has no timeout of its
+/// own: a connection that opens and then says nothing hangs for as long as the OS allows. On the
+/// wall that is not a slow request, it is a button that never comes back — the command never
+/// resolves, so the frontend never leaves the state it entered to make the call. `account.rs`
+/// already builds its client this way; this is the rest of the flow catching up.
+const HTTP_TIMEOUT: Duration = Duration::from_secs(20);
+
+/// A client that always gives up eventually. Falls back to the default client if the builder
+/// fails, which keeps a timeout from being the thing that stops the gate working at all.
+fn http() -> reqwest::Client {
+    reqwest::Client::builder().timeout(HTTP_TIMEOUT).build().unwrap_or_default()
+}
 
 /// The verdict `GET /v1/app/gate` returns.
 #[derive(Deserialize)]
@@ -60,6 +75,43 @@ enum Verdict {
 struct SigninRequired {
     required: bool,
     message: String,
+}
+
+/// The last verdict this run reached, kept so a webview can ask for it.
+///
+/// [`check`] is spawned from each app's `setup`, which runs *before* the webview exists, and a
+/// Tauri event goes only to the listeners attached at the instant it is emitted — there is no
+/// buffer and no replay. The gate's round trip is a couple of hundred milliseconds; mounting the
+/// frontend on a cold start is frequently slower. So the verdict was routinely emitted into an
+/// empty room and the sign-in wall never appeared at all — on an install that had just been told
+/// it must sign in with Steam. Remembering it costs nothing and makes the handshake one the
+/// webview can complete from its side.
+fn last_verdict() -> &'static Mutex<Option<SigninRequired>> {
+    static LAST: OnceLock<Mutex<Option<SigninRequired>>> = OnceLock::new();
+    LAST.get_or_init(|| Mutex::new(None))
+}
+
+/// Emit a verdict and remember it. Every announcement goes through here, so what is remembered
+/// cannot drift from what was sent.
+fn announce(app: &AppHandle, verdict: SigninRequired) {
+    if let Ok(mut slot) = last_verdict().lock() {
+        *slot = Some(verdict.clone());
+    }
+    let _ = app.emit("mxb-signin-required", verdict);
+}
+
+/// Re-send the verdict this run already reached, for a webview that mounted too late to hear it.
+///
+/// Does nothing when there is none yet, which is the point: either [`check`] is still in flight —
+/// and will emit to the listener that now exists — or it ended without a verdict (offline, no
+/// token), which already means "don't know" and never a wall. Deliberately *not* a second
+/// [`check`]: two running at once on an install with no token yet would both claim a device
+/// account, and the one that lost the race to the config file would have minted an orphan.
+pub async fn replay_verdict(app: AppHandle) {
+    let known = last_verdict().lock().ok().and_then(|slot| slot.clone());
+    if let Some(verdict) = known {
+        let _ = app.emit("mxb-signin-required", verdict);
+    }
 }
 
 /// Where the "stay blocked, even offline" marker lives. `None` only if there is no data dir to
@@ -138,7 +190,7 @@ pub async fn check(app: AppHandle) {
         }
     };
 
-    let resp = match reqwest::Client::new()
+    let resp = match http()
         .get(format!("{}/v1/app/gate", control_plane()))
         .bearer_auth(&token)
         .send()
@@ -165,12 +217,12 @@ pub async fn check(app: AppHandle) {
     match verdict {
         Verdict::Ok => {
             unmark(&app);
-            let _ = app.emit("mxb-signin-required", SigninRequired { required: false, message: String::new() });
+            announce(&app, SigninRequired { required: false, message: String::new() });
         }
         Verdict::Signin { message } => {
             let message = if message.trim().is_empty() { FALLBACK_SIGNIN.to_string() } else { message };
             log::info!("[gate] a Steam sign-in is required before this install may run");
-            let _ = app.emit("mxb-signin-required", SigninRequired { required: true, message });
+            announce(&app, SigninRequired { required: true, message });
         }
         Verdict::Unsupported { message } => {
             let message = if message.trim().is_empty() { FALLBACK_BLOCK.to_string() } else { message };
@@ -189,7 +241,7 @@ pub async fn check(app: AppHandle) {
 /// lands on `/v1/steam/return`, which sets `steam_id` and pins the derived GUID.
 pub async fn steam_link_start(app: &AppHandle) -> Result<String, String> {
     let token = account::ensure_token(app).await?;
-    let resp = reqwest::Client::new()
+    let resp = http()
         .post(format!("{}/v1/steam/login", control_plane()))
         .bearer_auth(&token)
         .send()
@@ -214,14 +266,16 @@ pub async fn steam_link_status(app: &AppHandle) -> Result<Option<String>, String
     if token.is_empty() {
         return Ok(None);
     }
-    let resp = reqwest::Client::new()
+    let resp = http()
         .get(format!("{}/v1/entitlements", control_plane()))
         .bearer_auth(&token)
         .send()
         .await
         .map_err(|e| format!("couldn't reach the service: {e}"))?;
+    // Shown to the person when the wall gives up, so it has to read as a sentence rather than
+    // as a log line.
     if !resp.status().is_success() {
-        return Err(format!("the service error ({})", resp.status()));
+        return Err(format!("couldn't check the sign-in ({})", resp.status()));
     }
     #[derive(Deserialize)]
     struct Ent {

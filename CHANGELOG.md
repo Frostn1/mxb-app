@@ -39,6 +39,33 @@
   a Steam copy the MX Bikes GUID *is* the Steam account written in hex, so the ban is recognised
   from the sign-in alone — deleting an account, or never having made one, is not a way round it.
 
+### Fixed
+- The "Sign in with Steam" wall now always appears when it is needed. It was announced by the
+  app the moment the service answered — which on a cold start is usually before the window has
+  finished loading, and an announcement nobody is listening for yet is simply lost. So the first
+  launch after updating often showed no wall at all: you were told the update requires a Steam
+  sign-in and given nothing to sign in with. The window now asks for the answer as soon as it is
+  ready, instead of only waiting to be told.
+- Signing in with Steam on a second PC works. Until now the sign-in wall would send you to
+  Steam, Steam would confirm who you are, and the app would sit there for good: your Steam
+  account was already spoken for by your other install, so the new one was refused an identity —
+  and the wall only comes down for an install that has one. The same thing happened after a
+  reinstall that lost its settings. Every install of yours now signs in, and they are all the
+  same you: the same mods, the same bans, the same GUID.
+- The "Sign in with Steam" button stays clickable. It used to grey out for the whole wait, so a
+  sign-in that had already failed in the browser left you looking at a wall with one control on
+  it that did nothing — for minutes, or for good if the service stopped answering mid-request.
+  Now it goes quiet only while the browser is opening, and after that reads "Open Steam again"
+  and starts you a fresh sign-in whenever you press it.
+- The wall says what happened instead of waiting in silence. If the service can't be reached, it
+  says so; if Steam never comes back, it says to check the browser tab that opened rather than
+  leaving "Waiting for Steam to confirm it's you…" on screen with nothing behind it. It also
+  waits the full ten minutes a sign-in is good for, so a Steam Guard prompt no longer outlasts
+  it.
+- Reloading the Steam tab after you'd already signed in said "Already linked — this Steam
+  account is linked to another MXB App profile", which described a problem you didn't have. It
+  now says the sign-in was already used.
+
 ## 2026-09-17 — Frost's Studio v0.3.0 — Make the track, and point at it on a photo
 
 ### Added

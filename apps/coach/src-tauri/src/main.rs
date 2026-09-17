@@ -110,6 +110,16 @@ async fn recheck_gate(app: tauri::AppHandle) {
     mxb_core::appgate::check(app).await;
 }
 
+/// Re-send the startup gate's verdict, for a frontend that mounted after it was emitted.
+///
+/// The gate runs from `setup`, before this webview exists, and a Tauri event reaches only the
+/// listeners attached when it fires. The sign-in wall asks for the verdict on mount so a slow
+/// cold start cannot leave it never knowing one was reached.
+#[tauri::command]
+async fn gate_verdict(app: tauri::AppHandle) {
+    mxb_core::appgate::replay_verdict(app).await;
+}
+
 fn main() {
     // Refuse to run under a debugger in release builds — the runtime half of the binary
     // hardening, shared by the whole lineup from `mxb_core`.
@@ -179,6 +189,7 @@ fn main() {
             steam_link_start,
             steam_link_status,
             recheck_gate,
+            gate_verdict,
             // ── Coach commands ─────────────────────────────────────────────────────
             // Register the coach's own commands below this line.
             coach::coach_status,

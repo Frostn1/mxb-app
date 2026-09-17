@@ -2311,6 +2311,19 @@ async fn mxbsecure_status(app: tauri::AppHandle) -> Result<Vec<SecureStatusItem>
     }
 }
 
+/// A client that always gives up eventually, for the two calls the Steam sign-in wall waits on.
+///
+/// `reqwest` has no timeout of its own, and a command that never resolves is a wall whose button
+/// never comes back — the frontend cannot leave the state it entered to make the call. Twenty
+/// seconds, matching `mxb_core::appgate`; the default client is the fallback so a builder failure
+/// can't be the thing that stops sign-in working at all.
+fn gate_http() -> reqwest::Client {
+    reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(20))
+        .build()
+        .unwrap_or_default()
+}
+
 /// Start linking this account to a Steam identity: ask the control plane for a Steam OpenID
 /// sign-in URL. The frontend opens it in the browser; the browser half lands on
 /// `/v1/steam/return`, which sets `accounts.steam_id`. Returns the URL to open.
@@ -2319,7 +2332,7 @@ async fn steam_link_start(app: tauri::AppHandle) -> Result<String, String> {
     let cfg = config::load_or_detect(&app).unwrap_or_default();
     // No account yet: claim a self-serve one. Steam is the identity; no invite needed.
     let tok = voice::signal::account(&app, &cfg).await?;
-    let resp = reqwest::Client::new()
+    let resp = gate_http()
         .post(format!("{}/v1/steam/login", crate::paintsync::control_plane()))
         .bearer_auth(&tok)
         .send()
@@ -2346,14 +2359,16 @@ async fn steam_link_status(app: tauri::AppHandle) -> Result<Option<String>, Stri
     if tok.is_empty() {
         return Ok(None);
     }
-    let resp = reqwest::Client::new()
+    let resp = gate_http()
         .get(format!("{}/v1/entitlements", crate::paintsync::control_plane()))
         .bearer_auth(&tok)
         .send()
         .await
         .map_err(|e| format!("couldn't reach the control plane: {e}"))?;
+    // Shown to the person when the sign-in wall gives up, so it has to read as a sentence
+    // rather than as a log line.
     if !resp.status().is_success() {
-        return Err(format!("control plane error ({})", resp.status()));
+        return Err(format!("couldn't check the sign-in ({})", resp.status()));
     }
     #[derive(serde::Deserialize)]
     struct Ent {
@@ -2372,6 +2387,17 @@ async fn steam_link_status(app: tauri::AppHandle) -> Result<Option<String>, Stri
 #[tauri::command]
 async fn recheck_gate(app: tauri::AppHandle) {
     gate::check(app).await;
+}
+
+/// Re-send the startup gate's verdict, for a frontend that mounted after it was emitted.
+///
+/// [`gate::check`] runs from `setup`, before this webview exists, and a Tauri event reaches only
+/// the listeners attached when it fires. The sign-in wall asks for the verdict on mount so a slow
+/// cold start cannot leave it never knowing one was reached — which is the wall never appearing,
+/// on an install that has just been told it must sign in.
+#[tauri::command]
+async fn gate_verdict(app: tauri::AppHandle) {
+    gate::replay_verdict(app).await;
 }
 
 #[tauri::command]
@@ -6927,6 +6953,7 @@ fn main() {
             steam_link_start,
             steam_link_status,
             recheck_gate,
+            gate_verdict,
             mxb_core::viewer::load_bike_model,
             preview_model_swap,
             mxb_core::viewer::load_rider_model,

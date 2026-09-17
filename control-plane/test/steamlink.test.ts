@@ -51,15 +51,18 @@ describe("steamIdFor", () => {
     expect(await steamIdOf(env, "acc_frost")).toBe(FROST);
   });
 
-  it("will not take an identity another account now holds", async () => {
+  it("will not take a column another account now holds, but still names the identity", async () => {
     const env = await deployment();
     await link(env, "acc_frost", FROST);
     await env.DB.prepare("UPDATE accounts SET steam_id = NULL WHERE id = 'acc_frost'").run();
-    // Someone else linked it in the meantime. Which of the two is right is not a question to
-    // answer automatically, so the refusal is the safe answer.
+    // Another account holds the value now — in practice a second install of the same person.
+    // Which row keeps the unique cell is not a question to answer unattended, so the column is
+    // left exactly as it is. What this account's identity *is* was never in doubt: Valve
+    // confirmed the link and the log still says so. Refusing to say it is what used to leave a
+    // second machine unable to open any app in the lineup.
     await link(env, "acc_nico", FROST);
 
-    expect(await steamIdFor(env, { id: "acc_frost", steam_id: null })).toBeNull();
+    expect(await steamIdFor(env, { id: "acc_frost", steam_id: null })).toBe(FROST);
     expect(await steamIdOf(env, "acc_frost")).toBeNull();
     expect(await steamIdOf(env, "acc_nico")).toBe(FROST);
   });

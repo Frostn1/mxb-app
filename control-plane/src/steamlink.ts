@@ -59,6 +59,16 @@ async function restore(env: Env, where: string, binds: string[]): Promise<boolea
 /**
  * This account's Steam identity, restored from the log if the column has been lost.
  *
+ * Two things that are not the same are kept apart here. Writing the column back is
+ * conservative — [`restore`] refuses while anybody else holds the value, because picking a
+ * winner for a unique cell is not a decision to make unattended. *Answering* is not: the log
+ * holds links Valve confirmed for this very account, and one of them being written in another
+ * account's column does not make it less true. Two installs of one person — a second PC, a
+ * reinstall that claimed a fresh device account — are exactly that case, and refusing to name
+ * their identity is what walls them out of every app in the lineup under `MXB_REQUIRE_STEAM`.
+ * Nothing downstream is keyed on which row holds the cell: entitlements are keyed on the
+ * SteamID64 itself, and the ban resolution widens through `steam_links` already.
+ *
  * Null only when the account has genuinely never linked — which stays a normal answer, not an
  * error: an unlinked account simply owns nothing yet.
  */
@@ -67,11 +77,21 @@ export async function steamIdFor(
   account: { id: string; steam_id: string | null },
 ): Promise<string | null> {
   if (account.steam_id) return account.steam_id;
-  if (!(await restore(env, "account_id = ?", [account.id]))) return null;
-  const row = await env.DB.prepare("SELECT steam_id FROM accounts WHERE id = ?")
+  if (await restore(env, "account_id = ?", [account.id])) {
+    const row = await env.DB.prepare("SELECT steam_id FROM accounts WHERE id = ?")
+      .bind(account.id)
+      .first<{ steam_id: string | null }>();
+    const restored = row?.steam_id ?? null;
+    if (restored && isSteamId64(restored)) return restored;
+  }
+  // The column could not be filled — most often because another install of this same person is
+  // holding the value. The confirmed link is still the answer.
+  const linked = await env.DB.prepare(
+    "SELECT steam_id FROM steam_links WHERE account_id = ? ORDER BY linked_at DESC LIMIT 1",
+  )
     .bind(account.id)
     .first<{ steam_id: string | null }>();
-  const steamId = row?.steam_id ?? null;
+  const steamId = linked?.steam_id ?? null;
   return steamId && isSteamId64(steamId) ? steamId : null;
 }
 
