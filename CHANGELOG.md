@@ -11,6 +11,13 @@
 - A call you have already heard gives up its place. It was only scored down, which still left it
   ahead of a smaller one, so on a short sheet the same calls came back forever. It now stands
   aside while there is anything else worth saying, and comes back only when there isn't.
+- Corners are called corners. A jump on a curved piece of track — ordinary motocross — used to
+  delete the turn completely: you got "Rhythm 2" where the corner is, and the braking zone
+  before it came back as a "Straight". The jump now belongs to the corner, and its advice still
+  fires there.
+- Sweeping corners are found. Anything wider than a 45 m radius could never be a corner however
+  far round it went, so long fast turns were read as straights. The limit is now about how far a
+  corner turns rather than how tight it is.
 
 ### Added
 - The whole lineup can be locked to a Steam sign-in. When turned on for the deployment, MXB App,
