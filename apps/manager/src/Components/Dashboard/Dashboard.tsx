@@ -3,7 +3,7 @@ import { toast } from "sonner";
 import TopRail from "../Shell/TopRail";
 import { ContextSlots } from "../Shell/ContextBar";
 import { type DashboardView } from "../Shell/nav";
-import { parsePluginView, usePlugins } from "@/lib/usePlugins";
+import { parsePluginView, usePlugins } from "@frost/shared/lib/usePlugins";
 import Library from "../Library/Library";
 import Downloads from "../Downloads/Downloads";
 import Locker from "../Locker/Locker";
@@ -70,7 +70,11 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
 
   // Paid plugins running this session. A plugin that fails to mount says so once and is
   // then dropped: the app is a mod manager first, and a broken add-on must not take it down.
-  const plugins = usePlugins((id, message) =>
+  //
+  // Only the ones that asked for this window. A plugin's panels are a creator's tool and
+  // open in Frost's Studio unless its manifest says otherwise — Settings → Plugins is where
+  // this app still buys, installs and updates them, with a button that opens the other one.
+  const plugins = usePlugins("manager", (id, message) =>
     toast.error(`${id}: ${message}`),
   );
   // The panel on screen, when the current view addresses one. A view naming a plugin that

@@ -59,6 +59,10 @@ reqwest = { version = "0.12", default-features = false, features = [
 tokio = { version = "1", features = ["time", "sync", "rt"] }
 uuid = { version = "1", features = ["v4"], optional = true }
 sha2 = "0.10"
+# Verifies the signature on a paid plugin's entitlement (`plugins.rs`). Verification only —
+# both apps hold the public half of the pair and neither ever signs anything, which is the
+# whole reason this is a signature rather than a MAC whose key would ship inside a binary.
+ed25519-dalek = { version = "2", default-features = false, features = ["std"] }
 # Signs a usage report with the build key, when one was compiled in. See `usage::signature`.
 hmac = "0.12"
 base64 = "0.22"
