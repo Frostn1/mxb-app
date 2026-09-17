@@ -4282,7 +4282,15 @@ pub fn write_source(prog: &TrackProgram, syn: &Synth, dir: &Path) -> Result<Vec<
     // The test for whether this is honest is simple and is worth stating: build the same scan
     // twice with two completely different laps, and every one of these files must be byte for
     // byte the same. If a mask moves when the lap moves, there is still a track being drawn.
+    //
+    // Declared out here because the patch band is one of the masks the scan rebuilds: every
+    // soil layer the ground has takes its share of the plot from the photograph's own tone.
+    // Painting only "dirt or grass" — which is what this did until 2026-09-16 — left three of
+    // the seven layers at zero coverage and tiled one pale sheet across 470 m of venue: flat,
+    // obviously repeating, and nothing like the ground in the picture it came from.
+    let mut patches = if prog.is_raw_scan() { vec![0u8; MASK_DIM * MASK_DIM] } else { band_of(BandMask::Patches) };
     if prog.is_raw_scan() {
+        use crate::trackground::Cover;
         let cover = prog
             .terrain
             .ground
@@ -4290,30 +4298,71 @@ pub fn write_source(prog: &TrackProgram, syn: &Synth, dir: &Path) -> Result<Vec<
             .and_then(|g| crate::trackground::load(&g.id))
             .map(|g| (g.cover.clone(), g.dim_x, g.dim_z))
             .filter(|(c, dx, dz)| c.len() == dx * dz);
-        let sample = |dim: usize, want: u8, x: usize, y: usize| -> u8 {
-            match &cover {
-                Some((c, dx, dz)) => {
-                    let sx = (x * (dx - 1) / (dim - 1).max(1)).min(dx - 1);
-                    let sy = (y * (dz - 1) / (dim - 1).max(1)).min(dz - 1);
-                    u8::from(c[sy * dx + sx] == want) * 255
-                }
-                // No photograph: plain dirt everywhere, which says "we do not know" rather than
-                // inventing a pattern.
-                None => u8::from(want == 1) * 255,
-            }
+        // Coverage, not a yes-or-no, and taken over a couple of metres rather than a cell.
+        //
+        // The photograph is classified on the plot's 1025-cell grid and the masks are 2048 and
+        // 4096 across, so reading a class with a nearest-neighbour lookup turns every boundary
+        // into a staircase of two- and four-texel blocks and every stray cell into a hard
+        // speck — a camouflage pattern of half-metre squares where a venue has a ragged edge
+        // and a photograph has grain. Averaging class membership over a small neighbourhood
+        // first, and sampling that bilinearly, gives each texel the share of the class around
+        // it, which is what a coverage mask is.
+        //
+        // The radius is deliberately small. Two cells is about a metre, which is the scale a
+        // real boundary between worked dirt and grass is ragged at anyway; going wider starts
+        // dissolving the track's own edges into the field.
+        let class_plane = |want: Cover| -> Option<(Vec<f32>, usize, usize)> {
+            let (c, dx, dz) = cover.as_ref()?;
+            let (dx, dz) = (*dx, *dz);
+            let mut f: Vec<f32> = c.iter().map(|v| f32::from(*v == want.id())).collect();
+            box_blur(&mut f, dx, dz, COVER_SOFTEN_CELLS);
+            Some((f, dx, dz))
         };
+        let planes: Vec<(Cover, Option<(Vec<f32>, usize, usize)>)> =
+            [Cover::Vegetation, Cover::SoilMid, Cover::SoilLight, Cover::Hard]
+                .into_iter()
+                .map(|c| (c, class_plane(c)))
+                .collect();
+        let sample = |dim: usize, want: Cover, x: usize, y: usize| -> u8 {
+            let Some((f, dx, dz)) = planes
+                .iter()
+                .find(|(c, _)| *c == want)
+                .and_then(|(_, p)| p.as_ref())
+            else {
+                // No photograph: plain dirt everywhere, which says "we do not know" rather
+                // than inventing a pattern.
+                return u8::from(want == Cover::SoilMid) * 255;
+            };
+            let (dx, dz) = (*dx, *dz);
+            let span = (dim - 1).max(1) as f32;
+            let fx = x as f32 * (dx - 1) as f32 / span;
+            let fy = y as f32 * (dz - 1) as f32 / span;
+            let (x0, y0) = (fx.floor() as usize, fy.floor() as usize);
+            let (x1, y1) = ((x0 + 1).min(dx - 1), (y0 + 1).min(dz - 1));
+            let (tx, ty) = (fx - x0 as f32, fy - y0 as f32);
+            let at = |sx: usize, sy: usize| f[sy * dx + sx];
+            let top = at(x0, y0) * (1.0 - tx) + at(x1, y0) * tx;
+            let bot = at(x0, y1) * (1.0 - tx) + at(x1, y1) * tx;
+            ((top * (1.0 - ty) + bot * ty) * 255.0).round().clamp(0.0, 255.0) as u8
+        };
+        // The riding surface's own mask is the one kept at the finer resolution, so it is
+        // filled on its own grid.
         for y in 0..RIDING_MASK_DIM {
             for x in 0..RIDING_MASK_DIM {
-                dirt[y * RIDING_MASK_DIM + x] = 255 - sample(RIDING_MASK_DIM, 0, x, y);
+                dirt[y * RIDING_MASK_DIM + x] = sample(RIDING_MASK_DIM, Cover::SoilLight, x, y);
             }
         }
         for y in 0..MASK_DIM {
             for x in 0..MASK_DIM {
                 let i = y * MASK_DIM + x;
-                grass[i] = sample(MASK_DIM, 0, x, y);
-                loose[i] = sample(MASK_DIM, 2, x, y);
-                // The worn line, the tyre marks, the grooves and the patches are all pictures of
-                // a racing line. A scan has its own and we are not drawing another.
+                grass[i] = sample(MASK_DIM, Cover::Vegetation, x, y);
+                patches[i] = sample(MASK_DIM, Cover::SoilMid, x, y);
+                loose[i] = sample(MASK_DIM, Cover::Hard, x, y);
+                // The darkest soil is the base layer, which carries no mask and shows wherever
+                // none of the three above cover it. Nothing to write.
+                //
+                // The worn line, the tyre marks and the grooves are all pictures of a racing
+                // line. A scan has its own and we are not drawing another.
                 rut[i] = 0;
                 line[i] = 0;
             }
@@ -4321,7 +4370,6 @@ pub fn write_source(prog: &TrackProgram, syn: &Synth, dir: &Path) -> Result<Vec<
     }
     put("mask_dirt.tga", tga_alpha(RIDING_MASK_DIM, RIDING_MASK_DIM, &dirt), &mut wrote)?;
     put("mask_loose.tga", tga_alpha(MASK_DIM, MASK_DIM, &loose), &mut wrote)?;
-    let patches = if prog.is_raw_scan() { vec![0u8; MASK_DIM * MASK_DIM] } else { band_of(BandMask::Patches) };
     put("mask_patches.tga", tga_alpha(MASK_DIM, MASK_DIM, &patches), &mut wrote)?;
     put("mask_line.tga", tga_alpha(MASK_DIM, MASK_DIM, &line), &mut wrote)?;
     put("mask_rut.tga", tga_alpha(MASK_DIM, MASK_DIM, &rut), &mut wrote)?;
@@ -4489,6 +4537,18 @@ pub fn write_source(prog: &TrackProgram, syn: &Synth, dir: &Path) -> Result<Vec<
     put(&format!("{slug}/{slug}.rdf"), crlf(&rdf(prog, syn)), &mut wrote)?;
     put(&format!("{slug}/{slug}.ssc"), SSC.into(), &mut wrote)?;
     put(&format!("{slug}/frost-algorithm.ini"), crlf(&frost_algorithm_ini()), &mut wrote)?;
+    // Where the ground came from, inside the archive. `README.txt` sits beside the source
+    // folder and so never reaches anyone who installs the track, and a licence that ships
+    // nowhere is not a licence that travels with the file. Written only where there is more to
+    // say than the label carries, which is a track built from a real place: a generated
+    // track's location is a place name and is already whole.
+    if location_label(&prog.location) != prog.location.trim() {
+        put(
+            &format!("{slug}/place.txt"),
+            crlf(&format!("{}\n", prog.location.trim())).into(),
+            &mut wrote,
+        )?;
+    }
     let (map_img, shot) = ui_images(prog, syn, &scenery, UI_IMAGE_DIM);
     put(&format!("{slug}/{slug}_map.tga"), map_img, &mut wrote)?;
     put(&format!("{slug}/{slug}.tga"), shot, &mut wrote)?;
@@ -7937,7 +7997,7 @@ fn hero_focus(prog: &TrackProgram, syn: &Synth) -> Vec<[f32; 3]> {
 fn ui_shot(prog: &TrackProgram, scene: &crate::trackshot::Scene, dim: usize) -> Vec<u8> {
     let mut rgb = crate::trackshot::render(scene, dim);
     let km = prog.lap_length() / 1000.0;
-    let sub = match prog.location.trim() {
+    let sub = match location_label(&prog.location).trim() {
         "" | "Generated" => format!("{km:.1} km"),
         at => format!("{at} · {km:.1} km"),
     };
@@ -8354,6 +8414,88 @@ fn tga_tinted(w: usize, h: usize, level: &[u8], base: [f32; 3]) -> Vec<u8> {
         px.extend_from_slice(&[c(2), c(1), c(0), 255]);
     }
     tga_bgra(w, h, &px)
+}
+
+/// How far a scanned venue's cover classes are averaged before they become coverage, in cells
+/// of the classified grid. At Ironman's 0.46 m a cell that is a little over two metres across.
+const COVER_SOFTEN_CELLS: usize = 2;
+
+/// A separable box blur over a plane, `r` cells each way, edges clamped.
+///
+/// Small and plain on purpose: this softens a classification, and anything with a kernel to
+/// tune would be a place for the ground to acquire a look of its own.
+fn box_blur(f: &mut [f32], w: usize, h: usize, r: usize) {
+    if r == 0 || w < 2 || h < 2 {
+        return;
+    }
+    let n = (2 * r + 1) as f32;
+    let mut tmp = vec![0.0f32; f.len()];
+    for y in 0..h {
+        for x in 0..w {
+            let mut sum = 0.0;
+            for k in 0..=2 * r {
+                let sx = (x + k).saturating_sub(r).min(w - 1);
+                sum += f[y * w + sx];
+            }
+            tmp[y * w + x] = sum / n;
+        }
+    }
+    for x in 0..w {
+        for y in 0..h {
+            let mut sum = 0.0;
+            for k in 0..=2 * r {
+                let sy = (y + k).saturating_sub(r).min(h - 1);
+                sum += tmp[sy * w + x];
+            }
+            f[y * w + x] = sum / n;
+        }
+    }
+}
+
+/// What a coverage mask's row order is, and why a reader will tell you it is upside down.
+///
+/// [`tga_alpha`] writes the array it is given in order and stamps the TGA as bottom-left
+/// origin, which is PiBoSo's own convention and the one TerrainEd and the `.trh` trailing
+/// block agree with: file row 0 is world z = 0. Every image library honours that descriptor
+/// and hands the picture back flipped, so **comparing a mask loaded through PIL or `image`
+/// against a photograph loaded the ordinary way reports about 48% agreement and looks exactly
+/// like a vertical flip.** It is not one. That measurement was made on 2026-09-16 and very
+/// nearly had a correct pipeline "fixed"; the same files score 95.7% read in file order, and
+/// the mask separates the terrain's own wooded slope from its flat ground 1.87 to 1 that way
+/// against 0.98 to 1 flipped, which is chance.
+///
+/// So this pins the row order at the byte level, where no reader can reinterpret it.
+#[cfg(test)]
+mod mask_orientation {
+    /// Row 0 of the array is row 0 of the file, and the file says bottom-left origin.
+    #[test]
+    fn a_mask_is_written_in_its_own_order_and_says_so() {
+        let (w, h) = (4usize, 3usize);
+        // Distinct per row, so a flip cannot pass.
+        let alpha: Vec<u8> = (0..h).flat_map(|y| (0..w).map(move |_| (y as u8 + 1) * 40)).collect();
+        let tga = super::tga_alpha(w, h, &alpha);
+
+        assert_eq!(tga[2], 2, "uncompressed true-colour");
+        assert_eq!(tga[16], 32, "32 bits a pixel");
+        assert_eq!(
+            tga[17] & 0x20,
+            0,
+            "the origin bit must stay clear: bottom-left is what the game and TerrainEd read"
+        );
+        assert_eq!(tga[17] & 0x0f, 8, "eight bits of alpha");
+
+        // The pixels, in file order, are the array in file order. BGRA, so alpha is byte 3.
+        let px = &tga[18..18 + w * h * 4];
+        for y in 0..h {
+            for x in 0..w {
+                assert_eq!(
+                    px[(y * w + x) * 4 + 3],
+                    alpha[y * w + x],
+                    "row {y} of the file is not row {y} of the mask"
+                );
+            }
+        }
+    }
 }
 
 fn tga_alpha(w: usize, h: usize, alpha: &[u8]) -> Vec<u8> {
@@ -8901,7 +9043,7 @@ fn start_tcl(prog: &TrackProgram) -> Option<String> {
 /// the code that made it. Bump it with every change to what a program builds into: minor for
 /// a new feature, patch for a fix. 0.x until the generator is finished. History in
 /// `apps/studio/FROST_ALGORITHM.md`.
-pub const FROST_ALGORITHM_VERSION: &str = "0.42.0";
+pub const FROST_ALGORITHM_VERSION: &str = "0.43.0";
 
 /// The stamp every built track carries in `<slug>/frost-algorithm.ini`.
 ///
@@ -8916,6 +9058,23 @@ fn frost_algorithm_ini() -> String {
 /// `length` is the lap in whole metres, and published tracks really do state it — SFDR 1813,
 /// MX191 1350, FarmSX 1107. `altitude` is metres above sea level, which a made-up track has
 /// no honest answer for. `pic`/`pic_info` name the two files the writer puts beside this one.
+/// The `location` line as a label, not as a paper trail.
+///
+/// A scanned track's `location` used to be the whole provenance note — source, flight dates,
+/// licence, projection, origin and every caveat, 190 characters of it — because that was the
+/// only field in the `.pkz` anything could be written into. The game puts `location` under the
+/// track's name in a small label and the app prints it on the track's own picture, so what
+/// arrived there was a wall of text with the place missing from it. The note still ships: it
+/// goes in `<slug>/place.txt` beside this, where there is room for it.
+fn location_label(full: &str) -> String {
+    let head = full.split(';').next().unwrap_or(full).trim();
+    if head.chars().count() <= 48 {
+        return head.to_string();
+    }
+    let cut: String = head.chars().take(47).collect();
+    format!("{}…", cut.trim_end())
+}
+
 fn track_ini(prog: &TrackProgram) -> String {
     let slug = slug(&prog.name);
     format!(
@@ -8933,7 +9092,7 @@ fn track_ini(prog: &TrackProgram) -> String {
         } else {
             &prog.author
         },
-        prog.location
+        location_label(&prog.location)
     )
 }
 

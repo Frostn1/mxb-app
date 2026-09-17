@@ -954,31 +954,26 @@ async fn build_track(
         std::fs::create_dir_all(&root).map_err(|e| format!("{}: {e}", root.display()))?;
         tracksynth::write_source(&prog, &syn, &root).map_err(|e| format!("{e:#}"))?;
 
-        let steps = trackbuild::compile(&tools, &root, &slug, &host, &mut |phase| {
-            say(plan.start(phase))
-        })
+        // Compiling, packaging and installing are one call: the scan path and this one must
+        // produce the same archive, and they only do that by going through the same code.
+        let built = trackbuild::finish(
+            &tools,
+            &root,
+            &slug,
+            &host,
+            tracks.as_deref(),
+            &mut |phase| say(plan.start(phase)),
+        )
         .map_err(|e| format!("{e:#}"))?;
-
-        let mut out = BuildResult {
-            dir: root.to_string_lossy().into_owned(),
-            pkz: None,
-            installed: None,
-            steps,
-        };
-        // Only a build that got all the way through is worth packaging: a `.pkz` missing its
-        // `.map` is a track the game lists and then refuses to load.
-        if out.steps.iter().all(|s| s.ok) {
-            say(plan.start("packaging"));
-            let pkz = root.join(format!("{slug}.pkz"));
-            trackbuild::package(&root, &slug, &pkz).map_err(|e| format!("{e:#}"))?;
-            out.pkz = Some(pkz.to_string_lossy().into_owned());
-            if let Some(tracks) = tracks {
-                say(plan.start("installing"));
-                let at = trackbuild::install(&pkz, &tracks).map_err(|e| format!("{e:#}"))?;
-                usage::track("track.build.install");
-                out.installed = Some(at.to_string_lossy().into_owned());
-            }
+        if built.installed.is_some() {
+            usage::track("track.build.install");
         }
+        let out = BuildResult {
+            dir: root.to_string_lossy().into_owned(),
+            pkz: built.pkz.map(|p| p.to_string_lossy().into_owned()),
+            installed: built.installed.map(|p| p.to_string_lossy().into_owned()),
+            steps: built.steps,
+        };
         // Closes the last phase, so what it cost is remembered and the next build is paced
         // by this machine rather than by the one the defaults were measured on.
         plan.finish();
