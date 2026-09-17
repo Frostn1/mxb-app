@@ -12,7 +12,8 @@
  * through here, and a link Valve has already confirmed is put back rather than refused.
  */
 
-import { isSteamId64 } from "./steam";
+import { rememberGuid } from "./bans";
+import { guidFromSteamId, isSteamId64 } from "./steam";
 
 /**
  * Remember a link Valve confirmed.
@@ -83,4 +84,35 @@ export async function steamIdFor(
 export function repairBySteamId(env: Env, steamId: string): Promise<boolean> {
   if (!isSteamId64(steamId)) return Promise.resolve(false);
   return restore(env, "steam_id = ?", [steamId]);
+}
+
+/**
+ * Pin an account's GUID to the one its Valve-confirmed Steam identity derives to.
+ *
+ * This is the auto-find the whole anti-spoof rests on: for a Steam copy of the game the GUID is
+ * a pure function of the SteamID64 (`guidFromSteamId`), and the SteamID64 is the value Valve
+ * just vouched for. So we do not ask the client what its GUID is — we compute it and store it.
+ *
+ * A derived GUID is unique per Steam account, but another row may already be holding this one:
+ * a first-come claim from before the link, or a spoofer who claimed the victim's GUID. Valve's
+ * word beats both, so the holder is cleared and this account takes it — in one batch, so the
+ * unique index never sees the GUID on two rows at once. Recorded in `guid_claims` too, so the
+ * ban resolution can follow it.
+ *
+ * Returns the derived GUID, or `null` for a non-Steam (Piboso) identity, whose GUID is its own
+ * opaque value and cannot be derived — those stay first-come, corroborated by server sightings.
+ */
+export async function pinGuidFromSteam(
+  env: Env,
+  accountId: string,
+  steamId: string,
+): Promise<string | null> {
+  const guid = guidFromSteamId(steamId);
+  if (!guid) return null;
+  await env.DB.batch([
+    env.DB.prepare("UPDATE accounts SET guid = NULL WHERE guid = ? AND id <> ?").bind(guid, accountId),
+    env.DB.prepare("UPDATE accounts SET guid = ? WHERE id = ?").bind(guid, accountId),
+  ]);
+  await rememberGuid(env, accountId, guid);
+  return guid;
 }

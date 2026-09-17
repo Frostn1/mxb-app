@@ -35,6 +35,7 @@ import { track } from "./lib/analytics";
 import { TrackBuildProvider } from "./Context/TrackBuild";
 import { UpdateProvider } from "./Context/Update";
 import UpdateBanner from "./Components/Shell/UpdateBanner";
+import SigninGate from "@frost/shared/Components/SigninGate/SigninGate";
 
 /** The rail's own view space: the Studio's tools, plus Settings. */
 type View = StudioTab | "settings";
@@ -261,6 +262,8 @@ export default function App() {
       <I18nProvider>
         <UpdateProvider>
           <Shell />
+          {/* The Steam sign-in wall, shown only when the estate gate requires one. */}
+          <SigninGate />
         </UpdateProvider>
       </I18nProvider>
     </ThemeProvider>

@@ -14,6 +14,7 @@
 
 import { allowedOrigin, assetOrigins, cors, lockAllowance, refuseCrossSiteWrite } from "./assets";
 import { tokenMatches } from "./auth";
+import { BANNED, banFor, isBanned } from "./bans";
 import { makeCreator } from "./creators";
 import { repairBySteamId } from "./steamlink";
 import { steamResult } from "./page";
@@ -146,6 +147,10 @@ export async function webRoutes(
     const account = (await find()) ?? ((await repairBySteamId(env, session.steamId)) ? await find() : null);
     // A web-only profile (made for a creator on the site) isn't an MXB App profile.
     const app = account && account.kind !== "web" ? account : null;
+    // Said plainly, and said here, because this is the answer every page on the site draws
+    // itself from. A banned account that was only ever refused at the moment it tried to lock
+    // something would read as a site that is broken; it is not broken, it is closed to them.
+    const ban = await banFor(env, { accountId: account?.id, steamId: session.steamId });
     // How much of today's ceiling is left, so the lock page can say so before somebody picks a
     // 600 MB file and finds out from a 429. Counted only for a creator: nobody else has one.
     const locks = account?.creator_at ? await lockAllowance(env, account.id) : null;
@@ -153,9 +158,14 @@ export async function webRoutes(
       json(200, {
         steamId: session.steamId,
         name: session.name || app?.rider_name || "",
-        creator: !!account?.creator_at,
+        // A banned account is not a creator as far as the site is concerned: `assets.ts`
+        // refuses every lock, so drawing the dashboard for them would be a page of buttons
+        // that all fail. The `creator_at` timestamp itself is left alone — the ban is not a
+        // removal, and lifting it puts them back exactly where they were.
+        creator: !!account?.creator_at && !ban,
         linked: !!app,
-        ...(locks ? { locks } : {}),
+        ...(ban ? { banned: true, banReason: ban.reason } : {}),
+        ...(locks && !ban ? { locks } : {}),
         // So the site knows whether to offer the dashboards at all. Never the gate itself —
         // every admin route checks the session again, and a client flag decides nothing.
         admin: isWebAdmin(session.steamId, env),
@@ -185,6 +195,12 @@ export async function webRoutes(
     if (refused) return cors(refused, origin);
     const session = await webSession(request, env);
     if (!session) return cors(json(401, { error: "not signed in" }), origin);
+    // The front door is open to everyone except the people we shut it on. Refused here as well
+    // as in `assets.ts` so a ban doesn't leave a `creator_at` timestamp behind it that somebody
+    // has to remember to clear if the ban is ever lifted for other reasons.
+    if (await isBanned(env, { steamId: session.steamId })) {
+      return cors(json(403, { error: BANNED }), origin);
+    }
     const made = await makeCreator(env, session.steamId, "self");
     const said = cors(json(made.already ? 200 : 201, { creator: true, already: made.already }), origin);
     // Same reason `/v1/web/me` is never cached: this is the answer that changes what somebody
@@ -244,6 +260,12 @@ async function lockweb(request: Request, url: URL, env: Env, origin: string | nu
 
   const session = await webSession(request, env);
   if (!session) return cors(json(401, { error: "sign in with Steam to lock a file" }), origin);
+  // The locker is the packer. Handing it to somebody banned for unlocking other people's
+  // content would be handing them the one file on this host worth taking — and they would keep
+  // it, sign-in or no sign-in, long after the ban.
+  if (await isBanned(env, { steamId: session.steamId })) {
+    return cors(json(403, { error: BANNED }), origin);
+  }
 
   const object = await env.LOCKWEB.get(name);
   // Nothing uploaded yet is a configuration problem, not a missing page: say so as 503 so it

@@ -1,6 +1,10 @@
-//! Refuse to run under a debugger — release builds only.
+//! Refuse to run under a debugger — release builds only. Shared by every app in the lineup.
 //!
-//! The release profile in `Cargo.toml` spends a lot to make the shipped binary hard to
+//! This lives in `mxb-core` because it affects all of them: MXB App, Frost's Studio and MXB
+//! Coach each call [`guard`] first thing in `main`, so one copy of the recipe hardens the whole
+//! set rather than three that drift.
+//!
+//! The workspace release profile in the root `Cargo.toml` spends a lot to make the shipped binary hard to
 //! read at rest: symbols stripped, fat LTO to dissolve the call structure, one codegen
 //! unit, no debug info. All of that is defeated the moment someone attaches a live
 //! debugger to the running process and watches it work — breakpoints on the paint

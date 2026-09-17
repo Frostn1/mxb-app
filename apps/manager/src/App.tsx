@@ -24,6 +24,7 @@ import { useI18n } from "@/i18n";
 import { setAmbientVars } from "@/i18n";
 import { UpdateProvider } from "./Context/Update";
 import RuntimeBanner from "./Components/RuntimeBanner/RuntimeBanner";
+import SigninGate from "@frost/shared/Components/SigninGate/SigninGate";
 import UpdateBanner from "./Components/UpdateBanner/UpdateBanner";
 import type { Config, GameId, GameInfo } from "@frost/shared/types";
 
@@ -199,6 +200,10 @@ const App = () => {
               </main>
             </div>
             <Toaster />
+            {/* The Steam sign-in wall, mounted unconditionally so it can cover setup, the
+                dashboard and the pre-config state alike. It shows itself only when the gate
+                says a sign-in is required. */}
+            <SigninGate />
             {ready && showWelcome && <Welcome onDone={dismissWelcome} />}
             {/* Offer to register loose model-swap folders once the app is set up and the
                 intro tour is out of the way. */}
