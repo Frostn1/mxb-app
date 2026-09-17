@@ -300,6 +300,24 @@ impl ScanJumps {
     }
 }
 
+impl TrackProgram {
+    /// Whether this track is a scan ridden as it was measured, rather than a track cut into
+    /// ground.
+    ///
+    /// The one question the whole raw path turns on, asked in one place so that nothing can gate
+    /// on it differently. When it is true the terrain is the scan and **nothing is placed**: no
+    /// banners, no boards, no marker poles, no edge markers, no tuff blocks, no fence, no
+    /// paddock, no gate, no trees. A rider on a scanned track should see nothing that was not in
+    /// the lidar.
+    ///
+    /// The first raw build got the heights right and left the decorations on, because the
+    /// centreline was metadata to the terrain and still geometry to the scenery. It is metadata
+    /// to both now: it survives only as the racing line for timing and as the spawn.
+    pub fn is_raw_scan(&self) -> bool {
+        self.terrain.ground.as_ref().is_some_and(|g| g.jumps == ScanJumps::Keep)
+    }
+}
+
 /// Half-worn: shapes settled, grooves started, most of the ground still to give.
 pub(crate) fn default_wear() -> f32 {
     0.55

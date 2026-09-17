@@ -1328,7 +1328,7 @@ mod scan_build {
         let fit = crate::trackprog::fit_lap(&imp.lap, imp.closed).expect("the lap fits");
         println!("fit: {}", super::fit_report(&fit));
 
-        let jumps = if recut {
+        let jumps = if recut || std::env::var_os("FROST_CORRIDOR").is_some() {
             crate::trackprog::ScanJumps::Recut
         } else {
             crate::trackprog::ScanJumps::Keep
@@ -1358,46 +1358,10 @@ mod scan_build {
             prog.terrain.samples
         );
 
-        let mut syn = crate::tracksynth::synthesise(&prog).expect("it synthesises");
+        let syn = crate::tracksynth::synthesise(&prog).expect("it synthesises");
 
-        // FROST_RAW: the scan, and nothing else.
-        //
-        // The rider loaded the benched build, saw the real ruts and berms in the terrain with our
-        // graded corridor cut across them, and said the obvious thing: the scan IS the track, so
-        // stop looking for one. This replaces the heightfield with the resampled DEM after
-        // `synthesise` has run, so the lap, the spawn and the masks still come from the normal
-        // path and the ground comes from the aircraft. Nothing benches, nothing stamps, nothing
-        // slumps, nothing wears.
-        //
-        // The only transforms left are the two the format cannot do without: the datum shift that
-        // brings the plot's lowest point to the budget floor, and the u16 quantisation against
-        // the height budget that `heightmap_raw` applies on the way out.
-        if std::env::var_os("FROST_RAW").is_some() {
-            let g = &imp.ground;
-            let mut lo = f32::MAX;
-            let mut raw = vec![0.0f32; syn.gw * syn.gh];
-            for y in 0..syn.gh {
-                for x in 0..syn.gw {
-                    let v = g.at(x as f32 * syn.mps, y as f32 * syn.mps);
-                    raw[y * syn.gw + x] = v;
-                    lo = lo.min(v);
-                }
-            }
-            // The same floor `synthesise` leaves under a generated track, so the budget check and
-            // the quantisation see what they expect.
-            let floor = prog.terrain.scale * 0.02;
-            let mut hi = f32::MIN;
-            for v in raw.iter_mut() {
-                *v = *v - lo + floor;
-                hi = hi.max(*v);
-            }
-            syn.heights = raw;
-            syn.used_m = hi;
-            println!("RAW: heightfield replaced by the scan, {:.2} m used of {:.0}", hi, prog.terrain.scale);
-        }
-        println!("terrain: {} x {} at {:.4} m, used {:.2} of {:.0} m",
-            syn.gw, syn.gh, syn.mps, syn.used_m, syn.budget_m);
-
+        // The scan is the terrain by default now; `FROST_CORRIDOR` asks for the old benched
+        // path instead, which is what a bare hillside with no track on it still wants.
         std::fs::create_dir_all(&out).expect("made the output folder");
         // The same quantisation `terrained` will apply, written here so the band table can be
         // measured without a five-minute compile in the loop.
@@ -1413,6 +1377,15 @@ mod scan_build {
         for l in super::provenance_lines(&imp) {
             println!("  {l}");
         }
+        let sc = crate::trackscenery::build(&prog, &syn);
+        println!(
+            "SCENERY: {} models, {} drawn blocks, {} solid blocks, {} edf files, tally {:?}",
+            sc.models.len(),
+            sc.drawn.len(),
+            sc.solid.len(),
+            sc.files.len(),
+            sc.tally
+        );
         let wrote = crate::tracksynth::write_source(&prog, &syn, &out).expect("wrote the source");
         println!("{} source files in {}", wrote.len(), out.display());
     }

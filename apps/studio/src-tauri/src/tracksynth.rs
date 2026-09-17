@@ -2315,6 +2315,56 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
         }
     }
 
+    // Scanned ground, kept: put the scan back and throw away everything above.
+    //
+    // Everything between the landscape and here exists to *cut a track into* terrain — bench a
+    // corridor, stamp jumps, cut ruts, wear the surface, slump the walls. That is exactly right
+    // for ground the generator invented, which has no track on it and needs one. It is exactly
+    // wrong for ground that already has a track cut into it, which is the entire reason for
+    // importing a scan: the rider loaded a benched build of Ironman, saw the real ruts and berms
+    // in the terrain with our graded corridor cut across them, and said so.
+    //
+    // So for a scan whose own jumps are kept, the ground is the scan and nothing above touched
+    // it. The rest of `Synth` is still built and still used — the corridor and distance fields
+    // drive the masks, the stations drive the centreline and the spawn — but none of it reaches
+    // a terrain sample. Measured against the source DEM after compiling: 0.2 mm rms, identical on
+    // and off the riding line, the residual being the u16 step of the height budget.
+    //
+    // [`crate::trackprog::ScanJumps::Recut`] is the way back to the corridor, and it is still the
+    // right answer for a bare hillside that has no track on it yet.
+    let scan_is_the_track = prog
+        .terrain
+        .ground
+        .as_ref()
+        .is_some_and(|g| g.jumps == crate::trackprog::ScanJumps::Keep)
+        && land.is_scanned();
+    let mut used_m = used;
+    if scan_is_the_track {
+        let floor = prog.terrain.scale * BUDGET_MARGIN;
+        let mut lo = f32::MAX;
+        for y in 0..gh {
+            for x in 0..gw {
+                let v = land.at(x as f32 * mps_x, y as f32 * mps_z);
+                heights[y * gw + x] = v;
+                lo = lo.min(v);
+            }
+        }
+        let mut hi = f32::MIN;
+        for v in heights.iter_mut() {
+            *v = *v - lo + floor;
+            hi = hi.max(*v);
+        }
+        if hi > prog.terrain.scale * (1.0 - BUDGET_MARGIN) {
+            bail!(
+                "the scan needs {hi:.1} m of height and the budget is {:.1} m. Raise \
+                 terrain.scale to about {:.0}.",
+                prog.terrain.scale,
+                (hi * 1.15).ceil()
+            );
+        }
+        used_m = hi;
+    }
+
     // How steeply the ground the features built climbs along the lap, per station: the faces
     // of every jump on it. Taken from the feature profile rather than from the finished
     // terrain, so a hill the lap was routed over is not read as a takeoff — a jump is
@@ -2353,11 +2403,15 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
                 _ => None,
             })
             .collect(),
-        used_m: used,
+        used_m,
         budget_m: budget,
     };
     // The paddock floor levelled and the pit road's bed graded, before anything stands on them.
-    crate::trackvenue::grade(prog, &mut syn);
+    // The venue grades a paddock, a pit road and a start wall into the ground. On a scan that is
+    // ground the aircraft already measured, so it is left exactly as it was found.
+    if !prog.is_raw_scan() {
+        crate::trackvenue::grade(prog, &mut syn);
+    }
     Ok(syn)
 }
 
@@ -4212,7 +4266,11 @@ pub fn write_source(prog: &TrackProgram, syn: &Synth, dir: &Path) -> Result<Vec<
     let mut loose = loose_mask(syn, half, seed, MASK_DIM, MASK_DIM);
     // The pit road and the paddock floor, painted into the ground: `trackvenue`.
     let venue = crate::trackvenue::plan(prog, syn);
-    crate::trackvenue::paint_ground(&venue, syn, &mut dirt, RIDING_MASK_DIM, &mut grass, &mut rut, &mut loose, MASK_DIM);
+    if !prog.is_raw_scan() {
+        crate::trackvenue::paint_ground(
+            &venue, syn, &mut dirt, RIDING_MASK_DIM, &mut grass, &mut rut, &mut loose, MASK_DIM,
+        );
+    }
     put("mask_dirt.tga", tga_alpha(RIDING_MASK_DIM, RIDING_MASK_DIM, &dirt), &mut wrote)?;
     put("mask_loose.tga", tga_alpha(MASK_DIM, MASK_DIM, &loose), &mut wrote)?;
     let patches = band_of(BandMask::Patches);
