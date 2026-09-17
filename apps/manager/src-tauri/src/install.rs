@@ -4221,10 +4221,19 @@ mod tests {
 
         // Stands in for the scanner releasing the file: unreadable at the first attempt,
         // there well inside the retry window.
+        //
+        // Written aside and moved in, not `fs::write`. `fs::write` creates the file and then
+        // fills it, so a retry landing in that window sees it at nought bytes or mid-write —
+        // the file exists but isn't the file yet. This raced on Windows CI often enough to
+        // fail runs that had nothing to do with installing, sometimes copying an empty file
+        // and sometimes failing the read outright. A rename is atomic, so the retry either
+        // doesn't see it or sees all of it, which is what the test is actually about.
         let late = src.clone();
         let writer = std::thread::spawn(move || {
             std::thread::sleep(Duration::from_millis(400));
-            std::fs::write(&late, b"track").unwrap();
+            let tmp = late.with_extension("pkz.part");
+            std::fs::write(&tmp, b"track").unwrap();
+            std::fs::rename(&tmp, &late).unwrap();
         });
 
         copy_staged(&src, &dst).expect("the copy should have waited");

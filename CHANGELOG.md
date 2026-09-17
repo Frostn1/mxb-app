@@ -9,6 +9,15 @@
   that size leaves your PC without you pressing the button.
 
 ### Fixed
+- Coach finds and saves setups on tracks that have layouts. Those keep their setups a folder
+  deeper than tracks that don't, and Coach was only looking at the shallower one — so on a
+  layout track it found none of your setups and saved where the game doesn't look.
+- A setup Coach builds from scratch carries the version the bike itself asks for. It always
+  wrote the same one, which the game refuses on any bike that names a different one.
+- A setup that came bundled with the bike is left alone rather than looked for in your profile.
+
+
+### Fixed
 - The live cues change as you ride. They were the same every lap and every session, for two
   reasons: the recorder read the sheet once when the session started and never looked again, and
   Coach only picked new calls while the Live cues panel was actually on screen — riding with the
