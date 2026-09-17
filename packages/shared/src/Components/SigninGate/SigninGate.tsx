@@ -53,6 +53,25 @@ export default function SigninGate() {
         setNote(null);
       }
     });
+
+    // Ask for the verdict rather than only waiting to be told it.
+    //
+    // `gate::check` is spawned from Rust `setup`, which runs before this webview exists, and a
+    // Tauri event is delivered to the listeners attached at that instant — there is no buffer
+    // and no replay. The gate's round trip is a couple of hundred milliseconds; mounting a
+    // React app of this size on a cold start is often slower. So the `signin` verdict was
+    // routinely emitted into an empty room, and the wall then never appeared at all: the update
+    // says you must sign in with Steam, and the app gives you nothing to sign in with. That is
+    // the shape of "can't sign in after updating", and it is a race, which is why it looked
+    // intermittent.
+    //
+    // `gate_verdict` re-sends the verdict the gate already reached, so asking once from here —
+    // after `listen` has resolved, because the listener is not attached until it does — closes
+    // the half of the handshake that could be missed. It is a replay, not a second check: it
+    // asks the service for nothing, and when no verdict has been reached yet it does nothing,
+    // because the check still in flight will emit to the listener that now exists.
+    void pending.then(() => invoke("gate_verdict")).catch(() => {});
+
     return () => {
       void pending.then((off) => off()).catch(() => {});
     };

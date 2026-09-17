@@ -3,6 +3,12 @@
 ## Unreleased
 
 ### Fixed
+- The "Sign in with Steam" wall now always appears when it is needed. It was announced by the
+  app the moment the service answered — which on a cold start is usually before the window has
+  finished loading, and an announcement nobody is listening for yet is simply lost. So the first
+  launch after updating often showed no wall at all: you were told the update requires a Steam
+  sign-in and given nothing to sign in with. The window now asks for the answer as soon as it is
+  ready, instead of only waiting to be told.
 - Signing in with Steam on a second PC works. Until now the sign-in wall would send you to
   Steam, Steam would confirm who you are, and the app would sit there for good: your Steam
   account was already spoken for by your other install, so the new one was refused an identity —

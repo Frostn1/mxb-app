@@ -2387,6 +2387,17 @@ async fn recheck_gate(app: tauri::AppHandle) {
     gate::check(app).await;
 }
 
+/// Re-send the startup gate's verdict, for a frontend that mounted after it was emitted.
+///
+/// [`gate::check`] runs from `setup`, before this webview exists, and a Tauri event reaches only
+/// the listeners attached when it fires. The sign-in wall asks for the verdict on mount so a slow
+/// cold start cannot leave it never knowing one was reached — which is the wall never appearing,
+/// on an install that has just been told it must sign in.
+#[tauri::command]
+async fn gate_verdict(app: tauri::AppHandle) {
+    gate::replay_verdict(app).await;
+}
+
 #[tauri::command]
 fn set_run_in_background(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
     let mut cfg = config::load(&app).unwrap_or_default();
@@ -6936,6 +6947,7 @@ fn main() {
             steam_link_start,
             steam_link_status,
             recheck_gate,
+            gate_verdict,
             mxb_core::viewer::load_bike_model,
             preview_model_swap,
             mxb_core::viewer::load_rider_model,
