@@ -21,6 +21,8 @@ import {
   Hourglass,
   LayoutGrid,
   List,
+  SlidersHorizontal,
+  MoreHorizontal,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@frost/shared/lib/utils";
@@ -33,7 +35,14 @@ import {
   SelectContent,
   SelectItem,
 } from "@frost/shared/Components/ui/select";
-import { ContextBarRight } from "../Shell/ContextBar";
+import { ContextBarLeft, ContextBarRight } from "../Shell/ContextBar";
+import { Popover, PopoverContent, PopoverTrigger } from "@frost/shared/Components/ui/popover";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from "@frost/shared/Components/ui/dropdown-menu";
 import HelpHint from "@frost/shared/Components/ui/help-hint";
 import {
   listMasterServers,
@@ -330,6 +339,16 @@ const Servers = () => {
     });
   }, [servers, query, showHidden, favesOnly, favs, region, hideEmpty, sort, dir]);
 
+  /** How many filters are narrowing the list, for the trigger that now holds them. */
+  const filterCount = useMemo(
+    () =>
+      (favesOnly ? 1 : 0) +
+      (hideEmpty ? 1 : 0) +
+      (!favesOnly && region !== "all" ? 1 : 0) +
+      (showHidden ? 1 : 0),
+    [favesOnly, hideEmpty, region, showHidden],
+  );
+
   const join = useCallback(
     async (address: string) => {
       if (joining) return;
@@ -459,12 +478,95 @@ const Servers = () => {
 
   return (
     <div className="flex h-full flex-col">
+      {/* Filters on the left, actions on the right — the split the bar was built for.
+          All of it used to sit on the right, and since most of it only appears once a list
+          has loaded, the row ran out of width at the moment the tab finished loading: every
+          button compressed at once and the last one, Add your server, worst of all. */}
+      <ContextBarLeft>
+        <div className="flex items-center gap-2 self-center">
+          <Popover>
+            <PopoverTrigger asChild>
+              <button
+                type="button"
+                title={t("serverBrowser.filters")}
+                className={cn(
+                  "flex h-7 shrink-0 items-center gap-1.5 whitespace-nowrap border border-input px-2.5 text-[12px]",
+                  filterCount > 0
+                    ? "bg-card text-muted-foreground"
+                    : "text-faint hover:text-muted-foreground",
+                )}
+              >
+                <SlidersHorizontal className="size-3.5" />
+                {t("serverBrowser.filters")}
+                {filterCount > 0 && (
+                  <span className="tabular-nums text-primary">{filterCount}</span>
+                )}
+              </button>
+            </PopoverTrigger>
+            {/* One trigger rather than five chips: five fit a wide window in English and
+                nothing else, and what gave way was always the buttons beside them. */}
+            <PopoverContent align="start" className="w-[236px] p-2">
+              <div className="flex flex-col gap-1.5">
+                {favs.count > 0 && (
+                  <ToggleChip
+                    on={favesOnly}
+                    onClick={() => setFavesOnly((v) => !v)}
+                    className="w-full justify-start"
+                  >
+                    <Star className={cn("size-3.5", favesOnly && "fill-current")} />
+                    {t("serverBrowser.favesOnly")}
+                  </ToggleChip>
+                )}
+                <ToggleChip
+                  on={hideEmpty}
+                  onClick={() => setHideEmpty((v) => !v)}
+                  title={t("serverBrowser.hideEmptyHelp")}
+                  className="w-full justify-start"
+                >
+                  <UserCheck className="size-3.5" />
+                  {t("serverBrowser.hideEmpty")}
+                </ToggleChip>
+                {!favesOnly && regions.length > 1 && (
+                  <Select value={region} onValueChange={(v) => setRegion(v as RegionKey | "all")}>
+                    <SelectTrigger className="h-7 w-full bg-card text-[12px]">
+                      <Globe className="size-3.5 text-faint" />
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">{t("serverBrowser.region.all")}</SelectItem>
+                      {regions.map((r) => (
+                        <SelectItem key={r} value={r}>
+                          {t(REGION_LABEL_KEY[r])}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+                {hiddenCount > 0 && (
+                  <ToggleChip
+                    on={showHidden}
+                    onClick={() => setShowHidden((v) => !v)}
+                    title={t("serverBrowser.hiddenHelp")}
+                    className="w-full justify-start"
+                  >
+                    <EyeOff className="size-3.5" />
+                    {showHidden
+                      ? t("serverBrowser.hideFiltered")
+                      : t("serverBrowser.hiddenCount", { count: hiddenCount })}
+                  </ToggleChip>
+                )}
+              </div>
+            </PopoverContent>
+          </Popover>
+          {servers && servers.length > 0 && (
+            <span className="shrink-0 tabular-figures text-[12.5px] text-faint">
+              {t("serverBrowser.count", { count: servers.length - (showHidden ? 0 : hiddenCount) })}
+            </span>
+          )}
+        </div>
+      </ContextBarLeft>
+
       <ContextBarRight>
-        {servers && servers.length > 0 && (
-          <span className="tabular-figures text-[12.5px] text-faint">
-            {t("serverBrowser.count", { count: servers.length - (showHidden ? 0 : hiddenCount) })}
-          </span>
-        )}
         <Segmented<ViewMode>
           size="sm"
           value={view}
@@ -482,107 +584,76 @@ const Servers = () => {
             },
           ]}
         />
-        {favs.count > 0 && (
-          <ToggleChip on={favesOnly} onClick={() => setFavesOnly((v) => !v)}>
-            <Star className={cn("size-3.5", favesOnly && "fill-current")} />
-            {t("serverBrowser.favesOnly")}
-          </ToggleChip>
-        )}
-        <ToggleChip
-          on={hideEmpty}
-          onClick={() => setHideEmpty((v) => !v)}
-          title={t("serverBrowser.hideEmptyHelp")}
-        >
-          <UserCheck className="size-3.5" />
-          {t("serverBrowser.hideEmpty")}
-        </ToggleChip>
-        {!favesOnly && regions.length > 1 && (
-          <Select value={region} onValueChange={(v) => setRegion(v as RegionKey | "all")}>
-            <SelectTrigger className="h-7 w-[150px] bg-card text-[12px]">
-              <Globe className="size-3.5 text-faint" />
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">{t("serverBrowser.region.all")}</SelectItem>
-              {regions.map((r) => (
-                <SelectItem key={r} value={r}>
-                  {t(REGION_LABEL_KEY[r])}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        )}
-        {hiddenCount > 0 && (
-          <ToggleChip
-            on={showHidden}
-            onClick={() => setShowHidden((v) => !v)}
-            title={t("serverBrowser.hiddenHelp")}
-          >
-            <EyeOff className="size-3.5" />
-            {showHidden
-              ? t("serverBrowser.hideFiltered")
-              : t("serverBrowser.hiddenCount", { count: hiddenCount })}
-          </ToggleChip>
-        )}
-        <div className="flex h-7 w-[220px] items-center gap-2 border border-input bg-card px-2.5">
-          <Search className="size-3.5 text-faint" />
+        {/* The one control here that may shrink. Everything else keeps its width, so a
+            narrow window trims the search box rather than wrapping four button labels. */}
+        <div className="flex h-7 w-[200px] min-w-[116px] shrink items-center gap-2 border border-input bg-card px-2.5">
+          <Search className="size-3.5 shrink-0 text-faint" />
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder={t("serverBrowser.searchPlaceholder")}
-            className="w-full bg-transparent text-[12.5px] placeholder:text-faint focus:outline-none"
+            className="w-full min-w-0 bg-transparent text-[12.5px] placeholder:text-faint focus:outline-none"
           />
         </div>
         <Button
           variant="outline"
           size="sm"
+          className="shrink-0 px-2.5"
           onClick={load}
           disabled={loading}
           title={t("serverBrowser.refresh")}
+          aria-label={t("serverBrowser.refresh")}
         >
           <RefreshCw className={cn("size-3.5", loading && "animate-spin")} />
-          {t("serverBrowser.refresh")}
         </Button>
         {/* Join by address, for a server the master list doesn't carry. It lived in the
             sidebar next to Play; with the sidebar gone this is where someone looks for
             it — the page that is already about joining servers. */}
-        <Button variant="outline" size="sm" onClick={() => setJoinOpen(true)}>
+        <Button
+          variant="outline"
+          size="sm"
+          className="shrink-0"
+          onClick={() => setJoinOpen(true)}
+        >
           <Plug className="size-3.5" />
           {t("join.title")}
         </Button>
-        {/* Putting your own server on the shared address book. Almost nobody needs it — a
-            server the master lists gets there on its own, off everyone's sweeps — so it is a
-            quiet button rather than anything louder. It is for the two it can't reach: one
-            nobody has found yet, and one that was never in that list to be seen in. */}
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => setRegisterOpen(true)}
-          title={t("registerServer.blurb")}
-        >
-          <ServerCog className="size-3.5" />
-          {t("registerServer.action")}
-        </Button>
-        {/* For the game's own Browse screen saying "connection timeout" until you restart it.
-            FrostMod clears that by itself when it recognises the state, so this is only here
-            for the times it holds off — which is why it is quiet, and why it appears only
-            while there is a game running to fix. */}
-        {gameRunning && (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={unwedgeBrowser}
-            disabled={unwedging}
-            title={t("serverBrowser.unwedgeBlurb")}
-          >
-            {unwedging ? (
-              <Loader2 className="size-3.5 animate-spin" />
-            ) : (
-              <Unplug className="size-3.5" />
+        {/* The two nobody reaches for twice in a day. Registering a server is for the one
+            the master can't show, and the browser reset is for a game that has wedged its
+            own list — both worth having, neither worth a permanent slot in the row. */}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="shrink-0 px-2"
+              title={t("serverBrowser.moreActions")}
+              aria-label={t("serverBrowser.moreActions")}
+            >
+              <MoreHorizontal className="size-4" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem onSelect={() => setRegisterOpen(true)}>
+              <ServerCog className="size-4" />
+              {t("registerServer.action")}
+            </DropdownMenuItem>
+            {/* For the game's own Browse screen saying "connection timeout" until you
+                restart it. FrostMod clears that by itself when it recognises the state, so
+                this is only here for the times it holds off — and only while there is a
+                game running to fix. */}
+            {gameRunning && (
+              <DropdownMenuItem onSelect={unwedgeBrowser} disabled={unwedging}>
+                {unwedging ? (
+                  <Loader2 className="size-4 animate-spin" />
+                ) : (
+                  <Unplug className="size-4" />
+                )}
+                {t("serverBrowser.unwedge")}
+              </DropdownMenuItem>
             )}
-            {t("serverBrowser.unwedge")}
-          </Button>
-        )}
+          </DropdownMenuContent>
+        </DropdownMenu>
         <HelpHint title={t("servers.title")} description={t("serverBrowser.help")} />
       </ContextBarRight>
 
@@ -851,16 +922,18 @@ const SortHead = ({
   </th>
 );
 
-/** The on/off chips in the context bar. */
+/** The on/off chips: in the filter popover now, still shaped like the bar they came from. */
 const ToggleChip = ({
   on,
   onClick,
   title,
+  className,
   children,
 }: {
   on: boolean;
   onClick: () => void;
   title?: string;
+  className?: string;
   children: React.ReactNode;
 }) => (
   <button
@@ -871,6 +944,7 @@ const ToggleChip = ({
     className={cn(
       "flex h-7 shrink-0 items-center gap-1.5 whitespace-nowrap border border-input px-2.5 text-[12px]",
       on ? "bg-card text-muted-foreground" : "text-faint hover:text-muted-foreground",
+      className,
     )}
   >
     {children}

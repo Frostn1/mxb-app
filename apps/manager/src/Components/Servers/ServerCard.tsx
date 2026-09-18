@@ -10,7 +10,6 @@ import {
   Star,
   Hourglass,
   Palette,
-  AlertTriangle,
   Download,
   ShoppingCart,
 } from "lucide-react";
@@ -117,17 +116,6 @@ const ServerCard = memo(function ServerCard({
           </div>
         )}
 
-        {missing && (
-          <span
-            className="absolute inset-0 grid place-items-center"
-            title={t("serverBrowser.trackMissing")}
-          >
-            <span className="grid size-9 place-items-center rounded-full bg-amber-500/90 text-black shadow">
-              <AlertTriangle className="size-5" strokeWidth={2.5} />
-            </span>
-          </span>
-        )}
-
         <span
           className={cn(
             "absolute right-1.5 top-1.5 flex items-center gap-1.5 rounded-md bg-black/70 px-2 py-1 text-[15px] font-bold tabular-nums shadow-sm backdrop-blur-[2px]",
@@ -202,6 +190,20 @@ const ServerCard = memo(function ServerCard({
               <span className="opacity-40">·</span>
               <span className="truncate">{cat}</span>
             </>
+          )}
+          {/* A track you don't have is an errand, not a fault. It read as one while this was
+              an amber hazard sign across the picture — the tile looked broken, and the button
+              under it already says what to do about it. On the track's own line, so it says
+              which thing is missing and costs the tile no height. */}
+          {missing && (
+            <Badge
+              variant="count"
+              className="ml-auto shrink-0"
+              title={t("serverBrowser.trackMissing")}
+            >
+              <Download className="size-3" />
+              {t("serverBrowser.notInstalled")}
+            </Badge>
           )}
         </div>
         <div className="flex flex-wrap items-center gap-1">
