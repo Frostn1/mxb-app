@@ -47,6 +47,7 @@ import HelpHint from "@frost/shared/Components/ui/help-hint";
 import {
   listMasterServers,
   joinServer,
+  closeAndJoin,
   queueJoin,
   serversWithPaintSync,
   serverTrackPreviews,
@@ -349,6 +350,24 @@ const Servers = () => {
     [favesOnly, hideEmpty, region, showHidden],
   );
 
+  const { game } = useConfig();
+
+  /** Close the open game and join with the copy that replaces it. */
+  const closeThenJoin = useCallback(
+    async (address: string) => {
+      setJoining(address);
+      try {
+        await closeAndJoin(address);
+        toast.success(t("join.launching", { address }));
+      } catch (e) {
+        toast.error(typeof e === "string" ? e : t("serverBrowser.joinFailed"));
+      } finally {
+        setJoining(null);
+      }
+    },
+    [t],
+  );
+
   const join = useCallback(
     async (address: string) => {
       if (joining) return;
@@ -356,7 +375,16 @@ const Servers = () => {
       try {
         const outcome = await joinServer(address);
         if (outcome === "already_running") {
-          toast.info(t("join.alreadyRunning"));
+          // The game reads the connect flag only at startup, so an open copy can't be sent
+          // anywhere — which used to be the end of it. The way through is to replace the
+          // process, and that is worth offering rather than leaving as a fact to act on.
+          toast.info(t("join.alreadyRunning", { game: game.display }), {
+            duration: 12_000,
+            action: {
+              label: t("join.closeAndJoin"),
+              onClick: () => void closeThenJoin(address),
+            },
+          });
         } else {
           toast.success(t("join.launching", { address }));
         }
@@ -366,7 +394,7 @@ const Servers = () => {
         setJoining(null);
       }
     },
-    [joining, t],
+    [joining, t, game.display, closeThenJoin],
   );
 
   // A full server turns you away, so the button gets you in line instead of failing.
@@ -383,7 +411,6 @@ const Servers = () => {
 
   // Install & join: a free track goes through the install queue, and the server is joined
   // once it lands. Keyed by the mod's slug, since that is all the queue reports by.
-  const { game } = useConfig();
   const { startPendingInstall, active } = useInstall();
   const [installing, setInstalling] = useState<Record<string, string>>({});
   // Slugs whose install has been seen running. A finished card left over from an earlier

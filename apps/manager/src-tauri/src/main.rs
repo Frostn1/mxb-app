@@ -3374,6 +3374,33 @@ fn join_server(app: tauri::AppHandle, address: String) -> Result<gameproc::Launc
     Ok(outcome)
 }
 
+/// Close the running game, then join `address` with the copy that replaces it.
+///
+/// The way forward from `already_running`, which the tab could previously only report. The
+/// game reads the connect flag at startup and nowhere else, so an open copy genuinely cannot
+/// be steered into a server — the only join is a new process, and the only way to a new
+/// process is for the old one to go first.
+///
+/// Deliberately a command of its own rather than something [`join_server`] does when it finds
+/// a game up: closing somebody's game is not a detail to slip into a button they thought was
+/// a join. The tab asks first.
+#[tauri::command]
+async fn close_and_join(
+    app: tauri::AppHandle,
+    address: String,
+) -> Result<gameproc::LaunchOutcome, String> {
+    if !gameproc::is_game_running() {
+        return join_server(app, address);
+    }
+    if !serverqueue::close_and_settle().await {
+        return Err(format!(
+            "{} wouldn't close. Close it yourself and press Join again.",
+            game::active().display
+        ));
+    }
+    join_server(app, address)
+}
+
 /// Wait in line for a full server; the app launches into it when a slot is ours.
 /// See [`serverqueue`].
 #[tauri::command]
@@ -6442,6 +6469,21 @@ fn main() {
     // `antidebug`.
     antidebug::guard();
 
+    // A copy of this binary, asked for a Steam app ticket and nothing else. It prints the
+    // ticket and exits, and the app proper never touches Steam's API itself.
+    //
+    // That separation is the whole point: `SteamAPI_Init` tells the Steam client that the
+    // calling process *is* MX Bikes, and Steam then refuses to launch the game for a
+    // `steam://rungameid` — it already has one running. Reading the master list used to do
+    // that inside this process, which left every Steam launch in the app doing nothing at all.
+    //
+    // It runs here, before the single-instance guard, so the helper is not mistaken for
+    // somebody opening a second copy of the app and killed before it answers.
+    #[cfg(worldnet)]
+    if let Some(code) = worldnet::ticket_cli() {
+        std::process::exit(code);
+    }
+
     begin_graphics_attempt();
 
     let builder = tauri::Builder::default();
@@ -7066,6 +7108,7 @@ fn main() {
             frostmod_stop,
             launch_game,
             join_server,
+            close_and_join,
             queue_join,
             queue_leave,
             queue_status,

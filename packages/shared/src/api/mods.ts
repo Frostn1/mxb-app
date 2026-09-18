@@ -2501,6 +2501,17 @@ export function joinServer(address: string): Promise<LaunchOutcome> {
   return invoke<LaunchOutcome>("join_server", { address });
 }
 
+/**
+ * Close the running game, then join `address` with the copy that replaces it.
+ *
+ * What to offer after `already_running`. The connect flag is read at startup and nowhere
+ * else, so the only join is a new process — and the old one has to go first. Rejects with
+ * the reason when the game wouldn't close.
+ */
+export function closeAndJoin(address: string): Promise<LaunchOutcome> {
+  return invoke<LaunchOutcome>("close_and_join", { address });
+}
+
 /** Is MX Bikes currently running? Probes for real on all three platforms — under Wine and
  *  Proton the game is an ordinary process whose argv still names the exe. */
 export function isGameRunning(): Promise<boolean> {

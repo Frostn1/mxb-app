@@ -792,6 +792,7 @@ export const ptBR: Translation = {
   "join.gameOpen":
     "O {{game}} já está aberto. O app o iniciou, então ele está atrás desta janela. Feche o jogo e entre a partir daqui.",
   "join.showGame": "Mostrar o jogo",
+  "join.closeAndJoin": "Fechar o jogo e entrar",
   "join.failed": "Não foi possível entrar nesse servidor",
   "join.manual": "Entrar num servidor fora da lista",
   "join.noServers": "Ainda não há servidores listados — digite um endereço que você recebeu.",
