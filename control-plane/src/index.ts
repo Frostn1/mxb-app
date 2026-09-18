@@ -151,13 +151,20 @@ async function route(request: Request, env: Env): Promise<Response> {
     return artifact(env, `content/bikes/${name}`);
   }
 
-  // Enrollment is the one unauthenticated write: it trades an invite code for a token.
+  // Above the account gate on purpose: track generation must work against a local `wrangler dev`
+  // that has no accounts, and enrollment is what trades an invite code for the first token.
+  // Track generation spends our Anthropic budget, so a per-address ceiling keeps a loop from
+  // running the bill up: the call's shape (one completion, a schema that can only be a motocross
+  // track) bounds each request, the limiter bounds how many an address may ask for.
+  if (method === "POST" && path === "/v1/track/generate") {
+    const ip = request.headers.get("CF-Connecting-IP") ?? "unknown";
+    if (env.TRACK_LIMITER && !(await env.TRACK_LIMITER.limit({ key: ip })).success) {
+      return json(429, { error: "busy" });
+    }
+    return generateTrack(request, env);
+  }
+  // Enrollment is the one unauthenticated write: it trades an invite code for a token, and
   // Steam sign-in will replace the invite code without changing anything downstream.
-  // Above the account gate on purpose. The endpoint spends our Anthropic budget, so it is
-  // capped hard by its own shape — one call, 16k output tokens, a schema that can only be a
-  // motocross track — rather than by who is asking. That also makes it usable against a local
-  // `wrangler dev`, which has no accounts to enroll with.
-  if (method === "POST" && path === "/v1/track/generate") return generateTrack(request, env);
   if (method === "POST" && path === "/v1/enroll") return enroll(request, env);
 
   // Steam comes back to the browser, which carries no bearer token — the login id in the

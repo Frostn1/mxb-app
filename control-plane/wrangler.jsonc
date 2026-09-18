@@ -114,8 +114,12 @@
   // Ceilings in front of the routes that ask Steam or hand out keys. Sign-in is per client
   // address: every return asks Steam, and a login state costs nothing to mint. Key grants are
   // per account: the app asks once per file per PC, so 60 a minute is far past honest use.
+  // Track generation is per client address: it is unauthenticated (usable against a local
+  // `wrangler dev`) and every call spends our Anthropic budget, so a ceiling keeps a loop from
+  // running the bill up. Ten a minute is well past a rider retrying a design.
   "ratelimits": [
     { "name": "SIGNIN_LIMITER", "namespace_id": "1001", "simple": { "limit": 20, "period": 60 } },
-    { "name": "KEY_GRANT_LIMITER", "namespace_id": "1002", "simple": { "limit": 60, "period": 60 } }
+    { "name": "KEY_GRANT_LIMITER", "namespace_id": "1002", "simple": { "limit": 60, "period": 60 } },
+    { "name": "TRACK_LIMITER", "namespace_id": "1003", "simple": { "limit": 10, "period": 60 } }
   ]
 }
