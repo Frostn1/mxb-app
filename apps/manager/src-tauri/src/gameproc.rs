@@ -1549,6 +1549,90 @@ fn steam_owned(dir: &std::path::Path) -> bool {
     dir.components().any(|c| c.as_os_str().eq_ignore_ascii_case("steamapps"))
 }
 
+/// Does Steam have this app down as already running?
+///
+/// The client keeps `HKCU\Software\Valve\Steam\Apps\<appid>\Running` set while a game of
+/// its own is up, and names the same app in `RunningAppID`. It is worth asking because Steam
+/// will not start a game it believes is running: the launch URL brings up the "additional
+/// command line options" prompt, OK does nothing, and no process ever appears — a failure
+/// with no error anywhere in it.
+///
+/// `None` when Windows won't say, which is treated as "no": an unreadable key must not take
+/// the Steam route away from everybody.
+#[cfg(windows)]
+fn steam_thinks_running(appid: &str) -> Option<bool> {
+    use std::os::raw::c_void;
+
+    const HKEY_CURRENT_USER: isize = -2147483647; // 0x80000001
+    const RRF_RT_REG_DWORD: u32 = 0x0000_0010;
+
+    #[link(name = "advapi32")]
+    unsafe extern "system" {
+        fn RegGetValueW(
+            hkey: isize,
+            subkey: *const u16,
+            value: *const u16,
+            flags: u32,
+            typ: *mut u32,
+            data: *mut c_void,
+            data_len: *mut u32,
+        ) -> i32;
+    }
+
+    fn dword(subkey: &str, value: &str) -> Option<u32> {
+        let subkey = wide(subkey);
+        let value = wide(value);
+        let mut out: u32 = 0;
+        let mut len = std::mem::size_of::<u32>() as u32;
+        // SAFETY: a read-only registry query into one stack u32, length passed in bytes.
+        let rc = unsafe {
+            RegGetValueW(
+                HKEY_CURRENT_USER,
+                subkey.as_ptr(),
+                value.as_ptr(),
+                RRF_RT_REG_DWORD,
+                std::ptr::null_mut(),
+                &mut out as *mut u32 as *mut c_void,
+                &mut len,
+            )
+        };
+        (rc == 0).then_some(out)
+    }
+
+    if let Some(running) = dword(&format!("Software\\Valve\\Steam\\Apps\\{appid}"), "Running") {
+        return Some(running != 0);
+    }
+    let wanted: u32 = appid.parse().ok()?;
+    dword("Software\\Valve\\Steam", "RunningAppID").map(|id| id == wanted)
+}
+
+/// Watch for the game after a launch we handed to somebody else, and say so if it never
+/// arrives.
+///
+/// Steam's launch is fire-and-forget — `ShellExecuteEx` succeeds the moment the client takes
+/// the URL, whatever the client then does with it — so a launch that quietly went nowhere
+/// looked exactly like one that worked. This is the only thing that can tell them apart, and
+/// it does it in the log rather than by blocking the button.
+#[cfg(windows)]
+fn watch_for_start(via: &'static str) {
+    /// Generous: a cold start off a slow disk, with Steam checking files first.
+    const WAIT: std::time::Duration = std::time::Duration::from_secs(45);
+    std::thread::spawn(move || {
+        let deadline = std::time::Instant::now() + WAIT;
+        while std::time::Instant::now() < deadline {
+            if is_game_running() {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(500));
+        }
+        log::warn!(
+            "{} was asked to start the game {WAIT:?} ago and no {} process ever appeared",
+            via,
+            crate::game::active().exe
+        );
+    });
+}
+
 /// The `steam://` URL that asks Steam to start the game, connect flag and all.
 ///
 /// Launch arguments go after a `//` separator, space-separated. The separator is
@@ -1833,12 +1917,28 @@ fn launch_with(cfg: &AppConfig, address: Option<&str>) -> anyhow::Result<LaunchO
             if let Some(reason) = steam_elevation_conflict() {
                 anyhow::bail!("{reason}");
             }
-            let url = steam_url(cfg.game().steam_appid, address);
-            match shell_open(&url) {
-                Ok(()) => return Ok(LaunchOutcome::Launched),
-                // A Steam whose own URL scheme isn't registered is a broken install, not a
-                // reason to leave Play dead — the exe is still sitting right there.
-                Err(e) => log::warn!("{e:#}; running {} directly instead", exe.display()),
+            // We already know there is no game process — that is the check at the top of this
+            // function. So Steam saying otherwise means it is holding a session that isn't a
+            // game, and handing it a launch URL would do nothing at all. Run the exe instead,
+            // which the Steam layer in the build hands straight back to the client anyway.
+            let appid = cfg.game().steam_appid;
+            if steam_thinks_running(appid) == Some(true) {
+                log::warn!(
+                    "Steam has app {appid} down as running while no {} process exists — \
+                     starting the exe directly, since a launch URL would be ignored",
+                    cfg.game().exe
+                );
+            } else {
+                let url = steam_url(appid, address);
+                match shell_open(&url) {
+                    Ok(()) => {
+                        watch_for_start("Steam");
+                        return Ok(LaunchOutcome::Launched);
+                    }
+                    // A Steam whose own URL scheme isn't registered is a broken install, not a
+                    // reason to leave Play dead — the exe is still sitting right there.
+                    Err(e) => log::warn!("{e:#}; running {} directly instead", exe.display()),
+                }
             }
         }
 

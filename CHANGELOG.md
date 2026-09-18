@@ -16,6 +16,14 @@
 - A server running a track you don't have says **Not installed** on the track's own line,
   rather than putting a warning sign over the picture.
 
+## Unreleased — Joining a server
+
+### Changed
+- **Install & join** and every other Join start the game with the server already picked, even
+  when the Servers tab has been open all evening.
+- Press Join with the game already open and the app offers to close it and take you straight
+  into the server, rather than leaving you to do both by hand.
+
 ## Unreleased — Replay moves into the Studio, and records itself
 
 ### Added

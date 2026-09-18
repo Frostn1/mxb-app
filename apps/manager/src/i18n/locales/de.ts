@@ -798,6 +798,7 @@ export const de: Translation = {
   "join.gameOpen":
     "{{game}} läuft bereits. Die App hat es gestartet, es liegt also hinter diesem Fenster. Schließe das Spiel und tritt dann von hier aus bei.",
   "join.showGame": "Spiel anzeigen",
+  "join.closeAndJoin": "Spiel schließen & beitreten",
   "join.failed": "Diesem Server konnte nicht beigetreten werden",
   "join.manual": "Einem nicht gelisteten Server beitreten",
   "join.noServers": "Noch keine Server gelistet — tippe eine Adresse ein, die du bekommen hast.",

@@ -281,6 +281,15 @@ async fn close_open_game(app: &AppHandle) -> bool {
     if !cfg.queue_restart_game {
         return false;
     }
+    close_and_settle().await
+}
+
+/// Close the game and give Steam a moment to notice, then say whether it went.
+///
+/// Shared with the Servers tab's own Close & join, which is the same two problems in a row:
+/// the game reads the connect flag only at startup, and a launch that follows the close too
+/// closely meets a Steam that still has the old session down as running.
+pub(crate) async fn close_and_settle() -> bool {
     let closed = tauri::async_runtime::spawn_blocking(|| gameproc::close_game(CLOSE_WAIT))
         .await
         .unwrap_or(false);

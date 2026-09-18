@@ -797,6 +797,7 @@ export const fr: Translation = {
   "join.gameOpen":
     "{{game}} est déjà ouvert. L'app l'a lancé, il se trouve donc derrière cette fenêtre. Fermez le jeu, puis rejoignez depuis ici.",
   "join.showGame": "Afficher le jeu",
+  "join.closeAndJoin": "Fermer le jeu et rejoindre",
   "join.failed": "Impossible de rejoindre ce serveur",
   "join.manual": "Rejoindre un serveur non listé",
   "join.noServers": "Aucun serveur listé pour l'instant — saisissez une adresse qu'on vous a donnée.",
