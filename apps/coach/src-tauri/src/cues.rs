@@ -273,7 +273,14 @@ pub fn pick(points: &[CuePoint], review: &Review, level: Level, amount: Amount, 
         if !allowed(level, kind) || lost < min_loss(level) || (level != Level::New && lost <= 0.0) {
             return;
         }
-        let answered = sr.findings.iter().any(|f| answers(f.skill) == Some(kind));
+        // A cue made from a tip is answering that tip, so it counts double the same way a cue
+        // the fast lap placed does. Without the second arm the line calls were the only kind
+        // that could never be doubled: `line` has no `answers` entry, while `gear_up` and
+        // `gear_down` sit in both tables and always were.
+        let answered = sr
+            .findings
+            .iter()
+            .any(|f| answers(f.skill) == Some(kind) || from_finding(f.skill, &f.title) == Some(kind));
         let resting = seen.resting(&sr.section.name, kind);
         let score = (lost * if answered { 2.0 } else { 1.0 } + basic(kind) * basics_weight(level))
             * seen.weight(&sr.section.name, kind);
@@ -436,6 +443,32 @@ mod tests {
         assert_eq!(from_finding("gear_up", ""), Some(cue::UPSHIFT));
         assert_eq!(from_finding("gear_down", ""), Some(cue::DOWNSHIFT));
         assert_eq!(from_finding("carry_speed", "Carry more speed"), None);
+    }
+
+    /// A line call is the section's own tip, so it counts double the way a gear call always
+    /// has. Before this, `line` was missing from `answers` while `gear_up` sat in both tables,
+    /// so on a short sheet the line call lost to whatever else the corner was costing.
+    #[test]
+    fn a_line_call_counts_double_like_a_gear_call_does() {
+        let off_line = Style { wide: 3.0, corner_v: 9.0, decel: 2.5, brake: 0.5, ..FAST };
+        let (fast, mine) = (lap(&FAST), lap(&off_line));
+        let rv = review(&mine, &fast, BIKE);
+        let line_tips: Vec<_> =
+            rv.sections.iter().flat_map(|s| s.findings.iter()).filter(|f| f.skill == "line").collect();
+        assert!(!line_tips.is_empty(), "the lap needs a line tip to be a test of one");
+        for f in &line_tips {
+            let kind = from_finding(f.skill, &f.title).expect("a line tip names a side");
+            assert!(
+                answers(f.skill) != Some(kind),
+                "this test is about the case `answers` does not cover"
+            );
+        }
+        // On the tightest sheet there is, the line call still earns its place.
+        let c = pick(&cue_points(&fast, &sections(&fast)), &rv, Level::SubPro, Amount::Few, &History::default()).cues;
+        assert!(
+            c.iter().any(|c| c.kind == cue::WIDE || c.kind == cue::INSIDE),
+            "the line call should survive a two-cue sheet: {c:?}"
+        );
     }
 
     /// Where the fast lap shifts is not on its own a reason to call a shift: only the gearing
