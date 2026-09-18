@@ -59,10 +59,23 @@ section bests, and the lines view), so two screens can't call the same corner di
 
 ## Rules
 
-Thresholds are starting values in `analysis.rs` → `mod th`, to be tuned on real laps. The landing
-and turn-in numbers are reasoned from the shape of a landing and from where braking belongs, not
-yet measured against recordings. ⚠ marks a safety finding; ◆ a judgement of the lap on its own
-terms rather than a difference from the reference.
+Thresholds live in `analysis.rs` → `mod th`. ⚠ marks a safety finding; ◆ a judgement of the lap
+on its own terms rather than a difference from the reference.
+
+`tune_thresholds` (ignored; `COACH_LAPS=<dir of .mxbc> cargo test -p mxb-coach --bin mxb-coach
+tune_thresholds -- --ignored --nocapture`) prints what the landing and turn-in rules read over
+real recordings, and — the number that matters — how often each tip actually reaches the rider
+per lap. Run it as recordings accumulate; a rule that fires more than about twice a lap is
+crying wolf whatever its reasoning.
+
+First pass, 3 recordings, 93 flights, 4 laps held against their own fast lap: landings run out
+at a median gradient of −0.114 and descend over the lip at −0.322, landing hits sit at 3.6 G
+median and 20.8 G at the 99th. `LAND_DOWN` moved from −0.12 to −0.07 on that evidence — the
+first value left half of all real landings in the dead band. `in_too_hot` reached the rider 1.75
+times a lap, in line with long-standing rules like `carry_speed` (3.0) and `coasting` (2.5), so
+its gate was left alone; `apex_early` 0.25; the absolute over-jump did not fire at all, and only
+2 of 93 flights earned a `Flat` verdict, so that verdict is if anything conservative. Four laps
+is a small sample and none of it is settled.
 
 | Section | Rule | Fires when |
 |---|---|---|
