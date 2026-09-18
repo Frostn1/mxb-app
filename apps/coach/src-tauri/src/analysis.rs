@@ -14,7 +14,7 @@
 use std::f32::consts::PI;
 use std::ops::Range;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::telemetry::{Lap, Sample};
 
@@ -79,6 +79,33 @@ mod th {
     pub const CLUTCH_S: f32 = 0.5;
     pub const EXIT_KMH: f32 = 3.0;
 
+    // Coming in too fast. Braking belongs before turn-in, so speed still leaving the bike after
+    // the bike is committed is speed that was carried in. Measured off the brake lever and not
+    // the deceleration: sand and a deep rut scrub speed on their own, and these rules cannot see
+    // the ground — `soil` is filled in by the caller, after the review returns.
+    /// Leaned this far into the core is turn-in: the bike is committed. Not the core's start —
+    /// `CORNER_CURVATURE` is a 100 m noise gate, so the core opens long before a rider would
+    /// say they had turned in.
+    pub const TURN_IN_DEG: f32 = 18.0;
+    /// Share of the turn-in speed that may still come off after it, and how much of it in km/h
+    /// before it is worth saying at all.
+    pub const HOT_INSIDE_SHARE: f32 = 0.30;
+    pub const HOT_INSIDE_KMH: f32 = 8.0;
+    pub const SOLO_HOT_INSIDE_SHARE: f32 = 0.40;
+    /// The lever still held this long past turn-in.
+    pub const HOT_BRAKE_S: f32 = 0.25;
+    /// And one consequence, or it is only trail-braking into a rut, which is how the corner is
+    /// meant to be ridden: the slowest point this far through the core, the bike picked up this
+    /// many degrees before the gas, or this far outside the fast line on the way out.
+    pub const HOT_APEX_SHARE: f32 = 0.6;
+    pub const HOT_STAND_DEG: f32 = 8.0;
+    pub const HOT_WIDE_M: f32 = 1.5;
+    /// A core shorter than this has no "inside the turn" to speak of.
+    pub const HOT_MIN_CORE_M: usize = 15;
+    /// Turning in too early: the slowest point this early in the core, and the bike still leaned
+    /// with the throttle shut at the end of it.
+    pub const APEX_EARLY_SHARE: f32 = 0.35;
+
     pub const FLOAT_AIR: f32 = 1.1;
     pub const FLOAT_HEIGHT_M: f32 = 0.5;
     pub const SCRUB_ROLL_DEG: f32 = 20.0;
@@ -89,6 +116,25 @@ mod th {
     pub const LAND_THROTTLE_LOW: f32 = 0.3;
     pub const LAND_THROTTLE_GOOD: f32 = 0.5;
     pub const LAND_ROLL_DEG: f32 = 15.0;
+    /// Where a jump was landed, read off the ground the bike runs on once the suspension has
+    /// settled: the first metres after touchdown are the shock soaking it up, not the hill.
+    pub const LAND_SLOPE_SKIP_M: usize = 2;
+    pub const LAND_SLOPE_M: usize = 8;
+    /// Ground falling away this steeply — metres down per metre along — is still the downslope;
+    /// this flat or flatter is past the bottom of it; rising this much is the up-face. The band
+    /// between `LAND_FLAT` and `LAND_DOWN` is deliberately left without a verdict: a shallow
+    /// landing is the case where the ground alone cannot settle it.
+    pub const LAND_DOWN: f32 = -0.12;
+    pub const LAND_FLAT: f32 = -0.04;
+    pub const LAND_UP: f32 = 0.06;
+    /// Coming down this steeply, gradient again, onto ground that isn't falling away: the bike
+    /// drops onto the ground instead of following a ramp down. About 10°.
+    pub const FALL_RATE: f32 = -0.18;
+    /// A flat landing is over-jumping when it hits this share of the hard-landing floor, so the
+    /// rider's own normalisation carries straight over.
+    pub const OVERJUMP_HIT_SHARE: f32 = 0.7;
+    /// Shorter flights are a hop off a bump, and the ground either side of one says nothing.
+    pub const OVERJUMP_AIR_S: f32 = 0.4;
     /// Share of the travel that counts as bottomed out.
     pub const BOTTOM: f32 = 0.95;
     pub const BOTTOMS_PER_LAP: usize = 3;
@@ -553,7 +599,7 @@ fn air_runs(tr: &Trace, within: Range<usize>) -> Vec<(usize, usize)> {
     raw.into_iter().filter(|&(s, e)| e - s >= th::JUMP_MIN_M && tr.span(s, e) >= th::JUMP_MIN_AIR_S).collect()
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Kind {
     Straight,
@@ -611,6 +657,9 @@ pub struct CornerType {
 #[serde(rename_all = "camelCase")]
 pub struct Section {
     pub kind: Kind,
+    /// Stable across laps and sessions once the track map has named it: `t5`, `j2`, `w1`. Until
+    /// then it is this lap's own positional slug, so a section always has a key.
+    pub id: String,
     pub name: String,
     pub start: usize,
     pub end: usize,
@@ -800,14 +849,16 @@ pub fn sections(reference: &Trace) -> Vec<Section> {
     let feats = features(reference);
     let mut out = Vec::new();
     let mut counts = [0usize; 5];
-    let mut name = |kind: Kind| {
+    let mut label = |kind: Kind| {
         let k = kind as usize;
         counts[k] += 1;
         let word = ["Straight", "Turn", "Jump", "Rhythm", "Whoops"][k];
-        format!("{word} {}", counts[k])
+        let tag = ["s", "t", "j", "r", "w"][k];
+        (format!("{tag}{}", counts[k]), format!("{word} {}", counts[k]))
     };
-    let straight = |a: usize, b: usize, name: String| Section {
+    let straight = |a: usize, b: usize, (id, name): (String, String)| Section {
         kind: Kind::Straight,
+        id,
         name,
         start: a,
         end: b,
@@ -821,15 +872,17 @@ pub fn sections(reference: &Trace) -> Vec<Section> {
     for (i, f) in feats.iter().enumerate() {
         let mut start = f.a.saturating_sub(f.entry()).max(cursor);
         if start - cursor > th::MIN_STRAIGHT_M {
-            out.push(straight(cursor, start, name(Kind::Straight)));
+            out.push(straight(cursor, start, label(Kind::Straight)));
         } else {
             start = cursor;
         }
         let next = feats.get(i + 1).map_or(last, |n| n.a.saturating_sub(n.entry()));
         let end = (f.b + f.exit()).min(next.max(f.b + 1)).min(last);
+        let (id, name) = label(f.kind);
         out.push(Section {
             kind: f.kind,
-            name: name(f.kind),
+            id,
+            name,
             start,
             end,
             core: (f.a, f.b),
@@ -840,7 +893,7 @@ pub fn sections(reference: &Trace) -> Vec<Section> {
         cursor = end;
     }
     if last - cursor > th::MIN_STRAIGHT_M || out.is_empty() {
-        out.push(straight(cursor, last, name(Kind::Straight)));
+        out.push(straight(cursor, last, label(Kind::Straight)));
     } else if let Some(s) = out.last_mut() {
         s.end = last;
     }
@@ -863,6 +916,11 @@ pub struct Finding {
     /// Advice about something risky: shown even where the section lost no time.
     #[serde(skip)]
     pub(crate) safety: bool,
+    /// True on the lap's own terms rather than against the fast lap: shown whatever the clock
+    /// says, but not a warning, so it still counts as an explanation of the time lost. A jump
+    /// you over-jump on every lap costs nothing against yourself and is still worth saying.
+    #[serde(skip)]
+    pub(crate) absolute: bool,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -1008,9 +1066,11 @@ pub fn norm(laps: &[Trace]) -> (f32, f32) {
 
 fn theme(skill: &str) -> &'static str {
     match skill {
+        // `in_too_hot` groups with the brake point because that is its fix, not with corner
+        // speed, which would separate a tip from its own family.
         "brake_early" | "brake_late" | "brake_harder" | "brake_unneeded" | "more_front" | "front_lock"
-        | "rear_lock" | "stoppie" | "clutch_braking" | "bottom_braking" => "Braking",
-        "carry_speed" | "lean_more" | "line" | "coasting" | "bar_fight" | "front_push" => "Corner speed",
+        | "rear_lock" | "stoppie" | "clutch_braking" | "bottom_braking" | "in_too_hot" => "Braking",
+        "carry_speed" | "lean_more" | "line" | "coasting" | "bar_fight" | "front_push" | "apex_early" => "Corner speed",
         "late_throttle" | "wheelspin" | "wheelie" | "exit_speed" | "gear_up" | "gear_down" | "throttle_room" => "Corner exits",
         "jump_it" | "chop_face" | "scrub" | "land_short" | "overjump" | "land_throttle" | "land_crooked"
         | "bottom_landing" | "air_throttle" | "rhythm_count" | "land_hard" => "Jumps",
@@ -1026,7 +1086,10 @@ fn overall(sections: &[SectionReview], solo: bool) -> Vec<Theme> {
     let mut themes: Vec<Theme> = Vec::new();
     for s in sections {
         let Some(head) = s.findings.iter().find(|f| f.skill != "unclear") else { continue };
-        if !solo && s.lost <= th::WORTH_S && !head.safety {
+        // A judgement counts towards the lap's themes even where the section cost nothing: it
+        // survived the `retain` for the same reason, and a card the rider can read while the
+        // theme above it pretends the mistake isn't there reads as the app contradicting itself.
+        if !solo && s.lost <= th::WORTH_S && !head.safety && !head.absolute {
             continue;
         }
         let (name, lost) = (theme(head.skill), if solo { 0.0 } else { s.lost.max(0.0) });
@@ -1101,7 +1164,7 @@ pub fn review(lap: &Trace, reference: &Trace, bike: Bike) -> Review {
             }
             let mut findings = dedupe(c.out, s.kind != Kind::Corner);
             if lost <= th::WORTH_S {
-                findings.retain(|f| f.safety);
+                findings.retain(|f| f.safety || f.absolute);
             } else if findings.iter().all(|f| f.safety) {
                 findings.push(Finding {
                     skill: "unclear",
@@ -1113,6 +1176,7 @@ pub fn review(lap: &Trace, reference: &Trace, bike: Bike) -> Review {
                     at: s.start,
                     weight: 0.0,
                     safety: false,
+                    absolute: false,
                 });
             }
             findings.sort_by(|a, b| b.weight.total_cmp(&a.weight));
@@ -1171,12 +1235,23 @@ struct Ctx<'a> {
 }
 
 impl Ctx<'_> {
+    fn push(&mut self, skill: &'static str, weight: f32, at: usize, title: &str, detail: String, safety: bool, absolute: bool) {
+        self.out.push(Finding { skill, title: title.into(), detail, at, weight, safety, absolute });
+    }
+
     fn add(&mut self, skill: &'static str, weight: f32, at: usize, title: &str, detail: String) {
-        self.out.push(Finding { skill, title: title.into(), detail, at, weight, safety: false });
+        self.push(skill, weight, at, title, detail, false, false);
     }
 
     fn warn(&mut self, skill: &'static str, at: usize, title: &str, detail: String) {
-        self.out.push(Finding { skill, title: title.into(), detail, at, weight: 2.0, safety: true });
+        self.push(skill, 2.0, at, title, detail, true, false);
+    }
+
+    /// A judgement the lap earns on its own — "you're over-jumping this" — rather than a
+    /// difference from the fast lap. Survives a section that cost no time, but unlike `warn`
+    /// it still reads as an explanation, so it doesn't trigger the "compare the traces" tip.
+    fn judge(&mut self, skill: &'static str, weight: f32, at: usize, title: &str, detail: String) {
+        self.push(skill, weight, at, title, detail, false, true);
     }
 }
 
@@ -1265,6 +1340,65 @@ fn corner(c: &mut Ctx) {
             ));
         }
         _ => {}
+    }
+
+    // Coming in too fast, on the lap's own terms. The gate is where the speed leaves the bike;
+    // the consequence is what stops it crying wolf on a rider trail-braking into a rut, which
+    // in MX Bikes is how the corner is meant to be ridden.
+    if let Some(h) = hot(p, a, b) {
+        let hot_enough = h.share > th::HOT_INSIDE_SHARE
+            && h.inside_kmh > th::HOT_INSIDE_KMH
+            && h.braking_s > th::HOT_BRAKE_S;
+        if hot_enough {
+            let late_apex = (h.apex - a) as f32 > (b - a) as f32 * th::HOT_APEX_SHARE;
+            // Leaned in, then picked back up to save it. No gas, or it is just an exit.
+            let stood_up = p.max_by(h.at..h.apex + 1, |q| q.roll.abs()) - p.pts[h.apex].roll.abs()
+                > th::HOT_STAND_DEG
+                && p.pts[h.apex].throttle < th::THROTTLE_ON;
+            // Ran wide: further outside the fast line leaving the corner than entering it.
+            let across = |i: usize| {
+                let heading = r.bearing(i);
+                let (dx, dz) = (p.pts[i].x - r.pts[i].x, p.pts[i].z - r.pts[i].z);
+                // Outside runs against the corner's handedness.
+                -(dx * heading.cos() - dz * heading.sin()) * s.dir as f32
+            };
+            let wide = (s.dir != 0 && across(end) > th::HOT_WIDE_M && across(end) > across(h.at))
+                .then(|| across(end));
+
+            let consequence = if let Some(m) = wide {
+                Some(format!("run {m:.1} m wide on the way out"))
+            } else if stood_up {
+                Some("have to pick the bike up mid-corner".to_string())
+            } else if late_apex {
+                Some("can't start driving until well past the middle of the turn".to_string())
+            } else {
+                None
+            };
+            if let Some(what) = consequence {
+                c.judge("in_too_hot", 0.95, h.at, "You're coming in too fast", format!(
+                    "You carry about {:.0} km/h too much into {name}: {:.0}% of the speed comes off \
+                     after you have already turned in, and you {what}. Get the braking done in a \
+                     straight line before turn-in, then roll through on a steady throttle.",
+                    h.inside_kmh,
+                    h.share * 100.0
+                ));
+            }
+        }
+    }
+
+    // Turning in too early: slowest in the first third, and still leaned with the throttle shut
+    // at the exit — running out of track rather than driving off the corner.
+    if let Some(at) = turn_in(p, a, b) {
+        let apex = p.slowest(at..b + 1);
+        let early = ((apex - a) as f32) < (b - a) as f32 * th::APEX_EARLY_SHARE;
+        let stuck = p.pts[b].roll.abs() > th::TURN_IN_DEG && p.pts[b].throttle < th::THROTTLE_ON;
+        if early && stuck {
+            c.judge("apex_early", 0.7, at, "You're turning in too early", format!(
+                "Your slowest point in {name} comes in the first third of the turn, and you are still \
+                 leaned over with the throttle shut on the way out. Turn in later and point the bike \
+                 at the exit so you can drive off the corner."
+            ));
+        }
     }
 
     // Through the turn.
@@ -1447,6 +1581,13 @@ fn corner(c: &mut Ctx) {
              the front brake and brake a little earlier."
         ));
     }
+
+    // Braking late and coming in hot are the same cause with the same fix, and the judgement
+    // outranks the comparison, so both would read as the tip said twice. `dedupe` keys on
+    // (skill, title) and can't see across two skills.
+    if c.out.iter().any(|f| f.skill == "in_too_hot") {
+        c.out.retain(|f| f.skill != "brake_late");
+    }
 }
 
 fn jumps(c: &mut Ctx) {
@@ -1499,6 +1640,13 @@ fn jumps(c: &mut Ctx) {
                 jumps(theirs)
             ));
         }
+        // No landing verdict is reached past this return, so the one fact that explains a
+        // mis-paired rhythm goes into the count tip rather than being lost with it.
+        if landing(p, mine[0].0, mine[0].1, s.end, c.bike).0 == Landing::Flat {
+            if let Some(f) = c.out.last_mut() {
+                f.detail.push_str(" You go long on the first one, which is what stops you linking them.");
+            }
+        }
         return;
     }
 
@@ -1541,23 +1689,50 @@ fn jumps(c: &mut Ctx) {
             ));
         }
         let landed = pl as i64 - rl as i64;
-        if landed < -th::SHORT_M {
-            let slow = p.pts[pt].v < r.pts[rt].v * th::TAKEOFF_SPEED_RATIO;
-            let why = if slow {
-                format!(" You hit the lip {:.0} km/h slower.", (r.pts[rt].v - p.pts[pt].v) * KMH)
-            } else {
-                String::new()
-            };
-            c.add("land_short", 0.8, pl, "You're landing short", format!(
-                "You land {} m short of the fast lap at {name} and lose speed on the face of the landing. \
-                 Carry more speed up to the lip.{why}",
-                -landed
-            ));
-        } else if landed > th::LONG_M {
-            c.add("overjump", 0.8, pl, "You're overjumping", format!(
-                "You land {landed} m past the fast lap at {name}, beyond the downslope. Roll off a touch \
-                 before the lip, or scrub it lower."
-            ));
+        // The ground settles this where it can read it; the pairing against the fast lap only
+        // speaks where it can't. A jump taken long on every lap costs nothing against yourself,
+        // and is still the thing worth saying.
+        let (verdict, hit_g) = landing(p, pt, pl, s.end, c.bike);
+        match verdict {
+            Landing::Flat => c.judge(
+                "overjump",
+                0.9,
+                // The spot is the face, not the landing: that is where the rider can still act.
+                pt,
+                "You're over-jumping this",
+                format!(
+                    "Your {} m flight over {name} finishes out on the flat, past the downslope, and \
+                     hits {hit_g:.0} G for it. Ease out of the throttle a bike length before the lip, \
+                     or stay seated and lean the bike over as you leave it so it stays low.",
+                    pl - pt
+                ),
+            ),
+            Landing::Face => c.judge("land_short", 0.9, pl, "You're casing this one", format!(
+                "You come down on the up-face of {name} and the landing stops you dead. Carry more \
+                 speed up to the lip and stay on the gas all the way to it."
+            )),
+            Landing::Ramp | Landing::Unsure => {
+                if landed < -th::SHORT_M {
+                    let slow = p.pts[pt].v < r.pts[rt].v * th::TAKEOFF_SPEED_RATIO;
+                    let why = if slow {
+                        format!(" You hit the lip {:.0} km/h slower.", (r.pts[rt].v - p.pts[pt].v) * KMH)
+                    } else {
+                        String::new()
+                    };
+                    c.add("land_short", 0.8, pl, "You're landing short", format!(
+                        "You land {} m short of the fast lap at {name} and lose speed on the face of \
+                         the landing. Carry more speed up to the lip.{why}",
+                        -landed
+                    ));
+                } else if landed > th::LONG_M {
+                    // At the face like the absolute verdict: the landing is where it shows, the
+                    // lip is where the rider can still do something about it.
+                    c.add("overjump", 0.8, pt, "You're overjumping", format!(
+                        "You land {landed} m past the fast lap at {name}, beyond the downslope. Roll \
+                         off a touch before the lip, or scrub it lower."
+                    ));
+                }
+            }
         }
         let at_land = |t: &Trace, l: usize| t.pts[(l + 2).min(s.end)].throttle;
         if at_land(p, pl) < th::LAND_THROTTLE_LOW && at_land(r, rl) > th::LAND_THROTTLE_GOOD {
@@ -1578,7 +1753,9 @@ fn jumps(c: &mut Ctx) {
         }
         let hit = |t: &Trace, l: usize| t.max_by(l..(l + 8).min(s.end + 1).max(l + 1), |q| q.hit);
         let (hp, hr) = (hit(p, pl), hit(r, rl));
-        if hp > c.bike.land_g(th::LAND_HIT_G) && hp > hr * th::LAND_HIT_RATIO {
+        // Where the landing is already called out as over-jumped, the G is the symptom of it
+        // and the over-jump detail quotes the figure anyway.
+        if verdict != Landing::Flat && hp > c.bike.land_g(th::LAND_HIT_G) && hp > hr * th::LAND_HIT_RATIO {
             c.warn("land_hard", pl, "Land softer", format!(
                 "You hit {hp:.0} G landing {name}, the fast lap {hr:.0} G. Aim for the downslope, and soak \
                  the landing up with your legs instead of locking your arms."
@@ -1626,6 +1803,113 @@ fn jumps(c: &mut Ctx) {
     }
 }
 
+/// Where the rider committed the bike: the first metre in the core leaned past `TURN_IN_DEG`.
+fn turn_in(t: &Trace, a: usize, b: usize) -> Option<usize> {
+    (a..=b).find(|&i| t.pts[i].roll.abs() > th::TURN_IN_DEG)
+}
+
+/// How a corner's speed came off, relative to the moment the bike was committed.
+struct Hot {
+    /// Turn-in, and the slowest metre at or after it.
+    at: usize,
+    apex: usize,
+    /// Speed still to lose at turn-in, km/h, and that as a share of the turn-in speed.
+    inside_kmh: f32,
+    share: f32,
+    /// How long the brake lever stays held past turn-in.
+    braking_s: f32,
+}
+
+/// Reads a corner on its own terms. `None` where the core is too short to have an inside to
+/// speak of, or the rider never leans it in at all.
+fn hot(t: &Trace, a: usize, b: usize) -> Option<Hot> {
+    if b <= a + th::HOT_MIN_CORE_M {
+        return None;
+    }
+    let at = turn_in(t, a, b)?;
+    let apex = t.slowest(at..b + 1);
+    let v_in = t.pts[at].v;
+    if v_in <= 0.1 {
+        return None;
+    }
+    let inside = v_in - t.pts[apex].v;
+    Some(Hot {
+        at,
+        apex,
+        inside_kmh: inside * KMH,
+        share: inside / v_in,
+        braking_s: t.time_where(at..b + 1, |q| q.brake() > th::BRAKE_ON),
+    })
+}
+
+/// Where a flight came down, on the jump's own terms.
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum Landing {
+    /// On the downslope, where the landing is built to be taken.
+    Ramp,
+    /// Out on the flat, past the bottom of the downslope.
+    Flat,
+    /// On the up-face: cased.
+    Face,
+    /// Not readable: a hop, ground that can't be measured, or a slope in between.
+    Unsure,
+}
+
+/// The gradient of the ground the bike runs on, metres of height per metre along, by least
+/// squares so one bump doesn't swing it. `None` where the stretch is too short, runs off the
+/// end of the lap, or has the bike in the air, since then it isn't the ground being measured.
+fn slope(t: &Trace, a: usize, b: usize) -> Option<f32> {
+    let b = b.min(t.len().saturating_sub(1));
+    if b < a + 5 || (a..=b).any(|i| t.pts[i].air) {
+        return None;
+    }
+    let n = (b - a + 1) as f32;
+    let mid = (b - a) as f32 / 2.0;
+    let mean = (a..=b).map(|i| t.pts[i].y).sum::<f32>() / n;
+    let (mut num, mut den) = (0.0, 0.0);
+    for i in a..=b {
+        let dx = (i - a) as f32 - mid;
+        num += dx * (t.pts[i].y - mean);
+        den += dx * dx;
+    }
+    (den > 0.0).then(|| num / den)
+}
+
+/// Where this flight came down, judged against the ground rather than another lap, and the
+/// landing hit in G. The bike's own height is the only terrain the app has, so the landing zone
+/// is read off the ground it runs on once the suspension has settled: over ten metres that is
+/// accurate to about a centimetre, an order below the thresholds.
+///
+/// A flat run-out alone isn't over-jumping. The bike has to have dropped onto it and hit for
+/// it: a gentle descent onto flat ground is a long low jump, which is fine.
+fn landing(t: &Trace, take: usize, land: usize, end: usize, bike: Bike) -> (Landing, f32) {
+    let hit = t.max_by(land..(land + 8).min(end + 1).max(land + 1), |q| q.hit);
+    if t.span(take, land) < th::OVERJUMP_AIR_S {
+        return (Landing::Unsure, hit);
+    }
+    let from = land + th::LAND_SLOPE_SKIP_M;
+    let Some(after) = slope(t, from, from + th::LAND_SLOPE_M) else {
+        return (Landing::Unsure, hit);
+    };
+    // How steeply the bike was coming down over the last metres of the flight. Read straight
+    // rather than through `slope`, which refuses airborne stretches on purpose.
+    let lip = land.saturating_sub(3).max(take);
+    let fall = if land > lip { (t.pts[land].y - t.pts[lip].y) / (land - lip) as f32 } else { 0.0 };
+
+    let verdict = if after > th::LAND_UP {
+        Landing::Face
+    } else if after > th::LAND_FLAT {
+        let dropped = fall < th::FALL_RATE;
+        let hard = hit > bike.land_g(th::LAND_HIT_G) * th::OVERJUMP_HIT_SHARE;
+        if dropped && hard { Landing::Flat } else { Landing::Unsure }
+    } else if after <= th::LAND_DOWN {
+        Landing::Ramp
+    } else {
+        Landing::Unsure
+    };
+    (verdict, hit)
+}
+
 /// Stretches where one end (0 fork, 1 shock) is out of travel.
 fn bottom_runs(tr: &Trace, within: Range<usize>, k: usize) -> Vec<(usize, usize)> {
     let mut out = Vec::new();
@@ -1658,7 +1942,7 @@ fn shifts(t: &Trace) -> usize {
 fn setup(p: &Trace, r: Option<&Trace>, secs: &[Section], bike: Bike, travel: bool) -> Vec<Finding> {
     let mut out = Vec::new();
     let mut tip = |skill: &'static str, weight: f32, at: usize, title: String, detail: String| {
-        out.push(Finding { skill, title, detail, at, weight, safety: false });
+        out.push(Finding { skill, title, detail, at, weight, safety: false, absolute: false });
     };
 
     if travel {
@@ -2022,6 +2306,45 @@ fn alone(c: &mut Ctx) {
                      touch earlier, get your weight forward over the front, and pick the bike up before the gas."
                 ));
             }
+            // Coming in too fast, with no lap to hold it against. The gate is raised, and the
+            // "ran wide" consequence is gone with the reference line it needed.
+            let (ca, cb) = (s.core.0.max(start), s.core.1.min(end));
+            if let Some(h) = hot(p, ca, cb) {
+                let hot_enough = h.share > th::SOLO_HOT_INSIDE_SHARE
+                    && h.inside_kmh > th::HOT_INSIDE_KMH
+                    && h.braking_s > th::HOT_BRAKE_S;
+                let late_apex = (h.apex - ca) as f32 > (cb - ca) as f32 * th::HOT_APEX_SHARE;
+                let picked_up = p.max_by(h.at..h.apex + 1, |q| q.roll.abs()) - p.pts[h.apex].roll.abs()
+                    > th::HOT_STAND_DEG;
+                let no_gas = p.pts[h.apex].throttle < th::THROTTLE_ON;
+                let stood_up = picked_up && no_gas;
+                if hot_enough && (stood_up || late_apex) {
+                    let what = if stood_up {
+                        "have to pick the bike up mid-corner"
+                    } else {
+                        "can't start driving until well past the middle of the turn"
+                    };
+                    c.judge("in_too_hot", 0.95, h.at, "You're coming in too fast", format!(
+                        "You carry about {:.0} km/h too much into {name}: {:.0}% of the speed comes off \
+                         after you have already turned in, and you {what}. Get the braking done in a \
+                         straight line before turn-in, then roll through on a steady throttle.",
+                        h.inside_kmh,
+                        h.share * 100.0
+                    ));
+                }
+            }
+            if let Some(at) = turn_in(p, ca, cb) {
+                let a2 = p.slowest(at..cb + 1);
+                let early = ((a2 - ca) as f32) < (cb - ca) as f32 * th::APEX_EARLY_SHARE;
+                let stuck = p.pts[cb].roll.abs() > th::TURN_IN_DEG && p.pts[cb].throttle < th::THROTTLE_ON;
+                if early && stuck {
+                    c.judge("apex_early", 0.7, at, "You're turning in too early", format!(
+                        "Your slowest point in {name} comes in the first third of the turn, and you are \
+                         still leaned over with the throttle shut on the way out. Turn in later and point \
+                         the bike at the exit so you can drive off the corner."
+                    ));
+                }
+            }
             let coast = p.time_where(start..end, |q| q.brake() < 0.05 && q.throttle < 0.15 && !q.air);
             if coast > th::SOLO_COAST_S {
                 c.add("coasting", 0.8, apex, "Don't coast", format!(
@@ -2097,8 +2420,24 @@ fn alone(c: &mut Ctx) {
                          moment earlier."
                     ));
                 }
+                // The ground says where this came down, with no lap to hold it against, which
+                // is the whole point of reading the landing rather than a pairing.
+                let (verdict, hit_g) = landing(p, pt, pl, s.end, c.bike);
+                match verdict {
+                    Landing::Flat => c.judge("overjump", 0.9, pt, "You're over-jumping this", format!(
+                        "Your {} m flight over {which} finishes out on the flat, past the downslope, and \
+                         hits {hit_g:.0} G for it. Ease out of the throttle a bike length before the lip, \
+                         or stay seated and lean the bike over as you leave it so it stays low.",
+                        pl - pt
+                    )),
+                    Landing::Face => c.judge("land_short", 0.9, pl, "You're casing this one", format!(
+                        "You come down on the up-face of {which} and the landing stops you dead. Carry \
+                         more speed up to the lip and stay on the gas all the way to it."
+                    )),
+                    Landing::Ramp | Landing::Unsure => {}
+                }
                 let hit = p.max_by(pl..(pl + 8).min(s.end + 1).max(pl + 1), |q| q.hit);
-                if hit > c.bike.land_g(th::SOLO_LAND_HIT_G) {
+                if verdict != Landing::Flat && hit > c.bike.land_g(th::SOLO_LAND_HIT_G) {
                     c.warn("land_hard", pl, "Land softer", format!(
                         "You hit {hit:.0} G landing {which}. Aim for the downslope, and soak the landing up with \
                          your legs instead of locking your arms."
@@ -2240,6 +2579,8 @@ fn straight(c: &mut Ctx) {
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SectionBest {
+    /// The section's stable id: what per-corner progress across sessions keys on.
+    pub id: String,
     pub name: String,
     pub best: f32,
     /// The lap it came from, as the caller keys its laps.
@@ -2275,7 +2616,7 @@ pub fn ideal(sections: &[Section], laps: &[(i32, Trace)]) -> Option<Ideal> {
             let mean = times.iter().map(|t| t.1).sum::<f32>() / times.len().max(1) as f32;
             let spread =
                 (times.iter().map(|t| (t.1 - mean).powi(2)).sum::<f32>() / times.len().max(1) as f32).sqrt();
-            SectionBest { name: s.name.clone(), best, lap, spread }
+            SectionBest { id: s.id.clone(), name: s.name.clone(), best, lap, spread }
         })
         .collect();
     let least_consistent = (laps.len() > 2)
@@ -2284,7 +2625,6 @@ pub fn ideal(sections: &[Section], laps: &[(i32, Trace)]) -> Option<Ideal> {
     Some(Ideal { time: bests.iter().map(|b| b.best).sum(), sections: bests, least_consistent })
 }
 
-/// Also the stadium laps other modules' tests ride.
 /// Cue kinds, numbered as the recorder plugin numbers them (FrostMod `src/coachcue.h`).
 pub(crate) mod cue {
     pub const BRAKE: u8 = 1;
@@ -2297,6 +2637,9 @@ pub(crate) mod cue {
     pub const SCRUB: u8 = 8;
     pub const STAND: u8 = 9;
     pub const SIT: u8 = 10;
+    // 11 is the plugin's CUSTOM: drawn, spoken by nothing. A kind past it needs a clip of its
+    // own added to the plugin's set, or it draws and stays silent the same way.
+    pub const ROLL: u8 = 12;
 }
 
 /// A place the fast lap does something a live cue calls, metres into the lap.
@@ -2359,6 +2702,7 @@ pub(crate) fn cue_points(r: &Trace, secs: &[Section]) -> Vec<CuePoint> {
     out
 }
 
+/// Also the stadium laps other modules' tests ride.
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
@@ -2416,6 +2760,38 @@ pub(crate) mod tests {
         /// Throttle while driving out of a corner, and the acceleration it gives, m/s².
         pub(crate) gas: f32,
         pub(crate) accel: f32,
+        /// The landing hill: where its crest sits along the lap, how steeply the ground falls
+        /// away past it in metres of height per metre along, and how far that downslope runs
+        /// before the ground goes flat. The up-face climbs to the crest at twice that slope over
+        /// a shorter face, the way a real landing is built. So a lap can come down on the
+        /// up-face (cased), on the downslope (right), or out on the flat past the bottom of it
+        /// (over-jumped). (0, 0, 0) for the flat ground the fixture had before it had terrain.
+        pub(crate) hill: (f32, f32, f32),
+        /// Metres of the braking carried past turn-in. 0 for braking finished before the turn.
+        pub(crate) hot: f32,
+        /// The brake dragged through the whole turn at a steady speed, as a rider does in a
+        /// rut: lever position, no speed lost to it. 0 for none.
+        pub(crate) drag: f32,
+    }
+
+    /// The height of the ground at `d`: flat, but for the landing hill when the style has one.
+    /// The rut under Turn 1 is applied by the caller on top of this.
+    pub(crate) fn ground_y(st: &Style, d: f32) -> f32 {
+        let (crest, slope, down) = st.hill;
+        if slope <= 0.0 || down <= 0.0 {
+            return 0.0;
+        }
+        let top = down * slope;
+        let up = top / (slope * 2.0);
+        if d <= crest - up {
+            0.0
+        } else if d <= crest {
+            (d - (crest - up)) * slope * 2.0
+        } else if d <= crest + down {
+            top - (d - crest) * slope
+        } else {
+            0.0
+        }
     }
 
     pub(crate) const FAST: Style = Style {
@@ -2434,6 +2810,11 @@ pub(crate) mod tests {
         push: 1.0,
         gas: 1.0,
         accel: 6.0,
+        // The fast lap's 330 → 350 jump comes down four metres past the crest, on the
+        // downslope, which is where a landing is meant to be taken.
+        hill: (346.0, 0.18, 26.0),
+        hot: 0.0,
+        drag: 0.0,
     };
     const BIKE: Bike =
         Bike { limiter: 13000.0, max_rpm: 14000.0, shift_rpm: 12500.0, travel: [0.3, 0.3], land_scale: 0.0, torque_scale: 0.0 };
@@ -2497,11 +2878,20 @@ pub(crate) mod tests {
     fn ride(st: &Style, d: f32) -> (f32, f32, f32, f32) {
         let arc = PI * R;
         let (c1, c1e, c2) = (200.0, 200.0 + arc, 400.0 + arc);
-        if (c1..c1e).contains(&d) || d >= c2 {
-            return (st.corner_v, 0.3, 0.0, 35.0);
-        }
-        let (exit, next) = if d < c1 { (0.0, c1) } else { (c1e, c2) };
         let cv2 = st.corner_v * st.corner_v;
+        if (c1..c1e).contains(&d) || d >= c2 {
+            let into = if d >= c2 { d - c2 } else { d - c1 };
+            // Braking carried past turn-in: the bike arrives above `corner_v` and the rest of
+            // the speed comes off inside the turn, on the brake, the way a rider who came in
+            // hot has to. The curve joins the approach exactly at the corner's start.
+            if st.hot > 0.0 && into < st.hot {
+                let target = (if d >= c2 { c2 } else { c1 }) + st.hot;
+                return ((cv2 + 2.0 * st.decel * (target - d)).sqrt(), 0.0, st.brake, 35.0);
+            }
+            return (st.corner_v, 0.3, st.drag, 35.0);
+        }
+        // With the braking carried in, the approach aims at a point inside the corner.
+        let (exit, next) = if d < c1 { (0.0, c1 + st.hot) } else { (c1e, c2 + st.hot) };
         let accel = (cv2 + st.accel * (d - exit)).sqrt();
         let braking = (cv2 + 2.0 * st.decel * (next - d)).sqrt();
         if braking < accel && braking < 20.0 {
@@ -2579,14 +2969,17 @@ pub(crate) mod tests {
             s.pos = d / l;
             s.x = x;
             s.z = z;
+            // The flight arcs ride on top of the ground, so a lap leaves the lip and touches
+            // down at ground height and the landing hill is there to be read after touchdown.
+            let g = ground_y(st, d);
             s.y = if in_hop {
-                hp * (1.0 - ((d - (h0 + h1) / 2.0) / ((h1 - h0) / 2.0)).powi(2))
+                g + hp * (1.0 - ((d - (h0 + h1) / 2.0) / ((h1 - h0) / 2.0)).powi(2))
             } else if air {
-                peak * (1.0 - ((d - mid) / half).powi(2))
+                g + peak * (1.0 - ((d - mid) / half).powi(2))
             } else if turn1 {
-                -st.sink
+                g - st.sink
             } else {
-                0.0
+                g
             };
             s.vel = [v * bearing.sin(), 0.0, v * bearing.cos()];
             s.speed = v;
@@ -2830,6 +3223,98 @@ pub(crate) mod tests {
         rv.sections.iter().flat_map(|s| s.findings.iter().map(|f| f.skill)).collect()
     }
 
+    /// Lands out on the flat, well past the bottom of the downslope, and hits hard for it.
+    pub(crate) const OVER: Style = Style { jump: (330.0, 375.0, 3.0), hit: 14.0, ..FAST };
+    /// Comes down on the up-face of the landing. The crest sits further along than the fast
+    /// lap's so the whole run-out after touchdown is still climbing, which is what being cased
+    /// looks like from the ground.
+    pub(crate) const CASED: Style = Style { jump: (330.0, 340.0, 1.5), hill: (352.0, 0.18, 26.0), ..FAST };
+
+    fn titles(s: &SectionReview) -> Vec<&str> {
+        s.findings.iter().map(|f| f.title.as_str()).collect()
+    }
+
+    /// Still slowing 45 m into a 63 m corner, on the brake the whole way.
+    pub(crate) const HOT: Style = Style { hot: 45.0, decel: 2.0, ..FAST };
+
+    #[test]
+    fn coming_in_too_fast_is_the_speed_that_comes_out_after_turn_in() {
+        let (fast, hot) = (lap(&FAST), lap(&HOT));
+        let rv = review(&hot, &fast, BIKE);
+        assert!(skills(section(&rv, "Turn 1")).contains(&"in_too_hot"), "{:?}", skills(section(&rv, "Turn 1")));
+        assert!(!skills_of(&review(&fast, &fast, BIKE)).contains(&"in_too_hot"));
+        // And with no lap to hold it against.
+        let alone = solo(&hot, BIKE);
+        assert!(skills(section(&alone, "Turn 1")).contains(&"in_too_hot"), "{:?}", skills(section(&alone, "Turn 1")));
+    }
+
+    #[test]
+    fn dragging_the_brake_through_a_rut_is_not_coming_in_too_fast() {
+        // The lever is held the whole way round and no speed comes off for it. Reading the
+        // lever alone would cry wolf on every rutted corner in the game.
+        let (fast, drag) = (lap(&FAST), lap(&Style { drag: 0.4, ..FAST }));
+        assert!(!skills_of(&review(&drag, &fast, BIKE)).contains(&"in_too_hot"));
+        assert!(!skills_of(&solo(&drag, BIKE)).contains(&"in_too_hot"));
+    }
+
+    #[test]
+    fn coming_in_too_fast_is_not_also_said_as_braking_late() {
+        // Same cause, same fix: saying both reads as the tip repeated.
+        let rv = review(&lap(&HOT), &lap(&FAST), BIKE);
+        let t1 = skills(section(&rv, "Turn 1"));
+        assert!(t1.contains(&"in_too_hot"), "{t1:?}");
+        assert!(!t1.contains(&"brake_late"), "{t1:?}");
+    }
+
+    #[test]
+    fn landing_out_on_the_flat_is_over_jumping_with_no_fast_lap() {
+        let solo_rv = solo(&lap(&OVER), BIKE);
+        assert!(skills(section(&solo_rv, "Jump 1")).contains(&"overjump"), "{:?}", skills(section(&solo_rv, "Jump 1")));
+        // And the fast lap, which lands on the downslope, earns no such verdict.
+        let fast_rv = solo(&lap(&FAST), BIKE);
+        assert!(!skills(section(&fast_rv, "Jump 1")).contains(&"overjump"));
+    }
+
+    #[test]
+    fn landing_on_the_up_face_is_casing_not_over_jumping() {
+        let rv = solo(&lap(&CASED), BIKE);
+        let j = section(&rv, "Jump 1");
+        assert!(titles(j).contains(&"You're casing this one"), "{:?}", titles(j));
+        assert!(!skills(j).contains(&"overjump"), "{:?}", skills(j));
+    }
+
+    #[test]
+    fn a_flat_landing_is_one_tip_not_three() {
+        // The G is the symptom, over-jumping is the cause, and the over-jump detail quotes the
+        // figure anyway — so `land_hard` must not be said beside it.
+        let j = &section(&solo(&lap(&OVER), BIKE), "Jump 1").findings.iter().map(|f| f.skill).collect::<Vec<_>>();
+        assert!(j.contains(&"overjump"), "{j:?}");
+        assert!(!j.contains(&"land_hard"), "{j:?}");
+        assert!(!j.contains(&"land_short"), "{j:?}");
+    }
+
+    #[test]
+    fn over_jumping_is_said_where_the_jump_cost_no_time() {
+        // Both laps take it the same way, so the section loses nothing and every ordinary tip
+        // is dropped. The judgement is not a comparison, so it survives.
+        let over = lap(&OVER);
+        let rv = review(&over, &over, BIKE);
+        let j = section(&rv, "Jump 1");
+        assert!(j.lost.abs() < 0.05, "lost {}", j.lost);
+        assert!(skills(j).contains(&"overjump"), "{:?}", skills(j));
+        assert!(!skills(j).contains(&"unclear"), "{:?}", skills(j));
+    }
+
+    #[test]
+    fn a_shallow_landing_gets_no_verdict() {
+        // A downslope inside the dead band between flat and a proper hill: the ground alone
+        // cannot settle it, so nothing absolute is said either way.
+        let shallow = Style { hill: (346.0, 0.08, 26.0), hit: 14.0, ..FAST };
+        let j = &section(&solo(&lap(&shallow), BIKE), "Jump 1").findings.iter().map(|f| f.skill).collect::<Vec<_>>();
+        assert!(!j.contains(&"overjump"), "{j:?}");
+        assert!(!titles(section(&solo(&lap(&shallow), BIKE), "Jump 1")).contains(&"You're casing this one"));
+    }
+
     #[test]
     fn a_hard_landing_is_called_against_the_fast_lap_and_on_its_own() {
         let (fast, hard) = (lap(&FAST), lap(&Style { hit: 14.0, ..FAST }));
@@ -2991,6 +3476,7 @@ pub(crate) mod tests {
             at: 0,
             weight: 1.0,
             safety: false,
+            absolute: false,
         };
         let out = dedupe(vec![f("chop_face", "Gas"), f("chop_face", "Gas"), f("scrub", "Scrub")], true);
         assert_eq!(out.len(), 2);

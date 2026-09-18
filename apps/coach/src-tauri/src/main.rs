@@ -25,6 +25,7 @@ mod soil;
 mod stp;
 mod surface;
 mod telemetry;
+mod trackmap;
 mod tyres;
 
 use mxb_core::{config, game, usage};
