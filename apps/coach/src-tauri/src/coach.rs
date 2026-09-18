@@ -126,7 +126,7 @@ pub struct LapSummary {
 }
 
 impl LapSummary {
-    fn comparable(&self) -> bool {
+    pub(crate) fn comparable(&self) -> bool {
         self.whole && !self.invalid
     }
 }
@@ -172,7 +172,7 @@ pub struct SessionSummary {
     pub stints: Vec<Stint>,
 }
 
-fn summarize(path: &Path, rec: &Recording) -> SessionSummary {
+pub(crate) fn summarize(path: &Path, rec: &Recording) -> SessionSummary {
     let file = path.to_string_lossy().into_owned();
     let laps: Vec<LapSummary> = rec
         .laps()
@@ -354,7 +354,7 @@ pub(crate) fn summaries(dirs: &[PathBuf], index_file: Option<PathBuf>) -> Vec<Se
 }
 
 /// Every session on disk, newest first: the stints of one event as one session.
-fn all_sessions(app: &AppHandle) -> Vec<SessionSummary> {
+pub(crate) fn all_sessions(app: &AppHandle) -> Vec<SessionSummary> {
     let dirs = session_dirs(&load_config(app));
     let mut out = group_sessions(summaries(&dirs, index_path(app)));
     out.sort_by(|a, b| b.started.cmp(&a.started));
@@ -400,7 +400,7 @@ fn ensure_watching(app: &AppHandle) {
     }
 }
 
-fn load(path: &str) -> Result<Recording, String> {
+pub(crate) fn load(path: &str) -> Result<Recording, String> {
     telemetry::parse(&fs::read(path).map_err(err)?).map_err(err)
 }
 
@@ -1066,6 +1066,46 @@ pub async fn preview_model_swap(
     .map_err(|e| format!("preview_model_swap task failed: {e}"))?
 }
 
+/// The rider's own body, as the shared viewer's rider parts.
+///
+/// The body alone, deliberately: `viewer::load_rider_model` wants a whole loadout, and the
+/// rider's kit is the garage's business rather than the coach's. Handing `load_rider_body` no
+/// paints leaves it wearing the textures baked into the mesh — the rider's model as it stands —
+/// and the body is the only part that carries a rig, which is what the replay poses on the bike.
+///
+/// The loose-file trap that makes the bike above read its archive doesn't reach here: a rider
+/// model installs as its own `mods/rider/riders/<profile>/` folder, a model swap only ever
+/// touches `mods/bikes`, and reading the archive alone once left a picked profile with no body.
+#[tauri::command]
+pub async fn coach_rider_body(
+    app: AppHandle,
+    profile: String,
+) -> Result<Vec<mxb_core::viewer::RiderPart>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        use mxb_core::{texstore, viewer};
+        let t0 = std::time::Instant::now();
+        let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+        let name = viewer::rider_profile_or_stock(&profile).to_string();
+        // A profile nobody installed is a fact about the rider's folder, not a failure: the
+        // replay then runs the bike on its own rather than an error the screen can't act on.
+        let Some(body) = viewer::load_rider_body(&cfg, &name, Vec::new()) else {
+            log::info!("coach_rider_body {name}: no body installed ({:?})", t0.elapsed());
+            return Ok(Vec::new());
+        };
+        log::info!(
+            "coach_rider_body {name}: {} node(s), {} bone(s), {} texture(s) | total {:?} | {:.1} MB resident in the texture store",
+            body.nodes.len(),
+            body.skeleton.len(),
+            body.textures.len(),
+            t0.elapsed(),
+            texstore::resident_bytes() as f64 / (1024.0 * 1024.0),
+        );
+        Ok(vec![body])
+    })
+    .await
+    .map_err(|e| format!("coach_rider_body task failed: {e}"))?
+}
+
 /// What the rider has already been called on this track and bike, beside the session index.
 /// Losing it is no worse than a fresh start: the next sheet simply repeats itself once.
 fn map_path(app: &AppHandle, track: &str) -> Option<PathBuf> {
@@ -1097,7 +1137,7 @@ fn write_map(app: &AppHandle, track: &str, m: &crate::trackmap::TrackMap) {
 /// screen calls the same corner the same thing. `seed` is whatever laps the caller has to hand:
 /// the first time a track is mapped, the roster is built from all of them at once so the
 /// numbering runs along the lap even for a feature only one lap saw.
-fn label(app: &AppHandle, track: &str, length: f32, seed: &[Trace], secs: &mut [analysis::Section]) {
+pub(crate) fn label(app: &AppHandle, track: &str, length: f32, seed: &[Trace], secs: &mut [analysis::Section]) {
     let mut map = read_map(app, track, length);
     let fresh = map.marks.is_empty();
     if fresh && !seed.is_empty() {

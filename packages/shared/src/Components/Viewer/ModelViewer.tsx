@@ -1360,6 +1360,18 @@ export interface BikePose {
 
 export const NEUTRAL_POSE: BikePose = { rearDrop: 0, forkUp: 0, steer: 0, spin: 0, spinRear: 0 };
 
+/**
+ * How the whole bike is tipped over, in degrees — not a joint, which is why it is its own
+ * type: every {@link BikePose} field moves one part against the others, and these two move
+ * the lot as one rigid machine on top of whatever the joints are doing.
+ */
+export interface BikeAttitude {
+  /** Lean, degrees. Positive leans the bike over to the RIDER'S RIGHT. */
+  roll: number;
+  /** Pitch, degrees. Positive puts the NOSE DOWN, the way it goes under brakes. */
+  pitch: number;
+}
+
 /** Which part of the bike moves with which joint. */
 type PoseGroup = "static" | "swing" | "steer" | "fork" | "fwheel" | "rwheel";
 
@@ -1382,6 +1394,7 @@ function poseGroup(name: string): PoseGroup {
 
 const X_AXIS = new THREE.Vector3(1, 0, 0);
 const Y_AXIS = new THREE.Vector3(0, 1, 0);
+const Z_AXIS = new THREE.Vector3(0, 0, 1);
 
 /** The fork/steering axis: straight up, tilted back by the rake. */
 function forkAxis(rake: number): THREE.Vector3 {
@@ -1598,6 +1611,82 @@ function EdfMesh({
   );
 }
 
+/**
+ * The bike's whole attitude — everything inside leans and pitches as one rigid machine.
+ *
+ * A wrapper rather than something `EdfMesh` does to itself, because in `onBike` what goes over
+ * is the bike *and* the rider sat on it: a machine that leaned out from under its rider is the
+ * one shape a corner replay must not draw. Everything below it — the joints, the rider's own
+ * bone pose — carries on in the frame this leaves them in rather than fighting it.
+ *
+ * The pivot is worked out in here, from the rig and the mesh, because this is the only piece
+ * holding both: the contact patch is the front axle less the tyre the wheel rolls on, and
+ * nothing above this level knows either number.
+ */
+function Tilted({
+  attitude,
+  nodes,
+  rig,
+  children,
+}: {
+  attitude?: BikeAttitude | null;
+  /** The bike's mesh — the tyre radius under the axles is read off it. */
+  nodes: EdfNode[];
+  rig?: BikeRig | null;
+  children: React.ReactNode;
+}) {
+  // Degrees straight off the axes this file already works in: the meshes face +Z with the
+  // rider's left on +X (see `bootSideOf`), so a turn about +Z drops the bike's top towards
+  // -X, the rider's right, and a turn about +X takes the nose down. Both documented signs
+  // are the natural ones here, so neither has to be negated.
+  const q = useMemo(() => {
+    const roll = new THREE.Quaternion().setFromAxisAngle(
+      Z_AXIS,
+      (attitude?.roll ?? 0) * THREE.MathUtils.DEG2RAD,
+    );
+    const pitch = new THREE.Quaternion().setFromAxisAngle(
+      X_AXIS,
+      (attitude?.pitch ?? 0) * THREE.MathUtils.DEG2RAD,
+    );
+    // Pitch first, so it happens in the bike's own plane and the lean then carries it over,
+    // rather than the nose dipping towards the floor on a bike already on its side.
+    return roll.multiply(pitch);
+  }, [attitude?.roll, attitude?.pitch]);
+  const tilted = !!attitude && (attitude.roll !== 0 || attitude.pitch !== 0);
+  /**
+   * The contact plane under the bike, which is what a bike tips about.
+   *
+   * Not the model origin — that sits up by the swingarm pivot, and leaning about it drives
+   * one tyre through the floor and floats the other, which reads as a broken model rather
+   * than as a bike on its side. The floor height comes off the front contact patch the same
+   * way {@link levelRearDrop} works it out, since that is the height the settled pose already
+   * stood both wheels on; the axles give the wheels' own centreline for X, and Z sits
+   * mid-wheelbase so a pitch shares its error between the two tyres instead of burying
+   * whichever end it turned about. Null when nothing is tipped over, so an upright bike draws
+   * the tree it always did, this wrapper included.
+   */
+  const at = useMemo<Vec3 | null>(() => {
+    if (!tilted) return null;
+    const b = partBounds(nodes);
+    const rf = wheelRadius(nodes, "fwheel");
+    const ground = rig?.frontAxle && rf != null ? rig.frontAxle[1] - rf : b.lo[1];
+    const x = rig?.frontAxle ? rig.frontAxle[0] : (b.lo[0] + b.hi[0]) / 2;
+    const z =
+      rig?.frontAxle && rig.rearAxle
+        ? (rig.frontAxle[2] + rig.rearAxle[2]) / 2
+        : (b.lo[2] + b.hi[2]) / 2;
+    return [x, ground, z];
+  }, [tilted, nodes, rig]);
+
+  return at ? (
+    <About at={at} q={q}>
+      {children}
+    </About>
+  ) : (
+    <>{children}</>
+  );
+}
+
 /** Clear air between the bike and the rider, in metres. */
 const PAIR_GAP = 0.35;
 
@@ -1695,6 +1784,7 @@ function SideBySide({
   overrides,
   rig,
   pose,
+  attitude,
   riderPose,
   onRiderPose,
   onGrab,
@@ -1707,6 +1797,9 @@ function SideBySide({
   overrides?: Map<string, THREE.Texture>;
   rig?: BikeRig | null;
   pose?: BikePose;
+  /** The bike's lean and pitch. The rider stands beside the bike rather than on it, so only
+      the machine goes over. */
+  attitude?: BikeAttitude | null;
   /** The rider's own pose — a turn per bone. Unrelated to the bike's `pose`. */
   riderPose?: RiderPose;
   /** Given, the rider wears grab handles and a drag writes back through this. */
@@ -1733,15 +1826,17 @@ function SideBySide({
   return (
     <group>
       <group position={at.bike}>
-        <Placed at={place?.bike} pivot={at.bikePivot}>
-          <EdfMesh
-            nodes={nodes}
-            textures={textures}
-            highlight={highlight}
-            rig={rig}
-            pose={pose}
-          />
-        </Placed>
+        <Tilted attitude={attitude} nodes={nodes} rig={rig}>
+          <Placed at={place?.bike} pivot={at.bikePivot}>
+            <EdfMesh
+              nodes={nodes}
+              textures={textures}
+              highlight={highlight}
+              rig={rig}
+              pose={pose}
+            />
+          </Placed>
+        </Tilted>
       </group>
       <group position={at.rider}>
         <Placed at={place?.rider} pivot={at.riderPivot}>
@@ -1776,6 +1871,7 @@ function OnBike({
   overrides,
   rig,
   pose,
+  attitude,
   riderPose,
   onRiderPose,
   onGrab,
@@ -1789,6 +1885,9 @@ function OnBike({
   overrides?: Map<string, THREE.Texture>;
   rig?: BikeRig | null;
   pose?: BikePose;
+  /** The bike's lean and pitch. The rider is seated in the bike's own frame, so the lean
+      takes both of them over together. */
+  attitude?: BikeAttitude | null;
   riderPose?: RiderPose;
   onRiderPose?: (pose: RiderPose) => void;
   onGrab?: (bone: string) => void;
@@ -1806,29 +1905,34 @@ function OnBike({
 
   return (
     <group position={at.lift}>
-      <Placed at={place?.bike} pivot={at.bikePivot}>
-        <EdfMesh
-          nodes={nodes}
-          textures={textures}
-          highlight={highlight}
-          rig={rig}
-          pose={pose}
-        />
-      </Placed>
-      {/* The placement sliders sit outside the seating, so "up" and "turn" still mean up and
-          turn in the scene rather than in whatever frame the rider was authored in. Turning
-          is about the seat, which is where a rider pivots. */}
-      <Placed at={place?.rider} pivot={seat}>
-        <PosedGroup matrix={at.seated}>
-          <RiderComposite
-            parts={parts}
-            overrides={overrides}
-            pose={riderPose}
-            onPose={onRiderPose}
-            onGrab={onGrab}
+      {/* Both halves inside the one lean: `seatTransform` puts the rider in the bike's own
+          frame, so a rotation of that frame carries the pair over together and their bone
+          pose goes on being a pose of a rider on a leaned machine. */}
+      <Tilted attitude={attitude} nodes={nodes} rig={rig}>
+        <Placed at={place?.bike} pivot={at.bikePivot}>
+          <EdfMesh
+            nodes={nodes}
+            textures={textures}
+            highlight={highlight}
+            rig={rig}
+            pose={pose}
           />
-        </PosedGroup>
-      </Placed>
+        </Placed>
+        {/* The placement sliders sit outside the seating, so "up" and "turn" still mean up and
+            turn in the scene rather than in whatever frame the rider was authored in. Turning
+            is about the seat, which is where a rider pivots. */}
+        <Placed at={place?.rider} pivot={seat}>
+          <PosedGroup matrix={at.seated}>
+            <RiderComposite
+              parts={parts}
+              overrides={overrides}
+              pose={riderPose}
+              onPose={onRiderPose}
+              onGrab={onGrab}
+            />
+          </PosedGroup>
+        </Placed>
+      </Tilted>
     </group>
   );
 }
@@ -2272,6 +2376,16 @@ export interface ModelViewerProps {
    * `null` or absent hands control back to the pose panel.
    */
   bikePoseOffset?: Partial<BikePose> | null;
+  /**
+   * The whole bike's attitude, degrees. Lean into the turn, pitch nose-down under brakes.
+   *
+   * Positive `roll` leans the bike to the RIDER'S RIGHT; positive `pitch` puts the NOSE
+   * DOWN. Not a joint, and so not part of `bikePoseOffset`: this turns the assembled
+   * machine, joints and all, about the ground under its tyres, which is what a corner replay
+   * needs on top of whatever the suspension is doing. `null` or absent stands the bike
+   * upright exactly as it always has.
+   */
+  bikeAttitude?: BikeAttitude | null;
   /** No room for them — the docked preview in the Designer is 240px tall. */
   hideHints?: boolean;
   /**
@@ -2304,6 +2418,7 @@ export function ModelViewer({
   onCaptureReady,
   poseControls = false,
   bikePoseOffset = null,
+  bikeAttitude = null,
   hideHints = false,
   placeControls = false,
   loading = false,
@@ -2448,6 +2563,7 @@ export function ModelViewer({
                 overrides={overrides}
                 rig={rig}
                 pose={pose}
+                attitude={bikeAttitude}
                 riderPose={riderPose}
                 onRiderPose={poseEdit}
                 onGrab={onGrab}
@@ -2463,21 +2579,24 @@ export function ModelViewer({
                 overrides={overrides}
                 rig={rig}
                 pose={pose}
+                attitude={bikeAttitude}
                 riderPose={riderPose}
                 onRiderPose={poseEdit}
                 onGrab={onGrab}
                 place={place}
               />
             ) : hasReal ? (
-              <Placed at={place.bike} pivot={soloPivot}>
-                <EdfMesh
-                  nodes={nodes!}
-                  textures={texMap}
-                  highlight={highlight}
-                  rig={rig}
-                  pose={pose}
-                />
-              </Placed>
+              <Tilted attitude={bikeAttitude} nodes={nodes!} rig={rig}>
+                <Placed at={place.bike} pivot={soloPivot}>
+                  <EdfMesh
+                    nodes={nodes!}
+                    textures={texMap}
+                    highlight={highlight}
+                    rig={rig}
+                    pose={pose}
+                  />
+                </Placed>
+              </Tilted>
             ) : hasRider ? (
               <Placed at={place.rider} pivot={soloPivot}>
                 <RiderComposite

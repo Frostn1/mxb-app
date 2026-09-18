@@ -273,6 +273,56 @@ export interface GroundAnswer {
   why: string | null;
 }
 export const coachGround = (path: string) => invoke<GroundAnswer>("coach_ground", { path });
+/** One sample of a section: the bike in the pose the rider had it in. */
+export interface ReplayFrame {
+  /** Seconds since the section's first frame. */
+  t: number;
+  /** Metres along the centreline since the section's first frame. */
+  dist: number;
+  /** Ground speed, m/s. */
+  v: number;
+  /** Bar angle in degrees, positive to the rider's left, as the recording gives it. */
+  steer: number;
+  /** Share of the travel in use, 0 extended to 1 bottomed, front then rear. */
+  used: [number, number];
+  roll: number;
+  pitch: number;
+  /** Degrees the wheels have turned since the section started. Only ever climbs. */
+  spin: number;
+  throttle: number;
+  front: number;
+  rear: number;
+  gear: number;
+  air: boolean;
+  /**
+   * Where the rider was asking to put their body, left/right then forward/back.
+   *
+   * `null` is an axis the recorder never read, which is not the same fact as a centred rider,
+   * so it stays apart all the way to the bones that would have moved for it.
+   */
+  lean: [number | null, number | null];
+  /** 0 not read, 1 standing, 2 sitting. */
+  stance: number;
+}
+
+export interface Replay {
+  sectionId: string;
+  name: string;
+  kind: SectionKind;
+  /** Section length, metres. */
+  length: number;
+  frames: ReplayFrame[];
+  /** The best lap through the same section. Empty when this lap is the best one. */
+  best: ReplayFrame[];
+  bestLap: number | null;
+  /** Whether the recorder read each lean axis, and the stance, at all. */
+  leanKnown: [boolean, boolean];
+  stanceKnown: boolean;
+}
+
+/** One section of one lap, frame by frame, with the same section of the best lap beside it. */
+export const coachReplay = (path: string, lap: number, sectionId: string) =>
+  invoke<Replay>("coach_replay", { path, lap, sectionId });
 export const coachLines = (path: string) => invoke<Lines | null>("coach_lines", { path });
 export const coachSurface = (path: string) => invoke<Surface | null>("coach_surface", { path });
 export const coachSessions = () => invoke<SessionSummary[]>("coach_sessions");

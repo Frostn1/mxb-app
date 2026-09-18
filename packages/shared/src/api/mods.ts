@@ -680,6 +680,17 @@ export function previewModelSwap(
   }).then(reviveMesh);
 }
 
+/**
+ * The rider's body on its own, as the viewer's rider parts: one `body` part carrying the mesh,
+ * its own baked textures and the rig a posed rider needs. No gear — Coach draws the rider, not
+ * their kit. An empty list means that profile's files aren't installed, not that anything failed.
+ *
+ * Coach only.
+ */
+export function coachRiderBody(profile: string): Promise<RiderPart[]> {
+  return invoke<RiderPart[]>("coach_rider_body", { profile }).then(reviveMesh);
+}
+
 /** The other bikes a model swap parked under `bike` lines up with — same `.geom` mounts. */
 export function modelSwapLineup(bike: string): Promise<string[]> {
   return invoke<string[]>("model_swap_lineup", { bike });

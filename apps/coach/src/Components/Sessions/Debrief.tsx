@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { Button } from "@frost/shared/Components/ui/button";
+import { cn } from "@frost/shared/lib/utils";
 import Page, { Label } from "../Page";
 import SectionStrip from "../Review/SectionStrip";
 import TrackMap from "../Review/TrackMap";
+import SectionReplay from "../Review/SectionReplay";
 import SetupFixes from "../Review/SetupFixes";
 import { preloadBike } from "../Review/BikeRender";
 import { Overall, SectionPanel } from "../Review/Review";
@@ -40,6 +42,9 @@ export default function Debrief({
   const [surface, setSurface] = useState<Surface | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [step, setStep] = useState(0);
+  /** Which way the corner is being looked at. Kept across steps: a rider who asked to watch
+      the bike wants to watch the next corner too. */
+  const [view, setView] = useState<"line" | "replay">("line");
 
   useEffect(() => {
     setDetail(null);
@@ -147,7 +152,37 @@ export default function Debrief({
             <div className="space-y-4">
               <SectionStrip review={review} selected={sel} onPick={() => {}} />
               <div className="grid gap-4 lg:grid-cols-[1.3fr_1fr]">
-                <TrackMap review={review} surface={surface} selected={sel} cursor={null} onPick={() => {}} solo={solo} />
+                <div className="min-w-0 space-y-2">
+                  {/* The line from above, or the bike doing it. Two ways to look at one corner,
+                      in one slot, because the step should not grow a scrollbar to hold both. */}
+                  <div className="flex gap-1">
+                    {(["line", "replay"] as const).map((v) => (
+                      <button
+                        key={v}
+                        onClick={() => setView(v)}
+                        className={cn(
+                          "border px-2.5 py-1 text-[11.5px]",
+                          view === v
+                            ? "border-primary text-primary"
+                            : "border-border text-muted-foreground hover:text-foreground",
+                        )}
+                      >
+                        {t(v === "line" ? "debrief.viewLine" : "debrief.viewReplay")}
+                      </button>
+                    ))}
+                  </div>
+                  {view === "line" ? (
+                    <TrackMap review={review} surface={surface} selected={sel} cursor={null} onPick={() => {}} solo={solo} />
+                  ) : (
+                    <SectionReplay
+                      path={data.lap.path}
+                      lap={data.lap.lap}
+                      sectionId={review.sections[sel].id}
+                      bikeId={data.lap.bikeId}
+                      rider={s.rider}
+                    />
+                  )}
+                </div>
                 <div className="space-y-3">
                   <SectionPanel s={review.sections[sel]} solo={solo} onPrev={() => setStep((v) => Math.max(1, v - 1))} onNext={() => setStep((v) => v + 1)} />
                   <Button

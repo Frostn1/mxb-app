@@ -19,6 +19,15 @@
 - The lap table and the full five-tab review are both still there, one click further in, from
   **All laps** and **Full review** on any section.
 
+- **Watch the corner back, on your own bike.** Every turn in the debrief now has two ways to
+  look at it: the line from above, or what you actually did. The bike plays the corner through
+  the way you rode it — the bars, both ends of the suspension by how much travel you used, how
+  far it was leaned and pitched, the wheels turning at the speed you were doing — with your
+  speed, gear, throttle and brake on the bike instead of in a paragraph, and how far ahead or
+  behind your best lap was at the same point on the track.
+- Your rider moves with it, where the game told the recorder what you were asking for with your
+  body. Where it didn't, the bike moves and the body stays still, and the screen says why.
+
 ### Changed
 - The debrief fits the window. The step you are on scrolls on its own if it has to, so Next and
   Back stay where you left them instead of sitting at the bottom of a long page.

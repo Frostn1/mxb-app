@@ -20,6 +20,7 @@ mod ini;
 mod lines;
 mod others;
 mod overlay;
+mod replay;
 mod sag;
 mod soil;
 mod stp;
@@ -188,6 +189,8 @@ fn main() {
             // The rider's own bike on the feel step: the active model swap resolved the way the
             // garage does it, and the sheets its materials name.
             coach::preview_model_swap,
+            // And the rider on top of it in the replay: the body mesh and its rig, no kit.
+            coach::coach_rider_body,
             mxb_core::viewer::texture_bytes,
             get_config,
             list_games,
@@ -203,6 +206,7 @@ fn main() {
             coach::coach_review,
             coach::coach_surface,
             coach::coach_lines,
+            replay::coach_replay,
             coach::coach_ground,
             coach::coach_setup_plan,
             coach::coach_save_setup,
