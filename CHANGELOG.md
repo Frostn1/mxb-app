@@ -3,6 +3,9 @@
 ## Unreleased — A session reads itself out
 
 ### Added
+- **Your own bike, in 3D, on the feel step.** The bike the session was ridden on, drawn from its
+  own files, beside the question about how it felt — with the fork travel your lap actually used
+  on it.
 - **Open a session and it tells you about itself.** Where it used to hand you a lap table and
   leave you to pick a lap and then a tab, a session now opens on a debrief: what you rode, what
   the lap was about, the sections that cost you the most with the lap drawn on the track and

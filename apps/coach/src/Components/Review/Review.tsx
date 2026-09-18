@@ -338,7 +338,7 @@ export default function Review({
           <div className="space-y-6">
             {/* What the lap actually did to the suspension, before what to change about it. */}
             <BikeSuspension channels={review.channels} />
-            <SetupFixes path={path} findings={review.setup} />
+            <SetupFixes path={path} findings={review.setup} bikeId={data.lap.bikeId} />
           </div>
         </TabsContent>
 

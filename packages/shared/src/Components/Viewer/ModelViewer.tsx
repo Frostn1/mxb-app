@@ -2217,6 +2217,16 @@ export interface ModelViewerProps {
   onCaptureReady?: (capture: CaptureFn | null) => void;
   /** Offer the pose panel. Off by default: a preview nobody is posing shouldn't grow chrome. */
   poseControls?: boolean;
+  /**
+   * Move the bike's joints from outside, as an offset from where it settles.
+   *
+   * For a caller with a reason to move the suspension other than someone dragging a slider —
+   * Coach showing how far the fork actually travelled on the lap. An OFFSET, not a pose: the
+   * settled pose is what stands the bike level on its wheels, so replacing it outright leaves
+   * the parts wherever the model was authored and the bike can end up outside the frame.
+   * `null` or absent hands control back to the pose panel.
+   */
+  bikePoseOffset?: Partial<BikePose> | null;
   /** No room for them — the docked preview in the Designer is 240px tall. */
   hideHints?: boolean;
   /**
@@ -2248,6 +2258,7 @@ export function ModelViewer({
   photo = false,
   onCaptureReady,
   poseControls = false,
+  bikePoseOffset = null,
   hideHints = false,
   placeControls = false,
   loading = false,
@@ -2268,7 +2279,16 @@ export function ModelViewer({
   const settled = useMemo(() => settledPose(rig, nodes ?? []), [rig, nodes]);
   const [posed, setPosed] = useState<BikePose | null>(null);
   useEffect(() => setPosed(null), [settled]);
-  const pose = posed ?? settled;
+  // A caller driving the joints wins: it is showing something measured, not something chosen.
+  // Added to the settled pose rather than replacing it, so the bike still stands on its wheels.
+  const base = posed ?? settled;
+  const pose = bikePoseOffset
+    ? {
+        rearDrop: base.rearDrop + (bikePoseOffset.rearDrop ?? 0),
+        forkUp: base.forkUp + (bikePoseOffset.forkUp ?? 0),
+        steer: base.steer + (bikePoseOffset.steer ?? 0),
+      }
+    : base;
   // Where each model has been moved to. Unlike the pose, this survives a re-resolve: the
   // rider is rebuilt on every slot edit, and having the arrangement someone just composed
   // spring apart because they picked a helmet would be its own bug.

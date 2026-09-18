@@ -12,6 +12,7 @@ import {
   type SetupPlan,
 } from "@/api/coach";
 import { Label } from "../Page";
+import BikeRender from "./BikeRender";
 import BikeFeel, { FEELS, type Feel } from "./BikeFeel";
 
 const SUSPENSION = ["setup_brake_dive", "setup_exit_squat", "setup_shock_kick", "setup_rear_low", "setup_front_low"];
@@ -138,7 +139,16 @@ function useGrouped(plan: SetupPlan | null, skills: string[]) {
  * the rider picking anything, then how the bike feels as a bike. Shared by the review page and
  * the overlay.
  */
-export default function SetupFixes({ path, findings }: { path: string; findings: Finding[] }) {
+export default function SetupFixes({
+  path,
+  findings,
+  bikeId,
+}: {
+  path: string;
+  findings: Finding[];
+  /** The bike the lap was ridden on, so the feel panel can show the rider their own. */
+  bikeId?: string;
+}) {
   const t = useT();
   const [plan, setPlan] = useState<SetupPlan | null>(null);
   const [saving, setSaving] = useState(false);
@@ -179,6 +189,15 @@ export default function SetupFixes({ path, findings }: { path: string; findings:
   const extra = useMemo(() => skills.filter((s) => !found.includes(s)), [skills, found]);
   const foundGroups = useGrouped(plan, found);
   const feltGroups = useGrouped(plan, extra);
+
+  // Each end's full stroke, from the one place it is already exposed: sag is a share AND a
+  // distance, so their ratio is the stroke.
+  const stroke = useMemo<[number, number] | null>(() => {
+    const sag = plan?.sag;
+    if (!sag) return null;
+    const each = [0, 1].map((i) => (sag.share[i] > 0.01 ? sag.metres[i] / sag.share[i] : 0));
+    return each[0] > 0 && each[1] > 0 ? [each[0], each[1]] : null;
+  }, [plan]);
 
   const writes = (plan?.saveAs != null && plan.fixes.some((f) => f.changes.some((c) => c.writes))) ?? false;
   // The one line over the button: how many changes a copy gets, and the first couple by name.
@@ -288,6 +307,7 @@ export default function SetupFixes({ path, findings }: { path: string; findings:
           <div className="min-w-0 border-t border-border pt-5 min-[1100px]:border-l min-[1100px]:border-t-0 min-[1100px]:pl-8 min-[1100px]:pt-0">
             <div className="mb-1.5 eyebrow">{t("feel.title")}</div>
             <p className="mb-4 text-[12.5px] text-muted-foreground">{t("feel.body")}</p>
+            {bikeId && <BikeRender bikeId={bikeId} travel={plan?.travelUsed ?? null} maxTravel={stroke} />}
             <BikeFeel felt={felt} onToggle={(skill) => setFelt((v) => (v.includes(skill) ? v.filter((s) => s !== skill) : [...v, skill]))} />
             {feels.length > 0 && (
               <div className="mt-4 space-y-2">

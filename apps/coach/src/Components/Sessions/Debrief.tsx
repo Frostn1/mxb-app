@@ -152,7 +152,7 @@ export default function Debrief({
             </div>
           )}
 
-          {here === "bike" && <SetupFixes path={data.lap.path} findings={review.setup} />}
+          {here === "bike" && <SetupFixes path={data.lap.path} findings={review.setup} bikeId={data.lap.bikeId} />}
         </div>
 
         {/* One thing per screen, so the rider is never asked to choose before being told. */}

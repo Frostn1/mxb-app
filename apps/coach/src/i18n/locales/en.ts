@@ -296,6 +296,8 @@ export const en = {
   "rivals.gains": "Where they gain",
   "rivals.even": "They're no quicker than you anywhere worth a word.",
   "feel.title": "How does the bike feel?",
+  "bike.noModel": "This bike's files aren't installed, so there's no model to show.",
+  "bike.forkUsed": "fork travel used on this lap",
   "feel.body": "Pick what you feel on the bike. The coach checks it against your laps and adds the fix.",
   "feel.group.fork": "Fork and front wheel",
   "feel.group.shock": "Shock and rear",
