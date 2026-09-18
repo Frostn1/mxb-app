@@ -1272,6 +1272,10 @@ export const de: Translation = {
   "library.moveFailed": "Mod konnte nicht verschoben werden",
   "library.uninstallFailed": "Deinstallation fehlgeschlagen",
   "library.openFailed": "Konnte nicht geöffnet werden",
+  "library.openModsFolder": "Mods-Ordner öffnen",
+  "library.openGameFolder": "Installationsordner von {{game}} öffnen",
+  "library.gameFolderUnset":
+    "Dein Installationsordner von {{game}} ist noch nicht festgelegt — wähle ihn in den Einstellungen.",
   "library.uninstalledOne": "{{name}} deinstalliert",
   "library.movedToBin": "In den Papierkorb verschoben.",
   "library.someNotRemoved":

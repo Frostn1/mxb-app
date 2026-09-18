@@ -34,6 +34,10 @@
   to the next corner, whichever you pick.
 - Every line on the map has a key now, so you can tell your line from the fast lap's, and the
   map travels to the corner you're on instead of leaving you to find it.
+- **Both of the Library's folders, one click from the list.** Two buttons in the Library's bar
+  open the mods folder and the game's install folder in your file manager, for the times it's
+  quicker to move a file by hand than to go through the app. The mods one lands on the real
+  tree, wherever `mxbikes.ini` put it, rather than where the folder usually is.
 
 ### Changed
 - **The lap's own tabs say what they hold.** Each tab carries a count for the lap you're on —

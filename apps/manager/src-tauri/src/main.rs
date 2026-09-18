@@ -6982,6 +6982,7 @@ fn main() {
             scan_rider_targets,
             scan_bike_targets,
             reveal_in_explorer,
+            open_game_folder,
             open_ransomware_protection,
             presets_save,
             list_games,
@@ -8492,6 +8493,38 @@ fn list_games() -> Vec<crate::game::GameInfo> {
 #[tauri::command]
 fn reveal_in_explorer(path: String) -> Result<(), String> {
     library::reveal_in_explorer(&path).map_err(|e| format!("{e:#}"))
+}
+
+/// One of the two folders the Library sits on top of.
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+enum GameFolder {
+    /// The mods tree itself — where everything the Library lists lives.
+    Mods,
+    /// The install dir, with the executable and the core archives.
+    Game,
+}
+
+/// Open one of the active title's folders in the OS file manager.
+///
+/// The path is resolved here rather than passed in from the UI. `mods_path` is either the
+/// user folder or the mods tree itself, so only [`library::mods_root`] can say which folder
+/// "the mods folder" is; and taking a choice of two instead of a path means the UI can't
+/// ask for anything else to be opened.
+#[tauri::command]
+fn open_game_folder(app: tauri::AppHandle, which: GameFolder) -> Result<(), String> {
+    let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+    let dir = match which {
+        GameFolder::Mods => library::mods_root(&cfg.mods_path),
+        GameFolder::Game => {
+            let p = cfg.game_path.trim();
+            if p.is_empty() {
+                return Err("the game folder hasn't been set yet".into());
+            }
+            std::path::PathBuf::from(p)
+        }
+    };
+    library::open_folder(&dir.to_string_lossy()).map_err(|e| format!("{e:#}"))
 }
 
 /// Open Windows Security on Ransomware protection, where Controlled folder access lives.
