@@ -382,3 +382,52 @@ function safeList(value: unknown): unknown[] {
     return [];
   }
 }
+
+/**
+ * How long a crash keeps the rider's name and GUID on it.
+ *
+ * Long enough to answer "is this happening to one person or to everyone", which is the only
+ * question the names are for and one asked within days of a report arriving. A crash from
+ * last season is a line in the offset catalogue, and the catalogue does not need to know
+ * whose it was.
+ */
+export const IDENTIFY_DAYS = 30;
+
+/**
+ * And how long the row itself is kept.
+ *
+ * A year, because a crash site only means anything against the build it is an offset into
+ * and the game gets a handful of builds a year. Past that the row describes a binary nobody
+ * runs. `account_id` is what keeps a de-identified row personal data for as long as the
+ * account exists, so this is the sweep that ends that rather than the one above.
+ */
+export const RETENTION_DAYS = 365;
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Forget who crashed, then forget the crash.
+ *
+ * Runs on the same cron sweep as the other prunes, and like them swallows its own failure: a
+ * sweep that throws must never be able to take out a scheduled run that also does real work.
+ *
+ * The de-identify pass is written to be cheap on the second run rather than correct only on
+ * the first — the `!= ''` guards mean a row already cleared is not rewritten, so the daily
+ * cost is the handful of rows that crossed the line that day and not the whole table.
+ */
+export async function pruneCrashes(env: Env): Promise<void> {
+  const now = Date.now();
+  try {
+    await env.DB.batch([
+      env.DB.prepare(
+        "UPDATE client_crashes SET rider_name = '', guid = ''" +
+          " WHERE crashed_at < ? AND (rider_name != '' OR guid != '')",
+      ).bind(now - IDENTIFY_DAYS * DAY_MS),
+      env.DB.prepare("DELETE FROM client_crashes WHERE crashed_at < ?").bind(
+        now - RETENTION_DAYS * DAY_MS,
+      ),
+    ]);
+  } catch (err) {
+    console.error(JSON.stringify({ msg: "crash sweep failed", error: String(err) }));
+  }
+}

@@ -1,0 +1,21 @@
+-- When an account asked to be forgotten.
+--
+-- Erasure here is not a `DELETE FROM accounts`. Half the tables in this database point at an
+-- account id without a cascade — the invite it was claimed with, the assets a creator owns,
+-- the buyer lists those assets carry — and dropping the row would either fail on a foreign
+-- key or take somebody's purchase with it. So the row stays as an opaque key and everything
+-- personal on it is cleared: the rider name, the Steam id, the GUID, the token. What is left
+-- identifies nobody and can do nothing.
+--
+-- `kind` becomes 'erased', which is what makes that true rather than merely tidy:
+--
+--   * `invitedOnly` admits only 'invited', so every privileged endpoint now refuses it;
+--   * the unique index on the rider name is `WHERE kind = 'invited'`, so the cleared name
+--     falls out of it and a second erasure cannot collide with the first;
+--   * `token_hash` is set to a value that is not a SHA-256 digest, so no token can ever hash
+--     to it. The credential is not revoked by a flag somewhere — there is no longer a string
+--     anyone could present.
+--
+-- This column is the record that it happened and when, which is the part an erasure request
+-- has to be answerable with afterwards. Null for every account that never asked.
+ALTER TABLE accounts ADD COLUMN erased_at INTEGER;

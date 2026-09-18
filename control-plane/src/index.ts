@@ -32,8 +32,9 @@ import { isWebPath, landingSite, webRoutes } from "./web";
 import { steamResult, redirectPage } from "./page";
 import { pinGuidFromSteam, rememberLink, steamIdFor } from "./steamlink";
 import { bmacWebhook } from "./bmac";
-import { putCrash } from "./crashes";
+import { pruneCrashes, putCrash } from "./crashes";
 import { pruneReports, putReport } from "./diagnostics";
+import { eraseAccount } from "./erasure";
 import { stateRegions } from "./stateinvariants";
 import { listPlugins, myPlugins, pluginBundle, redeemKey } from "./plugins";
 import { deleteShare, publishShare, readShare, updateShare } from "./liveshare";
@@ -121,6 +122,7 @@ export default {
         pruneMasterProbes(env),
         pruneRoster(env),
         pruneReports(env),
+        pruneCrashes(env),
         pruneQueue(env),
         resolveTrackCatalog(env),
       ]).then(
@@ -384,6 +386,11 @@ async function route(request: Request, env: Env): Promise<Response> {
   if (method === "GET" && path === "/v1/me") return me(account, env);
   if (method === "PUT" && path === "/v1/me/guid") return putGuid(request, account, env);
   if (method === "PUT" && path === "/v1/me/name") return putName(request, account, env);
+
+  // "Delete everything you have about me", self-served. Deliberately reachable by a banned
+  // account and by a self-enrolled one: the right does not depend on being in good standing,
+  // and `eraseAccount` is what decides which records survive the request.
+  if (method === "DELETE" && path === "/v1/me") return eraseAccount(account, env);
   if (method === "PUT" && path === "/v1/presence") return putPresence(request, account, env);
   if (method === "PUT" && path === "/v1/diagnostics") return putReport(request, account, env);
 
@@ -1100,6 +1107,7 @@ function requireSteam(env: Env): boolean {
 function bannedMayUse(method: string, path: string): boolean {
   if (method === "GET" && path === "/v1/app/gate") return true;
   if (method === "GET" && path === "/v1/me") return true;
+  if (method === "DELETE" && path === "/v1/me") return true;
   if (method === "PUT" && path === "/v1/diagnostics") return true;
   if (method === "PUT" && path === "/v1/diagnostics/crash") return true;
   if (method === "POST" && path === "/v1/steam/login") return true;
