@@ -213,12 +213,14 @@ pub fn contribute_snapshot(servers: &[WorldServer]) {
 /// whose book has aged out — so the answer is either a tab that fills at once or the spinner it
 /// would have had anyway.
 pub async fn snapshot() -> Option<(Vec<WorldServer>, u64)> {
+    snapshot_from(&control_plane()).await
+}
+
+/// The same, against a given control plane. Split out so a test can point it at a stand-in
+/// without touching the process-wide override, which every other caller reads too.
+async fn snapshot_from(base: &str) -> Option<(Vec<WorldServer>, u64)> {
     let client = client().ok()?;
-    let res = client
-        .get(format!("{}/v1/roster/snapshot", control_plane()))
-        .send()
-        .await
-        .ok()?;
+    let res = client.get(format!("{base}/v1/roster/snapshot")).send().await.ok()?;
     if !res.status().is_success() {
         return None;
     }
@@ -326,4 +328,83 @@ async fn fetch() -> Option<Vec<String>> {
 
 fn client() -> anyhow::Result<reqwest::Client> {
     Ok(reqwest::Client::builder().timeout(TIMEOUT).build()?)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    /// A stand-in control plane that answers one request with `body` and hangs up.
+    fn serve(body: &'static str) -> String {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            let Ok((mut sock, _)) = listener.accept() else { return };
+            // Read the request first. Replying to a peer that is still sending — and then
+            // closing on unread bytes — resets the connection, and the client sees a send
+            // error rather than the answer.
+            read_request(&mut sock);
+            let reply = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            let _ = sock.write_all(reply.as_bytes());
+            let _ = sock.flush();
+        });
+        format!("http://127.0.0.1:{port}")
+    }
+
+    /// Read up to the end of the request headers. A GET carries no body, so that is all of it.
+    fn read_request(sock: &mut std::net::TcpStream) {
+        use std::io::Read;
+        let mut buf = Vec::new();
+        let mut chunk = [0u8; 1024];
+        while !buf.windows(4).any(|w| w == b"\r\n\r\n") {
+            match sock.read(&mut chunk) {
+                Ok(0) | Err(_) => return,
+                Ok(n) => buf.extend_from_slice(&chunk[..n]),
+            }
+        }
+    }
+
+    /// The pooled list is the whole of what a machine with no MX Bikes on it can show, so the
+    /// shape the Worker sends has to arrive as rows the Servers tab can draw — name, address,
+    /// riders and what's running, not an empty `WorldServer`.
+    ///
+    #[tokio::test]
+    async fn the_pooled_snapshot_arrives_as_rows_the_tab_can_draw() {
+        let body = r#"{"asOf":1758000000000,"count":2,"servers":[
+            {"address":"45.129.56.133:5341","name":"Frost EU #1","players":7,"maxPlayers":20,
+             "track":"Indiana","trackLayout":"","location":"EU West","session":"Practice",
+             "conditions":"Sunny","categories":["MX2"],"passworded":false,"joinable":true},
+            {"address":"18.185.94.143:54210","name":"Frost US","players":0,"maxPlayers":16,
+             "track":"Duna","trackLayout":"Short","location":"USA","session":"Race 1",
+             "conditions":"Cloudy","categories":[],"passworded":true,"joinable":true}]}"#;
+        let base = serve(body);
+        let (rows, as_of) =
+            snapshot_from(&base).await.expect("the pooled list should have come back");
+
+        assert_eq!(as_of, 1_758_000_000_000);
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].name, "Frost EU #1");
+        assert_eq!(rows[0].address, "45.129.56.133:5341");
+        assert_eq!((rows[0].players, rows[0].max_players), (7, 20));
+        assert_eq!(rows[0].track, "Indiana");
+        assert_eq!(rows[0].location, "EU West");
+        assert!(rows[0].joinable && !rows[0].passworded);
+        assert!(rows[1].passworded, "a locked server has to still read as locked");
+        // Never measured for somebody else's sweep: the tab sorts unmeasured rows last rather
+        // than showing a ping this machine did not take.
+        assert!(rows[0].ping_ms.is_none());
+    }
+
+    /// An empty pool is not a list. The caller has to see `None` so the tab shows the failure
+    /// and its connection check rather than an empty browser that looks like nobody is online.
+    #[tokio::test]
+    async fn an_empty_pool_is_not_a_list() {
+        let base = serve(r#"{"asOf":0,"count":0,"servers":[]}"#);
+        assert!(snapshot_from(&base).await.is_none());
+    }
 }
