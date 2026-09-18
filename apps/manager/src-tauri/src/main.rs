@@ -142,6 +142,7 @@ mod serverbook;
 mod serverfilter;
 mod serverqueue;
 mod servers;
+mod serverwatch;
 mod sessionwatch;
 mod shop_catalog_session;
 mod shop_credentials;
@@ -165,6 +166,7 @@ use frostmod::ReloadOutcome;
 use frostmod_manage::{FrostmodProcess, FrostmodStatus, InstallReport};
 use library::InstalledMod;
 use modwatch::ModWatcher;
+use serverwatch::CachedServers;
 use paintwatch::{LookWatcher, PaintWatcher, SourceWatcher};
 // Decoding a paint's textures is per-texture CPU work over no shared state, and every path
 // that does it wants the same treatment — so this sits here rather than in one function.
@@ -4157,21 +4159,6 @@ fn set_ranked_guid(app: tauri::AppHandle, guid: String) -> Result<(), String> {
     config::save(&app, &cfg).map_err(|e| format!("{e:#}"))
 }
 
-/// A list to draw at once, and the moment it was true.
-///
-/// `asOf` is the whole contract. Nothing here is live — it is the last sweep, or somebody
-/// else's from a minute ago — so the tab draws its age beside it rather than passing it off,
-/// and replaces it with its own sweep as soon as that lands.
-#[derive(Debug, Clone, Default, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CachedServers {
-    pub servers: Vec<WorldServer>,
-    /// Milliseconds since the epoch. Zero when there was nothing to give.
-    pub as_of: u64,
-    /// `"local"` for this install's own last sweep, `"shared"` for the pooled snapshot, `""`
-    /// for neither. The tab words the age differently for somebody else's list.
-    pub source: String,
-}
 
 /// The list the Servers tab paints while the real one is being fetched.
 ///
@@ -4188,13 +4175,38 @@ pub struct CachedServers {
 /// anyway, and a failure is simply the spinner the tab used to have.
 #[tauri::command]
 async fn cached_master_servers(app: tauri::AppHandle) -> CachedServers {
-    let (servers, as_of) = serverbook::last_sweep(&serverbook::load(&app));
-    if !servers.is_empty() {
-        return CachedServers { servers, as_of, source: "local".into() };
+    // The beat has usually just been round, and what it left is fresher than anything on disk.
+    // Never a sweep of its own: this runs while the tab is drawing, and the whole point of it is
+    // that it answers at once.
+    if let Some(list) = serverwatch::warm_list() {
+        if !list.servers.is_empty() {
+            return list;
+        }
     }
-    match roster::snapshot().await {
-        Some((servers, as_of)) => CachedServers { servers, as_of, source: "shared".into() },
-        None => CachedServers::default(),
+
+    let (servers, as_of) = serverbook::last_sweep(&serverbook::load(&app));
+    let mine = (!servers.is_empty())
+        .then(|| CachedServers { servers, as_of, source: serverwatch::SOURCE_LOCAL.into() });
+
+    // Whichever is newer, rather than ours first. A list this install swept last Tuesday is
+    // worse than one another rider's app read a minute ago, and on a machine that has never run
+    // MX Bikes there is no list of our own to be had at all.
+    let shared = roster::snapshot().await.map(|(servers, as_of)| CachedServers {
+        servers,
+        as_of,
+        source: serverwatch::SOURCE_SHARED.into(),
+    });
+    match (mine, shared) {
+        (Some(mine), Some(shared)) => {
+            if shared.as_of > mine.as_of {
+                shared
+            } else {
+                mine
+            }
+        }
+        (Some(mine), None) => mine,
+        (None, Some(shared)) => shared,
+        (None, None) => CachedServers::default(),
     }
 }
 
@@ -4204,53 +4216,16 @@ async fn cached_master_servers(app: tauri::AppHandle) -> CachedServers {
 /// the local-only `worldnet` module. Without it (the public tree, or a build that never had
 /// the file) the tab still exists but says the browser isn't included, rather than failing
 /// opaquely.
+///
+/// The sweep itself, and the list it leaves behind, live in [`serverwatch`]: the app has been
+/// sweeping on a beat since it started, so opening the tab usually costs nothing at all.
+///
+/// The answer says where it came from. A machine with no MX Bikes on it can't sweep at all, and
+/// gets the pooled list every other app has been feeding — labelled `shared`, with the moment it
+/// was true, so the tab draws its age rather than passing it off as live.
 #[tauri::command]
-async fn list_master_servers(app: tauri::AppHandle) -> Result<Vec<WorldServer>, String> {
-    let mut out = master_list(app.clone()).await;
-
-    // A fresh install has an empty address book, so the fallback the rest of this depends on
-    // has nothing to fall back to — which makes it useless to precisely the people an outage
-    // hits hardest, the ones who never got to open this tab on a good day. Fill it from the
-    // shared book and ask again. Only ever on an empty book, so this is once in an install's
-    // life and nobody pays the second attempt twice.
-    if out.is_err() && serverbook::load(&app).is_empty() && roster::seed(&app).await > 0 {
-        out = master_list(app.clone()).await;
-    }
-
-    match &out {
-        // The outcome, never the list: a list rebuilt from the book is what a *failed* master
-        // looks like from here, and reporting it as an answer would have every install with a
-        // warm book calling an outage `ok`. See `masterstatus::MasterOutcome`.
-        Ok((list, outcome)) => {
-            masterstatus::report(&app, outcome);
-            // Only a real sweep is worth contributing. A list rebuilt from our own book would
-            // corroborate the shared book using the copies it handed out — see `roster`.
-            if *outcome == masterstatus::MasterOutcome::Answered {
-                roster::contribute(list);
-                // The same list with its live half attached, for whoever opens the tab next
-                // with nothing of their own to paint. Same rule, same reason: a master sweep,
-                // never a list rebuilt from a book.
-                roster::contribute_snapshot(list);
-            }
-        }
-        Err(e) => masterstatus::report(&app, &masterstatus::MasterOutcome::Failed(e.clone())),
-    }
-
-    out.map(|(list, _)| list)
-}
-
-async fn master_list(
-    app: tauri::AppHandle,
-) -> Result<(Vec<WorldServer>, masterstatus::MasterOutcome), String> {
-    #[cfg(worldnet)]
-    {
-        worldnet::list_servers(app).await
-    }
-    #[cfg(not(worldnet))]
-    {
-        let _ = app;
-        Err("The server browser isn't included in this build.".into())
-    }
+async fn list_master_servers(app: tauri::AppHandle) -> Result<CachedServers, String> {
+    serverwatch::list(app).await
 }
 
 /// What every other app is seeing of the master server, right now.
@@ -4291,7 +4266,7 @@ async fn reset_server_browser(app: tauri::AppHandle) -> frostmod::CommandOutcome
 /// seeing, because that last one is the only check that can overturn the others.
 #[tauri::command]
 async fn connection_selftest(app: tauri::AppHandle) -> masterstatus::SelfTest {
-    let out = master_list(app.clone()).await;
+    let out = serverwatch::master_list(app.clone()).await;
     let outcome = match &out {
         Ok((_, outcome)) => outcome.clone(),
         Err(e) => masterstatus::MasterOutcome::Failed(e.clone()),
@@ -6939,6 +6914,10 @@ fn main() {
                     }
                 });
             }
+            // Keep the server list warm from here on. The tab used to be the only thing that
+            // ever read the master, which made every visit wait for a sweep and made an install
+            // that never opened the tab invisible to the shared book and to the outage count.
+            serverwatch::start(handle);
             // Only registers the result listener and stashes the handle — the hidden window
             // isn't built until something is actually refused.
             mxb_fetch::init(handle);

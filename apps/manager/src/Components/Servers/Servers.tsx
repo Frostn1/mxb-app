@@ -48,6 +48,7 @@ import HelpHint from "@frost/shared/Components/ui/help-hint";
 import {
   listMasterServers,
   cachedMasterServers,
+  onServersSwept,
   joinServer,
   closeAndJoin,
   queueJoin,
@@ -281,13 +282,15 @@ const Servers = () => {
     // check under it was unmounted, and its results thrown away, every time somebody pressed
     // Try again. The spinner on the button already says a retry is happening.
     listMasterServers()
-      .then((list) => {
+      .then(({ servers: list, asOf, source }) => {
         // Merged, not replaced: the tiles are memoised, and handing every row a new object
         // would redraw the whole grid to show that four rider counts moved.
         const merged = mergeRows(onScreen.current, list);
         onScreen.current = merged;
         setServers(merged);
-        setCached(null);
+        // A list that isn't ours keeps its age on screen. On a machine with no MX Bikes there
+        // is never one of our own, so this is what the tab shows from then on.
+        setCached(source ? { asOf, source } : null);
         setError(null);
         // After the list, never with it: the browser has to draw whether or not the control
         // plane answers, and badges arriving a moment later is the right trade for that.
@@ -313,6 +316,25 @@ const Servers = () => {
   useEffect(() => {
     load();
   }, [load]);
+
+  // The app sweeps on its own beat whether or not anybody is on this tab, so a tab left open
+  // follows those instead of polling. Merged the same way a refresh is, so a beat that moves
+  // four rider counts redraws four tiles rather than the grid.
+  //
+  // A sweep landing is also the answer to whatever error is on screen: it only arrives when
+  // one succeeded.
+  useEffect(() => {
+    const stop = onServersSwept(({ servers: list, asOf, source }) => {
+      const merged = mergeRows(onScreen.current, list);
+      onScreen.current = merged;
+      setServers(merged);
+      setCached(source ? { asOf, source } : null);
+      setError(null);
+    });
+    return () => {
+      stop.then((off) => off()).catch(() => {});
+    };
+  }, []);
 
   // Something to look at while that runs. The sweep behind `load` is a Steam sign-in, a master
   // login and a datagram to every server that answers, and for those seconds the tab used to
