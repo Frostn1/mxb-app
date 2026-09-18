@@ -696,15 +696,17 @@ export async function collectStats(
  * Is this request allowed to read the numbers?
  *
  * `ADMIN_KEY` is a secret like the rest (see `env.d.ts`); a deployment without one has no
- * admin surface at all rather than an open one. The key may arrive as a bearer token or as
- * `?key=`, because the dashboard is opened by typing a URL into a browser and a browser
- * cannot send a header.
+ * admin surface at all rather than an open one. The key must arrive as a bearer token in the
+ * `Authorization` header, never in the URL: a query string lands in access logs, browser
+ * history and the `Referer` of anything an admin page loads, and one leaked stats URL would be
+ * the whole admin credential. The Steam-session dashboards at mxbsecure.com/admin cover the
+ * browser case; scripts send the header.
  */
 export function adminAllowed(request: Request, url: URL, env: Env): "ok" | "unset" | "denied" {
   const expected = env.ADMIN_KEY;
   if (!expected) return "unset";
   const header = request.headers.get("Authorization");
-  const presented = /^Bearer\s+(.+)$/i.exec(header?.trim() ?? "")?.[1] ?? url.searchParams.get("key");
+  const presented = /^Bearer\s+(.+)$/i.exec(header?.trim() ?? "")?.[1] ?? null;
   if (!presented) return "denied";
   return tokenMatches(expected, presented) ? "ok" : "denied";
 }

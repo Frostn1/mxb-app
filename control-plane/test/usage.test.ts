@@ -237,11 +237,11 @@ describe("who may read the numbers", () => {
     expect(adminAllowed(plain, url("?key=guess"), { ADMIN_KEY: "s3cret" } as Env)).toBe("denied");
   });
 
-  it("takes the key from the query, because a browser cannot send a header", () => {
-    expect(adminAllowed(plain, url("?key=s3cret"), { ADMIN_KEY: "s3cret" } as Env)).toBe("ok");
+  it("refuses the key in the query, so a leaked URL is not the admin credential", () => {
+    expect(adminAllowed(plain, url("?key=s3cret"), { ADMIN_KEY: "s3cret" } as Env)).toBe("denied");
   });
 
-  it("takes a bearer token too, for anything scripting it", () => {
+  it("takes a bearer token, the only way in for anything scripting it", () => {
     const req = new Request("https://cp.test/v1/usage/stats", {
       headers: { Authorization: "Bearer s3cret" },
     });

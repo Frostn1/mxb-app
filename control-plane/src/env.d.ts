@@ -103,6 +103,9 @@ declare global {
     SIGNIN_LIMITER?: RateLimit;
     /** Rate limit on `/v1/keys/grant`, per account. Optional for the same reason. */
     KEY_GRANT_LIMITER?: RateLimit;
+    /** Rate limit on `/v1/track/generate`, per client address: the call is unauthenticated and
+     *  spends our Anthropic budget. Optional so tests and a bare `wrangler dev` run without it. */
+    TRACK_LIMITER?: RateLimit;
     /** How the shop's catalogue dump is authenticated: `header:<name>`, `basic:<user>`,
      *  `bearer` or `query:<name>`. With `SHOP_CATALOG_KEY`, lets the track catalogue find sold
      *  tracks and their prices. Unset means mxb-mods.com only. */
