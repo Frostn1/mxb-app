@@ -61,6 +61,8 @@ import {
 } from "@frost/shared/Components/ui/alert-dialog";
 import { cn } from "@frost/shared/lib/utils";
 import { useConfig } from "@frost/shared/Context/Config";
+import { openCreatorPage, closeCreatorPage } from "@frost/shared/api/creatorPage";
+import { readAdSupport } from "@frost/shared/lib/adSupport";
 
 interface ModDetailProps {
   slug: string;
@@ -202,6 +204,17 @@ export default function ModDetail({
     };
   }, [slug, modType, livery, sound, game, rider, reloadKey]);
 
+  // Show the mod's own mxb-mods.com page behind the app while it's open, so the site keeps the
+  // ad revenue the app's direct install would otherwise strip. No-ops when the player has
+  // opted out (Settings → General); closes when they leave the mod.
+  useEffect(() => {
+    if (!detail?.link) return;
+    void openCreatorPage(detail.link);
+    return () => {
+      void closeCreatorPage();
+    };
+  }, [detail?.link]);
+
   const folderCounts = useMemo(() => {
     const m = new Map<string, number>();
     for (const it of installedFiles) m.set(it.folder, (m.get(it.folder) ?? 0) + 1);
@@ -250,6 +263,9 @@ export default function ModDetail({
       // pre-remember the chosen folder for the import step
       localStorage.setItem(destKey, destFolder);
     } else if (detail) {
+      // Installing is the download the creator most wants credited — make sure their page is
+      // up for it, even if it was closed since the mod opened.
+      void openCreatorPage(detail.link);
       startInstall({
         slug,
         title: detail.title,
@@ -455,6 +471,12 @@ export default function ModDetail({
             </span>
             {/* Authored HTML from mxb-mods.com's REST API. */}
             <RichDescription html={detail.descriptionHtml} />
+            {readAdSupport().enabled && (
+              <div className="mt-1 flex items-start gap-2 rounded-lg border border-input bg-muted/40 px-3 py-2 text-[11.5px] leading-relaxed text-muted-foreground">
+                <Snowflake className="mt-0.5 size-3.5 flex-none text-primary" />
+                <span>{t("modDetail.creatorPageNote", { site: game.catalogDomain })}</span>
+              </div>
+            )}
           </div>
         </div>
 

@@ -117,6 +117,12 @@ import {
   writeDownloadPrefs,
   type DownloadPrefs,
 } from "@frost/shared/lib/downloadPrefs";
+import {
+  readAdSupport,
+  writeAdSupport,
+  type AdSupportPrefs,
+} from "@frost/shared/lib/adSupport";
+import { closeCreatorPage } from "@frost/shared/api/creatorPage";
 import { useFrostmod } from "../../Context/FrostmodContext";
 import { formatBytes, formatDateShort } from "@frost/shared/lib/mods";
 import { copyText } from "../../lib/clipboard";
@@ -134,6 +140,16 @@ import {
   SelectValue,
 } from "@frost/shared/Components/ui/select";
 import { Switch } from "@frost/shared/Components/ui/switch";
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogCancel,
+  AlertDialogAction,
+} from "@frost/shared/Components/ui/alert-dialog";
 import SurveySetting from "@frost/shared/Components/Survey/SurveySetting";
 import { cn } from "@frost/shared/lib/utils";
 
@@ -254,6 +270,27 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
     writeDownloadPrefs(next);
     setDlPrefsState(next);
   }, []);
+  // Whether the app shows the creator's mxb-mods.com page (with its ads) while a mod is open
+  // or installing — see `lib/adSupport`. On by default; turning it off is what the two
+  // confirmations below guard, because it takes the ad revenue away from the mod site.
+  const [adSupport, setAdSupportState] = useState<AdSupportPrefs>(readAdSupport);
+  const [optOutStep1, setOptOutStep1] = useState(false);
+  const [optOutStep2, setOptOutStep2] = useState(false);
+  const setAdSupport = useCallback((enabled: boolean) => {
+    const next = { enabled };
+    writeAdSupport(next);
+    setAdSupportState(next);
+    // Turning it off with a mod open should take its page down now, not on the next navigation.
+    if (!enabled) void closeCreatorPage();
+  }, []);
+  // Turning it on is frictionless; turning it off has to pass both dialogs first.
+  const onToggleAdSupport = useCallback(
+    (v: boolean) => {
+      if (v) setAdSupport(true);
+      else setOptOutStep1(true);
+    },
+    [setAdSupport],
+  );
   const { running, reload, status, installing, checking, statusError, install, start, stop, refreshStatus, missingRuntime, installRuntime, installingRuntime, repairRuntimes, repairingRuntimes, strayMsvcr90, clearingStray, clearStrayMsvcr90 } =
     useFrostmod();
   const { check: checkForUpdates } = useUpdate();
@@ -1386,6 +1423,16 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
               onChange={togglePaintSync}
             />
             <div className="h-px bg-border" />
+            {/* Show the creator's own mxb-mods.com page (ads and all) while a mod is open or
+                installing, so the site keeps the ad revenue the app's direct install strips.
+                On by default; turning it off passes two confirmations first. */}
+            <ToggleRow
+              label={t("settings.adSupport")}
+              desc={t("settings.adSupportDesc", { site: game.catalogDomain })}
+              checked={adSupport.enabled}
+              onChange={onToggleAdSupport}
+            />
+            <div className="h-px bg-border" />
             <ToggleRow
               label={t("settings.queueRestartGame")}
               desc={t("settings.queueRestartGameDesc")}
@@ -2489,6 +2536,57 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
           )}
         </div>
       </div>
+
+      {/* Opting out of showing the creator's page. Two gates on the way out, because it
+          quietly takes income from the people who make and host the mods this app installs.
+          Opting back in is a single click. */}
+      <AlertDialog open={optOutStep1} onOpenChange={setOptOutStep1}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("settings.adSupportOff1Title")}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t("settings.adSupportOff1Body", { site: game.catalogDomain })}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setOptOutStep1(false)}>
+              {t("settings.adSupportKeepOn")}
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                setOptOutStep1(false);
+                setOptOutStep2(true);
+              }}
+            >
+              {t("settings.adSupportOff1Continue")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={optOutStep2} onOpenChange={setOptOutStep2}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("settings.adSupportOff2Title")}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t("settings.adSupportOff2Body")}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setOptOutStep2(false)}>
+              {t("settings.adSupportKeepOn")}
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                setOptOutStep2(false);
+                setAdSupport(false);
+              }}
+            >
+              {t("settings.adSupportOff2Confirm")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

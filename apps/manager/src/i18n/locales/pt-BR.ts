@@ -2295,4 +2295,15 @@ export const ptBR: Translation = {
   "ranked.mxp": "MXP",
   "ranked.penalty": "Penalidade",
   "ranked.finished": "Disputada",
+  // Showing the creator's ad-supported page — see lib/adSupport & creator_page.rs.
+  "settings.adSupport": "Apoiar os criadores de mods",
+  "settings.adSupportDesc": "Abre a página do mod no {{site}} atrás do app enquanto você navega e instala, para que o site mantenha sua receita de anúncios. A instalação funciona do mesmo jeito; isso só dá aos criadores a visita que eles perderiam.",
+  "settings.adSupportKeepOn": "Continuar apoiando",
+  "settings.adSupportOff1Title": "Desativar o apoio aos criadores de mods?",
+  "settings.adSupportOff1Body": "O {{site}} e as pessoas que criam e hospedam esses mods ganham com os anúncios de suas páginas. Deixando isto ligado, essa página aparece enquanto você navega e instala; desligando, seus downloads não trazem nada para eles. Por favor, não tire isso deles sem pensar.",
+  "settings.adSupportOff1Continue": "Desativar mesmo assim",
+  "settings.adSupportOff2Title": "Desativar mesmo? Isso prejudica a comunidade.",
+  "settings.adSupportOff2Body": "Essa é a receita que mantém os mods que você está instalando sendo feitos. Desativar tira diretamente de quem os mantém. Você tem certeza absoluta?",
+  "settings.adSupportOff2Confirm": "Sim, desativar",
+  "modDetail.creatorPageNote": "A página deste mod está aberta no {{site}} atrás do app, para que o criador mantenha a receita de anúncios que sua instalação pularia. Você pode desativar isso em Configurações → Geral.",
 };

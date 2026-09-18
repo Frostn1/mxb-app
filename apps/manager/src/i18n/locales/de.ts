@@ -2315,4 +2315,15 @@ export const de: Translation = {
   "ranked.mxp": "MXP",
   "ranked.penalty": "Strafe",
   "ranked.finished": "Gefahren",
+  // Showing the creator's ad-supported page — see lib/adSupport & creator_page.rs.
+  "settings.adSupport": "Mod-Ersteller unterstützen",
+  "settings.adSupportDesc": "Öffnet die eigene Seite des Mods auf {{site}} hinter der App, während du stöberst und installierst, damit die Seite ihre Werbeeinnahmen behält. Die Installation läuft genauso ab – so bekommen die Ersteller nur den Besuch, den sie sonst verlieren würden.",
+  "settings.adSupportKeepOn": "Weiter unterstützen",
+  "settings.adSupportOff1Title": "Unterstützung für Mod-Ersteller ausschalten?",
+  "settings.adSupportOff1Body": "{{site}} und die Leute, die diese Mods erstellen und hosten, verdienen an der Werbung auf ihren Seiten. Bleibt dies an, wird diese Seite beim Stöbern und Installieren angezeigt; schaltest du es aus, bringen deine Downloads ihnen nichts. Bitte nimm ihnen das nicht leichtfertig weg.",
+  "settings.adSupportOff1Continue": "Trotzdem ausschalten",
+  "settings.adSupportOff2Title": "Wirklich ausschalten? Das schadet der Community.",
+  "settings.adSupportOff2Body": "Das sind die Einnahmen, mit denen die Mods, die du installierst, überhaupt erst entstehen. Es auszuschalten nimmt den Leuten, die sie pflegen, direkt etwas weg. Bist du dir ganz sicher?",
+  "settings.adSupportOff2Confirm": "Ja, ausschalten",
+  "modDetail.creatorPageNote": "Die Seite dieses Mods ist auf {{site}} hinter der App geöffnet, damit der Ersteller die Werbeeinnahmen behält, die deine Installation sonst überspringen würde. Du kannst dies unter Einstellungen → Allgemein ausschalten.",
 };

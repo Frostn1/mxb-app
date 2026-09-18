@@ -2306,4 +2306,15 @@ export const fr: Translation = {
   "ranked.mxp": "MXP",
   "ranked.penalty": "Pénalité",
   "ranked.finished": "Disputée",
+  // Showing the creator's ad-supported page — see lib/adSupport & creator_page.rs.
+  "settings.adSupport": "Soutenir les créateurs de mods",
+  "settings.adSupportDesc": "Ouvre la page du mod sur {{site}} derrière l'application pendant que vous parcourez et installez, pour que le site conserve ses revenus publicitaires. L'installation se déroule de la même façon ; cela donne simplement aux créateurs la visite qu'ils perdraient autrement.",
+  "settings.adSupportKeepOn": "Continuer à les soutenir",
+  "settings.adSupportOff1Title": "Désactiver le soutien aux créateurs de mods ?",
+  "settings.adSupportOff1Body": "{{site}} et les personnes qui créent et hébergent ces mods gagnent grâce aux publicités de leurs pages. Si vous laissez ceci activé, cette page s'affiche pendant que vous parcourez et installez ; si vous le désactivez, vos téléchargements ne leur rapportent rien. Ne le leur retirez pas à la légère.",
+  "settings.adSupportOff1Continue": "Désactiver quand même",
+  "settings.adSupportOff2Title": "Vraiment désactiver ? Cela nuit à la communauté.",
+  "settings.adSupportOff2Body": "Ce sont les revenus qui permettent aux mods que vous installez de continuer à exister. Le désactiver prend directement aux personnes qui les maintiennent. En êtes-vous absolument sûr ?",
+  "settings.adSupportOff2Confirm": "Oui, désactiver",
+  "modDetail.creatorPageNote": "La page de ce mod est ouverte sur {{site}} derrière l'application, pour que le créateur conserve les revenus publicitaires que votre installation ignorerait. Vous pouvez désactiver ceci dans Paramètres → Général.",
 };

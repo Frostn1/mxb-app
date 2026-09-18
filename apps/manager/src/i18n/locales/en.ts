@@ -2270,4 +2270,15 @@ export const en = {
   "ranked.mxp": "MXP",
   "ranked.penalty": "Penalty",
   "ranked.finished": "Finished",
+  // Showing the creator's ad-supported page — see lib/adSupport & creator_page.rs.
+  "settings.adSupport": "Support mod creators",
+  "settings.adSupportDesc": "Opens the mod's own page on {{site}} behind the app while you browse and install, so the site keeps its ad revenue. The app installs the mod the same way regardless — this just gives the creators the visit they'd otherwise lose.",
+  "settings.adSupportKeepOn": "Keep supporting them",
+  "settings.adSupportOff1Title": "Turn off support for mod creators?",
+  "settings.adSupportOff1Body": "{{site}} and the people who make and host these mods earn from the ads on their pages. Left on, that page shows while you browse and install; turned off, your downloads bring them nothing. Please don't take that away lightly.",
+  "settings.adSupportOff1Continue": "Turn it off anyway",
+  "settings.adSupportOff2Title": "Really turn it off? This hurts the community.",
+  "settings.adSupportOff2Body": "This is the revenue that keeps the mods you're installing being made. Turning it off takes directly from the guys maintaining them. Are you absolutely sure?",
+  "settings.adSupportOff2Confirm": "Yes, turn it off",
+  "modDetail.creatorPageNote": "This mod's page is open on {{site}} behind the app, so the creator keeps the ad revenue your install would otherwise skip. You can turn this off in Settings → General.",
 } as const;
