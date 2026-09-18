@@ -97,6 +97,140 @@ pub fn contribute(servers: &[WorldServer]) {
     });
 }
 
+/// The rows a snapshot carries. A subset of [`WorldServer`] on purpose.
+///
+/// No ping: it is a measurement of the round trip from *one* machine, and serving somebody
+/// else's would be a number about a network the reader isn't on. No `hidden`: the filtering is
+/// the app's own judgement and it makes it again on whatever it draws. Nothing else is left out
+/// for any reason but that the tab doesn't draw it.
+#[derive(Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase", default)]
+pub struct SnapshotRow {
+    pub address: String,
+    pub name: String,
+    pub players: u32,
+    pub max_players: u32,
+    pub track: String,
+    pub track_layout: String,
+    pub location: String,
+    pub session: String,
+    pub conditions: String,
+    pub categories: Vec<String>,
+    pub passworded: bool,
+    pub joinable: bool,
+}
+
+#[derive(Serialize)]
+struct SnapshotReport {
+    servers: Vec<SnapshotRow>,
+}
+
+#[derive(Deserialize, Default)]
+#[serde(rename_all = "camelCase", default)]
+struct Snapshot {
+    as_of: u64,
+    servers: Vec<SnapshotRow>,
+}
+
+impl From<&WorldServer> for SnapshotRow {
+    fn from(s: &WorldServer) -> Self {
+        SnapshotRow {
+            address: s.address.trim().to_string(),
+            name: s.name.clone(),
+            players: s.players,
+            max_players: s.max_players,
+            track: s.track.clone(),
+            track_layout: s.track_layout.clone(),
+            location: s.location.clone(),
+            session: s.session.clone(),
+            conditions: s.conditions.clone(),
+            categories: s.categories.clone(),
+            passworded: s.passworded,
+            joinable: s.joinable,
+        }
+    }
+}
+
+impl From<SnapshotRow> for WorldServer {
+    fn from(r: SnapshotRow) -> Self {
+        WorldServer {
+            address: r.address,
+            name: r.name,
+            players: r.players,
+            max_players: r.max_players,
+            track: r.track,
+            track_layout: r.track_layout,
+            location: r.location,
+            session: r.session,
+            conditions: r.conditions,
+            categories: r.categories,
+            passworded: r.passworded,
+            joinable: r.joinable,
+            ..Default::default()
+        }
+    }
+}
+
+/// Contribute what the sweep found, so somebody else's tab opens with a list in it.
+///
+/// Called with the same list [`contribute`] gets and under the same rule — a master sweep and
+/// nothing rebuilt from a book — for a reason worth stating again: a snapshot built from the
+/// shared one would be this list quoting itself, ageing a little more each round.
+///
+/// Spawned and forgotten, and the control plane takes at most one of these a minute from
+/// everybody, so a contribution that isn't needed costs one request and is answered as fine.
+pub fn contribute_snapshot(servers: &[WorldServer]) {
+    let rows: Vec<SnapshotRow> = servers
+        .iter()
+        .filter(|s| !s.address.trim().is_empty() && !s.name.trim().is_empty())
+        .map(SnapshotRow::from)
+        .collect();
+    if rows.is_empty() {
+        return;
+    }
+
+    tauri::async_runtime::spawn(async move {
+        let count = rows.len();
+        let Ok(client) = client() else { return };
+        match client
+            .post(format!("{}/v1/roster/snapshot", control_plane()))
+            .json(&SnapshotReport { servers: rows })
+            .send()
+            .await
+        {
+            Ok(res) if res.status().is_success() => {
+                log::debug!("[roster] contributed a snapshot of {count} server(s)");
+            }
+            Ok(res) => log::debug!("[roster] snapshot refused ({})", res.status()),
+            Err(e) => log::debug!("[roster] snapshot didn't send: {e}"),
+        }
+    });
+}
+
+/// The shared snapshot: rows, and the moment they were true. `None` for any failure at all.
+///
+/// Read only when this install has no last sweep of its own to paint — a fresh install, or one
+/// whose book has aged out — so the answer is either a tab that fills at once or the spinner it
+/// would have had anyway.
+pub async fn snapshot() -> Option<(Vec<WorldServer>, u64)> {
+    let client = client().ok()?;
+    let res = client
+        .get(format!("{}/v1/roster/snapshot", control_plane()))
+        .send()
+        .await
+        .ok()?;
+    if !res.status().is_success() {
+        return None;
+    }
+    let snapshot = res.json::<Snapshot>().await.ok()?;
+    if snapshot.servers.is_empty() || snapshot.as_of == 0 {
+        return None;
+    }
+    let rows: Vec<WorldServer> = snapshot.servers.into_iter().map(WorldServer::from).collect();
+    log::info!("[roster] painted {} server(s) from the shared snapshot", rows.len());
+    Some((rows, snapshot.as_of))
+}
+
 /// Fill the local book from the shared one. Returns how many addresses it added.
 ///
 /// Additive by construction — see [`serverbook::seed`] — so this can run whenever without ever

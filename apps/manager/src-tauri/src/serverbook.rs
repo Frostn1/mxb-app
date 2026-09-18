@@ -19,27 +19,64 @@ use crate::WorldServer;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
-/// One remembered server. Only the fields the master is the sole source of — everything else
-/// comes back live from the server itself, so storing it would just be a staler copy.
+/// One remembered server: the whole row as the last sweep had it, and when that was.
+///
+/// It used to be the master-only fields alone, on the grounds that anything a `GETINFO` reply
+/// carries would only ever be stored stale. That is still true of the rebuild path — see
+/// [`rows`], which drops the live half before handing the book to the prober — but it is not
+/// true of opening the tab. A list from four minutes ago, drawn at once and labelled with its
+/// own age, is what the tab has instead of an empty screen while the sweep runs. So the row is
+/// kept whole, and the two readers take what each of them can honestly use.
+///
+/// The JSON shape is unchanged: `WorldServer` is flattened into the same flat object the book
+/// has always been, so a book written by an older build loads with the new fields defaulted.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Entry {
-    /// `ip:port` — the key, and the only field that is truly required.
-    pub address: String,
-    /// Last name the master gave it. A `GETINFO` reply carries a name too, so this is really
-    /// just what the row says before the probe comes back.
-    pub name: String,
-    /// The address the server reports for itself; kept because the master is the only place it
-    /// appears and the detail panel shows it.
-    pub lan_address: String,
-    /// Operator free text, `[connection] location`. Never sent by `GETINFO`.
-    pub location: String,
-    /// Licence class the server requires. Also master-only.
-    pub rating: String,
-    /// Whether the game could reach the address at all.
-    pub joinable: bool,
+    /// The row itself — `address` is the key, and the only field truly required.
+    #[serde(flatten)]
+    pub row: WorldServer,
     /// Milliseconds since the epoch, from the last sweep that saw it.
     pub last_seen: u64,
+}
+
+impl Entry {
+    /// The key, which reads better than reaching through the row every time.
+    pub fn address(&self) -> &str {
+        &self.row.address
+    }
+}
+
+/// How far back from the newest stamp still counts as the same sweep.
+///
+/// A sweep writes every row it saw with one `now`, so this only has to cover the sweep itself
+/// rather than any real interval — and being generous here costs nothing, since the rows it
+/// would let in are the ones that same sweep wrote.
+const SWEEP_WINDOW_MS: u64 = 60 * 1000;
+
+/// The last sweep's rows exactly as they were shown, and the moment they were true.
+///
+/// What the tab paints while the real one runs. Empty when there is nothing worth painting,
+/// which is what a fresh install has and is the shared book's cue (see [`crate::roster`]).
+///
+/// Rows with no name are skipped: an address seeded from the shared book carries nothing but
+/// the address and is stamped like anything else, and painting a screen of blank tiles would
+/// be a worse answer than the spinner it replaced.
+pub fn last_sweep(book: &[Entry]) -> (Vec<WorldServer>, u64) {
+    let newest = book.iter().map(|e| e.last_seen).max().unwrap_or(0);
+    if newest == 0 {
+        return (Vec::new(), 0);
+    }
+    let cutoff = newest.saturating_sub(SWEEP_WINDOW_MS);
+    let rows: Vec<WorldServer> = book
+        .iter()
+        .filter(|e| e.last_seen >= cutoff && !e.row.name.trim().is_empty())
+        .map(|e| e.row.clone())
+        .collect();
+    if rows.is_empty() {
+        return (Vec::new(), 0);
+    }
+    (rows, newest)
 }
 
 /// How long a server that has stopped appearing is kept.
@@ -120,22 +157,14 @@ pub fn merge(existing: Vec<Entry>, servers: &[WorldServer], now: u64) -> Vec<Ent
         if s.address.trim().is_empty() {
             continue;
         }
-        let fresh = Entry {
-            address: s.address.clone(),
-            name: s.name.clone(),
-            lan_address: s.lan_address.clone(),
-            location: s.location.clone(),
-            rating: s.rating.clone(),
-            joinable: s.joinable,
-            last_seen: now,
-        };
-        match book.iter_mut().find(|e| e.address == s.address) {
+        let fresh = Entry { row: s.clone(), last_seen: now };
+        match book.iter_mut().find(|e| e.address() == s.address) {
             Some(e) => *e = fresh,
             None => book.push(fresh),
         }
     }
 
-    book.sort_by(|a, b| b.last_seen.cmp(&a.last_seen).then_with(|| a.address.cmp(&b.address)));
+    book.sort_by(|a, b| b.last_seen.cmp(&a.last_seen).then_with(|| a.address().cmp(b.address())));
     book.truncate(MAX_ENTRIES);
     book
 }
@@ -164,7 +193,7 @@ pub fn seed(existing: Vec<Entry>, addresses: &[String], now: u64) -> Vec<Entry> 
     let cutoff = now.saturating_sub(KEEP.as_millis() as u64);
     let mut book: Vec<Entry> = existing.into_iter().filter(|e| e.last_seen >= cutoff).collect();
     let known: std::collections::HashSet<String> =
-        book.iter().map(|e| e.address.clone()).collect();
+        book.iter().map(|e| e.address().to_string()).collect();
 
     for address in addresses.iter().take(MAX_SEEDED) {
         let address = address.trim();
@@ -174,14 +203,12 @@ pub fn seed(existing: Vec<Entry>, addresses: &[String], now: u64) -> Vec<Entry> 
             continue;
         }
         book.push(Entry {
-            address: address.to_string(),
-            joinable: true,
+            row: WorldServer { address: address.to_string(), joinable: true, ..Default::default() },
             last_seen: now,
-            ..Default::default()
         });
     }
 
-    book.sort_by(|a, b| b.last_seen.cmp(&a.last_seen).then_with(|| a.address.cmp(&b.address)));
+    book.sort_by(|a, b| b.last_seen.cmp(&a.last_seen).then_with(|| a.address().cmp(b.address())));
     book.truncate(MAX_ENTRIES);
     book
 }
@@ -195,12 +222,12 @@ pub fn seed(existing: Vec<Entry>, addresses: &[String], now: u64) -> Vec<Entry> 
 pub fn rows(book: &[Entry]) -> Vec<WorldServer> {
     book.iter()
         .map(|e| WorldServer {
-            name: e.name.clone(),
-            address: e.address.clone(),
-            joinable: e.joinable,
-            lan_address: e.lan_address.clone(),
-            location: e.location.clone(),
-            rating: e.rating.clone(),
+            name: e.row.name.clone(),
+            address: e.row.address.clone(),
+            joinable: e.row.joinable,
+            lan_address: e.row.lan_address.clone(),
+            location: e.row.location.clone(),
+            rating: e.row.rating.clone(),
             ..Default::default()
         })
         .collect()
@@ -240,7 +267,7 @@ mod tests {
         assert_eq!(book.len(), 2);
         // Seeded rows have to be joinable or the probe skips them and they can only ever be
         // dropped — which would make the whole seed a no-op.
-        assert!(book.iter().all(|e| e.joinable));
+        assert!(book.iter().all(|e| e.row.joinable));
         assert!(book.iter().all(|e| e.last_seen == 1_000));
     }
 
@@ -253,8 +280,8 @@ mod tests {
         let book = seed(known, &["198.51.100.1:54210".into()], 9_000);
 
         assert_eq!(book.len(), 1);
-        assert_eq!(book[0].name, "One");
-        assert_eq!(book[0].location, "EU");
+        assert_eq!(book[0].row.name, "One");
+        assert_eq!(book[0].row.location, "EU");
         // And its own stamp: a seed is not a sighting, so it must not make a cold row look
         // freshly seen and win it another 30 days.
         assert_eq!(book[0].last_seen, 1_000);
@@ -265,7 +292,7 @@ mod tests {
         let stale = merge(vec![], &[server("198.51.100.1:54210", "Old")], 1_000);
         let book = seed(stale, &["203.0.113.9:54210".into()], 40 * DAY);
         assert_eq!(book.len(), 1);
-        assert_eq!(book[0].address, "203.0.113.9:54210");
+        assert_eq!(book[0].row.address, "203.0.113.9:54210");
     }
 
     #[test]
@@ -281,8 +308,8 @@ mod tests {
     fn a_sweep_becomes_a_book() {
         let book = merge(vec![], &[server("198.51.100.1:54210", "One")], 1_000);
         assert_eq!(book.len(), 1);
-        assert_eq!(book[0].address, "198.51.100.1:54210");
-        assert_eq!(book[0].location, "EU");
+        assert_eq!(book[0].row.address, "198.51.100.1:54210");
+        assert_eq!(book[0].row.location, "EU");
         assert_eq!(book[0].last_seen, 1_000);
     }
 
@@ -293,7 +320,7 @@ mod tests {
         let first = merge(vec![], &[server("198.51.100.1:54210", "One")], DAY);
         let second = merge(first, &[server("198.51.100.2:54210", "Two")], 2 * DAY);
         assert_eq!(second.len(), 2);
-        assert!(second.iter().any(|e| e.address == "198.51.100.1:54210"));
+        assert!(second.iter().any(|e| e.address() == "198.51.100.1:54210"));
     }
 
     #[test]
@@ -301,7 +328,7 @@ mod tests {
         let first = merge(vec![], &[server("198.51.100.1:54210", "Old name")], DAY);
         let second = merge(first, &[server("198.51.100.1:54210", "New name")], 2 * DAY);
         assert_eq!(second.len(), 1);
-        assert_eq!(second[0].name, "New name");
+        assert_eq!(second[0].row.name, "New name");
         assert_eq!(second[0].last_seen, 2 * DAY);
     }
 
@@ -322,23 +349,66 @@ mod tests {
         assert_eq!(book.len(), 1);
     }
 
+    /// A book written before the row was stored whole still loads — the flat shape is the same
+    /// one it always was, and everything new defaults.
+    #[test]
+    fn an_older_book_still_reads() {
+        let older = r#"[{"address":"203.0.113.9:54210","name":"One","lanAddress":"192.168.0.2",
+                         "location":"EU","rating":"B","joinable":true,"lastSeen":1700}]"#;
+        let book: Vec<Entry> = serde_json::from_str(older).expect("an older book is readable");
+        assert_eq!(book[0].address(), "203.0.113.9:54210");
+        assert_eq!(book[0].row.name, "One");
+        assert_eq!(book[0].last_seen, 1700);
+        assert_eq!(book[0].row.players, 0, "what it never stored defaults");
+    }
+
+    /// The tab paints the last sweep, not the whole book: a row nobody has seen since last
+    /// week is an address to probe, not something to draw as though it were live.
+    #[test]
+    fn only_the_last_sweep_is_painted() {
+        let mut now = merge(vec![], &[server("hot:1", "Hot"), server("warm:1", "Warm")], 10 * DAY);
+        now.push(Entry {
+            row: WorldServer { address: "old:1".into(), name: "Old".into(), ..Default::default() },
+            last_seen: 3 * DAY,
+        });
+
+        let (rows, at) = last_sweep(&now);
+        assert_eq!(at, 10 * DAY);
+        assert_eq!(rows.len(), 2);
+        assert!(!rows.iter().any(|r| r.address == "old:1"), "last week is not the last sweep");
+    }
+
+    /// A book of nothing but seeded addresses has nothing to draw, and says so — which is what
+    /// sends the tab to the shared snapshot instead of painting blank tiles.
+    #[test]
+    fn a_seeded_book_paints_nothing() {
+        let book = seed(vec![], &["198.51.100.1:54210".into()], 1_000);
+        assert_eq!(last_sweep(&book), (vec![], 0));
+    }
+
     /// The cap has to drop the coldest addresses; dropping the freshest would mean the servers
     /// people are actually on are the ones that stop being remembered.
     #[test]
     fn the_cap_drops_the_coldest_first() {
         let mut book: Vec<Entry> = (0..MAX_ENTRIES)
             .map(|i| Entry {
-                address: format!("198.51.100.1:{}", 10_000 + i),
+                row: WorldServer {
+                    address: format!("198.51.100.1:{}", 10_000 + i),
+                    ..Default::default()
+                },
                 last_seen: 10 * DAY,
                 ..Default::default()
             })
             .collect();
-        book.push(Entry { address: "cold:1".into(), last_seen: 2 * DAY, ..Default::default() });
+        book.push(Entry {
+            row: WorldServer { address: "cold:1".into(), ..Default::default() },
+            last_seen: 2 * DAY,
+        });
 
         let merged = merge(book, &[server("hot:1", "Hot")], 11 * DAY);
         assert_eq!(merged.len(), MAX_ENTRIES);
-        assert_eq!(merged[0].address, "hot:1", "the newest sighting leads");
-        assert!(!merged.iter().any(|e| e.address == "cold:1"), "the coldest row is what goes");
+        assert_eq!(merged[0].row.address, "hot:1", "the newest sighting leads");
+        assert!(!merged.iter().any(|e| e.address() == "cold:1"), "the coldest row is what goes");
     }
 
     /// A record with no address can't be probed and can't be joined, so it has no business in
