@@ -27,7 +27,7 @@
 - A server running a track you don't have says **Not installed** on the track's own line,
   rather than putting a warning sign over the picture.
 
-## Unreleased — Coach says what it sees, and calls a corner by the same name twice
+## 2026-09-17 — v0.1.17-beta.17 — Coach says what it sees, and calls a corner by the same name twice
 
 ### Added
 - **Coach tells you when you're over-jumping or casing a landing**, on its own terms rather
@@ -41,7 +41,7 @@
   Dragging the brake through a rut is normal riding and doesn't trigger it.
 - **"You're turning in too early"**, where the slowest point comes early and you're still
   leaned over with the throttle shut on the way out.
-- **Roll off here** — a new in-game call, spoken at the lip of a jump you're going long over,
+- **Roll off here** — a new in-game call, shown at the lip of a jump you're going long over,
   where you can still do something about it.
 
 ### Changed
