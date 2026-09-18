@@ -3385,6 +3385,27 @@ export function listMasterServers(): Promise<MasterServer[]> {
   return invoke<MasterServer[]>("list_master_servers");
 }
 
+/** A list to draw at once, and the moment it was true. */
+export interface CachedServers {
+  servers: MasterServer[];
+  /** Milliseconds since the epoch; 0 when there was nothing to give. */
+  asOf: number;
+  /** `local` for this install's own last sweep, `shared` for the pooled one, `""` for neither. */
+  source: "local" | "shared" | "";
+}
+
+/**
+ * The list to paint while the real one is being fetched.
+ *
+ * A sweep is a Steam sign-in, a master login and a datagram to every server that answers, so
+ * the tab has nothing on it for seconds. This is this install's own last sweep — or, for
+ * somebody who has never had one, the snapshot another app contributed a minute ago. Never
+ * rejects: it is a head start on a fetch that is happening anyway.
+ */
+export function cachedMasterServers(): Promise<CachedServers> {
+  return invoke<CachedServers>("cached_master_servers");
+}
+
 /**
  * Ask one server about itself, right now.
  *

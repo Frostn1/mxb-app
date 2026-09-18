@@ -3,12 +3,18 @@ import {
   KEEP_MS,
   MAX_ADDRESSES,
   MAX_REPORTS_PER_DAY,
+  MAX_SNAPSHOT_SERVERS,
   MIN_REPORTERS,
+  SNAPSHOT_MAX_AGE_MS,
+  SNAPSHOT_MIN_GAP_MS,
   claimRoster,
   parseReport,
+  parseSnapshot,
   pruneRoster,
   readRoster,
+  readSnapshot,
   reportRoster,
+  reportSnapshot,
 } from "../src/roster";
 import { ipDigest } from "../src/voice";
 import { d1 } from "./d1sqlite";
@@ -325,5 +331,111 @@ describe("the sweep", () => {
     await corroborate(A);
     await pruneRoster(e);
     expect(await served()).toEqual([A]);
+  });
+});
+
+describe("the shared snapshot", () => {
+  /** One row as an app would contribute it. */
+  function row(address: string, over: Record<string, unknown> = {}) {
+    return {
+      address,
+      name: "Evening practice",
+      players: 7,
+      maxPlayers: 20,
+      track: "Indiana MX",
+      trackLayout: "",
+      location: "Germany",
+      session: "Practice",
+      conditions: "Clear",
+      categories: ["MX2"],
+      passworded: false,
+      joinable: true,
+      ...over,
+    };
+  }
+
+  async function contribute(servers: unknown[], who = 9): Promise<Response> {
+    return reportSnapshot(
+      new Request("https://cp.invalid/v1/roster/snapshot", {
+        method: "POST",
+        headers: { "CF-Connecting-IP": `192.0.2.${who}` },
+        body: JSON.stringify({ servers }),
+      }),
+      e,
+    );
+  }
+
+  async function snapshot(): Promise<{ asOf: number; servers: { address: string; name: string }[] }> {
+    const res = await readSnapshot(e);
+    expect(res.status).toBe(200);
+    return (await res.json()) as { asOf: number; servers: { address: string; name: string }[] };
+  }
+
+  it("cleans the text and clamps the counts", () => {
+    const rows = parseSnapshot(
+      JSON.stringify({
+        servers: [row(A, { name: "a\u0000b\u001fc", players: -4, maxPlayers: 10 ** 9 })],
+      }),
+    );
+    expect(Array.isArray(rows)).toBe(true);
+    const [only] = rows as { name: string; players: number; maxPlayers: number }[];
+    expect(only.name).toBe("a b c");
+    expect(only.players).toBe(0);
+    expect(only.maxPlayers).toBe(999);
+  });
+
+  it("drops a row nobody could join and refuses a snapshot of nothing else", () => {
+    expect(parseSnapshot(JSON.stringify({ servers: [row("127.0.0.1:54210")] }))).toBe(
+      "no usable servers in that snapshot",
+    );
+    expect(parseSnapshot(JSON.stringify({ servers: [] }))).toBe("servers was empty");
+    expect(
+      parseSnapshot(
+        JSON.stringify({ servers: Array.from({ length: MAX_SNAPSHOT_SERVERS + 1 }, () => row(A)) }),
+      ),
+    ).toBe(`at most ${MAX_SNAPSHOT_SERVERS} servers in one snapshot`);
+  });
+
+  /** The whole safety argument: an address the roster doesn't serve is not served here either. */
+  it("keeps only rows for corroborated addresses", async () => {
+    await corroborate(A);
+    const res = await contribute([row(A), row(B, { name: "Somewhere nobody has seen" })]);
+    expect(res.status).toBe(202);
+    expect(await res.json()).toMatchObject({ stored: true, servers: 1 });
+
+    const served = await snapshot();
+    expect(served.servers.map((s) => s.address)).toEqual([A]);
+  });
+
+  it("stores nothing when none of the addresses are corroborated", async () => {
+    const res = await contribute([row(B)]);
+    expect(await res.json()).toMatchObject({ stored: false });
+    expect((await snapshot()).servers).toEqual([]);
+  });
+
+  it("takes one snapshot a minute and leaves the one it has alone", async () => {
+    await corroborate(A);
+    await contribute([row(A, { name: "First" })]);
+
+    vi.setSystemTime(clock + SNAPSHOT_MIN_GAP_MS - 1_000);
+    const again = await contribute([row(A, { name: "Second" })]);
+    expect(await again.json()).toMatchObject({ ok: true, stored: false });
+    expect((await snapshot()).servers[0].name).toBe("First");
+
+    vi.setSystemTime(clock + SNAPSHOT_MIN_GAP_MS + 1_000);
+    await contribute([row(A, { name: "Second" })]);
+    expect((await snapshot()).servers[0].name).toBe("Second");
+  });
+
+  /** Stale enough and it stops being a head start, so it is not served at all. */
+  it("stops serving a snapshot that has gone cold", async () => {
+    await corroborate(A);
+    await contribute([row(A)]);
+    expect((await snapshot()).asOf).toBe(clock);
+
+    vi.setSystemTime(clock + SNAPSHOT_MAX_AGE_MS + 1_000);
+    const cold = await snapshot();
+    expect(cold.servers).toEqual([]);
+    expect(cold.asOf).toBe(0);
   });
 });

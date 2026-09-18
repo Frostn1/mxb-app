@@ -23,6 +23,7 @@ import {
   List,
   SlidersHorizontal,
   MoreHorizontal,
+  Clock,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@frost/shared/lib/utils";
@@ -46,6 +47,7 @@ import {
 import HelpHint from "@frost/shared/Components/ui/help-hint";
 import {
   listMasterServers,
+  cachedMasterServers,
   joinServer,
   closeAndJoin,
   queueJoin,
@@ -60,7 +62,7 @@ import {
 } from "@frost/shared/api/mods";
 import { useConfig } from "@frost/shared/Context/Config";
 import { useInstall } from "../../Context/Install";
-import { useT } from "@/i18n";
+import { useT, type TFunc, type TKey } from "@/i18n";
 import { useFavorites } from "@/lib/useFavorites";
 import { useGameRunning } from "@/lib/useGameRunning";
 import { isFull, useServerQueue } from "@/lib/useServerQueue";
@@ -100,6 +102,39 @@ const DEFAULT_DIR: Record<SortMode, SortDir> = {
 
 const HIDE_EMPTY_KEY = "mxb:serversHideEmpty:v1";
 
+/**
+ * The next list, keeping the previous object wherever nothing about a server changed.
+ *
+ * The tiles are memoised on the server object, so a refresh that hands every row a fresh
+ * object redraws all of them — two hundred tiles, their art and their badges, to show that
+ * four rider counts moved. Comparing by value here means a refresh costs the rows that
+ * actually changed and nothing else.
+ *
+ * Rows are matched by address, and a row that is gone from the new list is gone: this returns
+ * the new list's shape, only with the old list's objects in it where they are equal.
+ */
+function mergeRows(prev: MasterServer[] | null, next: MasterServer[]): MasterServer[] {
+  if (!prev?.length) return next;
+  const held = new Map(prev.map((s) => [s.address, s]));
+  return next.map((s) => {
+    const was = held.get(s.address);
+    return was && same(was, s) ? was : s;
+  });
+}
+
+/** Two rows, field by field — the shallow compare the tiles themselves do, one level down. */
+function same(a: MasterServer, b: MasterServer): boolean {
+  const keys = Object.keys(b) as (keyof MasterServer)[];
+  return keys.every((k) => {
+    const x = a[k];
+    const y = b[k];
+    if (Array.isArray(x) && Array.isArray(y)) {
+      return x.length === y.length && x.every((v, i) => v === y[i]);
+    }
+    return x === y;
+  });
+}
+
 function readFlag(key: string, fallback: boolean): boolean {
   try {
     const v = localStorage.getItem(key);
@@ -124,6 +159,9 @@ const Servers = () => {
   const [servers, setServers] = useState<MasterServer[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  // When what is on screen was true, and whose list it is. Cleared by the first real sweep;
+  // until then the tab says how old the thing it drew is rather than implying it is live.
+  const [cached, setCached] = useState<{ asOf: number; source: string } | null>(null);
   const [query, setQuery] = useState("");
   const [joining, setJoining] = useState<string | null>(null);
   const queue = useServerQueue();
@@ -244,8 +282,12 @@ const Servers = () => {
     // Try again. The spinner on the button already says a retry is happening.
     listMasterServers()
       .then((list) => {
-        onScreen.current = list;
-        setServers(list);
+        // Merged, not replaced: the tiles are memoised, and handing every row a new object
+        // would redraw the whole grid to show that four rider counts moved.
+        const merged = mergeRows(onScreen.current, list);
+        onScreen.current = merged;
+        setServers(merged);
+        setCached(null);
         setError(null);
         // After the list, never with it: the browser has to draw whether or not the control
         // plane answers, and badges arriving a moment later is the right trade for that.
@@ -271,6 +313,30 @@ const Servers = () => {
   useEffect(() => {
     load();
   }, [load]);
+
+  // Something to look at while that runs. The sweep behind `load` is a Steam sign-in, a master
+  // login and a datagram to every server that answers, and for those seconds the tab used to
+  // be a spinner — every time, for a list that is mostly the same as the last one.
+  //
+  // Only ever fills an empty screen: a sweep that has already landed is the better answer and
+  // must not be replaced by a remembered one that arrives a moment later.
+  useEffect(() => {
+    let dropped = false;
+    cachedMasterServers()
+      .then(({ servers: list, asOf, source }) => {
+        if (dropped || !list.length || !asOf) return;
+        setServers((cur) => {
+          if (cur !== null) return cur;
+          onScreen.current = list;
+          setCached({ asOf, source });
+          return list;
+        });
+      })
+      .catch(() => {});
+    return () => {
+      dropped = true;
+    };
+  }, []);
 
   // Never sit on an empty favorites view after the last star is removed.
   useEffect(() => {
@@ -588,6 +654,17 @@ const Servers = () => {
           {servers && servers.length > 0 && (
             <span className="shrink-0 tabular-figures text-[12.5px] text-faint">
               {t("serverBrowser.count", { count: servers.length - (showHidden ? 0 : hiddenCount) })}
+            </span>
+          )}
+          {/* What is on screen is a remembered list until the sweep lands, and it says so. The
+              rider counts are the first thing anybody reads off this tab, and a stale one shown
+              without its age is worse than no list at all. */}
+          {cached && (
+            <span className="flex shrink-0 items-center gap-1.5 whitespace-nowrap text-[12.5px] text-faint">
+              <Clock className="size-3.5" />
+              {cached.source === "shared"
+                ? t("serverBrowser.cachedShared", { age: ago(t, cached.asOf) })
+                : t("serverBrowser.cachedLocal", { age: ago(t, cached.asOf) })}
             </span>
           )}
         </div>
@@ -948,6 +1025,18 @@ const SortHead = ({
     </button>
   </th>
 );
+
+/** `1723459200000` -> `2 minutes ago`. The paint-sync wording, which already exists in every
+ *  language the app speaks. */
+function ago(t: TFunc<TKey>, at: number): string {
+  const secs = Math.max(0, Math.round((Date.now() - at) / 1000));
+  if (secs < 60) return t("sync.agoJustNow");
+  const mins = Math.round(secs / 60);
+  if (mins < 60) return t("sync.agoMinutes", { count: mins });
+  const hours = Math.round(mins / 60);
+  if (hours < 24) return t("sync.agoHours", { count: hours });
+  return t("sync.agoDays", { count: Math.round(hours / 24) });
+}
 
 /** The on/off chips: in the filter popover now, still shaped like the bar they came from. */
 const ToggleChip = ({

@@ -66,7 +66,14 @@ import { claimDeviceAccount, iceServers, voiceRoom } from "./voice";
 import { adminAllowed, pruneUsage, reportUsage, usageStats } from "./usage";
 import { listPolls, pruneSurvey, reportAnswer, surveyStats } from "./survey";
 import { masterStatus, pruneMasterProbes, reportMasterProbe } from "./masterstatus";
-import { claimRoster, pruneRoster, readRoster, reportRoster } from "./roster";
+import {
+  claimRoster,
+  pruneRoster,
+  readRoster,
+  readSnapshot,
+  reportRoster,
+  reportSnapshot,
+} from "./roster";
 import { VoiceRoom } from "./voiceroom";
 
 interface Account {
@@ -252,6 +259,14 @@ async function route(request: Request, env: Env): Promise<Response> {
   // that, this would be a reflection amplifier with a public API.
   if (method === "POST" && path === "/v1/roster") return reportRoster(request, env);
   if (method === "GET" && path === "/v1/roster") return readRoster(env);
+
+  // The same book with the live half attached: what those servers were doing a minute ago, so
+  // the Servers tab opens with a list in it rather than a spinner while its own sweep runs. It
+  // carries operator text, which the roster deliberately does not, and `roster.ts` says at
+  // length what makes that safe to hand back — in short, a row is kept only for an address the
+  // roster already serves, so this can never put a new address in front of anybody.
+  if (method === "POST" && path === "/v1/roster/snapshot") return reportSnapshot(request, env);
+  if (method === "GET" && path === "/v1/roster/snapshot") return readSnapshot(env);
 
   // Reading the numbers back. Behind `ADMIN_KEY`, above the account gate because it is not a
   // player's endpoint at all: the key belongs to whoever runs the deployment, and an account

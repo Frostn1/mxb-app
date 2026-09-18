@@ -971,6 +971,8 @@ export const es: Translation = {
   "serverBrowser.waitInLine": "Hacer cola",
   "serverBrowser.trackMissing": "No tienes esta pista",
   "serverBrowser.notInstalled": "No instalada",
+  "serverBrowser.cachedLocal": "Última lista, {{age}}",
+  "serverBrowser.cachedShared": "Lista compartida, {{age}}",
   "serverBrowser.installJoin": "Instalar y unirse",
   "serverBrowser.installJoinHint": "Instala {{title}} desde mxb-mods.com y luego se une",
   "serverBrowser.installing": "Instalando",

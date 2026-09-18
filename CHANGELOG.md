@@ -16,6 +16,15 @@
 - A server running a track you don't have says **Not installed** on the track's own line,
   rather than putting a warning sign over the picture.
 
+## Unreleased — The Servers tab opens with a list in it
+
+### Added
+- The Servers tab draws the list straight away — the one it had last time, with how old it is
+  beside it — and replaces it with a fresh sweep as that lands. Only the rows that changed
+  redraw, so a refresh no longer redraws the grid.
+- A first-ever look at the tab starts from a list another rider's app read a minute ago,
+  instead of waiting on a sweep with nothing on screen.
+
 ## Unreleased — Joining a server
 
 ### Changed
