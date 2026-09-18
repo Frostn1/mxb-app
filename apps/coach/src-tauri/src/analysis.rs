@@ -229,6 +229,10 @@ pub struct Point {
     pub ground: u8,
     /// Sitting or standing, `telemetry::stance`.
     pub stance: u8,
+    /// Where the rider is asking to put their body, `telemetry::lean`: left/right then
+    /// forward/back, each -1 to +1, NaN where it could not be read. Rider input, not a body
+    /// angle - see the module docs on `telemetry::lean`.
+    pub lean: [f32; 2],
     /// Share of the travel in use, 0 fully extended to 1 bottomed; see `Trace::fill_travel`.
     pub used: [f32; 2],
     /// Acceleration in G, in the chassis frame: sideways, up (1 standing still), forward.
@@ -278,6 +282,7 @@ fn point(s: &Sample) -> Point {
         off: [s.wheel_material[0] == 0, s.wheel_material[1] == 0],
         ground: s.wheel_material[1].clamp(0, 255) as u8,
         stance: s.stance,
+        lean: s.lean,
         used: [0.0; 2],
         acc: s.acc,
         turn: s.yaw_rate / s.roll.to_radians().cos().max(0.3),
@@ -293,6 +298,15 @@ fn point(s: &Sample) -> Point {
 fn lerp(a: &Point, b: &Point, f: f32) -> Point {
     let m = |p: f32, q: f32| p + (q - p) * f;
     let near = if f < 0.5 { a } else { b };
+    // A lean axis can be unknown at either end, and unknown must not spread: NaN through `m`
+    // would blank every metre between two readings, so a rider whose stick was readable for
+    // most of a lap would come back with nothing.
+    let ml = |p: f32, q: f32| match (crate::telemetry::lean::known(p), crate::telemetry::lean::known(q)) {
+        (true, true) => m(p, q),
+        (true, false) => p,
+        (false, true) => q,
+        (false, false) => f32::NAN,
+    };
     Point {
         t: m(a.t, b.t),
         v: m(a.v, b.v),
@@ -314,6 +328,7 @@ fn lerp(a: &Point, b: &Point, f: f32) -> Point {
         off: near.off,
         ground: near.ground,
         stance: near.stance,
+        lean: [ml(a.lean[0], b.lean[0]), ml(a.lean[1], b.lean[1])],
         used: [0.0; 2],
         acc: [m(a.acc[0], b.acc[0]), m(a.acc[1], b.acc[1]), m(a.acc[2], b.acc[2])],
         turn: m(a.turn, b.turn),
@@ -2496,6 +2511,31 @@ pub(crate) mod tests {
         } else {
             (20.0, 0.9, 0.0, 0.0)
         }
+    }
+
+    /// A lean axis can be unknown at either end of a grid step. Unknown must not spread: if
+    /// NaN went through the ordinary lerp, every metre between two readings would blank, and a
+    /// rider whose stick was readable for most of a lap would come back with nothing.
+    #[test]
+    fn an_unknown_lean_does_not_blank_the_metres_around_it() {
+        use crate::telemetry::lean;
+        let pt = |lr: f32| Point { lean: [lr, f32::NAN], ..Point::default() };
+
+        // Both known: an ordinary reading in between.
+        let mid = lerp(&pt(-1.0), &pt(1.0), 0.5);
+        assert!(mid.lean[lean::LR].abs() < 1e-6, "got {}", mid.lean[lean::LR]);
+
+        // One known: the reading we have, rather than nothing.
+        let from = lerp(&pt(0.5), &pt(f32::NAN), 0.75);
+        assert!((from.lean[lean::LR] - 0.5).abs() < 1e-6, "got {}", from.lean[lean::LR]);
+        let to = lerp(&pt(f32::NAN), &pt(-0.25), 0.25);
+        assert!((to.lean[lean::LR] + 0.25).abs() < 1e-6, "got {}", to.lean[lean::LR]);
+
+        // Neither: still nothing, and never a centred rider.
+        let none = lerp(&pt(f32::NAN), &pt(f32::NAN), 0.5);
+        assert!(!lean::known(none.lean[lean::LR]));
+        // The axis that was never read stays unknown throughout.
+        assert!(!lean::known(mid.lean[lean::FB]));
     }
 
     pub(crate) fn lap(st: &Style) -> Trace {

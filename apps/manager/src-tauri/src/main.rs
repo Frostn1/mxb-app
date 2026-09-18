@@ -3435,8 +3435,11 @@ async fn queue_counts(
 /// from the master-server list; a superset of [`paintsync::RegisteredServer`] so the tab's
 /// Join button reuses [`join_server`]. The struct carries no protocol detail — that all lives
 /// behind `cfg(worldnet)` — so it stays in the public tree and the command compiles either way.
-#[derive(Debug, Clone, Default, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
+// `Deserialize` and the container `default` are for `serverbook`, which stores the row whole
+// and has to be able to read back one written by an older build — a book from before a field
+// existed loads with that field defaulted rather than as a damaged file.
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase", default)]
 pub struct WorldServer {
     /// Display name the operator gave the server.
     pub name: String,
@@ -4154,6 +4157,47 @@ fn set_ranked_guid(app: tauri::AppHandle, guid: String) -> Result<(), String> {
     config::save(&app, &cfg).map_err(|e| format!("{e:#}"))
 }
 
+/// A list to draw at once, and the moment it was true.
+///
+/// `asOf` is the whole contract. Nothing here is live — it is the last sweep, or somebody
+/// else's from a minute ago — so the tab draws its age beside it rather than passing it off,
+/// and replaces it with its own sweep as soon as that lands.
+#[derive(Debug, Clone, Default, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CachedServers {
+    pub servers: Vec<WorldServer>,
+    /// Milliseconds since the epoch. Zero when there was nothing to give.
+    pub as_of: u64,
+    /// `"local"` for this install's own last sweep, `"shared"` for the pooled snapshot, `""`
+    /// for neither. The tab words the age differently for somebody else's list.
+    pub source: String,
+}
+
+/// The list the Servers tab paints while the real one is being fetched.
+///
+/// A sweep is a Steam sign-in, a master login and a datagram to every server that answers, and
+/// until all of it lands the tab has nothing on it. It has this instead: the rows from this
+/// install's own last sweep, kept in the server book, which is the right answer for anybody
+/// who has opened the tab before and is free.
+///
+/// A fresh install has no last sweep, and that is exactly the person least able to wait — so
+/// the shared snapshot stands in, which is the same list somebody else's app read from the
+/// master a minute ago. See [`roster`] for what makes that safe to take.
+///
+/// Never an error: everything here is an optimisation on top of a fetch that is happening
+/// anyway, and a failure is simply the spinner the tab used to have.
+#[tauri::command]
+async fn cached_master_servers(app: tauri::AppHandle) -> CachedServers {
+    let (servers, as_of) = serverbook::last_sweep(&serverbook::load(&app));
+    if !servers.is_empty() {
+        return CachedServers { servers, as_of, source: "local".into() };
+    }
+    match roster::snapshot().await {
+        Some((servers, as_of)) => CachedServers { servers, as_of, source: "shared".into() },
+        None => CachedServers::default(),
+    }
+}
+
 /// The live MX Bikes server list, as the game's WORLD browser sees it.
 ///
 /// All the work — the master-server protocol, the Steam auth ticket, the parsing — lives in
@@ -4183,6 +4227,10 @@ async fn list_master_servers(app: tauri::AppHandle) -> Result<Vec<WorldServer>, 
             // corroborate the shared book using the copies it handed out — see `roster`.
             if *outcome == masterstatus::MasterOutcome::Answered {
                 roster::contribute(list);
+                // The same list with its live half attached, for whoever opens the tab next
+                // with nothing of their own to paint. Same rule, same reason: a master sweep,
+                // never a list rebuilt from a book.
+                roster::contribute_snapshot(list);
             }
         }
         Err(e) => masterstatus::report(&app, &masterstatus::MasterOutcome::Failed(e.clone())),
@@ -7114,6 +7162,7 @@ fn main() {
             queue_status,
             queue_counts,
             list_master_servers,
+            cached_master_servers,
             master_status,
             connection_selftest,
             reset_server_browser,
