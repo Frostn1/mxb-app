@@ -1,5 +1,32 @@
 # Changelog
 
+## 2026-09-18 — v0.17.3 — The Servers tab is ready when you open it
+
+### Added
+- The Servers tab draws the list straight away — the one it had last time, with how old it is
+  beside it — and replaces it with a fresh sweep as that lands. Only the rows that changed
+  redraw, so a refresh no longer redraws the grid.
+- A first-ever look at the tab starts from a list another rider's app read a minute ago,
+  instead of waiting on a sweep with nothing on screen.
+- The app keeps the list current for as long as it is open, MX Bikes running or not, and shares
+  what it reads. The tab opens on a live list without being asked, and one left open follows
+  servers filling and emptying on its own.
+- A machine that can't read the master itself — no MX Bikes installed, or a build without the
+  browser — now shows the pooled list every other app has been feeding, with how old it is
+  beside it, instead of an error where the servers should be.
+
+### Changed
+- **Install & join** and every other Join start the game with the server already picked, even
+  when the Servers tab has been open all evening.
+- Press Join with the game already open and the app offers to close it and take you straight
+  into the server, rather than leaving you to do both by hand.
+- The Servers toolbar keeps its shape once the list lands. The filters sit together behind one
+  **Filters** button on the left, the actions stay on the right, and the two you reach for
+  rarely — registering your own server, and resetting the game's own browser — moved under the
+  `...` menu.
+- A server running a track you don't have says **Not installed** on the track's own line,
+  rather than putting a warning sign over the picture.
+
 ## Unreleased — Coach says what it sees, and calls a corner by the same name twice
 
 ### Added
@@ -28,39 +55,6 @@
 ### Fixed
 - The Steam sign-in card takes your click when a dialog opened behind it at launch. It looked
   normal and did nothing, which is why it kept coming back after the other sign-in fixes.
-
-## Unreleased — Servers tab
-
-### Changed
-- The Servers toolbar keeps its shape once the list lands. The filters sit together behind one
-  **Filters** button on the left, the actions stay on the right, and the two you reach for
-  rarely — registering your own server, and resetting the game's own browser — moved under the
-  `...` menu.
-- A server running a track you don't have says **Not installed** on the track's own line,
-  rather than putting a warning sign over the picture.
-
-## Unreleased — The Servers tab opens with a list in it
-
-### Added
-- The Servers tab draws the list straight away — the one it had last time, with how old it is
-  beside it — and replaces it with a fresh sweep as that lands. Only the rows that changed
-  redraw, so a refresh no longer redraws the grid.
-- A first-ever look at the tab starts from a list another rider's app read a minute ago,
-  instead of waiting on a sweep with nothing on screen.
-- The app keeps the list current for as long as it is open, MX Bikes running or not, and shares
-  what it reads. The tab opens on a live list without being asked, and one left open follows
-  servers filling and emptying on its own.
-- A machine that can't read the master itself — no MX Bikes installed, or a build without the
-  browser — now shows the pooled list every other app has been feeding, with how old it is
-  beside it, instead of an error where the servers should be.
-
-## Unreleased — Joining a server
-
-### Changed
-- **Install & join** and every other Join start the game with the server already picked, even
-  when the Servers tab has been open all evening.
-- Press Join with the game already open and the app offers to close it and take you straight
-  into the server, rather than leaving you to do both by hand.
 
 ## Unreleased — Replay moves into the Studio, and records itself
 
