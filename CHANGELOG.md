@@ -24,6 +24,9 @@
   redraw, so a refresh no longer redraws the grid.
 - A first-ever look at the tab starts from a list another rider's app read a minute ago,
   instead of waiting on a sweep with nothing on screen.
+- The app keeps the list current for as long as it is open, MX Bikes running or not. The tab
+  opens on a live list without being asked, and one left open follows servers filling and
+  emptying on its own.
 
 ## Unreleased — Joining a server
 

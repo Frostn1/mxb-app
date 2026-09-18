@@ -48,6 +48,7 @@ import HelpHint from "@frost/shared/Components/ui/help-hint";
 import {
   listMasterServers,
   cachedMasterServers,
+  onServersSwept,
   joinServer,
   closeAndJoin,
   queueJoin,
@@ -313,6 +314,25 @@ const Servers = () => {
   useEffect(() => {
     load();
   }, [load]);
+
+  // The app sweeps on its own beat whether or not anybody is on this tab, so a tab left open
+  // follows those instead of polling. Merged the same way a refresh is, so a beat that moves
+  // four rider counts redraws four tiles rather than the grid.
+  //
+  // A sweep landing is also the answer to whatever error is on screen: it only arrives when
+  // one succeeded.
+  useEffect(() => {
+    const stop = onServersSwept((list) => {
+      const merged = mergeRows(onScreen.current, list);
+      onScreen.current = merged;
+      setServers(merged);
+      setCached(null);
+      setError(null);
+    });
+    return () => {
+      stop.then((off) => off()).catch(() => {});
+    };
+  }, []);
 
   // Something to look at while that runs. The sweep behind `load` is a Steam sign-in, a master
   // login and a datagram to every server that answers, and for those seconds the tab used to

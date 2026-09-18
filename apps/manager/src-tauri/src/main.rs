@@ -142,6 +142,7 @@ mod serverbook;
 mod serverfilter;
 mod serverqueue;
 mod servers;
+mod serverwatch;
 mod sessionwatch;
 mod shop_catalog_session;
 mod shop_credentials;
@@ -4204,53 +4205,12 @@ async fn cached_master_servers(app: tauri::AppHandle) -> CachedServers {
 /// the local-only `worldnet` module. Without it (the public tree, or a build that never had
 /// the file) the tab still exists but says the browser isn't included, rather than failing
 /// opaquely.
+///
+/// The sweep itself, and the list it leaves behind, live in [`serverwatch`]: the app has been
+/// sweeping on a beat since it started, so opening the tab usually costs nothing at all.
 #[tauri::command]
 async fn list_master_servers(app: tauri::AppHandle) -> Result<Vec<WorldServer>, String> {
-    let mut out = master_list(app.clone()).await;
-
-    // A fresh install has an empty address book, so the fallback the rest of this depends on
-    // has nothing to fall back to — which makes it useless to precisely the people an outage
-    // hits hardest, the ones who never got to open this tab on a good day. Fill it from the
-    // shared book and ask again. Only ever on an empty book, so this is once in an install's
-    // life and nobody pays the second attempt twice.
-    if out.is_err() && serverbook::load(&app).is_empty() && roster::seed(&app).await > 0 {
-        out = master_list(app.clone()).await;
-    }
-
-    match &out {
-        // The outcome, never the list: a list rebuilt from the book is what a *failed* master
-        // looks like from here, and reporting it as an answer would have every install with a
-        // warm book calling an outage `ok`. See `masterstatus::MasterOutcome`.
-        Ok((list, outcome)) => {
-            masterstatus::report(&app, outcome);
-            // Only a real sweep is worth contributing. A list rebuilt from our own book would
-            // corroborate the shared book using the copies it handed out — see `roster`.
-            if *outcome == masterstatus::MasterOutcome::Answered {
-                roster::contribute(list);
-                // The same list with its live half attached, for whoever opens the tab next
-                // with nothing of their own to paint. Same rule, same reason: a master sweep,
-                // never a list rebuilt from a book.
-                roster::contribute_snapshot(list);
-            }
-        }
-        Err(e) => masterstatus::report(&app, &masterstatus::MasterOutcome::Failed(e.clone())),
-    }
-
-    out.map(|(list, _)| list)
-}
-
-async fn master_list(
-    app: tauri::AppHandle,
-) -> Result<(Vec<WorldServer>, masterstatus::MasterOutcome), String> {
-    #[cfg(worldnet)]
-    {
-        worldnet::list_servers(app).await
-    }
-    #[cfg(not(worldnet))]
-    {
-        let _ = app;
-        Err("The server browser isn't included in this build.".into())
-    }
+    serverwatch::list(app).await
 }
 
 /// What every other app is seeing of the master server, right now.
@@ -4291,7 +4251,7 @@ async fn reset_server_browser(app: tauri::AppHandle) -> frostmod::CommandOutcome
 /// seeing, because that last one is the only check that can overturn the others.
 #[tauri::command]
 async fn connection_selftest(app: tauri::AppHandle) -> masterstatus::SelfTest {
-    let out = master_list(app.clone()).await;
+    let out = serverwatch::master_list(app.clone()).await;
     let outcome = match &out {
         Ok((_, outcome)) => outcome.clone(),
         Err(e) => masterstatus::MasterOutcome::Failed(e.clone()),
@@ -6939,6 +6899,10 @@ fn main() {
                     }
                 });
             }
+            // Keep the server list warm from here on. The tab used to be the only thing that
+            // ever read the master, which made every visit wait for a sweep and made an install
+            // that never opened the tab invisible to the shared book and to the outage count.
+            serverwatch::start(handle);
             // Only registers the result listener and stashes the handle — the hidden window
             // isn't built until something is actually refused.
             mxb_fetch::init(handle);
