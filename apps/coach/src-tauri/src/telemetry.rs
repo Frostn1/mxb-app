@@ -27,6 +27,10 @@ mod tag {
     pub const ENTRY: u8 = 12;
     pub const POSITIONS: u8 = 13;
     pub const RACE_LAP: u8 = 14;
+    /// How the rider's two body-lean controls are bound and how sure the recorder is of each;
+    /// then where the rider is asking to be, with every sample (FrostMod's `src/lean.h`).
+    pub const LEAN_BIND: u8 = 16;
+    pub const LEAN: u8 = 17;
 }
 
 /// A rider in the event, as the game lists them.
@@ -76,6 +80,23 @@ pub mod stance {
     pub const UNKNOWN: u8 = 0;
     pub const STAND: u8 = 1;
     pub const SIT: u8 = 2;
+}
+
+/// Where the rider is asking to put their body, as the recorder gives it: -1 to +1 on each of
+/// two axes, or NaN where it could not be read.
+///
+/// This is the rider's *input*, not a body angle. The body has its own rates and springs in
+/// the bike's own config and the riding aids can move it instead, so nothing built on these
+/// should be worded as though the rider's body were visible.
+pub mod lean {
+    /// Left (-1) to right (+1): counter-lean.
+    pub const LR: usize = 0;
+    /// Back (-1) to forward (+1).
+    pub const FB: usize = 1;
+
+    pub fn known(v: f32) -> bool {
+        v.is_finite() && (-1.5..=1.5).contains(&v)
+    }
 }
 
 /// `SPluginsBikeEvent_t`: who, on what, where.
@@ -178,6 +199,9 @@ pub struct Sample {
     pub steer_torque: f32,
     /// See [`stance`]: the last change the recorder wrote before this sample.
     pub stance: u8,
+    /// See [`lean`]: where the rider was asking to be, indexed by `lean::LR` and `lean::FB`.
+    /// NaN on either axis the recorder could not read.
+    pub lean: [f32; 2],
 }
 
 impl Sample {
@@ -207,6 +231,10 @@ pub struct Recording {
     /// How sure the recorder is of sitting and standing: 0 not read, 1 a guess (a toggle bind,
     /// or auto-sit it couldn't rule out), 2 sure.
     pub stance_confidence: u8,
+    /// How sure the recorder is of each lean axis, by `lean::LR` and `lean::FB`: 0 not read
+    /// (the aid moves the rider, nothing is bound, or it is on a device that can't be polled),
+    /// 1 a guess, 2 sure.
+    pub lean_confidence: [u8; 2],
     /// The other riders, from recorders that write them: the latest listing of each.
     pub riders: Vec<Rider>,
     pub frames: Vec<Frame>,
@@ -365,6 +393,7 @@ fn sample(p: &[u8]) -> Sample {
         wheel_speed: [b.f(160), b.f(164)],
         wheel_material: [b.i(168), b.i(172)],
         stance: stance::UNKNOWN,
+        lean: [f32::NAN; 2],
         brake_pressure: [b.f(176), b.f(180)],
         steer_torque: b.f(184),
     }
@@ -381,6 +410,7 @@ pub fn parse(bytes: &[u8]) -> Result<Recording> {
     }
     let mut rec = Recording::default();
     let mut now = stance::UNKNOWN;
+    let mut now_lean = [f32::NAN; 2];
     let mut at = 8;
     while at + 8 <= bytes.len() {
         let t = bytes[at];
@@ -392,8 +422,26 @@ pub fn parse(bytes: &[u8]) -> Result<Recording> {
             tag::EVENT => rec.event = event(p),
             tag::SESSION => rec.session = session(p),
             tag::CENTRELINE => rec.centreline = centreline(p),
-            tag::SAMPLE => rec.samples.push(Sample { stance: now, ..sample(p) }),
+            tag::SAMPLE => rec.samples.push(Sample { stance: now, lean: now_lean, ..sample(p) }),
             tag::STANCE_BIND => rec.stance_confidence = p.get(4).copied().unwrap_or(0),
+            // Layout byte, three zeros, then one 96-byte block per axis; each block leads with
+            // input, aid, confidence, source.
+            tag::LEAN_BIND => {
+                const AXIS: usize = 96;
+                rec.lean_confidence = [
+                    p.get(4 + 2).copied().unwrap_or(0),
+                    p.get(4 + AXIS + 2).copied().unwrap_or(0),
+                ];
+            }
+            // `f32 t`, `f32 lap position`, then the two axes. Anything that isn't a reading
+            // between -1 and +1 — NaN from the recorder included — stays unknown.
+            tag::LEAN => {
+                let read = |at: usize| {
+                    let v = b.f(at);
+                    if lean::known(v) { v.clamp(-1.0, 1.0) } else { f32::NAN }
+                };
+                now_lean = [read(8), read(12)];
+            }
             tag::ENTRY => {
                 let r = rider(p);
                 match rec.riders.iter_mut().find(|x| x.num == r.num) {
@@ -556,6 +604,23 @@ pub(crate) mod testfile {
             p.extend_from_slice(&[state, 0, 0, 0]);
             self.record(tag::STANCE, &p)
         }
+        /// Both lean axes bound to a pad, with a confidence each.
+        pub fn lean_bind(&mut self, lr: u8, fb: u8) -> &mut Self {
+            const AXIS: usize = 96;
+            let mut p = vec![0u8; 4 + AXIS * 2];
+            p[0] = 1;
+            // input = axis (3), aid off, confidence, read through DirectInput (2).
+            p[4..4 + 4].copy_from_slice(&[3, 0, lr, 2]);
+            p[4 + AXIS..4 + AXIS + 4].copy_from_slice(&[3, 0, fb, 2]);
+            self.record(tag::LEAN_BIND, &p)
+        }
+        pub fn lean(&mut self, t: f32, pos: f32, lr: f32, fb: f32) -> &mut Self {
+            let mut p = Vec::with_capacity(16);
+            for v in [t, pos, lr, fb] {
+                p.extend_from_slice(&v.to_le_bytes());
+            }
+            self.record(tag::LEAN, &p)
+        }
     }
 
     /// A `SPluginsBikeData_t` being filled in by offset.
@@ -672,6 +737,52 @@ mod tests {
         assert_eq!((b[1].num, b[1].local, b[1].x, b[1].z), (3, true, 10.0, -4.0));
         let l = rec.race_laps[0];
         assert_eq!((l.t, l.num, l.lap, l.invalid, l.time_ms), (13.0, 7, 3, false, 61_234));
+    }
+
+    #[test]
+    /// Lean rides along with each sample the way stance does, and an axis the recorder could
+    /// not read stays unknown rather than arriving as a centred rider.
+    #[test]
+    fn each_sample_carries_where_the_rider_was_asking_to_be() {
+        let mut f = File::new();
+        f.event("indiana", 1650.0).lean_bind(2, 1);
+        f.lean(0.0, 0.0, -0.5, 0.25).sample(0.0, 0.0, |_| {});
+        f.lean(0.02, 0.001, 0.75, f32::NAN).sample(0.02, 0.001, |_| {});
+        let rec = parse(&f.0).unwrap();
+
+        assert_eq!(rec.lean_confidence, [2, 1]);
+        assert!((rec.samples[0].lean[lean::LR] + 0.5).abs() < 1e-6);
+        assert!((rec.samples[0].lean[lean::FB] - 0.25).abs() < 1e-6);
+        assert!((rec.samples[1].lean[lean::LR] - 0.75).abs() < 1e-6);
+        assert!(
+            !lean::known(rec.samples[1].lean[lean::FB]),
+            "an axis the recorder couldn't read is unknown, not centred"
+        );
+    }
+
+    /// A recorder that writes no lean at all — every one before this change — still reads, with
+    /// both axes unknown rather than zero.
+    #[test]
+    fn a_recording_without_lean_reads_with_it_unknown() {
+        let mut f = File::new();
+        f.event("indiana", 1650.0);
+        f.sample(0.0, 0.0, |_| {});
+        let rec = parse(&f.0).unwrap();
+        assert_eq!(rec.lean_confidence, [0, 0]);
+        assert!(!lean::known(rec.samples[0].lean[lean::LR]));
+        assert!(!lean::known(rec.samples[0].lean[lean::FB]));
+    }
+
+    /// Out of range is not a reading. A stick the recorder mapped to the wrong axis can hand
+    /// back anything, and believing it would put the rider somewhere they never were.
+    #[test]
+    fn a_lean_reading_outside_the_axis_is_unknown() {
+        let mut f = File::new();
+        f.event("indiana", 1650.0).lean_bind(2, 2);
+        f.lean(0.0, 0.0, 9999.0, -7.5).sample(0.0, 0.0, |_| {});
+        let rec = parse(&f.0).unwrap();
+        assert!(!lean::known(rec.samples[0].lean[lean::LR]), "9999 is not a stick position");
+        assert!(!lean::known(rec.samples[0].lean[lean::FB]), "-7.5 is not either");
     }
 
     #[test]
