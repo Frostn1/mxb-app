@@ -124,7 +124,14 @@ mod th {
     /// this flat or flatter is past the bottom of it; rising this much is the up-face. The band
     /// between `LAND_FLAT` and `LAND_DOWN` is deliberately left without a verdict: a shallow
     /// landing is the case where the ground alone cannot settle it.
-    pub const LAND_DOWN: f32 = -0.12;
+    ///
+    /// Measured against real recordings by `tune_thresholds`: the median landing runs out at
+    /// −0.114, so the first value tried here, −0.12, left half of all real landings in the dead
+    /// band. −0.07 puts a typical downslope landing on the right side of it. This boundary is
+    /// diagnostic only today — `Landing::Ramp` and `Landing::Unsure` both fall through to the
+    /// rules that need a fast lap — so moving it changes what the tuning pass reports rather
+    /// than what a rider is told.
+    pub const LAND_DOWN: f32 = -0.07;
     pub const LAND_FLAT: f32 = -0.04;
     pub const LAND_UP: f32 = 0.06;
     /// Coming down this steeply, gradient again, onto ground that isn't falling away: the bike
@@ -3077,6 +3084,187 @@ pub(crate) mod tests {
     /// `$COACH_LAPS` and, for each corner of each comparable lap, the numbers a classifier
     /// would have to work from.
     ///
+    /// The numbers the landing and turn-in verdicts key on, over real recordings, so the
+    /// thresholds are chosen rather than argued. Prints one row per flight and per corner with
+    /// everything the rules read, plus the verdict each one currently earns.
+    ///
+    /// `COACH_LAPS=<dir> cargo test -p mxb-coach --bin mxb-coach tune_thresholds -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn tune_thresholds() {
+        let Ok(dir) = std::env::var("COACH_LAPS") else { return };
+        let mut files: Vec<_> = std::fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(|e| e.ok().map(|e| e.path()))
+            .filter(|p| p.extension().is_some_and(|x| x == "mxbc"))
+            .collect();
+        files.sort();
+
+        let mut afters: Vec<f32> = Vec::new();
+        let mut falls: Vec<f32> = Vec::new();
+        let mut hits: Vec<f32> = Vec::new();
+        let mut shares: Vec<f32> = Vec::new();
+        let mut verdicts = [0usize; 4];
+
+        for path in files {
+            let Ok(bytes) = std::fs::read(&path) else { continue };
+            let Ok(rec) = crate::telemetry::parse(&bytes) else { continue };
+            let e = &rec.event;
+            let traces: Vec<Trace> =
+                rec.laps().iter().filter_map(|l| Trace::new(l, e.track_length)).collect();
+            let (land_scale, torque_scale) = norm(&traces);
+            let bike = Bike {
+                limiter: e.limiter as f32,
+                max_rpm: e.max_rpm as f32,
+                shift_rpm: e.shift_rpm as f32,
+                travel: e.susp_max_travel,
+                land_scale,
+                torque_scale,
+            };
+            let usable: Vec<_> = rec.laps().into_iter().filter(|l| l.whole && !l.invalid).collect();
+            let Some(fast) = usable.iter().min_by_key(|l| l.time_ms).and_then(|l| Trace::new(l, e.track_length))
+            else {
+                continue;
+            };
+            let secs = sections(&fast);
+            println!(
+                "\n== {} | {} on {} | travel {:.3}/{:.3} m | land_scale {:.2}",
+                path.file_name().unwrap().to_string_lossy(),
+                e.bike_name,
+                e.track_name,
+                e.susp_max_travel[0],
+                e.susp_max_travel[1],
+                land_scale
+            );
+
+            println!("  {:>7} {:>5} {:>6} {:>6} {:>7} {:>7} {:>6}  verdict", "sect", "lap", "air s", "len m", "after", "fall", "hit G");
+            for (li, t) in traces.iter().enumerate() {
+                for s in secs.iter().filter(|s| matches!(s.kind, Kind::Jump | Kind::Rhythm)) {
+                    for (pt, pl) in air_runs(t, s.start..s.end + 1) {
+                        let from = pl + th::LAND_SLOPE_SKIP_M;
+                        let after = slope(t, from, from + th::LAND_SLOPE_M);
+                        let lip = pl.saturating_sub(3).max(pt);
+                        let fall = if pl > lip {
+                            (t.pts[pl].y - t.pts[lip].y) / (pl - lip) as f32
+                        } else {
+                            0.0
+                        };
+                        let (v, hit) = landing(t, pt, pl, s.end, bike);
+                        verdicts[v as usize] += 1;
+                        if let Some(a) = after {
+                            afters.push(a);
+                        }
+                        falls.push(fall);
+                        hits.push(hit);
+                        println!(
+                            "  {:>7} {:>5} {:>6.2} {:>6} {:>7} {:>7.3} {:>6.1}  {:?}",
+                            s.name,
+                            li,
+                            t.span(pt, pl),
+                            pl - pt,
+                            after.map_or("  --".to_string(), |a| format!("{a:.3}")),
+                            fall,
+                            hit,
+                            v
+                        );
+                    }
+                }
+            }
+
+            println!("  {:>7} {:>5} {:>7} {:>8} {:>8}  gated", "corner", "lap", "share", "in km/h", "brake s");
+            for (li, t) in traces.iter().enumerate() {
+                for s in secs.iter().filter(|s| s.kind == Kind::Corner) {
+                    let (a, b) = (s.core.0.min(t.len() - 1), s.core.1.min(t.len() - 1));
+                    let Some(h) = hot(t, a, b) else { continue };
+                    shares.push(h.share);
+                    let gated = h.share > th::HOT_INSIDE_SHARE
+                        && h.inside_kmh > th::HOT_INSIDE_KMH
+                        && h.braking_s > th::HOT_BRAKE_S;
+                    println!(
+                        "  {:>7} {:>5} {:>7.3} {:>8.1} {:>8.2}  {}",
+                        s.name, li, h.share, h.inside_kmh, h.braking_s, gated
+                    );
+                }
+            }
+        }
+
+        // The number that actually decides whether a rule cries wolf: how often it reaches the
+        // rider, gate and consequence and all, over every real lap held against the fast one.
+        {
+            let mut laps = 0usize;
+            let mut tally: std::collections::BTreeMap<&str, usize> = std::collections::BTreeMap::new();
+            let mut files: Vec<_> = std::fs::read_dir(&dir)
+                .unwrap()
+                .filter_map(|e| e.ok().map(|e| e.path()))
+                .filter(|p| p.extension().is_some_and(|x| x == "mxbc"))
+                .collect();
+            files.sort();
+            for path in files {
+                let Ok(bytes) = std::fs::read(&path) else { continue };
+                let Ok(rec) = crate::telemetry::parse(&bytes) else { continue };
+                let e = &rec.event;
+                let traces: Vec<Trace> =
+                    rec.laps().iter().filter_map(|l| Trace::new(l, e.track_length)).collect();
+                let (land_scale, torque_scale) = norm(&traces);
+                let bike = Bike {
+                    limiter: e.limiter as f32,
+                    max_rpm: e.max_rpm as f32,
+                    shift_rpm: e.shift_rpm as f32,
+                    travel: e.susp_max_travel,
+                    land_scale,
+                    torque_scale,
+                };
+                let usable: Vec<_> = rec.laps().into_iter().filter(|l| l.whole && !l.invalid).collect();
+                let Some(best) = usable.iter().min_by_key(|l| l.time_ms) else { continue };
+                let Some(fast) = Trace::new(best, e.track_length) else { continue };
+                for l in usable.iter().filter(|l| l.num != best.num) {
+                    let Some(t) = Trace::new(l, e.track_length) else { continue };
+                    laps += 1;
+                    for s in &review(&t, &fast, bike).sections {
+                        for f in &s.findings {
+                            *tally.entry(f.skill).or_default() += 1;
+                        }
+                    }
+                }
+            }
+            println!("\n== how often each tip reaches the rider, over {laps} real laps");
+            let mut rows: Vec<_> = tally.into_iter().collect();
+            rows.sort_by(|a, b| b.1.cmp(&a.1));
+            for (skill, n) in rows {
+                let per = n as f32 / laps.max(1) as f32;
+                let flag = if per > 2.0 { "  <-- every lap, several times" } else { "" };
+                println!("  {skill:>28}  {n:>4}   {per:>5.2} per lap{flag}");
+            }
+        }
+
+        let pct = |v: &mut Vec<f32>, p: f32| {
+            if v.is_empty() {
+                return f32::NAN;
+            }
+            v.sort_by(f32::total_cmp);
+            v[((v.len() - 1) as f32 * p).round() as usize]
+        };
+        println!("\n== distributions over every flight and corner");
+        println!(
+            "  after-touchdown slope  p10 {:.3}  p50 {:.3}  p90 {:.3}   (LAND_DOWN {} / LAND_FLAT {} / LAND_UP {})",
+            pct(&mut afters, 0.1), pct(&mut afters, 0.5), pct(&mut afters, 0.9),
+            th::LAND_DOWN, th::LAND_FLAT, th::LAND_UP
+        );
+        println!(
+            "  descent over the lip   p10 {:.3}  p50 {:.3}  p90 {:.3}   (FALL_RATE {})",
+            pct(&mut falls, 0.1), pct(&mut falls, 0.5), pct(&mut falls, 0.9), th::FALL_RATE
+        );
+        println!(
+            "  landing hit, G         p50 {:.1}  p90 {:.1}  p99 {:.1}   (floor {:.1})",
+            pct(&mut hits, 0.5), pct(&mut hits, 0.9), pct(&mut hits, 0.99), th::LAND_HIT_G
+        );
+        println!(
+            "  speed off after turn-in p50 {:.3}  p90 {:.3}  p99 {:.3}   (HOT_INSIDE_SHARE {})",
+            pct(&mut shares, 0.5), pct(&mut shares, 0.9), pct(&mut shares, 0.99), th::HOT_INSIDE_SHARE
+        );
+        println!("  verdicts: Ramp {} | Flat {} | Face {} | Unsure {}", verdicts[0], verdicts[1], verdicts[2], verdicts[3]);
+    }
+
     /// `COACH_LAPS=<dir> cargo test -p mxb-coach inspect_real_corners -- --ignored --nocapture`
     #[test]
     #[ignore]
