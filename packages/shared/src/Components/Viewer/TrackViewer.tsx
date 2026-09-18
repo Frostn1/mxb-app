@@ -1,10 +1,14 @@
-import { createContext, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useThree } from "@react-three/fiber";
 import { Line, OrbitControls } from "@react-three/drei";
 import { Move, Rotate3d, ZoomIn } from "lucide-react";
 import * as THREE from "three";
 import { cn } from "../../lib/utils";
 import type {
+  BikeRig,
+  EdfNode,
+  PaintTexture,
+  RiderPart,
   TrackBackdrop,
   TrackGround,
   TrackGroundLayer,
@@ -15,6 +19,14 @@ import type {
   TrackSceneryTexture,
   TrackTerrain,
 } from "../../types";
+import {
+  BikeOnGround,
+  canSeatRider,
+  settledPose,
+  useTextureMap,
+  type BikePose,
+} from "./ModelViewer";
+import type { RiderPose } from "../../lib/riderPose";
 import { ErrorBoundary } from "../ErrorBoundary";
 import { useT } from "../../i18n/context";
 import { reportRenderer } from "../../lib/glInfo";
@@ -28,6 +40,10 @@ const VIEW_SPAN = 10;
  * It used to be half as tall again, so faces and lips cast a shadow to be seen by, which made
  * every jump look bigger than it rides. The hollows are darkened instead: see [`cavityShade`].
  */
+/** How far back to sit when the camera first lands on a bike, in metres. Close enough to see a
+ *  rider's shoulders move, far enough to see the corner they are moving them in. */
+const WATCH_M = 14;
+
 const RELIEF_EXAGGERATION = 1;
 
 /**
@@ -347,12 +363,171 @@ function Lines({ terrain, lines }: { terrain: TrackTerrain; lines: ViewerLine[] 
 }
 
 /**
+ * A bike to draw on the track: where it is, which way it points, how it is leaned.
+ *
+ * Everything is in the world frame [`ViewerLine`] points are in, so a replay hands the same
+ * numbers to both and the machine rides the line it is drawn beside.
+ */
+export interface ViewerActor {
+  nodes: EdfNode[];
+  /** The joints to pose about. Null draws the bike rigid, as an unassembled one always is. */
+  rig: BikeRig | null;
+  /** The model's own sheets, the way `BikeModel.base` carries them. */
+  textures?: PaintTexture[];
+  /** World metres. The ground under the tyres, not the middle of the machine. */
+  at: [number, number, number];
+  /** Heading, degrees: zero faces world +Z and positive turns towards world +X. */
+  yaw: number;
+  /** Lean, degrees, positive over to the RIDER'S RIGHT. */
+  roll: number;
+  /** Pitch, degrees, positive NOSE DOWN. */
+  pitch: number;
+  /**
+   * Steering, fork, shock and wheel spin, as an OFFSET from where the bike settles.
+   *
+   * The same bargain `ModelViewer`'s `bikePoseOffset` makes, and for the same reason: the
+   * settled pose is what stands the bike on both wheels, so replacing it outright leaves the
+   * parts in the frame the model was authored in with the shock apparently collapsed.
+   */
+  pose?: Partial<BikePose> | null;
+  /**
+   * The rider's own body and kit, sat on the machine. Absent draws the bike alone.
+   *
+   * The same list `ModelViewer`'s `riderParts` takes, and seated the same way — a bike whose
+   * `.geom` names no seat, or a body that brought no rig, rides riderless rather than wearing
+   * a guess. See {@link canSeatRider}.
+   */
+  riderParts?: RiderPart[] | null;
+  /** The rider's pose, a turn per bone — what `riderPoseFrom` makes of a replay sample. */
+  riderPose?: RiderPose;
+}
+
+/** A bike wearing nothing but its own model. One instance, so an untextured bike settles. */
+const NO_SHEETS: PaintTexture[] = [];
+
+/**
+ * One bike and its rider, standing on the track in the frame the lap lines are drawn in.
+ *
+ * The anchor goes through [`toView`] — the same call every line point makes — so the bike
+ * cannot be anywhere but on the ground its own line is over, whatever [`RELIEF_EXAGGERATION`]
+ * is doing to that ground. Its own metres are then scaled by `unitsPerMetre` rather than by
+ * the taller `heightScale`, because a bike is one rigid machine: stretching it upright would
+ * shear it the moment it leans. While relief is drawn true the two are the same number.
+ *
+ * What stands there is `ModelViewer`'s own `BikeOnGround` — joints, seating, lean and all —
+ * so the machine out on the hillside is the machine the studio draws. This only says where.
+ */
+function TrackActor({ terrain, actor }: { terrain: TrackTerrain; actor: ViewerActor }) {
+  const lift = useContext(ReliefContext);
+  const { nodes, rig, yaw, roll, pitch, riderParts = null, riderPose } = actor;
+  const [ax, ay, az] = actor.at;
+  const tex = useTextureMap(actor.textures ?? NO_SHEETS);
+
+  const settled = useMemo(() => settledPose(rig, nodes), [rig, nodes]);
+  const pose = useMemo<BikePose>(() => {
+    const o = actor.pose;
+    if (!o) return settled;
+    return {
+      rearDrop: settled.rearDrop + (o.rearDrop ?? 0),
+      forkUp: settled.forkUp + (o.forkUp ?? 0),
+      steer: settled.steer + (o.steer ?? 0),
+      spin: settled.spin + (o.spin ?? 0),
+      spinRear: settled.spinRear + (o.spinRear ?? 0),
+    };
+  }, [settled, actor.pose]);
+
+  const place = useMemo(() => {
+    const frame = viewFrame(terrain, lift);
+    return { at: toView(frame, ax, ay, az), scale: frame.unitsPerMetre };
+  }, [terrain, lift, ax, ay, az]);
+  const attitude = useMemo(() => ({ roll, pitch }), [roll, pitch]);
+  // Only a pair that can actually be seated is offered a seat; the rest ride riderless rather
+  // than with a body dropped on the swingarm pivot.
+  const seat = canSeatRider(rig, riderParts) ? rig!.seat : null;
+
+  // The canvas only draws when asked, and a bike that moves while nothing else does is
+  // exactly the case that would otherwise sit still on screen.
+  const invalidate = useThree((s) => s.invalidate);
+  useEffect(
+    () => invalidate(),
+    [place, pose, attitude, yaw, tex, riderParts, riderPose, invalidate],
+  );
+
+  if (nodes.length === 0) return null;
+  return (
+    // Turned the other way about Y than the heading says, because `toView` negates X: a rider
+    // bearing towards world +X is bearing towards -X here.
+    <group
+      position={place.at}
+      rotation={[0, -yaw * THREE.MathUtils.DEG2RAD, 0]}
+      scale={place.scale}
+    >
+      <BikeOnGround
+        nodes={nodes}
+        textures={tex}
+        rig={rig}
+        pose={pose}
+        attitude={attitude}
+        riderParts={riderParts}
+        riderPose={riderPose}
+        seat={seat}
+      />
+    </group>
+  );
+}
+
+/**
  * Bring the camera to a point on the track.
  *
  * Sets the orbit target and pulls the camera back along the direction it was already
  * looking, so flying to a jump keeps whatever angle you had rather than snapping to a
  * canned one. Close enough to read a single face — the point of going there at all.
  */
+/**
+ * Keeps the camera pointed at something that is moving, without taking it over.
+ *
+ * `FocusCamera` places the camera: it picks a distance and an angle, which is right for landing
+ * on a corner and wrong for following a bike, because it would undo the rider's own orbiting
+ * and zoom on every frame. This only ever moves the target, and slides the camera by the same
+ * amount, so where the rider put themselves is exactly where they stay.
+ */
+function FollowCamera({ terrain, at }: { terrain: TrackTerrain; at: { x: number; z: number } | null }) {
+  const { camera, controls, invalidate } = useThree();
+  const lift = useContext(ReliefContext);
+  const was = useRef<THREE.Vector3 | null>(null);
+  useEffect(() => {
+    if (!at) {
+      was.current = null;
+      return;
+    }
+    const frame = viewFrame(terrain, lift);
+    const [x, , z] = toView(frame, at.x, terrain.minHeight, at.z);
+    const now = new THREE.Vector3(x, 0, z);
+    const orbit0 = controls as unknown as { target?: THREE.Vector3 } | null;
+    const orbit = controls as unknown as {
+      target?: THREE.Vector3 & { set: (x: number, y: number, z: number) => void };
+      update?: () => void;
+    } | null;
+    // Landing on a bike for the first time comes in close with it: a track is hundreds of
+    // metres across and a bike is two, so the view that frames a whole circuit shows a rider a
+    // dot. Only on arrival — after that the rider's own zoom is theirs to keep, and every frame
+    // moves the camera by what the bike moved rather than placing it again.
+    if (!was.current) {
+      const from = camera.position.clone().sub(orbit0?.target ?? now);
+      const back = from.lengthSq() > 1e-6 ? from.normalize() : new THREE.Vector3(0.5, 0.45, 0.5).normalize();
+      const near = viewFrame(terrain, lift).unitsPerMetre * WATCH_M;
+      camera.position.set(now.x + back.x * near, now.y + Math.max(back.y * near, near * 0.35), now.z + back.z * near);
+    } else {
+      camera.position.add(now.clone().sub(was.current));
+    }
+    was.current = now;
+    orbit?.target?.set(now.x, now.y, now.z);
+    orbit?.update?.();
+    invalidate();
+  }, [at, terrain, camera, controls, invalidate, lift]);
+  return null;
+}
+
 function FocusCamera({
   terrain,
   focus,
@@ -402,6 +577,25 @@ function toView(
     (wy - frame.midHeight) * frame.heightScale,
     wz * frame.unitsPerMetre - frame.originZ,
   ];
+}
+
+/**
+ * The same journey backwards: a point in the scene, in world metres.
+ *
+ * Read straight off [`toView`] rather than worked out again, so the two can't drift apart —
+ * X is mirrored about the origin and Z is only shifted, and the scale is the one number both
+ * axes go through. Height is left out: a place on a track is named by where it is on the
+ * ground, and every caller matches it against a line that carries its own.
+ */
+function toWorld(
+  frame: ReturnType<typeof viewFrame>,
+  vx: number,
+  vz: number,
+): { x: number; z: number } {
+  return {
+    x: (frame.originX - vx) / frame.unitsPerMetre,
+    z: (vz + frame.originZ) / frame.unitsPerMetre,
+  };
 }
 
 /**
@@ -696,6 +890,97 @@ function buildGeometry(
   return geometry;
 }
 
+/**
+ * Where a ray meets the ground, without walking the mesh.
+ *
+ * three.js's own intersection tests every triangle, and the fine grid is eight million of
+ * them — measured here at 0.41 s a ray, and the event system casts one on every press and
+ * every release as well as on the click itself. So the ground is intersected as what it is:
+ * a heightfield, marched half a cell at a time until the ray first drops under the surface
+ * and then halved down to the crossing. That costs a few thousand height lookups whatever
+ * the grid's size, and it is the mesh's own heights it looks them up in.
+ *
+ * The grid is built already placed, and nothing above it is moved or scaled, so the ray
+ * arrives in the same units the positions are in and needs no transform.
+ */
+function groundRaycast(
+  self: { current: THREE.Mesh | null },
+  terrain: TrackTerrain,
+  frame: ReturnType<typeof viewFrame>,
+): THREE.Mesh["raycast"] {
+  const { width, height, heights, minHeight, maxHeight } = terrain;
+  const { step, midHeight, heightScale, originX, originZ } = frame;
+  // The surface between four samples, in view units, at a fractional place on the grid.
+  const surfaceAt = (gx: number, gy: number): number => {
+    const x0 = Math.min(Math.max(Math.floor(gx), 0), width - 1);
+    const y0 = Math.min(Math.max(Math.floor(gy), 0), height - 1);
+    const x1 = Math.min(x0 + 1, width - 1);
+    const y1 = Math.min(y0 + 1, height - 1);
+    const fx = Math.min(Math.max(gx - x0, 0), 1);
+    const fy = Math.min(Math.max(gy - y0, 0), 1);
+    const h =
+      heights[y0 * width + x0] * (1 - fx) * (1 - fy) +
+      heights[y0 * width + x1] * fx * (1 - fy) +
+      heights[y1 * width + x0] * (1 - fx) * fy +
+      heights[y1 * width + x1] * fx * fy;
+    return (h - midHeight) * heightScale;
+  };
+  const lo = [-originX, (minHeight - midHeight) * heightScale, -originZ];
+  const hi = [originX, (maxHeight - midHeight) * heightScale, originZ];
+  return (raycaster, intersects) => {
+    const mesh = self.current;
+    if (!mesh) return;
+    const { origin, direction } = raycaster.ray;
+    const o = [origin.x, origin.y, origin.z];
+    const d = [direction.x, direction.y, direction.z];
+    // The stretch of the ray that is inside the box the grid occupies. Outside it there is
+    // no ground to meet, and marching the whole ray instead would be mostly empty sky.
+    let enter = Math.max(raycaster.near, 0);
+    let leave = raycaster.far;
+    for (let a = 0; a < 3; a += 1) {
+      if (Math.abs(d[a]) < 1e-9) {
+        if (o[a] < lo[a] || o[a] > hi[a]) return;
+        continue;
+      }
+      const a0 = (lo[a] - o[a]) / d[a];
+      const a1 = (hi[a] - o[a]) / d[a];
+      enter = Math.max(enter, Math.min(a0, a1));
+      leave = Math.min(leave, Math.max(a0, a1));
+    }
+    if (leave < enter) return;
+    // How far the ray is above the ground under it, at a distance along it.
+    const gap = (t: number): number =>
+      o[1] +
+      d[1] * t -
+      surfaceAt((originX - (o[0] + d[0] * t)) / step, (o[2] + d[2] * t + originZ) / step);
+    if (gap(enter) <= 0) return;
+    const march = step / 2;
+    const steps = Math.ceil((leave - enter) / march);
+    let last = enter;
+    for (let i = 1; i <= steps; i += 1) {
+      const t = Math.min(enter + i * march, leave);
+      if (gap(t) > 0) {
+        last = t;
+        continue;
+      }
+      let above = last;
+      let below = t;
+      // Sixteen halvings put the crossing well inside a millimetre of a cell.
+      for (let k = 0; k < 16; k += 1) {
+        const mid = (above + below) / 2;
+        if (gap(mid) > 0) above = mid;
+        else below = mid;
+      }
+      intersects.push({
+        distance: below,
+        point: raycaster.ray.at(below, new THREE.Vector3()),
+        object: mesh,
+      });
+      return;
+    }
+  };
+}
+
 /** Metres one tile of the ground sheet covers. Small enough to read as grain up close,
  *  large enough not to shimmer when the whole track is in frame. */
 const GROUND_TILE_METRES = 4;
@@ -853,6 +1138,7 @@ function TerrainMesh({
   layers,
   game,
   backdrop,
+  onGroundClick,
 }: {
   terrain: TrackTerrain;
   overview: TrackOverview | null;
@@ -863,6 +1149,8 @@ function TerrainMesh({
   /** Draw the ground the way the game's own shader does. */
   game: boolean;
   backdrop: TrackBackdrop | null;
+  /** Told where a click landed on the ground, in world metres. */
+  onGroundClick?: (at: { x: number; z: number }) => void;
 }) {
   // The stack is the ground when a track states one. Everything below — the surface picture
   // built from the physics masks, the single sheet tiled everywhere, the elevation ramp — is
@@ -875,6 +1163,13 @@ function TerrainMesh({
   const geometry = useMemo(
     () => buildGeometry(terrain, tinted, lift),
     [terrain, tinted, lift],
+  );
+
+  // Its own intersection, for the same reason the mesh is built by hand: see [`groundRaycast`].
+  const self = useRef<THREE.Mesh | null>(null);
+  const picker = useMemo(
+    () => groundRaycast(self, terrain, viewFrame(terrain, lift)),
+    [terrain, lift],
   );
 
   // Built once per picture and handed to the GPU as-is. `sRGB` because it's artwork rather
@@ -1078,7 +1373,24 @@ function TerrainMesh({
     // Both cast and receive: the terrain is the only thing in the scene, so every shadow it
     // shows is its own — a jump face darkening the ground in front of it, a berm shading its
     // own inside. That self-shadowing is most of what makes the relief read as ground.
-    <mesh geometry={geometry} castShadow receiveShadow>
+    <mesh
+      ref={self}
+      geometry={geometry}
+      castShadow
+      receiveShadow
+      raycast={picker}
+      onClick={
+        onGroundClick &&
+        ((e) => {
+          // A press that ends where it began. Orbiting ends in a click too — the browser
+          // sends one whenever a drag starts and finishes on the same element — and two
+          // pixels is what the event system itself treats as having stood still.
+          if (e.delta > 2) return;
+          e.stopPropagation();
+          onGroundClick(toWorld(viewFrame(terrain, lift), e.point.x, e.point.z));
+        })
+      }
+    >
       {/* Flat-ish and unshiny: dirt, and it keeps the relief legible rather than glared out.
           Vertex colours stay on with a texture, because three.js multiplies the two: the
           surface keeps the colours the track states while the cavity shading underneath gives
@@ -1231,11 +1543,14 @@ function SceneryMesh({
   surfaces,
   terrain,
   onPick,
+  clickThrough = false,
 }: {
   scenery: TrackScenery;
   surfaces: TrackSceneryTexture[];
   terrain: TrackTerrain;
   onPick?: (piece: PickedPiece | null) => void;
+  /** Let clicks fall through to the ground instead of selecting a piece. */
+  clickThrough?: boolean;
 }) {
   const [picked, setPicked] = useState<number | null>(null);
   const lift = useContext(ReliefContext);
@@ -1385,6 +1700,10 @@ function SceneryMesh({
         material={materials}
         castShadow
         onClick={(e) => {
+          // When the viewer is being used to point at places on the track, the ground is
+          // what a click means: a tent or a tree drawn over a corner is in front of the
+          // rider's own line, not the thing they were aiming at.
+          if (clickThrough) return;
           e.stopPropagation();
           const face = e.faceIndex;
           if (face == null || scenery.pieceOfTriangle.length === 0) return;
@@ -1514,6 +1833,14 @@ interface TrackViewerProps {
   /** Told what a click on the scenery landed on, and when the selection clears. */
   onPick?: (piece: PickedPiece | null) => void;
   /**
+   * Told where a click landed on the ground, in world metres — the frame `lines`, `focus`
+   * and the actor are given in, so what comes back can be matched straight against a lap.
+   *
+   * Given one, the scenery stops taking clicks for itself: the place under the tent is what
+   * was meant. Absent, nothing about the view changes.
+   */
+  onGroundClick?: (at: { x: number; z: number }) => void;
+  /**
    * A point in world metres to bring the camera to, or null to leave it alone.
    *
    * The identity matters as much as the value: passing a fresh object with the same
@@ -1521,6 +1848,13 @@ interface TrackViewerProps {
    * bring you back to it after you have panned away.
    */
   focus?: { x: number; z: number } | null;
+  /**
+   * Somewhere moving to keep the camera pointed at, in world metres — a bike being replayed.
+   *
+   * Unlike `focus` this never chooses a distance or an angle: it slides the camera and its
+   * target together, so the rider keeps whatever view they had and the subject stays in it.
+   */
+  follow?: { x: number; z: number } | null;
   /**
    * A stretch of track to light up: world-metre points along it, and how wide it is.
    *
@@ -1532,6 +1866,12 @@ interface TrackViewerProps {
   highlight?: { path: { x: number; z: number }[]; width: number } | null;
   /** Lines to draw over the ground, in world metres with height. */
   lines?: ViewerLine[];
+  /**
+   * A bike to stand on the track — the rider's own machine, on the line they rode.
+   *
+   * Null or absent draws the scene the viewer has always drawn. See {@link ViewerActor}.
+   */
+  actor?: ViewerActor | null;
   className?: string;
 }
 
@@ -1547,9 +1887,12 @@ export function TrackViewer({
   ground = null,
   groundLayers = [],
   onPick,
+  onGroundClick,
   focus = null,
+  follow = null,
   highlight = null,
   lines = [],
+  actor = null,
   className,
 }: TrackViewerProps) {
   const lift = RELIEF_EXAGGERATION;
@@ -1642,6 +1985,7 @@ export function TrackViewer({
               layers={groundLayers}
               game={gameView}
               backdrop={backdrop}
+              onGroundClick={onGroundClick}
             />
           )}
           {terrain && showObjects && scenery && (
@@ -1650,14 +1994,17 @@ export function TrackViewer({
               surfaces={surfaces}
               terrain={terrain}
               onPick={onPick}
+              clickThrough={onGroundClick != null}
             />
           )}
           {terrain && showObjects && placements.length > 0 && (
             <PlacementMarkers placements={placements} terrain={terrain} />
           )}
           {terrain && <FocusCamera terrain={terrain} focus={focus} />}
+          {terrain && <FollowCamera terrain={terrain} at={follow} />}
           {terrain && highlight && <Highlight terrain={terrain} at={highlight} />}
           {terrain && lines.length > 0 && <Lines terrain={terrain} lines={lines} />}
+          {terrain && actor && <TrackActor terrain={terrain} actor={actor} />}
           </group>
           </ReliefContext.Provider>
           <OrbitControls

@@ -30,12 +30,21 @@ import SectionStrip from "./SectionStrip";
 import Charts from "./Charts";
 import SetupFixes, { Notes, Num } from "./SetupFixes";
 import BikeSuspension from "./BikeSuspension";
+import SectionReplay from "./SectionReplay";
 import LiveCues from "./LiveCues";
 import HudPanel from "./HudPanel";
 
-/** The page is a lot to take in at once, so it's split: the lap, the sections, the bike, what
- *  the game shows, and the track itself. */
-const TABS = ["lap", "sections", "setup", "ingame", "track"] as const;
+/**
+ * The page is a lot to take in at once, so it's split.
+ *
+ * The order is the order a rider works through it: the lap end to end, then corner by corner,
+ * then the track those corners are on, then the bike, and last what the game shows while
+ * riding — which is a setting rather than a thing to read, so it goes at the end.
+ */
+const TABS = ["lap", "sections", "setup", "ingame"] as const;
+/** How a corner is being looked at: from above, or on the track it is on. */
+const VIEWS = ["flat", "solid"] as const;
+type View = (typeof VIEWS)[number];
 /** Under this a section cost nothing, and `analysis.rs` keeps no tips for it — see `th::WORTH_S`.
  *  The page needs the same number to say why a section has nothing under it. */
 const WORTH_S = 0.05;
@@ -82,6 +91,7 @@ export default function Review({
   const [whole, setWhole] = useState(false);
   const [surface, setSurface] = useState<Surface | null>(null);
   const [tab, setTab] = useState<Tab>(firstTab);
+  const [view, setView] = useState<View>("flat");
   // Which lines are drawn: this lap alone, or every lap in the session.
   const [laps, setLaps] = useState<"one" | "all">("one");
   const [lines, setLines] = useState<Lines | null>(null);
@@ -149,7 +159,7 @@ export default function Review({
   const pick = (i: number) => {
     setSelected(i);
     setWhole(false);
-    if (tab !== "track") setTab("sections");
+    setTab("sections");
   };
   // The arrow keys walk the sections, but only where a section is on screen.
   useEffect(() => {
@@ -193,6 +203,20 @@ export default function Review({
     ...review.sections.map((s, i) => (s.findings.length > 0 && !review.focus.includes(i) ? i : -1)).filter((i) => i >= 0),
   ];
   const where = [data.trackName || data.trackId, started(data.lap.started), data.lap.bikeName].filter(Boolean).join(" · ");
+  /**
+   * How much each tab has for this lap.
+   *
+   * Not a decoration: five tabs with nothing to tell them apart is the reason a rider opens all
+   * five. A clean lap with no setup fixes should say so on the tab rather than after a click.
+   * "Lap" counts the themes because that is what the tab is for; "In game" counts nothing,
+   * since what the game shows is a setting and not a finding.
+   */
+  const counts: Record<Tab, number> = {
+    lap: review.overall.length,
+    sections: worth.length,
+    setup: review.setup.length,
+    ingame: 0,
+  };
   // Every lap's line, fastest green to slowest red; this lap in blue on top.
   const others = (() => {
     if (laps !== "all" || !lines) return undefined;
@@ -274,13 +298,28 @@ export default function Review({
       )}
 
       <Tabs value={tab} onValueChange={(v) => setTab(v as Tab)}>
-        <TabsList className="mb-4">
+        {/* A tab's name says what it holds; the count says whether it holds anything for this
+            lap. Between them a rider can tell what to open without opening all five. */}
+        <TabsList>
           {TABS.map((id) => (
-            <TabsTrigger key={id} value={id} className="px-3.5 py-1.5">
+            <TabsTrigger key={id} value={id} className="gap-1.5 px-3.5 py-1.5">
               {t(`review.tab.${id}` as TKey)}
+              {counts[id] > 0 && (
+                <span
+                  className={cn(
+                    "rounded-full px-1.5 text-[10px] font-semibold tabular-nums",
+                    tab === id ? "bg-primary/15 text-primary" : "bg-secondary text-muted-foreground",
+                  )}
+                >
+                  {counts[id]}
+                </span>
+              )}
             </TabsTrigger>
           ))}
         </TabsList>
+        {/* One line on arrival, so "when do I come here" is answered by the page rather than
+            by opening it and guessing. */}
+        <p className="mb-4 mt-2 text-[12px] text-muted-foreground">{t(`review.tabSub.${tab}` as TKey)}</p>
 
         {/* The lap end to end: where the time went, and the charts behind it. */}
         <TabsContent value="lap" className="space-y-4">
@@ -295,11 +334,12 @@ export default function Review({
             <Overall themes={review.overall} solo={solo} onPick={bySection} />
             <Focus review={review} worth={worth} selected={selected} solo={solo} onPick={pick} />
           </div>
-          {/* The line notes and the track itself sit on the last tab, which a rider landing
-              here never opens. A line to say they are there, rather than moving them. */}
           {lines && lines.notes.length > 0 && (
             <button
-              onClick={() => setTab("track")}
+              onClick={() => {
+                setTab("sections");
+                setView("solid");
+              }}
               className="flex w-full items-center justify-between gap-3 border border-border bg-card px-4 py-2.5 text-left hover:border-foreground/30"
             >
               <span className="text-[12.5px]">{t("review.linesHere", { count: lines.notes.length })}</span>
@@ -308,37 +348,97 @@ export default function Review({
           )}
         </TabsContent>
 
-        {/* One section at a time, with the map to find it on. */}
+        {/* One corner at a time, and the track it is on. These were two tabs, which asked the
+            rider to hold a corner in their head while moving between them: the map found it,
+            the track showed it, and neither said what the other knew. One tab, two ways of
+            looking, and the section stays picked across both. */}
         <TabsContent value="sections" className="space-y-4">
           <SectionStrip review={review} selected={selected} onPick={pick} />
           <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_420px]">
-            <div className="relative h-[460px] border border-border bg-card">
-              {allLaps && <div className="absolute right-3 top-3 z-10">{allLaps}</div>}
-              <div className="h-full p-3">
-                <TrackMap review={review} surface={relief} others={others} selected={selected} cursor={cursor} onPick={pick} solo={noTrace} />
+            <div className="min-w-0 space-y-2">
+              <div className="flex items-center gap-1">
+                {VIEWS.map((v) => (
+                  <button
+                    key={v}
+                    onClick={() => setView(v)}
+                    disabled={v === "solid" && !can3d}
+                    title={v === "solid" && !can3d ? `${t("review.groundFromLaps")}${why ? ` ${why}.` : ""}` : undefined}
+                    className={cn(
+                      "border px-2.5 py-1 text-[11.5px] disabled:opacity-40",
+                      view === v ? "border-primary text-primary" : "border-border text-muted-foreground hover:text-foreground",
+                    )}
+                  >
+                    {t(v === "flat" ? "review.view2d" : "review.view3d")}
+                  </button>
+                ))}
+                {allLaps && <div className="ml-auto">{allLaps}</div>}
               </div>
-              {laps === "all" && (
-                <p className="pointer-events-none absolute bottom-2 left-3 text-[11px] text-muted-foreground">{t("review.lapsLegend")}</p>
+              {view === "flat" || !can3d ? (
+                <div className="relative h-[460px] border border-border bg-card">
+                  <div className="h-full p-3">
+                    <TrackMap review={review} surface={relief} others={others} selected={selected} cursor={cursor} onPick={pick} solo={noTrace} />
+                  </div>
+                  {laps === "all" && (
+                    <p className="pointer-events-none absolute bottom-2 left-3 text-[11px] text-muted-foreground">{t("review.lapsLegend")}</p>
+                  )}
+                </div>
+              ) : sel ? (
+                /* On the track, with the corner played back on the rider's own bike: the 3D
+                   view and the replay are the same picture, so they are not two things. */
+                <SectionReplay
+                  path={path}
+                  lap={lap}
+                  sectionId={sel.id}
+                  bikeId={data.lap.bikeId}
+                  rider={data.lap.rider}
+                  review={review}
+                  ground={ground}
+                  why={why}
+                  surface={surface}
+                  lines={lines}
+                  selected={selected}
+                  onNext={selected != null ? () => pick((selected + 1) % count) : undefined}
+                  onPick={pick}
+                />
+              ) : (
+                <div className="h-[460px] border border-border bg-card">
+                  <Track3D
+                    review={review}
+                    ground={ground}
+                    why={why}
+                    surface={surface}
+                    lines={lines}
+                    allLaps={laps === "all"}
+                    lap={lap}
+                    selected={selected}
+                    className="h-full w-full"
+                  />
+                </div>
               )}
             </div>
-            {sel && selected != null && (
-              <SectionPanel
-                key={sel.name}
-                s={sel}
-                solo={solo}
-                onPrev={() => pick((selected - 1 + count) % count)}
-                onNext={() => pick((selected + 1) % count)}
-              />
-            )}
+            <div className="space-y-4">
+              {sel && selected != null && (
+                <SectionPanel
+                  key={sel.name}
+                  s={sel}
+                  solo={solo}
+                  onPrev={() => pick((selected - 1 + count) % count)}
+                  onNext={() => pick((selected + 1) % count)}
+                />
+              )}
+              {lines && <LineNotes lines={lines} selected={sel?.name ?? null} onPick={bySection} />}
+              <Rivals rivals={data.rivals ?? []} />
+            </div>
           </div>
         </TabsContent>
 
         {/* The bike: what it would change, and how it feels. */}
         <TabsContent value="setup">
           <div className="space-y-6">
-            {/* What the lap actually did to the suspension, before what to change about it. */}
-            <BikeSuspension channels={review.channels} />
+            {/* The bike and what to change on it first. The readings fold in underneath: they
+                are what the changes were worked out from, not the thing to read first. */}
             <SetupFixes path={path} findings={review.setup} bikeId={data.lap.bikeId} />
+            <BikeSuspension channels={review.channels} />
           </div>
         </TabsContent>
 
@@ -350,33 +450,6 @@ export default function Review({
           </div>
         </TabsContent>
 
-        {/* The track itself, with the lap on it. */}
-        <TabsContent value="track" className="space-y-4">
-          {can3d ? (
-            <div className="relative h-[520px] border border-border bg-card">
-              {allLaps && <div className="absolute right-3 top-3 z-10">{allLaps}</div>}
-              <Track3D
-                review={review}
-                ground={ground}
-                why={why}
-                surface={surface}
-                lines={lines}
-                allLaps={laps === "all"}
-                lap={lap}
-                selected={selected}
-                className="h-full w-full"
-              />
-            </div>
-          ) : (
-            <p className="border border-border bg-card px-4 py-3 text-[12.5px] text-muted-foreground">
-              {`${t("review.groundFromLaps")}${why ? ` ${why}.` : ""}`}
-            </p>
-          )}
-          <div className="grid gap-6 lg:grid-cols-2">
-            {lines && <LineNotes lines={lines} selected={sel?.name ?? null} onPick={bySection} />}
-            <Rivals rivals={data.rivals ?? []} />
-          </div>
-        </TabsContent>
       </Tabs>
     </Page>
   );

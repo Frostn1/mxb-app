@@ -18,8 +18,29 @@
   fixing.
 - The lap table and the full five-tab review are both still there, one click further in, from
   **All laps** and **Full review** on any section.
+- **Watch the corner back, on the track, on your own bike.** Every turn in the debrief now has
+  two ways to look at it: the line from above, or what you actually did — your bike riding the
+  real track, along the line you rode, with the terrain and scenery around it. It plays the
+  corner through the way you rode it — the bars, both ends of the suspension by how much travel
+  you used, how far it was leaned and pitched, the wheels turning at the speed you were doing —
+  with your
+  speed, gear, throttle and brake on the bike instead of in a paragraph, and how far ahead or
+  behind your best lap was at the same point on the track.
+- Your rider moves with it, where the game told the recorder what you were asking for with your
+  body. Where it didn't, the bike moves and the body stays still, and the screen says why.
+- The camera rides with you, close enough to watch, and leaves your zoom where you put it. Click
+  anywhere on the track to jump there — inside the corner it moves the playhead, outside it
+  takes you to the corner you pointed at. At the end it can stop, play round again, or run on
+  to the next corner, whichever you pick.
+- Every line on the map has a key now, so you can tell your line from the fast lap's, and the
+  map travels to the corner you're on instead of leaving you to find it.
 
 ### Changed
+- **The lap's own tabs say what they hold.** Each tab carries a count for the lap you're on —
+  what the lap was about, the corners worth your time, the notes on the track, the changes for
+  the bike — so a clean lap says so on the tab instead of after five clicks. A line under them
+  says what the tab you're on is for, and they run in the order you'd use them: the lap, the
+  corners, the track they're on, the bike, and last what the coach shows you while you ride.
 - The debrief fits the window. The step you are on scrolls on its own if it has to, so Next and
   Back stay where you left them instead of sitting at the bottom of a long page.
 
