@@ -82,6 +82,8 @@ export interface LapRef {
 }
 
 export interface SectionBest {
+  /** The section's stable id: what per-corner progress over time keys on. */
+  id: string;
   name: string;
   best: number;
   lap: number;
@@ -112,6 +114,8 @@ export interface Finding {
 
 export interface SectionReview {
   kind: SectionKind;
+  /** Stable across sessions once the track's roster has named it: `t5`, `j2`, `w1`. */
+  id: string;
   name: string;
   start: number;
   end: number;
@@ -236,7 +240,7 @@ export interface LapId {
 export interface Lines {
   /** Every whole lap's line, every metre, with the bike's height. */
   laps: (LapId & { time: number; path: [number, number][]; heights: number[] })[];
-  sections: Pick<SectionReview, "kind" | "name" | "start" | "end" | "core" | "dir">[];
+  sections: Pick<SectionReview, "kind" | "id" | "name" | "start" | "end" | "core" | "dir">[];
   /** Per section, one row per lap: metres right of the fast line, and the section time. */
   offsets: (LapId & { offset: number; time: number })[][];
   notes: LineNote[];
@@ -393,6 +397,8 @@ export interface CueOut {
   priority: number;
   text: string;
   section: string;
+  /** That section's stable id, which the cue rotation keys on. */
+  sectionId: string;
 }
 
 export interface CuesOut {

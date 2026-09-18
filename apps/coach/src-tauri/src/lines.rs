@@ -7,7 +7,7 @@
 
 use serde::Serialize;
 
-use crate::analysis::{sections, Kind, Section, Trace};
+use crate::analysis::{Kind, Section, Trace};
 
 /// Points along the lap paths sent to the map: every metre, the grid's own spacing.
 const STEP: usize = 1;
@@ -152,8 +152,7 @@ fn which(ids: &[LapId], stints: bool) -> String {
 /// `laps` in the order they were ridden, across every stint of the session; `reference` decides
 /// the sections and the fast line. `others` is every other rider's world x/z the recorder saw,
 /// for where the track will wear.
-pub fn lines(laps: &[(LapId, Trace)], reference: &Trace, others: &[[f32; 2]]) -> Lines {
-    let secs = sections(reference);
+pub fn lines(laps: &[(LapId, Trace)], reference: &Trace, others: &[[f32; 2]], secs: &[Section]) -> Lines {
     let mut offsets = Vec::with_capacity(secs.len());
     let mut notes = Vec::new();
     // A session ridden in several stints numbers its laps from 1 in each, so a note that names
@@ -223,7 +222,7 @@ pub fn lines(laps: &[(LapId, Trace)], reference: &Trace, others: &[[f32; 2]]) ->
                 heights: t.pts.iter().step_by(STEP).map(|q| q.y).collect(),
             })
             .collect(),
-        sections: secs,
+        sections: secs.to_vec(),
         offsets,
         notes,
         alone: others.is_empty(),
@@ -504,6 +503,12 @@ fn cutting_up(si: usize, s: &Section, rows: &[Row], stints: bool) -> Option<Note
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::analysis::sections;
+    /// The sections the reference implies, the way `lines` used to derive them itself.
+    fn lines_of(laps: &[(LapId, Trace)], reference: &Trace, others: &[[f32; 2]]) -> Lines {
+        lines(laps, reference, others, &sections(reference))
+    }
+
     use crate::analysis::tests::{lap, Style, FAST};
 
     fn titles(l: &Lines) -> Vec<String> {
@@ -518,7 +523,7 @@ mod tests {
     #[test]
     fn the_same_lap_over_and_over_says_nothing() {
         let laps: Vec<(LapId, Trace)> = (0..6).map(|n| (id(n), lap(&FAST))).collect();
-        let out = lines(&laps, &lap(&FAST), &[]);
+        let out = lines_of(&laps, &lap(&FAST), &[]);
         assert!(out.notes.is_empty(), "{:?}", titles(&out));
         assert_eq!(out.laps.len(), 6);
         assert!(out.offsets.iter().flatten().all(|r| r.offset.abs() < 0.05));
@@ -528,7 +533,7 @@ mod tests {
     fn a_line_that_pays_is_named() {
         let wide = Style { wide: 2.5, corner_v: 11.0, ..FAST };
         let laps = vec![(id(0), lap(&FAST)), (id(1), lap(&FAST)), (id(2), lap(&wide)), (id(3), lap(&wide))];
-        let out = lines(&laps, &lap(&FAST), &[]);
+        let out = lines_of(&laps, &lap(&FAST), &[]);
         let t1 = out.notes.iter().find(|n| n.kind == "line" && n.name == "Turn 1").unwrap_or_else(|| panic!("{:?}", titles(&out)));
         assert!(t1.title.contains("outside"), "{}", t1.title);
         assert!(t1.detail.contains("laps 3, 4"), "{}", t1.detail);
@@ -543,13 +548,13 @@ mod tests {
     fn a_second_line_nearly_as_quick_is_kept_for_passing() {
         let wide = Style { wide: 2.5, corner_v: 10.2, ..FAST };
         let laps = vec![(id(0), lap(&FAST)), (id(1), lap(&FAST)), (id(2), lap(&wide)), (id(3), lap(&wide))];
-        let out = lines(&laps, &lap(&FAST), &[]);
+        let out = lines_of(&laps, &lap(&FAST), &[]);
         let t1 = out.notes.iter().find(|n| n.kind == "line" && n.name == "Turn 1").unwrap_or_else(|| panic!("{:?}", titles(&out)));
         assert!(t1.detail.contains("inside line is only") && t1.detail.contains("for passing"), "{}", t1.detail);
         // A line that's much slower isn't offered as a second one.
         let far = Style { wide: 2.5, corner_v: 11.0, ..FAST };
         let laps = vec![(id(0), lap(&FAST)), (id(1), lap(&FAST)), (id(2), lap(&far)), (id(3), lap(&far))];
-        let out = lines(&laps, &lap(&FAST), &[]);
+        let out = lines_of(&laps, &lap(&FAST), &[]);
         assert!(!out.notes.iter().any(|n| n.detail.contains("for passing")), "{:?}", titles(&out));
     }
 
@@ -589,7 +594,7 @@ mod tests {
             .enumerate()
             .map(|(n, &sink)| (id(n as i32), lap(&Style { sink, ..FAST })))
             .collect();
-        let out = lines(&laps, &lap(&FAST), &[]);
+        let out = lines_of(&laps, &lap(&FAST), &[]);
         let cut = out.notes.iter().find(|n| n.kind == "cut").unwrap_or_else(|| panic!("{:?}", titles(&out)));
         assert_eq!(cut.name, "Turn 1");
         // The depth is the mean drop over the corner's core, so it moves a centimetre when the
@@ -617,10 +622,10 @@ mod tests {
                 [fast.pts[i].x + 2.0 * h.cos(), fast.pts[i].z - 2.0 * h.sin()]
             })
             .collect();
-        let out = lines(&[], &fast, &crowd);
+        let out = lines_of(&[], &fast, &crowd);
         let n = out.notes.iter().find(|n| n.kind == "wear" && n.section == si).expect("a wear note");
         assert!(n.detail.contains("about 2.0 m"), "{}", n.detail);
-        assert!(lines(&[], &fast, &crowd[..10]).notes.iter().all(|n| n.kind != "wear"), "too few passes to say");
+        assert!(lines_of(&[], &fast, &crowd[..10]).notes.iter().all(|n| n.kind != "wear"), "too few passes to say");
     }
 
     /// Every line note names a side a rider can act on. "Take the fast line" was the whole
@@ -639,7 +644,7 @@ mod tests {
             (id(4), lap(&sunk)),
             (id(5), lap(&sunk)),
         ];
-        let out = lines(&laps, &lap(&FAST), &[]);
+        let out = lines_of(&laps, &lap(&FAST), &[]);
         assert!(!out.notes.is_empty(), "nothing to check");
         for n in &out.notes {
             for text in [&n.title, &n.detail] {
@@ -664,7 +669,7 @@ mod tests {
             (LapId { lap: 0, stint: 1 }, lap(&wide)),
             (LapId { lap: 1, stint: 1 }, lap(&wide)),
         ];
-        let out = lines(&laps, &lap(&FAST), &[]);
+        let out = lines_of(&laps, &lap(&FAST), &[]);
         let t1 = out.notes.iter().find(|n| n.kind == "line" && n.name == "Turn 1").unwrap_or_else(|| panic!("{:?}", titles(&out)));
         assert!(t1.detail.contains("laps 1, 2 of stint 2"), "{}", t1.detail);
     }
@@ -681,12 +686,12 @@ mod tests {
     #[test]
     fn a_session_with_no_notes_says_what_it_was_missing() {
         let few: Vec<(LapId, Trace)> = (0..2).map(|n| (id(n), lap(&FAST))).collect();
-        let out = lines(&few, &lap(&FAST), &[]);
+        let out = lines_of(&few, &lap(&FAST), &[]);
         assert!(out.notes.is_empty(), "{:?}", titles(&out));
         assert!(!out.enough_laps, "two laps can't tell one line from another");
         assert!(out.alone, "nobody else was on track");
         let many: Vec<(LapId, Trace)> = (0..MIN_LAPS_LINE as i32).map(|n| (id(n), lap(&FAST))).collect();
-        let out = lines(&many, &lap(&FAST), &[[0.0, 0.0]]);
+        let out = lines_of(&many, &lap(&FAST), &[[0.0, 0.0]]);
         assert!(out.enough_laps);
         assert!(!out.alone);
     }

@@ -359,6 +359,7 @@ pub fn pressure_finding(setup: &Setup, opts: &BikeOptions, optimal: [Option<f32>
         at: 0,
         weight: 0.4,
         safety: false,
+        absolute: false,
     })
 }
 

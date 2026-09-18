@@ -1,7 +1,8 @@
 # MXB Coach — how a lap is reviewed
 
 MXB Coach compares a lap with a faster **reference lap** on the same track (by default the
-fastest whole lap on that track, same bike first) and says where the time went and why.
+fastest whole lap on that track, same bike first) and says where the time went and why. A few of
+the things it says are judgements of the lap on its own terms, which hold whatever the clock says.
 
 ## Pipeline
 
@@ -18,13 +19,50 @@ fastest whole lap on that track, same bike first) and says where the time went a
    35° of turn, plus a 70 m braking zone and 25 m exit), jumps (both wheels off the ground
    ≥ 0.3 s and ≥ 6 m), rhythm (jumps within 30 m of each other) and whoops (three or more hops
    under 10 m long), and straights between.
-5. **Explain** each section that loses more than 0.05 s with the rules below. The three
+5. **Name the sections** from the track's own frozen roster, so Turn 5 is the same corner next
+   week (`trackmap.rs`, below).
+6. **Explain** each section that loses more than 0.05 s with the rules below. The three
    sections losing most are shown first. Safety findings (⚠: front lock, crooked or hard
-   landing, sliding front) show even where no time was lost.
+   landing, sliding front) show even where no time was lost, and so do judgements the lap earns
+   on its own terms (◆: over-jumping, casing, coming in too fast, turning in too early). A
+   judgement is not a warning, though: it counts as an explanation, so it holds off the "Compare
+   the traces" tip a section with nothing but warnings gets.
+
+### Section names
+
+A section's number is frozen per track. `trackmap.rs` keeps a roster of the track's
+corners, jumps, rhythms and whoops in `<data dir>\coach\tracks\<track>.json`: the kind, a stable
+id (`t5`, `j2`, `w1`), the name the rider sees, and the middle of the core in metres past the
+line, averaged over the laps that have seen it. A grid index is already a stable track
+coordinate, so what the roster adds is a stable *number*. The detected list moves: roll a jump
+and the lap has one feature fewer, so everything after it counts up one, and a personal best
+ridden on a slightly different line renumbers the whole track.
+
+So the numbers are handed out once, from the union of the features over every lap the rider has
+on the track, and never handed out again. A feature the map meets later takes the next free
+number for its kind, which can leave it out of numeric order: a Turn 9 between 4 and 5. That is
+the price of never renumbering, and it is worth paying, because renumbering silently
+re-attributes the cue history and any per-corner progress. A section is matched to its landmark
+by kind and then by the largest overlap of the cores, since a corner read forty metres longer on
+one lap is still the same corner; with no overlap, by how close the two middles are (25 m). A map
+built against a different centreline length, or by older code, is discarded and rebuilt.
+
+The game's own centreline is not used for this, though the recorder does capture it. It is the
+track builder's coarse driving line rather than the rutted berm people ride, its corner count
+doesn't match what a rider feels, it says nothing about jumps or whoops, and its distances have
+no origin in the recording: the start line's offset lives in race data the recorder never writes.
+
+Straights keep their positional names. They are the leftovers between features, they move
+whenever a feature's bounds move, and nobody says "meet me at straight four". `coach.rs`'s
+`label` stamps the roster onto every list of sections the app builds (the review, the ideal lap's
+section bests, and the lines view), so two screens can't call the same corner different things.
 
 ## Rules
 
-Thresholds are starting values in `analysis.rs` → `mod th`, to be tuned on real laps.
+Thresholds are starting values in `analysis.rs` → `mod th`, to be tuned on real laps. The landing
+and turn-in numbers are reasoned from the shape of a landing and from where braking belongs, not
+yet measured against recordings. ⚠ marks a safety finding; ◆ a judgement of the lap on its own
+terms rather than a difference from the reference.
 
 | Section | Rule | Fires when |
 |---|---|---|
@@ -33,7 +71,9 @@ Thresholds are starting values in `analysis.rs` → `mod th`, to be tuned on rea
 | Corner | `brake_harder` | peak decel < 70% of the reference and zone > 120% as long |
 | Corner | `brake_unneeded` | brakes where the reference doesn't |
 | Corner | `more_front` | front share of braking < 50% where the reference's is ≥ 60% |
+| Corner | `in_too_hot` ◆ | more than 30% of the turn-in speed still comes off after turn-in, at least 8 km/h of it, the brake lever held 0.25 s past turn-in, and a consequence: the slowest point past 60% of the core, the bike picked up 8° mid-corner, or 1.5 m wide on the way out (on its own: 40%, and no wide, which needs the reference line) |
 | Corner | `carry_speed` | minimum speed < 95% of the reference |
+| Corner | `apex_early` ◆ | slowest point in the first 35% of the core, and still leaned past 18° with the throttle shut at the end of it |
 | Corner | `lean_more` | ≥ 5° less bike lean, and slower mid-corner |
 | Corner | `line` | > 1.5 m off the reference line at its apex (tighter / wider) |
 | Corner | `coasting` | 0.3 s more with no brake and no throttle |
@@ -51,12 +91,58 @@ Thresholds are starting values in `analysis.rs` → `mod th`, to be tuned on rea
 | Jump | `jump_it` | reference jumps, lap rolls it |
 | Jump | `chop_face` | throttle drops > 0.3 on the last 15 m of the face |
 | Jump | `scrub` | > 10% + 0.1 s more airtime and > 0.5 m higher |
-| Jump | `land_short` / `overjump` | lands > 2 m short / > 3 m long |
+| Jump | `overjump` ◆ | the ground after touchdown runs flat past the downslope, and the bike dropped onto it and hit for it; said at the takeoff, the last place the rider can act |
+| Jump | `land_short` ◆ | the ground after touchdown is still climbing: cased |
+| Jump | `land_short` / `overjump` | where the ground can't settle it: lands > 2 m short of the reference / > 3 m past it |
 | Jump | `land_throttle` | off the gas at touchdown, reference on it |
 | Jump | `land_crooked` ⚠ | > 15° of lean 4 m after touchdown (a whip has unwound by then), 7.5° more than the reference |
-| Jump | `land_hard` ⚠ | the landing hits > 10 G and > 1.4× the reference (on its own: > 12 G) |
+| Jump | `land_hard` ⚠ | the landing hits > 10 G and > 1.4× the reference (on its own: > 12 G); not said where the landing already reads flat |
 | Whoops | `whoops_speed` / `whoops_throttle` / `whoops_bucking` | slower, off the gas, pitching more |
 | Straight | `shift_earlier` / `full_gas` | more time on the limiter / less throttle |
+
+**Where a jump was landed** is read off the ground rather than off the reference lap. The bike's
+own height is the only terrain these rules have, so the landing zone is the ground the bike runs
+on after touchdown: skip the first 2 m, where the suspension is still soaking the hit up, then
+fit 8 m by least squares, which over that length is good to about a centimetre, an order below
+the thresholds. Ground falling away at 0.12 m per metre or steeper is still the downslope, where
+the landing is built to be taken. Flatter than 0.04 is past the bottom of it. Rising more than
+0.06 is the up-face. The band between 0.04 and 0.12 is left without a verdict on purpose: a
+shallow landing is the case the ground alone cannot settle, so the comparison with the reference
+takes it back.
+
+A flat run-out on its own is not over-jumping. A long low jump that settles onto flat ground is
+fine, so the bike also has to have dropped onto it, coming down at 0.18 m per metre (about 10°),
+and hit for it, at 0.7 of the rider's own hard-landing floor so `norm` carries straight over.
+Flights under 0.4 s are hops off a bump and the ground either side of one says nothing. Where the
+landing does read flat, `land_hard` is dropped: the G is the symptom, the over-jump is the cause,
+and the over-jump tip quotes the figure anyway. Where a rhythm's jumps don't pair up against the
+reference at all, a flat first landing is added to the count tip, because it is usually what
+stopped the section linking.
+
+Both verdicts run with a reference lap and alone, which is the point of reading the ground: a
+jump over-jumped on every lap costs nothing against yourself and is still the thing worth saying.
+What the bike's height cannot tell is a hill that keeps falling away, so a genuinely downhill
+landing reads as a ramp: no judgement is made and the comparison with the reference takes it
+back. That is the safe way round for it to be wrong. The app does read the track's own terrain to
+draw the map, when the track is installed and readable, but these rules never see it, which is
+also why they work on a locked track.
+
+**Coming in too fast** is not a grip model. Nothing in the recording or the track files carries a
+grip figure, and curvature measured from the rider's own path is a consequence of their entry
+speed rather than a measure of the corner: come in hot, run a wider arc, and the radius grows to
+fit the speed, so the error cancels. What is left is *when* the speed comes off. Braking belongs
+before turn-in, so speed still leaving the bike after the bike is committed is speed that was
+carried in. Turn-in is the first metre in the core past 18° of lean, not the core's start: the
+corner detector's curvature gate is a 100 m arc, so a core opens long before a rider would say
+they had turned in. A core shorter than 15 m has no inside of the turn to speak of and is left
+alone.
+
+The gate is the brake lever, not the deceleration. Sand and a deep rut scrub speed on their own,
+and these rules cannot see the ground: a section's `soil` is filled in by the caller after the
+review returns. The rule also wants a consequence before it says anything, or it fires on every
+rider trail-braking into a rut, which in MX Bikes is how the corner is meant to be ridden.
+`brake_late` is dropped in the same section: same cause, same fix, and saying both reads as the
+tip repeated.
 
 ## Setup
 
@@ -83,12 +169,13 @@ list is never written; swingarm pivot and rake never are.
 | `setup_sag_rear_deep` / `_high` | standing still ≥ 1 s with the rider on, the shock outside 30–36% of its travel | shock preload by the millimetres it's off; the spring when preload runs out |
 | `setup_pressure` | a tyre > 10 kPa from the `OptimalPressure` in its `.tyre` file | back to the tyre's optimum |
 | `setup_sand` / `_hardpack` / `_mud` | ≥ 30% of the lap on sand / ≥ 50% on hardpack or wet soil (`soil.rs`) | firmer shock low-speed and fork compression, +1 rear tooth / softer compression / −1 rear tooth |
+| `setup_gearing_*`, `setup_shift_*`, `setup_swingarm` | limiter, bogging, shift points, front up on exits | rear sprocket; a longer swingarm |
 
 The ground comes from the rear wheel's material as the recorder gives it: the game's global
 surface list plus one (0 in the air). 11 is soft soil, 12 compact soil (hardpack), 8 soil, 6
 sand, 5 grass, 13–14 gravel and rock; there is no mud, so soil in rainy conditions counts as mud.
-No track file is read, so locked tracks work. Each section carries its main ground.
-| `setup_gearing_*`, `setup_shift_*`, `setup_swingarm` | limiter, bogging, shift points, front up on exits | rear sprocket; a longer swingarm |
+No track file is read, so locked tracks work. Each section carries its main ground, worked out
+after the review, which is why no rule in the review can read it.
 
 The suspension, acceleration and bar thresholds come from real laps (2026-09-15, five laps of a
 250F): a landing's hit has a median of 5 G and a 90th percentile of 10 G, the bars into a
@@ -120,6 +207,10 @@ Two kinds of call come from the section's own tips rather than from the fast lap
   is **not** a reason to call a shift, and the cue names a gear to be in ("One gear higher"),
   never a moment to change ("shift earlier"), which a rider carrying speed reads as "go
   slower". Both were rider reports against the first sheet that shipped.
+
+The judgements don't raise a call yet. There is no cue kind for over-jumping, and `in_too_hot`
+and `land_short` aren't in the mapping that counts a tip as answered by a call, so a corner the
+rider arrives at too hot only lifts its brake cue through the time the section loses.
 
 Every cue is an instruction at a spot, under 26 characters — what the plugin's cue box fits —
 and never a summary: "Take the fast line" is the example of what not to write. The plugin
@@ -173,6 +264,14 @@ costing time now takes the place it leaves. A call the rider has actually taken 
 — its section stops losing time, so it stops qualifying and is dropped from the history
 altogether.
 
+The history keys on the section's stable id, not its name, so a call rests at the corner the
+rider actually heard it at. Version 1 keyed on the name, which a new personal best could
+renumber, so a history of any other version than the current one (`cues::HISTORY_VERSION`, now
+2) is dropped rather than migrated: translating a v1 file needs the very track map that did not
+exist when it was written, and it would be wrong exactly on the tracks whose numbering had
+already drifted. The cost is one sheet that doesn't know what the rider has heard, and the sheet
+after it has rebuilt the record.
+
 Rewriting rather than shipping several sheets at once is deliberate: the `.cue` layout is a
 contract with FrostMod, the plugin has no way to choose between sets, and Coach already
 watches the sessions folder, so it can pick again from the newest lap while the rider is still
@@ -215,7 +314,15 @@ will and the fast line stays smoother (`wear` notes).
   rhythm; both need the stance known for 60% of the section on both laps.
 - Riding-aid settings and deformation from `profile.ini`, stored with each session.
 - Starts (launch, wheelie, bog) and consistency across a session beyond section spread.
-- A terrain background under the track map.
+- A live call for the new judgements. Over-jumping wants "Roll this one", which needs a cue kind
+  here and a clip in the plugin (`ROLL = 12` is the plan; the kinds stop at 10 today), and
+  `in_too_hot` and `land_short` have to count as answered by the brake and throttle calls before
+  they can lift one.
+- Grip. Nothing in the recording or the track files carries a figure for it, so no rule can say
+  a speed was too fast for the surface; `in_too_hot` reads the consequence instead.
+- The ground under the rules. A section's soil is worked out after the review returns and the
+  terrain is only read to draw the map, so no rule can make allowances for a sand corner, a
+  rutted berm or a downhill landing.
 
 ## Sources
 

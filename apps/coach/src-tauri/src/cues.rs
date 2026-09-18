@@ -26,6 +26,10 @@ use serde::{Deserialize, Serialize};
 use crate::analysis::{cue, CuePoint, Review};
 
 pub const MAGIC: &[u8; 4] = b"MXCQ";
+/// Stays 1 when a cue kind is added. The plugin refuses the whole sheet on a version it does
+/// not know, so bumping it to announce a kind would silence every cue for every rider still on
+/// the old recorder — whereas a kind it has no clip for simply draws in white and says nothing,
+/// the way `CUSTOM` always has. That is why `cue::ROLL` needs no version gate.
 pub const VERSION: u32 = 1;
 /// How long before its spot a cue shows, at the bike's speed, and how long it stays up.
 const LEAD_S: f32 = 1.2;
@@ -43,6 +47,9 @@ const REST: u32 = 2;
 /// What a resting call's score is multiplied by. Not zero: on a track where only one thing is
 /// losing time, hearing it again beats hearing nothing.
 const RESTING: f32 = 0.2;
+/// What a judgement is worth on the sheet when the clock says nothing. Scored like a tenth of
+/// a second lost, so a section that measurably costs more than that always outranks it.
+const JUDGED: f32 = 0.1;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -88,6 +95,10 @@ fn text(kind: u8) -> &'static str {
         cue::SCRUB => "Scrub it flat",
         cue::STAND => "Stand up",
         cue::SIT => "Sit down",
+        // Not "roll it": in the engine's own words that already means not jumping the thing at
+        // all — `jump_it`'s tip reads "the fast lap jumps it and you roll it" — which is the
+        // opposite of the fix here. "Roll off" is the throttle.
+        cue::ROLL => "Roll off here",
         _ => "",
     }
 }
@@ -96,7 +107,10 @@ fn text(kind: u8) -> &'static str {
 fn allowed(level: Level, kind: u8) -> bool {
     let basics = [cue::BRAKE, cue::THROTTLE, cue::STAND, cue::SIT];
     let gears = [cue::OFF_BRAKES, cue::UPSHIFT, cue::DOWNSHIFT];
-    let fine = [cue::WIDE, cue::INSIDE, cue::SCRUB];
+    // `ROLL` sits with these: telling a rider to ease off before a lip is only safe once they
+    // clear it every lap. Say it to a new one and the next attempt lands on the up-face, which
+    // is the mistake that hurts. Until then the lesson they need is the opposite one, commit.
+    let fine = [cue::WIDE, cue::INSIDE, cue::SCRUB, cue::ROLL];
     match level {
         Level::New => basics.contains(&kind),
         Level::Intermediate => basics.contains(&kind) || gears.contains(&kind),
@@ -128,6 +142,11 @@ fn basic(kind: u8) -> f32 {
         cue::WIDE | cue::INSIDE => 0.6,
         cue::UPSHIFT | cue::DOWNSHIFT | cue::SCRUB => 0.5,
         cue::SIT => 0.4,
+        // Nothing: this is the bonus that floats a call up where little time was lost, and a
+        // rider who is jumping long on purpose and losing nothing for it hears "Roll off here"
+        // as "go slower" — the same way a shift called off the fast lap's gear change read.
+        // It goes on the sheet for the time it costs or not at all.
+        cue::ROLL => 0.0,
         _ => 0.0,
     }
 }
@@ -143,13 +162,21 @@ fn basics_weight(level: Level) -> f32 {
 /// The cue a tip is about, so a cue that answers one of the section's tips counts double.
 fn answers(skill: &str) -> Option<u8> {
     Some(match skill {
-        "brake_early" | "brake_late" | "brake_harder" | "front_lock" | "rear_lock" => cue::BRAKE,
-        "coasting" | "late_throttle" | "throttle_room" | "exit_speed" | "whoops_throttle" | "chop_face" => cue::THROTTLE,
+        // Coming in hot is fixed by braking sooner, and the brake call already sits at the fast
+        // lap's brake point: the right metre is the whole tip, so it counts double there.
+        "brake_early" | "brake_late" | "brake_harder" | "front_lock" | "rear_lock" | "in_too_hot" => cue::BRAKE,
+        // `land_short` asks for the same thing as `chop_face` — gas held to the lip — so it
+        // doubles the same call.
+        "coasting" | "late_throttle" | "throttle_room" | "exit_speed" | "whoops_throttle" | "chop_face"
+        | "land_short" => cue::THROTTLE,
         "gear_up" => cue::UPSHIFT,
         "gear_down" => cue::DOWNSHIFT,
         "scrub" => cue::SCRUB,
         "whoops_bucking" | "whoops_speed" | "stance_stand" => cue::STAND,
         "stance_sit" => cue::SIT,
+        // `apex_early` is about when the bike is turned, not what a control does at a spot.
+        // There is no call that says it: "Go inside here" names a side and would send them
+        // tighter still. It stays a review tip with the map beside it.
         _ => return None,
     })
 }
@@ -162,6 +189,10 @@ fn from_finding(skill: &str, title: &str) -> Option<u8> {
     Some(match skill {
         "gear_up" => cue::UPSHIFT,
         "gear_down" => cue::DOWNSHIFT,
+        // The over-jump verdict is read off the ground, so it says where without a fast lap to
+        // compare against, and its `at` is the takeoff: the call fires at the face, which is
+        // the last place the rider can change where they land.
+        "overjump" => cue::ROLL,
         // Which way the fast line goes, in the words the tip uses.
         "line" => {
             if title.contains("outside") {
@@ -185,12 +216,16 @@ pub struct CueOut {
     pub text: String,
     /// The section it belongs to, for showing the list.
     pub section: String,
+    /// That section's stable id, which the rotation keys on.
+    pub section_id: String,
 }
 
 /// One call the rider has already been given, and how long it has been running.
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Sent {
+    /// The section's stable id, not its name: a name can be renumbered and then the rotation
+    /// silently forgets what the rider has already been told, or worse, credits it elsewhere.
     pub section: String,
     pub kind: u8,
     /// Sheets in a row this call has been on.
@@ -201,12 +236,20 @@ pub struct Sent {
     pub resting: u32,
 }
 
+/// Bumped when a stored history can no longer be read as meaning what it says. v1 keyed on
+/// section names, which a new personal best could renumber.
+pub const HISTORY_VERSION: u32 = 2;
+
 /// What the rider has been told on this track and bike so far. Kept beside the session index
 /// and handed back to [`pick`] each time a sheet is written, so every sheet knows what the
 /// last one said.
 #[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct History {
+    /// Bumped when the meaning of `Sent.section` changes. An older file is dropped: it keys on
+    /// names that could drift, which is the very thing the stable ids fixed.
+    #[serde(default)]
+    pub version: u32,
     #[serde(default)]
     pub sent: Vec<Sent>,
 }
@@ -236,14 +279,14 @@ impl History {
     fn after(&self, chosen: &[CueOut]) -> History {
         let mut out: Vec<Sent> = Vec::new();
         for c in chosen {
-            let was = self.find(&c.section, c.kind);
+            let was = self.find(&c.section_id, c.kind);
             let runs = was.map_or(0, |s| s.runs) + 1;
             let rest = was.map_or(0, |s| s.resting);
             let (runs, resting) = if runs >= REPEATS { (0, REST) } else { (runs, rest.saturating_sub(1)) };
-            out.push(Sent { section: c.section.clone(), kind: c.kind, runs, resting });
+            out.push(Sent { section: c.section_id.clone(), kind: c.kind, runs, resting });
         }
         for s in &self.sent {
-            if chosen.iter().any(|c| c.kind == s.kind && c.section == s.section) {
+            if chosen.iter().any(|c| c.kind == s.kind && c.section_id == s.section) {
                 continue;
             }
             let resting = s.resting.saturating_sub(1);
@@ -251,7 +294,7 @@ impl History {
                 out.push(Sent { section: s.section.clone(), kind: s.kind, runs: 0, resting });
             }
         }
-        History { sent: out }
+        History { version: HISTORY_VERSION, sent: out }
     }
 }
 
@@ -270,7 +313,17 @@ pub fn pick(points: &[CuePoint], review: &Review, level: Level, amount: Amount, 
     let mut consider = |at: usize, kind: u8, si: usize| {
         let Some(sr) = review.sections.get(si) else { return };
         let lost = sr.lost.max(0.0);
-        if !allowed(level, kind) || lost < min_loss(level) || (level != Level::New && lost <= 0.0) {
+        // A judgement holds whatever the clock says — that is what makes it one — so a section
+        // carrying one qualifies on the judgement rather than on the time. Without this a lap
+        // ridden with no fast lap to compare against shows nothing lost anywhere and the sheet
+        // comes out empty, so the rider would never be told in game about a jump they over-jump
+        // every single lap. Which is the case the absolute rules exist for.
+        let judged = sr
+            .findings
+            .iter()
+            .any(|f| f.absolute && (from_finding(f.skill, &f.title) == Some(kind) || answers(f.skill) == Some(kind)));
+        let too_cheap = lost < min_loss(level) || (level != Level::New && lost <= 0.0);
+        if !allowed(level, kind) || (too_cheap && !judged) {
             return;
         }
         // A cue made from a tip is answering that tip, so it counts double the same way a cue
@@ -281,9 +334,11 @@ pub fn pick(points: &[CuePoint], review: &Review, level: Level, amount: Amount, 
             .findings
             .iter()
             .any(|f| answers(f.skill) == Some(kind) || from_finding(f.skill, &f.title) == Some(kind));
-        let resting = seen.resting(&sr.section.name, kind);
-        let score = (lost * if answered { 2.0 } else { 1.0 } + basic(kind) * basics_weight(level))
-            * seen.weight(&sr.section.name, kind);
+        let resting = seen.resting(&sr.section.id, kind);
+        let score = (lost * if answered { 2.0 } else { 1.0 }
+            + if judged { JUDGED } else { 0.0 }
+            + basic(kind) * basics_weight(level))
+            * seen.weight(&sr.section.id, kind);
         cands.push((score, at, kind, si, resting));
     };
     for p in points {
@@ -332,6 +387,7 @@ pub fn pick(points: &[CuePoint], review: &Review, level: Level, amount: Amount, 
             priority: (255 - (rank * 200 / n.max(1)) as i32).max(1) as u8,
             text: text(kind).to_string(),
             section: review.sections[si].section.name.clone(),
+            section_id: review.sections[si].section.id.clone(),
         })
         .collect();
     cues.sort_by(|x, y| x.at.total_cmp(&y.at));
@@ -378,7 +434,7 @@ pub fn history_name(track: &str, bike: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::analysis::tests::{lap, Style, FAST};
+    use crate::analysis::tests::{lap, Style, CASED, FAST, OVER};
     use crate::analysis::{cue_points, review, sections, Bike};
 
     const BIKE: Bike =
@@ -392,6 +448,45 @@ mod tests {
 
     fn cues_for(st: &Style, level: Level, amount: Amount) -> Vec<CueOut> {
         picked(st, level, amount, &History::default()).cues
+    }
+
+    /// The case the absolute rules exist for: riding on your own, with no faster lap to be held
+    /// against. Every section then shows no time lost, so before judgements qualified a section
+    /// on their own merit this sheet came out empty and the rider heard nothing all session.
+    #[test]
+    fn a_judgement_earns_its_place_on_the_sheet_with_no_fast_lap() {
+        let rv = crate::analysis::solo(&lap(&OVER), BIKE);
+        assert!(
+            rv.sections.iter().all(|s| s.lost == 0.0),
+            "a solo review has no time lost to rank by, which is the whole difficulty"
+        );
+        let fast = lap(&FAST);
+        let sheet = pick(
+            &cue_points(&fast, &sections(&fast)),
+            &rv,
+            Level::Pro,
+            Amount::Normal,
+            &History::default(),
+        );
+        assert!(
+            sheet.cues.iter().any(|c| c.kind == cue::ROLL),
+            "the over-jump is still the thing worth saying: {:?}",
+            sheet.cues.iter().map(|c| (&c.section, c.kind)).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn a_measured_loss_still_outranks_a_judgement() {
+        // The judgement is worth saying, not worth saying first. A corner that demonstrably
+        // costs half a second has to come off the sheet ahead of a jump that costs nothing.
+        let slow = Style { decel: 2.5, brake: 0.5, corner_v: 8.0, ..OVER };
+        let sheet = cues_for(&slow, Level::Pro, Amount::Few);
+        let roll = sheet.iter().position(|c| c.kind == cue::ROLL);
+        let braking = sheet.iter().position(|c| c.kind == cue::BRAKE);
+        if let (Some(r), Some(b)) = (roll, braking) {
+            let by_priority = sheet[b].priority >= sheet[r].priority;
+            assert!(by_priority, "braking that costs real time should not rank under the judgement");
+        }
     }
 
     #[test]
@@ -420,7 +515,7 @@ mod tests {
     /// Every cue is an instruction, and the ones about the line say which side of the track.
     #[test]
     fn every_cue_is_something_to_do_at_a_spot() {
-        for kind in 1..=10u8 {
+        for kind in (1..=10u8).chain([cue::ROLL]) {
             let t = text(kind);
             assert!(!t.is_empty(), "kind {kind} has no words");
             assert!(t.len() <= 26, "\"{t}\" is too long for the cue box");
@@ -512,11 +607,22 @@ mod tests {
         assert!(sheets[4..].iter().any(|s| s.contains(&head)) || sheets[3..].iter().all(|s| !s.is_empty()));
     }
 
+    #[test]
+    fn a_history_from_before_the_ids_is_not_mis_attributed() {
+        // v1 stored section names. A name can have been renumbered since, so the rotation
+        // would credit the wrong corner; the reader drops anything that isn't this version.
+        let v1 = br#"{"sent":[{"section":"Turn 5","kind":1,"runs":2,"resting":0}]}"#;
+        let read: History = serde_json::from_slice(v1).expect("v1 still parses");
+        assert_ne!(read.version, HISTORY_VERSION, "a versionless file must not pass the gate");
+        // And what this version writes does pass it.
+        assert_eq!(History::default().after(&[]).version, HISTORY_VERSION);
+    }
+
     /// A call the rider has taken leaves on its own: its section stops losing time, so it
     /// stops qualifying and nothing is carried for it.
     #[test]
     fn a_call_that_was_taken_is_not_kept_alive() {
-        let seen = History { sent: vec![Sent { section: "Turn 1".into(), kind: cue::BRAKE, runs: 2, resting: 0 }] };
+        let seen = History { version: HISTORY_VERSION, sent: vec![Sent { section: "t1".into(), kind: cue::BRAKE, runs: 2, resting: 0 }] };
         // A clean lap at pro level qualifies nothing at all.
         let out = picked(&FAST, Level::Pro, Amount::Normal, &seen);
         assert!(out.cues.is_empty());
@@ -525,7 +631,7 @@ mod tests {
 
     #[test]
     fn writes_the_file_the_plugin_reads() {
-        let c = [CueOut { at: 500.0, kind: cue::BRAKE, priority: 200, text: "Brake here".into(), section: "Turn 1".into() }];
+        let c = [CueOut { at: 500.0, kind: cue::BRAKE, priority: 200, text: "Brake here".into(), section: "Turn 1".into(), section_id: "t1".into() }];
         let b = write(1000.0, &c, Amount::Normal);
         assert_eq!(&b[..4], b"MXCQ");
         let u32_at = |i: usize| u32::from_le_bytes(b[i..i + 4].try_into().unwrap());
@@ -557,7 +663,8 @@ mod tests {
 
         // Rest the top call, and nothing else.
         let seen = History {
-            sent: vec![Sent { section: head.section.clone(), kind: head.kind, runs: 0, resting: 2 }],
+            version: HISTORY_VERSION,
+            sent: vec![Sent { section: head.section_id.clone(), kind: head.kind, runs: 0, resting: 2 }],
         };
         let after = picked(&slow, Level::New, Amount::Normal, &seen);
         let still_there = after.cues.iter().any(|c| c.section == head.section && c.kind == head.kind);
@@ -566,10 +673,81 @@ mod tests {
 
         // With nothing else to say it comes back rather than leaving the rider in silence:
         // resting means "not while there is better", not "never".
+        // On ids, not names: `History::find` compares ids, so a sheet of names rests nothing
+        // and what follows would pass without testing anything.
+        assert_ne!(head.section, head.section_id, "a history keyed on the name would be inert");
         let only = History {
-            sent: fresh.cues.iter().map(|c| Sent { section: c.section.clone(), kind: c.kind, runs: 0, resting: 2 }).collect(),
+            version: HISTORY_VERSION,
+            sent: fresh.cues.iter().map(|c| Sent { section: c.section_id.clone(), kind: c.kind, runs: 0, resting: 2 }).collect(),
         };
         let all_rested = picked(&slow, Level::New, Amount::Normal, &only);
         assert!(!all_rested.cues.is_empty(), "silence is worse than a repeat");
+        // And it is the rested calls themselves that come back, not the sheet quietly filling
+        // with whatever was left over: that would be silence on everything that matters.
+        let back = |c: &CueOut| fresh.cues.iter().any(|f| f.section_id == c.section_id && f.kind == c.kind);
+        assert!(all_rested.cues.iter().any(back), "{:?}", all_rested.cues.iter().map(|c| (&c.section_id, c.kind)).collect::<Vec<_>>());
+    }
+
+    /// Over-jumping asks for a roll, and asks at the lip: once the bike is in the air there is
+    /// nothing left to do about where it comes down.
+    #[test]
+    fn over_jumping_asks_for_a_roll_at_the_face() {
+        // `OVER` carries the fast lap's speed through a longer flight, so the jump costs it
+        // nothing and the sheet, which is scored on time lost, never sees it. Bleed the speed
+        // it holds in the air and the same over-jump costs time.
+        let over = Style { air_v: 16.0, ..OVER };
+        let c = cues_for(&over, Level::Pro, Amount::Lots);
+        let roll = c.iter().find(|c| c.kind == cue::ROLL).unwrap_or_else(|| panic!("{c:?}"));
+        assert_eq!(roll.text, "Roll off here");
+        // The lip is at 330 m and the bike lands out on the flat at 375: the call belongs at
+        // the first of those, where the throttle still decides the rest.
+        assert!(roll.at < 340.0, "called at {} m, which is the landing, not the face", roll.at);
+        // And a rider who can't clear it every lap is not told to ease off.
+        assert!(!cues_for(&over, Level::New, Amount::Lots).iter().any(|c| c.kind == cue::ROLL));
+    }
+
+    /// Coming in too fast is fixed at the brake point, and the brake call already stands there:
+    /// so it doubles that one rather than inventing a call of its own.
+    #[test]
+    fn coming_in_too_fast_doubles_the_brake_call_in_that_corner() {
+        // Hot into Turn 1 and slow out of it, so the corner actually loses time.
+        let hot = Style { hot: 45.0, corner_v: 6.0, accel: 3.0, gas: 0.6, ..FAST };
+        let (fast, mine) = (lap(&FAST), lap(&hot));
+        let points = cue_points(&fast, &sections(&fast));
+        let mut rv = review(&mine, &fast, BIKE);
+        let t1 = rv.sections.iter().position(|s| s.section.name == "Turn 1").expect("Turn 1");
+        let skills: Vec<&str> = rv.sections[t1].findings.iter().map(|f| f.skill).collect();
+        assert!(skills.contains(&"in_too_hot"), "{skills:?}");
+        // Nothing else in the corner answers the brake call, so what follows is this tip's doing.
+        assert_eq!(skills.iter().filter(|s| answers(s) == Some(cue::BRAKE)).count(), 1, "{skills:?}");
+        let top = |cues: &[CueOut]| {
+            let c = cues.iter().max_by_key(|c| c.priority).expect("a sheet").clone();
+            (c.kind, c.section)
+        };
+        let with = pick(&points, &rv, Level::Intermediate, Amount::Normal, &History::default()).cues;
+        assert_eq!(top(&with), (cue::BRAKE, "Turn 1".to_string()), "{with:?}");
+
+        // Take the tip away and the brake call drops behind the gas call. Same lap, same time
+        // lost, same cue points and the same level: the doubling is all that moved.
+        rv.sections[t1].findings.retain(|f| f.skill != "in_too_hot");
+        let without = pick(&points, &rv, Level::Intermediate, Amount::Normal, &History::default()).cues;
+        assert_eq!(top(&without), (cue::THROTTLE, "Turn 1".to_string()), "{without:?}");
+    }
+
+    /// Casing asks for the gas — the same call `chop_face` asks for, because it is the same
+    /// fix — and never for a roll, which would put the rider further onto the up-face.
+    #[test]
+    fn casing_a_jump_asks_for_the_gas() {
+        let rv = review(&lap(&Style { air_v: 16.0, ..CASED }), &lap(&FAST), BIKE);
+        let j = rv.sections.iter().find(|s| s.section.name == "Jump 1").expect("Jump 1");
+        let tip = j.findings.iter().find(|f| f.skill == "land_short").unwrap_or_else(|| {
+            panic!("{:?}", j.findings.iter().map(|f| f.skill).collect::<Vec<_>>())
+        });
+        // It stops at the mapping because a jump of its own has no gas call to double: a jump
+        // section's cue points are the scrub and nothing else. The doubling lands where the
+        // jump is folded into a corner, which is where `chop_face`'s has always landed too.
+        assert_eq!(answers(tip.skill), Some(cue::THROTTLE));
+        assert_eq!(answers("land_short"), answers("chop_face"));
+        assert_eq!(from_finding(tip.skill, &tip.title), None);
     }
 }
