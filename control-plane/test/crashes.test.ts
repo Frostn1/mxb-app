@@ -3,10 +3,13 @@ import { d1 } from "./d1sqlite";
 import {
   crashDetail,
   crashSites,
+  IDENTIFY_DAYS,
   isSite,
   parseCrash,
+  pruneCrashes,
   putCrash,
   recentCrashes,
+  RETENTION_DAYS,
   type Account,
 } from "../src/crashes";
 
@@ -234,5 +237,74 @@ describe("ranking what to fix", () => {
       reports: [],
     });
     expect(await crashDetail(DB, "garbage")).toBeNull();
+  });
+});
+
+describe("the retention sweep", () => {
+  const DAY = 24 * 60 * 60 * 1000;
+
+  /** A row with a chosen age, written straight in — `putCrash` only ever writes "now". */
+  async function crashAged(DB: ReturnType<typeof d1>, id: string, daysAgo: number) {
+    const when = Date.now() - daysAgo * DAY;
+    await DB.prepare(
+      "INSERT INTO client_crashes" +
+        " (account_id, rider_name, guid, site, crashed_at, received_at)" +
+        " VALUES (?, 'Frost', 'FF011000013A7C2E91', ?, ?, ?)",
+    )
+      .bind(id, "mxbikes.exe+0x11D753", when, when)
+      .run();
+  }
+
+  async function rows(DB: ReturnType<typeof d1>) {
+    const all = await DB.prepare(
+      "SELECT account_id, rider_name, guid FROM client_crashes ORDER BY account_id",
+    ).all<{ account_id: string; rider_name: string; guid: string }>();
+    return all.results;
+  }
+
+  it("forgets who crashed once the names have done their job", async () => {
+    const DB = d1();
+    await addAccount(DB, "acc-fresh", "Frost");
+    await addAccount(DB, "acc-old", "Frost2");
+    await crashAged(DB, "acc-fresh", 2);
+    await crashAged(DB, "acc-old", IDENTIFY_DAYS + 1);
+
+    await pruneCrashes({ DB });
+
+    const after = await rows(DB);
+    // The recent one keeps its name: "is this one person or everyone" is asked in days.
+    expect(after.find((r) => r.account_id === "acc-fresh")?.rider_name).toBe("Frost");
+    // The old one is still a crash at that offset, and is nobody's.
+    const old = after.find((r) => r.account_id === "acc-old");
+    expect(old).toBeDefined();
+    expect(old?.rider_name).toBe("");
+    expect(old?.guid).toBe("");
+  });
+
+  it("drops the row once the build it is an offset into is history", async () => {
+    const DB = d1();
+    await addAccount(DB, "acc-ancient", "Frost");
+    await addAccount(DB, "acc-keep", "Frost2");
+    await crashAged(DB, "acc-ancient", RETENTION_DAYS + 1);
+    await crashAged(DB, "acc-keep", RETENTION_DAYS - 1);
+
+    await pruneCrashes({ DB });
+
+    const after = await rows(DB);
+    expect(after.map((r) => r.account_id)).toEqual(["acc-keep"]);
+  });
+
+  it("does not rewrite a row it already cleared", async () => {
+    const DB = d1();
+    await addAccount(DB, "acc-old", "Frost");
+    await crashAged(DB, "acc-old", IDENTIFY_DAYS + 1);
+
+    await pruneCrashes({ DB });
+    // Twice, because the sweep runs every day over the same table for a year.
+    await pruneCrashes({ DB });
+
+    const after = await rows(DB);
+    expect(after).toHaveLength(1);
+    expect(after[0]?.rider_name).toBe("");
   });
 });
