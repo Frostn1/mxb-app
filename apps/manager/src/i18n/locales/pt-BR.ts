@@ -971,6 +971,8 @@ export const ptBR: Translation = {
   "serverBrowser.waitInLine": "Entrar na fila",
   "serverBrowser.trackMissing": "Você não tem esta pista",
   "serverBrowser.notInstalled": "Não instalada",
+  "serverBrowser.cachedLocal": "Última lista, {{age}}",
+  "serverBrowser.cachedShared": "Lista compartilhada, {{age}}",
   "serverBrowser.installJoin": "Instalar e entrar",
   "serverBrowser.installJoinHint": "Instala {{title}} do mxb-mods.com e depois entra",
   "serverBrowser.installing": "Instalando",

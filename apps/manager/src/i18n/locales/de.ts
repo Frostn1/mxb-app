@@ -977,6 +977,8 @@ export const de: Translation = {
   "serverBrowser.waitInLine": "Anstellen",
   "serverBrowser.trackMissing": "Du hast diese Strecke nicht",
   "serverBrowser.notInstalled": "Nicht installiert",
+  "serverBrowser.cachedLocal": "Letzte Liste, {{age}}",
+  "serverBrowser.cachedShared": "Geteilte Liste, {{age}}",
   "serverBrowser.installJoin": "Installieren & beitreten",
   "serverBrowser.installJoinHint": "Installiert {{title}} von mxb-mods.com und tritt dann bei",
   "serverBrowser.installing": "Wird installiert",

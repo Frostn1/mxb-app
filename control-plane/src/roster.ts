@@ -344,6 +344,261 @@ export async function pruneRoster(env: Env): Promise<void> {
   }
 }
 
+// --- The shared snapshot -------------------------------------------------------------------
+//
+// The book above answers "what servers exist". This answers "what were they doing a minute
+// ago", and it exists for one reason: the Servers tab takes seconds to fill. A sweep is a Steam
+// sign-in, a master login and a datagram to every server that comes back, and until all of that
+// lands there is nothing on the screen. The app paints its own last sweep instead — but a fresh
+// install has no last sweep, and neither has anyone opening the tab for the first time this
+// week. They get this one, which somebody else's app wrote a minute ago.
+//
+// ## What is different about this from the roster
+//
+// This does carry operator text — the server's name, its track, its location string — and that
+// is a thing to be careful with rather than to wave through, because it is written by anonymous
+// callers and drawn in everybody's app. Three rules make it safe enough for what it is, and it
+// is worth being precise about what "enough" means:
+//
+//  1. **Only corroborated addresses.** A row whose address the roster does not already serve is
+//     dropped. So this cannot put a *new* address in front of anyone, which is the part that
+//     would matter — the join button goes to the address, and the address is one the game's own
+//     master server has been independently seen listing.
+//  2. **Text is cleaned and capped**: control characters out, length limited, counts clamped.
+//     What survives is drawn as text and nothing else.
+//  3. **It is replaced in seconds.** The app fires its own sweep the moment it paints this, and
+//     shows the snapshot's age while it waits.
+//
+// What remains is that a liar could mis-state a real server's name or rider count for up to a
+// minute, in the apps that load it in that minute. That is worth the tab filling instantly.
+// Inventing a server, or pointing anybody at an address of their choosing, is not possible here.
+
+/** A snapshot is a few hundred rows of short strings. Six times the roster's cap. */
+export const MAX_SNAPSHOT_BYTES = 192 * 1024;
+
+/** Rows one snapshot may carry, matching the roster's address cap. */
+export const MAX_SNAPSHOT_SERVERS = MAX_ADDRESSES;
+
+/**
+ * How long the stored snapshot is left alone before another is accepted.
+ *
+ * The write is one row, but the check that makes it safe is a query per hundred addresses, and
+ * every install with the tab open would otherwise pay it on every refresh. A minute is well
+ * inside how stale the app is willing to paint, and it means what this endpoint costs does not
+ * grow with how many people have MXB App open.
+ */
+export const SNAPSHOT_MIN_GAP_MS = 60 * 1000;
+
+/**
+ * How old a stored snapshot may be and still be served.
+ *
+ * The app draws this age beside the list, so nothing here is passed off as live. Past half an
+ * hour it stops being a head start and becomes a list of who was online earlier, which the
+ * sweep the app is already running answers better.
+ */
+export const SNAPSHOT_MAX_AGE_MS = 30 * 60 * 1000;
+
+/** The one row. There is only ever one snapshot, and it is the latest. */
+const SNAPSHOT_ID = "live";
+
+/** One server as the tab draws it. Deliberately not everything the app knows. */
+export interface SnapshotRow {
+  address: string;
+  name: string;
+  players: number;
+  maxPlayers: number;
+  track: string;
+  trackLayout: string;
+  location: string;
+  session: string;
+  conditions: string;
+  categories: string[];
+  passworded: boolean;
+  joinable: boolean;
+}
+
+/**
+ * `POST /v1/roster/snapshot` — the list one app just read from the game's master server.
+ *
+ * Unauthenticated, like the roster itself and for the same reason: a snapshot only invited
+ * accounts could write would be one that stayed empty, and the people with nothing of their own
+ * are exactly who it is for. What makes it safe to hand back is above.
+ */
+export async function reportSnapshot(request: Request, env: Env): Promise<Response> {
+  const declared = Number(request.headers.get("content-length") ?? "0");
+  if (declared > MAX_SNAPSHOT_BYTES) return json(413, { error: "snapshot too large" });
+
+  const raw = await readText(request);
+  if (raw === null || raw.length > MAX_SNAPSHOT_BYTES) {
+    return json(413, { error: "snapshot too large" });
+  }
+  const rows = parseSnapshot(raw);
+  if (typeof rows === "string") return json(400, { error: rows });
+
+  const now = Date.now();
+  // Asked before anything expensive, and answered as a success: an app whose contribution was
+  // not needed has done nothing wrong and has nothing to retry.
+  const held = await env.DB.prepare("SELECT updated_at FROM server_snapshot WHERE id = ?")
+    .bind(SNAPSHOT_ID)
+    .first<{ updated_at: number }>();
+  if (held && now - held.updated_at < SNAPSHOT_MIN_GAP_MS) {
+    return json(202, { ok: true, stored: false });
+  }
+
+  const known = await corroborated(
+    rows.map((r) => r.address),
+    env,
+  );
+  const keep = rows.filter((r) => known.has(r.address));
+  if (keep.length === 0) {
+    return json(202, { ok: true, stored: false, reason: "no corroborated addresses" });
+  }
+
+  await env.DB.prepare(
+    "INSERT INTO server_snapshot (id, payload, servers, updated_at) VALUES (?, ?, ?, ?)" +
+      " ON CONFLICT(id) DO UPDATE SET payload = excluded.payload," +
+      "  servers = excluded.servers, updated_at = excluded.updated_at",
+  )
+    .bind(SNAPSHOT_ID, JSON.stringify(keep), keep.length, now)
+    .run();
+
+  return json(202, { ok: true, stored: true, servers: keep.length });
+}
+
+/**
+ * `GET /v1/roster/snapshot` — the most recent one, and the moment it was true.
+ *
+ * Public, CORS-open and cached for half a minute at the edge, which is what keeps this from
+ * costing a database read per app that opens the tab. `asOf` is not decoration: the app draws
+ * it, so nobody is shown a rider count from twenty minutes ago as though it were now.
+ */
+export async function readSnapshot(env: Env): Promise<Response> {
+  let servers: SnapshotRow[] = [];
+  let asOf = 0;
+  try {
+    const row = await env.DB.prepare("SELECT payload, updated_at FROM server_snapshot WHERE id = ?")
+      .bind(SNAPSHOT_ID)
+      .first<{ payload: string; updated_at: number }>();
+    if (row && Date.now() - row.updated_at <= SNAPSHOT_MAX_AGE_MS) {
+      servers = JSON.parse(row.payload) as SnapshotRow[];
+      asOf = row.updated_at;
+    }
+  } catch (err) {
+    console.error(JSON.stringify({ msg: "snapshot read failed", error: String(err) }));
+  }
+
+  return new Response(JSON.stringify({ asOf, servers, count: servers.length }), {
+    status: 200,
+    headers: {
+      "content-type": "application/json",
+      "cache-control": "public, max-age=30",
+      "access-control-allow-origin": "*",
+    },
+  });
+}
+
+/** Check a snapshot, returning the reason it was refused rather than a bare false. */
+export function parseSnapshot(raw: string): SnapshotRow[] | string {
+  let body: unknown;
+  try {
+    body = JSON.parse(raw);
+  } catch {
+    return "expected a JSON body";
+  }
+  if (!body || typeof body !== "object") return "expected a JSON body";
+  const { servers } = body as Record<string, unknown>;
+  if (!Array.isArray(servers)) return "servers must be an array";
+  if (servers.length === 0) return "servers was empty";
+  if (servers.length > MAX_SNAPSHOT_SERVERS) {
+    return `at most ${MAX_SNAPSHOT_SERVERS} servers in one snapshot`;
+  }
+
+  const rows: SnapshotRow[] = [];
+  const seen = new Set<string>();
+  for (const entry of servers) {
+    if (!entry || typeof entry !== "object") continue;
+    const s = entry as Record<string, unknown>;
+    // Dropped rather than refused, exactly as in `parseReport`: one row the caller could never
+    // have joined anyway must not cost them the whole snapshot.
+    if (!isPublicGameAddress(s.address)) continue;
+    const address = (s.address as string).trim();
+    if (seen.has(address)) continue;
+    seen.add(address);
+    rows.push({
+      address,
+      name: text(s.name, 64),
+      players: count(s.players, 999),
+      maxPlayers: count(s.maxPlayers, 999),
+      track: text(s.track, 64),
+      trackLayout: text(s.trackLayout, 48),
+      location: text(s.location, 48),
+      session: text(s.session, 32),
+      conditions: text(s.conditions, 32),
+      categories: Array.isArray(s.categories)
+        ? s.categories
+            .slice(0, 4)
+            .map((c) => text(c, 24))
+            .filter(Boolean)
+        : [],
+      passworded: s.passworded === true,
+      joinable: s.joinable !== false,
+    });
+  }
+  if (rows.length === 0) return "no usable servers in that snapshot";
+  return rows;
+}
+
+/**
+ * One field of operator text, as it will be drawn.
+ *
+ * Control characters go — they are never in a server name, and they are what turns a string
+ * into something other than a string in whatever reads it next — and the length is capped at
+ * what a tile shows. Anything that is not a string at all becomes "".
+ */
+function text(value: unknown, max: number): string {
+  if (typeof value !== "string") return "";
+  // eslint-disable-next-line no-control-regex
+  return value
+    .replace(/[\u0000-\u001f\u007f]/g, " ")
+    .trim()
+    .slice(0, max);
+}
+
+/** One count, as a whole number inside a sane range. */
+function count(value: unknown, max: number): number {
+  const n = typeof value === "number" && Number.isFinite(value) ? Math.trunc(value) : 0;
+  return Math.min(Math.max(n, 0), max);
+}
+
+/**
+ * Which of these addresses the roster already serves.
+ *
+ * Chunked, because D1 binds a limited number of parameters to one statement and a snapshot
+ * carries several hundred addresses. The chunks are read in parallel: this sits in front of a
+ * write that happens at most once a minute, not in front of a player.
+ */
+async function corroborated(addresses: string[], env: Env): Promise<Set<string>> {
+  const CHUNK = 90;
+  const chunks: string[][] = [];
+  for (let i = 0; i < addresses.length; i += CHUNK) chunks.push(addresses.slice(i, i + CHUNK));
+
+  const found = new Set<string>();
+  const answers = await Promise.all(
+    chunks.map((chunk) =>
+      env.DB.prepare(
+        "SELECT address FROM server_roster WHERE corroborated_at IS NOT NULL" +
+          ` AND address IN (${chunk.map(() => "?").join(",")})`,
+      )
+        .bind(...chunk)
+        .all<{ address: string }>(),
+    ),
+  );
+  for (const answer of answers) {
+    for (const row of answer.results ?? []) found.add(row.address);
+  }
+  return found;
+}
+
 async function readText(request: Request): Promise<string | null> {
   try {
     return await request.text();

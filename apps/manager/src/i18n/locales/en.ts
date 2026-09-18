@@ -955,6 +955,8 @@ export const en = {
   "serverBrowser.waitInLine": "Wait in line",
   "serverBrowser.trackMissing": "You don't have this track",
   "serverBrowser.notInstalled": "Not installed",
+  "serverBrowser.cachedLocal": "Last list, {{age}}",
+  "serverBrowser.cachedShared": "Shared list, {{age}}",
   "serverBrowser.installJoin": "Install & join",
   "serverBrowser.installJoinHint": "Installs {{title}} from mxb-mods.com, then joins",
   "serverBrowser.installing": "Installing",
