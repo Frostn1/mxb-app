@@ -246,7 +246,7 @@ const Plugins = () => {
 
   // Hand over to the window the panels are actually in, naming the plugin so it opens on one
   // of its own rather than on whatever the Studio shows first. A studio that isn't installed
-  // says so in the toast — the Studio card on the dashboard is where it gets installed.
+  // says so in the toast.
   const openStudio = async (p: PluginView) => {
     try {
       await launchStudio(p.id);

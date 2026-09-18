@@ -42,8 +42,6 @@ export const useTour = () => useContext(TourContext);
 interface Step {
   /** View to switch to before highlighting, so the real screen sits behind the spotlight. */
   view?: DashboardView;
-  /** Which Studio sub-view to open with it — a step anchored in the Studio has to name one,
-   *  or it lands on whichever was last open. */
   /** CSS selector of the element to spotlight. Omit for a centered, un-anchored step. */
   selector?: string;
   icon: LucideIcon;
