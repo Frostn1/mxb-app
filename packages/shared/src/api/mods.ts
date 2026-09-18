@@ -1241,9 +1241,13 @@ export type GameFolder = "mods" | "game";
  *
  * Takes the choice rather than a path: `modsPath` can be either the user folder or the
  * mods tree itself, and only the backend resolves that correctly.
+ *
+ * `subpath` narrows the mods case to one folder under the tree — pass a mod type's
+ * `installSubpath`. The backend checks it against the title's own mods folders, and falls
+ * back to the tree itself when the game hasn't created that one yet.
  */
-export function openGameFolder(which: GameFolder): Promise<void> {
-  return invoke<void>("open_game_folder", { which });
+export function openGameFolder(which: GameFolder, subpath?: string): Promise<void> {
+  return invoke<void>("open_game_folder", { which, subpath });
 }
 
 /** Open Windows Security on Ransomware protection (Controlled folder access). */

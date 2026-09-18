@@ -36,8 +36,10 @@
   map travels to the corner you're on instead of leaving you to find it.
 - **Both of the Library's folders, one click from the list.** Two buttons in the Library's bar
   open the mods folder and the game's install folder in your file manager, for the times it's
-  quicker to move a file by hand than to go through the app. The mods one lands on the real
-  tree, wherever `mxbikes.ini` put it, rather than where the folder usually is.
+  quicker to move a file by hand than to go through the app. The mods one opens the tab you're
+  on — Tracks opens `mods/tracks` — so the list on screen and the folder that opens are the
+  same thing, and it lands on the real tree wherever `mxbikes.ini` put it, rather than where
+  the folder usually is. A tab the game hasn't made a folder for yet opens the tree above it.
 
 ### Changed
 - **The lap's own tabs say what they hold.** Each tab carries a count for the lap you're on —
