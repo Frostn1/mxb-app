@@ -89,16 +89,20 @@ export default function ContextBar({
             {tab.rawLabel ?? t(tab.label)}
           </ContextTab>
         ))}
+      {/* `min-w-0` so a screen's filters are what gives when the row is short. Without it
+          the row's only flexible items were the right-hand actions, which meant a loaded
+          screen compressed its own buttons — labels wrapping inside them — rather than
+          trimming anything a person could do without. */}
       <div
         ref={leftRef}
         className={cn(
-          "flex items-stretch gap-[22px]",
+          "flex min-w-0 items-stretch gap-[22px]",
           // Only divide when there is something on both sides of the line.
           tabs.length > 1 && "ctx-divider",
         )}
       />
-      <div className="flex-1" />
-      <div ref={rightRef} className="flex items-center gap-3 self-center" />
+      <div className="min-w-[12px] flex-1" />
+      <div ref={rightRef} className="flex min-w-0 items-center gap-3 self-center" />
     </div>
   );
 }

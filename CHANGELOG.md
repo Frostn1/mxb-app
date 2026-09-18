@@ -6,6 +6,16 @@
 - The Steam sign-in card takes your click when a dialog opened behind it at launch. It looked
   normal and did nothing, which is why it kept coming back after the other sign-in fixes.
 
+## Unreleased — Servers tab
+
+### Changed
+- The Servers toolbar keeps its shape once the list lands. The filters sit together behind one
+  **Filters** button on the left, the actions stay on the right, and the two you reach for
+  rarely — registering your own server, and resetting the game's own browser — moved under the
+  `...` menu.
+- A server running a track you don't have says **Not installed** on the track's own line,
+  rather than putting a warning sign over the picture.
+
 ## Unreleased — Replay moves into the Studio, and records itself
 
 ### Added
