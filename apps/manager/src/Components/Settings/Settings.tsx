@@ -276,20 +276,19 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
   const [adSupport, setAdSupportState] = useState<AdSupportPrefs>(readAdSupport);
   const [optOutStep1, setOptOutStep1] = useState(false);
   const [optOutStep2, setOptOutStep2] = useState(false);
-  const setAdSupport = useCallback((enabled: boolean) => {
-    const next = { enabled };
+  const saveAdSupport = useCallback((next: AdSupportPrefs) => {
     writeAdSupport(next);
     setAdSupportState(next);
     // Turning it off with a mod open should take its page down now, not on the next navigation.
-    if (!enabled) void closeCreatorPage();
+    if (!next.enabled) void closeCreatorPage();
   }, []);
   // Turning it on is frictionless; turning it off has to pass both dialogs first.
   const onToggleAdSupport = useCallback(
     (v: boolean) => {
-      if (v) setAdSupport(true);
+      if (v) saveAdSupport({ ...adSupport, enabled: true });
       else setOptOutStep1(true);
     },
-    [setAdSupport],
+    [saveAdSupport, adSupport],
   );
   const { running, reload, status, installing, checking, statusError, install, start, stop, refreshStatus, missingRuntime, installRuntime, installingRuntime, repairRuntimes, repairingRuntimes, strayMsvcr90, clearingStray, clearStrayMsvcr90 } =
     useFrostmod();
@@ -1431,6 +1430,16 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
               desc={t("settings.adSupportDesc", { site: game.catalogDomain })}
               checked={adSupport.enabled}
               onChange={onToggleAdSupport}
+            />
+            {/* Where the page opens. Beside the app it's fully visible — which is what an ad
+                network counts as a view; behind the app tucks it away but may earn nothing.
+                Only meaningful while the page is being shown at all. */}
+            <ToggleRow
+              label={t("settings.adSupportBehind")}
+              desc={t("settings.adSupportBehindDesc")}
+              checked={adSupport.behindApp}
+              disabled={!adSupport.enabled}
+              onChange={(v) => saveAdSupport({ ...adSupport, behindApp: v })}
             />
             <div className="h-px bg-border" />
             <ToggleRow
@@ -2579,7 +2588,7 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
             <AlertDialogAction
               onClick={() => {
                 setOptOutStep2(false);
-                setAdSupport(false);
+                saveAdSupport({ ...adSupport, enabled: false });
               }}
             >
               {t("settings.adSupportOff2Confirm")}

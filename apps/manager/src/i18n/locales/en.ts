@@ -2281,4 +2281,6 @@ export const en = {
   "settings.adSupportOff2Body": "This is the revenue that keeps the mods you're installing being made. Turning it off takes directly from the guys maintaining them. Are you absolutely sure?",
   "settings.adSupportOff2Confirm": "Yes, turn it off",
   "modDetail.creatorPageNote": "This mod's page is open on {{site}} behind the app, so the creator keeps the ad revenue your install would otherwise skip. You can turn this off in Settings → General.",
+  "settings.adSupportBehind": "Keep it behind the app",
+  "settings.adSupportBehindDesc": "By default the page opens beside the app, fully visible — which is what actually counts as an ad view. Turn this on to tuck it behind the app instead; tidier, but the creator may earn nothing from a page nobody sees.",
 } as const;

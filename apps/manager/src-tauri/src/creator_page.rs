@@ -1,21 +1,24 @@
-//! The creator's own mxb-mods.com page, shown *behind* the app while a mod is open or
-//! installing — so the site keeps the ad impression the app would otherwise strip.
+//! The creator's own mxb-mods.com page, shown beside the app (or behind it, if the player
+//! prefers) while a mod is open or installing — so the site keeps the ad impression the app
+//! would otherwise strip.
 //!
 //! MXB App browses the catalog through mxb-mods.com's REST API and installs straight from the
 //! mirror, which means a player never loads the mod's own page. mxb-mods.com earns from the
 //! ads on that page, so every install through the app is a view the creator used to get and
 //! now doesn't. This window puts the real page back in front of a real person: a visible
-//! WebView on the true origin, opened when a mod is viewed or installed, and pushed one layer
-//! down so it doesn't take over the screen. Real browser, real fingerprint, the site's own
-//! ads — the impression restored, not counterfeited. It is never parked hidden and never
-//! auto-refreshed; a player who turns the setting off (Settings → General) stops opening it.
+//! WebView on the true origin, opened when a mod is viewed or installed. Beside the app by
+//! default, so the whole page is on screen — which is what an ad network actually counts as a
+//! view; a player who'd rather it stayed out of the way can tuck it behind the app instead,
+//! at the cost of that revenue. Real browser, real fingerprint, the site's own ads — the
+//! impression restored, not counterfeited. It is never parked hidden and never auto-refreshed;
+//! a player who turns the setting off (Settings → General) stops opening it.
 //!
 //! It is display-only. It runs a remote origin and is granted no capability file, so — unlike
 //! the mxb-fetch and shop-fetch windows — its page cannot reach a single app command at all
 //! (capabilities target a window by label; nothing targets this one). Nothing is read back
 //! out of it, and it only ever navigates to a catalog URL the app itself passed.
 
-use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri::{AppHandle, LogicalPosition, Manager, WebviewUrl, WebviewWindowBuilder};
 
 /// The window the creator's page runs in. One, reused: opening another mod navigates this
 /// window rather than stacking a second one behind the app.
@@ -31,12 +34,37 @@ fn is_catalog_url(url: &str) -> bool {
     ALLOWED.iter().any(|prefix| url.starts_with(prefix))
 }
 
-/// Push the main window back to the front, so the creator page sits behind it — visible, but
-/// not in the way of what the player came to do. Best-effort: on a WM that ignores the
-/// request the page is merely alongside the app rather than under it, which is still fine.
-fn behind_main(app: &AppHandle) {
+/// Keep the keyboard on the app after the creator page opens. Beside the app that just means
+/// the player keeps typing where they were; behind it, focusing the app is also what pushes
+/// the page under it. Best-effort — a WM that ignores the request leaves the page alongside,
+/// which is still fine.
+fn keep_app_focused(app: &AppHandle) {
     if let Some(main) = app.get_webview_window(crate::MAIN_WINDOW) {
         let _ = main.set_focus();
+    }
+}
+
+/// Where to put the creator page, in logical pixels, relative to the main window.
+///
+/// Beside (the default): just off the app's right edge, so the whole page — ads and all — is
+/// on screen, which is what an ad network actually counts as a view. Behind: overlapping the
+/// app, down and right a little so an edge still shows; [`keep_app_focused`] then drops it
+/// under the app. outer_position/outer_size are physical pixels and the window API wants
+/// logical, so both are divided by the scale factor — otherwise the offset doubles on HiDPI.
+fn target_pos(app: &AppHandle, behind: bool) -> Option<(f64, f64)> {
+    let main = app.get_webview_window(crate::MAIN_WINDOW)?;
+    let pos = main.outer_position().ok()?;
+    let scale = main.scale_factor().ok()?;
+    let x0 = pos.x as f64 / scale;
+    let y0 = pos.y as f64 / scale;
+    if behind {
+        Some((x0 + 48.0, y0 + 48.0))
+    } else {
+        let width = main
+            .outer_size()
+            .ok()
+            .map_or(0.0, |s| s.width as f64 / scale);
+        Some((x0 + width + 24.0, y0))
     }
 }
 
@@ -45,7 +73,7 @@ fn behind_main(app: &AppHandle) {
 /// logged and swallowed, because this window supports the creator and must never be able to
 /// block the player's own browsing or install.
 #[tauri::command]
-pub fn open_creator_page(app: AppHandle, url: String) -> Result<(), String> {
+pub fn open_creator_page(app: AppHandle, url: String, placement: String) -> Result<(), String> {
     if !is_catalog_url(&url) {
         return Err(format!(
             "refusing to open a non-catalog URL in the creator page: {url}"
@@ -54,14 +82,21 @@ pub fn open_creator_page(app: AppHandle, url: String) -> Result<(), String> {
     let target = url
         .parse()
         .map_err(|e| format!("creator page URL didn't parse: {e}"))?;
+    // Anything but the explicit "behind" is beside the app — the default, and where the page
+    // is actually visible.
+    let behind = placement == "behind";
 
-    // Already open on a different mod: just point it at the new one. Reusing the window keeps
-    // this to a single background page no matter how many mods a player clicks through.
+    // Already open on a different mod: point it at the new one and re-apply placement (the
+    // player may have changed the setting since). Reusing the window keeps this to a single
+    // background page no matter how many mods a player clicks through.
     if let Some(win) = app.get_webview_window(WINDOW) {
         if let Err(e) = win.navigate(target) {
             log::warn!("couldn't navigate the creator page to {url}: {e:#}");
         }
-        behind_main(&app);
+        if let Some((x, y)) = target_pos(&app, behind) {
+            let _ = win.set_position(LogicalPosition::new(x, y));
+        }
+        keep_app_focused(&app);
         return Ok(());
     }
 
@@ -74,13 +109,8 @@ pub fn open_creator_page(app: AppHandle, url: String) -> Result<(), String> {
         .inner_size(1100.0, 820.0)
         .focused(false);
 
-    // Offset it down-right of the app so an edge always shows even when the app is maximised.
-    // outer_position is physical pixels and the builder wants logical, so divide by the scale
-    // factor — otherwise the offset doubles on a HiDPI display.
-    if let Some(main) = app.get_webview_window(crate::MAIN_WINDOW) {
-        if let (Ok(pos), Ok(scale)) = (main.outer_position(), main.scale_factor()) {
-            builder = builder.position(pos.x as f64 / scale + 48.0, pos.y as f64 / scale + 48.0);
-        }
+    if let Some((x, y)) = target_pos(&app, behind) {
+        builder = builder.position(x, y);
     }
 
     if let Err(e) = builder.build() {
@@ -88,7 +118,7 @@ pub fn open_creator_page(app: AppHandle, url: String) -> Result<(), String> {
         log::warn!("couldn't open the creator page for {url}: {e:#}");
         return Ok(());
     }
-    behind_main(&app);
+    keep_app_focused(&app);
     Ok(())
 }
 

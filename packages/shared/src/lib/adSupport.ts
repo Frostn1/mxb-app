@@ -13,11 +13,19 @@
 export interface AdSupportPrefs {
   /** Open the creator's page in the background while viewing/installing a mod. */
   enabled: boolean;
+  /**
+   * Tuck the page *behind* the app instead of beside it.
+   *
+   * Off by default: beside the app the page is fully on screen, which is what an ad network
+   * actually counts as a view — a page hidden behind the app may earn the creator nothing. On
+   * for a player who'd rather it stayed out of the way, at the cost of that revenue.
+   */
+  behindApp: boolean;
 }
 
-/** On by default: the whole point is that the creator keeps the impression unless a player
- *  deliberately opts out. */
-export const DEFAULT_AD_SUPPORT: AdSupportPrefs = { enabled: true };
+/** On, and beside the app, by default: the creator keeps the impression — and it's a real,
+ *  visible one — unless a player deliberately changes it. */
+export const DEFAULT_AD_SUPPORT: AdSupportPrefs = { enabled: true, behindApp: false };
 
 const KEY = "frost-ad-support";
 
@@ -28,7 +36,9 @@ export function readAdSupport(): AdSupportPrefs {
     const v = JSON.parse(raw) as Partial<AdSupportPrefs>;
     // Anything but an explicit `false` reads as on, so a corrupt or half-written value
     // fails toward supporting the creator rather than silently opting the player out.
-    return { enabled: v.enabled !== false };
+    // `behindApp` is the opposite: only an explicit `true` tucks it away, so the default
+    // (beside, and visible) is what a missing or garbled value gives.
+    return { enabled: v.enabled !== false, behindApp: v.behindApp === true };
   } catch {
     return DEFAULT_AD_SUPPORT;
   }

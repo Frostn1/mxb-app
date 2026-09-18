@@ -16,9 +16,13 @@ import { readAdSupport } from "../lib/adSupport";
  */
 export async function openCreatorPage(url: string | null | undefined): Promise<void> {
   if (!url) return;
-  if (!readAdSupport().enabled) return;
+  const prefs = readAdSupport();
+  if (!prefs.enabled) return;
+  // Beside the app (the default) so the page is fully visible — a real, countable view —
+  // unless the player chose to keep it behind.
+  const placement = prefs.behindApp ? "behind" : "beside";
   try {
-    await invoke<void>("open_creator_page", { url });
+    await invoke<void>("open_creator_page", { url, placement });
   } catch {
     // Display-only; a window that won't build must not stop the mod from installing.
   }

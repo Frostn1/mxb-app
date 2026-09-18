@@ -2306,4 +2306,6 @@ export const ptBR: Translation = {
   "settings.adSupportOff2Body": "Essa é a receita que mantém os mods que você está instalando sendo feitos. Desativar tira diretamente de quem os mantém. Você tem certeza absoluta?",
   "settings.adSupportOff2Confirm": "Sim, desativar",
   "modDetail.creatorPageNote": "A página deste mod está aberta no {{site}} atrás do app, para que o criador mantenha a receita de anúncios que sua instalação pularia. Você pode desativar isso em Configurações → Geral.",
+  "settings.adSupportBehind": "Manter atrás do app",
+  "settings.adSupportBehindDesc": "Por padrão a página abre ao lado do app, totalmente visível — que é o que conta como uma visualização de anúncio. Ative isto para escondê-la atrás do app; mais organizado, mas o criador pode não ganhar nada de uma página que ninguém vê.",
 };

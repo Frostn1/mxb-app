@@ -2312,4 +2312,6 @@ export const es: Translation = {
   "settings.adSupportOff2Body": "Estos son los ingresos que permiten que sigan haciéndose los mods que instalas. Desactivarlo les quita directamente a quienes los mantienen. ¿Estás totalmente seguro?",
   "settings.adSupportOff2Confirm": "Sí, desactivarlo",
   "modDetail.creatorPageNote": "La página de este mod está abierta en {{site}} detrás de la app, para que el creador conserve los ingresos por publicidad que tu instalación se saltaría. Puedes desactivarlo en Ajustes → General.",
+  "settings.adSupportBehind": "Mantenerla detrás de la app",
+  "settings.adSupportBehindDesc": "De forma predeterminada la página se abre junto a la app, totalmente visible, que es lo que cuenta como una visualización de anuncio. Actívalo para ocultarla detrás de la app; más ordenado, pero el creador podría no ganar nada con una página que nadie ve.",
 };

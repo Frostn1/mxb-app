@@ -2326,4 +2326,6 @@ export const de: Translation = {
   "settings.adSupportOff2Body": "Das sind die Einnahmen, mit denen die Mods, die du installierst, überhaupt erst entstehen. Es auszuschalten nimmt den Leuten, die sie pflegen, direkt etwas weg. Bist du dir ganz sicher?",
   "settings.adSupportOff2Confirm": "Ja, ausschalten",
   "modDetail.creatorPageNote": "Die Seite dieses Mods ist auf {{site}} hinter der App geöffnet, damit der Ersteller die Werbeeinnahmen behält, die deine Installation sonst überspringen würde. Du kannst dies unter Einstellungen → Allgemein ausschalten.",
+  "settings.adSupportBehind": "Hinter der App halten",
+  "settings.adSupportBehindDesc": "Standardmäßig öffnet sich die Seite neben der App, voll sichtbar – und nur das zählt als Werbeeinblendung. Schalte dies ein, um sie stattdessen hinter der App zu verstecken; aufgeräumter, aber der Ersteller verdient womöglich nichts an einer Seite, die niemand sieht.",
 };

@@ -2306,4 +2306,6 @@ export const it: Translation = {
   "settings.adSupportOff2Body": "Sono gli introiti che permettono ai mod che stai installando di continuare a esistere. Disattivarlo toglie direttamente a chi li mantiene. Sei assolutamente sicuro?",
   "settings.adSupportOff2Confirm": "Sì, disattivalo",
   "modDetail.creatorPageNote": "La pagina di questo mod è aperta su {{site}} dietro all'app, così il creatore mantiene gli introiti pubblicitari che la tua installazione salterebbe. Puoi disattivarlo in Impostazioni → Generali.",
+  "settings.adSupportBehind": "Tienila dietro all'app",
+  "settings.adSupportBehindDesc": "Per impostazione predefinita la pagina si apre accanto all'app, ben visibile — ed è questo che conta come visualizzazione di un annuncio. Attiva questa opzione per nasconderla dietro all'app; più ordinato, ma il creatore potrebbe non guadagnare nulla da una pagina che nessuno vede.",
 };
