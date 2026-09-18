@@ -1648,9 +1648,12 @@ function Tilted({
       X_AXIS,
       (attitude?.pitch ?? 0) * THREE.MathUtils.DEG2RAD,
     );
-    // Pitch first, so it happens in the bike's own plane and the lean then carries it over,
-    // rather than the nose dipping towards the floor on a bike already on its side.
-    return roll.multiply(pitch);
+    // Pitch about the horizontal axis first, then roll about the bike's own nose: the order
+    // the game itself uses, measured against three real recordings — its attitude is a
+    // heading, a pitch and a bank, in that order. Rolling first instead agrees to about a
+    // degree upright and diverges by a median 12 degrees on a leaned, pitched bike, which is
+    // a berm exit and a downhill turn, the two places a rider is looking hardest.
+    return pitch.multiply(roll);
   }, [attitude?.roll, attitude?.pitch]);
   const tilted = !!attitude && (attitude.roll !== 0 || attitude.pitch !== 0);
   /**

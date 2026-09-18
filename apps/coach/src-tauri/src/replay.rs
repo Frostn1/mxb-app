@@ -133,8 +133,17 @@ fn section_of(app: &AppHandle, rec: &Recording, tr: &Trace, id: &str) -> Result<
 }
 
 /// Where a section sits along the centreline, metres: entry through exit, not just its core.
+/// How much track to keep either side of the section, metres.
+///
+/// A corner cut at its own edges starts with the bike already committed and ends before the
+/// drive out, which is the half a rider most wants to see. The run in and the run out are what
+/// make it a corner rather than an arc.
+const PAD_M: f32 = 45.0;
+
+/// The section, with the approach and the exit either side of it.
 fn span(sec: &Section) -> (f32, f32) {
-    (sec.start as f32 * STEP_M, sec.end as f32 * STEP_M)
+    let (a, b) = (sec.start as f32 * STEP_M, sec.end as f32 * STEP_M);
+    ((a - PAD_M).max(0.0), b + PAD_M)
 }
 
 /// The rider's own fastest whole lap of this session over the same section. Nothing when the

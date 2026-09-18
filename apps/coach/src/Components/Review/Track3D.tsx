@@ -94,6 +94,19 @@ function Key({ colour, children }: { colour: string; children: string }) {
   );
 }
 
+/** Two swatches running one into the other, for a scale rather than a single line. */
+function Scale({ from, to, children }: { from: string; to: string; children: string }) {
+  return (
+    <span className="flex items-center gap-1.5">
+      <span
+        className="inline-block h-[3px] w-6 rounded"
+        style={{ background: `linear-gradient(to right, ${from}, ${to})` }}
+      />
+      {children}
+    </span>
+  );
+}
+
 /**
  * The track in 3D as MXB App shows it, when its files can be read: terrain, scenery and the
  * ground in game view, with this lap, the fast lap, the picked section and a post at every tip
@@ -109,6 +122,8 @@ export default function Track3D({
   lap,
   selected,
   actor,
+  follow = false,
+  onGround,
   legend = true,
   className,
 }: {
@@ -130,6 +145,10 @@ export default function Track3D({
    * the same reason the lines' is: it is the only piece that knows which ground is underneath.
    */
   actor?: ViewerActor | null;
+  /** Keep the camera on the actor as it moves, instead of on the picked section. */
+  follow?: boolean;
+  /** A click on the ground, in the same space as the review's own path points. */
+  onGround?: (at: { x: number; z: number }) => void;
   /** The colour key under the view. Off where the caller says what the colours mean itself. */
   legend?: boolean;
   className?: string;
@@ -217,6 +236,13 @@ export default function Track3D({
     [actor, ox, oz, lift],
   );
 
+  // Following the bike and framing the corner are the same camera, so only one may drive it:
+  // a focus that keeps firing would drag the view back off the bike every time it changed.
+  const chase = useMemo(
+    () => (follow && placed ? { x: placed.at[0], z: placed.at[2] } : null),
+    [follow, placed],
+  );
+
   const waiting = ground != null && !scene.terrain;
   // Not the track at all, and it isn't coming: it isn't in the rider's mods, it's locked, or
   // its terrain wouldn't read. Anything that reads is drawn, so this is now rare.
@@ -245,7 +271,11 @@ export default function Track3D({
           gameView={real && scene.groundLayers.length > 0}
           lines={drawn}
           actor={placed}
-          focus={focus}
+          focus={chase ? null : focus}
+          follow={chase}
+          // The viewer answers in the grid's frame; the caller thinks in the lap's, which is
+          // the one the shift above took the lines out of.
+          onGroundClick={onGround && ((at) => onGround({ x: at.x + ox, z: at.z + oz }))}
           className="h-full w-full"
         />
         {waiting && (
@@ -279,8 +309,18 @@ export default function Track3D({
       </div>
       {legend && (
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-border px-3 py-2 text-[11px] text-muted-foreground">
+        {/* Every colour on the track gets a word, and only the ones actually drawn: a key for
+            a line that isn't there is worse than no key. */}
         <Key colour={YOU}>{t("review.legendYou")}</Key>
-        {!review.solo && <Key colour={REF}>{t("review.legendRef")}</Key>}
+        {!review.solo && review.traced && <Key colour={REF}>{t("review.legendRef")}</Key>}
+        {allLaps && <Scale from="hsl(120, 65%, 55%)" to="hsl(0, 65%, 55%)">{t("review.legendLaps")}</Scale>}
+        {sel && (
+          <Key colour={loss(sel.lost)}>
+            {t(sel.lost > 0.05 ? "review.legendLost" : sel.lost < -0.05 ? "review.legendGained" : "review.legendLevel", {
+              name: sel.name,
+            })}
+          </Key>
+        )}
         <span>{t("review.tipsOnTrack")}</span>
         {roughFit && (
           <span className="text-faint">

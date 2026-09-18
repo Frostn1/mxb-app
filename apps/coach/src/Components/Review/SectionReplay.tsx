@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Pause, Play, RotateCcw } from "lucide-react";
+import { Pause, Play, Repeat, RotateCcw, SkipForward, Square } from "lucide-react";
 import { type BikePose } from "@frost/shared/Components/Viewer/ModelViewer";
 import type { ViewerActor } from "@frost/shared/Components/Viewer/TrackViewer";
 import { riderPoseFrom } from "@frost/shared/lib/riderMotion";
@@ -10,10 +10,12 @@ import { coachReplay, type Ground, type Lines, type Replay, type ReplayFrame, ty
 import { useT } from "@/i18n";
 import { preloadBike } from "./BikeRender";
 import Track3D from "./Track3D";
-import { frameAt, lerp, useReplayClock } from "./useReplayClock";
+import { frameAt, lerp, useReplayClock, type AtEnd } from "./useReplayClock";
 
 /** The bike's own attitude, degrees, and how much of it to draw. */
 const LEAN_SHOW = 0.85;
+/** How near a click has to land to count as pointing at the run rather than at the track. */
+const ON_RUN_M = 12;
 /**
  * A nominal stroke at each end, millimetres, for turning a travel share into a distance.
  *
@@ -91,6 +93,8 @@ export default function SectionReplay({
   surface,
   lines,
   selected,
+  onNext,
+  onPick,
   className,
 }: {
   path: string;
@@ -109,6 +113,10 @@ export default function SectionReplay({
   lines: Lines | null;
   /** Which section is the subject, so the view frames it and the strip agrees. */
   selected: number | null;
+  /** Move on to the next corner. Without it, running on at the end isn't offered. */
+  onNext?: () => void;
+  /** Go to a corner the rider pointed at on the track. */
+  onPick?: (i: number) => void;
   className?: string;
 }) {
   const t = useT();
@@ -154,7 +162,16 @@ export default function SectionReplay({
 
   const frames = useMemo(() => replay?.frames ?? [], [replay]);
   const length = frames.length > 0 ? frames[frames.length - 1].t : 0;
-  const clock = useReplayClock(length);
+  /**
+   * What to do at the end of a run, kept where the rider left it.
+   *
+   * A rider watching one corner over and over and a rider walking the whole lap want opposite
+   * things from the same button, so it is a choice rather than a guess — and it outlives the
+   * corner, because picking "run on" once means the lap, not this section.
+   */
+  const [atEnd, setAtEnd] = useState<AtEnd>("stop");
+  const runOn = atEnd === "next" && onNext ? onNext : undefined;
+  const clock = useReplayClock(length, true, atEnd, runOn);
   const now = useMemo(() => at(frames, clock.at), [frames, clock.at]);
   const ghost = useMemo(
     () => (now && replay?.best.length ? atDistance(replay.best, now.dist) : null),
@@ -174,8 +191,25 @@ export default function SectionReplay({
     [now, maxTravel],
   );
 
+  /**
+   * The recording's attitude, turned into the viewer's.
+   *
+   * Only roll turns over. Measured against three real recordings: pitch regressed against the
+   * climb angle of the bike's own trajectory gives a slope of -0.985 over 565 clean samples,
+   * so the recorder already reads pitch nose-DOWN positive, which is the viewer's own
+   * convention. Roll against the two-wheeler lean angle, and against which way the bars are
+   * turned, says positive roll is to the rider's LEFT, which is not.
+   *
+   * Negating pitch as well is what put the bike in a wheelie up every hill and on every
+   * landing while corners still looked right: climbing hard the recorder reads about -23
+   * degrees, and flipping that draws a 47-degree error on a bike that is only following the
+   * ground. Corners looked fine because the roll half of the guess happened to be true.
+   *
+   * The resting reading is about -2.5 degrees rather than zero: a bike sits nose-up on its own
+   * sag. That is the bike's real attitude, so it is left alone.
+   */
   const attitude = useMemo(
-    () => (now ? { roll: now.roll * LEAN_SHOW, pitch: now.pitch * LEAN_SHOW } : null),
+    () => (now ? { roll: -now.roll * LEAN_SHOW, pitch: now.pitch * LEAN_SHOW } : null),
     [now],
   );
 
@@ -193,7 +227,8 @@ export default function SectionReplay({
       leanLR: known(now.lean[0], replay.leanKnown[0]),
       leanFB: known(now.lean[1], replay.leanKnown[1]),
       stance: !replay.stanceKnown || now.stance === 0 ? "unknown" : now.stance === 1 ? "stand" : "sit",
-      bikeRoll: now.roll,
+      // The same turn the bike is drawn with, or the rider would counter-lean into the corner.
+      bikeRoll: -now.roll,
     });
   }, [now, replay]);
 
@@ -217,6 +252,38 @@ export default function SectionReplay({
     [now, model, attitude, pose, body, bones],
   );
 
+  /**
+   * A click on the track: go to that point on the lap.
+   *
+   * Nearest frame of the run when the click lands inside it — the playhead moves there and
+   * keeps playing, because a rider pointing at the exit of a corner means "show me that", not
+   * "stop there". A click outside the run finds the corner it fell in and hands it over, which
+   * is the same gesture meaning "that one instead".
+   */
+  const goTo = (at: { x: number; z: number }) => {
+    const near = (a: ReplayFrame) => (a.x - at.x) ** 2 + (a.z - at.z) ** 2;
+    let best: ReplayFrame | null = null;
+    for (const f of frames) if (!best || near(f) < near(best)) best = f;
+    // Within a bike's length or two of the run, it is the run they meant.
+    if (best && near(best) < ON_RUN_M * ON_RUN_M) {
+      clock.seekPlaying(best.t);
+      return;
+    }
+    if (!onPick) return;
+    const lapPath = review.paths.lap;
+    const step = review.paths.step || 1;
+    let k = -1;
+    let far = Infinity;
+    lapPath.forEach((p, i) => {
+      const d = (p[0] - at.x) ** 2 + (p[1] - at.z) ** 2;
+      if (d < far) [far, k] = [d, i];
+    });
+    if (k < 0) return;
+    const m = k * step;
+    const found = review.sections.findIndex((x) => m >= x.start && m <= x.end);
+    if (found >= 0 && found !== selected) onPick(found);
+  };
+
   if (failed) return <p className={cn("text-[12px] text-faint", className)}>{t("replay.noFrames")}</p>;
 
   const bodyBlind = replay != null && !replay.leanKnown[0] && !replay.leanKnown[1] && !replay.stanceKnown;
@@ -238,27 +305,30 @@ export default function SectionReplay({
           lap={lap}
           selected={selected}
           actor={actor}
+          follow
+          onGround={goTo}
           legend={false}
           className="absolute inset-0"
         />
 
         {/* The numbers, on the bike, instead of a paragraph about the corner. */}
+        {/* All of it in one block along the bottom: the track view keeps its own button in the
+            top-left corner, and the speed was sitting on top of it. */}
         {now && (
-          <div className="pointer-events-none absolute left-3 top-3 space-y-1">
-            <div className="font-mono text-[22px] font-bold leading-none tabular-nums text-primary">
-              {Math.round(now.v * 3.6)}
-              <span className="ml-1 text-[11px] font-normal text-muted-foreground">km/h</span>
+          <div className="pointer-events-none absolute inset-x-3 bottom-3 flex items-end gap-4">
+            <div className="shrink-0">
+              <div className="font-mono text-[22px] font-bold leading-none tabular-nums text-primary">
+                {Math.round(now.v * 3.6)}
+                <span className="ml-1 text-[11px] font-normal text-muted-foreground">km/h</span>
+              </div>
+              <div className="mt-0.5 text-[11px] text-muted-foreground">
+                {t("replay.gear")} {now.gear > 0 ? now.gear : "N"}
+              </div>
             </div>
-            <div className="text-[11px] text-muted-foreground">
-              {t("replay.gear")} {now.gear > 0 ? now.gear : "N"}
+            <div className="min-w-0 flex-1 space-y-1.5 pb-0.5">
+              <Bar label={t("replay.throttle")} v={now.throttle} colour="var(--primary)" />
+              <Bar label={t("replay.brake")} v={Math.max(now.front, now.rear)} colour="#ff6961" />
             </div>
-          </div>
-        )}
-
-        {now && (
-          <div className="pointer-events-none absolute bottom-3 left-3 right-3 space-y-1.5">
-            <Bar label={t("replay.throttle")} v={now.throttle} colour="var(--primary)" />
-            <Bar label={t("replay.brake")} v={Math.max(now.front, now.rear)} colour="#ff6961" />
           </div>
         )}
 
@@ -301,6 +371,30 @@ export default function SectionReplay({
         <span className="w-14 shrink-0 text-right font-mono text-[11px] tabular-nums text-muted-foreground">
           {clock.at.toFixed(2)}s
         </span>
+        {/* What happens at the end: stop where it stopped, go round again, or carry on to the
+            next corner. */}
+        <div className="flex shrink-0 items-center gap-0.5">
+          {([
+            ["stop", Square, "replay.endStop"],
+            ["loop", Repeat, "replay.endLoop"],
+            ["next", SkipForward, "replay.endNext"],
+          ] as const).map(([v, Icon, key]) =>
+            v === "next" && !onNext ? null : (
+              <button
+                key={v}
+                onClick={() => setAtEnd(v)}
+                aria-pressed={atEnd === v}
+                title={t(key)}
+                className={cn(
+                  "flex size-6 items-center justify-center rounded",
+                  atEnd === v ? "bg-secondary text-primary" : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                <Icon className="size-3" />
+              </button>
+            ),
+          )}
+        </div>
       </div>
 
       {bodyBlind && <p className="text-[11px] leading-snug text-faint">{t("replay.bodyUnknown")}</p>}

@@ -28,6 +28,12 @@
   behind your best lap was at the same point on the track.
 - Your rider moves with it, where the game told the recorder what you were asking for with your
   body. Where it didn't, the bike moves and the body stays still, and the screen says why.
+- The camera rides with you, close enough to watch, and leaves your zoom where you put it. Click
+  anywhere on the track to jump there — inside the corner it moves the playhead, outside it
+  takes you to the corner you pointed at. At the end it can stop, play round again, or run on
+  to the next corner, whichever you pick.
+- Every line on the map has a key now, so you can tell your line from the fast lap's, and the
+  map travels to the corner you're on instead of leaving you to find it.
 
 ### Changed
 - **The lap's own tabs say what they hold.** Each tab carries a count for the lap you're on —

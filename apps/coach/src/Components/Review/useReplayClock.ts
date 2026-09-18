@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
+/** What happens when a run reaches its end. */
+export type AtEnd = "stop" | "loop" | "next";
+
 /**
  * A clock over a recorded run, in the run's own seconds.
  *
@@ -16,12 +19,20 @@ export type Clock = {
   toggle: () => void;
   /** Put the playhead somewhere, in seconds. Stops playback: a hand on the scrub means look. */
   seek: (t: number) => void;
+  /** Put it somewhere and keep playing, for a click that means "go there and carry on". */
+  seekPlaying: (t: number) => void;
 };
 
 /** How much slower than life to play. A corner at speed is over before it can be read. */
 const RATE = 0.55;
 
-export function useReplayClock(length: number, autoplay = true): Clock {
+export function useReplayClock(
+  length: number,
+  autoplay = true,
+  /** What to do at the end, and who to tell when the answer is somebody else's. */
+  end: AtEnd = "stop",
+  onEnd?: () => void,
+): Clock {
   const [at, setAt] = useState(0);
   const [playing, setPlaying] = useState(autoplay && length > 0);
   const frame = useRef<number | null>(null);
@@ -45,6 +56,14 @@ export function useReplayClock(length: number, autoplay = true): Clock {
     [length, stop],
   );
 
+  const seekPlaying = useCallback(
+    (t: number) => {
+      head.current = Math.max(0, Math.min(length, t));
+      setAt(head.current);
+    },
+    [length],
+  );
+
   // Restarting from the end is what a rider means by play on a run they have just watched.
   const play = useCallback(() => {
     if (head.current >= length - 0.01) {
@@ -57,6 +76,11 @@ export function useReplayClock(length: number, autoplay = true): Clock {
   const pause = useCallback(() => setPlaying(false), []);
   const toggle = useCallback(() => (playing ? pause() : play()), [playing, pause, play]);
 
+  // Held in a ref so the running loop always reads the current answer: a rider who turns
+  // looping on halfway through a run means this run, not the next one.
+  const ending = useRef({ end, onEnd });
+  ending.current = { end, onEnd };
+
   useEffect(() => {
     if (!playing || length <= 0) return;
     let last = performance.now();
@@ -64,10 +88,20 @@ export function useReplayClock(length: number, autoplay = true): Clock {
       const on = head.current + ((now - last) / 1000) * RATE;
       last = now;
       if (on >= length) {
+        const { end: how, onEnd: tell } = ending.current;
+        if (how === "loop") {
+          // Straight back round without stopping: the point of a loop is to watch the same
+          // thing again without reaching for anything.
+          head.current = 0;
+          setAt(0);
+          frame.current = requestAnimationFrame(step);
+          return;
+        }
         head.current = length;
         setAt(length);
         setPlaying(false);
         frame.current = null;
+        if (how === "next") tell?.();
         return;
       }
       head.current = on;
@@ -86,7 +120,7 @@ export function useReplayClock(length: number, autoplay = true): Clock {
     setPlaying(autoplay && length > 0);
   }, [length, autoplay]);
 
-  return { at, playing, play, pause, toggle, seek };
+  return { at, playing, play, pause, toggle, seek, seekPlaying };
 }
 
 /**

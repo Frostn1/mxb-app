@@ -215,6 +215,7 @@ export default function Debrief({
                       surface={surface}
                       lines={lines}
                       selected={sel}
+                      onNext={step < steps.length - 1 ? () => setStep((v) => v + 1) : undefined}
                     />
                   )}
                 </div>
