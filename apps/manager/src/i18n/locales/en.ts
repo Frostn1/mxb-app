@@ -1249,6 +1249,10 @@ export const en = {
   "library.moveFailed": "Couldn't move mod",
   "library.uninstallFailed": "Couldn't uninstall",
   "library.openFailed": "Couldn't open",
+  "library.openModsFolder": "Open the mods folder",
+  "library.openGameFolder": "Open the {{game}} install folder",
+  "library.gameFolderUnset":
+    "Your {{game}} install folder isn't set yet — pick it in Settings.",
   "library.uninstalledOne": "{{name}} uninstalled",
   "library.movedToBin": "Moved to the Recycle Bin.",
   "library.someNotRemoved": "Some items couldn't be removed.",

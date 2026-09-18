@@ -1270,6 +1270,10 @@ export const fr: Translation = {
   "library.moveFailed": "Impossible de déplacer le mod",
   "library.uninstallFailed": "Impossible de désinstaller",
   "library.openFailed": "Impossible d'ouvrir",
+  "library.openModsFolder": "Ouvrir le dossier mods",
+  "library.openGameFolder": "Ouvrir le dossier d'installation de {{game}}",
+  "library.gameFolderUnset":
+    "Votre dossier d'installation de {{game}} n'est pas encore défini — choisissez-le dans les Réglages.",
   "library.uninstalledOne": "{{name}} désinstallé",
   "library.movedToBin": "Déplacé vers la Corbeille.",
   "library.someNotRemoved": "Certains éléments n'ont pas pu être retirés.",

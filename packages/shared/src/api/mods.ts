@@ -1233,6 +1233,19 @@ export function revealInExplorer(path: string): Promise<void> {
   return invoke<void>("reveal_in_explorer", { path });
 }
 
+/** One of the two folders the Library sits on top of: the mods tree, or the install dir. */
+export type GameFolder = "mods" | "game";
+
+/**
+ * Open one of the active title's folders in the OS file manager.
+ *
+ * Takes the choice rather than a path: `modsPath` can be either the user folder or the
+ * mods tree itself, and only the backend resolves that correctly.
+ */
+export function openGameFolder(which: GameFolder): Promise<void> {
+  return invoke<void>("open_game_folder", { which });
+}
+
 /** Open Windows Security on Ransomware protection (Controlled folder access). */
 export function openRansomwareProtection(): Promise<void> {
   return invoke<void>("open_ransomware_protection");
