@@ -185,6 +185,10 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             // What the shared shell calls: the platform, the config, the titles.
             mxb_core::viewer::app_platform,
+            // The rider's own bike on the feel step: the active model swap resolved the way the
+            // garage does it, and the sheets its materials name.
+            coach::preview_model_swap,
+            mxb_core::viewer::texture_bytes,
             get_config,
             list_games,
             steam_link_start,

@@ -1021,6 +1021,51 @@ pub struct CuesOut {
     pub ghost: LapRef,
 }
 
+/// The rider's bike as it stands, from the id the recording carries.
+///
+/// Not `viewer::load_bike_model`, which reads a plain bike folder: a bike with a FrostMod model
+/// swap installed keeps its `.geom` in the archive and layers the active variant's files over
+/// it, so a plain read gets meshes with nothing to place them and draws a heap of parts.
+/// `modelswap::preview_set` works out which files the active variant puts where, exactly as the
+/// garage does — the swap is its business, and turning the answer into a model is the viewer's.
+/// The rider's bike as it stands, for the shared viewer.
+///
+/// Named for the command `ViewerPanel` calls, so Coach can use the garage's own panel rather
+/// than re-wiring the viewer by hand. `variant` is ignored: the panel's default is "Stock",
+/// which is a sound-mod word, and Coach only ever wants the model the rider is actually on —
+/// so the active one is resolved here.
+///
+/// Not `viewer::load_bike_model`, which reads a plain bike folder: an OEM bike keeps its
+/// `.geom` in a locked `.pkz` and a swapped one layers a variant over it, so a plain read
+/// returns parts with nothing to place them and draws a heap.
+#[tauri::command]
+pub async fn preview_model_swap(
+    app: AppHandle,
+    bike: String,
+    _variant: String,
+    tyres: Option<String>,
+) -> Result<mxb_core::viewer::BikeModel, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        use mxb_core::{library, viewer};
+        let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+        let root = library::mods_subdir(cfg.mods_path.trim(), "mods/bikes").join(&bike);
+        // The archive only, deliberately: the bike as it shipped. Layering the loose files over
+        // it — which is what the garage does, and what the game does — draws whatever a model
+        // swap left at the root, and a folder can hold a mesh from another bike entirely long
+        // after its swap was meant to be reverted. Coach is illustrating the machine behind a
+        // suspension question, so the bike the session names is the one to draw.
+        let files = viewer::packed_layer(&root);
+        if files.is_empty() {
+            return Err(format!("no archive to read for {bike}"));
+        }
+        let tyre_dir = library::mods_subdir(cfg.mods_path.trim(), "mods/tyres");
+        let key = format!("coach-oem#{bike}#{}", tyres.as_deref().unwrap_or(""));
+        viewer::build_bike_model(&bike, key, files, Vec::new(), Some(tyre_dir), tyres, std::time::Instant::now())
+    })
+    .await
+    .map_err(|e| format!("preview_model_swap task failed: {e}"))?
+}
+
 /// What the rider has already been called on this track and bike, beside the session index.
 /// Losing it is no worse than a fresh start: the next sheet simply repeats itself once.
 fn map_path(app: &AppHandle, track: &str) -> Option<PathBuf> {

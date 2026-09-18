@@ -1,6 +1,27 @@
 # Changelog
 
-## Unreleased — Frost's Studio is its own app
+## Unreleased — A session reads itself out
+
+### Added
+- **Your own bike, in 3D, on the feel step.** The bike the session was ridden on, drawn from its
+  own files, beside the question about how it felt — with the fork travel your lap actually used
+  on it. It is loaded before you get there, so it is already on screen when you arrive.
+- **Saying how the bike feels moves the part you mean.** Pick "the front is harsh" and the fork
+  strokes, by the distance your own lap used. The shock squats, "slow to turn in" turns the
+  bars, "nervous at speed" shakes them, and gearing spins the rear wheel — fast when it revs
+  out, slow when it bogs.
+- **Open a session and it tells you about itself.** Where it used to hand you a lap table and
+  leave you to pick a lap and then a tab, a session now opens on a debrief: what you rode, what
+  the lap was about, the sections that cost you the most with the lap drawn on the track and
+  the one thing to change in each, and then how the bike felt. One thing per screen, Next and
+  Back. Read on your best whole lap, because the mistakes on your best lap are the ones worth
+  fixing.
+- The lap table and the full five-tab review are both still there, one click further in, from
+  **All laps** and **Full review** on any section.
+
+### Changed
+- The debrief fits the window. The step you are on scrolls on its own if it has to, so Next and
+  Back stay where you left them instead of sitting at the bottom of a long page.
 
 ### Removed
 - The **Studio** tab. Frost's Studio is an app of its own: open it from your desktop, or from

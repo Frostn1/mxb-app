@@ -12,7 +12,8 @@ import {
   type SetupPlan,
 } from "@/api/coach";
 import { Label } from "../Page";
-import BikeFeel, { FEELS, type Feel } from "./BikeFeel";
+import BikeRender, { type Poke } from "./BikeRender";
+import BikeFeel, { FEELS, FEEL_GROUPS, type Feel } from "./BikeFeel";
 
 const SUSPENSION = ["setup_brake_dive", "setup_exit_squat", "setup_shock_kick", "setup_rear_low", "setup_front_low"];
 const SETUP_GROUPS: { key: TKey; of: (skill: string) => boolean }[] = [
@@ -138,18 +139,31 @@ function useGrouped(plan: SetupPlan | null, skills: string[]) {
  * the rider picking anything, then how the bike feels as a bike. Shared by the review page and
  * the overlay.
  */
-export default function SetupFixes({ path, findings }: { path: string; findings: Finding[] }) {
+export default function SetupFixes({
+  path,
+  findings,
+  bikeId,
+}: {
+  path: string;
+  findings: Finding[];
+  /** The bike the lap was ridden on, so the feel panel can show the rider their own. */
+  bikeId?: string;
+}) {
   const t = useT();
   const [plan, setPlan] = useState<SetupPlan | null>(null);
   const [saving, setSaving] = useState(false);
   /** The setup this page wrote, so it can be pointed at the game once MX Bikes is closed. */
   const [saved, setSaved] = useState<SavedSetup | null>(null);
   const [felt, setFelt] = useState<string[]>([]);
+  // Which end the last pick was about, so the bike can stroke it. Carries the time: the
+  // same end picked twice is two pokes, and without it the second one wouldn't move.
+  const [poke, setPoke] = useState<Poke | null>(null);
   // Kept apart from the plan so a refetch never flips a feel's check.
   const [used, setUsed] = useState<[number, number] | null>(null);
   useEffect(() => {
     setPlan(null);
     setFelt([]);
+    setPoke(null);
     setUsed(null);
     setSaved(null);
   }, [path]);
@@ -179,6 +193,15 @@ export default function SetupFixes({ path, findings }: { path: string; findings:
   const extra = useMemo(() => skills.filter((s) => !found.includes(s)), [skills, found]);
   const foundGroups = useGrouped(plan, found);
   const feltGroups = useGrouped(plan, extra);
+
+  // Each end's full stroke, from the one place it is already exposed: sag is a share AND a
+  // distance, so their ratio is the stroke.
+  const stroke = useMemo<[number, number] | null>(() => {
+    const sag = plan?.sag;
+    if (!sag) return null;
+    const each = [0, 1].map((i) => (sag.share[i] > 0.01 ? sag.metres[i] / sag.share[i] : 0));
+    return each[0] > 0 && each[1] > 0 ? [each[0], each[1]] : null;
+  }, [plan]);
 
   const writes = (plan?.saveAs != null && plan.fixes.some((f) => f.changes.some((c) => c.writes))) ?? false;
   // The one line over the button: how many changes a copy gets, and the first couple by name.
@@ -288,7 +311,40 @@ export default function SetupFixes({ path, findings }: { path: string; findings:
           <div className="min-w-0 border-t border-border pt-5 min-[1100px]:border-l min-[1100px]:border-t-0 min-[1100px]:pl-8 min-[1100px]:pt-0">
             <div className="mb-1.5 eyebrow">{t("feel.title")}</div>
             <p className="mb-4 text-[12.5px] text-muted-foreground">{t("feel.body")}</p>
-            <BikeFeel felt={felt} onToggle={(skill) => setFelt((v) => (v.includes(skill) ? v.filter((s) => s !== skill) : [...v, skill]))} />
+            {bikeId && (
+              <BikeRender bikeId={bikeId} travel={plan?.travelUsed ?? null} maxTravel={stroke} poke={poke} />
+            )}
+            <BikeFeel
+              felt={felt}
+              onToggle={(skill) => {
+                const dropping = felt.includes(skill);
+                setFelt((v) => (dropping ? v.filter((s) => s !== skill) : [...v, skill]));
+                // Only the two ends move. A chassis or engine feel has nothing to stroke,
+                // and making the fork twitch for it would be saying the wrong thing.
+                const part = FEEL_GROUPS.find((g) => g.feels.some((f) => f.skill === skill))?.part;
+                // Each feel moves the thing it is actually about. "Slow to turn in" turns the
+                // bars; "nervous at speed" shakes them, because a headshake goes both ways;
+                // gearing is the rear wheel alone, fast when it revs out and slow when it bogs.
+                // A feel with nothing to show picks quietly rather than twitching the fork and
+                // saying the wrong thing.
+                const axis =
+                  part === "fork"
+                    ? ("fork" as const)
+                    : part === "shock"
+                      ? ("shock" as const)
+                      : skill === "setup_turns_slow"
+                        ? ("steer" as const)
+                        : skill === "setup_unstable"
+                          ? ("shake" as const)
+                          : skill === "setup_gearing_tall"
+                            ? ("revs" as const)
+                            : skill === "setup_gearing_short"
+                              ? ("bog" as const)
+                              : null;
+                // Taking a feel back is not a feel being described, so nothing moves for it.
+                if (axis && !dropping) setPoke({ axis, at: Date.now() });
+              }}
+            />
             {feels.length > 0 && (
               <div className="mt-4 space-y-2">
                 {feels.map(({ f, seen, against }) => {

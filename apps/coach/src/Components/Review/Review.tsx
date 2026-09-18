@@ -338,7 +338,7 @@ export default function Review({
           <div className="space-y-6">
             {/* What the lap actually did to the suspension, before what to change about it. */}
             <BikeSuspension channels={review.channels} />
-            <SetupFixes path={path} findings={review.setup} />
+            <SetupFixes path={path} findings={review.setup} bikeId={data.lap.bikeId} />
           </div>
         </TabsContent>
 
@@ -434,7 +434,7 @@ export function LineNotes({
 }
 
 /** Where the time went first, then anything flagged that cost nothing. */
-function Focus({
+export function Focus({
   review,
   worth,
   selected,
@@ -484,7 +484,7 @@ function Focus({
 }
 
 /** The lap in a few lines: each kind of mistake, where it happened, and the tip for it. */
-function Overall({ themes, solo, onPick }: { themes: Theme[]; solo: boolean; onPick: (section: string) => void }) {
+export function Overall({ themes, solo, onPick }: { themes: Theme[]; solo: boolean; onPick: (section: string) => void }) {
   const t = useT();
   if (themes.length === 0) return null;
   return (
@@ -553,7 +553,7 @@ function Rivals({ rivals }: { rivals: Rival[] }) {
 }
 
 /** The picked section: what it cost, the tip that matters most, and the rest underneath. */
-function SectionPanel({ s, solo, onPrev, onNext }: { s: SectionReview; solo: boolean; onPrev: () => void; onNext: () => void }) {
+export function SectionPanel({ s, solo, onPrev, onNext }: { s: SectionReview; solo: boolean; onPrev: () => void; onNext: () => void }) {
   const t = useT();
   const [more, setMore] = useState(false);
   const [head, ...rest] = s.findings;
