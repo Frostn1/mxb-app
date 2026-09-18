@@ -383,6 +383,20 @@ export function isGameId(value: unknown): value is string {
   return value === "mxb" || value === "gpb";
 }
 
+/**
+ * What an install says about its Steam sign-in, as `usage_daily.steam` stores it.
+ *
+ * Three states, not two. 'unknown' is what a build that predates the field reports (nothing, and
+ * the column default supplies it) and what a running client reports before the startup gate has
+ * answered. Reading either as 'no' would turn the rollout of a release into a graph of the
+ * sign-in gate — see `0041_usage_steam.sql`.
+ */
+export const STEAM_STATES = ["yes", "no", "unknown"] as const;
+
+export function isSteamFlag(value: unknown): value is (typeof STEAM_STATES)[number] {
+  return typeof value === "string" && (STEAM_STATES as readonly string[]).includes(value);
+}
+
 /** Which app a report came from. A closed list, like the platform and the title. */
 /**
  * The apps that report.

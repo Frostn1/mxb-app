@@ -346,10 +346,15 @@ async function route(request: Request, env: Env): Promise<Response> {
   if (method === "GET" && path === "/v1/app/gate") {
     const banned = await appGate(env, { accountId: account.id, steamId: account.steam_id, guid: account.guid });
     if (banned.status !== "ok") return json(200, banned);
-    if (requireSteam(env) && !(await steamIdFor(env, account))) {
+    const steam = Boolean(await steamIdFor(env, account));
+    if (requireSteam(env) && !steam) {
       return json(200, { status: "signin", message: APP_SIGNIN_MESSAGE });
     }
-    return json(200, { status: "ok" });
+    // `ok` carries whether Valve has confirmed this account, which is not the same question as
+    // whether it may run: with `MXB_REQUIRE_STEAM` off an unlinked account is also `ok`. The app
+    // reports it with its anonymous usage counters, as one bit and nothing else, so adoption can
+    // be read against every install rather than only the ones whose game we saw running.
+    return json(200, { status: "ok", steam });
   }
 
   // Open to every account, self-serve ones included: who you are, where you are, and the

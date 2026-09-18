@@ -178,6 +178,11 @@ pub struct Report {
     pub game: String,
     pub sessions: u32,
     pub minutes: u32,
+    /// `"yes"`, `"no"` or `"unknown"` — whether the startup gate confirmed a Steam identity for
+    /// this install. Always sent, including `"unknown"`: the server defaults an absent field the
+    /// same way for builds that predate it, but a build that *has* the field saying nothing
+    /// would be indistinguishable from one that cannot.
+    pub steam: String,
     pub events: Vec<Event>,
 }
 
@@ -624,6 +629,7 @@ fn take(cfg: &AppConfig, version: &str) -> Option<Report> {
         game: cfg.active_game.id().to_string(),
         sessions,
         minutes,
+        steam: crate::appgate::steam_state().to_string(),
         events,
     })
 }
@@ -795,9 +801,13 @@ mod tests {
         report.minutes = 7;
         report.sessions = 1;
 
+        // `steam` is "unknown" because no gate ran in this test, which is also what a real
+        // install sends before its startup check comes back. It is always present: a build that
+        // has the field must be distinguishable from one that does not.
+
         assert_eq!(
             serde_json::to_string(&report).unwrap(),
-            r#"{"installId":"6f1f2b6c-0f6d-4a5e-9f3a-2b7c4d5e6f70","app":"manager","version":"0.12.3","os":"PLATFORM","game":"mxb","sessions":1,"minutes":7,"events":[{"name":"view.browse","count":1}]}"#
+            r#"{"installId":"6f1f2b6c-0f6d-4a5e-9f3a-2b7c4d5e6f70","app":"manager","version":"0.12.3","os":"PLATFORM","game":"mxb","sessions":1,"minutes":7,"steam":"unknown","events":[{"name":"view.browse","count":1}]}"#
                 .replace("PLATFORM", platform())
         );
     }
@@ -886,6 +896,7 @@ mod tests {
             game: String::new(),
             sessions: 0,
             minutes: 0,
+            steam: "unknown".into(),
             events,
         });
         assert_eq!(BUFFER.lock().unwrap().events.len(), MAX_EVENTS);
