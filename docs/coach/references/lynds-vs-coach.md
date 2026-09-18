@@ -4,6 +4,10 @@ How the techniques in [lynds-slow-to-pro.md](lynds-slow-to-pro.md) line up with 
 [COACHING.md](../COACHING.md) describes and with what the code actually does. Written
 2026-09-17 against `origin/main` (de3069ab).
 
+> The ranked list at the end of this file is superseded by
+> [technique-gaps.md](technique-gaps.md), which weighs this video against four more
+> sources. The per-technique comparison below still stands.
+
 One thing to hold on to while reading: a finding only becomes a spoken cue if it has an arm in
 `cues::answers()` (`cues.rs:144-155`) or `cues::from_finding()` (`cues.rs:161-175`). Plenty of
 analysis exists that never reaches the rider in the bike.
