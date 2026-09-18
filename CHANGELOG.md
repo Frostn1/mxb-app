@@ -1,22 +1,6 @@
 # Changelog
 
-## 2026-09-17 — v0.17.2 — Steam sign-in takes your click
-
-### Fixed
-- The Steam sign-in card takes your click when a dialog opened behind it at launch. It looked
-  normal and did nothing, which is why it kept coming back after the other sign-in fixes.
-
-## Unreleased — Servers tab
-
-### Changed
-- The Servers toolbar keeps its shape once the list lands. The filters sit together behind one
-  **Filters** button on the left, the actions stay on the right, and the two you reach for
-  rarely — registering your own server, and resetting the game's own browser — moved under the
-  `...` menu.
-- A server running a track you don't have says **Not installed** on the track's own line,
-  rather than putting a warning sign over the picture.
-
-## Unreleased — The Servers tab opens with a list in it
+## 2026-09-18 — v0.17.3 — The Servers tab is ready when you open it
 
 ### Added
 - The Servers tab draws the list straight away — the one it had last time, with how old it is
@@ -31,13 +15,23 @@
   browser — now shows the pooled list every other app has been feeding, with how old it is
   beside it, instead of an error where the servers should be.
 
-## Unreleased — Joining a server
-
 ### Changed
 - **Install & join** and every other Join start the game with the server already picked, even
   when the Servers tab has been open all evening.
 - Press Join with the game already open and the app offers to close it and take you straight
   into the server, rather than leaving you to do both by hand.
+- The Servers toolbar keeps its shape once the list lands. The filters sit together behind one
+  **Filters** button on the left, the actions stay on the right, and the two you reach for
+  rarely — registering your own server, and resetting the game's own browser — moved under the
+  `...` menu.
+- A server running a track you don't have says **Not installed** on the track's own line,
+  rather than putting a warning sign over the picture.
+
+## 2026-09-17 — v0.17.2 — Steam sign-in takes your click
+
+### Fixed
+- The Steam sign-in card takes your click when a dialog opened behind it at launch. It looked
+  normal and did nothing, which is why it kept coming back after the other sign-in fixes.
 
 ## Unreleased — Replay moves into the Studio, and records itself
 
