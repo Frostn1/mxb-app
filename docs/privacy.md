@@ -1,18 +1,13 @@
 # Privacy
 
-<!-- TODO(sean), before this is published anywhere: fill in the controller's legal name and a
-     working contact address on the two lines marked TODO below, and decide whether an EU
-     representative under GDPR Article 27 is needed. Everything else here is a description of
-     what the code actually does as of 2026-09-17 and was written against it. -->
-
 This is what MXB App, MXB Studio, MXB Coach and FrostMod send, what mxbsecure holds, how long
 any of it stays, and how to get rid of it.
 
 It is written to be checkable. Every claim here matches something in the code, and the parts
 that would be convenient to leave out are in here too.
 
-**Who holds it:** TODO(sean) legal name, based in TODO(sean) country.
-**How to reach us:** the Discord at https://discord.gg/3994Rr3ywb, or TODO(sean) email.
+**Who holds it:** Creste LLC, a software company in the United States.
+**How to reach us:** hello@creste.dev, or the Discord at https://discord.gg/3994Rr3ywb.
 
 ## The short version
 
@@ -140,8 +135,8 @@ third-party analytics in any of the apps.
   every table that describes you, clears your rider name, Steam id and GUID off the account,
   and destroys the token, so the account cannot be used again. The answer lists what went and
   what was kept.
-- **Ask for the rest of it.** A copy of what is held, a correction to something that is wrong,
-  or an objection to the crash and module reports described above. If you are in the EU or the
+- **Ask for the rest of it**, at hello@creste.dev. A copy of what is held, a correction to
+  something that is wrong, or an objection to the crash and module reports described above. If you are in the EU or the
   UK you can also complain to your data protection authority.
 
 Two things survive a deletion, and they are named in the answer it gives you:
@@ -159,8 +154,12 @@ presence, banned or not.
 
 ## Where it is held
 
-Cloudflare and AWS run worldwide and data may be processed outside your country, including in
-the United States, under the transfer terms in their own data processing agreements.
+Creste LLC is in the United States, and the servers are Cloudflare's and AWS's, which run
+worldwide. If you are in the EU or the UK, that means your data is processed outside your
+country, including in the United States, under the transfer terms in Cloudflare's and AWS's own
+data processing agreements. We have not appointed a representative in the EU. Write to
+hello@creste.dev and you are talking to the person who holds the data, not to a desk in
+between.
 
 ## Age
 
