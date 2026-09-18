@@ -877,17 +877,19 @@ export default function Library({
       toast.error(t("library.openFailed"), { description: String(e) }),
     );
 
-  /** Either of the two folders the Library is a view of, in the OS file manager. The
-   *  install dir is optional in the config, so that one gets its own sentence rather
-   *  than the backend's "hasn't been set yet". */
+  /** Either of the two folders the Library is a view of, in the OS file manager. The mods
+   *  one opens the tab you're on rather than the tree above it — the list on screen and the
+   *  folder that opens are then the same thing. The install dir is optional in the config,
+   *  so that one gets its own sentence rather than the backend's "hasn't been set yet". */
   const openFolder = (which: GameFolder) => {
     if (which === "game" && !config.gamePath?.trim()) {
       toast.error(t("library.gameFolderUnset"));
       return;
     }
-    return openGameFolder(which).catch((e) =>
-      toast.error(t("library.openFailed"), { description: String(e) }),
-    );
+    return openGameFolder(
+      which,
+      which === "mods" ? modType.installSubpath : undefined,
+    ).catch((e) => toast.error(t("library.openFailed"), { description: String(e) }));
   };
 
   const rowActions = (item: LibraryEntry): RowAction[] => [
@@ -1172,7 +1174,8 @@ export default function Library({
         </DropdownMenu>
         {/* The two folders this list is a view of, one click from the list itself, for
             the times it's quicker to move a file by hand than to go through the app.
-            Icon-only: the bar is already carrying a search box and three controls. */}
+            Icon-only: the bar is already carrying a search box and three controls. The
+            first follows the tabs, so its tooltip names the folder it will actually open. */}
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
@@ -1184,7 +1187,12 @@ export default function Library({
               <FolderOpen className="size-4" />
             </Button>
           </TooltipTrigger>
-          <TooltipContent side="top">{t("library.openModsFolder")}</TooltipContent>
+          <TooltipContent side="top">
+            {/* The tab's own label, not its in-sentence form: here the noun is the
+                folder's name, and a genitive ("the folder of the rider gear") is what
+                doesn't survive translation. */}
+            {t("library.openModsFolder", { type: t(modType.label) })}
+          </TooltipContent>
         </Tooltip>
         <Tooltip>
           <TooltipTrigger asChild>

@@ -8501,17 +8501,94 @@ enum GameFolder {
     Game,
 }
 
+/// Which of the active title's own mods folders a subpath names, if it names exactly one.
+///
+/// Returns the name from [`game::GameProfile::mods_dirs`] rather than the caller's string,
+/// so the path is built from the title's own table and a subpath arriving over IPC decides
+/// only *which* entry to use. [`library::mods_subdir`] joins the segments it is given, so a
+/// `..` in one would otherwise walk back out of the mods tree.
+fn mods_dir_named(subpath: &str) -> Option<&'static str> {
+    let mut segs = subpath.split(['/', '\\']).filter(|s| !s.is_empty());
+    let first = segs.next()?;
+    // `installSubpath` is `mods/<dir>`, but the leading segment is optional here for the
+    // same reason `mods_subdir` tolerates it: a relocated tree is already the mods root.
+    let leaf = if first.eq_ignore_ascii_case("mods") { segs.next()? } else { first };
+    if segs.next().is_some() {
+        return None; // deeper than one folder under `mods` — not a Library tab
+    }
+    game::active().mods_dirs.iter().copied().find(|d| d.eq_ignore_ascii_case(leaf))
+}
+
+#[cfg(test)]
+mod mods_dir_named_tests {
+    use super::mods_dir_named;
+
+    #[test]
+    fn names_the_folder_behind_a_library_tab() {
+        // What the tabs actually send: a mod type's `installSubpath`.
+        assert_eq!(mods_dir_named("mods/tracks"), Some("tracks"));
+        assert_eq!(mods_dir_named("mods/bikes"), Some("bikes"));
+        assert_eq!(mods_dir_named("mods/rider"), Some("rider"));
+        assert_eq!(mods_dir_named("mods/misc"), Some("misc"));
+    }
+
+    #[test]
+    fn takes_the_folder_on_its_own_and_spelled_either_way() {
+        // A relocated tree is already the mods root, so the leading segment is optional.
+        assert_eq!(mods_dir_named("tracks"), Some("tracks"));
+        assert_eq!(mods_dir_named("Mods\\Tracks"), Some("tracks"));
+        assert_eq!(mods_dir_named("mods//bikes"), Some("bikes"));
+    }
+
+    #[test]
+    fn refuses_anything_that_is_not_one_of_the_games_own_folders() {
+        // The command is reachable over IPC, and `mods_subdir` joins what it is given —
+        // so a `..` here would walk back out of the mods tree.
+        for bad in [
+            "mods/../../Windows",
+            "..",
+            "mods/tracks/../../..",
+            "/etc",
+            "C:\\Windows",
+            "mods/profiles",
+            "reshade",
+            "mods/tracks/deeper",
+            "mods",
+            "",
+        ] {
+            assert!(mods_dir_named(bad).is_none(), "{bad:?} must be refused");
+        }
+    }
+}
+
 /// Open one of the active title's folders in the OS file manager.
 ///
 /// The path is resolved here rather than passed in from the UI. `mods_path` is either the
 /// user folder or the mods tree itself, so only [`library::mods_root`] can say which folder
 /// "the mods folder" is; and taking a choice of two instead of a path means the UI can't
 /// ask for anything else to be opened.
+///
+/// `subpath` narrows the mods case to the folder behind one Library tab — the tab's own
+/// `installSubpath`. A subpath that isn't one of the title's mods folders is refused rather
+/// than sanitised; one that is, but that the game hasn't created yet, falls back to the
+/// tree above it, so an untouched tab still lands somewhere useful.
 #[tauri::command]
-fn open_game_folder(app: tauri::AppHandle, which: GameFolder) -> Result<(), String> {
+fn open_game_folder(
+    app: tauri::AppHandle,
+    which: GameFolder,
+    subpath: Option<String>,
+) -> Result<(), String> {
     let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
     let dir = match which {
-        GameFolder::Mods => library::mods_root(&cfg.mods_path),
+        GameFolder::Mods => match subpath.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+            Some(sub) => {
+                let name = mods_dir_named(sub)
+                    .ok_or_else(|| format!("not one of this game's mods folders: {sub}"))?;
+                let dir = library::mods_subdir(&cfg.mods_path, &format!("mods/{name}"));
+                if dir.is_dir() { dir } else { library::mods_root(&cfg.mods_path) }
+            }
+            None => library::mods_root(&cfg.mods_path),
+        },
         GameFolder::Game => {
             let p = cfg.game_path.trim();
             if p.is_empty() {

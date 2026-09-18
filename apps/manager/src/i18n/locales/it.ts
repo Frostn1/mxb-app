@@ -1263,7 +1263,7 @@ export const it: Translation = {
   "library.moveFailed": "Impossibile spostare la mod",
   "library.uninstallFailed": "Impossibile disinstallare",
   "library.openFailed": "Impossibile aprire",
-  "library.openModsFolder": "Apri la cartella mods",
+  "library.openModsFolder": "Apri la cartella {{type}}",
   "library.openGameFolder": "Apri la cartella di installazione di {{game}}",
   "library.gameFolderUnset":
     "La cartella di installazione di {{game}} non è ancora impostata: scegliila nelle Impostazioni.",

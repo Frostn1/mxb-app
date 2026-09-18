@@ -1265,7 +1265,7 @@ export const ptBR: Translation = {
   "library.moveFailed": "Não foi possível mover o mod",
   "library.uninstallFailed": "Não foi possível desinstalar",
   "library.openFailed": "Não foi possível abrir",
-  "library.openModsFolder": "Abrir a pasta de mods",
+  "library.openModsFolder": "Abrir a pasta de {{type}}",
   "library.openGameFolder": "Abrir a pasta de instalação do {{game}}",
   "library.gameFolderUnset":
     "Sua pasta de instalação do {{game}} ainda não foi definida — escolha-a nas Configurações.",
