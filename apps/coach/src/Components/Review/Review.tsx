@@ -33,9 +33,14 @@ import BikeSuspension from "./BikeSuspension";
 import LiveCues from "./LiveCues";
 import HudPanel from "./HudPanel";
 
-/** The page is a lot to take in at once, so it's split: the lap, the sections, the bike, what
- *  the game shows, and the track itself. */
-const TABS = ["lap", "sections", "setup", "ingame", "track"] as const;
+/**
+ * The page is a lot to take in at once, so it's split.
+ *
+ * The order is the order a rider works through it: the lap end to end, then corner by corner,
+ * then the track those corners are on, then the bike, and last what the game shows while
+ * riding — which is a setting rather than a thing to read, so it goes at the end.
+ */
+const TABS = ["lap", "sections", "track", "setup", "ingame"] as const;
 /** Under this a section cost nothing, and `analysis.rs` keeps no tips for it — see `th::WORTH_S`.
  *  The page needs the same number to say why a section has nothing under it. */
 const WORTH_S = 0.05;
@@ -193,6 +198,21 @@ export default function Review({
     ...review.sections.map((s, i) => (s.findings.length > 0 && !review.focus.includes(i) ? i : -1)).filter((i) => i >= 0),
   ];
   const where = [data.trackName || data.trackId, started(data.lap.started), data.lap.bikeName].filter(Boolean).join(" · ");
+  /**
+   * How much each tab has for this lap.
+   *
+   * Not a decoration: five tabs with nothing to tell them apart is the reason a rider opens all
+   * five. A clean lap with no setup fixes should say so on the tab rather than after a click.
+   * "Lap" counts the themes because that is what the tab is for; "In game" counts nothing,
+   * since what the game shows is a setting and not a finding.
+   */
+  const counts: Record<Tab, number> = {
+    lap: review.overall.length,
+    sections: worth.length,
+    track: lines?.notes.length ?? 0,
+    setup: review.setup.length,
+    ingame: 0,
+  };
   // Every lap's line, fastest green to slowest red; this lap in blue on top.
   const others = (() => {
     if (laps !== "all" || !lines) return undefined;
@@ -274,13 +294,28 @@ export default function Review({
       )}
 
       <Tabs value={tab} onValueChange={(v) => setTab(v as Tab)}>
-        <TabsList className="mb-4">
+        {/* A tab's name says what it holds; the count says whether it holds anything for this
+            lap. Between them a rider can tell what to open without opening all five. */}
+        <TabsList>
           {TABS.map((id) => (
-            <TabsTrigger key={id} value={id} className="px-3.5 py-1.5">
+            <TabsTrigger key={id} value={id} className="gap-1.5 px-3.5 py-1.5">
               {t(`review.tab.${id}` as TKey)}
+              {counts[id] > 0 && (
+                <span
+                  className={cn(
+                    "rounded-full px-1.5 text-[10px] font-semibold tabular-nums",
+                    tab === id ? "bg-primary/15 text-primary" : "bg-secondary text-muted-foreground",
+                  )}
+                >
+                  {counts[id]}
+                </span>
+              )}
             </TabsTrigger>
           ))}
         </TabsList>
+        {/* One line on arrival, so "when do I come here" is answered by the page rather than
+            by opening it and guessing. */}
+        <p className="mb-4 mt-2 text-[12px] text-muted-foreground">{t(`review.tabSub.${tab}` as TKey)}</p>
 
         {/* The lap end to end: where the time went, and the charts behind it. */}
         <TabsContent value="lap" className="space-y-4">

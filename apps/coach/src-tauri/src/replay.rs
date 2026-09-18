@@ -32,6 +32,19 @@ pub struct Frame {
     pub t: f32,
     /// Metres along the centreline since the section's first frame.
     pub dist: f32,
+    /// Where the bike was, world metres, as the recording gives it. The same space as the
+    /// review's `paths`: those points are these very fields put on the review's metre grid,
+    /// nothing else done to them. So a bike drawn here lands on its own line once the caller
+    /// applies what the line gets — `Track3D` takes the terrain grid's origin off x and z, and
+    /// `ground.lift` off the height, and that lift is measured against these same samples.
+    pub x: f32,
+    pub y: f32,
+    pub z: f32,
+    /// Which way the bike pointed, degrees: zero down +z and climbing towards +x, so it is
+    /// `atan2(x, z)` of the heading and a rotation about +y as it stands. Checked against the
+    /// direction of travel over two sessions, upright and driving, where the two agreed to
+    /// within a quarter of a degree.
+    pub yaw: f32,
     /// Ground speed, m/s.
     pub v: f32,
     /// Bar angle, degrees, negative right, as the recording gives it.
@@ -202,6 +215,10 @@ fn frames(lap: &Lap, rec: &Recording, (from, to): (f32, f32)) -> Vec<Frame> {
         out.push(Frame {
             t: s.t - t0,
             dist: d - from,
+            x: s.x,
+            y: s.y,
+            z: s.z,
+            yaw: s.yaw,
             v,
             steer: s.steer,
             used,
@@ -229,12 +246,24 @@ mod tests {
     /// Metres of the lap spent in the air, so there is an extended length to measure travel
     /// against.
     const FLIGHT: (f32, f32) = (150.0, 165.0);
+    /// The lap runs on a diagonal, from a corner of the world that isn't the origin and a
+    /// good way above it: frames that dropped the position or zeroed it would otherwise read
+    /// as a lap that happens to start at 0, 0, 0 pointing down +z.
+    const HEADING: f32 = 30.0;
+    const START: [f32; 2] = [40.0, -25.0];
+
+    /// The ground the lap is ridden over, metres, `d` metres in: a gentle climb, so height is
+    /// a reading rather than a constant anything could match.
+    fn height(d: f32) -> f32 {
+        12.0 + 0.5 * d / LEN
+    }
 
     /// A straight lap at 50 Hz, ridden at `v` metres a second and leaning `lean` all the way
     /// round. `bind` is what the recorder managed to read of each lean axis.
     fn ride(v: impl Fn(f32) -> f32, lean: [f32; 2], bind: [u8; 2]) -> Recording {
         let mut f = File::new();
         f.event("stadium", LEN).lean_bind(bind[0], bind[1]).stance_bind(2);
+        let (sx, cz) = HEADING.to_radians().sin_cos();
         let (mut d, mut t) = (0.0f32, 0.0f32);
         while d <= LEN {
             let speed = v(d).max(0.5);
@@ -242,7 +271,8 @@ mod tests {
             f.lean(t, d / LEN, lean[0], lean[1]);
             f.stance(t, d / LEN, 0);
             f.sample(t, d / LEN, |b| {
-                b.f(20, speed).f(44, speed).f(32, d);
+                b.f(20, speed).f(36, speed * sx).f(44, speed * cz);
+                b.f(24, START[0] + d * sx).f(28, height(d)).f(32, START[1] + d * cz).f(96, HEADING);
                 b.f(140, 3.0).f(144, 0.6).f(148, 0.1);
                 b.f(120, if air { 0.30 } else { 0.24 }).f(124, if air { 0.30 } else { 0.24 });
                 b.i(12, 3).i(168, if air { 0 } else { 2 }).i(172, if air { 0 } else { 2 });
@@ -278,6 +308,32 @@ mod tests {
         assert!((turns - last.dist / (2.0 * std::f32::consts::PI * ROLL_RADIUS_M)).abs() < turns * 0.02);
         // Travel is measured against the flight, so the frames on the ground use some of it.
         assert!((fr[0].used[0] - 0.2).abs() < 0.01, "used {:?}", fr[0].used);
+    }
+
+    /// Every frame has to say where on the track it was, in the samples' own world metres. A
+    /// replay that dropped the position, or handed back zeros, would put the bike beside the
+    /// line the review draws for the very same lap.
+    #[test]
+    fn every_frame_carries_the_samples_own_place_on_the_track() {
+        let rec = ride(|_| 12.0, [0.2, 0.1], [2, 2]);
+        let (lap, tr) = lap_and_trace(&rec, 1).unwrap();
+        let secs = analysis::sections(&tr);
+        let (from, _) = span(&secs[0]);
+        let fr = frames(&lap, &rec, span(&secs[0]));
+
+        assert!(!fr.is_empty());
+        let (sx, cz) = HEADING.to_radians().sin_cos();
+        for f in &fr {
+            let d = f.dist + from;
+            assert!((f.x - (START[0] + d * sx)).abs() < 0.05, "x {} at {d} m", f.x);
+            assert!((f.z - (START[1] + d * cz)).abs() < 0.05, "z {} at {d} m", f.z);
+            assert!((f.y - height(d)).abs() < 0.05, "y {} at {d} m", f.y);
+            assert!((f.yaw - HEADING).abs() < 1e-3, "yaw {}", f.yaw);
+        }
+        // And it moved: the checks above would pass on a bike standing still at the entry.
+        let (a, b) = (fr.first().unwrap(), fr.last().unwrap());
+        assert!((b.x - a.x).hypot(b.z - a.z) > 10.0, "the section covered no ground");
+        assert!(a.y > 1.0 && a.x != 0.0 && a.z != 0.0);
     }
 
     /// A lean axis the recorder could not read has to arrive unread. Zero is the rider asking

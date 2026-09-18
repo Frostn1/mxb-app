@@ -132,7 +132,7 @@ function texturesKey(textures: PaintTexture[]): string {
   return textures.map((t) => `${t.name} ${t.token} ${t.width}x${t.height}`).join("\n");
 }
 
-function useTextureMap(textures: PaintTexture[]): Map<string, THREE.Texture> {
+export function useTextureMap(textures: PaintTexture[]): Map<string, THREE.Texture> {
   const [map, setMap] = useState<Map<string, THREE.Texture>>(NO_TEXTURES);
   const key = texturesKey(textures);
   useEffect(() => {
@@ -1483,7 +1483,7 @@ function levelRearDrop(
 const REAR_DEFAULT_MM = 140;
 
 /** The stance a bike is first drawn in: level if it can be solved, on its suspension if not. */
-function settledPose(rig: BikeRig | null | undefined, nodes: EdfNode[]): BikePose {
+export function settledPose(rig: BikeRig | null | undefined, nodes: EdfNode[]): BikePose {
   if (!rig) return NEUTRAL_POSE;
   return { ...NEUTRAL_POSE, rearDrop: levelRearDrop(rig, nodes, 0) ?? REAR_DEFAULT_MM };
 }
@@ -1854,7 +1854,21 @@ function SideBySide({
 }
 
 /**
- * Bike and rider in one scene, the rider sitting on it.
+ * Whether a rider can be sat on a bike: the bike names a seat and the body brought a rig.
+ *
+ * Either missing leaves the two standing side by side rather than guessing a height or
+ * dropping a body on the origin. Asked here rather than at each view, so the studio and the
+ * track viewer can only agree about whether a given pair can be seated at all.
+ */
+export function canSeatRider(
+  rig: BikeRig | null | undefined,
+  parts: RiderPart[] | null | undefined,
+): boolean {
+  return !!rig?.seat && !!parts?.some((p) => p.part === "body" && p.skeleton?.length);
+}
+
+/**
+ * A bike standing on its wheels at y = 0, with its rider sat on it when there is one.
  *
  * The bike stands on the ground exactly as it does beside the rider; only the rider moves, on
  * to the seat the bike's own `.geom` names. Nothing is scaled — both meshes come out of the
@@ -1862,12 +1876,17 @@ function SideBySide({
  *
  * The rider is still standing until somebody bends the legs: this puts them where they belong,
  * and the Pose tab's "Sit on bike" is what folds them round the machine.
+ *
+ * The one assembled machine, so the studio and the track viewer draw the same bike with the
+ * same rider on it. The track viewer's is a hundredth the size and out on a hillside, and
+ * nothing here knows or cares: everything below is in the bike's own metres, and where that
+ * frame ends up is the caller's business.
  */
-function OnBike({
+export function BikeOnGround({
   nodes,
   textures,
   highlight,
-  parts,
+  riderParts = null,
   overrides,
   rig,
   pose,
@@ -1876,12 +1895,13 @@ function OnBike({
   onRiderPose,
   onGrab,
   place,
-  seat,
+  seat = null,
 }: {
   nodes: EdfNode[];
   textures: Map<string, THREE.Texture>;
   highlight?: Int32Array | null;
-  parts: RiderPart[];
+  /** The rider to sit on it. Absent, or with no `seat`, draws the bike alone. */
+  riderParts?: RiderPart[] | null;
   overrides?: Map<string, THREE.Texture>;
   rig?: BikeRig | null;
   pose?: BikePose;
@@ -1892,16 +1912,19 @@ function OnBike({
   onRiderPose?: (pose: RiderPose) => void;
   onGrab?: (bone: string) => void;
   place?: Record<PlaceTarget, Placement>;
-  /** The bike's seat, in the frame its vertices came back in. */
-  seat: Vec3;
+  /** The bike's seat, in the frame its vertices came back in — see {@link canSeatRider}. */
+  seat?: Vec3 | null;
 }) {
+  const seated = seat != null && !!riderParts?.length;
   const at = useMemo(() => {
     const bike = partBounds(nodes);
     // Dropped onto y = 0, like every other arrangement, so the ground shadow means something.
     const lift: Vec3 = [0, -bike.lo[1], 0];
-    const seated = seatTransform(parts, seat, rig ?? null);
-    return { lift, seated, bikePivot: spinPivot(bike) };
-  }, [nodes, parts, seat, rig]);
+    const sat = seat != null && riderParts?.length
+      ? seatTransform(riderParts, seat, rig ?? null)
+      : null;
+    return { lift, seated: sat, bikePivot: spinPivot(bike) };
+  }, [nodes, riderParts, seat, rig]);
 
   return (
     <group position={at.lift}>
@@ -1921,17 +1944,19 @@ function OnBike({
         {/* The placement sliders sit outside the seating, so "up" and "turn" still mean up and
             turn in the scene rather than in whatever frame the rider was authored in. Turning
             is about the seat, which is where a rider pivots. */}
-        <Placed at={place?.rider} pivot={seat}>
-          <PosedGroup matrix={at.seated}>
-            <RiderComposite
-              parts={parts}
-              overrides={overrides}
-              pose={riderPose}
-              onPose={onRiderPose}
-              onGrab={onGrab}
-            />
-          </PosedGroup>
-        </Placed>
+        {seated && (
+          <Placed at={place?.rider} pivot={seat}>
+            <PosedGroup matrix={at.seated}>
+              <RiderComposite
+                parts={riderParts}
+                overrides={overrides}
+                pose={riderPose}
+                onPose={onRiderPose}
+                onGrab={onGrab}
+              />
+            </PosedGroup>
+          </Placed>
+        )}
       </Tilted>
     </group>
   );
@@ -2469,11 +2494,7 @@ export function ModelViewer({
   const showBike = mode !== "rider" && !!nodes?.length;
   const showRider = mode !== "bike" && !!riderParts?.length;
   const pair = showBike && showRider;
-  // Sitting the rider on the bike needs the bike to say where its seat is and the rider to
-  // have a rig to be sat by. Either missing leaves the two standing side by side rather than
-  // guessing a height or dropping a body on the origin.
-  const canSeat =
-    !!rig?.seat && !!riderParts?.some((p) => p.part === "body" && p.skeleton?.length);
+  const canSeat = canSeatRider(rig, riderParts);
   const seat = mode === "onBike" && pair && canSeat ? rig!.seat : null;
   const hasReal = showBike && !showRider;
   const hasRider = showRider && !showBike;
@@ -2555,11 +2576,11 @@ export function ModelViewer({
           <directionalLight position={[0, 1.5, 5]} intensity={look.front} />
           <Center>
             {seat ? (
-              <OnBike
+              <BikeOnGround
                 nodes={nodes!}
                 textures={texMap}
                 highlight={highlight}
-                parts={riderParts!}
+                riderParts={riderParts!}
                 overrides={overrides}
                 rig={rig}
                 pose={pose}

@@ -5,6 +5,10 @@ import { Move, Rotate3d, ZoomIn } from "lucide-react";
 import * as THREE from "three";
 import { cn } from "../../lib/utils";
 import type {
+  BikeRig,
+  EdfNode,
+  PaintTexture,
+  RiderPart,
   TrackBackdrop,
   TrackGround,
   TrackGroundLayer,
@@ -15,6 +19,14 @@ import type {
   TrackSceneryTexture,
   TrackTerrain,
 } from "../../types";
+import {
+  BikeOnGround,
+  canSeatRider,
+  settledPose,
+  useTextureMap,
+  type BikePose,
+} from "./ModelViewer";
+import type { RiderPose } from "../../lib/riderPose";
 import { ErrorBoundary } from "../ErrorBoundary";
 import { useT } from "../../i18n/context";
 import { reportRenderer } from "../../lib/glInfo";
@@ -343,6 +355,120 @@ function Lines({ terrain, lines }: { terrain: TrackTerrain; lines: ViewerLine[] 
         <Line key={i} points={l.points} color={l.colour} lineWidth={l.width ?? 2} renderOrder={3} />
       ))}
     </>
+  );
+}
+
+/**
+ * A bike to draw on the track: where it is, which way it points, how it is leaned.
+ *
+ * Everything is in the world frame [`ViewerLine`] points are in, so a replay hands the same
+ * numbers to both and the machine rides the line it is drawn beside.
+ */
+export interface ViewerActor {
+  nodes: EdfNode[];
+  /** The joints to pose about. Null draws the bike rigid, as an unassembled one always is. */
+  rig: BikeRig | null;
+  /** The model's own sheets, the way `BikeModel.base` carries them. */
+  textures?: PaintTexture[];
+  /** World metres. The ground under the tyres, not the middle of the machine. */
+  at: [number, number, number];
+  /** Heading, degrees: zero faces world +Z and positive turns towards world +X. */
+  yaw: number;
+  /** Lean, degrees, positive over to the RIDER'S RIGHT. */
+  roll: number;
+  /** Pitch, degrees, positive NOSE DOWN. */
+  pitch: number;
+  /**
+   * Steering, fork, shock and wheel spin, as an OFFSET from where the bike settles.
+   *
+   * The same bargain `ModelViewer`'s `bikePoseOffset` makes, and for the same reason: the
+   * settled pose is what stands the bike on both wheels, so replacing it outright leaves the
+   * parts in the frame the model was authored in with the shock apparently collapsed.
+   */
+  pose?: Partial<BikePose> | null;
+  /**
+   * The rider's own body and kit, sat on the machine. Absent draws the bike alone.
+   *
+   * The same list `ModelViewer`'s `riderParts` takes, and seated the same way — a bike whose
+   * `.geom` names no seat, or a body that brought no rig, rides riderless rather than wearing
+   * a guess. See {@link canSeatRider}.
+   */
+  riderParts?: RiderPart[] | null;
+  /** The rider's pose, a turn per bone — what `riderPoseFrom` makes of a replay sample. */
+  riderPose?: RiderPose;
+}
+
+/** A bike wearing nothing but its own model. One instance, so an untextured bike settles. */
+const NO_SHEETS: PaintTexture[] = [];
+
+/**
+ * One bike and its rider, standing on the track in the frame the lap lines are drawn in.
+ *
+ * The anchor goes through [`toView`] — the same call every line point makes — so the bike
+ * cannot be anywhere but on the ground its own line is over, whatever [`RELIEF_EXAGGERATION`]
+ * is doing to that ground. Its own metres are then scaled by `unitsPerMetre` rather than by
+ * the taller `heightScale`, because a bike is one rigid machine: stretching it upright would
+ * shear it the moment it leans. While relief is drawn true the two are the same number.
+ *
+ * What stands there is `ModelViewer`'s own `BikeOnGround` — joints, seating, lean and all —
+ * so the machine out on the hillside is the machine the studio draws. This only says where.
+ */
+function TrackActor({ terrain, actor }: { terrain: TrackTerrain; actor: ViewerActor }) {
+  const lift = useContext(ReliefContext);
+  const { nodes, rig, yaw, roll, pitch, riderParts = null, riderPose } = actor;
+  const [ax, ay, az] = actor.at;
+  const tex = useTextureMap(actor.textures ?? NO_SHEETS);
+
+  const settled = useMemo(() => settledPose(rig, nodes), [rig, nodes]);
+  const pose = useMemo<BikePose>(() => {
+    const o = actor.pose;
+    if (!o) return settled;
+    return {
+      rearDrop: settled.rearDrop + (o.rearDrop ?? 0),
+      forkUp: settled.forkUp + (o.forkUp ?? 0),
+      steer: settled.steer + (o.steer ?? 0),
+      spin: settled.spin + (o.spin ?? 0),
+      spinRear: settled.spinRear + (o.spinRear ?? 0),
+    };
+  }, [settled, actor.pose]);
+
+  const place = useMemo(() => {
+    const frame = viewFrame(terrain, lift);
+    return { at: toView(frame, ax, ay, az), scale: frame.unitsPerMetre };
+  }, [terrain, lift, ax, ay, az]);
+  const attitude = useMemo(() => ({ roll, pitch }), [roll, pitch]);
+  // Only a pair that can actually be seated is offered a seat; the rest ride riderless rather
+  // than with a body dropped on the swingarm pivot.
+  const seat = canSeatRider(rig, riderParts) ? rig!.seat : null;
+
+  // The canvas only draws when asked, and a bike that moves while nothing else does is
+  // exactly the case that would otherwise sit still on screen.
+  const invalidate = useThree((s) => s.invalidate);
+  useEffect(
+    () => invalidate(),
+    [place, pose, attitude, yaw, tex, riderParts, riderPose, invalidate],
+  );
+
+  if (nodes.length === 0) return null;
+  return (
+    // Turned the other way about Y than the heading says, because `toView` negates X: a rider
+    // bearing towards world +X is bearing towards -X here.
+    <group
+      position={place.at}
+      rotation={[0, -yaw * THREE.MathUtils.DEG2RAD, 0]}
+      scale={place.scale}
+    >
+      <BikeOnGround
+        nodes={nodes}
+        textures={tex}
+        rig={rig}
+        pose={pose}
+        attitude={attitude}
+        riderParts={riderParts}
+        riderPose={riderPose}
+        seat={seat}
+      />
+    </group>
   );
 }
 
@@ -1532,6 +1658,12 @@ interface TrackViewerProps {
   highlight?: { path: { x: number; z: number }[]; width: number } | null;
   /** Lines to draw over the ground, in world metres with height. */
   lines?: ViewerLine[];
+  /**
+   * A bike to stand on the track — the rider's own machine, on the line they rode.
+   *
+   * Null or absent draws the scene the viewer has always drawn. See {@link ViewerActor}.
+   */
+  actor?: ViewerActor | null;
   className?: string;
 }
 
@@ -1550,6 +1682,7 @@ export function TrackViewer({
   focus = null,
   highlight = null,
   lines = [],
+  actor = null,
   className,
 }: TrackViewerProps) {
   const lift = RELIEF_EXAGGERATION;
@@ -1658,6 +1791,7 @@ export function TrackViewer({
           {terrain && <FocusCamera terrain={terrain} focus={focus} />}
           {terrain && highlight && <Highlight terrain={terrain} at={highlight} />}
           {terrain && lines.length > 0 && <Lines terrain={terrain} lines={lines} />}
+          {terrain && actor && <TrackActor terrain={terrain} actor={actor} />}
           </group>
           </ReliefContext.Provider>
           <OrbitControls

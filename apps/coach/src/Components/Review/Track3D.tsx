@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { Boxes, Loader2 } from "lucide-react";
-import { TrackViewer, type ViewerLine } from "@frost/shared/Components/Viewer/TrackViewer";
+import { TrackViewer, type ViewerActor, type ViewerLine } from "@frost/shared/Components/Viewer/TrackViewer";
 import { useTrackScene } from "@frost/shared/Components/Viewer/useTrackScene";
 import { Button } from "@frost/shared/Components/ui/button";
 import { cn } from "@frost/shared/lib/utils";
@@ -108,6 +108,8 @@ export default function Track3D({
   allLaps,
   lap,
   selected,
+  actor,
+  legend = true,
   className,
 }: {
   review: Review;
@@ -120,6 +122,16 @@ export default function Track3D({
   allLaps: boolean;
   lap: number;
   selected: number | null;
+  /**
+   * A bike to ride the track, for a replay.
+   *
+   * Its `at` is in the same space as the review's own path points — the raw sample position —
+   * because that is what a caller has. The shift onto the drawn grid is this component's, for
+   * the same reason the lines' is: it is the only piece that knows which ground is underneath.
+   */
+  actor?: ViewerActor | null;
+  /** The colour key under the view. Off where the caller says what the colours mean itself. */
+  legend?: boolean;
   className?: string;
 }) {
   const t = useT();
@@ -198,6 +210,13 @@ export default function Track3D({
   // The track is on its way: say so over the canvas rather than in 11px under it. The ground
   // built from the laps is drawn meanwhile and looks finished, which is exactly how a rider
   // ends up believing the blurred grid is their circuit.
+  // The bike, moved onto the same grid the lines are drawn on. Not the lines' own +0.3: that
+  // lifts a hairline clear of the ground it is painted on, and a bike raised by it hovers.
+  const placed = useMemo<ViewerActor | null>(
+    () => (actor ? { ...actor, at: [actor.at[0] - ox, actor.at[1] - lift, actor.at[2] - oz] } : null),
+    [actor, ox, oz, lift],
+  );
+
   const waiting = ground != null && !scene.terrain;
   // Not the track at all, and it isn't coming: it isn't in the rider's mods, it's locked, or
   // its terrain wouldn't read. Anything that reads is drawn, so this is now rare.
@@ -225,6 +244,7 @@ export default function Track3D({
           // The game's own look, the way MXB App shows a track.
           gameView={real && scene.groundLayers.length > 0}
           lines={drawn}
+          actor={placed}
           focus={focus}
           className="h-full w-full"
         />
@@ -257,6 +277,7 @@ export default function Track3D({
           </Button>
         )}
       </div>
+      {legend && (
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-border px-3 py-2 text-[11px] text-muted-foreground">
         <Key colour={YOU}>{t("review.legendYou")}</Key>
         {!review.solo && <Key colour={REF}>{t("review.legendRef")}</Key>}
@@ -269,6 +290,7 @@ export default function Track3D({
         )}
         {note && <span className="text-faint">{note}</span>}
       </div>
+      )}
     </div>
   );
 }

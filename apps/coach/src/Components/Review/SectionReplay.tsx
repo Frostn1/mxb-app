@@ -1,13 +1,15 @@
 import { useEffect, useMemo, useState } from "react";
 import { Pause, Play, RotateCcw } from "lucide-react";
-import { ModelViewer, type BikePose } from "@frost/shared/Components/Viewer/ModelViewer";
+import { type BikePose } from "@frost/shared/Components/Viewer/ModelViewer";
+import type { ViewerActor } from "@frost/shared/Components/Viewer/TrackViewer";
 import { riderPoseFrom } from "@frost/shared/lib/riderMotion";
 import { coachRiderBody } from "@frost/shared/api/mods";
 import { cn } from "@frost/shared/lib/utils";
 import type { BikeModel, RiderPart } from "@frost/shared/types";
-import { coachReplay, type Replay, type ReplayFrame } from "@/api/coach";
+import { coachReplay, type Ground, type Lines, type Replay, type ReplayFrame, type Review, type Surface } from "@/api/coach";
 import { useT } from "@/i18n";
 import { preloadBike } from "./BikeRender";
+import Track3D from "./Track3D";
 import { frameAt, lerp, useReplayClock } from "./useReplayClock";
 
 /** The bike's own attitude, degrees, and how much of it to draw. */
@@ -83,6 +85,12 @@ export default function SectionReplay({
   bikeId,
   rider,
   maxTravel,
+  review,
+  ground,
+  why,
+  surface,
+  lines,
+  selected,
   className,
 }: {
   path: string;
@@ -93,6 +101,14 @@ export default function SectionReplay({
   rider?: string;
   /** Each end's real stroke in mm, when the caller knows it. Without it, {@link NOMINAL_MM}. */
   maxTravel?: [number, number] | null;
+  /** What the track view needs to draw the track the corner is on. */
+  review: Review;
+  ground: Ground | null;
+  why: string | null;
+  surface: Surface | null;
+  lines: Lines | null;
+  /** Which section is the subject, so the view frames it and the strip agrees. */
+  selected: number | null;
   className?: string;
 }) {
   const t = useT();
@@ -181,6 +197,26 @@ export default function SectionReplay({
     });
   }, [now, replay]);
 
+  /** The rider's bike, where they had it, pointing where they were pointing it. */
+  const actor = useMemo<ViewerActor | null>(
+    () =>
+      now && model && attitude
+        ? {
+            nodes: model.nodes,
+            rig: model.rig,
+            textures: model.base,
+            at: [now.x, now.y, now.z],
+            yaw: now.yaw,
+            roll: attitude.roll,
+            pitch: attitude.pitch,
+            pose,
+            riderParts: body.length > 0 ? body : null,
+            riderPose: bones,
+          }
+        : null,
+    [now, model, attitude, pose, body, bones],
+  );
+
   if (failed) return <p className={cn("text-[12px] text-faint", className)}>{t("replay.noFrames")}</p>;
 
   const bodyBlind = replay != null && !replay.leanKnown[0] && !replay.leanKnown[1] && !replay.stanceKnown;
@@ -188,18 +224,21 @@ export default function SectionReplay({
 
   return (
     <div className={cn("space-y-2", className)}>
-      <div className="relative h-[280px] overflow-hidden rounded-[var(--radius)] border border-border">
-        <ModelViewer
-          mode={body.length > 0 ? "onBike" : "bike"}
-          nodes={model?.nodes ?? null}
-          rig={model?.rig ?? null}
-          textures={model?.base}
-          riderParts={body.length > 0 ? body : null}
-          riderPose={bones}
-          bikePoseOffset={pose}
-          bikeAttitude={attitude}
-          loading={!model || !replay}
-          hideHints
+      <div className="relative h-[340px] overflow-hidden rounded-[var(--radius)] border border-border">
+        {/* The track the corner is actually on, with the lap drawn on it and the bike riding
+            it. A bike against a blank background answers where the fork went; it does not
+            answer where on the track any of this happened, which is the question. */}
+        <Track3D
+          review={review}
+          ground={ground}
+          why={why}
+          surface={surface}
+          lines={lines}
+          allLaps={false}
+          lap={lap}
+          selected={selected}
+          actor={actor}
+          legend={false}
           className="absolute inset-0"
         />
 

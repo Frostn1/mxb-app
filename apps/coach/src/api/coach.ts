@@ -279,6 +279,18 @@ export interface ReplayFrame {
   t: number;
   /** Metres along the centreline since the section's first frame. */
   dist: number;
+  /**
+   * Where the bike was, world metres, as the recording gives it — the same space as
+   * `Review.paths`, which is these fields on the review's metre grid. So a bike put here sits
+   * on its own line once it gets what `Track3D` gives the line: the terrain grid's origin off
+   * x and z, and `Ground.lift` off the height.
+   */
+  x: number;
+  y: number;
+  z: number;
+  /** Which way the bike pointed, degrees: zero down +z and climbing towards +x, so it is a
+   *  rotation about +y as it stands. */
+  yaw: number;
   /** Ground speed, m/s. */
   v: number;
   /** Bar angle in degrees, positive to the rider's left, as the recording gives it. */

@@ -8,7 +8,18 @@ import SectionReplay from "../Review/SectionReplay";
 import SetupFixes from "../Review/SetupFixes";
 import { preloadBike } from "../Review/BikeRender";
 import { Overall, SectionPanel } from "../Review/Review";
-import { coachReview, coachSession, coachSurface, type ReviewOut, type SessionDetail, type Surface } from "@/api/coach";
+import {
+  coachGround,
+  coachLines,
+  coachReview,
+  coachSession,
+  coachSurface,
+  type Ground,
+  type Lines,
+  type ReviewOut,
+  type SessionDetail,
+  type Surface,
+} from "@/api/coach";
 import { lapTime } from "@/lib/format";
 import { useT } from "@/i18n";
 
@@ -40,6 +51,11 @@ export default function Debrief({
   const [detail, setDetail] = useState<SessionDetail | null>(null);
   const [data, setData] = useState<ReviewOut | null>(null);
   const [surface, setSurface] = useState<Surface | null>(null);
+  // The track's own files, for the turn step: the corner is easier to place on the track it is
+  // on than on a flat map of it.
+  const [ground, setGround] = useState<Ground | null>(null);
+  const [why, setWhy] = useState<string | null>(null);
+  const [lines, setLines] = useState<Lines | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [step, setStep] = useState(0);
   /** Which way the corner is being looked at. Kept across steps: a rider who asked to watch
@@ -50,6 +66,9 @@ export default function Debrief({
     setDetail(null);
     setData(null);
     setSurface(null);
+    setGround(null);
+    setWhy(null);
+    setLines(null);
     setError(null);
     setStep(0);
     let live = true;
@@ -73,6 +92,16 @@ export default function Debrief({
       .catch(() => {});
     coachSurface(path)
       .then((s) => live && setSurface(s))
+      .catch(() => {});
+    coachGround(path)
+      .then((a) => {
+        if (!live) return;
+        setGround(a.ground);
+        setWhy(a.why);
+      })
+      .catch(() => {});
+    coachLines(path)
+      .then((l) => live && setLines(l))
       .catch(() => {});
     return () => {
       live = false;
@@ -180,6 +209,12 @@ export default function Debrief({
                       sectionId={review.sections[sel].id}
                       bikeId={data.lap.bikeId}
                       rider={s.rider}
+                      review={review}
+                      ground={ground}
+                      why={why}
+                      surface={surface}
+                      lines={lines}
+                      selected={sel}
                     />
                   )}
                 </div>
