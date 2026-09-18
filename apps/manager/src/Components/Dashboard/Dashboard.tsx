@@ -8,7 +8,6 @@ import Library from "../Library/Library";
 import Downloads from "../Downloads/Downloads";
 import Locker from "../Locker/Locker";
 import Presets from "../Presets/Presets";
-import StudioCard from "../StudioCard/StudioCard";
 import Manage from "../Manage/Manage";
 import Browse from "../Browse/Browse";
 import Servers from "../Servers/Servers";
@@ -91,8 +90,8 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
   // Derived and counted by an effect rather than inside `navigate`, because plenty of
   // things move the view without going through it — the tour, the release showcase, a
   // download row jumping to the Library — and a page nobody counted is worse than one
-  // counted twice. Studio's sub-views are pages in their own right; everything else is
-  // one name, so a tab added to the sidebar is counted without touching this.
+  // counted twice. Every view is one name, so a tab added to the sidebar is counted
+  // without touching this.
   const page = view.startsWith("plugin:")
     ? "view.plugin"   // one bucket: naming each panel would be unbounded cardinality
     : `view.${view}`;
@@ -265,8 +264,6 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
               onOpenLocker={() => setView("locker")}
               onOpenSettings={() => openSettingsSection("folder")}
             />
-          ) : view === "studio" ? (
-            <StudioCard />
           ) : view === "manage" ? (
             <Manage />
           ) : (

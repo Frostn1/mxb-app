@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased — Frost's Studio is its own app
+
+### Removed
+- The **Studio** tab. Frost's Studio is an app of its own: open it from your desktop, or from
+  **Settings → Plugins** when a plugin's panels live there.
+
 ## 2026-09-18 — v0.17.3 — The Servers tab is ready when you open it
 
 ### Added
