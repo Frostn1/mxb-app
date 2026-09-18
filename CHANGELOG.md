@@ -31,6 +31,9 @@
   centred on it. Nobody has to read a latitude off a map for their local track any more.
 
 ### Changed
+- **Coach calls the line where it used to stay quiet.** A line call now carries the same weight
+  as a gear call, so on a short sheet it holds its place instead of losing every time to the
+  braking call in the same corner.
 - **A paid plugin's panels open in Frost's Studio, not in MXB App.** Cutting a replay is the
   same errand as painting a bike or building a track, and none of it is managing mods. MXB App
   keeps the half that is its own — buying the licence, installing the bundle and updating it —
