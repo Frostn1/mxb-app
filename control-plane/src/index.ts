@@ -14,8 +14,15 @@ import {
   isVerified,
   loginUrl,
   verifyAssertion,
-  LOGIN_TTL_MS,
 } from "./steam";
+import {
+  markRefused,
+  markStarted,
+  mayReturn,
+  mayStart,
+  pageResult,
+  type PendingLogin,
+} from "./signin";
 import {
   awsEnv,
   createImage,
@@ -585,25 +592,40 @@ async function steamLogin(request: Request, account: Account, env: Env): Promise
 /**
  * The branded hop into Steam. The app opens this; it rebuilds the Steam OpenID URL for the
  * pending login and shows a mxbsecure card that redirects on to Steam. The login row is still
- * consumed only by [`steamReturn`], so this can be reloaded harmlessly.
+ * consumed only by [`steamReturn`], so this can be reloaded harmlessly — the one mark it leaves
+ * is `started_at`, and that is written once however many times this is opened.
+ *
+ * It is also where a sign-in that cannot work is now refused, rather than at the far end after
+ * the rider has been through Steam for nothing.
  */
 async function steamStart(url: URL, env: Env): Promise<Response> {
   const site = landingSite(null, env);
   const loginId = url.searchParams.get("login");
   if (!loginId) return steamResult(site, "expired");
 
+  const now = Date.now();
   const login = await env.DB.prepare(
-    "SELECT consumed_at FROM steam_logins WHERE id = ?",
+    "SELECT created_at, started_at, consumed_at FROM steam_logins WHERE id = ?",
   )
     .bind(loginId)
-    .first<{ consumed_at: number | null }>();
+    .first<PendingLogin>();
+  // Nothing to write a refusal onto, so it is only an answer.
   if (!login) return steamResult(site, "expired");
-  // A sign-in that has already been through Valve, usually because the tab was reloaded after
-  // it finished. Same answer [`steamReturn`] gives the same condition: it is a spent sign-in,
-  // not a statement about whose Steam account this is. It said `already-linked` before, which
-  // on the site reads "this Steam account belongs to another profile" — a sentence that sent
-  // people looking for an account problem they did not have.
-  if (login.consumed_at !== null) return steamResult(site, "expired");
+
+  // Refused here, before Steam, rather than after. A sign-in that has already been through Valve
+  // (usually a reloaded tab) and one whose URL has gone stale are both "start it again", and the
+  // rider finds that out having spent nothing. It said `already-linked` before, which on the site
+  // reads "this Steam account belongs to another profile" — a sentence that sent people looking
+  // for an account problem they did not have.
+  const verdict = mayStart(login, now);
+  if (!verdict.ok) {
+    await markRefused(env, loginId, verdict.reason, now);
+    return steamResult(site, pageResult(verdict.reason));
+  }
+
+  // The rider's own window opens here, not when the app asked for the URL — see `signin.ts`.
+  // Stamped once, so reloading this page cannot roll the deadline forward.
+  await markStarted(env, loginId, now);
 
   const origin = url.origin;
   const returnTo = `${origin}/v1/steam/return?login=${loginId}`;
@@ -629,19 +651,30 @@ async function steamReturn(request: Request, url: URL, env: Env): Promise<Respon
   const loginId = url.searchParams.get("login");
   if (!loginId) return steamResult(site, "expired");
 
+  const now = Date.now();
   const login = await env.DB.prepare(
-    "SELECT account_id, created_at, consumed_at FROM steam_logins WHERE id = ?",
+    "SELECT account_id, created_at, started_at, consumed_at FROM steam_logins WHERE id = ?",
   )
     .bind(loginId)
-    .first<{ account_id: string; created_at: number; consumed_at: number | null }>();
+    .first<PendingLogin & { account_id: string }>();
+  if (!login) return steamResult(site, "expired");
 
-  if (!login || login.consumed_at !== null || Date.now() - login.created_at > LOGIN_TTL_MS) {
-    return steamResult(site, "expired");
+  // Counted from when the browser reached us, not from when the app minted the row: the rider
+  // does not get charged for the time their browser took to launch. See `signin.ts`.
+  const verdict = mayReturn(login, now);
+  if (!verdict.ok) {
+    await markRefused(env, loginId, verdict.reason, now);
+    return steamResult(site, pageResult(verdict.reason));
   }
 
   const expectedReturnTo = `${url.origin}${url.pathname}`;
   const result = await verifyAssertion(url.searchParams, expectedReturnTo);
   if (!isVerified(result)) {
+    // The rider pressing Cancel at Steam is recorded as itself. What they are shown does not
+    // change — the page has one sentence for "that didn't go through at Steam" — but a row that
+    // says `cancelled` is a rider who changed their mind, and counting those as failures is how
+    // a flow that works looks broken.
+    await markRefused(env, loginId, result.error === "cancelled" ? "cancelled" : "unconfirmed", now);
     return steamResult(site, "unconfirmed");
   }
 

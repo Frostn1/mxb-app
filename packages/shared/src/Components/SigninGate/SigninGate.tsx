@@ -106,13 +106,21 @@ export default function SigninGate() {
     setNote("Waiting for Steam to confirm it's you…");
 
     // Poll until the link lands, then let the gate have the final word. The ceiling matches the
-    // control plane's own ten-minute sign-in window: stopping at five left a sign-in that was
-    // still perfectly valid — a Steam Guard prompt, a password typed slowly — with nothing
-    // watching for it.
+    // control plane's own sign-in window, which is now thirty minutes counted from the browser
+    // arriving at Steam (`signin.ts`): stopping earlier than the service does leaves a sign-in
+    // that is still perfectly valid — a Steam Guard prompt, a password typed slowly — with
+    // nothing watching for it, which is the app going quiet on a sign-in that then works.
+    //
+    // Every two seconds for the first minute, because that is when almost every sign-in lands
+    // and the person is watching; every five after, because the rest of the window is somebody
+    // reading a code off a phone and polling it 900 times would be asking the service for
+    // nothing at fifteen times the rate it can answer differently.
+    const QUICK_POLLS = 30;
+    const polls = QUICK_POLLS + Math.ceil((29 * 60) / 5);
     let linked: string | null = null;
     let lastError: string | null = null;
-    for (let i = 0; i < 300 && !linked && mineStill(); i++) {
-      await new Promise((r) => setTimeout(r, 2000));
+    for (let i = 0; i < polls && !linked && mineStill(); i++) {
+      await new Promise((r) => setTimeout(r, i < QUICK_POLLS ? 2000 : 5000));
       try {
         linked = await invoke<string | null>("steam_link_status");
         lastError = null;

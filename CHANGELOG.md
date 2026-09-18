@@ -52,6 +52,16 @@
 - The **Studio** tab. Frost's Studio is an app of its own: open it from your desktop, or from
   **Settings → Plugins** when a plugin's panels live there.
 
+### Fixed
+- **The Steam sign-in gives you time to actually sign in.** The window was ten minutes counted
+  from the moment the app asked for the sign-in — before your browser had even opened — and it
+  was only checked at the very end. So a password typed carefully, or a Steam Guard code waited
+  on, came back "that sign-in expired" *after* Steam had already confirmed you, and pressing the
+  button again ran the same clock down the same way. Your half of it is now thirty minutes and
+  starts when your browser reaches Steam, not when the app asked. A sign-in that genuinely can't
+  go on is refused before Steam rather than after, so you find out having spent nothing, and the
+  app keeps watching for the whole window instead of giving up while the sign-in is still good.
+
 ## 2026-09-18 — v0.17.3 — The Servers tab is ready when you open it
 
 ### Added
