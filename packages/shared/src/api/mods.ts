@@ -3378,25 +3378,29 @@ export interface MasterServer {
 
 /**
  * Every live MX Bikes server, as the in-game WORLD browser sees it, read straight from
- * PiBoSo's master server. Rejects with a human-readable message when the list can't be
- * fetched (this build lacks the browser, or the master didn't answer) — the tab shows it.
+ * PiBoSo's master server.
  *
  * Usually free: the app sweeps on its own beat for as long as it is open, so this hands back
  * the last sweep whenever that is still current and only goes to the master when it isn't.
+ *
+ * `source` says whose list it is. A machine with no MX Bikes on it can't sweep at all and gets
+ * `shared` — the pooled list every other app has been feeding — so the tab can draw its age
+ * instead of an error where the servers should be. Rejects only when there is no list anywhere:
+ * this app couldn't sweep and the pool had nothing either.
  */
-export function listMasterServers(): Promise<MasterServer[]> {
-  return invoke<MasterServer[]>("list_master_servers");
+export function listMasterServers(): Promise<CachedServers> {
+  return invoke<CachedServers>("list_master_servers");
 }
 
 /**
- * Every background sweep, as it lands.
+ * Every background refresh, as it lands.
  *
  * The app keeps reading the list while nobody is on the tab, so a tab that stays open can be
  * kept current without asking for anything — no spinner, no second fetch, and no wait when
  * somebody comes back to it.
  */
-export function onServersSwept(cb: (servers: MasterServer[]) => void): Promise<UnlistenFn> {
-  return listen<MasterServer[]>("servers-swept", (event) => cb(event.payload));
+export function onServersSwept(cb: (list: CachedServers) => void): Promise<UnlistenFn> {
+  return listen<CachedServers>("servers-swept", (event) => cb(event.payload));
 }
 
 /** A list to draw at once, and the moment it was true. */

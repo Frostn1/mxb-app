@@ -166,6 +166,7 @@ use frostmod::ReloadOutcome;
 use frostmod_manage::{FrostmodProcess, FrostmodStatus, InstallReport};
 use library::InstalledMod;
 use modwatch::ModWatcher;
+use serverwatch::CachedServers;
 use paintwatch::{LookWatcher, PaintWatcher, SourceWatcher};
 // Decoding a paint's textures is per-texture CPU work over no shared state, and every path
 // that does it wants the same treatment — so this sits here rather than in one function.
@@ -4158,21 +4159,6 @@ fn set_ranked_guid(app: tauri::AppHandle, guid: String) -> Result<(), String> {
     config::save(&app, &cfg).map_err(|e| format!("{e:#}"))
 }
 
-/// A list to draw at once, and the moment it was true.
-///
-/// `asOf` is the whole contract. Nothing here is live — it is the last sweep, or somebody
-/// else's from a minute ago — so the tab draws its age beside it rather than passing it off,
-/// and replaces it with its own sweep as soon as that lands.
-#[derive(Debug, Clone, Default, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CachedServers {
-    pub servers: Vec<WorldServer>,
-    /// Milliseconds since the epoch. Zero when there was nothing to give.
-    pub as_of: u64,
-    /// `"local"` for this install's own last sweep, `"shared"` for the pooled snapshot, `""`
-    /// for neither. The tab words the age differently for somebody else's list.
-    pub source: String,
-}
 
 /// The list the Servers tab paints while the real one is being fetched.
 ///
@@ -4189,13 +4175,38 @@ pub struct CachedServers {
 /// anyway, and a failure is simply the spinner the tab used to have.
 #[tauri::command]
 async fn cached_master_servers(app: tauri::AppHandle) -> CachedServers {
-    let (servers, as_of) = serverbook::last_sweep(&serverbook::load(&app));
-    if !servers.is_empty() {
-        return CachedServers { servers, as_of, source: "local".into() };
+    // The beat has usually just been round, and what it left is fresher than anything on disk.
+    // Never a sweep of its own: this runs while the tab is drawing, and the whole point of it is
+    // that it answers at once.
+    if let Some(list) = serverwatch::warm_list() {
+        if !list.servers.is_empty() {
+            return list;
+        }
     }
-    match roster::snapshot().await {
-        Some((servers, as_of)) => CachedServers { servers, as_of, source: "shared".into() },
-        None => CachedServers::default(),
+
+    let (servers, as_of) = serverbook::last_sweep(&serverbook::load(&app));
+    let mine = (!servers.is_empty())
+        .then(|| CachedServers { servers, as_of, source: serverwatch::SOURCE_LOCAL.into() });
+
+    // Whichever is newer, rather than ours first. A list this install swept last Tuesday is
+    // worse than one another rider's app read a minute ago, and on a machine that has never run
+    // MX Bikes there is no list of our own to be had at all.
+    let shared = roster::snapshot().await.map(|(servers, as_of)| CachedServers {
+        servers,
+        as_of,
+        source: serverwatch::SOURCE_SHARED.into(),
+    });
+    match (mine, shared) {
+        (Some(mine), Some(shared)) => {
+            if shared.as_of > mine.as_of {
+                shared
+            } else {
+                mine
+            }
+        }
+        (Some(mine), None) => mine,
+        (None, Some(shared)) => shared,
+        (None, None) => CachedServers::default(),
     }
 }
 
@@ -4208,8 +4219,12 @@ async fn cached_master_servers(app: tauri::AppHandle) -> CachedServers {
 ///
 /// The sweep itself, and the list it leaves behind, live in [`serverwatch`]: the app has been
 /// sweeping on a beat since it started, so opening the tab usually costs nothing at all.
+///
+/// The answer says where it came from. A machine with no MX Bikes on it can't sweep at all, and
+/// gets the pooled list every other app has been feeding — labelled `shared`, with the moment it
+/// was true, so the tab draws its age rather than passing it off as live.
 #[tauri::command]
-async fn list_master_servers(app: tauri::AppHandle) -> Result<Vec<WorldServer>, String> {
+async fn list_master_servers(app: tauri::AppHandle) -> Result<CachedServers, String> {
     serverwatch::list(app).await
 }
 

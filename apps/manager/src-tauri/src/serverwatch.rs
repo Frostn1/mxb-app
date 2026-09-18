@@ -7,8 +7,13 @@
 //! that makes a fresh install's browser work, to the snapshot it paints while its own sweep
 //! runs, or to the count that answers "is the master down or is it me".
 //!
-//! So the app sweeps on a beat for as long as it is open, and the tab takes whatever the last
-//! one found. Two things make that affordable:
+//! So the app sweeps on a beat for as long as it is open, feeds what it finds to the control
+//! plane, and the tab takes whatever the last one found. That pooled list is also the answer for
+//! an app that cannot sweep at all — a machine with no MX Bikes on it, or a build without the
+//! browser in it — which used to be an error message where the list should be and is now
+//! somebody else's sweep from a minute ago, with its age on it.
+//!
+//! Three things make the beat affordable:
 //!
 //! - **While MX Bikes is running the master is never asked.** `worldnet::list_servers`
 //!   already rebuilds the list by asking each remembered server about itself, because the
@@ -67,18 +72,43 @@ pub const EVENT: &str = "servers-swept";
 /// app is counted in every window without reporting several times into the same one.
 const REPORT_EVERY: Duration = Duration::from_secs(5 * 60);
 
-/// How often a sweep may offer the shared snapshot. The control plane keeps one snapshot and
-/// refuses another inside a minute, so a faster offer is a request spent to be turned down.
-const SNAPSHOT_EVERY: Duration = Duration::from_secs(5 * 60);
+/// How often a sweep may offer the shared snapshot.
+///
+/// The pooled list is only as current as the last app that fed it, and apps that cannot sweep
+/// have nothing else to look at — so this is deliberately close to the control plane's own
+/// minute-wide gap rather than well above it. Anything offered inside that gap is turned down
+/// cheaply, before the expensive half of the endpoint runs.
+const SNAPSHOT_EVERY: Duration = Duration::from_secs(90);
 
 /// How often a sweep may contribute addresses when the set of them hasn't changed. A changed
 /// set always goes at once — that is a server that appeared or went away.
 const ADDRESSES_EVERY: Duration = Duration::from_secs(15 * 60);
 
-/// The last sweep, and when it landed.
+/// A list to draw, and the moment it was true.
+///
+/// `as_of` and `source` are the whole contract. A list is either this app's own sweep, seconds
+/// old, or the pooled one somebody else's app read a minute ago — and the tab says which rather
+/// than passing the second off as the first.
+#[derive(Debug, Clone, Default, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CachedServers {
+    pub servers: Vec<WorldServer>,
+    /// Milliseconds since the epoch. Zero when there was nothing to give.
+    pub as_of: u64,
+    /// `""` for this app's own sweep, `"local"` for its last one out of the book, `"shared"`
+    /// for the pooled snapshot. The tab draws an age beside the two that aren't live.
+    pub source: String,
+}
+
+/// Where a list came from, in the vocabulary the tab reads.
+pub const SOURCE_LIVE: &str = "";
+pub const SOURCE_LOCAL: &str = "local";
+pub const SOURCE_SHARED: &str = "shared";
+
+/// The last list, and when this app got hold of it.
 struct Warm {
     at: Instant,
-    list: Vec<WorldServer>,
+    list: CachedServers,
 }
 
 static WARM: Mutex<Option<Warm>> = Mutex::new(None);
@@ -128,29 +158,73 @@ pub async fn master_list(app: AppHandle) -> Result<(Vec<WorldServer>, MasterOutc
     }
 }
 
-/// What the tab asks for: the last sweep when it is still true, and a fresh one otherwise.
-///
-/// A failure is handed back as a failure even with a warm list in hand. The tab has its own
-/// remembered list to paint and a connection check to offer under the error, and quietly
-/// serving a list from three minutes ago would take both away from somebody whose network has
-/// just gone — which is the one moment the tab is trying to be honest about.
-pub async fn list(app: AppHandle) -> Result<Vec<WorldServer>, String> {
+/// What the tab asks for: the last list when it is still true, and a fresh one otherwise.
+pub async fn list(app: AppHandle) -> Result<CachedServers, String> {
     if let Some(list) = warm() {
         return Ok(list);
     }
-    sweep(app).await
+    refresh(app).await
 }
 
-/// The last sweep, if it is fresh enough to answer with.
-fn warm() -> Option<Vec<WorldServer>> {
+/// The last list, if it is fresh enough to answer with — without asking for a new one.
+///
+/// What the instant-paint command takes: it runs while the tab is drawing, so it must never be
+/// the thing that starts a sweep.
+pub fn warm_list() -> Option<CachedServers> {
+    warm()
+}
+
+/// The last list, if it is fresh enough to answer with.
+fn warm() -> Option<CachedServers> {
     let held = WARM.lock().unwrap_or_else(|p| p.into_inner());
     let warm = held.as_ref()?;
     (warm.at.elapsed() < FRESH).then(|| warm.list.clone())
 }
 
+/// A sweep of our own, and the pooled list when there can't be one.
+///
+/// The fallback is what makes the tab work on a machine that has never run MX Bikes: no Steam,
+/// no ticket, no master login, and — until now — no list either. It is somebody else's sweep,
+/// so it arrives labelled `shared` with the moment it was true, and the tab draws that age
+/// rather than passing it off as live.
+///
+/// The failure is still handed back when the pool has nothing either. The tab has a connection
+/// check to offer under that error, and it is the one moment worth being blunt about.
+pub async fn refresh(app: AppHandle) -> Result<CachedServers, String> {
+    match got(app).await {
+        Got::Mine(list) | Got::Shared(list, _) => Ok(list),
+        Got::Nothing(why) => Err(why),
+    }
+}
+
+/// What a refresh came back with, and — when it isn't ours — what stopped it being ours.
+///
+/// The beat needs that reason and the tab doesn't: a master that was asked and didn't answer is
+/// worth backing off from, and a build that was never able to ask isn't.
+enum Got {
+    Mine(CachedServers),
+    Shared(CachedServers, String),
+    Nothing(String),
+}
+
+async fn got(app: AppHandle) -> Got {
+    let failed = match sweep(app.clone()).await {
+        Ok(list) => return Got::Mine(list),
+        Err(e) => e,
+    };
+    match roster::snapshot().await {
+        Some((servers, as_of)) => {
+            let list = CachedServers { servers, as_of, source: SOURCE_SHARED.into() };
+            remember(&app, list.clone());
+            Got::Shared(list, failed)
+        }
+        None => Got::Nothing(failed),
+    }
+}
+
 /// Sweep now: read the list, keep it, tell the control plane what the floors allow, and wake
 /// whoever is looking at the tab.
-pub async fn sweep(app: AppHandle) -> Result<Vec<WorldServer>, String> {
+pub async fn sweep(app: AppHandle) -> Result<CachedServers, String> {
     // Held across the whole sweep, so a tab opening mid-beat waits rather than racing it. The
     // freshness check runs again inside the gate: by the time a waiter gets in, the sweep it
     // was waiting on has usually answered its question.
@@ -181,26 +255,31 @@ pub async fn sweep(app: AppHandle) -> Result<Vec<WorldServer>, String> {
             if *outcome == MasterOutcome::Answered {
                 contribute(list);
             }
-            remember(&app, list);
         }
         Err(e) => report(&app, &MasterOutcome::Failed(e.clone())),
     }
 
-    out.map(|(list, _)| list)
+    out.map(|(servers, _)| {
+        let list = CachedServers {
+            servers,
+            as_of: serverbook::now_millis(),
+            source: SOURCE_LIVE.into(),
+        };
+        remember(&app, list.clone());
+        list
+    })
 }
 
 /// Keep the list for the next asker, and hand it to a tab that is already open.
 ///
 /// Emitted whatever the outcome was: a list rebuilt from the book with `GETINFO` is as true as
 /// one from the master, and during a session it is the only kind there is.
-fn remember(app: &AppHandle, list: &[WorldServer]) {
-    {
-        let mut held = WARM.lock().unwrap_or_else(|p| p.into_inner());
-        *held = Some(Warm { at: Instant::now(), list: list.to_vec() });
-    }
-    if let Err(e) = app.emit(EVENT, list) {
+fn remember(app: &AppHandle, list: CachedServers) {
+    if let Err(e) = app.emit(EVENT, &list) {
         log::debug!("[serverwatch] couldn't announce the sweep: {e}");
     }
+    let mut held = WARM.lock().unwrap_or_else(|p| p.into_inner());
+    *held = Some(Warm { at: Instant::now(), list });
 }
 
 /// Report to `masterstatus`, but not on every beat.
@@ -293,7 +372,21 @@ fn addresses_due(
     }
 }
 
-/// Whether anybody could be looking at the app.
+/// The beat to use after a sweep that didn't come back with a list of our own.
+///
+/// A build with no browser in it never put a packet on the wire, so widening after one protects
+/// nothing and only makes the pooled list it falls back to staler — it keeps the fast beat.
+/// Every other failure is a master that was asked and didn't answer, and an outage is the one
+/// time every install is failing at once, so those widen.
+fn widened(backoff: Duration, failure: &str) -> Duration {
+    if masterstatus::classify(failure) == masterstatus::Reason::Unsupported {
+        BEAT
+    } else {
+        (backoff * 2).min(MAX_BEAT)
+    }
+}
+
+/// Whether anybody could be looking at the app./// Whether anybody could be looking at the app.
 ///
 /// The main window parks in the tray on close rather than ending the app, so "open" covers a
 /// process that has had no window on screen since breakfast. A hidden or minimised window is
@@ -325,19 +418,27 @@ pub fn start(app: &AppHandle) {
         tokio::time::sleep(SETTLE).await;
         let mut backoff = BEAT;
         loop {
-            let wait = match sweep(app.clone()).await {
-                Ok(list) => {
-                    log::info!("[serverwatch] swept: {} server(s)", list.len());
+            let beat = if watching(&app) { BEAT } else { IDLE_BEAT };
+            // The backoff follows our own sweep, not what ended up on screen: a beat that
+            // finished on the pooled list is still a beat whose master didn't answer.
+            match got(app.clone()).await {
+                Got::Mine(list) => {
+                    log::info!("[serverwatch] swept {} server(s)", list.servers.len());
                     backoff = BEAT;
-                    if watching(&app) { BEAT } else { IDLE_BEAT }
                 }
-                Err(e) => {
-                    log::debug!("[serverwatch] sweep failed: {e}");
-                    backoff = (backoff * 2).min(MAX_BEAT);
-                    backoff.max(if watching(&app) { BEAT } else { IDLE_BEAT })
+                Got::Shared(list, why) => {
+                    log::info!(
+                        "[serverwatch] {} server(s) from the shared snapshot ({why})",
+                        list.servers.len()
+                    );
+                    backoff = widened(backoff, &why);
                 }
-            };
-            tokio::time::sleep(wait).await;
+                Got::Nothing(why) => {
+                    log::debug!("[serverwatch] no list: {why}");
+                    backoff = widened(backoff, &why);
+                }
+            }
+            tokio::time::sleep(beat.max(backoff)).await;
         }
     });
 }
@@ -346,23 +447,31 @@ pub fn start(app: &AppHandle) {
 mod tests {
     use super::*;
 
-    fn server(address: &str) -> WorldServer {
-        WorldServer { address: address.into(), joinable: true, ..Default::default() }
+    fn one_server() -> CachedServers {
+        CachedServers {
+            servers: vec![WorldServer {
+                address: "1.2.3.4:54200".into(),
+                joinable: true,
+                ..Default::default()
+            }],
+            as_of: 1,
+            source: SOURCE_LIVE.into(),
+        }
     }
 
     /// The tab and the beat share one warm list, and it ages out.
     #[test]
     fn warm_is_only_offered_while_it_is_fresh() {
         let mut held = WARM.lock().unwrap();
-        *held = Some(Warm { at: Instant::now(), list: vec![server("1.2.3.4:54200")] });
+        *held = Some(Warm { at: Instant::now(), list: one_server() });
         drop(held);
-        assert_eq!(warm().map(|l| l.len()), Some(1));
+        assert_eq!(warm().map(|l| l.servers.len()), Some(1));
 
         let stale = Instant::now()
             .checked_sub(FRESH + Duration::from_secs(1))
             .expect("the clock has been up longer than FRESH");
         let mut held = WARM.lock().unwrap();
-        *held = Some(Warm { at: stale, list: vec![server("1.2.3.4:54200")] });
+        *held = Some(Warm { at: stale, list: one_server() });
         drop(held);
         assert!(warm().is_none(), "a sweep older than FRESH is not an answer");
 
@@ -409,14 +518,23 @@ mod tests {
         ));
     }
 
-    /// The beat must not widen without bound, and must come back to the fast one.
+    /// A master that keeps not answering is asked less and less often, but never unboundedly so.
     #[test]
-    fn the_beat_backs_off_and_recovers() {
+    fn a_failing_master_widens_the_beat_to_a_limit() {
         let mut wait = BEAT;
         for _ in 0..10 {
-            wait = (wait * 2).min(MAX_BEAT);
+            wait = widened(wait, "the master didn't answer the login");
         }
         assert_eq!(wait, MAX_BEAT);
         assert!(MAX_BEAT > BEAT);
+    }
+
+    /// A build with no browser in it never asked anyone anything, so there is nothing to be
+    /// gentle with — and widening would only stale the pooled list it falls back to.
+    #[test]
+    fn a_build_without_the_browser_keeps_the_fast_beat() {
+        let widened_once = widened(BEAT, "The server browser isn't included in this build.");
+        assert_eq!(widened_once, BEAT);
+        assert_eq!(widened(MAX_BEAT, "The server browser isn't included in this build."), BEAT);
     }
 }

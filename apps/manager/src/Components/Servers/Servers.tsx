@@ -282,13 +282,15 @@ const Servers = () => {
     // check under it was unmounted, and its results thrown away, every time somebody pressed
     // Try again. The spinner on the button already says a retry is happening.
     listMasterServers()
-      .then((list) => {
+      .then(({ servers: list, asOf, source }) => {
         // Merged, not replaced: the tiles are memoised, and handing every row a new object
         // would redraw the whole grid to show that four rider counts moved.
         const merged = mergeRows(onScreen.current, list);
         onScreen.current = merged;
         setServers(merged);
-        setCached(null);
+        // A list that isn't ours keeps its age on screen. On a machine with no MX Bikes there
+        // is never one of our own, so this is what the tab shows from then on.
+        setCached(source ? { asOf, source } : null);
         setError(null);
         // After the list, never with it: the browser has to draw whether or not the control
         // plane answers, and badges arriving a moment later is the right trade for that.
@@ -322,11 +324,11 @@ const Servers = () => {
   // A sweep landing is also the answer to whatever error is on screen: it only arrives when
   // one succeeded.
   useEffect(() => {
-    const stop = onServersSwept((list) => {
+    const stop = onServersSwept(({ servers: list, asOf, source }) => {
       const merged = mergeRows(onScreen.current, list);
       onScreen.current = merged;
       setServers(merged);
-      setCached(null);
+      setCached(source ? { asOf, source } : null);
       setError(null);
     });
     return () => {
