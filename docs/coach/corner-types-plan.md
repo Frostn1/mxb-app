@@ -88,6 +88,53 @@ Not part of this change; listed so the shape is visible.
 | `carry_speed` | what "slow" means differs between a sand turn and a smooth berm |
 | a rut-entry rule | only meaningful where there is a rut to enter — this is the item the corpus raised, and it needs `rutted` before it can exist at all |
 
+## What the recordings showed (2026-09-17)
+
+Three recordings arrived: one on Forest Raceway with **no comparable laps at all**, and two on
+755 Compound (KTM 450) with two and four. So the calibration below rests on **one track, one
+bike and one surface** — every corner in all of it is soft soil. Enough to check the machinery
+responds to the right things and agrees with itself; nowhere near enough to call the thresholds
+settled.
+
+What it settled:
+
+- **Peak lean separates corners cleanly.** One corner read 40–44° in both sessions while every
+  other read 55–81°. That gap is where `RUT_LEAN_DEG` and `FLAT_LEAN_DEG` now sit.
+- **Peak hit is useless, mean hit is usable.** The peak moved by more than 2 G between two
+  sessions on the same corner — it is one sample. The mean moved by about 0.3.
+- **Mean lean is useless.** It moved by up to 20° on the same corner between sessions.
+- **The hook metric is noise.** First-third against last-third turn rate gave ratios from 0.17
+  to 4.7 with no agreement between sessions. `shape` is therefore not implemented, and should
+  not be until there is a better measurement than that.
+
+Cross-session agreement over the same eleven corners, which is the test that matters:
+
+| Property | Agreed | Abstained on one side | **Contradicted** |
+|---|---|---|---|
+| `hold` | 9 / 11 | 2 | **0** |
+| `bumps` | 5 / 11 | 6 | **0** |
+
+Zero contradictions is the property worth having: no corner ever flipped Flat to Rutted or
+Smooth to Rough. `bumps` abstains more than it decides, which is the right way to fail, but it
+is weak and should gate nothing until better recordings say more.
+
+Not calibrated at all: **`soil`**, because there is one surface in this data. The mapping is
+reused from `soil.rs` so it is mechanically right, but nothing here shows it separating a sand
+turn from hardpack in practice.
+
+### One thing this turned up that matters more than the classifier
+
+**Corner extents are not stable between sessions on the same track.** The same corner came back
+as 166 m in one session and 73 m in the other; another as 50 m and 31 m. `features()` derives
+corners from whichever lap is the reference, so two reviews of the same track are not measuring
+the same piece of ground.
+
+The classifier is built to survive that — the properties that held up are the ones least
+sensitive to where a corner is cut — but it undermines the assumption written above that
+classifying the reference "keeps a corner's type stable across every review of that track".
+Stabilising corner extents is now the more valuable piece of work, and a prerequisite for
+anything that compares a corner with itself over time.
+
 ## Steps
 
 1. `CornerType` (the four properties) on `Section`, classifier in `features()`, provisional
