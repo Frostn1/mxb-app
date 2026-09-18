@@ -1,6 +1,16 @@
 # Changelog
 
-## Unreleased — Frost's Studio is its own app
+## Unreleased — A session reads itself out
+
+### Added
+- **Open a session and it tells you about itself.** Where it used to hand you a lap table and
+  leave you to pick a lap and then a tab, a session now opens on a debrief: what you rode, what
+  the lap was about, the sections that cost you the most with the lap drawn on the track and
+  the one thing to change in each, and then how the bike felt. One thing per screen, Next and
+  Back. Read on your best whole lap, because the mistakes on your best lap are the ones worth
+  fixing.
+- The lap table and the full five-tab review are both still there, one click further in, from
+  **All laps** and **Full review** on any section.
 
 ### Removed
 - The **Studio** tab. Frost's Studio is an app of its own: open it from your desktop, or from
