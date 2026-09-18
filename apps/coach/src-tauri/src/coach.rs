@@ -491,7 +491,10 @@ pub fn coach_session(app: AppHandle, path: String) -> Result<SessionDetail, Stri
     let ideal = match &reference {
         Some(r) => {
             let ref_trace = trace(&load(&r.path)?, r.lap)?;
-            let sections = analysis::sections(&ref_trace);
+            let mut sections = analysis::sections(&ref_trace);
+            // The same names the review uses, or the section-bests table disagrees with the
+            // page it sits on.
+            label(&app, &summary.track_id, summary.track_length, &[], &mut sections);
             // Keyed by where each lap sits in the session's list, not by its number: every
             // stint starts counting at lap 1 again.
             let mut laps: Vec<(i32, Trace)> = Vec::new();
@@ -691,6 +694,15 @@ pub fn coach_review(
         s.soil = mine.pts.get(s.section.start..=end).and_then(|p| crate::soil::profile(p, wet));
     }
     review.setup.extend(crate::soil::profile(&mine.pts, wet).as_ref().and_then(crate::soil::finding));
+    // Stable names, so "Turn 5" is the same corner next week and the cue history keyed on it
+    // doesn't quietly re-attribute. Seeded from every lap of this session the first time the
+    // rider reviews the track, so the numbering runs along the lap from day one; after that it
+    // only ever grows.
+    let mut named: Vec<analysis::Section> = review.sections.iter().map(|s| s.section.clone()).collect();
+    label(&app, &summary.track_id, e.track_length, &laps, &mut named);
+    for (s, n) in review.sections.iter_mut().zip(named) {
+        s.section = n;
+    }
     // Lap-wide setup tips that come from the recording and the setup file, not the lap: sag, tyres.
     let r = rider_setup(&app, &rec);
     review.setup.extend(r.sag.as_ref().and_then(|s| crate::sag::finding(s, rec.event.susp_max_travel)));
@@ -1011,14 +1023,62 @@ pub struct CuesOut {
 
 /// What the rider has already been called on this track and bike, beside the session index.
 /// Losing it is no worse than a fresh start: the next sheet simply repeats itself once.
+fn map_path(app: &AppHandle, track: &str) -> Option<PathBuf> {
+    Some(config::data_dir(app)?.join("coach").join("tracks").join(crate::trackmap::file_name(track)))
+}
+
+/// The track's frozen roster of corners and jumps. A map for another build of the track, or
+/// from older code, is discarded rather than trusted: both it and the cue history keyed on it
+/// are derived caches, and the cost of rebuilding them is one cue sheet.
+fn read_map(app: &AppHandle, track: &str, length: f32) -> crate::trackmap::TrackMap {
+    map_path(app, track)
+        .and_then(|p| fs::read(p).ok())
+        .and_then(|b| serde_json::from_slice::<crate::trackmap::TrackMap>(&b).ok())
+        .filter(|m| !m.stale(length, TRACK_LENGTH_SLACK_M))
+        .unwrap_or_else(|| crate::trackmap::TrackMap::empty(track, length))
+}
+
+fn write_map(app: &AppHandle, track: &str, m: &crate::trackmap::TrackMap) {
+    let Some(path) = map_path(app, track) else { return };
+    if let Some(parent) = path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    if let Ok(json) = serde_json::to_vec(m) {
+        let _ = fs::write(path, json);
+    }
+}
+
+/// Labels a freshly detected section list with the track's stable ids and names, so every
+/// screen calls the same corner the same thing. `seed` is whatever laps the caller has to hand:
+/// the first time a track is mapped, the roster is built from all of them at once so the
+/// numbering runs along the lap even for a feature only one lap saw.
+fn label(app: &AppHandle, track: &str, length: f32, seed: &[Trace], secs: &mut [analysis::Section]) {
+    let mut map = read_map(app, track, length);
+    let fresh = map.marks.is_empty();
+    if fresh && !seed.is_empty() {
+        let per_lap: Vec<Vec<analysis::Section>> = seed.iter().map(analysis::sections).collect();
+        map = crate::trackmap::build(track, length, &per_lap);
+    }
+    let grew = crate::trackmap::apply(&mut map, secs);
+    if fresh || grew {
+        write_map(app, track, &map);
+    }
+}
+
 fn history_path(app: &AppHandle, track: &str, bike: &str) -> Option<PathBuf> {
     Some(config::data_dir(app)?.join("coach").join("cues").join(crate::cues::history_name(track, bike)))
 }
 
+/// A history from before the sections had stable ids keys on names that may since have been
+/// renumbered, and translating it needs the very map that didn't exist when it was written. So
+/// it is dropped: one sheet doesn't know what the rider has already heard, and the sheet after
+/// that has rebuilt it. Cheaper than a translation that would be wrong exactly on the tracks
+/// whose numbering had already drifted.
 fn read_history(app: &AppHandle, track: &str, bike: &str) -> crate::cues::History {
     history_path(app, track, bike)
         .and_then(|p| fs::read(p).ok())
-        .and_then(|b| serde_json::from_slice(&b).ok())
+        .and_then(|b| serde_json::from_slice::<crate::cues::History>(&b).ok())
+        .filter(|h| h.version == crate::cues::HISTORY_VERSION)
         .unwrap_or_default()
 }
 
@@ -1171,7 +1231,9 @@ fn lines_for(app: &AppHandle, path: &str) -> Result<Option<LinesOut>, String> {
         );
     }
     let stint = summary.stints.iter().position(|x| x.path == path).unwrap_or(0) as i32;
-    Ok(Some(LinesOut { lines: crate::lines::lines(&laps, &reference, &others), stint }))
+    let mut secs = analysis::sections(&reference);
+    label(&app, &summary.track_id, summary.track_length, &[], &mut secs);
+    Ok(Some(LinesOut { lines: crate::lines::lines(&laps, &reference, &others, &secs), stint }))
 }
 
 /// The track's own terrain for a session: installed, readable, and lined up with the laps.

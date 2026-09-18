@@ -1,5 +1,28 @@
 # Changelog
 
+## Unreleased — Coach says what it sees, and calls a corner by the same name twice
+
+### Added
+- **Coach tells you when you're over-jumping or casing a landing**, on its own terms rather
+  than by comparing you with a faster lap. It reads the ground you land on, so it says it on a
+  session ridden alone, and on a jump you go long over every single lap — which a comparison
+  with yourself can never show. Where it says you're over-jumping it stops also telling you to
+  land softer: the hit is the symptom, going long is the cause.
+- **"You're coming in too fast."** Braking belongs before you turn in, so Coach measures the
+  speed that's still coming off after the bike is committed, and says so when you pay for it by
+  running wide, having to pick the bike up, or not getting to drive until past the middle.
+  Dragging the brake through a rut is normal riding and doesn't trigger it.
+- **"You're turning in too early"**, where the slowest point comes early and you're still
+  leaned over with the throttle shut on the way out.
+- **Roll off here** — a new in-game call, spoken at the lip of a jump you're going long over,
+  where you can still do something about it.
+
+### Changed
+- **Turn 5 is Turn 5 next week.** Corners, jumps and whoops are named once per track and keep
+  those names, so a new personal best no longer renumbers everything. The in-game calls rotate
+  against the right corner because of it, and every screen now agrees on what a section is
+  called.
+
 ## 2026-09-17 — v0.17.2 — Steam sign-in takes your click
 
 ### Fixed

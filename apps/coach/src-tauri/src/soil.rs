@@ -101,7 +101,7 @@ pub fn finding(lap: &Profile) -> Option<Finding> {
             _ => return None,
         }
     };
-    Some(Finding { skill, title: title.into(), detail, at: 0, weight: 0.5, safety: false })
+    Some(Finding { skill, title: title.into(), detail, at: 0, weight: 0.5, safety: false, absolute: false })
 }
 
 #[cfg(test)]

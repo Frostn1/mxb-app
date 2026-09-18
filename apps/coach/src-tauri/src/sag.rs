@@ -142,6 +142,7 @@ pub fn finding(sag: &Sag, travel: [f32; 2]) -> Option<Finding> {
         at: 0,
         weight: 0.9,
         safety: false,
+        absolute: false,
     })
 }
 
