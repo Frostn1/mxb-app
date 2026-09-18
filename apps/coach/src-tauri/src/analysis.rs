@@ -127,6 +127,23 @@ mod th {
     pub const SCALE_LANDINGS: usize = 8;
     /// Sitting this much more (or less) of a section than the fast lap is worth a word.
     pub const STANCE_GAP: f32 = 0.3;
+    /// Peak bike lean through a corner's core. At or past `RUT_LEAN_DEG` something is holding
+    /// the bike - a rut or a berm - because a flat corner's tyres let go first; at or under
+    /// `FLAT_LEAN_DEG` nothing is. In between is left unknown rather than guessed.
+    ///
+    /// PROVISIONAL. Set from two sessions on one track (755 Compound, 450), where the one
+    /// corner that reads flat in both sat at 40-44 deg and every other corner at 55-81. That
+    /// is a real gap, but it is one track and one surface: these want re-checking against a
+    /// flat corner on a stock track and a sand turn before anything leans on them.
+    pub const RUT_LEAN_DEG: f32 = 60.0;
+    pub const FLAT_LEAN_DEG: f32 = 45.0;
+
+    /// Mean vertical hit through the core, G. PROVISIONAL, from the same two sessions, where
+    /// corner means ran 1.1 to 2.3 G. Peak hit was tried first and thrown out: it is a single
+    /// sample and moved by more than 2 G between two sessions on the same corner.
+    pub const ROUGH_HIT_G: f32 = 1.8;
+    pub const SMOOTH_HIT_G: f32 = 1.2;
+
     /// A lap needs its stance known over this share of the section to be judged.
     pub const STANCE_KNOWN: f32 = 0.6;
     /// Turning less than this share of what the lean would give: the front is sliding.
@@ -546,6 +563,48 @@ pub enum Kind {
     Whoops,
 }
 
+/// Whether the ground holds the bike through a corner: a rut or a berm does, a flat corner
+/// leaves the tyres to do it. It decides advice that inverts between the two - counter-lean
+/// is right on a flat corner and wrong in a rut, and sitting is right on a smooth rut and
+/// wrong on a hooked one - so a coach that can't tell them apart is as likely to be wrong as
+/// right on those points.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Hold {
+    /// Not sure, and it must read as today's behaviour wherever it is used.
+    #[default]
+    Unknown,
+    Flat,
+    Rutted,
+}
+
+/// How rough a corner is: whether the suspension is working through it or riding a clean line.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Bumps {
+    #[default]
+    Unknown,
+    Smooth,
+    Rough,
+}
+
+/// What sort of corner this is, as properties rather than as one of a handful of named types.
+///
+/// The named types riders use - flat, smooth rut, hooked rut, rough rut, sand turn, berm - are
+/// combinations of these, so naming one forces a single winner where a corner is usually two
+/// things at once and leaves nothing to fall back on when the call is marginal. Each property
+/// carries its own `Unknown`, and every rule that reads one must treat `Unknown` as today's
+/// behaviour.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CornerType {
+    pub hold: Hold,
+    pub bumps: Bumps,
+    /// The ground under the corner, from the rear wheel's material. `None` off a corner or
+    /// where the recorder gave nothing usable.
+    pub soil: Option<crate::soil::Soil>,
+}
+
 /// A stretch of track with one job: a corner with its braking zone and exit, a jump with its
 /// face and landing, or the straight between.
 #[derive(Clone, Debug, Serialize)]
@@ -559,6 +618,10 @@ pub struct Section {
     pub core: (usize, usize),
     /// +1 right-hander, -1 left-hander, 0 otherwise.
     pub dir: i8,
+    /// What sort of corner it is. All `Unknown` off a corner. Nothing reads it yet: it lands
+    /// ahead of the rules so that no existing finding changes behaviour because it exists.
+    #[serde(default)]
+    pub corner: CornerType,
     #[serde(skip)]
     runs: Vec<(usize, usize)>,
 }
@@ -679,6 +742,58 @@ fn features(tr: &Trace) -> Vec<Feature> {
     feats
 }
 
+/// What sort of corner this is, read off the reference lap over the corner's core.
+///
+/// Each property is read from the one measurement that held up between two sessions on the
+/// same track, and each returns `Unknown` unless the reading is clear of both thresholds. It
+/// is meant to be shy: a corner called nothing costs a rule its extra sharpness, while a
+/// corner called wrong makes the rule worse than it is today.
+pub fn corner_type(tr: &Trace, core: (usize, usize)) -> CornerType {
+    let (a, b) = (core.0.min(tr.len().saturating_sub(1)), core.1.min(tr.len().saturating_sub(1)));
+    if b <= a + 2 {
+        return CornerType::default();
+    }
+    let pts = &tr.pts[a..=b];
+    let ground: Vec<&Point> = pts.iter().filter(|q| !q.air).collect();
+    if ground.is_empty() {
+        return CornerType::default();
+    }
+
+    // How far it leaned at all. A rut or a berm holds the bike over further than the tyres
+    // alone would on a flat corner, so the peak is what separates them.
+    let lean = ground.iter().map(|q| q.roll.abs()).fold(0.0f32, f32::max);
+    let hold = if lean >= th::RUT_LEAN_DEG {
+        Hold::Rutted
+    } else if lean <= th::FLAT_LEAN_DEG {
+        Hold::Flat
+    } else {
+        Hold::Unknown
+    };
+
+    // How hard the ground hit on the way round, averaged: one bad sample is not a rough corner.
+    let hit = ground.iter().map(|q| q.hit.abs()).sum::<f32>() / ground.len() as f32;
+    let bumps = if hit >= th::ROUGH_HIT_G {
+        Bumps::Rough
+    } else if hit <= th::SMOOTH_HIT_G {
+        Bumps::Smooth
+    } else {
+        Bumps::Unknown
+    };
+
+    // What it is made of: the ground under the rear wheel for most of the corner. Read dry;
+    // wet conditions are a whole-lap matter that `soil` already handles.
+    let mut tally: std::collections::HashMap<u8, usize> = std::collections::HashMap::new();
+    for q in &ground {
+        *tally.entry(q.ground).or_default() += 1;
+    }
+    let soil = tally
+        .into_iter()
+        .max_by_key(|&(_, n)| n)
+        .and_then(|(v, _)| crate::soil::Soil::from_wheel(v, false));
+
+    CornerType { hold, bumps, soil }
+}
+
 /// Splits the track into sections, from the reference lap.
 pub fn sections(reference: &Trace) -> Vec<Section> {
     let last = reference.len() - 1;
@@ -698,6 +813,7 @@ pub fn sections(reference: &Trace) -> Vec<Section> {
         end: b,
         core: (a, b),
         dir: 0,
+        corner: CornerType::default(),
         runs: Vec::new(),
     };
 
@@ -718,6 +834,7 @@ pub fn sections(reference: &Trace) -> Vec<Section> {
             end,
             core: (f.a, f.b),
             dir: f.dir,
+            corner: if f.kind == Kind::Corner { corner_type(reference, (f.a, f.b)) } else { CornerType::default() },
             runs: f.runs.clone(),
         });
         cursor = end;
@@ -2498,6 +2615,161 @@ pub(crate) mod tests {
             t += dt;
         }
         (samples, t)
+    }
+
+    /// A corner is only called what the reading is clear about. Everything here is built from
+    /// points directly rather than from a generated lap, because what is under test is the
+    /// classifier's own thresholds, not how a lap is made.
+    #[test]
+    fn a_corner_is_only_called_what_the_reading_is_clear_about() {
+        let corner = |roll: f32, hit: f32, ground: u8| {
+            let pts: Vec<Point> =
+                (0..40).map(|_| Point { roll, hit, ground, ..Point::default() }).collect();
+            corner_type(&Trace { pts }, (0, 39))
+        };
+
+        // Leaned right over: something is holding the bike. Barely leaned: nothing is.
+        assert_eq!(corner(70.0, 1.0, 12).hold, Hold::Rutted);
+        assert_eq!(corner(40.0, 1.0, 12).hold, Hold::Flat);
+        // In between is not guessed at, in either direction.
+        assert_eq!(corner(52.0, 1.0, 12).hold, Hold::Unknown);
+
+        assert_eq!(corner(70.0, 2.5, 12).bumps, Bumps::Rough);
+        assert_eq!(corner(70.0, 0.8, 12).bumps, Bumps::Smooth);
+        assert_eq!(corner(70.0, 1.5, 12).bumps, Bumps::Unknown);
+
+        // Lean is read whichever way the corner goes.
+        assert_eq!(corner(-70.0, 1.0, 12).hold, Hold::Rutted);
+
+        // The ground is the one under most of the corner: 12 is hardpack, 6 sand, 11 soft.
+        assert_eq!(corner(70.0, 1.0, 12).soil, Some(crate::soil::Soil::Hardpack));
+        assert_eq!(corner(70.0, 1.0, 6).soil, Some(crate::soil::Soil::Sand));
+        assert_eq!(corner(70.0, 1.0, 11).soil, Some(crate::soil::Soil::Soft));
+    }
+
+    /// The things that must not turn a corner into something it isn't.
+    #[test]
+    fn a_corner_type_is_not_led_astray() {
+        let point = |roll: f32, hit: f32, air: bool| Point { roll, hit, air, ground: if air { 0 } else { 12 }, ..Point::default() };
+
+        // One bad landing does not make a corner rough: the hit is averaged, not peaked. Peak
+        // was tried first and moved by more than 2 G between two sessions on the same corner.
+        let mut pts: Vec<Point> = (0..40).map(|_| point(70.0, 0.9, false)).collect();
+        pts[20] = point(70.0, 30.0, false);
+        let spike = corner_type(&Trace { pts }, (0, 39));
+        assert_ne!(spike.bumps, Bumps::Rough, "one spike is not a rough corner");
+
+        // Air is not ground: a jump through a corner must not decide what the corner is made
+        // of, and the lean a rider carries in the air is not the ground holding them.
+        let mut pts: Vec<Point> = (0..40).map(|_| point(40.0, 0.9, false)).collect();
+        for p in pts.iter_mut().take(30) {
+            *p = point(80.0, 0.9, true);
+        }
+        let flown = corner_type(&Trace { pts }, (0, 39));
+        assert_eq!(flown.hold, Hold::Flat, "the leaning was all in the air");
+        assert_eq!(flown.soil, Some(crate::soil::Soil::Hardpack), "the ground is what it touched");
+
+        // Nothing to read is unknown, never a guess.
+        let air: Vec<Point> = (0..40).map(|_| point(80.0, 0.9, true)).collect();
+        let all_air = corner_type(&Trace { pts: air }, (0, 39));
+        assert_eq!((all_air.hold, all_air.bumps, all_air.soil), (Hold::Unknown, Bumps::Unknown, None));
+
+        // Too short to say anything about.
+        let few: Vec<Point> = (0..2).map(|_| point(80.0, 3.0, false)).collect();
+        assert_eq!(corner_type(&Trace { pts: few }, (0, 1)), CornerType::default());
+    }
+
+    /// Prints what every corner in some real recordings looks like, so the corner-type
+    /// thresholds are set against real riding rather than guessed. Reads every `.mxbc` in
+    /// `$COACH_LAPS` and, for each corner of each comparable lap, the numbers a classifier
+    /// would have to work from.
+    ///
+    /// `COACH_LAPS=<dir> cargo test -p mxb-coach inspect_real_corners -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn inspect_real_corners() {
+        let Ok(dir) = std::env::var("COACH_LAPS") else { return };
+        let mut files: Vec<_> = std::fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(|e| e.ok().map(|e| e.path()))
+            .filter(|p| p.extension().is_some_and(|x| x == "mxbc"))
+            .collect();
+        files.sort();
+        for path in files {
+            let Ok(bytes) = std::fs::read(&path) else { continue };
+            let rec = match crate::telemetry::parse(&bytes) {
+                Ok(r) => r,
+                Err(e) => {
+                    println!("{}: unreadable: {e}", path.display());
+                    continue;
+                }
+            };
+            let laps = rec.laps();
+            let usable: Vec<_> = laps.iter().filter(|l| l.whole && !l.invalid).collect();
+            println!(
+                "\n== {} | {} on {} | {:.0} m | {} laps, {} comparable",
+                path.file_name().unwrap().to_string_lossy(),
+                rec.event.bike_name,
+                rec.event.track_name,
+                rec.event.track_length,
+                laps.len(),
+                usable.len()
+            );
+            for l in &laps {
+                println!("   lap {:>2}  {:>7.3}s  whole={} issue={:?} crashed={}",
+                    l.num, l.time_ms as f32 / 1000.0, l.whole, l.issue, l.crashed);
+            }
+            let Some(fast) = usable
+                .iter()
+                .min_by_key(|l| l.time_ms)
+                .and_then(|l| Trace::new(l, rec.event.track_length))
+            else {
+                continue;
+            };
+            println!("   {:>8} {:>7} {:>11} | {:>10} {:>5} {:>4} {:>6} {:>6} {:>6} {:>7} {:>7} {:>7} {:>6}",
+                "hold", "bumps", "soil",
+                "corner", "len", "dir", "roll", "rollm", "vmin", "sv~", "hit~", "drop/m", "grnd");
+            for sc in sections(&fast).iter().filter(|s| s.kind == Kind::Corner) {
+                let (a, b) = sc.core;
+                let (a, b) = (a.min(fast.len() - 1), b.min(fast.len() - 1));
+                if b <= a + 2 {
+                    continue;
+                }
+                let core = &fast.pts[a..=b];
+                let pk = |f: fn(&Point) -> f32| core.iter().map(f).fold(0.0f32, |m, v| m.max(v.abs()));
+                let n = core.len() as f32;
+                let avg = |f: fn(&Point) -> f32| core.iter().map(|q| f(q).abs()).sum::<f32>() / n;
+                let roll = pk(|q| q.roll);
+                let rollm = avg(|q| q.roll);
+                let vmin = core.iter().map(|q| q.v).fold(f32::MAX, f32::min);
+                let svhi = avg(|q| q.sv[0].abs().max(q.sv[1].abs()));
+                let hit = avg(|q| q.hit);
+                let _ = pk;
+                // A rut sits below the way in and out; a berm rises above it.
+                let ends = (fast.pts[a].y + fast.pts[b].y) * 0.5;
+                let low = core.iter().map(|q| q.y).fold(f32::MAX, f32::min);
+                let drop = ends - low;
+                // Hooked: it turns harder on the way out than on the way in.
+                let third = (b - a) / 3;
+                let mean = |r: std::ops::Range<usize>| {
+                    let n = r.len().max(1) as f32;
+                    fast.pts[r].iter().map(|q| q.turn.abs()).sum::<f32>() / n
+                };
+                let (first, last) = (mean(a..a + third.max(1)), mean(b - third.max(1)..b));
+                let mut grounds: Vec<u8> = core.iter().map(|q| q.ground).collect();
+                grounds.sort_unstable();
+                grounds.dedup();
+                let _ = (first, last);
+                let ct = corner_type(&fast, sc.core);
+                print!("   {:>8?} {:>7?} {:>11?} |", ct.hold, ct.bumps, ct.soil);
+                println!(
+                    "   {:>10} {:>5} {:>4} {:>6.1} {:>6.1} {:>6.1} {:>7.3} {:>7.2} {:>7.4} {:>6?}",
+                    sc.name, b - a, sc.dir, roll, rollm, vmin, svhi, hit,
+                    drop / (b - a).max(1) as f32,
+                    grounds
+                );
+            }
+        }
     }
 
     /// Writes a demo session to `$COACH_DEMO_DIR` for looking at the app without the game:
