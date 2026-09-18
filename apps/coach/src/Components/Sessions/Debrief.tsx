@@ -4,6 +4,7 @@ import Page, { Label } from "../Page";
 import SectionStrip from "../Review/SectionStrip";
 import TrackMap from "../Review/TrackMap";
 import SetupFixes from "../Review/SetupFixes";
+import { preloadBike } from "../Review/BikeRender";
 import { Overall, SectionPanel } from "../Review/Review";
 import { coachReview, coachSession, coachSurface, type ReviewOut, type SessionDetail, type Surface } from "@/api/coach";
 import { lapTime } from "@/lib/format";
@@ -58,6 +59,13 @@ export default function Debrief({
         if (live) setData(out);
       })
       .catch((e) => live && setError(String(e)));
+    // The bike is the slowest thing on any step, so it starts loading with the debrief rather
+    // than when the rider gets to it. By then it is already in hand.
+    coachSession(path)
+      .then((d) => {
+        if (live) preloadBike(d.summary.bikeId);
+      })
+      .catch(() => {});
     coachSurface(path)
       .then((s) => live && setSurface(s))
       .catch(() => {});
@@ -102,10 +110,12 @@ export default function Debrief({
       onBack={onBack}
       backLabel={t("nav.sessions")}
       wide
+      fill
       actions={<Button size="sm" variant="outline" onClick={onAllLaps}>{t("debrief.allLaps")}</Button>}
     >
-      <div className="flex min-h-[560px] flex-col">
-        <div className="flex-1">
+      <div className="flex min-h-0 flex-1 flex-col">
+        {/* Only the step scrolls. The rider should never have to scroll to find Next. */}
+        <div className="min-h-0 flex-1 overflow-y-auto pr-1">
           {here === "verdict" && (
             <div>
               <div className="grid gap-3 sm:grid-cols-3">
@@ -156,7 +166,7 @@ export default function Debrief({
         </div>
 
         {/* One thing per screen, so the rider is never asked to choose before being told. */}
-        <div className="mt-6 flex items-center gap-4 border-t border-border pt-4">
+        <div className="mt-5 flex shrink-0 items-center gap-4 border-t border-border pt-4">
           <Button size="sm" variant="outline" onClick={() => setStep((v) => Math.max(0, v - 1))} disabled={step === 0}>
             {t("debrief.back")}
           </Button>

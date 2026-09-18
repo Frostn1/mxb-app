@@ -10,6 +10,7 @@ export default function Page({
   backLabel,
   actions,
   wide,
+  fill,
   children,
 }: {
   title: ReactNode;
@@ -18,11 +19,23 @@ export default function Page({
   backLabel?: string;
   actions?: ReactNode;
   wide?: boolean;
+  /**
+   * Fit the window instead of growing past it: the title row stays put and only the body
+   * scrolls, if anything does. For a page whose own chrome has to stay reachable — the
+   * debrief's Next and Back, which are no use at the bottom of a long scroll.
+   */
+  fill?: boolean;
   children: ReactNode;
 }) {
   return (
-    <div className="h-full overflow-y-auto">
-      <div className={cn("mx-auto px-8 py-8", wide ? "max-w-[1400px]" : "max-w-3xl")}>
+    <div className={cn("h-full", fill ? "overflow-hidden" : "overflow-y-auto")}>
+      <div
+        className={cn(
+          "mx-auto px-8 py-8",
+          wide ? "max-w-[1400px]" : "max-w-3xl",
+          fill && "flex h-full flex-col",
+        )}
+      >
         {onBack && (
           <button
             onClick={onBack}
@@ -32,14 +45,14 @@ export default function Page({
             {backLabel}
           </button>
         )}
-        <div className="flex items-end justify-between gap-4">
+        <div className={cn("flex items-end justify-between gap-4", fill && "shrink-0")}>
           <div className="min-w-0">
             <h2 className="truncate headline text-[24px]">{title}</h2>
             {sub && <div className="mt-1 text-[12.5px] text-muted-foreground">{sub}</div>}
           </div>
           {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}
         </div>
-        <div className="mt-6">{children}</div>
+        <div className={cn("mt-6", fill && "flex min-h-0 flex-1 flex-col")}>{children}</div>
       </div>
     </div>
   );

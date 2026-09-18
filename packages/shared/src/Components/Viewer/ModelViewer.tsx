@@ -1347,12 +1347,21 @@ export interface BikePose {
   forkUp: number;
   /** Steering angle, in degrees. */
   steer: number;
+  /** How far the wheels have turned about their axles, in degrees. */
+  spin: number;
+  /**
+   * Extra turn on the REAR wheel only, in degrees.
+   *
+   * The driven wheel. Gearing is about how fast it turns for the engine behind it, so a bike
+   * running out of revs and a bike bogging differ in the rear wheel and nowhere else.
+   */
+  spinRear: number;
 }
 
-export const NEUTRAL_POSE: BikePose = { rearDrop: 0, forkUp: 0, steer: 0 };
+export const NEUTRAL_POSE: BikePose = { rearDrop: 0, forkUp: 0, steer: 0, spin: 0, spinRear: 0 };
 
 /** Which part of the bike moves with which joint. */
-type PoseGroup = "static" | "swing" | "steer" | "fork";
+type PoseGroup = "static" | "swing" | "steer" | "fork" | "fwheel" | "rwheel";
 
 /**
  * Which pose group a node belongs to, read off the same name prefixes `assemble_bike` mounts
@@ -1361,8 +1370,12 @@ type PoseGroup = "static" | "swing" | "steer" | "fork";
  */
 function poseGroup(name: string): PoseGroup {
   const n = name.toLowerCase();
-  if (n.startsWith("rsusp") || n.startsWith("rwheel")) return "swing";
-  if (n.startsWith("fsusp") || n.startsWith("fwheel")) return "fork";
+  // The wheels first: they ride with the swingarm and the fork, but they also turn about their
+  // own axles, so they need a group of their own inside each.
+  if (n.startsWith("rwheel")) return "rwheel";
+  if (n.startsWith("fwheel")) return "fwheel";
+  if (n.startsWith("rsusp")) return "swing";
+  if (n.startsWith("fsusp")) return "fork";
   if (n.startsWith("steer")) return "steer";
   return "static";
 }
@@ -1512,6 +1525,19 @@ function EdfMesh({
     () => new THREE.Quaternion().setFromAxisAngle(axis, pose.steer * THREE.MathUtils.DEG2RAD),
     [axis, pose.steer],
   );
+  const spinQ = useMemo(
+    () => new THREE.Quaternion().setFromAxisAngle(X_AXIS, pose.spin * THREE.MathUtils.DEG2RAD),
+    [pose.spin],
+  );
+  // The rear carries its own turn on top of the shared one: it is the driven wheel.
+  const spinRearQ = useMemo(
+    () =>
+      new THREE.Quaternion().setFromAxisAngle(
+        X_AXIS,
+        (pose.spin + pose.spinRear) * THREE.MathUtils.DEG2RAD,
+      ),
+    [pose.spin, pose.spinRear],
+  );
   const forkAt = useMemo<Vec3>(() => {
     const v = axis.clone().multiplyScalar(pose.forkUp / 1000);
     return [v.x, v.y, v.z];
@@ -1543,11 +1569,30 @@ function EdfMesh({
       {part("static")}
       <About at={rig.pivot} q={swingQ}>
         {part("swing")}
+        {/* The rear wheel rides with the swingarm and turns about its own axle inside it. A
+            `.geom` that names no axle leaves it where it sits rather than turning it about the
+            pivot, which would swing it through the frame. */}
+        {rig.rearAxle ? (
+          <About at={rig.rearAxle} q={spinRearQ}>
+            {part("rwheel")}
+          </About>
+        ) : (
+          part("rwheel")
+        )}
       </About>
       <About at={rig.steerHead} q={steerQ}>
         {part("steer")}
         {/* Inside the steering group: the fork slides along the axis the bars turn about. */}
-        <group position={forkAt}>{part("fork")}</group>
+        <group position={forkAt}>
+          {part("fork")}
+          {rig.frontAxle ? (
+            <About at={rig.frontAxle} q={spinQ}>
+              {part("fwheel")}
+            </About>
+          ) : (
+            part("fwheel")
+          )}
+        </group>
       </About>
     </group>
   );
@@ -2287,6 +2332,8 @@ export function ModelViewer({
         rearDrop: base.rearDrop + (bikePoseOffset.rearDrop ?? 0),
         forkUp: base.forkUp + (bikePoseOffset.forkUp ?? 0),
         steer: base.steer + (bikePoseOffset.steer ?? 0),
+        spin: base.spin + (bikePoseOffset.spin ?? 0),
+        spinRear: base.spinRear + (bikePoseOffset.spinRear ?? 0),
       }
     : base;
   // Where each model has been moved to. Unlike the pose, this survives a re-resolve: the
