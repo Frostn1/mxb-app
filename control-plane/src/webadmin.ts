@@ -42,6 +42,7 @@ import {
 import { batchCodes, keyQuery, licenseQuery } from "./pluginspage";
 import { paintThumb } from "./pntthumb";
 import { isSteamId64 } from "./steam";
+import { steamAdoption } from "./steamstats";
 import {
   clearNote,
   collectSurvey,
@@ -72,7 +73,8 @@ export function isWebAdmin(steamId: string, env: Env): boolean {
  * Every `/v1/web/admin/*` route the site's dashboards read and write.
  *
  * Usage is the same `collectStats` that `/v1/usage/stats` returns, so a script and the page
- * can never disagree about what a figure means.
+ * can never disagree about what a figure means. The page additionally gets `steam`, which is a
+ * whole extra block rather than a changed figure — nothing shared has two definitions.
  */
 export async function webAdminRoutes(
   request: Request,
@@ -95,8 +97,18 @@ export async function webAdminRoutes(
   const path = url.pathname;
   if (request.method === "GET") {
     switch (path) {
-      case "/v1/web/admin/usage":
-        return said(200, await collectStats(env, windowDays(url), Date.now(), windowApp(url)));
+      // The Steam split rides along rather than living behind its own route: it is one query,
+      // it is read on the same tab, and a second round trip would let the page draw a version
+      // panel from one window and a sign-in panel from another.
+      case "/v1/web/admin/usage": {
+        const days = windowDays(url);
+        const now = Date.now();
+        const [stats, steam] = await Promise.all([
+          collectStats(env, days, now, windowApp(url)),
+          steamAdoption(env, days, now),
+        ]);
+        return said(200, { ...stats, steam });
+      }
 
       // What people said when they were asked. The poll definitions ride along with the
       // figures because the page cannot label a choice id without them, and a second round
