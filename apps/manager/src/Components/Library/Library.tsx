@@ -36,6 +36,7 @@ import {
   Undo2,
   Search as SearchIcon,
   Star,
+  HardDrive,
   type LucideIcon,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -45,6 +46,7 @@ import {
   scanLibrary,
   moveMod,
   revealInExplorer,
+  openGameFolder,
   uninstallMod,
   libraryLedger,
   ledgerCapture,
@@ -55,6 +57,7 @@ import {
   onFrostmodReload,
   mxbsecureAutoUnlock,
   MODS_WATCH_SLUG,
+  type GameFolder,
   type ModType,
 } from "@frost/shared/api/mods";
 import type {
@@ -775,7 +778,7 @@ export default function Library({
     [selectedEntries],
   );
 
-  const { bikePreview, game } = useConfig();
+  const { bikePreview, game, config } = useConfig();
   const { startInstall } = useInstall();
   // The Library is a view of the mods tree, so the one type that installs outside it —
   // ReShade presets, which live in the game's install folder — has no tab here. They're
@@ -873,6 +876,19 @@ export default function Library({
     revealInExplorer(item.path).catch((e) =>
       toast.error(t("library.openFailed"), { description: String(e) }),
     );
+
+  /** Either of the two folders the Library is a view of, in the OS file manager. The
+   *  install dir is optional in the config, so that one gets its own sentence rather
+   *  than the backend's "hasn't been set yet". */
+  const openFolder = (which: GameFolder) => {
+    if (which === "game" && !config.gamePath?.trim()) {
+      toast.error(t("library.gameFolderUnset"));
+      return;
+    }
+    return openGameFolder(which).catch((e) =>
+      toast.error(t("library.openFailed"), { description: String(e) }),
+    );
+  };
 
   const rowActions = (item: LibraryEntry): RowAction[] => [
     {
@@ -1154,6 +1170,35 @@ export default function Library({
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
+        {/* The two folders this list is a view of, one click from the list itself, for
+            the times it's quicker to move a file by hand than to go through the app.
+            Icon-only: the bar is already carrying a search box and three controls. */}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="outline"
+              size="icon"
+              className="h-8 w-8"
+              onClick={() => void openFolder("mods")}
+            >
+              <FolderOpen className="size-4" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="top">{t("library.openModsFolder")}</TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="outline"
+              size="icon"
+              className="h-8 w-8"
+              onClick={() => void openFolder("game")}
+            >
+              <HardDrive className="size-4" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="top">{t("library.openGameFolder")}</TooltipContent>
+        </Tooltip>
         <HelpHint title={t("nav.library")} description={t("library.help")} />
       </ContextBarRight>
 
