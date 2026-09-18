@@ -621,3 +621,70 @@ describe("the vocabulary", () => {
     expect(client).toEqual(Object.keys(KNOWN_EVENTS).sort());
   });
 });
+
+describe("the Steam bit an install reports", () => {
+  const INSTALL_B = "7a2e3c4d-5b6f-4a7e-8f9a-0b1c2d3e4f51";
+
+  /** What a build older than the field sends: nothing. */
+  it("reads a report with no steam field as unknown, never as no", () => {
+    expect(parseReport(JSON.stringify(body()))).toMatchObject({ steam: "unknown" });
+  });
+
+  it("takes the three states and refuses anything else", () => {
+    for (const state of ["yes", "no", "unknown"]) {
+      expect(parseReport(JSON.stringify(body({ steam: state })))).toMatchObject({ steam: state });
+    }
+    expect(parseReport(JSON.stringify(body({ steam: true })))).toBe("steam must be yes, no or unknown");
+    expect(parseReport(JSON.stringify(body({ steam: "maybe" })))).toBe("steam must be yes, no or unknown");
+  });
+
+  /**
+   * The upsert's whole reason for a CASE. An install flushes every half hour, and the startup
+   * gate may not have answered by the first one — so 'unknown' routinely arrives after 'yes' on
+   * the same day. Letting it win would blank the only figure this field exists to produce.
+   */
+  it("never lets a later unknown erase a sign-in already recorded today", async () => {
+    const db = d1();
+    const env = { DB: db } as unknown as Env;
+    await reportUsage(post(body({ steam: "yes" })), env);
+    await reportUsage(post(body({ steam: "unknown" })), env);
+
+    const row = await db
+      .prepare("SELECT steam FROM usage_daily WHERE install_id = ?")
+      .bind(INSTALL)
+      .first<{ steam: string }>();
+    expect(row?.steam).toBe("yes");
+  });
+
+  /** A real change of state still has to land: signing out is not the same as not knowing. */
+  it("lets a known state replace another known state", async () => {
+    const db = d1();
+    const env = { DB: db } as unknown as Env;
+    await reportUsage(post(body({ steam: "no" })), env);
+    await reportUsage(post(body({ steam: "yes" })), env);
+
+    const row = await db
+      .prepare("SELECT steam FROM usage_daily WHERE install_id = ?")
+      .bind(INSTALL)
+      .first<{ steam: string }>();
+    expect(row?.steam).toBe("yes");
+  });
+
+  it("buckets installs by their most recent day, with unknown kept apart", async () => {
+    const db = d1();
+    const now = Date.now();
+    const env = { DB: db } as unknown as Env;
+    await reportUsage(post(body({ steam: "yes" })), env);
+    await reportUsage(post(body({ installId: INSTALL_B, steam: "no" })), env);
+    // A third install on a build that predates the field, sending nothing.
+    await reportUsage(post(body({ installId: "7a2e3c4d-5b6f-4a7e-8f9a-0b1c2d3e4f52" })), env);
+
+    const stats = await collectStats(env, 30, now);
+
+    expect(stats.steamInstalls).toEqual({ yes: 1, no: 1, unknown: 1 });
+    // The three buckets are the window's installs, so the page can show them as a whole.
+    expect(stats.steamInstalls.yes + stats.steamInstalls.no + stats.steamInstalls.unknown).toBe(
+      stats.active.window,
+    );
+  });
+});

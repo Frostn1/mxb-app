@@ -50,9 +50,11 @@ import {
   isGameId,
   isInstallId,
   isPlatform,
+  isSteamFlag,
   MAX_EVENTS_PER_REPORT,
   MAX_EVENT_COUNT,
   MAX_REPORT_MINUTES,
+  STEAM_STATES,
 } from "./validate";
 
 /** A report is a few hundred bytes. Anything approaching this is not one. */
@@ -287,6 +289,13 @@ interface Report {
   sessions: number;
   minutes: number;
   events: { name: string; count: number }[];
+  /**
+   * Whether the startup gate has confirmed a Steam identity for this install.
+   *
+   * 'unknown' on a build that predates the field and on one whose gate has not answered yet —
+   * never 'no'. See `0041_usage_steam.sql`.
+   */
+  steam: (typeof STEAM_STATES)[number];
 }
 
 /**
@@ -344,10 +353,14 @@ export async function reportUsage(request: Request, env: Env): Promise<Response>
   const statements = [
     env.DB.prepare(
       "INSERT INTO usage_daily" +
-        " (install_id, app, day, version, os, game, sessions, minutes, first_seen, updated_at)" +
-        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)" +
+        " (install_id, app, day, version, os, game, sessions, minutes, steam, first_seen, updated_at)" +
+        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)" +
         " ON CONFLICT(install_id, app, day) DO UPDATE SET" +
         "  version = excluded.version, os = excluded.os, game = excluded.game," +
+        // Never let 'unknown' erase what was already known today. A flush from before the gate
+        // answered, or a second app on the same machine that has not been updated yet, would
+        // otherwise blank a real 'yes' — and the figure this exists for is the count of 'yes'.
+        "  steam = CASE WHEN excluded.steam = 'unknown' THEN steam ELSE excluded.steam END," +
         // Accumulate, but never past what a day can hold. A real install cannot reach either
         // ceiling; anything that does is telling us something other than how long it was open.
         // Spliced, not bound: these are module constants, and mixing numbered parameters into
@@ -365,6 +378,7 @@ export async function reportUsage(request: Request, env: Env): Promise<Response>
       report.game,
       Math.min(report.sessions, MAX_DAY_SESSIONS),
       Math.min(report.minutes, MAX_DAY_MINUTES),
+      report.steam,
       now,
       now,
     ),
@@ -404,7 +418,7 @@ export function parseReport(raw: string): Report | string {
     return "expected a JSON body";
   }
   if (!body || typeof body !== "object") return "expected a JSON body";
-  const { installId, app, version, os, game, sessions, minutes, events } = body as Record<
+  const { installId, app, version, os, game, sessions, minutes, events, steam } = body as Record<
     string,
     unknown
   >;
@@ -418,6 +432,8 @@ export function parseReport(raw: string): Report | string {
   if (!isGameId(game)) return "game must be mxb or gpb";
   if (!isCount(sessions, 1000)) return "sessions out of range";
   if (!isCount(minutes, MAX_REPORT_MINUTES)) return "minutes out of range";
+  // Absent is 'unknown', like `app` above: a build that predates the field must keep landing.
+  if (steam !== undefined && !isSteamFlag(steam)) return "steam must be yes, no or unknown";
   if (!Array.isArray(events)) return "events must be an array";
   if (events.length > MAX_EVENTS_PER_REPORT) return "too many events in one report";
 
@@ -447,6 +463,7 @@ export function parseReport(raw: string): Report | string {
     game: game as string,
     sessions: sessions as number,
     minutes: minutes as number,
+    steam: (steam as (typeof STEAM_STATES)[number] | undefined) ?? "unknown",
     events: clean,
   };
 }
@@ -517,6 +534,14 @@ export interface Stats {
   events: EventRow[];
   /** Names this app is expected to report that have no rows in the window at all. */
   unused: string[];
+  /**
+   * Installs by whether the startup gate confirmed a Steam identity, over the window.
+   *
+   * Sums to `active.window`, and `unknown` is its own bucket rather than being folded into
+   * `no` — most of it is builds that predate the field, and calling those a refusal would
+   * describe the release rollout as if it were the sign-in gate.
+   */
+  steamInstalls: { yes: number; no: number; unknown: number };
 }
 
 /** UTC day, `n` days back from `now`. */
@@ -570,7 +595,7 @@ export async function collectStats(
   const before = dayKey(now, days * 2 - 1);
   const canRetain = days * 2 <= RETENTION_DAYS;
 
-  const [active, ever, fresh, totals, daily, retention, current, platforms, games, events] =
+  const [active, ever, fresh, totals, daily, retention, current, platforms, games, events, steam] =
     await Promise.all([
       // `window` is quoted for the reason `returning` is below: both are SQLite keywords.
       // Scanned from whichever of the month and the window reaches further back, so one pass
@@ -659,11 +684,25 @@ export async function collectStats(
           " FROM usage_events WHERE day >= ?/*app*/ GROUP BY name ORDER BY reach DESC, volume DESC",
         from,
       ),
+      // Each install counted once, under its most recent day — the same window function
+      // `currentVersions` uses, and for the same reason: a plain GROUP BY would count an
+      // install under both states on the day it signed in, which is exactly the day that matters.
+      q<{ label: string; installs: number }>(
+        "SELECT label, COUNT(*) AS installs FROM (" +
+          " SELECT steam AS label," +
+          " ROW_NUMBER() OVER (PARTITION BY install_id ORDER BY day DESC) AS rn" +
+          " FROM usage_daily WHERE day >= ?/*app*/" +
+          ") WHERE rn = 1 GROUP BY label",
+        from,
+      ),
     ]);
 
   const rows = events.results ?? [];
   const seen = new Set(rows.map((r) => r.name));
   const counts = active.results?.[0] ?? { day: 0, week: 0, month: 0, window: 0 };
+  // A state with no installs has no row, not a zero — the bucket has to supply that itself.
+  const steamBucket = (state: string) =>
+    (steam.results ?? []).find((r) => r.label === state)?.installs ?? 0;
 
   return {
     generatedAt: now,
@@ -689,6 +728,11 @@ export async function collectStats(
     // Only the names this app could have sent. A studio-only read used to list the manager's
     // entire vocabulary as never touched, which buried the few that genuinely were.
     unused: knownFor(app).filter((name) => !seen.has(name)),
+    steamInstalls: {
+      yes: steamBucket("yes"),
+      no: steamBucket("no"),
+      unknown: steamBucket("unknown"),
+    },
   };
 }
 

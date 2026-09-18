@@ -21,6 +21,7 @@
 //! calling three functions rather than by copying the machinery and letting it drift.
 
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
@@ -57,7 +58,15 @@ fn http() -> reqwest::Client {
 #[serde(tag = "status", rename_all = "lowercase")]
 enum Verdict {
     /// This install may run.
-    Ok,
+    ///
+    /// `steam` is whether Valve has confirmed the account — a different question from whether it
+    /// may run, because with the requirement off an unlinked install is also `Ok`. Defaulted, so
+    /// a control plane older than the field reads as "not confirmed" rather than failing to
+    /// deserialize and taking the whole gate down with it.
+    Ok {
+        #[serde(default)]
+        steam: bool,
+    },
     /// A Steam sign-in is required before it may. Honest, and never fatal.
     Signin {
         #[serde(default)]
@@ -75,6 +84,30 @@ enum Verdict {
 struct SigninRequired {
     required: bool,
     message: String,
+}
+
+/// What the gate said about this install's Steam sign-in, for the usage counters to report.
+///
+/// Three states, and `UNKNOWN` is the one that matters: the gate answers once at startup and can
+/// fail to (offline, no token yet), while the counters flush every half hour regardless. Reading
+/// "we have not been told" as "not signed in" would put every unreachable start in the `no`
+/// bucket and make the adoption figure a graph of the network. See `0041_usage_steam.sql`.
+const STEAM_UNKNOWN: u8 = 0;
+const STEAM_NO: u8 = 1;
+const STEAM_YES: u8 = 2;
+static STEAM: AtomicU8 = AtomicU8::new(STEAM_UNKNOWN);
+
+/// What this install reports about its sign-in: `"yes"`, `"no"` or `"unknown"`.
+///
+/// Named the way the wire names it so there is nothing to translate at the call site — the one
+/// caller is `usage::take`, and a second spelling of these three words is a bug waiting to
+/// happen.
+pub fn steam_state() -> &'static str {
+    match STEAM.load(Ordering::Relaxed) {
+        STEAM_YES => "yes",
+        STEAM_NO => "no",
+        _ => "unknown",
+    }
 }
 
 /// The last verdict this run reached, kept so a webview can ask for it.
@@ -215,11 +248,16 @@ pub async fn check(app: AppHandle) {
     };
 
     match verdict {
-        Verdict::Ok => {
+        Verdict::Ok { steam } => {
+            STEAM.store(if steam { STEAM_YES } else { STEAM_NO }, Ordering::Relaxed);
             unmark(&app);
             announce(&app, SigninRequired { required: false, message: String::new() });
         }
         Verdict::Signin { message } => {
+            // A sign-in wall is only raised for an account Valve has not confirmed, so this
+            // verdict is itself the answer — and it is the one state where "not signed in" is
+            // known rather than merely untold.
+            STEAM.store(STEAM_NO, Ordering::Relaxed);
             let message = if message.trim().is_empty() { FALLBACK_SIGNIN.to_string() } else { message };
             log::info!("[gate] a Steam sign-in is required before this install may run");
             announce(&app, SigninRequired { required: true, message });

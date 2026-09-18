@@ -1,0 +1,30 @@
+-- Whether the install that reported has a Valve-confirmed Steam identity.
+--
+-- The one question the anonymous counters could not answer. `client_modules` can, by joining an
+-- account to a build, but only for the accounts whose *game* was seen running — about half the
+-- estate — so the figure was always a sample presented beside totals. This closes that by asking
+-- the install itself, alongside everything else it already reports.
+--
+-- ## This is still nobody
+--
+-- The column is one tri-state word. It is not a Steam id, not an account id, not a rider name,
+-- and it does not become one by being next to `install_id`, which is a UUID a machine minted for
+-- itself and joined to nothing. The table's promise in `usage.ts` — "there is no user here" —
+-- survives intact: this says *whether* a sign-in happened, never whose.
+--
+-- ## Why three states and not a boolean
+--
+-- Every build shipped before this one reports nothing at all, and a NOT NULL boolean would have
+-- to read them as `false`. That would invent a cliff: the day this deploys, the whole estate
+-- would appear to have no Steam sign-in and then "adopt" it at exactly the rate people happen to
+-- update, which is a graph of the rollout wearing the label of the gate. 'unknown' is the honest
+-- answer for a client that was never asked, and the dashboard shows it as its own bucket rather
+-- than folding it into either side.
+--
+-- The gate is also allowed to not know: it answers once at startup and the network can fail, so
+-- an install that is running reports 'unknown' until it has a verdict. See `reportUsage` for why
+-- the upsert never lets 'unknown' overwrite a value that was known earlier the same day.
+--
+-- A plain ADD COLUMN with a constant default is metadata-only in SQLite — no table rebuild, and
+-- no copy of the kind 0030 needed to widen the primary key.
+ALTER TABLE usage_daily ADD COLUMN steam TEXT NOT NULL DEFAULT 'unknown';

@@ -557,7 +557,9 @@ describe("locking the apps down to a Steam sign-in", () => {
   it("does nothing until the deployment turns it on", async () => {
     const env = await deployment(); // MXB_REQUIRE_STEAM unset
     await account(env, "acc_nosteam", "t", null, null);
-    expect(await (await gate(env, "t")).json()).toEqual({ status: "ok" });
+    // `ok` with `steam: false` — the two are different questions, and only this deployment
+    // setting makes an unlinked install allowed to run.
+    expect(await (await gate(env, "t")).json()).toEqual({ status: "ok", steam: false });
   });
 
   it("asks an unlinked install to sign in when it is on, honestly", async () => {
@@ -572,7 +574,7 @@ describe("locking the apps down to a Steam sign-in", () => {
   it("lets a Valve-confirmed install straight through", async () => {
     const env = await deployment({ MXB_REQUIRE_STEAM: "1" });
     await account(env, "acc_steam", "t", BUYER, null);
-    expect(await (await gate(env, "t")).json()).toEqual({ status: "ok" });
+    expect(await (await gate(env, "t")).json()).toEqual({ status: "ok", steam: true });
   });
 
   it("restores a lost Steam link from the log rather than nagging a linked account", async () => {
@@ -582,7 +584,9 @@ describe("locking the apps down to a Steam sign-in", () => {
     await env.DB.prepare("INSERT INTO steam_links (account_id, steam_id, linked_at) VALUES (?, ?, ?)")
       .bind("acc_lost", BUYER, Date.now())
       .run();
-    expect(await (await gate(env, "t")).json()).toEqual({ status: "ok" });
+    // Restored from the log, so the reported bit is `true` as well — the usage counters must
+    // not read a recovered link as an install that never signed in.
+    expect(await (await gate(env, "t")).json()).toEqual({ status: "ok", steam: true });
   });
 
   it("a ban still wins over the sign-in requirement", async () => {
@@ -616,8 +620,8 @@ describe("the desktop apps' startup gate", () => {
     await account(env, "acc_clean", "clean-token", CLEAN, OTHER_GUID);
     const gate = (token: string) => call(env, req("GET", "/v1/app/gate", { key: token, origin: null }));
 
-    expect(await (await gate("clean-token")).json()).toEqual({ status: "ok" });
-    expect(await (await gate("banned-token")).json()).toEqual({ status: "ok" });
+    expect(await (await gate("clean-token")).json()).toEqual({ status: "ok", steam: true });
+    expect(await (await gate("banned-token")).json()).toEqual({ status: "ok", steam: true });
 
     await ban(env, GUID);
     // The banned install still reaches the gate (it is on the allow-list) — that is how it is
@@ -626,7 +630,7 @@ describe("the desktop apps' startup gate", () => {
     expect(blocked.status).toBe(200);
     expect(await blocked.json()).toEqual({ status: "unsupported", message: APP_BLOCK_MESSAGE });
     // And a clean install is unaffected.
-    expect(await (await gate("clean-token")).json()).toEqual({ status: "ok" });
+    expect(await (await gate("clean-token")).json()).toEqual({ status: "ok", steam: true });
   });
 });
 
