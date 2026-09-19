@@ -6,9 +6,10 @@
 //!
 //! The GUID is not a third identity to collect either: every rider link on the site is `FF`
 //! followed by the SteamID64 in hex (checked against all 35 rider ids on their Records,
-//! Results and Season Ranks pages, 2026-09-08), and [`crate::steamid`] already reads the
-//! signed-in SteamID64 off Steam's own `loginusers.vdf`, offline. So the player's own profile
-//! costs one request and no setup at all.
+//! Results and Season Ranks pages, 2026-09-08). The SteamID64 is the one this app is signed in
+//! as — the Steam sign-in the account is linked to, which Valve verified — and failing that the
+//! one [`crate::steamid`] reads off Steam's own `loginusers.vdf`, offline. So the player's own
+//! profile costs one request and no setup at all.
 //!
 //! The exception is someone who bought MX Bikes direct rather than on Steam: they set a
 //! stand-alone GUID on the site, and it is not derived from anything we can see. They pass it

@@ -154,6 +154,9 @@ import SurveySetting from "@frost/shared/Components/Survey/SurveySetting";
 import { cn } from "@frost/shared/lib/utils";
 
 const REPO_URL = "https://github.com/Frostn1/mxb-app";
+// Where the app comes from, as far as anyone using it is concerned. GitHub is still where the
+// files and the changelog sit, but nobody has to start there.
+const SITE_URL = "https://mxbsecure.com/app";
 // Permanent invite (no expiry, no use cap) — a link that dies leaves a dead button
 // in a shipped build, and the app can't be told about a new one without an update.
 const DISCORD_URL = "https://discord.gg/3994Rr3ywb";
@@ -1202,7 +1205,7 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
             desc={t("settings.modsFolderDesc")}
           >
             <div className="flex gap-2">
-              <div className="flex flex-1 items-center gap-2 rounded-lg border border-input bg-background px-3 py-2.5 font-mono text-[12px] text-muted-foreground">
+              <div className="flex min-w-0 flex-1 items-center gap-2 rounded-lg border border-input bg-background px-3 py-2.5 font-mono text-[12px] text-muted-foreground">
                 {/* Named rather than a bare "Not set": switching to a title the player
                     hasn't installed lands here, and "Not set" says neither what to set
                     nor which game it's for. */}
@@ -1238,7 +1241,9 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
                 )}
               >
                 {modsRoot.exists ? "Reading mods from " : "No mods folder at "}
-                <span className="font-mono">{modsRoot.path}</span>
+                {/* A path has no spaces to break at, so it has to be told it may break
+                    mid-word — otherwise a deep one runs straight out of the card. */}
+                <span className="break-all font-mono">{modsRoot.path}</span>
                 {!modsRoot.exists && " — nothing will show up until it's there."}
               </p>
             )}
@@ -1268,7 +1273,7 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
               <div className="mt-2 flex gap-2">
                 <div
                   className={cn(
-                    "flex flex-1 items-center gap-2 rounded-lg border border-input bg-background px-3 py-2 font-mono text-[12px]",
+                    "flex min-w-0 flex-1 items-center gap-2 rounded-lg border border-input bg-background px-3 py-2 font-mono text-[12px]",
                     config.profilesPath ? "text-muted-foreground" : "text-faint",
                   )}
                 >
@@ -1314,7 +1319,7 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
               />
             </p>
             <div className="flex gap-2">
-              <div className="flex flex-1 items-center gap-2 rounded-lg border border-input bg-background px-3 py-2.5 font-mono text-[12px] text-muted-foreground">
+              <div className="flex min-w-0 flex-1 items-center gap-2 rounded-lg border border-input bg-background px-3 py-2.5 font-mono text-[12px] text-muted-foreground">
                 <span className="flex-1 truncate" title={config.gamePath}>
                   {config.gamePath || t("settings.notSet")}
                 </span>
@@ -1344,7 +1349,7 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
                   {t("settings.wineRunnerDesc", { game: game.display })}
                 </p>
                 <div className="flex gap-2">
-                  <div className="flex flex-1 items-center gap-2 rounded-lg border border-input bg-background px-3 py-2.5 font-mono text-[12px] text-muted-foreground">
+                  <div className="flex min-w-0 flex-1 items-center gap-2 rounded-lg border border-input bg-background px-3 py-2.5 font-mono text-[12px] text-muted-foreground">
                     <span className="flex-1 truncate" title={wineHost?.runner}>
                       {wineHost?.runner || t("settings.wineRunnerNone")}
                     </span>
@@ -2127,7 +2132,7 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
                 </span>
                 <span className="text-[11px] text-muted-foreground">
                   {checking
-                    ? t("settings.checkingGitHub")
+                    ? t("settings.checkingUpdates")
                     : statusError
                       ? t("settings.updateCheckFailed")
                       : // Above everything else: a file in the game folder that aborts
@@ -2481,10 +2486,10 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
                 </span>
               )}
               <button
-                onClick={() => openUrl(REPO_URL)}
+                onClick={() => openUrl(SITE_URL)}
                 className="flex cursor-default items-center gap-1 font-semibold text-primary hover:brightness-110"
               >
-                GitHub <ExternalLink className="size-3" />
+                mxbsecure.com <ExternalLink className="size-3" />
               </button>
               <button
                 onClick={() => openUrl(`${REPO_URL}/blob/main/CHANGELOG.md`)}
@@ -2534,7 +2539,7 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
                 <span className="text-primary">❄</span>
                 <span>by</span>
                 <button
-                  onClick={() => openUrl("https://github.com/Frostn1")}
+                  onClick={() => openUrl("https://mxbsecure.com")}
                   className="cursor-default font-semibold text-primary hover:brightness-110"
                 >
                   Frost

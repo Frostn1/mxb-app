@@ -686,9 +686,9 @@ export const en = {
   "settings.notRunning": "Not running",
   "settings.frostmodInstalled": "Installed{{suffix}}",
   "settings.notInstalled": "Not installed",
-  "settings.checkingGitHub": "Checking GitHub for the latest release…",
+  "settings.checkingUpdates": "Checking mxbsecure.com for the latest release…",
   "settings.updateCheckFailed":
-    "Couldn't check for updates — offline or GitHub unavailable.",
+    "Couldn't check for updates — offline or mxbsecure.com unavailable.",
   "settings.latestVersion": "Latest: {{version}}",
   "settings.frostmodStrayMsvcr90":
     "A file in your game folder crashes MX Bikes with \"R6034\" — move it aside to fix it.",

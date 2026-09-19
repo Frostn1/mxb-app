@@ -20,9 +20,10 @@ import GuidDialog from "./GuidDialog";
 /**
  * The player's standing on MXB Ranked — rank, season stats and the last 50 races.
  *
- * There is nothing to sign into and no account to link. The profile is public and
- * server-rendered, and MX Bikes' GUID is `FF` + the SteamID64, which the app already reads off
- * Steam's own files — so for a Steam copy this tab works the first time it is opened, with no
+ * Nothing to sign into on mxb-ranked's side: the profile is public and server-rendered. Whose
+ * it shows follows the Steam account the app is signed in as — MX Bikes' GUID is `FF` + the
+ * SteamID64, so the sign-in names the rider — falling back to the account the Steam client on
+ * this machine is on. Either way a Steam copy works the first time this tab is opened, with no
  * setup at all. A copy bought direct from PiBoSo has a stand-alone GUID only mxb-ranked knows;
  * that one is typed in once, through the same dialog used to look somebody else up.
  *

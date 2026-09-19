@@ -695,9 +695,9 @@ export const ptBR: Translation = {
   "settings.notRunning": "Não está em execução",
   "settings.frostmodInstalled": "Instalado{{suffix}}",
   "settings.notInstalled": "Não instalado",
-  "settings.checkingGitHub": "Verificando a última versão no GitHub…",
+  "settings.checkingUpdates": "Verificando a última versão no mxbsecure.com…",
   "settings.updateCheckFailed":
-    "Não foi possível verificar as atualizações — sem conexão ou GitHub indisponível.",
+    "Não foi possível verificar as atualizações — sem conexão ou mxbsecure.com indisponível.",
   "settings.latestVersion": "Última: {{version}}",
   "settings.frostmodStrayMsvcr90":
     "Um arquivo na pasta do jogo faz o MX Bikes travar com \"R6034\" — tire-o do caminho para resolver.",

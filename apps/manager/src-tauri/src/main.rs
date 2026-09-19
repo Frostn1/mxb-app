@@ -4105,20 +4105,47 @@ struct RankedIdentity {
 
 /// The GUID this machine's profile lives under.
 ///
-/// A Steam copy needs no setup: MX Bikes' GUID is `FF` + the SteamID64, and Steam records the
-/// signed-in account on disk. A copy bought direct from PiBoSo has a stand-alone GUID that
-/// only mxb-ranked knows, so that one is typed in and kept in config — which is the same
-/// field used to point the tab at a friend.
+/// Whose season the tab shows is decided in this order, and the order is the point:
+///
+/// 1. A GUID typed by hand — a copy bought direct from PiBoSo, or a friend being looked up.
+///    Someone who typed one meant it.
+/// 2. **The Steam account this app is signed in as.** That sign-in is verified by Valve and
+///    the account's GUID is pinned from it, so it is the identity the player actually chose
+///    rather than whichever account the Steam client on this machine was last opened with.
+/// 3. The Steam client on this machine, as a fallback for an install that has never signed in.
+///
+/// A Steam copy therefore needs no setup at all either way: MX Bikes' GUID is `FF` + the
+/// SteamID64, so knowing the account is knowing the GUID.
 #[tauri::command]
-fn ranked_identity(app: tauri::AppHandle) -> RankedIdentity {
-    let manual = config::load_or_detect(&app).unwrap_or_default().ranked_guid;
-    if let Some(guid) = ranked::normalise_guid(&manual) {
+async fn ranked_identity(app: tauri::AppHandle) -> RankedIdentity {
+    let cfg = config::load_or_detect(&app).unwrap_or_default();
+    if let Some(guid) = ranked::normalise_guid(&cfg.ranked_guid) {
         return RankedIdentity { guid, source: "manual".into() };
+    }
+    if let Some(guid) = signed_in_guid(&app, &cfg).await {
+        return RankedIdentity { guid, source: "steam".into() };
     }
     match ranked::local_guid() {
         Some(guid) => RankedIdentity { guid, source: "steam".into() },
         None => RankedIdentity::default(),
     }
+}
+
+/// The GUID of the Steam account this app is signed in as, or `None` when it isn't signed in.
+///
+/// Usually free: the sign-in pins the derived GUID on the account and [`identity`] keeps a copy
+/// in `cp_guid`, so the answer is already on disk and works offline. The request is only for the
+/// install that has signed in but never claimed — and if it fails, the caller falls through to
+/// the local Steam read rather than the tab going blank over one unreachable endpoint.
+async fn signed_in_guid(app: &tauri::AppHandle, cfg: &config::AppConfig) -> Option<String> {
+    if let Some(guid) = ranked::normalise_guid(&cfg.cp_guid) {
+        return Some(guid);
+    }
+    if cfg.cp_token.trim().is_empty() {
+        return None;
+    }
+    let steam_id = gate::steam_link_status(app).await.ok().flatten()?;
+    ranked::guid_from_steam_id64(&steam_id)
 }
 
 /// One rider's rank, season standings and last 50 races, read off mxb-ranked.com.
@@ -4134,7 +4161,7 @@ async fn ranked_profile(
     let guid = match ranked::normalise_guid(&asked) {
         Some(g) => g,
         // Not "invalid": an empty argument is the tab asking for the player's own.
-        None if asked.trim().is_empty() => ranked_identity(app).guid,
+        None if asked.trim().is_empty() => ranked_identity(app).await.guid,
         None => return Err(format!("{asked} isn't an MX Bikes GUID")),
     };
     if guid.is_empty() {
