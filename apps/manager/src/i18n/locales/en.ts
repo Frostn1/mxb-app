@@ -1202,9 +1202,6 @@ export const en = {
   "library.stockSection": "Stock tracks",
   "library.stockSectionHint":
     "The tracks MX Bikes ships with. They live inside the game's own tracks.pkz, so there's no file here to move or remove — view one in 3D, or extract it as its own .pkz to work on.",
-  "library.extractStock": "Extract as .pkz",
-  "library.extractingStock": "Extracting {{name}}…",
-  "library.extractedStock": "Extracted — {{size}}",
   "library.searchPlaceholder": "Search installed…",
   "library.sortFolder": "By folder",
   "library.sortRecent": "Recently added",

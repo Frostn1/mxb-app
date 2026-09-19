@@ -7049,7 +7049,6 @@ fn main() {
             mxb_core::trackview::diagnose_track,
             mxb_core::trackview::resolve_track_source,
             mxb_core::trackview::list_stock_tracks,
-            mxb_core::trackview::extract_stock_track,
             mxb_core::viewer::unpack_paint,
             mxb_core::viewer::texture_bytes,
             mxb_core::viewer::watch_paint_files,

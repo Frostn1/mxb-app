@@ -96,7 +96,6 @@ import { useConfig } from "@frost/shared/Context/Config";
 import { useImport } from "../Dropzone/useImport";
 import { useShare } from "../../Context/Share";
 import { cachedScan, dropScans, putScan } from "./scanCache";
-import { extractStock } from "./extractStock";
 import { useFavorites } from "../../lib/useFavorites";
 
 /** Starred mods, by tab and file name — a name survives a move between folders, a path doesn't. */
@@ -972,8 +971,8 @@ export default function Library({
    *
    * Short on purpose. A stock track is one folder inside the install's shared `tracks.pkz`,
    * so there is no file of its own to move, share or uninstall — sharing would hand over the
-   * whole 1.7 GB archive, and uninstalling would aim a delete at the game itself. Extract
-   * writes a copy you own and can work on; Reveal shows the archive it came out of.
+   * whole 1.7 GB archive, and uninstalling would aim a delete at the game itself. Reveal
+   * shows the archive it came out of.
    */
   const stockActions = (item: LibraryEntry): RowAction[] => [
     {
@@ -981,12 +980,6 @@ export default function Library({
       icon: Star,
       label: isStarred(item) ? t("library.unstar") : t("library.star"),
       onSelect: () => favs.toggle(starId(modType, item)),
-    },
-    {
-      key: "extract",
-      icon: PackageOpen,
-      label: t("library.extractStock"),
-      onSelect: () => void extractStock(item, t),
     },
     {
       key: "reveal",

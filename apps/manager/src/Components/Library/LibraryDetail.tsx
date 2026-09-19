@@ -10,7 +10,6 @@ import {
   Box,
   Mountain,
   Share2,
-  PackageOpen,
   type LucideIcon,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -32,7 +31,6 @@ import {
   formatLength,
 } from "@frost/shared/lib/mods";
 import { CATEGORY_ICON, CATEGORY_LABEL, categoryIcon } from "./categories";
-import { extractStock } from "./extractStock";
 import { Trans } from "@/i18n";
 import { ContextBarLeft } from "../Shell/ContextBar";
 import { useT } from "@/i18n";
@@ -235,15 +233,6 @@ export default function LibraryDetail({
               {canMove && (
                 <Button variant="outline" size="sm" onClick={() => onMove(entry)}>
                   <FolderInput className="size-3.5" /> Move
-                </Button>
-              )}
-              {isStock && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => void extractStock(entry, t)}
-                >
-                  <PackageOpen className="size-3.5" /> {t("library.extractStock")}
                 </Button>
               )}
               {/* Sharing a stock entry would share the install's whole 1.7 GB archive, and
