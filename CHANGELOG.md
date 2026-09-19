@@ -66,6 +66,8 @@
 - The Studio tab. Frost's Studio is its own app.
 
 ### Fixed
+- A track only has to be looked up once. What each one turned out to be is kept between
+  runs, so the same track on another server, a refresh or a restart draws straight away.
 - A track identified in the server panel now shows its picture in the list beside it, and
   on every other server running the same track.
 - A server's track now links to its page on mxb-mods.com even when you already have the

@@ -6,6 +6,7 @@ mod bikeswap;
 mod bundle;
 mod cancel;
 pub(crate) use mxb_core::cfg;
+mod trackbook;
 mod trainerfix;
 mod trashbin;
 
@@ -3720,6 +3721,20 @@ async fn guess_server_track(app: tauri::AppHandle, track: String) -> Result<Trac
         }
     }
 
+    // What this id turned out to be last time, on any server and on any run of the app.
+    // Identification is four requests at worst and the answer barely changes, so the panel
+    // reads the book before it touches a catalogue — and a remembered "nowhere" counts, or
+    // the tracks with no page would be the ones paying full price every rotation.
+    if let Some(known) = trackbook::get(&app, &id) {
+        guess.source = known.source;
+        guess.product_id = known.product_id;
+        guess.product_name = known.product_name;
+        guess.product_url = known.product_url;
+        guess.product_image = known.product_image;
+        guess.exact = guess.exact || known.exact;
+        return Ok(guess);
+    }
+
     // The id is snake_case and a product title is not, so the underscores become spaces
     // before any catalogue sees it.
     let words = id.replace('_', " ");
@@ -3737,7 +3752,7 @@ async fn guess_server_track(app: tauri::AppHandle, track: String) -> Result<Trac
             guess.product_url = hit.link;
             guess.product_image = hit.image.unwrap_or_default();
             guess.exact = true;
-            return Ok(guess);
+            return Ok(learned(&app, guess));
         }
     }
 
@@ -3754,7 +3769,7 @@ async fn guess_server_track(app: tauri::AppHandle, track: String) -> Result<Trac
             // `exact` describes the name fold, and it is already true for something found on
             // disk — a catalogue's opinion must not downgrade that to "we think".
             guess.exact = guess.exact || exact;
-            return Ok(guess);
+            return Ok(learned(&app, guess));
         }
     }
 
@@ -3762,7 +3777,7 @@ async fn guess_server_track(app: tauri::AppHandle, track: String) -> Result<Trac
     // whether something is installed — reused here rather than a second opinion about names.
     if let Ok(hits) = mods::shop_catalog::match_products(&app, &[id.clone()]).await {
         if let Some(hit) = hits.into_iter().flatten().next() {
-            return Ok(shop_guess(guess, hit, true));
+            return Ok(learned(&app, shop_guess(guess, hit, true)));
         }
     }
     if let Ok(page) =
@@ -3771,7 +3786,7 @@ async fn guess_server_track(app: tauri::AppHandle, track: String) -> Result<Trac
         if let Some((hit, exact)) = best_track_hit(&id, page.items, |m| m.title.clone(), |m| {
             sells_tracks(&m.category_names)
         }) {
-            return Ok(shop_guess(guess, hit, exact));
+            return Ok(learned(&app, shop_guess(guess, hit, exact)));
         }
     }
 
@@ -3792,7 +3807,30 @@ async fn guess_server_track(app: tauri::AppHandle, track: String) -> Result<Trac
             guess.exact = guess.exact || exact;
         }
     }
-    Ok(guess)
+    // Reached whether or not the hub had it: a miss is worth remembering too.
+    Ok(learned(&app, guess))
+}
+
+/// Put what a lookup found into the book, and hand the guess straight back.
+///
+/// Only the catalogue half is stored. Whether the track is installed is worked out afresh on
+/// every call, because the library changes under us and a local scan is cheap.
+fn learned(app: &tauri::AppHandle, guess: TrackGuess) -> TrackGuess {
+    trackbook::remember(
+        app,
+        &guess.id,
+        trackbook::Entry {
+            source: guess.source.clone(),
+            product_id: guess.product_id,
+            product_name: guess.product_name.clone(),
+            product_url: guess.product_url.clone(),
+            product_image: guess.product_image.clone(),
+            exact: guess.exact,
+            checked: trackbook::now_ms(),
+            version: trackbook::VERSION,
+        },
+    );
+    guess
 }
 
 /// Slugs worth trying for a track id, best first.
