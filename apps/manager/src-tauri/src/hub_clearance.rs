@@ -130,12 +130,12 @@ pub async fn earn(app: &AppHandle) -> anyhow::Result<()> {
         // A window left over from a previous attempt is on a page that has already been decided
         // one way or the other, so it is dropped rather than reused: the point is a fresh
         // navigation, which is what re-serves the challenge and lets the browser answer it.
-        close(app);
+        close_and_settle(app).await;
         if attempt(app, Mode::Hidden).await? {
             return anyhow::Ok(true);
         }
         log::info!("the hidden window could not answer the MXB Hub check — asking the user to");
-        close(app);
+        close_and_settle(app).await;
         attempt(app, Mode::Visible).await
     }
     .await;
@@ -220,7 +220,11 @@ async fn attempt(app: &AppHandle, mode: Mode) -> anyhow::Result<bool> {
         builder.inner_size(1024.0, 768.0).position(-32000.0, -32000.0)
     };
 
-    let window = builder.build()?;
+    let window = builder.build().inspect_err(|e| {
+        // Mute until now: the caller turns this into "still refused", which reads as the store
+        // saying no when in fact the app never opened anything.
+        log::error!("the MXB Hub challenge window could not be built: {e}");
+    })?;
 
     let deadline = std::time::Instant::now() + mode.budget();
     let mut last_seen: Vec<(String, String)> = Vec::new();
@@ -314,8 +318,30 @@ async fn probe() -> bool {
 
 pub fn close(app: &AppHandle) {
     if let Some(win) = app.get_webview_window(WINDOW) {
-        let _ = win.close();
+        // `close()` only *asks* the window to go, and the label stays taken until it actually
+        // does. The next pass then fails to build with "a window with label … already
+        // exists" — which is how the visible window came to never open at all: the hidden one
+        // timed out, the app told the user to finish the check in a window that was never
+        // there, and the error went nowhere because a build failure is an `Err` this function
+        // never sees. `destroy()` tears it down rather than asking.
+        let _ = win.destroy();
     }
+}
+
+/// Close the window and wait for its label to come free.
+///
+/// Even `destroy()` unwinds on the main thread, so a builder that runs in the same breath can
+/// still land on a label that is on its way out. A short wait costs nothing next to a pass
+/// that is about to sit out a 40 second budget.
+async fn close_and_settle(app: &AppHandle) {
+    close(app);
+    for _ in 0..40 {
+        if app.get_webview_window(WINDOW).is_none() {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    log::warn!("the MXB Hub window did not go away; the next pass may fail to open");
 }
 
 #[cfg(test)]
