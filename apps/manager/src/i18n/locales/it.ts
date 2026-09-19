@@ -526,6 +526,15 @@ export const it: Translation = {
   "settings.groupApp": "App",
   "settings.groupAdvanced": "Avanzate",
   "settings.groupAbout": "Info",
+  "settings.downloads": "Mod e download",
+  "settings.downloadsDesc":
+    "Cosa succede durante l'installazione di una mod — quale file viene preso quando c'è una scelta, e cosa ne ricava il creatore dal tuo download.",
+  "settings.secure": "Contenuti protetti",
+  "settings.secureDesc":
+    "Le mod bloccate che hai acquistato e le chiavi che le aprono su questa macchina. Mostrato solo su una build in grado di leggerle.",
+  "settings.paintSyncOn": "Sincronizza le grafiche automaticamente",
+  "settings.paintSyncOnDesc":
+    "Se disattivato, nulla di tuo viene pubblicato e nessuna grafica altrui viene installata.",
   "settings.gameFolder": "Cartella di gioco",
   "settings.general": "Generali",
   "settings.appearance": "Aspetto",

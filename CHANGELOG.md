@@ -11,6 +11,14 @@
   the folder usually is. A tab the game hasn't made a folder for yet opens the tree above it.
 
 ### Changed
+- **Settings is sorted by what a setting belongs to.** General had collected every switch
+  that never got a home, so the paint sync toggle, the download preferences and the whole
+  secure-content block sat in one long list between "keep running in the background" and the
+  version number. The paint sync switch now sits above what paint sync has actually managed,
+  in **Paint sync**. The mod install preferences — supporting creators, dedicated-server
+  files, preferred download host — are together under a new **Mods & downloads**. Signing in
+  with Steam, unlocking what you've bought and restoring keys have their own **Secure
+  content** page under Advanced. General is the app's own behaviour and nothing else.
 - **Ranked follows the Steam account you're signed in as.** The tab shows the season of the
   Steam account this app is signed in with, rather than whichever account the Steam client on
   the machine was last opened with — so a shared PC, or a second Steam account, shows your

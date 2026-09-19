@@ -520,6 +520,17 @@ export const en = {
   "settings.groupApp": "App",
   "settings.groupAdvanced": "Advanced",
   "settings.groupAbout": "About",
+  // Two sections split out of General, which had grown into the page every setting
+  // landed on when nobody picked one.
+  "settings.downloads": "Mods & downloads",
+  "settings.downloadsDesc":
+    "What happens while a mod installs — which file gets taken when there's a choice, and what the creator gets out of your download.",
+  "settings.secure": "Secure content",
+  "settings.secureDesc":
+    "Locked mods you've bought, and the keys that open them on this machine. Only shown on a build that can read them.",
+  "settings.paintSyncOn": "Sync paints automatically",
+  "settings.paintSyncOnDesc":
+    "Turned off, nothing of yours is published and nobody else's paints are installed.",
   "settings.gameFolder": "Game folder",
   "settings.general": "General",
   "settings.appearance": "Appearance",
