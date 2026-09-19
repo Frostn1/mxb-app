@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import {
   Check,
   CircleSlash,
+  ExternalLink,
   Loader2,
   Minus,
   RefreshCw,
@@ -9,6 +10,7 @@ import {
   Stethoscope,
   X,
 } from "lucide-react";
+import { open as openUrl } from "@tauri-apps/plugin-shell";
 import { toast } from "sonner";
 import { cn } from "@frost/shared/lib/utils";
 import { Button } from "@frost/shared/Components/ui/button";
@@ -36,6 +38,9 @@ import { useT } from "@/i18n";
  * too quiet to be believed, is it worth asking the player to look at their own machine — and
  * then the self-test does the looking for them rather than handing them a list of things to try.
  */
+/** Is MX Bikes down — the same question this screen is asking, answered for everybody. */
+const STATUS_URL = "https://mxbsecure.com/status";
+
 const ConnectionCheck = ({ error, onRetry }: { error: string; onRetry: () => void }) => {
   const t = useT();
   const [status, setStatus] = useState<MasterStatus | null | undefined>(undefined);
@@ -114,6 +119,12 @@ const ConnectionCheck = ({ error, onRetry }: { error: string; onRetry: () => voi
             <Stethoscope className="size-3.5" />
           )}
           {t("connection.runCheck")}
+        </Button>
+        {/* Whoever is reading this wants to know whether it is them or the game. The status
+            page answers that for everyone at once, and keeps answering while the app cannot. */}
+        <Button variant="ghost" size="sm" onClick={() => void openUrl(STATUS_URL)}>
+          <ExternalLink className="size-3.5" />
+          {t("connection.statusPage")}
         </Button>
       </div>
 

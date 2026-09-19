@@ -1069,6 +1069,7 @@ export const en = {
   "connection.failed": "The server list wouldn't load",
   "connection.failingFor": "Failing for at least {{minutes}} min",
   "connection.runCheck": "Check my connection",
+  "connection.statusPage": "Is MX Bikes down?",
   "connection.verdict.upstream": "This is MX Bikes' own master server, not your connection. There's nothing to fix at your end — it usually comes back within a few minutes.",
   "connection.verdict.local": "Everyone else is getting through right now, so this is something on this machine or this network.",
   "connection.verdict.fine": "Everything is working. Whatever that was, it's over.",

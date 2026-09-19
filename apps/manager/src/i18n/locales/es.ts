@@ -1083,6 +1083,7 @@ export const es: Translation = {
   "connection.failed": "La lista de servidores no se cargó",
   "connection.failingFor": "Sin responder desde hace al menos {{minutes}} min",
   "connection.runCheck": "Comprobar mi conexión",
+  "connection.statusPage": "¿MX Bikes está caído?",
   "connection.verdict.upstream": "Es el servidor maestro de MX Bikes, no tu conexión. No hay nada que arreglar por tu parte: suele volver en unos minutos.",
   "connection.verdict.local": "Ahora mismo a todos los demás les funciona, así que es algo de este equipo o de esta red.",
   "connection.verdict.fine": "Todo funciona. Fuera lo que fuera, ya pasó.",

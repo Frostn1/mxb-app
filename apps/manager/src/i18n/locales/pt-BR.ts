@@ -1083,6 +1083,7 @@ export const ptBR: Translation = {
   "connection.failed": "A lista de servidores não carregou",
   "connection.failingFor": "Fora do ar há pelo menos {{minutes}} min",
   "connection.runCheck": "Verificar minha conexão",
+  "connection.statusPage": "O MX Bikes está fora do ar?",
   "connection.verdict.upstream": "É o servidor mestre do MX Bikes, não a sua conexão. Não há nada para consertar do seu lado — costuma voltar em alguns minutos.",
   "connection.verdict.local": "Agora está funcionando para todo mundo, então é algo neste computador ou nesta rede.",
   "connection.verdict.fine": "Está tudo funcionando. Seja o que for que aconteceu, já passou.",

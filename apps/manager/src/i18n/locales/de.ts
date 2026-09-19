@@ -1089,6 +1089,7 @@ export const de: Translation = {
   "connection.failed": "Die Serverliste ließ sich nicht laden",
   "connection.failingFor": "Fällt seit mindestens {{minutes}} Min aus",
   "connection.runCheck": "Meine Verbindung prüfen",
+  "connection.statusPage": "Ist MX Bikes offline?",
   "connection.verdict.upstream": "Das ist der Master-Server von MX Bikes, nicht deine Verbindung. Bei dir gibt es nichts zu reparieren — meist ist er nach ein paar Minuten wieder da.",
   "connection.verdict.local": "Bei allen anderen klappt es gerade, also liegt es an diesem Rechner oder diesem Netzwerk.",
   "connection.verdict.fine": "Es funktioniert alles. Was auch immer das war, es ist vorbei.",
