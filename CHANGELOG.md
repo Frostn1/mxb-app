@@ -7,6 +7,12 @@
   is going and how long it has left, then everything waiting behind it.
 - Downloads shows what is in flight above the history, with the same speed and time left.
 - A mod waiting in the queue can be moved to the front, so it is the next one to start.
+- Settings has an Accounts page. Steam, mxbikes-shop.com, MXB Hub and mxb-mods.com in one
+  list, each with whether you are signed in, what the account is for, and its own buttons.
+  mxb-mods.com needs no account at all.
+- Buy something on a store and the app installs it for you. After it opens a store page it
+  watches that store for about two minutes and queues anything new that shows up. Turn it off
+  in Settings, Accounts. A purchase that lands later is still one Refresh away in Purchases.
 
 ### Changed
 - Setting up the app now asks you to sign in with Steam before it asks about folders, so
