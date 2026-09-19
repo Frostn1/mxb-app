@@ -438,6 +438,31 @@ fn challenge_marker(html: &str) -> Option<&'static str> {
     }
 }
 
+/// A post asked for by its slug.
+///
+/// The site's search is a relevance ranker over titles and bodies, and it does not always
+/// reach a short name: `fort red` comes back as TheBackForty, Silver Rock and The Redman's,
+/// while https://mxb-mods.com/fort-red/ exists and is exactly the post wanted. A server's
+/// track id is the folder name inside the `.pkz` and reads like a slug already, so asking
+/// WordPress for that slug is both cheaper than a search and right more often.
+pub async fn by_slug(slug: &str, category_id: u32) -> anyhow::Result<Option<ModSummary>> {
+    let slug = slug.trim();
+    if slug.is_empty() {
+        return Ok(None);
+    }
+    let url = format!("{}{}", mxb_session::base(), obfstr!("/wp-json/wp/v2/posts"));
+    let params = vec![
+        ("slug", slug.to_string()),
+        ("categories", category_id.to_string()),
+        ("_embed", "author,wp:featuredmedia".to_string()),
+    ];
+    let resp = get_with_retry(&url, &params).await?;
+    let v: Value = resp.json()?;
+    Ok(v.as_array()
+        .and_then(|posts| posts.first())
+        .and_then(|p| summary_from_post(p, category_id)))
+}
+
 pub async fn search(
     query: &str,
     category_id: u32,

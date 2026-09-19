@@ -66,6 +66,11 @@
 - The Studio tab. Frost's Studio is its own app.
 
 ### Fixed
+- A server's track now links to its page on mxb-mods.com even when you already have the
+  track installed, and is found by its address on the site rather than by search, so
+  tracks like Fort Red come up with their picture instead of a stranger's mod.
+- The server panel no longer puts a paint sync chip and a Not installed chip over the
+  track photo.
 - A bike can no longer be installed inside another bike.
 - Long profile paths stay inside their panel in Settings → Game folder.
 - Steam sign-in now gives you 30 minutes.

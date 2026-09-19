@@ -628,7 +628,6 @@ const Servers = () => {
     product: detail ? catalog[detail.track] : undefined,
     installing: !!detail && installingAt.has(detail.address),
     favourite: !!detail && favs.has(detail.address),
-    paintSync: detail ? (paintSync[detail.address] ?? 0) : 0,
     joining,
     busy: joining !== null,
     queue,

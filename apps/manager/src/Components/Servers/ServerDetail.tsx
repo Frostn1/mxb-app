@@ -13,7 +13,6 @@ import {
   Mountain,
   Copy,
   Star,
-  Palette,
   ShoppingCart,
   ServerOff,
 } from "lucide-react";
@@ -158,7 +157,6 @@ const Track = ({
   loading,
   track,
   layout,
-  missing,
   className,
 }: {
   guess: TrackGuess | null;
@@ -167,8 +165,6 @@ const Track = ({
    *  carried, brought up beside the have-it-or-not line they belong with. */
   track: string;
   layout: string;
-  /** The player doesn't have it. Said here rather than on the hero. */
-  missing: boolean;
   className?: string;
 }) => {
   const t = useT();
@@ -182,16 +178,8 @@ const Track = ({
   }
   return (
     <section className={cn("space-y-2", className)}>
-      <h3 className="flex items-center gap-2 font-cond text-[11px] font-bold uppercase tracking-[0.14em] text-faint">
+      <h3 className="font-cond text-[11px] font-bold uppercase tracking-[0.14em] text-faint">
         {t("serverBrowser.trackTitle")}
-        {/* Beside the track, not over the artwork: it is a fact about this track, and at the
-            top of the hero it read as a label on the picture. */}
-        {missing && (
-          <Badge variant="count" title={t("serverBrowser.trackMissing")}>
-            <Download className="size-3" />
-            {t("serverBrowser.notInstalled")}
-          </Badge>
-        )}
       </h3>
       <div className="min-w-0 space-y-1">
         {/* The name IS the link. It was rendered three times over — once as the title, once
@@ -299,8 +287,6 @@ export interface ServerDetailProps {
   /** Its track is installing, to join once it lands. */
   installing: boolean;
   favourite: boolean;
-  /** Riders on this server running paint sync. */
-  paintSync: number;
   /** The address a join is starting for, app-wide. */
   joining: string | null;
   /** Joining anything is blocked while another join is starting. */
@@ -321,7 +307,6 @@ const ServerDetail = ({
   product,
   installing,
   favourite,
-  paintSync,
   joining,
   busy,
   queue,
@@ -444,15 +429,6 @@ const ServerDetail = ({
               {t("serverBrowser.filtered")}
             </Badge>
           )}
-          {paintSync > 0 && (
-            <Badge
-              variant="success"
-              title={t("serverBrowser.paintSyncHere", { count: paintSync })}
-            >
-              <Palette className="size-3" />
-              {paintSync}
-            </Badge>
-          )}
         </div>
         <div className="absolute inset-x-0 bottom-0 flex items-end gap-2 p-4">
           {s.passworded && (
@@ -498,7 +474,6 @@ const ServerDetail = ({
             loading={guessing}
             track={s.track}
             layout={s.trackLayout}
-            missing={missing}
             className="min-w-0 flex-1"
           />
           <Riders

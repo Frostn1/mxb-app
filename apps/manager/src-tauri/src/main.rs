@@ -3690,14 +3690,17 @@ async fn guess_server_track(app: tauri::AppHandle, track: String) -> Result<Trac
                 .ok()
                 .flatten()
                 .unwrap_or_default();
-            // A track whose `.pkz` carries no preview used to end here with nothing to show
-            // and nowhere to go: the panel had a name, no picture and no link, because
-            // finding it installed skipped every catalogue below. The searches still run for
-            // that case — what they must not do is undo `installed`, which is what keeps the
+            // Deliberately does NOT return. Finding the file answers "do I have it" and
+            // supplies the picture; it says nothing about where the track came from, and the
+            // panel links its title to that page. Gating the search on a missing preview —
+            // which is what this did first — meant the tracks that read fine were exactly the
+            // ones with no link on them.
+            //
+            // The cost is one search per distinct track, and the panel caches the answer for
+            // the run: a rotation brings the same handful back every few minutes.
+            //
+            // What the catalogues must not do is undo `installed`, which is what keeps the
             // buy button off a track the player already has.
-            if !guess.preview.is_empty() {
-                return Ok(guess);
-            }
         }
     }
 
@@ -3709,8 +3712,9 @@ async fn guess_server_track(app: tauri::AppHandle, track: String) -> Result<Trac
         guess.preview = stock.preview;
         guess.stock = true;
         guess.exact = true;
-        // A stock track is never bought, so there is nothing a catalogue could add but a
-        // picture — and only when the archive had none.
+        // A stock track is the one case that really is finished here: it came with the game,
+        // so there is no page to link and nothing to buy. Only a missing picture is worth
+        // another look.
         if !guess.preview.is_empty() {
             return Ok(guess);
         }
@@ -3720,6 +3724,22 @@ async fn guess_server_track(app: tauri::AppHandle, track: String) -> Result<Trac
     // before any catalogue sees it.
     let words = id.replace('_', " ");
     let tracks_category = game::active().catalog_tracks_category;
+
+    // Ask mxb-mods for the post whose slug is the track id before asking it to search. A
+    // server's id is the folder inside the `.pkz` — `fort_red` — and the site's permalinks
+    // are the same shape, so `fort-red` is a direct hit where its search engine returns
+    // TheBackForty and Silver Rock and never the track itself. One request, no ranking.
+    for slug in slug_candidates(&id) {
+        if let Ok(Some(hit)) = mods::mxb::by_slug(&slug, tracks_category).await {
+            guess.source = "mods".into();
+            guess.product_id = hit.id;
+            guess.product_name = hit.title;
+            guess.product_url = hit.link;
+            guess.product_image = hit.image.unwrap_or_default();
+            guess.exact = true;
+            return Ok(guess);
+        }
+    }
 
     // mxb-mods.com. Scoped to its Tracks category: an unscoped search for `forest` comes
     // back four bike liveries deep, and a track is the only thing a server can be running.
@@ -3773,6 +3793,28 @@ async fn guess_server_track(app: tauri::AppHandle, track: String) -> Result<Trac
         }
     }
     Ok(guess)
+}
+
+/// Slugs worth trying for a track id, best first.
+///
+/// WordPress slugs are lowercase words joined by hyphens, which is what a track id already
+/// nearly is. The second candidate drops a trailing revision — `mmx_supercross_2024` is a
+/// folder convention, not something a permalink carries.
+fn slug_candidates(id: &str) -> Vec<String> {
+    let base: String = id
+        .trim()
+        .to_ascii_lowercase()
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect();
+    let base = base.trim_matches('-').split('-').filter(|p| !p.is_empty()).collect::<Vec<_>>();
+    let mut out = vec![base.join("-")];
+    if base.len() > 1 && base.last().is_some_and(|p| p.chars().all(|c| c.is_ascii_digit())) {
+        out.push(base[..base.len() - 1].join("-"));
+    }
+    out.retain(|s| !s.is_empty());
+    out.dedup();
+    out
 }
 
 /// A stock track's display name and artwork, off the blocking pool.
