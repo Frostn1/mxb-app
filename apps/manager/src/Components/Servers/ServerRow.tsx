@@ -107,15 +107,6 @@ const ServerRow = memo(function ServerRow({
               aria-label={t("serverBrowser.inLine", { position: queuePosition })}
             />
           )}
-          {paintSync > 0 && (
-            <span
-              className="inline-flex shrink-0 items-center gap-0.5 font-cond text-[10.5px] font-bold tabular-nums text-success"
-              title={t("serverBrowser.paintSyncHere", { count: paintSync })}
-            >
-              <Palette className="size-3" />
-              {paintSync}
-            </span>
-          )}
           {missing && (
             <Download
               className="size-3 shrink-0 text-faint"
@@ -144,25 +135,35 @@ const ServerRow = memo(function ServerRow({
               {t("serverBrowser.filtered")}
             </span>
           )}
-        </div>
-      </div>
 
-      <div className="flex shrink-0 flex-col items-end gap-0.5 font-cond text-[11.5px] font-semibold tabular-nums">
-        <span className="flex items-center gap-1">
-          <Users className="size-3 text-faint" />
-          {s.players}/{s.maxPlayers}
-        </span>
-        {s.pingMs === null ? (
-          <span className="text-faint">—</span>
-        ) : (
-          <span
-            className={cn("flex items-center gap-1", pingTone(s.pingMs))}
-            title={t("serverBrowser.ping.title", { ms: s.pingMs })}
-          >
-            <Wifi className="size-3" />
-            {s.pingMs}
+          {/* The figures ride on this line, hard right. They were a column of their own, which
+              took the width the server name needed — and its second row was a ping this
+              platform never measures, so most rows spent it on an em dash. */}
+          <span className="ml-auto flex shrink-0 items-center gap-2.5 font-cond text-[11.5px] font-semibold tabular-nums">
+            {paintSync > 0 && (
+              <span
+                className="flex items-center gap-0.5 text-success"
+                title={t("serverBrowser.paintSyncHere", { count: paintSync })}
+              >
+                <Palette className="size-3" />
+                {paintSync}
+              </span>
+            )}
+            {s.pingMs !== null && (
+              <span
+                className={cn("flex items-center gap-1", pingTone(s.pingMs))}
+                title={t("serverBrowser.ping.title", { ms: s.pingMs })}
+              >
+                <Wifi className="size-3" />
+                {s.pingMs}
+              </span>
+            )}
+            <span className="flex items-center gap-1 text-foreground">
+              <Users className="size-3 text-faint" />
+              {s.players}/{s.maxPlayers}
+            </span>
           </span>
-        )}
+        </div>
       </div>
 
       <button
