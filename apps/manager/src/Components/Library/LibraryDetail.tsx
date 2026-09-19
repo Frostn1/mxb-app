@@ -10,6 +10,7 @@ import {
   Box,
   Mountain,
   Share2,
+  PackageOpen,
   type LucideIcon,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -31,6 +32,7 @@ import {
   formatLength,
 } from "@frost/shared/lib/mods";
 import { CATEGORY_ICON, CATEGORY_LABEL, categoryIcon } from "./categories";
+import { extractStock } from "./extractStock";
 import { Trans } from "@/i18n";
 import { ContextBarLeft } from "../Shell/ContextBar";
 import { useT } from "@/i18n";
@@ -110,16 +112,16 @@ export default function LibraryDetail({
     let alive = true;
     setMeta(null);
     setPreview(null);
-    getPkzMeta(entry.path)
+    getPkzMeta(entry.path, entry.prefix)
       .then((m) => alive && setMeta(m))
       .catch(() => {});
-    getPkzPreview(entry.path)
+    getPkzPreview(entry.path, entry.prefix)
       .then((p) => alive && setPreview(p))
       .catch(() => {});
     return () => {
       alive = false;
     };
-  }, [entry.path]);
+  }, [entry.path, entry.prefix]);
 
   const title = meta?.name?.trim() || displayName(entry.name);
   const Icon: LucideIcon = categoryIcon(entry.category);
@@ -164,7 +166,10 @@ export default function LibraryDetail({
   if (entry.size) rows.push([t("libraryDetail.size"), formatBytes(entry.size)]);
   rows.push([t("libraryDetail.folder"), folderLabel(entry.folder)]);
 
-  const canMove = entry.kind === "pkz";
+  // A stock track has no file of its own — it is one folder inside the install's shared
+  // `tracks.pkz` — so everything that acts on a file is off, and Extract is on instead.
+  const isStock = !!entry.stock;
+  const canMove = entry.kind === "pkz" && !isStock;
 
   return (
     <div className="flex h-full flex-col">
@@ -232,20 +237,35 @@ export default function LibraryDetail({
                   <FolderInput className="size-3.5" /> Move
                 </Button>
               )}
-              <Button variant="outline" size="sm" onClick={() => onShare(entry)}>
-                <Share2 className="size-3.5" /> {t("share.share")}
-              </Button>
+              {isStock && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => void extractStock(entry, t)}
+                >
+                  <PackageOpen className="size-3.5" /> {t("library.extractStock")}
+                </Button>
+              )}
+              {/* Sharing a stock entry would share the install's whole 1.7 GB archive, and
+                  there is nothing of it to uninstall. Reveal stays: it shows the archive. */}
+              {!isStock && (
+                <Button variant="outline" size="sm" onClick={() => onShare(entry)}>
+                  <Share2 className="size-3.5" /> {t("share.share")}
+                </Button>
+              )}
               <Button variant="outline" size="sm" onClick={() => onReveal(entry)}>
                 <FolderOpen className="size-3.5" /> Show in Explorer
               </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => onUninstall(entry)}
-                className="text-destructive hover:text-destructive"
-              >
-                <Trash2 className="size-3.5" /> Uninstall
-              </Button>
+              {!isStock && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => onUninstall(entry)}
+                  className="text-destructive hover:text-destructive"
+                >
+                  <Trash2 className="size-3.5" /> Uninstall
+                </Button>
+              )}
             </div>
           </div>
 
@@ -412,6 +432,7 @@ export default function LibraryDetail({
           open={viewTrack}
           onOpenChange={setViewTrack}
           path={entry.path}
+          prefix={entry.prefix}
           title={title}
         />
       )}

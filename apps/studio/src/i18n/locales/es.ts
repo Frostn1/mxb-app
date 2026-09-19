@@ -353,6 +353,7 @@ export const es: Translation = {
   "track.saved": "Guardado «{{name}}»",
   "track.saveFailed": "No se pudo guardar",
   "track.open": "Abrir pista…",
+  "track.importTrack": "Desde una pista…",
   "track.openFailed": "No se pudo abrir",
   "track.projectFile": "Proyecto de pista",
   "track.kind.tabletop": "Tabletop",

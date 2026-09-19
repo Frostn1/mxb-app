@@ -20,9 +20,14 @@ import type { LibraryEntry, PkzMeta } from "@frost/shared/types";
 const cache = new Map<string, PkzMeta>();
 const inflight = new Map<string, Promise<PkzMeta | null>>();
 
-/** Size is part of the key so replacing a mod in place invalidates its entry. */
-export function metaKey(entry: Pick<LibraryEntry, "path" | "size">): string {
-  return `${entry.path}:${entry.size}`;
+/** Size is part of the key so replacing a mod in place invalidates its entry.
+ *
+ *  So is the prefix: the stock tracks all live inside one `tracks.pkz` at one size, and
+ *  without it fifteen cards share a key and every one of them paints Forest Raceway. */
+export function metaKey(entry: Pick<LibraryEntry, "path" | "size" | "prefix">): string {
+  return entry.prefix
+    ? `${entry.path}:${entry.size}#${entry.prefix}`
+    : `${entry.path}:${entry.size}`;
 }
 
 /** Metadata already in hand, if any — never triggers a read. */
@@ -36,7 +41,12 @@ export function peekMeta(key: string): PkzMeta | undefined {
  * failure here just means the cards fall back to requesting metadata individually.
  */
 export async function primeMetaCache(entries: LibraryEntry[]): Promise<void> {
-  const wanted = entries.filter((e) => !cache.has(metaKey(e)));
+  // Prefixed entries sit this one out. The batch call is keyed on path alone, so asking it
+  // about fifteen stock tracks asks it fifteen times about `tracks.pkz` itself — and every
+  // answer would be cached under a different track. They go through {@link requestMeta},
+  // which carries the prefix; the backend caches those per track, so it costs one read each,
+  // once, ever.
+  const wanted = entries.filter((e) => !e.prefix && !cache.has(metaKey(e)));
   if (wanted.length === 0) return;
   try {
     const metas = await getPkzMetaCached(wanted.map((e) => e.path));
@@ -76,7 +86,10 @@ function release(): void {
  * Read a mod's metadata, queued behind whatever else is in flight. Resolves `null`
  * when the archive can't be read — the caller keeps its icon-and-size fallback.
  */
-export function requestMeta(path: string, key: string): Promise<PkzMeta | null> {
+export function requestMeta(
+  entry: Pick<LibraryEntry, "path" | "prefix">,
+  key: string,
+): Promise<PkzMeta | null> {
   const cached = cache.get(key);
   if (cached) return Promise.resolve(cached);
 
@@ -84,7 +97,7 @@ export function requestMeta(path: string, key: string): Promise<PkzMeta | null> 
   if (pending) return pending;
 
   const run = acquire()
-    .then(() => getPkzMeta(path))
+    .then(() => getPkzMeta(entry.path, entry.prefix))
     .then((meta) => {
       cache.set(key, meta);
       return meta;

@@ -869,6 +869,30 @@ impl Ground {
 }
 
 /// Fetch a stored ground plot by id, decoding it once per process.
+/// Put a plot in the store and hand back the id a [`crate::trackprog::GroundRef`] names it by.
+///
+/// Content-addressed, so the same ground imported twice is stored once and two programs
+/// referring to it agree by construction. Writing is skipped when the file is already there —
+/// its name *is* its hash, so an existing file cannot be a different plot.
+///
+/// The seam every ground import comes through, whether the heights were flown by an aircraft
+/// or read back out of a track somebody compiled.
+pub fn store(ground: &Ground) -> Result<String> {
+    let id = {
+        use sha2::Digest;
+        let mut h = sha2::Sha256::new();
+        h.update(ground.encode());
+        format!("{:x}", h.finalize())[..32].to_string()
+    };
+    let dir = dir();
+    std::fs::create_dir_all(&dir).with_context(|| format!("couldn't make {}", dir.display()))?;
+    let file = dir.join(format!("{id}.fgd"));
+    if !file.exists() {
+        write_atomically(&file, &ground.encode())?;
+    }
+    Ok(id)
+}
+
 pub fn load(id: &str) -> Option<Arc<Ground>> {
     if id.is_empty() {
         return None;
@@ -1059,19 +1083,7 @@ pub fn import(tif: &Path, lap: &Path, strength: f32) -> Result<Imported> {
     let cover = imagery_cover(tif, lap, &dem, west, north, per, dim_x, dim_z);
     let ground = Ground { dim_x, dim_z, size_x, size_z, z, cover, base_m: base };
 
-    let id = {
-        use sha2::Digest;
-        let mut h = sha2::Sha256::new();
-        h.update(ground.encode());
-        format!("{:x}", h.finalize())[..32].to_string()
-    };
-    let dir = dir();
-    std::fs::create_dir_all(&dir)
-        .with_context(|| format!("couldn't make {}", dir.display()))?;
-    let file = dir.join(format!("{id}.fgd"));
-    if !file.exists() {
-        write_atomically(&file, &ground.encode())?;
-    }
+    let id = store(&ground)?;
 
     let lap_xz: Vec<(f32, f32, f32)> = pts
         .iter()

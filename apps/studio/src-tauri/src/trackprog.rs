@@ -292,6 +292,20 @@ pub enum ScanJumps {
     /// it was flown out of season with the jumps graded flat — the land is still right even
     /// when what was built on it is not.
     Recut,
+    /// [`Self::Keep`], and then lay the generator's ruts and grooves over the riding line.
+    ///
+    /// For the question [`Self::Keep`] can't answer and [`Self::Recut`] answers by changing the
+    /// subject: *this track, ridden in*. A scan or a published track arrives with the shape its
+    /// builder graded — and, if it was flown fresh or compiled from a clean heightfield, with
+    /// none of what a day of racing puts into it. `Keep` hands that back untouched, ruts and
+    /// all where the source had them and flat where it didn't; `Recut` would cut a new corridor
+    /// and throw the jumps away with it.
+    ///
+    /// This is the third thing: every terrain sample is still the source's, except that the rut
+    /// layer — which the generator already builds apart from the ground precisely so it can be
+    /// blended before it lands — is added on top. Nothing else from the corridor pass reaches a
+    /// sample, and nothing is placed, exactly as under [`Self::Keep`].
+    Rut,
 }
 
 impl ScanJumps {
@@ -314,7 +328,10 @@ impl TrackProgram {
     /// centreline was metadata to the terrain and still geometry to the scenery. It is metadata
     /// to both now: it survives only as the racing line for timing and as the spawn.
     pub fn is_raw_scan(&self) -> bool {
-        self.terrain.ground.as_ref().is_some_and(|g| g.jumps == ScanJumps::Keep)
+        self.terrain
+            .ground
+            .as_ref()
+            .is_some_and(|g| matches!(g.jumps, ScanJumps::Keep | ScanJumps::Rut))
     }
 }
 

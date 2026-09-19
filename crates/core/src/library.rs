@@ -402,6 +402,19 @@ pub struct LibraryEntry {
     /// A secured file with no key for the live account: shown, but not openable/viewable yet.
     #[serde(default)]
     pub locked: bool,
+    /// The folder inside [`Self::path`] this entry actually is, when the archive holds more
+    /// than one of them — `tracks/motocross/forest` for a stock track inside the install's
+    /// `tracks.pkz`. `None` for everything in the mods tree, where one file is one mod.
+    ///
+    /// It is part of the entry's identity, not decoration: fifteen stock tracks share one
+    /// path, so anything keyed on path alone — a cache, a selection, a list key — has to key
+    /// on this too.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prefix: Option<String>,
+    /// Shipped with the game rather than installed by the player. Read-only: there is no file
+    /// of its own to move, share or delete.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub stock: bool,
 }
 
 fn has_ext(p: &Path, ext: &str) -> bool {
@@ -511,6 +524,9 @@ fn make_entry(base: &Path, p: &Path, category: &str, parent: Option<String>) -> 
         secured,
         // A secured file with no key for the live account can be shown but not opened.
         locked: secured && !crate::securesource::is_unlocked(p),
+        // One file in the mods tree is one mod, and the player put it there.
+        prefix: None,
+        stock: false,
     }
 }
 

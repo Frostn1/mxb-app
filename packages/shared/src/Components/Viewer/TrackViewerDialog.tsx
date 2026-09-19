@@ -48,6 +48,9 @@ interface TrackViewerDialogProps {
   onOpenChange: (o: boolean) => void;
   /** The track's `.pkz` or unpacked folder. */
   path: string;
+  /** The track's folder inside `path`, when the archive holds more than one — a stock track
+   *  inside the install's `tracks.pkz`. */
+  prefix?: string | null;
   title?: string;
 }
 
@@ -55,6 +58,7 @@ export function TrackViewerDialog({
   open,
   onOpenChange,
   path,
+  prefix,
   title,
 }: TrackViewerDialogProps) {
   const t = useT();
@@ -105,7 +109,7 @@ export function TrackViewerDialog({
     settled,
     sceneryError,
     error,
-  } = useTrackScene(open ? path : null, { generation });
+  } = useTrackScene(open ? path : null, { prefix, generation });
 
   // A fresh load starts the panel over: nothing picked, no stale diagnosis, the list back up.
   useEffect(() => {
@@ -282,7 +286,10 @@ export function TrackViewerDialog({
                     puts that evidence in reach of whoever is holding the track, who is
                     rarely the person who can rebuild the app to go and look. */}
                 <div className="pointer-events-auto mt-3 flex flex-col items-center gap-2">
-                  {!diagnosis ? (
+                  {/* Not offered for a track inside a shared archive: the reader takes a path
+                      and no prefix, so on a stock track it would diagnose whichever heightfield
+                      `tracks.pkz` happens to list first and report it with confidence. */}
+                  {prefix ? null : !diagnosis ? (
                     <Button
                       variant="outline"
                       size="sm"

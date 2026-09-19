@@ -21,6 +21,7 @@ mod replayrec;
 mod trackbuild;
 mod tracklayout;
 mod trackground;
+mod trackimport;
 mod trackline;
 mod trackllm;
 mod trackmodel;
@@ -205,6 +206,8 @@ fn main() {
             export_track_source,
             save_track_project,
             open_track_project,
+            inspect_track_import,
+            import_track,
             import_track_texture,
             list_track_textures,
             forget_track_texture,
@@ -237,6 +240,8 @@ fn main() {
             mxb_core::trackview::read_track_info,
             mxb_core::trackview::diagnose_track,
             mxb_core::trackview::resolve_track_source,
+            mxb_core::trackview::list_stock_tracks,
+            mxb_core::trackview::extract_stock_track,
             mxb_core::trackview::load_track_terrain,
             mxb_core::trackview::load_track_overview,
             mxb_core::trackview::load_track_scenery,
@@ -829,6 +834,75 @@ async fn save_track_project(program: serde_json::Value, path: String) -> Result<
     let tmp = format!("{path}.tmp");
     std::fs::write(&tmp, text).map_err(|e| format!("couldn't write {path}: {e}"))?;
     std::fs::rename(&tmp, &path).map_err(|e| format!("couldn't write {path}: {e}"))
+}
+
+/// What a compiled track offers before anyone commits to importing it.
+///
+/// Read separately from [`import_track`] so the dialog can say what it found — how big the
+/// plot is, how much relief, whether there is a lap in there at all — while the choice of
+/// mode is still open. A track with no centreline can't be imported, and that is much better
+/// said here than after the picker closes.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TrackImportPreview {
+    name: String,
+    size_x: f32,
+    size_z: f32,
+    samples_x: u32,
+    samples_z: u32,
+    relief_m: f32,
+    /// `tracked -merge` is what writes one, and not every track was finished with it.
+    has_lap: bool,
+    segments: usize,
+    surfaces: Vec<String>,
+}
+
+#[tauri::command]
+async fn inspect_track_import(
+    path: String,
+    prefix: Option<String>,
+) -> Result<TrackImportPreview, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let imp = trackimport::read(std::path::Path::new(&path), prefix.as_deref())
+            .map_err(|e| format!("{e:#}"))?;
+        Ok(TrackImportPreview {
+            name: imp.name.clone(),
+            size_x: imp.ground.size_x,
+            size_z: imp.ground.size_z,
+            samples_x: imp.ground.dim_x as u32,
+            samples_z: imp.ground.dim_z as u32,
+            relief_m: imp.ground.relief(),
+            has_lap: imp.lap.is_some(),
+            segments: imp.lap.as_ref().map(|l| l.segments.len()).unwrap_or(0),
+            surfaces: imp.surfaces,
+        })
+    })
+    .await
+    .map_err(|e| format!("inspect_track_import task failed: {e}"))?
+}
+
+/// Bring a compiled track in as a track program to edit and rebuild.
+///
+/// `jumps` chooses what the ground arrives as — `keep` for the terrain exactly as its builder
+/// left it, `rut` for that with the generator's ruts laid over the riding line, `recut` to
+/// keep only the landform and cut a fresh corridor into it. See `trackprog::ScanJumps`.
+///
+/// What comes across is the layout, the elevation and the footprint; the ground sheets,
+/// scenery and props do not, because the `.map` is a bake with no source in the archive. The
+/// UI says so before this is called.
+#[tauri::command]
+async fn import_track(
+    path: String,
+    prefix: Option<String>,
+    jumps: trackprog::ScanJumps,
+) -> Result<trackprog::TrackProgram, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let imp = trackimport::read(std::path::Path::new(&path), prefix.as_deref())
+            .map_err(|e| format!("{e:#}"))?;
+        trackimport::program_for(&imp, jumps).map_err(|e| format!("{e:#}"))
+    })
+    .await
+    .map_err(|e| format!("import_track task failed: {e}"))?
 }
 
 /// Open a saved track project. A bare program file is taken too.
