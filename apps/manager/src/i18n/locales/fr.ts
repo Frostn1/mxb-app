@@ -1555,6 +1555,10 @@ export const fr: Translation = {
   "downloads.stageDownloading": "Téléchargement",
   "downloads.stageExtracting": "Extraction",
   "downloads.stagePlacing": "Installation",
+  "downloads.timeLeft": "{{time}} restantes",
+  "downloads.moveToFront": "Placer en tête de file",
+  "downloads.sectionActive": "En cours",
+  "downloads.sectionQueued": "En attente",
   "downloads.stageReview": "En attente de vous",
 
   // ── Téléchargements (historique) ───────────────────────────────────────────

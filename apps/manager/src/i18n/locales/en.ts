@@ -1526,6 +1526,10 @@ export const en = {
   "downloads.stageDownloading": "Downloading",
   "downloads.stageExtracting": "Extracting",
   "downloads.stagePlacing": "Installing",
+  "downloads.timeLeft": "{{time}} left",
+  "downloads.moveToFront": "Move to the front of the queue",
+  "downloads.sectionActive": "In progress",
+  "downloads.sectionQueued": "Waiting",
   "downloads.stageReview": "Waiting for you",
 
   // ── Downloads (history) ────────────────────────────────────────────────────
