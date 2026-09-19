@@ -1112,6 +1112,7 @@ export const ptBR: Translation = {
   "serverBrowser.trackGetShop": "Pegar na loja",
   "serverBrowser.trackGetMods": "Pegar no mxb-mods",
   "serverBrowser.trackGetHub": "Pegar no MXB Hub",
+  "serverBrowser.pickServer": "Escolha um servidor para ver o que está rodando.",
   "serverBrowser.favesOnly": "Favoritos",
   "serverBrowser.star": "Adicionar aos favoritos",
   "serverBrowser.unstar": "Remover dos favoritos",

@@ -16,6 +16,10 @@
 - The Library lists your tracks, bikes and rider gear down the left, each with its count, and
   your folders under them. Click a folder to see only what's in it, or Favorites for the ones
   you starred.
+- The Servers list view puts a server's details beside the list instead of over it. Click a
+  row and the pane on the right fills with the track art, who's on, the session and the rules,
+  and the same Join button the tile gives you. Picking the next row swaps the pane, so you can
+  read two servers without closing the first.
 - The app wears the mxbsecure look: the brand blue, black chrome, and rounded corners
   throughout. Every colorway but the default is untouched.
 - Buttons, switches and sliders are upright and rounded. The switch is a pill, the slider has

@@ -1110,6 +1110,7 @@ export const it: Translation = {
   "serverBrowser.trackGetShop": "Prendila dallo shop",
   "serverBrowser.trackGetMods": "Prendila da mxb-mods",
   "serverBrowser.trackGetHub": "Prendila da MXB Hub",
+  "serverBrowser.pickServer": "Scegli un server per vedere cosa sta girando.",
   "serverBrowser.favesOnly": "Preferiti",
   "serverBrowser.star": "Aggiungi ai preferiti",
   "serverBrowser.unstar": "Rimuovi dai preferiti",
