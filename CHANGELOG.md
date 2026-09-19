@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased — Stock tracks in the Library
+## 2026-09-18 — v0.17.4 — Stock tracks in the Library
 
 ### Added
 - Stock tracks now appear in the Library. All fifteen, with names and artwork, on the Tracks
