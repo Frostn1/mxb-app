@@ -3,8 +3,11 @@
 //!
 //! Every release carries its own signed `latest.json`, so a channel only has to find the newest
 //! one and hand the updater plugin that manifest. Download, signature check and install stay
-//! the plugin's. More than one app releases from `Frostn1/mxb-app` (the manager as `v1.2.3`,
-//! MXB Coach as `coach-v1.2.3`), so the tag prefix keeps each app to its own releases.
+//! the plugin's. Each app has its own release repo now — the manager `Frostn1/mxb-app`, MXB
+//! Coach `Frostn1/mxb-coach` — but the prefix stays: coach installs from before that move look
+//! for `coach-v` tags in the manager's repo, where a pointer release carries the manifest
+//! (scripts/coach-update-bridge.sh), and the prefix is what keeps them off the manager's own
+//! `v` releases.
 
 use serde::{Deserialize, Serialize};
 use tauri::Manager;
@@ -149,5 +152,34 @@ mod tests {
         assert_eq!(newest_manifest(&list, "v", true), Some("https://x/v0.14.4/latest.json"));
         assert_eq!(newest_manifest(&list, "coach-v", true), Some("https://x/coach-v0.1.3-beta.3/latest.json"));
         assert_eq!(newest_manifest(&list, "coach-v", false), None, "no stable coach yet");
+    }
+
+    /// A pre-move coach install (0.1.3 to 0.1.17) scans the manager's releases for `coach-v`,
+    /// where the pointer releases live. It must pick the newest of those and nothing else —
+    /// a manager release would be the wrong app entirely.
+    #[test]
+    fn a_pre_move_coach_follows_the_pointer_releases() {
+        let list = [
+            release("v0.17.3", false, true),
+            release("coach-v0.1.17-beta.17", false, true),
+            release("coach-v0.1.18-beta.18", false, true),
+        ];
+        assert_eq!(
+            newest_manifest(&list, "coach-v", true),
+            Some("https://x/coach-v0.1.18-beta.18/latest.json")
+        );
+    }
+
+    /// In the coach's own repo the tags carry no product prefix, so it reads them the way the
+    /// manager reads its own.
+    #[test]
+    fn the_coach_reads_plain_tags_in_its_own_repo() {
+        let list = [release("v0.1.18-beta.18", false, true), release("v0.1.18", false, true)];
+        assert_eq!(newest_manifest(&list, "v", false), Some("https://x/v0.1.18/latest.json"));
+        assert_eq!(
+            newest_manifest(&list, "v", true),
+            Some("https://x/v0.1.18/latest.json"),
+            "a release outranks its own beta"
+        );
     }
 }

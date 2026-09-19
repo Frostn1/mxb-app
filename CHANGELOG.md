@@ -313,6 +313,12 @@ the people who did reach it.
   the fork leg and along the shock, with a mark at the deepest it went, instead of two rows in a
   list. It sits on the Setup tab, above what the coach would change.
 
+### Changed
+- MXB Coach has a home of its own: every version from now on is published at
+  [Frostn1/mxb-coach](https://github.com/Frostn1/mxb-coach), with the download and what changed
+  in it on the same page, instead of being mixed in with MXB App's. Nothing to do — the coach
+  updates itself to the new place.
+
 ## 2026-09-17 — MXB Coach v0.1.16-beta.16
 
 ### Fixed

@@ -63,13 +63,16 @@ fn open_folder(path: String) -> Result<(), String> {
     mxb_core::library::open_folder(&path).map_err(|e| format!("{e:#}"))
 }
 
-/// The coach's own builds: `coach-v` releases in the manager's repo, betas when asked for.
+/// The coach's own builds: releases of Frostn1/mxb-coach, betas when asked for. Its own repo
+/// since 0.1.18, so the tag is a plain `v` there; installs from before the move look for
+/// `coach-v` in Frostn1/mxb-app and find a pointer release instead
+/// (scripts/coach-update-bridge.sh).
 #[tauri::command]
 async fn check_coach_update(
     webview: tauri::Webview,
     beta: bool,
 ) -> Result<Option<mxb_core::update_channel::UpdateMetadata>, String> {
-    mxb_core::update_channel::check(&webview, "Frostn1/mxb-app", "coach-v", beta, "mxb-coach")
+    mxb_core::update_channel::check(&webview, "Frostn1/mxb-coach", "v", beta, "mxb-coach")
         .await
         .map_err(|e| format!("{e:#}"))
 }

@@ -3,7 +3,7 @@
 //! The stable channel is the updater plugin's own check against `releases/latest`, which
 //! GitHub never points at a pre-release. The beta channel finds the newest `v` release with a
 //! signed `latest.json` and hands the plugin that manifest; the lookup is core's, shared with
-//! MXB Coach, which releases from this repo under `coach-v` tags.
+//! MXB Coach and Frost's Studio, each against its own repo.
 
 use mxb_core::update_channel::{self, UpdateMetadata};
 
