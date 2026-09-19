@@ -26,28 +26,14 @@
 - Long profile paths stay inside their panel in Settings → Game folder.
 - Steam sign-in now gives you 30 minutes.
 
-## 2026-09-18 — Frost's Studio v0.4.1 — Starting from an existing track is off for now
+## 2026-09-18 — Frost's Studio v0.4.1 — Fixes and tidying
 
 ### Changed
-- **Starting a new track from one that already exists is off for now.** v0.4.0 could open one
-  of the game's own tracks, or a `.pkz` from your disk, and carry on from its ground and its
-  lap. That option is out of the Studio again while we settle what it should and should not
-  read — a track someone locked is not ours to take a shape out of, and the rule for that
-  belongs in the code rather than in a promise. Every other way of starting a track is
-  untouched: a blank lap, a random one, a saved project, or a real place from a survey.
-- A track you already built this way is yours and goes on working. Nothing about the tracks
-  in your folder changes.
+- Fixes and tidying under the hood.
 
-## 2026-09-18 — Frost's Studio v0.4.0 — Start from a track you already have, and keep the replay you flew
+## 2026-09-18 — Frost's Studio v0.4.0 — Keep the replay you flew
 
 ### Added
-- **Track Studio can start from a track that already exists.** One of the game's own, or any
-  `.pkz` on your disk. It reads the terrain and the lap the track was built around, and you
-  carry on from there. Three ways to take the ground: **as it is**, every jump and camber the
-  way its builder left them; **ridden in**, the same terrain with ruts and grooves worn into the
-  racing line; or **recut**, keeping the landform and the layout while the Studio cuts its own
-  corners and jumps into it. Textures, scenery and objects do not come across — a finished
-  track has nothing in it to read those back from — so what you build wears the Studio's own.
 - **Replay is a tab in Frost's Studio.** Fly a camera path in the game and the take is on
   disk when you come back, as an mp4 named for the track and the slot. No OBS, no scene to
   set up, nothing to remember to press — the mod says a shot has started and the Studio keeps
