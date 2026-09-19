@@ -2649,14 +2649,10 @@ export function ModelViewer({
               far={4}
             />
           )}
-          {/* Below the contact shadow, which is what keeps it out of the shadow's own render:
-              that camera looks up from its plane, so anything under it isn't in the shot. */}
-          {grounded && look.ground && (
-            <mesh position={[0, -0.02, 0]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
-              <circleGeometry args={[9, 64]} />
-              <meshStandardMaterial color={look.ground} roughness={0.95} metalness={0} />
-            </mesh>
-          )}
+          {/* No ground plane. A disc at y=0 is a horizon: from anywhere above the bike it
+              cuts a hard line straight across the frame and through the model, which reads
+              as a rendering fault rather than as a floor. The contact shadow above already
+              says the bike is standing on something, without drawing the something. */}
           <OrbitControls
             makeDefault
             enablePan

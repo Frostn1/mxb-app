@@ -740,14 +740,24 @@ pub fn apply_model_swap_reporting(
     // Only the files that belong to the model move. The bike's own setup stays put.
     let mut root_files = active_set_files(mods_path, bike, &active_label, &target_files);
 
-    // Reverting to Stock has to clear every loose override, not just the meshes.
-    // `active_set_files` never reports the bike's setup — that is the point of it — so a
-    // swap's `.hrc`/`.cfg` would stay behind, still overriding the `.pkz` but now naming
-    // meshes that are gone. Nothing is deleted: it parks with the rest, and the manifest
-    // written below makes the way back exact.
+    // Reverting to Stock has to clear every loose override, not just the meshes: a swap's
+    // `.hrc`/`.cfg` left behind would still override the `.pkz`, while naming meshes that
+    // are gone.
+    //
+    // But only where something supplies a setup afterwards. A bike unpacked into
+    // `mods/bikes/<Bike>/` has no packed fallback — its `.hrc`s *are* the bike — and
+    // carrying them into a swap folder leaves a directory the game cannot load at all.
+    // That is exactly the damage `detect_orphaned_setup` reports and `repair_orphaned_setup`
+    // undoes, and going Stock was causing it rather than finding it. So on an unpacked bike
+    // only a setup file some variant folder also holds — demonstrably a swap's copy — parks;
+    // the bike's own stays where it is.
     if is_stock {
+        let packed = has_packed_fallback(&root);
         for f in root_setup_files(mods_path, bike) {
-            if !contains_ci(&root_files, &f) {
+            if contains_ci(&root_files, &f) {
+                continue;
+            }
+            if packed || setup_held_by_a_variant(mods_path, bike, &f) {
                 root_files.push(f);
             }
         }
@@ -1066,6 +1076,23 @@ pub struct OrphanedSetup {
     pub bike: String,
     /// Filenames missing from the bike root that a parked variant still holds.
     pub files: Vec<String>,
+}
+
+/// Does a parked variant hold a setup file by this name?
+///
+/// The question behind "is this the bike's own setup, or a swap's copy of one". Asked when
+/// reverting to Stock on a bike with no packed fallback, where parking the bike's own would
+/// leave the game nothing to load.
+fn setup_held_by_a_variant(mods_path: &str, bike: &str, file: &str) -> bool {
+    let Ok(rd) = fs::read_dir(lib_dir(mods_path, bike)) else {
+        return false;
+    };
+    rd.flatten().any(|e| {
+        let p = e.path();
+        p.is_dir()
+            && !e.file_name().to_str().is_some_and(is_shelf)
+            && set_files(&p).iter().any(|f| f.eq_ignore_ascii_case(file))
+    })
 }
 
 fn root_setup_files(mods_path: &str, bike: &str) -> Vec<String> {
@@ -2079,6 +2106,48 @@ mod tests {
         let _ = fs::remove_dir_all(&root);
     }
 
+    /// Going Stock on an unpacked bike must not carry its own setup away.
+    ///
+    /// The bike's `.hrc`/`.cfg`/`.geom` ARE the bike when there is no `.pkz` under it, and a
+    /// swap folder full of them is a bike the game cannot load at all — the state
+    /// `detect_orphaned_setup` exists to report. Reverting used to cause it.
+    #[test]
+    fn going_stock_leaves_an_unpacked_bike_its_setup() {
+        let root = tmp("stock-keeps-setup");
+        let mp = root.to_str().unwrap();
+        make_bike(mp, "KTM250", "model.edf");
+        // A swap that brings only a mesh, applied and then reverted.
+        touch(&variant_dir(mp, "KTM250", "Handguards").join("model.edf"));
+        apply_model_swap(mp, "KTM250", "Handguards").unwrap();
+        apply_model_swap(mp, "KTM250", STOCK).unwrap();
+
+        let at_root = names_at(&bike_dir(mp, "KTM250"));
+        for f in ["chassis.hrc", "bike.cfg", "wheel.geom"] {
+            assert!(at_root.iter().any(|n| n == f), "{f} must stay at the root: {at_root:?}");
+        }
+        assert!(
+            detect_orphaned_setup(mp).is_empty(),
+            "the revert must not create the damage the orphan check reports",
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// With a packed fallback the old behaviour is still right: the `.pkz` supplies the
+    /// setup once the loose copies are parked, so every override goes.
+    #[test]
+    fn going_stock_still_clears_overrides_over_a_pkz() {
+        let root = tmp("stock-clears-over-pkz");
+        let mp = root.to_str().unwrap();
+        make_bike(mp, "KTM450", "model.edf");
+        touch(&bike_dir(mp, "KTM450").join("KTM450.pkz"));
+        touch(&variant_dir(mp, "KTM450", "Factory").join("model.edf"));
+        apply_model_swap(mp, "KTM450", "Factory").unwrap();
+        apply_model_swap(mp, "KTM450", STOCK).unwrap();
+
+        assert_eq!(names_at(&bike_dir(mp, "KTM450")), vec!["KTM450.pkz"], "only the packed bike");
+        let _ = fs::remove_dir_all(&root);
+    }
+
     #[test]
     fn preview_of_the_active_model_is_the_bike_as_it_stands() {
         let root = tmp("preview-active");
@@ -2637,14 +2706,25 @@ mod tests {
         // The cost of offering Stock unconditionally: a bike with no packed model is left
         // without one. That has to stay a parking job, never a delete, and one swap back
         // has to undo it completely — otherwise the row is a trap.
+        //
+        // The model goes; the bike's own setup does NOT. An unpacked mod bike keeps its
+        // `.hrc`/`.cfg`/`.geom` at the root, and carrying those off leaves a folder the game
+        // cannot load at all — which is the state `detect_orphaned_setup` reports as damage.
+        // An OEM bike is untouched by this: it holds nothing loose but paints, so there is no
+        // setup at its root to park in the first place.
         let root = tmp("stock-no-fallback");
         let mp = root.to_str().unwrap();
         make_bike(mp, "KTM", "model.edf"); // no `.pkz` behind it
         let before = names_at(&bike_dir(mp, "KTM"));
 
         apply_model_swap(mp, "KTM", STOCK).unwrap();
-        assert!(names_at(&bike_dir(mp, "KTM")).is_empty(), "the root is bare");
+        assert_eq!(
+            names_at(&bike_dir(mp, "KTM")),
+            vec!["bike.cfg", "chassis.hrc", "wheel.geom"],
+            "the model parks, the bike's own setup stays",
+        );
         assert!(file_exists(&variant_dir(mp, "KTM", ORIGINAL).join("model.edf")), "parked, not deleted");
+        assert!(detect_orphaned_setup(mp).is_empty(), "and the bike still loads");
 
         apply_model_swap(mp, "KTM", ORIGINAL).unwrap();
         assert_eq!(names_at(&bike_dir(mp, "KTM")), before, "one click puts it all back");
