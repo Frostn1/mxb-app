@@ -110,6 +110,20 @@ export const en = {
   "setup.detectAndStart": "Detect & start browsing",
   "setup.pickModsFolder": "Select your {{game}} folder",
   "setup.pickInstallFolder": "Select your {{game}} install folder",
+  "setup.step": "Step {{current}} of {{total}}",
+  "setup.finishing": "Setting up {{game}}…",
+  "setup.steamTitle": "Sign in with Steam",
+  "setup.steamLead":
+    "MX Bikes identifies you by your Steam account, and so does everything you have paid for.",
+  "setup.steamReasonSealed":
+    "Sealed tracks and gear unlock on the account that owns them.",
+  "setup.steamReasonStore": "Anything bought on a store shows up ready to install.",
+  "setup.steamReasonRanked": "Your Ranked profile is found from the same account.",
+  "setup.steamNote":
+    "This opens Steam in your browser. The app never sees your password.",
+  "setup.steamWaiting": "Waiting for Steam…",
+  "setup.steamSignedIn": "Signed in as {{id}}",
+  "setup.steamContinue": "Continue",
 
   // ── Welcome slideshow ──────────────────────────────────────────────────────
   "welcome.intro.title": "Welcome to {{app}}",
