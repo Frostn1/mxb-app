@@ -1,5 +1,5 @@
 import { useLayoutEffect, useRef } from "react";
-import { Search, Download, X } from "lucide-react";
+import { Download, X } from "lucide-react";
 import { type ModSort, type ModType } from "@frost/shared/api/mods";
 import type { InstalledIndex } from "../../lib/installedMatch";
 import type { ModListing } from "../../lib/useModListing";
@@ -7,6 +7,7 @@ import { useT } from "@/i18n";
 import ModCard from "./ModCard";
 import FeaturedMod from "./FeaturedMod";
 import { useQuickInstall } from "./useQuickInstall";
+import { SearchBox } from "@frost/shared/Components/ui/search-box";
 import { Button } from "@frost/shared/Components/ui/button";
 import { ContextBarLeft, ContextBarRight, ContextTab } from "../Shell/ContextBar";
 import HelpHint from "@frost/shared/Components/ui/help-hint";
@@ -125,15 +126,12 @@ export default function Browse({
           </ContextBarLeft>
 
           <ContextBarRight>
-            <div className="flex h-7 w-[210px] items-center gap-2 border border-input bg-card px-2.5">
-              <Search className="size-3.5 text-faint" />
-              <input
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder={t("browse.searchPlaceholder", { type: t(modType.labelInline) })}
-                className="w-full bg-transparent text-[12.5px] placeholder:text-faint focus:outline-none"
-              />
-            </div>
+            <SearchBox
+              value={query}
+              onChange={setQuery}
+              placeholder={t("browse.searchPlaceholder", { type: t(modType.labelInline) })}
+              className="w-[210px]"
+            />
             {/* The category filter was a row of pills of its own. Three bands of chrome
                 before the first mod is what this redesign set out to remove, so it folds in
                 here beside the sort it belongs with. */}

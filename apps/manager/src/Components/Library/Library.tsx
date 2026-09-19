@@ -1,7 +1,6 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ComponentType, ReactNode } from "react";
 import {
-  Search,
   RefreshCw,
   MoreHorizontal,
   FolderInput,
@@ -142,6 +141,7 @@ import {
   AlertDialogCancel,
   AlertDialogAction,
 } from "@frost/shared/Components/ui/alert-dialog";
+import { SearchBox } from "@frost/shared/Components/ui/search-box";
 import { cn } from "@frost/shared/lib/utils";
 
 interface RowAction {
@@ -1349,15 +1349,12 @@ export default function Library({
       {/* The bar is left with the controls that act on what you're looking at: the type
           you're in, and the folder inside it, are the left list's job now. */}
       <ContextBarRight>
-        <div className="flex h-7 w-[220px] items-center gap-2 border border-input bg-card px-2.5">
-          <Search className="size-3.5 text-faint" />
-          <input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder={t("library.searchPlaceholder")}
-            className="w-full bg-transparent text-[12.5px] placeholder:text-faint focus:outline-none"
-          />
-        </div>
+        <SearchBox
+          value={search}
+          onChange={setSearch}
+          placeholder={t("library.searchPlaceholder")}
+          className="w-[220px]"
+        />
         {/* Sorting by arrival is the only way to find a mod whose name you never read —
             and it works for everything on disk, not just what the history remembers. */}
         <DropdownMenu>

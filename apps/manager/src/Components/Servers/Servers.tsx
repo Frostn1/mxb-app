@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  Search,
   RefreshCw,
   Loader2,
   Plug,
@@ -20,6 +19,7 @@ import {
   Clock,
 } from "lucide-react";
 import { toast } from "sonner";
+import { SearchBox } from "@frost/shared/Components/ui/search-box";
 import { cn } from "@frost/shared/lib/utils";
 import { Button } from "@frost/shared/Components/ui/button";
 import { Segmented } from "@frost/shared/Components/ui/segmented";
@@ -762,15 +762,12 @@ const Servers = () => {
         />
         {/* The one control here that may shrink. Everything else keeps its width, so a
             narrow window trims the search box rather than wrapping four button labels. */}
-        <div className="flex h-7 w-[200px] min-w-[116px] shrink items-center gap-2 border border-input bg-card px-2.5">
-          <Search className="size-3.5 shrink-0 text-faint" />
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder={t("serverBrowser.searchPlaceholder")}
-            className="w-full min-w-0 bg-transparent text-[12.5px] placeholder:text-faint focus:outline-none"
-          />
-        </div>
+        <SearchBox
+          value={query}
+          onChange={setQuery}
+          placeholder={t("serverBrowser.searchPlaceholder")}
+          className="w-[200px] shrink"
+        />
         <Button
           variant="outline"
           size="sm"

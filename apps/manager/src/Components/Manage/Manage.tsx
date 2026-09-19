@@ -5,11 +5,11 @@ import {
   Loader2,
   RefreshCw,
   RotateCcw,
-  Search,
   Share2,
   Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
+import { SearchBox } from "@frost/shared/Components/ui/search-box";
 import { cn } from "@frost/shared/lib/utils";
 import { Button } from "@frost/shared/Components/ui/button";
 import { ContextBarLeft, ContextBarRight, ContextTab } from "../Shell/ContextBar";
@@ -612,15 +612,12 @@ function ModsPanel({
       </ContextBarLeft>
 
       <ContextBarRight>
-        <div className="flex h-7 w-[210px] items-center gap-2 border border-input bg-card px-2.5">
-          <Search className="size-3.5 text-faint" />
-          <input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder={t("library.searchPlaceholder")}
-            className="w-full bg-transparent text-[12.5px] placeholder:text-faint focus:outline-none"
-          />
-        </div>
+        <SearchBox
+          value={search}
+          onChange={setSearch}
+          placeholder={t("library.searchPlaceholder")}
+          className="w-[210px]"
+        />
         <Button
           variant="outline"
           size="sm"

@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { RefreshCw, Search } from "lucide-react";
+import { RefreshCw } from "lucide-react";
 import type { ModType } from "@frost/shared/api/mods";
 import { useConfig } from "@frost/shared/Context/Config";
+import { SearchBox } from "@frost/shared/Components/ui/search-box";
 import { cn } from "@frost/shared/lib/utils";
 import { Button } from "@frost/shared/Components/ui/button";
 import { Skeleton } from "@frost/shared/Components/ui/skeleton";
@@ -325,15 +326,12 @@ export default function Mods({
         <ContextBarRight>
           {browsing && (
             <>
-              <div className="flex h-7 w-[210px] items-center gap-2 rounded-lg border border-input bg-card px-2.5">
-                <Search className="size-3.5 text-faint" />
-                <input
-                  value={listing.query}
-                  onChange={(e) => listing.setQuery(e.target.value)}
-                  placeholder={t("mods.searchPlaceholder")}
-                  className="w-full bg-transparent text-[12.5px] placeholder:text-faint focus:outline-none"
-                />
-              </div>
+              <SearchBox
+          value={listing.query}
+          onChange={listing.setQuery}
+          placeholder={t("mods.searchPlaceholder")}
+          className="w-[210px]"
+        />
               <Select value={activeSort} onValueChange={(v) => setSort(v as ModsSort)}>
                 <SelectTrigger className="h-7 w-[196px] bg-card text-[12px]">
                   <SelectValue />

@@ -17,7 +17,7 @@
  * where its contents say it belongs and shows its collisions first — see `Context/DropReview`.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowUpDown, Check, Search, Store, LogOut, RefreshCw } from "lucide-react";
+import { ArrowUpDown, Check, Store, LogOut, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import {
   onShopAuth,
@@ -70,6 +70,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@frost/shared/Components/ui/select";
+import { SearchBox } from "@frost/shared/Components/ui/search-box";
 import { cn } from "@frost/shared/lib/utils";
 
 /** The pill for purchases the catalog doesn't list. */
@@ -539,15 +540,12 @@ export default function MyDownloads({ refreshKey }: MyDownloadsProps) {
         </span>
         {loggedIn && (
           <>
-            <div className="flex h-7 w-[220px] items-center gap-2 border border-input bg-card px-2.5">
-              <Search className="size-3.5 text-faint" />
-              <input
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder={t("purchases.searchPlaceholder")}
-                className="w-full bg-transparent text-[12.5px] placeholder:text-faint focus:outline-none"
-              />
-            </div>
+            <SearchBox
+          value={query}
+          onChange={setQuery}
+          placeholder={t("purchases.searchPlaceholder")}
+          className="w-[220px]"
+        />
             <Button
               variant="outline"
               size="sm"
