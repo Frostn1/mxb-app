@@ -3927,6 +3927,8 @@ mod card_art_tests {
             parent: None,
             secured: false,
             locked: false,
+            prefix: None,
+            stock: false,
         };
 
         // Installed, spaced unlike the id the server sends, and with no picture.
@@ -7008,6 +7010,8 @@ fn main() {
             mxb_core::trackview::load_track_ground_layers,
             mxb_core::trackview::diagnose_track,
             mxb_core::trackview::resolve_track_source,
+            mxb_core::trackview::list_stock_tracks,
+            mxb_core::trackview::extract_stock_track,
             mxb_core::viewer::unpack_paint,
             mxb_core::viewer::texture_bytes,
             mxb_core::viewer::watch_paint_files,
@@ -8408,6 +8412,8 @@ fn scan_library_blocking(
                 parent: None,
                 secured: false,
                 locked: false,
+                prefix: None,
+                stock: false,
             })
             .collect());
     }

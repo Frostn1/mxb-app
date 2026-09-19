@@ -367,6 +367,56 @@ export function openTrackProject(path: string): Promise<TrackProgram> {
 }
 
 /**
+ * What the ground arrives as when a track is imported.
+ *
+ * - `keep` — the terrain exactly as its builder left it. Every jump, camber and rut the
+ *   source had, and not one the generator invented. A faithful base.
+ * - `rut` — that, with the generator's ruts and grooves laid over the riding line. A track
+ *   that was compiled clean, ridden in.
+ * - `recut` — keep only the landform and let the generator cut its own corridor, jumps and
+ *   ruts into it. The layout survives; what was built on it does not.
+ */
+export type ScanJumps = "keep" | "rut" | "recut";
+
+/** What a compiled track turned out to hold, read before anyone commits to importing it. */
+export interface TrackImportPreview {
+  name: string;
+  sizeX: number;
+  sizeZ: number;
+  samplesX: number;
+  samplesZ: number;
+  reliefM: number;
+  /** `tracked -merge` writes the centreline into the terrain file, and not every track was
+   *  finished with it. Without one there is no lap to rebuild around and no import. */
+  hasLap: boolean;
+  segments: number;
+  surfaces: string[];
+}
+
+/** Look inside a compiled track — a `.pkz`, or one track's `prefix` inside a shared one. */
+export function inspectTrackImport(
+  path: string,
+  prefix?: string | null,
+): Promise<TrackImportPreview> {
+  return invoke<TrackImportPreview>("inspect_track_import", { path, prefix: prefix ?? null });
+}
+
+/**
+ * Bring a compiled track in as a program to edit and rebuild.
+ *
+ * Its layout, elevation and footprint come across. Its ground sheets, scenery and props do
+ * not — the `.map` is a bake and the source it was baked from isn't in the archive — so the
+ * rebuilt track wears the Studio's own. Tell the rider that before calling this.
+ */
+export function importTrack(
+  path: string,
+  prefix: string | null,
+  jumps: ScanJumps,
+): Promise<TrackProgram> {
+  return invoke<TrackProgram>("import_track", { path, prefix, jumps });
+}
+
+/**
  * The lap as a list you can read in order: a straight, a left turn, a double.
  *
  * The program stores corners and jumps separately — one is the shape of the lap, the other

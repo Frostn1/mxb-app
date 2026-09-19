@@ -111,6 +111,8 @@ mod tests {
             parent: None,
             secured: false,
             locked: false,
+            prefix: None,
+            stock: false,
         }
     }
 

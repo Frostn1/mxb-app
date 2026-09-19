@@ -3,6 +3,20 @@
 ## Unreleased — A session reads itself out
 
 ### Added
+- **The tracks that came with the game are in your Library.** All fifteen of them, with their
+  real names and their own artwork, in a section of their own on the Tracks tab. Click one to
+  look around it in 3D, the same as any track you installed. They live inside the game's own
+  files rather than your mods folder, which is why they have never shown up here before.
+- **Extract a stock track as its own .pkz.** From the card menu or its page. You get a normal
+  track file, packaged the way the game reads them, wherever you asked for it — to open in the
+  Studio, or to pick apart. Nothing about your game install changes.
+- **Track Studio can start from a track that already exists.** One of the game's own, or any
+  `.pkz` on your disk. It reads the terrain and the lap the track was built around, and you
+  carry on from there. Three ways to take the ground: **as it is**, every jump and camber the
+  way its builder left them; **ridden in**, the same terrain with ruts and grooves worn into the
+  racing line; or **recut**, keeping the landform and the layout while the Studio cuts its own
+  corners and jumps into it. Textures, scenery and objects do not come across — a finished
+  track has nothing in it to read those back from — so what you build wears the Studio's own.
 - **Your own bike, in 3D, on the feel step.** The bike the session was ridden on, drawn from its
   own files, beside the question about how it felt — with the fork travel your lap actually used
   on it. It is loaded before you get there, so it is already on screen when you arrive.

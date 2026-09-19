@@ -352,6 +352,7 @@ export const ptBR: Translation = {
   "track.saved": "“{{name}}” salvo",
   "track.saveFailed": "Não foi possível salvar",
   "track.open": "Abrir pista…",
+  "track.importTrack": "A partir de uma pista…",
   "track.openFailed": "Não foi possível abrir",
   "track.projectFile": "Projeto de pista",
   "track.kind.tabletop": "Tabletop",

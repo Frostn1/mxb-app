@@ -1195,6 +1195,13 @@ export const de: Translation = {
   "library.locked": "Gesperrt — Inhalt kann nicht gelesen werden",
   "library.securedLocked": "mxbsecure — gesperrt, zum Freischalten anmelden",
   "library.securedUnlocked": "mxbsecure — freigeschaltet",
+  "library.stock": "Im Spiel enthalten",
+  "library.stockSection": "Mitgelieferte Strecken",
+  "library.stockSectionHint":
+    "Die Strecken, die MX Bikes mitbringt. Sie liegen in der tracks.pkz des Spiels, es gibt hier also keine Datei zum Verschieben oder Entfernen — sieh dir eine in 3D an oder extrahiere sie als eigene .pkz.",
+  "library.extractStock": "Als .pkz extrahieren",
+  "library.extractingStock": "{{name}} wird extrahiert…",
+  "library.extractedStock": "Extrahiert — {{size}}",
   "library.searchPlaceholder": "Installierte durchsuchen…",
   "library.sortFolder": "Nach Ordner",
   "library.sortRecent": "Zuletzt hinzugefügt",

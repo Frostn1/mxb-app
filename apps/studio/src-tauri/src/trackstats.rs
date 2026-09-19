@@ -749,7 +749,7 @@ fn transpose(v: &[f32], w: usize, h: usize) -> Vec<f32> {
 }
 
 /// The surface names in a height file's material table.
-fn material_names(block: &[u8]) -> Vec<String> {
+pub(crate) fn material_names(block: &[u8]) -> Vec<String> {
     let Some(at) = track::material_table_offset(block) else {
         return Vec::new();
     };

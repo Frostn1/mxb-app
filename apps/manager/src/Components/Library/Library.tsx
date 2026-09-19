@@ -11,6 +11,7 @@ import {
   ChevronRight,
   Lock,
   ShieldCheck,
+  Package,
   Box,
   ListChecks,
   CheckCircle2,
@@ -43,6 +44,7 @@ import {
   installsOutsideMods,
   modTypesFor,
   scanLibrary,
+  listStockTracks,
   moveMod,
   revealInExplorer,
   uninstallMod,
@@ -65,6 +67,7 @@ import type {
   ModelVariant,
   PkzMeta,
 } from "@frost/shared/types";
+import { entryKey } from "@frost/shared/types";
 import {
   displayName,
   folderLabel,
@@ -90,6 +93,7 @@ import { useConfig } from "@frost/shared/Context/Config";
 import { useImport } from "../Dropzone/useImport";
 import { useShare } from "../../Context/Share";
 import { cachedScan, dropScans, putScan } from "./scanCache";
+import { extractStock } from "./extractStock";
 import { useFavorites } from "../../lib/useFavorites";
 
 /** Starred mods, by tab and file name — a name survives a move between folders, a path doesn't. */
@@ -164,6 +168,9 @@ function LibraryCardBody({
   const [meta, setMeta] = useState<PkzMeta | null>(() => peekMeta(cacheKey) ?? null);
   // The thumbnail tile doubles as the visibility probe for the card.
   const [tile, setTile] = useState<HTMLDivElement | null>(null);
+  // What the read needs, and only that: `item` itself is a fresh object every scan, so
+  // depending on it would re-arm the observer on every render.
+  const { path, prefix } = item;
 
   useEffect(() => {
     const cached = peekMeta(cacheKey);
@@ -182,7 +189,7 @@ function LibraryCardBody({
       (entries) => {
         if (!entries.some((e) => e.isIntersecting)) return;
         io.disconnect();
-        void requestMeta(item.path, cacheKey).then((m) => {
+        void requestMeta({ path, prefix }, cacheKey).then((m) => {
           if (alive && m) setMeta(m);
         });
       },
@@ -194,7 +201,7 @@ function LibraryCardBody({
       alive = false;
       io.disconnect();
     };
-  }, [item.path, cacheKey, tile]);
+  }, [path, prefix, cacheKey, tile]);
 
   const title = meta?.name?.trim() || displayName(item.name);
   const folder = item.name;
@@ -233,6 +240,14 @@ function LibraryCardBody({
             title={t("library.securedUnlocked")}
           >
             <ShieldCheck className="size-3" />
+          </span>
+        )}
+        {item.stock && (
+          <span
+            className="absolute bottom-0.5 right-0.5 rounded bg-black/60 p-0.5 text-white/75"
+            title={t("library.stock")}
+          >
+            <Package className="size-3" />
           </span>
         )}
       </div>
@@ -593,6 +608,9 @@ export default function Library({
   const [findAgain, setFindAgain] = useState<LedgerRow | null>(null);
   // Joined to ledger rows so a mod the app installed can be fetched again from the row.
   const [history, setHistory] = useState<DownloadRecord[]>([]);
+  // The tracks the game itself ships. They are not in the mods tree and never will be, so
+  // they come from their own call and are rendered in their own section — see `stockSection`.
+  const [stock, setStock] = useState<LibraryEntry[]>([]);
 
   /** Scan the folder. `quiet` refreshes behind a list already on screen, so a cached
    *  library isn't replaced by a spinner to be redrawn identically. */
@@ -615,6 +633,24 @@ export default function Library({
       setLoading(false);
     }
   }, [modType]);
+
+  // Only the Tracks tab has any, and the call reads a cached index rather than walking the
+  // archive, so it costs nothing to ask on every visit. An install that hasn't been found
+  // yet answers with an empty list, which is the right answer: a card nothing can open is
+  // worse than no card.
+  useEffect(() => {
+    if (modType.id !== "tracks") {
+      setStock([]);
+      return;
+    }
+    let alive = true;
+    void listStockTracks()
+      .then((rows) => alive && setStock(rows))
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [modType, refreshKey]);
 
   // The ledger is only fetched once the player asks to see it: it inflates a thumbnail per
   // missing mod, which is real work for a panel most visits never open.
@@ -913,6 +949,35 @@ export default function Library({
     },
   ];
 
+  /**
+   * What you can do to a track that came with the game.
+   *
+   * Short on purpose. A stock track is one folder inside the install's shared `tracks.pkz`,
+   * so there is no file of its own to move, share or uninstall — sharing would hand over the
+   * whole 1.7 GB archive, and uninstalling would aim a delete at the game itself. Extract
+   * writes a copy you own and can work on; Reveal shows the archive it came out of.
+   */
+  const stockActions = (item: LibraryEntry): RowAction[] => [
+    {
+      key: "star",
+      icon: Star,
+      label: isStarred(item) ? t("library.unstar") : t("library.star"),
+      onSelect: () => favs.toggle(starId(modType, item)),
+    },
+    {
+      key: "extract",
+      icon: PackageOpen,
+      label: t("library.extractStock"),
+      onSelect: () => void extractStock(item, t),
+    },
+    {
+      key: "reveal",
+      icon: FolderOpen,
+      label: t("library.showInExplorer"),
+      onSelect: () => reveal(item),
+    },
+  ];
+
   /** The download that installed this mod, when the app was the one that fetched it. */
   const sourceOf = (row: LedgerRow) =>
     history.find(
@@ -1009,6 +1074,69 @@ export default function Library({
       },
     ];
   };
+
+  /**
+   * The tracks that came with the game.
+   *
+   * Kept out of `sections` — and so out of `visibleItems` — for the same reason a
+   * {@link GhostCard} is: select-all, bulk move, bulk share and bulk uninstall all read from
+   * there, and not one of them means anything for a folder inside the game's own archive.
+   * Rendering these apart makes that impossible rather than merely unlikely.
+   *
+   * The search box still applies, because a list of fifteen you cannot filter is a list you
+   * scroll past. Sorting doesn't: they arrive grouped by discipline, which is the order the
+   * game itself shows them in and the only one anybody would want.
+   */
+  const stockSection = (() => {
+    const q = search.trim().toLowerCase();
+    const rows = q
+      ? stock.filter(
+          (s) =>
+            s.name.toLowerCase().includes(q) || s.folder.toLowerCase().includes(q),
+        )
+      : stock;
+    if (rows.length === 0) return null;
+    return (
+      <section key="__stock__" className="flex flex-col gap-2.5">
+        <div className="flex items-baseline gap-2">
+          <span className="text-[12px] font-bold uppercase tracking-[1.2px] text-faint">
+            ▸ {t("library.stockSection")}
+          </span>
+          <span className="text-[11px] text-faint">{rows.length}</span>
+          <span className="text-[11px] text-faint/70">{t("library.stockSectionHint")}</span>
+        </div>
+        <div className="grid grid-cols-3 gap-3">
+          {rows.map((item) => (
+            <ContextMenu key={entryKey(item)}>
+              <ContextMenuTrigger asChild>
+                <div
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => setDetail(item)}
+                  onKeyDown={(e) => e.key === "Enter" && setDetail(item)}
+                  className="group flex cursor-pointer flex-col self-start rounded-xl border border-dashed border-white/[0.09] bg-card/40 p-3 transition-colors hover:border-white/20"
+                >
+                  <div className="flex w-full items-center gap-3">
+                    <LibraryCardBody item={item} typeIcon={categoryIcon(item.category)} />
+                  </div>
+                </div>
+              </ContextMenuTrigger>
+              <ContextMenuContent>
+                {stockActions(item).map((a) => (
+                  <Fragment key={a.key}>
+                    {a.separatorBefore && <ContextMenuSeparator />}
+                    <ContextMenuItem onSelect={a.onSelect}>
+                      <a.icon className="size-4" /> {a.label}
+                    </ContextMenuItem>
+                  </Fragment>
+                ))}
+              </ContextMenuContent>
+            </ContextMenu>
+          ))}
+        </div>
+      </section>
+    );
+  })();
 
   const ghostSection = (
     key: string,
@@ -1354,6 +1482,7 @@ export default function Library({
             ))}
             {/* After the installed grid, never mixed into it: these are a different kind of
                 fact and support a different set of actions. */}
+            {stockSection}
             {ghostSection(
               "__parked__",
               t("section.parked"),

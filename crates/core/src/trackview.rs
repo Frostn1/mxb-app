@@ -26,15 +26,27 @@ pub async fn resolve_track_source(
         .flatten()
 }
 
+/// One archive's metadata, or one track's inside a shared archive when `prefix` is given.
+///
+/// `prefix` is what [`resolve_track_source`] reports for a stock track — the folder inside the
+/// install's `tracks.pkz`. Omitted, this is the whole-archive read every mod card uses.
 #[tauri::command]
-pub async fn get_pkz_meta(app: tauri::AppHandle, path: String) -> Result<pkz::PkzMeta, String> {
-    tauri::async_runtime::spawn_blocking(move || get_pkz_meta_blocking(app, path))
+pub async fn get_pkz_meta(
+    app: tauri::AppHandle,
+    path: String,
+    prefix: Option<String>,
+) -> Result<pkz::PkzMeta, String> {
+    tauri::async_runtime::spawn_blocking(move || get_pkz_meta_blocking(app, path, prefix))
         .await
         .map_err(|e| format!("get_pkz_meta task failed: {e}"))?
 }
 
-fn get_pkz_meta_blocking(app: tauri::AppHandle, path: String) -> Result<pkz::PkzMeta, String> {
-    pkz::read_meta_cached(&app, &path).map_err(|e| format!("{e:#}"))
+fn get_pkz_meta_blocking(
+    app: tauri::AppHandle,
+    path: String,
+    prefix: Option<String>,
+) -> Result<pkz::PkzMeta, String> {
+    pkz::read_meta_cached_under(&app, &path, prefix.as_deref()).map_err(|e| format!("{e:#}"))
 }
 
 /// Metadata for many mods at once, but only for the ones already cached — `None` marks
@@ -58,14 +70,95 @@ pub async fn get_pkz_meta_cached(
 }
 
 #[tauri::command]
-pub async fn get_pkz_preview(path: String) -> Result<Option<String>, String> {
-    tauri::async_runtime::spawn_blocking(move || get_pkz_preview_blocking(path))
+pub async fn get_pkz_preview(
+    path: String,
+    prefix: Option<String>,
+) -> Result<Option<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || get_pkz_preview_blocking(path, prefix))
         .await
         .map_err(|e| format!("get_pkz_preview task failed: {e}"))?
 }
 
-fn get_pkz_preview_blocking(path: String) -> Result<Option<String>, String> {
-    pkz::read_preview(std::path::Path::new(&path)).map_err(|e| format!("{e:#}"))
+fn get_pkz_preview_blocking(path: String, prefix: Option<String>) -> Result<Option<String>, String> {
+    let path = std::path::Path::new(&path);
+    match prefix.as_deref().map(str::trim).filter(|p| !p.is_empty()) {
+        Some(p) => pkz::read_meta_and_preview_under(path, p).map(|(_, art)| art),
+        None => pkz::read_preview(path),
+    }
+    .map_err(|e| format!("{e:#}"))
+}
+
+// ===========================================================================
+// The tracks that came with the game
+// ===========================================================================
+
+/// Every stock track the install carries, shaped like anything else in the Library.
+///
+/// A [`crate::library::LibraryEntry`] rather than a [`crate::trackstock::StockTrack`] so the
+/// Library's own card, sort and grouping code renders these without learning a second shape.
+/// Each one points at the shared `tracks.pkz` with its own `prefix`, carries `stock`, and
+/// files itself under its discipline so the existing folder grouping sections them for free.
+///
+/// `name` is the id, not the name the game shows — see [`crate::trackstock::list`] for why —
+/// so a caller that wants "Forest Raceway" asks [`get_pkz_meta`] with the entry's `prefix`,
+/// exactly as a mod card asks for its own. `size` is zero: a track's share of a 1.7 GB
+/// archive isn't in the central directory, and no card needs it enough to walk for it.
+#[tauri::command]
+pub async fn list_stock_tracks(
+    app: tauri::AppHandle,
+) -> Result<Vec<crate::library::LibraryEntry>, String> {
+    let cfg = crate::config::load(&app).map_err(|e| format!("{e:#}"))?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let install = cfg.install_dir();
+        // No archive means no install found, and a card that can't be opened is worse than no
+        // card. The baked fallback list exists for the server browser, which only ever looks a
+        // track up by name; it has no business painting a Library.
+        let Some(path) = crate::trackstock::archive_path(&install) else {
+            return Vec::new();
+        };
+        let path = path.to_string_lossy().into_owned();
+        crate::trackstock::list(&install)
+            .into_iter()
+            .map(|t| crate::library::LibraryEntry {
+                prefix: Some(t.prefix()),
+                name: t.id,
+                folder: t.category,
+                path: path.clone(),
+                size: 0,
+                modified: 0,
+                kind: "pkz".into(),
+                category: "track".into(),
+                parent: None,
+                secured: false,
+                locked: false,
+                stock: true,
+            })
+            .collect()
+    })
+    .await
+    .map_err(|e| format!("list_stock_tracks task failed: {e}"))
+}
+
+/// Lift one stock track out of the install's shared archive into a `.pkz` of its own.
+///
+/// `to` is where the player asked for it — never the mods tree, because a mod track sharing a
+/// stock track's id gives the game two sources for one name. Returns the bytes written.
+#[tauri::command]
+pub async fn extract_stock_track(
+    app: tauri::AppHandle,
+    track_id: String,
+    to: String,
+) -> Result<u64, String> {
+    let cfg = crate::config::load(&app).map_err(|e| format!("{e:#}"))?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let install = cfg.install_dir();
+        let track = crate::trackstock::find(&install, &track_id)
+            .ok_or_else(|| format!("no stock track called {track_id}"))?;
+        crate::trackstock::extract(&install, &track, std::path::Path::new(&to))
+            .map_err(|e| format!("{e:#}"))
+    })
+    .await
+    .map_err(|e| format!("extract_stock_track task failed: {e}"))?
 }
 
 /// A track's metadata and contents. Cheap by construction — nothing is inflated — so the

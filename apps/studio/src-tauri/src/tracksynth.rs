@@ -2009,7 +2009,10 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
     // The ruts, blended in: every groove, bank and scuff softened as one layer before it touches
     // the ground — the fade a hand would take over it — so floors and walls blend rather than
     // meeting at an edge. Ridden without it as "every rut is a sharp wall".
-    {
+    //
+    // Kept afterwards rather than dropped: [`crate::trackprog::ScanJumps::Rut`] throws away
+    // everything else this pass did to the ground and lays this one layer back over the scan.
+    let rut_layer = {
         let r = ((RUT_BLEND_M / mps_x).round() as usize).max(1);
         let mut soft = rut_h;
         for _ in 0..RUT_BLEND_PASSES {
@@ -2018,7 +2021,8 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
         for (h, s) in heights.iter_mut().zip(&soft) {
             *h += s;
         }
-    }
+        soft
+    };
 
     // 3b. Smooth the ridden ground along the way it was ridden.
     //
@@ -2332,20 +2336,28 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
     //
     // [`crate::trackprog::ScanJumps::Recut`] is the way back to the corridor, and it is still the
     // right answer for a bare hillside that has no track on it yet.
-    let scan_is_the_track = prog
-        .terrain
-        .ground
-        .as_ref()
-        .is_some_and(|g| g.jumps == crate::trackprog::ScanJumps::Keep)
-        && land.is_scanned();
+    //
+    // `Rut` restores the scan the same way and then adds the one layer back — see
+    // [`crate::trackprog::ScanJumps::Rut`]. It goes on before the budget is measured, because
+    // a berm is height the archive has to hold like any other.
+    let jumps = prog.terrain.ground.as_ref().map(|g| g.jumps);
+    let scan_is_the_track = matches!(
+        jumps,
+        Some(crate::trackprog::ScanJumps::Keep | crate::trackprog::ScanJumps::Rut)
+    ) && land.is_scanned();
+    let ruts_over_the_scan = jumps == Some(crate::trackprog::ScanJumps::Rut);
     let mut used_m = used;
     if scan_is_the_track {
         let floor = prog.terrain.scale * BUDGET_MARGIN;
         let mut lo = f32::MAX;
         for y in 0..gh {
             for x in 0..gw {
-                let v = land.at(x as f32 * mps_x, y as f32 * mps_z);
-                heights[y * gw + x] = v;
+                let i = y * gw + x;
+                let mut v = land.at(x as f32 * mps_x, y as f32 * mps_z);
+                if ruts_over_the_scan {
+                    v += rut_layer[i];
+                }
+                heights[i] = v;
                 lo = lo.min(v);
             }
         }

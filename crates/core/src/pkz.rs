@@ -138,23 +138,55 @@ fn file_name_of(path: &str) -> String {
         .unwrap_or_default()
 }
 
+/// What the cache calls one archive — or one track inside a shared one.
+///
+/// The stock tracks all live in a single `tracks.pkz`, so the file's own name identifies
+/// fifteen different things. Without the prefix here they collide on one key and the Library
+/// paints Forest Raceway's name and art on every one of them.
+fn cache_name(path: &str, prefix: Option<&str>) -> String {
+    let name = file_name_of(path);
+    match prefix.map(str::trim).filter(|p| !p.is_empty()) {
+        Some(p) => format!("{name}#{}", p.trim_matches('/').to_ascii_lowercase()),
+        None => name,
+    }
+}
+
 pub fn read_meta_cached(app: &tauri::AppHandle, path: &str) -> Result<PkzMeta> {
+    read_meta_cached_under(app, path, None)
+}
+
+/// Metadata for one track inside a shared archive, cached per track.
+///
+/// `prefix` names the folder inside `path` — `tracks/motocross/forest` for a stock track. With
+/// `None` this is [`read_meta_cached`] and reads the whole archive.
+///
+/// Worth caching hard: the uncached read walks a 1.7 GB central directory and decodes a
+/// full-size TGA, and the Library asks for fifteen of them the moment the Tracks tab opens.
+pub fn read_meta_cached_under(
+    app: &tauri::AppHandle,
+    path: &str,
+    prefix: Option<&str>,
+) -> Result<PkzMeta> {
     let stamp = stamp(path)?;
-    let cache_file = cache_path(app, path, stamp);
-    if let Some(meta) = cache_file.as_deref().and_then(|cf| read_cache(cf, path, stamp)) {
+    let cache_file = cache_path(app, path, prefix, stamp);
+    if let Some(meta) = cache_file.as_deref().and_then(|cf| read_cache(cf, path, prefix, stamp)) {
         return Ok(meta);
     }
 
     // Only genuine misses queue for the disk + decode work.
     let _permit = acquire();
     // Someone ahead of us in the queue may have been inspecting this very file.
-    if let Some(meta) = cache_file.as_deref().and_then(|cf| read_cache(cf, path, stamp)) {
+    if let Some(meta) = cache_file.as_deref().and_then(|cf| read_cache(cf, path, prefix, stamp)) {
         return Ok(meta);
     }
 
-    let meta = read_meta(Path::new(path))?;
+    let meta = match prefix {
+        // `read_meta_and_preview_under` takes its own permit, and we are already holding one.
+        Some(p) => inspect_zip_under(Path::new(path), Some(p))?.0,
+        None => read_meta(Path::new(path))?,
+    };
     if let Some(cf) = &cache_file {
-        write_cache(cf, path, stamp, &meta);
+        write_cache(cf, path, prefix, stamp, &meta);
     }
     Ok(meta)
 }
@@ -164,27 +196,37 @@ pub fn read_meta_cached(app: &tauri::AppHandle, path: &str) -> Result<PkzMeta> {
 /// Lets the Library paint every card it has seen before in one pass, leaving the
 /// gated inspection above for the handful of entries that are genuinely new.
 pub fn read_meta_if_cached(app: &tauri::AppHandle, path: &str) -> Option<PkzMeta> {
-    let stamp = stamp(path).ok()?;
-    let cache_file = cache_path(app, path, stamp)?;
-    read_cache(&cache_file, path, stamp)
+    read_meta_if_cached_under(app, path, None)
 }
 
-fn read_cache(cache_file: &Path, path: &str, stamp: Stamp) -> Option<PkzMeta> {
+/// The same, for one track inside a shared archive.
+pub fn read_meta_if_cached_under(
+    app: &tauri::AppHandle,
+    path: &str,
+    prefix: Option<&str>,
+) -> Option<PkzMeta> {
+    let stamp = stamp(path).ok()?;
+    let cache_file = cache_path(app, path, prefix, stamp)?;
+    read_cache(&cache_file, path, prefix, stamp)
+}
+
+fn read_cache(cache_file: &Path, path: &str, prefix: Option<&str>, stamp: Stamp) -> Option<PkzMeta> {
     let bytes = std::fs::read(cache_file).ok()?;
     let entry: CacheEntry = serde_json::from_slice(&bytes).ok()?;
-    let same_file =
-        entry.mtime_ns == stamp.mtime_ns && entry.size == stamp.size && entry.name == file_name_of(path);
+    let same_file = entry.mtime_ns == stamp.mtime_ns
+        && entry.size == stamp.size
+        && entry.name == cache_name(path, prefix);
     same_file.then_some(entry.meta)
 }
 
-fn write_cache(cache_file: &Path, path: &str, stamp: Stamp, meta: &PkzMeta) {
+fn write_cache(cache_file: &Path, path: &str, prefix: Option<&str>, stamp: Stamp, meta: &PkzMeta) {
     if let Some(parent) = cache_file.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
     let entry = CacheEntry {
         mtime_ns: stamp.mtime_ns,
         size: stamp.size,
-        name: file_name_of(path),
+        name: cache_name(path, prefix),
         meta: meta.clone(),
     };
     if let Ok(bytes) = serde_json::to_vec(&entry) {
@@ -197,12 +239,17 @@ fn write_cache(cache_file: &Path, path: &str, stamp: Stamp, meta: &PkzMeta) {
 // v3: image ranking now prefers a bike's `logo.tga`, so v2 thumbnails are stale.
 const CACHE_DIR: &str = "pkz-meta-v3";
 
-fn cache_path(app: &tauri::AppHandle, source: &str, stamp: Stamp) -> Option<PathBuf> {
+fn cache_path(
+    app: &tauri::AppHandle,
+    source: &str,
+    prefix: Option<&str>,
+    stamp: Stamp,
+) -> Option<PathBuf> {
     let cache_root = crate::config::cache_dir(app)?;
     drop_stale_cache(&cache_root);
 
     let mut hasher = DefaultHasher::new();
-    file_name_of(source).hash(&mut hasher);
+    cache_name(source, prefix).hash(&mut hasher);
     stamp.size.hash(&mut hasher);
     stamp.mtime_ns.hash(&mut hasher);
     Some(cache_root.join(CACHE_DIR).join(format!("{:016x}.json", hasher.finish())))
@@ -830,6 +877,114 @@ fn extract_plain(path: &Path, out_dir: &Path) -> Result<Vec<String>> {
     Ok(written)
 }
 
+// ===========================================================================
+// Writing an archive the game can read
+// ===========================================================================
+
+/// Pack `<dir>/<slug>/` into a `.pkz` at `to`, nested under the slug folder.
+///
+/// Everything under `<dir>/<slug>/` and nothing else. Anything beside it — a track's
+/// heightmap, masks, sheets and shaders — is a couple of hundred megabytes the game never
+/// opens, and every published track ships only what is inside the folder named after it.
+///
+/// **Use this rather than a `zip` command, and never repack a built track by hand.** MX Bikes
+/// reads a `.pkz` with its own minimal reader and that reader makes no allowance for a local
+/// header's extra field: it takes an entry's data to start right after the name. Info-ZIP —
+/// the `zip` on every Mac and Linux box — writes a 28-byte `UT`/`ux` timestamp-and-owner extra
+/// into every local header, so every entry in such an archive begins 28 bytes late and decodes
+/// to rubbish. The track then lists nowhere, with nothing wrong in any file inside it; four
+/// lidar builds were lost to exactly that on 2026-09-16. Every track of ours the game does
+/// list was written here, and what makes it readable is that `ZipWriter` with these options
+/// writes no extra field at all. [`tests::packaged_as_the_game_reads_it`] pins that.
+///
+/// Entries go in sorted by name so two builds of the same source produce the same archive.
+///
+/// It lives in the shared crate because two apps write archives the game has to read: the
+/// Studio packages what its compilers produced, and the manager packages a stock track lifted
+/// out of the install's `tracks.pkz`. A second copy of this is how the extra-field bug comes
+/// back.
+pub fn pack_dir(dir: &Path, slug: &str, to: &Path) -> Result<u64> {
+    let root = dir.join(slug);
+    if !root.is_dir() {
+        bail!("nothing was compiled: there's no {slug} folder in {dir:?}");
+    }
+    // Paths, not bytes: a track's source folder runs to hundreds of megabytes and only one
+    // file of it is ever held at a time.
+    let mut files: Vec<(String, Source)> = Vec::new();
+    let mut stack = vec![root.clone()];
+    while let Some(at) = stack.pop() {
+        for e in std::fs::read_dir(&at)
+            .with_context(|| format!("read {at:?}"))?
+            .flatten()
+        {
+            let path = e.path();
+            if path.is_dir() {
+                stack.push(path);
+                continue;
+            }
+            // Named from the track folder up, so the archive nests the way the game expects.
+            let rel = path
+                .strip_prefix(dir)
+                .unwrap_or(&path)
+                .to_string_lossy()
+                .replace('\\', "/");
+            files.push((rel, Source::OnDisk(path)));
+        }
+    }
+    if files.is_empty() {
+        bail!("{root:?} is empty — nothing to package");
+    }
+    write_pkz(files, to)
+}
+
+/// The same archive, from entries already in hand rather than from a folder.
+///
+/// For a track lifted straight out of another archive — a stock track out of the install's
+/// `tracks.pkz` — where staging a copy on disk just to zip it back up would double the write
+/// for nothing. Names are as they should appear in the archive, so the caller has already put
+/// them under the track's own folder. Same writer, so see [`pack_dir`] for why that matters.
+pub fn pack_entries(entries: Vec<(String, Vec<u8>)>, to: &Path) -> Result<u64> {
+    if entries.is_empty() {
+        bail!("nothing to package: no entries");
+    }
+    write_pkz(
+        entries.into_iter().map(|(n, b)| (n, Source::InMemory(b))).collect(),
+        to,
+    )
+}
+
+/// Where one entry's bytes come from.
+enum Source {
+    OnDisk(PathBuf),
+    InMemory(Vec<u8>),
+}
+
+/// The one writer. Sorted by name, no directory entries, no extra fields.
+///
+/// Sorted so the archive doesn't come out in whatever order the filesystem handed the
+/// directory over in, and two builds of the same source produce the same bytes. Nothing but a
+/// file is written: the game's reader wants files, and a zero-length folder record is one more
+/// thing for it to have an opinion about.
+fn write_pkz(mut files: Vec<(String, Source)>, to: &Path) -> Result<u64> {
+    use std::io::Write;
+    files.sort_by(|a, b| a.0.cmp(&b.0));
+    let file = std::fs::File::create(to).with_context(|| format!("create {to:?}"))?;
+    let mut zip = zip::ZipWriter::new(file);
+    let opts: zip::write::FileOptions<'_, ()> =
+        zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+    for (name, src) in files {
+        zip.start_file(&name, opts)?;
+        match src {
+            Source::OnDisk(path) => {
+                zip.write_all(&std::fs::read(&path).with_context(|| format!("read {path:?}"))?)?
+            }
+            Source::InMemory(bytes) => zip.write_all(&bytes)?,
+        }
+    }
+    zip.finish()?;
+    Ok(std::fs::metadata(to).map(|m| m.len()).unwrap_or(0))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -843,6 +998,93 @@ mod tests {
         d
     }
 
+    /// The archive has to be readable by the game's own reader, not merely by a zip library.
+    ///
+    /// Every track of ours the game does list — Draycott Valley, Granite Peak, both Northgates
+    /// — was written by [`pack_dir`], and all eleven entries of each carry a zero-length extra
+    /// field, a zero-length central extra, and version 20 both ways. So that is the shape, and
+    /// this test reads the raw headers rather than asking a zip library, because a zip library
+    /// is exactly the thing that hides the difference.
+    #[test]
+    fn packaged_as_the_game_reads_it() {
+        let dir = tmp_dir("headers");
+        std::fs::create_dir_all(dir.join("mytrack/sub")).unwrap();
+        std::fs::write(dir.join("mytrack/mytrack.map"), vec![7u8; 9000]).unwrap();
+        std::fs::write(dir.join("mytrack/mytrack.ini"), b"[info]\r\nname = My Track\r\n").unwrap();
+        std::fs::write(dir.join("mytrack/sub/deep.tga"), vec![3u8; 64]).unwrap();
+        let pkz = dir.join("mytrack.pkz");
+        pack_dir(&dir, "mytrack", &pkz).unwrap();
+        let b = std::fs::read(&pkz).unwrap();
+
+        let u16_at = |o: usize| u16::from_le_bytes(b[o..o + 2].try_into().unwrap());
+        let u32_at = |o: usize| u32::from_le_bytes(b[o..o + 4].try_into().unwrap());
+
+        // Walk the local headers from the front, the way a reader that never opens the central
+        // directory does. Each one has to land exactly on the next.
+        let mut at = 0usize;
+        let mut seen = Vec::new();
+        while at + 4 <= b.len() && b[at..at + 4] == ZIP_MAGIC {
+            let (name_len, extra_len) = (u16_at(at + 26) as usize, u16_at(at + 28) as usize);
+            let name = String::from_utf8_lossy(&b[at + 30..at + 30 + name_len]).into_owned();
+            assert_eq!(extra_len, 0, "{name} carries a {extra_len}-byte local extra field");
+            assert_eq!(u16_at(at + 4), 20, "{name} needs an unexpected zip version to extract");
+            // Streamed entries hide their sizes behind a trailing descriptor, which the same
+            // kind of reader also cannot follow. Bit 3 of the flags is that.
+            assert_eq!(u16_at(at + 6) & 0x08, 0, "{name} was written with a data descriptor");
+            assert!(!name.ends_with('/'), "{name} is a directory entry");
+            let comp = u32_at(at + 18) as usize;
+            assert!(comp > 0, "{name} has no data");
+            seen.push(name);
+            at += 30 + name_len + extra_len + comp;
+        }
+        assert_eq!(seen.len(), 3, "walked {seen:?} before losing the thread");
+        // And sorted, so the same source packs to the same archive twice running.
+        let mut want = seen.clone();
+        want.sort();
+        assert_eq!(seen, want, "entries came out in filesystem order");
+
+        // The central directory agrees, and carries no extra field either — the two lengths
+        // disagreeing is the specific thing that makes an Info-ZIP archive unreadable.
+        let end = b.len() - 22;
+        assert_eq!(&b[end..end + 4], b"PK\x05\x06", "no end-of-central-directory where expected");
+        let mut cd = u32_at(end + 16) as usize;
+        for _ in 0..seen.len() {
+            assert_eq!(&b[cd..cd + 4], b"PK\x01\x02");
+            assert_eq!(u16_at(cd + 30), 0, "a central header carries an extra field");
+            let (n, e, c) = (u16_at(cd + 28) as usize, u16_at(cd + 30) as usize, u16_at(cd + 32) as usize);
+            cd += 46 + n + e + c;
+        }
+    }
+
+    #[test]
+    fn packaging_nests_the_track_folder_and_leaves_the_source_behind() {
+        let dir = tmp_dir("package");
+        std::fs::create_dir_all(dir.join("mytrack/sub")).unwrap();
+        std::fs::write(dir.join("mytrack/mytrack.map"), b"map").unwrap();
+        std::fs::write(dir.join("mytrack/sub/deep.tga"), b"tga").unwrap();
+        // The source beside it, which the game never opens.
+        std::fs::write(dir.join("heightmap.raw"), vec![0u8; 4096]).unwrap();
+
+        let pkz = dir.join("mytrack.pkz");
+        assert!(pack_dir(&dir, "mytrack", &pkz).unwrap() > 0);
+
+        let mut zip = zip::ZipArchive::new(std::fs::File::open(&pkz).unwrap()).unwrap();
+        let mut names: Vec<String> = (0..zip.len())
+            .map(|i| zip.by_index(i).unwrap().name().to_string())
+            .collect();
+        names.sort();
+        assert_eq!(names, ["mytrack/mytrack.map", "mytrack/sub/deep.tga"]);
+    }
+
+    #[test]
+    fn packaging_a_folder_that_was_never_compiled_says_so() {
+        let dir = tmp_dir("package-empty");
+        let err = pack_dir(&dir, "mytrack", &dir.join("x.pkz"))
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("nothing was compiled"), "{err}");
+    }
+
     #[test]
     fn cached_metadata_survives_the_library_moving() {
         let dir = tmp_dir("cache-move");
@@ -852,11 +1094,11 @@ mod tests {
             name: Some("Red Bud".into()),
             ..Default::default()
         };
-        write_cache(&cache_file, "/old/mods/tracks/Red Bud.pkz", stamp, &meta);
+        write_cache(&cache_file, "/old/mods/tracks/Red Bud.pkz", None, stamp, &meta);
 
         // Same file, different folder: pointing the app at a moved MX Bikes install
         // must not re-inspect every archive it already knows.
-        let hit = read_cache(&cache_file, "/new/drive/mods/tracks/Red Bud.pkz", stamp);
+        let hit = read_cache(&cache_file, "/new/drive/mods/tracks/Red Bud.pkz", None, stamp);
         assert_eq!(hit.and_then(|m| m.name).as_deref(), Some("Red Bud"));
 
         let _ = std::fs::remove_dir_all(&dir);
@@ -867,15 +1109,15 @@ mod tests {
         let dir = tmp_dir("cache-miss");
         let cache_file = dir.join("entry.json");
         let stamp = Stamp { size: 1234, mtime_ns: 999 };
-        write_cache(&cache_file, "/mods/tracks/Red Bud.pkz", stamp, &PkzMeta::default());
+        write_cache(&cache_file, "/mods/tracks/Red Bud.pkz", None, stamp, &PkzMeta::default());
 
         // Updated in place — same name and path, new contents.
         let resized = Stamp { size: 4321, ..stamp };
-        assert!(read_cache(&cache_file, "/mods/tracks/Red Bud.pkz", resized).is_none());
+        assert!(read_cache(&cache_file, "/mods/tracks/Red Bud.pkz", None, resized).is_none());
         let retouched = Stamp { mtime_ns: 1000, ..stamp };
-        assert!(read_cache(&cache_file, "/mods/tracks/Red Bud.pkz", retouched).is_none());
+        assert!(read_cache(&cache_file, "/mods/tracks/Red Bud.pkz", None, retouched).is_none());
         // A different mod that happens to hash to the same cache file.
-        assert!(read_cache(&cache_file, "/mods/tracks/Other.pkz", stamp).is_none());
+        assert!(read_cache(&cache_file, "/mods/tracks/Other.pkz", None, stamp).is_none());
 
         let _ = std::fs::remove_dir_all(&dir);
     }

@@ -791,8 +791,13 @@ export function repairOrphanedSetup(bike: string): Promise<number> {
   return invoke<number>("repair_orphaned_setup", { bike });
 }
 
-export function getPkzMeta(path: string): Promise<PkzMeta> {
-  return invoke<PkzMeta>("get_pkz_meta", { path });
+/**
+ * One archive's metadata — or one track's, when `prefix` names its folder inside a shared
+ * archive (`tracks/motocross/forest` inside the install's `tracks.pkz`). Cached per prefix,
+ * so the fifteen stock tracks don't collide on one entry.
+ */
+export function getPkzMeta(path: string, prefix?: string | null): Promise<PkzMeta> {
+  return invoke<PkzMeta>("get_pkz_meta", { path, prefix: prefix ?? null });
 }
 
 /**
@@ -804,8 +809,33 @@ export function getPkzMetaCached(paths: string[]): Promise<(PkzMeta | null)[]> {
   return invoke<(PkzMeta | null)[]>("get_pkz_meta_cached", { paths });
 }
 
-export function getPkzPreview(path: string): Promise<string | null> {
-  return invoke<string | null>("get_pkz_preview", { path });
+export function getPkzPreview(path: string, prefix?: string | null): Promise<string | null> {
+  return invoke<string | null>("get_pkz_preview", { path, prefix: prefix ?? null });
+}
+
+/**
+ * The tracks that came with the game, as library entries pointing into the install's shared
+ * `tracks.pkz`. Empty when no install has been found — see `trackstock::list`.
+ *
+ * `name` is the folder id (`forest`), not the name the game shows: that costs an archive read
+ * per track, so a card asks {@link getPkzMeta} with the entry's `prefix` for it, the same way
+ * an installed mod does.
+ */
+export function listStockTracks(): Promise<LibraryEntry[]> {
+  return invoke<LibraryEntry[]>("list_stock_tracks");
+}
+
+/**
+ * Lift one stock track out of the shared archive into a `.pkz` of its own at `to`. Returns
+ * the bytes written.
+ *
+ * Nested under the track's own folder and written with the game's own reader in mind, so the
+ * result lists in the game and opens in the Studio. `to` is wherever the player asked for it,
+ * never the mods tree: a mod track sharing a stock track's id gives the game two sources for
+ * one name.
+ */
+export function extractStockTrack(trackId: string, to: string): Promise<number> {
+  return invoke<number>("extract_stock_track", { trackId, to });
 }
 
 export function unpackPaint(path: string): Promise<PaintTexture[]> {

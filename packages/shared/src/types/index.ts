@@ -282,6 +282,25 @@ export interface LibraryEntry {
   secured?: boolean;
   /** A secured file with no key for this account yet: shown, but not openable/viewable. */
   locked?: boolean;
+  /** The folder inside {@link path} this entry actually is, when the archive holds more than
+   *  one of them — `tracks/motocross/forest` for a stock track inside the install's
+   *  `tracks.pkz`. Absent for everything in the mods tree, where one file is one mod.
+   *
+   *  Part of the entry's identity, not decoration: every stock track shares one path, so use
+   *  {@link entryKey} anywhere a list key, a selection or a cache is keyed on an entry. */
+  prefix?: string | null;
+  /** Shipped with the game rather than installed by the player. Read-only — there is no file
+   *  of its own to move, share or delete. */
+  stock?: boolean;
+}
+
+/** What identifies one library entry.
+ *
+ *  Not the path on its own: the fifteen stock tracks all live inside one `tracks.pkz`, so a
+ *  path-keyed list renders one card, a path-keyed selection selects all of them at once, and a
+ *  path-keyed metadata cache paints Forest Raceway's art on every track the game ships. */
+export function entryKey(entry: Pick<LibraryEntry, "path" | "prefix">): string {
+  return entry.prefix ? `${entry.path}#${entry.prefix}` : entry.path;
 }
 
 export interface ModelVariant {
