@@ -1,51 +1,25 @@
 # Changelog
 
-## Unreleased — The Library's folders, one click away
+## Unreleased — Stock tracks in the Library
 
 ### Added
-- **The tracks that came with the game are in your Library.** All fifteen of them, with their
-  real names and their own artwork, in a section of their own on the Tracks tab. Click one to
-  look around it in 3D, the same as any track you installed. They live inside the game's own
-  files rather than your mods folder, which is why they have never shown up here before.
-- **Both of the Library's folders, one click from the list.** Two buttons in the Library's bar
-  open the mods folder and the game's install folder in your file manager, for the times it's
-  quicker to move a file by hand than to go through the app. The mods one opens the tab you're
-  on — Tracks opens `mods/tracks` — so the list on screen and the folder that opens are the
-  same thing, and it lands on the real tree wherever `mxbikes.ini` put it, rather than where
-  the folder usually is. A tab the game hasn't made a folder for yet opens the tree above it.
+- Stock tracks now appear in the Library. All fifteen, with names and artwork, on the Tracks
+  tab. Click one to view it in 3D.
+- Two buttons in the Library bar open your mods folder and your game folder.
 
 ### Changed
-- **Settings is sorted by what a setting belongs to.** General had collected every switch
-  that never got a home, so the paint sync toggle, the download preferences and the whole
-  secure-content block sat in one long list between "keep running in the background" and the
-  version number. The paint sync switch now sits above what paint sync has actually managed,
-  in **Paint sync**. The mod install preferences — supporting creators, dedicated-server
-  files, preferred download host — are together under a new **Mods & downloads**. Signing in
-  with Steam, unlocking what you've bought and restoring keys have their own **Secure
-  content** page under Advanced. General is the app's own behaviour and nothing else.
-- **Ranked follows the Steam account you're signed in as.** The tab shows the season of the
-  Steam account this app is signed in with, rather than whichever account the Steam client on
-  the machine was last opened with — so a shared PC, or a second Steam account, shows your
-  rider and not somebody else's. A GUID you typed in yourself still wins, and a machine that
-  has never signed in still works off Steam as before.
-- **Servers sits first in the top row**, before Browse.
-- About links to mxbsecure.com, and the update check says so.
+- Settings is sorted by section. Paint sync, Mods & downloads and Secure content each have
+  their own page.
+- Ranked uses the Steam account you're signed in as.
+- Servers sits first in the top row.
+- About links to mxbsecure.com.
 
 ### Removed
-- The **Studio** tab. Frost's Studio is an app of its own: open it from your desktop, or from
-  **Settings → Plugins** when a plugin's panels live there.
+- The Studio tab. Frost's Studio is its own app.
 
 ### Fixed
-- A long profiles folder in **Settings → Game folder** stays inside its panel instead of
-  running off the side of it, with the end of the path a hover away.
-- **The Steam sign-in gives you time to actually sign in.** The window was ten minutes counted
-  from the moment the app asked for the sign-in — before your browser had even opened — and it
-  was only checked at the very end. So a password typed carefully, or a Steam Guard code waited
-  on, came back "that sign-in expired" *after* Steam had already confirmed you, and pressing the
-  button again ran the same clock down the same way. Your half of it is now thirty minutes and
-  starts when your browser reaches Steam, not when the app asked. A sign-in that genuinely can't
-  go on is refused before Steam rather than after, so you find out having spent nothing, and the
-  app keeps watching for the whole window instead of giving up while the sign-in is still good.
+- Long profile paths stay inside their panel in Settings → Game folder.
+- Steam sign-in now gives you 30 minutes.
 
 ## 2026-09-18 — Frost's Studio v0.4.1 — Starting from an existing track is off for now
 
