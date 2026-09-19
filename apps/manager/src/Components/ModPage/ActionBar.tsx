@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import type { LucideIcon } from "lucide-react";
+import { ChevronLeft, type LucideIcon } from "lucide-react";
 import { cn } from "@frost/shared/lib/utils";
 import SmartImg from "./Img";
 
@@ -16,6 +16,8 @@ export function ActionBar({
   fallbackIcon: Fallback,
   title,
   meta,
+  onBack,
+  backLabel,
   children,
 }: {
   /** The mod's own picture, at thumbnail size. */
@@ -25,12 +27,29 @@ export function ActionBar({
   title: string;
   /** "Track · Author · v1.2" — anything empty is dropped rather than left as a stray dot. */
   meta: (string | null | undefined | false)[];
+  /**
+   * Adds the way out to the bar itself. Browse and the library put their breadcrumb in the
+   * context bar above, because that row is theirs while a mod is open; the stores keep their
+   * own tabs up there the whole time, so their way back belongs here instead.
+   */
+  onBack?: () => void;
+  backLabel?: string;
   /** The state chip and the primary action, right-aligned. */
   children?: ReactNode;
 }) {
   const parts = meta.filter((m): m is string => !!m && m.trim() !== "");
   return (
     <div className="flex h-[60px] flex-none items-center gap-3.5 border-b border-border bg-window px-7">
+      {onBack && (
+        <button
+          onClick={onBack}
+          aria-label={backLabel}
+          title={backLabel}
+          className="-ml-2 grid size-8 flex-none cursor-default place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-foreground/[0.06] hover:text-foreground"
+        >
+          <ChevronLeft className="size-4" />
+        </button>
+      )}
       <div className="grid size-10 flex-none place-items-center overflow-hidden rounded-lg border border-border bg-card text-foreground/25">
         {image ? (
           <SmartImg src={image} width={120} alt="" className="size-full object-cover" />

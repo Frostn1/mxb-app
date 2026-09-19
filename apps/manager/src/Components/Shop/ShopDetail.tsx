@@ -26,7 +26,6 @@ import {
 } from "@frost/shared/Components/ui/select";
 import { useI18n, useT } from "@/i18n";
 import { formatDate } from "@frost/shared/lib/mods";
-import { ContextBarLeft } from "../Shell/ContextBar";
 import { ActionBar, StateChip } from "../ModPage/ActionBar";
 import MediaPanel, { type Figure } from "../ModPage/Media";
 import { Panel, SectionLabel, WhatsInside } from "../ModPage/Panels";
@@ -93,26 +92,19 @@ export default function ShopDetail({
     };
   }, [id, load]);
 
-  const crumb = (title: string) => (
-    <ContextBarLeft>
-      <span className="flex items-center gap-2 font-cond text-[12.5px] font-semibold tracking-[-0.02em]">
-        <button
-          onClick={onBack}
-          className="flex cursor-default items-center gap-1 text-muted-foreground transition-colors hover:text-foreground"
-        >
-          <ChevronLeft className="size-3.5" />
-          {t("common.back")}
-        </button>
-        <span className="text-faint">/</span>
-        <span className="max-w-[420px] truncate text-foreground">{title}</span>
-      </span>
-    </ContextBarLeft>
+  // The store keeps its own Catalog/Purchases tabs in the context bar the whole time it is
+  // open, so the way back rides in the action bar rather than portalling in beside them.
+  const back = (
+    <Button variant="ghost" size="sm" onClick={onBack} className="flex-none self-start">
+      <ChevronLeft className="size-4" />
+      {t("common.back")}
+    </Button>
   );
 
   if (error) {
     return (
-      <div className="flex min-h-0 flex-1 flex-col px-7 pt-5">
-        {crumb("—")}
+      <div className="flex min-h-0 flex-1 flex-col px-7 pt-4">
+        {back}
         <div className="mx-auto flex max-w-md flex-col items-center gap-3 py-20 text-center">
           <p className="text-[13px] font-semibold text-destructive">
             {t("shopCatalog.loadFailed")}
@@ -127,8 +119,8 @@ export default function ShopDetail({
 
   if (!detail) {
     return (
-      <div className="flex min-h-0 flex-1 flex-col px-7 pt-5">
-        {crumb("…")}
+      <div className="flex min-h-0 flex-1 flex-col px-7 pt-4">
+        {back}
         <div className="mt-4 flex gap-6">
           <Skeleton className="aspect-video flex-1 rounded-xl" />
           <Skeleton className="h-64 w-[320px] flex-none rounded-xl" />
@@ -141,19 +133,23 @@ export default function ShopDetail({
   // The mxbikes-shop dump carries no equivalent, so this is simply absent there.
   const summary = (detail as Partial<HubModDetail>).summary ?? null;
 
+  // One figure for the bar. A product sold in a range of options has no single price, so the
+  // button says "Buy" and the card below shows the range in full rather than the low end,
+  // which would read as the price and be wrong for every other option.
   const price = detail.price;
   const live = price.onSale ? price.sale : price.base;
   const priceLabel = price.free
     ? t("shopCatalog.free")
-    : live === null
+    : live === null || price.hasRange
       ? null
       : formatPrice(live, currency, resolved);
 
   const files = owned?.files ?? [];
   const picked = files.find((f) => String(f.id) === pickedId) ?? files[0];
 
+  // The price is the bar's job and the state card's; on the picture it would be the third
+  // copy of one number.
   const figures: Figure[] = [
-    ...(priceLabel ? [{ label: "Price", value: priceLabel }] : []),
     ...(detail.updated !== null
       ? [
           {
@@ -166,13 +162,13 @@ export default function ShopDetail({
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden">
-      {crumb(detail.title)}
-
       <ActionBar
         image={detail.image ?? detail.images[0] ?? null}
         fallbackIcon={ShoppingBag}
         title={detail.title}
         meta={[detail.author, detail.categoryNames[0]]}
+        onBack={onBack}
+        backLabel={t("common.back")}
       >
         {owned ? (
           <>
@@ -204,7 +200,9 @@ export default function ShopDetail({
           detail.url && (
             <Button onClick={() => void openShopUrl(detail.url)}>
               <ExternalLink className="size-4" />
-              {priceLabel ? `${t("shopCatalog.buyOnStore")} · ${priceLabel}` : t("shopCatalog.buyOnStore")}
+              {/* Short, because the bar is one row: what it costs, and that it opens the
+                  store, which the card below says in full. */}
+              {priceLabel ? `Buy · ${priceLabel}` : t("shopCatalog.buyOnStore")}
             </Button>
           )
         )}
