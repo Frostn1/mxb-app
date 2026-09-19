@@ -3,6 +3,10 @@
 ## Unreleased
 
 ### Changed
+- Browse, Shop and MXB Hub are one MODS screen. Pick tracks, bikes, rider or ReShade down the
+  left, then choose where it comes from: mxb-mods, MXB Hub, the shop, or all three in one
+  grid. Every card says which site it is from, who made it, and what it costs. Free mods say
+  Free. Your purchases are still there, at the bottom of the left column.
 - The app wears the mxbsecure look: the brand blue, black chrome, and rounded corners
   throughout. Every colorway but the default is untouched.
 - Buttons, switches and sliders are upright and rounded. The switch is a pill, the slider has

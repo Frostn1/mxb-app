@@ -1,15 +1,12 @@
-import { useCallback, useLayoutEffect, useRef, useState } from "react";
+import { useLayoutEffect, useRef } from "react";
 import { Search, Download, X } from "lucide-react";
-import { toast } from "sonner";
-import { resolveQuickInstall, type ModSort, type ModType } from "@frost/shared/api/mods";
-import { useConfig } from "@frost/shared/Context/Config";
+import { type ModSort, type ModType } from "@frost/shared/api/mods";
 import type { InstalledIndex } from "../../lib/installedMatch";
 import type { ModListing } from "../../lib/useModListing";
-import type { ModSummary } from "@frost/shared/types";
-import { useInstall } from "../../Context/Install";
 import { useT } from "@/i18n";
 import ModCard from "./ModCard";
 import FeaturedMod from "./FeaturedMod";
+import { useQuickInstall } from "./useQuickInstall";
 import { Button } from "@frost/shared/Components/ui/button";
 import { ContextBarLeft, ContextBarRight, ContextTab } from "../Shell/ContextBar";
 import HelpHint from "@frost/shared/Components/ui/help-hint";
@@ -21,16 +18,6 @@ import {
   SelectContent,
   SelectItem,
 } from "@frost/shared/Components/ui/select";
-import {
-  AlertDialog,
-  AlertDialogContent,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogCancel,
-  AlertDialogAction,
-} from "@frost/shared/Components/ui/alert-dialog";
 
 interface BrowseProps {
   modType: ModType;
@@ -45,6 +32,14 @@ interface BrowseProps {
   installed: InstalledIndex;
   onOpenMod: (slug: string, categoryId: number) => void;
   onChangeType: (type: ModType) => void;
+  /**
+   * Whether this grid fills the context bar itself.
+   *
+   * False inside the Mods screen, which owns one search box, one sort and one source filter
+   * for three catalogues — two components portalling into the same slot would stack two of
+   * each. True everywhere else (the in-game overlay), where nothing else is competing for it.
+   */
+  chrome?: boolean;
 }
 
 export default function Browse({
@@ -54,9 +49,9 @@ export default function Browse({
   installed,
   onOpenMod,
   onChangeType,
+  chrome = true,
 }: BrowseProps) {
   const t = useT();
-  const { game } = useConfig();
   const {
     query,
     setQuery,
@@ -79,12 +74,7 @@ export default function Browse({
     selectAll,
     scrollTop,
   } = listing;
-  // A pending reinstall the user must confirm (they already have these mods).
-  const [reinstall, setReinstall] = useState<
-    { kind: "single"; mod: ModSummary } | { kind: "bulk"; mods: ModSummary[] } | null
-  >(null);
 
-  const { startPendingInstall } = useInstall();
   const selectionActive = selected.size > 0;
 
   // The grid scroller. Its offset is kept in `listing` rather than here, so opening a mod
@@ -96,101 +86,13 @@ export default function Browse({
     if (grid.current) grid.current.scrollTop = scrollTop.current;
   }, [scrollTop]);
 
-  const isInstalled = useCallback(
-    (mod: ModSummary) => installed.has(mod.title),
-    [installed],
+  const { quickInstall, quickInstallMany, isInstalled, dialog } = useQuickInstall(
+    modType,
+    categoryId,
+    installed,
   );
 
-  /**
-   * Silent quick-install: the mod joins the download queue on the spot, and its mirror and
-   * destination folder are worked out when the queue reaches it.
-   *
-   * The lookup used to come first, which meant a mod existed nowhere on screen until its page
-   * came back — and a bulk selection of twenty appeared in the panel a page-fetch at a time.
-   * Resolving late also asks the library where the mod should go *after* the installs ahead of
-   * it have landed, which is the state the answer depends on.
-   */
-  const queueQuickInstall = useCallback(
-    (mod: ModSummary) =>
-      startPendingInstall({
-        slug: mod.slug,
-        title: mod.title,
-        subpath: modType.installSubpath,
-        resolve: async () => {
-          try {
-            const res = await resolveQuickInstall(mod.slug, modType, game, categoryId);
-            if (res.ok) return { ...res.params, categoryId };
-            if (res.reason === "blocked") {
-              toast.error(t("browse.needsBrowser", { title: res.title }), {
-                description: t("browse.needsBrowserDesc", { host: res.host ?? "" }),
-              });
-            } else if (res.reason === "serverOnly") {
-              // Not installed on the user's behalf: one click can't ask which build was meant,
-              // and a server file installs cleanly while the game shows nothing.
-              toast.error(t("browse.serverOnly", { title: res.title }), {
-                description: t("browse.serverOnlyDesc"),
-              });
-            } else {
-              toast.error(t("browse.noDownload", { title: res.title }));
-            }
-          } catch (e) {
-            toast.error(t("browse.quickInstallFailed", { title: mod.title }), {
-              description: String(e),
-            });
-          }
-          return null;
-        },
-      }),
-    [modType, categoryId, game, startPendingInstall, t],
-  );
-
-  const doQuickInstall = useCallback(
-    (mod: ModSummary) => {
-      queueQuickInstall(mod);
-      toast.success(t("browse.queued", { title: mod.title }), {
-        description: t("browse.queuedDesc"),
-      });
-    },
-    [queueQuickInstall, t],
-  );
-
-  // Guard: if the mod is already installed, confirm before overwriting.
-  const quickInstall = useCallback(
-    (mod: ModSummary) => {
-      if (isInstalled(mod)) setReinstall({ kind: "single", mod });
-      else doQuickInstall(mod);
-    },
-    [isInstalled, doQuickInstall],
-  );
-
-  // The whole selection is queued at once. Nothing is fetched here, so there's no busy state
-  // to sit through and no count of what got skipped — a mod with no usable download says so
-  // itself, by name, when the queue gets to it.
-  const doBulkInstall = useCallback(
-    (list: ModSummary[]) => {
-      list.forEach(queueQuickInstall);
-      clearSelection();
-      toast.success(t("browse.queuedBulk", { count: list.length }), {
-        description: t("browse.queuedBulkDesc"),
-      });
-    },
-    [queueQuickInstall, clearSelection, t],
-  );
-
-  const bulkInstall = useCallback(() => {
-    const list = [...selected.values()];
-    const already = list.filter(isInstalled);
-    if (already.length) setReinstall({ kind: "bulk", mods: list });
-    else doBulkInstall(list);
-  }, [selected, isInstalled, doBulkInstall]);
-
-  const confirmReinstall = useCallback(() => {
-    const pending = reinstall;
-    setReinstall(null);
-    if (!pending) return;
-    if (pending.kind === "single") doQuickInstall(pending.mod);
-    else doBulkInstall(pending.mods);
-  }, [reinstall, doQuickInstall, doBulkInstall]);
+  const bulkInstall = () => quickInstallMany([...selected.values()], clearSelection);
 
   const isBike = modType.id === "bikes";
 
@@ -206,64 +108,68 @@ export default function Browse({
   return (
     <div className="flex h-full flex-col">
       {/* The type tabs and the search/sort controls live in the shell's context bar. The
-          rail already says BROWSE, so the page does not repeat it as a heading — that
+          rail already says MODS, so the page does not repeat it as a heading — that
           stacked title-then-tabs-then-filters column is what read as a dashboard. */}
-      <ContextBarLeft>
-        {modTypes.map((mt) => (
-          <ContextTab
-            key={mt.id}
-            active={mt.id === modType.id}
-            onSelect={() => onChangeType(mt)}
-          >
-            {t(mt.label)}
-          </ContextTab>
-        ))}
-      </ContextBarLeft>
+      {chrome && (
+        <>
+          <ContextBarLeft>
+            {modTypes.map((mt) => (
+              <ContextTab
+                key={mt.id}
+                active={mt.id === modType.id}
+                onSelect={() => onChangeType(mt)}
+              >
+                {t(mt.label)}
+              </ContextTab>
+            ))}
+          </ContextBarLeft>
 
-      <ContextBarRight>
-        <div className="flex h-7 w-[210px] items-center gap-2 border border-input bg-card px-2.5">
-          <Search className="size-3.5 text-faint" />
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder={t("browse.searchPlaceholder", { type: t(modType.labelInline) })}
-            className="w-full bg-transparent text-[12.5px] placeholder:text-faint focus:outline-none"
-          />
-        </div>
-        {/* The category filter was a row of pills of its own. Three bands of chrome
-            before the first mod is what this redesign set out to remove, so it folds in
-            here beside the sort it belongs with. */}
-        <Select
-          value={String(categoryId ?? modType.categoryId)}
-          onValueChange={(v) => setCategoryId(Number(v))}
-        >
-          <SelectTrigger className="h-7 w-[164px] bg-card text-[12px]">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {modType.categories.map((c) => (
-              <SelectItem key={c.id} value={String(c.id)}>
-                {t(c.label)}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Select value={activeSort} onValueChange={(v) => setSort(v as ModSort)}>
-          {/* Wide enough for the longest translated label ("Popolari questa
-              settimana") rather than the English one. */}
-          <SelectTrigger className="h-7 w-[196px] bg-card text-[12px]">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {sortOptions.map((s) => (
-              <SelectItem key={s.value} value={s.value}>
-                {t(s.label)}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <HelpHint title={t("nav.browse")} description={t("browse.help")} />
-      </ContextBarRight>
+          <ContextBarRight>
+            <div className="flex h-7 w-[210px] items-center gap-2 border border-input bg-card px-2.5">
+              <Search className="size-3.5 text-faint" />
+              <input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder={t("browse.searchPlaceholder", { type: t(modType.labelInline) })}
+                className="w-full bg-transparent text-[12.5px] placeholder:text-faint focus:outline-none"
+              />
+            </div>
+            {/* The category filter was a row of pills of its own. Three bands of chrome
+                before the first mod is what this redesign set out to remove, so it folds in
+                here beside the sort it belongs with. */}
+            <Select
+              value={String(categoryId ?? modType.categoryId)}
+              onValueChange={(v) => setCategoryId(Number(v))}
+            >
+              <SelectTrigger className="h-7 w-[164px] bg-card text-[12px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {modType.categories.map((c) => (
+                  <SelectItem key={c.id} value={String(c.id)}>
+                    {t(c.label)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select value={activeSort} onValueChange={(v) => setSort(v as ModSort)}>
+              {/* Wide enough for the longest translated label ("Popolari questa
+                  settimana") rather than the English one. */}
+              <SelectTrigger className="h-7 w-[196px] bg-card text-[12px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {sortOptions.map((s) => (
+                  <SelectItem key={s.value} value={s.value}>
+                    {t(s.label)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <HelpHint title={t("nav.mods")} description={t("browse.help")} />
+          </ContextBarRight>
+        </>
+      )}
 
       <div
         ref={grid}
@@ -355,33 +261,7 @@ export default function Browse({
         </div>
       )}
 
-      <AlertDialog open={Boolean(reinstall)} onOpenChange={(o) => !o && setReinstall(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
-              {reinstall?.kind === "single"
-                ? t("browse.reinstallOne", { title: reinstall.mod.title })
-                : t("browse.reinstallMany")}
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              {reinstall?.kind === "single"
-                ? t("browse.reinstallOneBody")
-                : t("browse.reinstallManyBody", {
-                    installed: reinstall?.mods.filter(isInstalled).length ?? 0,
-                    total: reinstall?.mods.length ?? 0,
-                  })}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
-            <AlertDialogAction onClick={confirmReinstall}>
-              {reinstall?.kind === "single"
-                ? t("browse.reinstall")
-                : t("browse.reinstallAll")}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      {dialog}
     </div>
   );
 }

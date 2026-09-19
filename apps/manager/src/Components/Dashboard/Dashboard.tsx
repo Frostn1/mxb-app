@@ -2,18 +2,16 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import TopRail from "../Shell/TopRail";
 import { ContextSlots } from "../Shell/ContextBar";
-import { type DashboardView } from "../Shell/nav";
+import { isModsView, type DashboardView } from "../Shell/nav";
 import { parsePluginView, usePlugins } from "@frost/shared/lib/usePlugins";
 import Library from "../Library/Library";
 import Downloads from "../Downloads/Downloads";
 import Locker from "../Locker/Locker";
 import Presets from "../Presets/Presets";
 import Manage from "../Manage/Manage";
-import Browse from "../Browse/Browse";
+import Mods from "../Mods/Mods";
 import Servers from "../Servers/Servers";
 import Ranked from "../Ranked/Ranked";
-import Shop from "../Shop/Shop";
-import Hub from "../Hub/Hub";
 import ModDetail from "../ModDetail/ModDetail";
 import DropZone from "../Dropzone/DropZone";
 import RuntimeBanner from "../RuntimeBanner/RuntimeBanner";
@@ -244,7 +242,7 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
           <ContextSlots.Provider value={ctxSlots}>
           {pluginPanel ? (
             <pluginPanel.component />
-          ) : view === "browse" && selectedSlug ? (
+          ) : isModsView(view) && selectedSlug ? (
             <ModDetail
               slug={selectedSlug}
               modType={modType}
@@ -252,12 +250,14 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
               installed={installed}
               onBack={closeMod}
             />
-          ) : view === "browse" ? (
-            <Browse
+          ) : isModsView(view) ? (
+            <Mods
+              view={view}
               modType={modType}
               modTypes={modTypes}
               listing={listing}
               installed={installed}
+              refreshKey={libraryVersion}
               onOpenMod={openMod}
               onChangeType={changeType}
             />
@@ -265,10 +265,6 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
             <Servers />
           ) : view === "ranked" ? (
             <Ranked />
-          ) : view === "shop" ? (
-            <Shop refreshKey={libraryVersion} />
-          ) : view === "hub" ? (
-            <Hub refreshKey={libraryVersion} />
           ) : view === "library" ? (
             <Library
               modType={modType}
