@@ -353,7 +353,6 @@ export const de: Translation = {
   "track.saved": "„{{name}}“ gespeichert",
   "track.saveFailed": "Konnte nicht gespeichert werden",
   "track.open": "Strecke öffnen…",
-  "track.importTrack": "Aus einer Strecke…",
   "track.openFailed": "Konnte nicht geöffnet werden",
   "track.projectFile": "Streckenprojekt",
   "track.kind.tabletop": "Tabletop",

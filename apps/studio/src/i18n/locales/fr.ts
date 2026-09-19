@@ -353,7 +353,6 @@ export const fr: Translation = {
   "track.saved": "« {{name}} » enregistré",
   "track.saveFailed": "Enregistrement impossible",
   "track.open": "Ouvrir un circuit…",
-  "track.importTrack": "À partir d'un circuit…",
   "track.openFailed": "Ouverture impossible",
   "track.projectFile": "Projet de circuit",
   "track.kind.tabletop": "Tabletop",

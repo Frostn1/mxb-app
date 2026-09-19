@@ -899,10 +899,8 @@ fn extract_plain(path: &Path, out_dir: &Path) -> Result<Vec<String>> {
 ///
 /// Entries go in sorted by name so two builds of the same source produce the same archive.
 ///
-/// It lives in the shared crate because two apps write archives the game has to read: the
-/// Studio packages what its compilers produced, and the manager packages a stock track lifted
-/// out of the install's `tracks.pkz`. A second copy of this is how the extra-field bug comes
-/// back.
+/// It lives in the shared crate rather than beside the Studio's compilers because a second
+/// copy of this is how the extra-field bug comes back.
 pub fn pack_dir(dir: &Path, slug: &str, to: &Path) -> Result<u64> {
     let root = dir.join(slug);
     if !root.is_dir() {
@@ -910,7 +908,7 @@ pub fn pack_dir(dir: &Path, slug: &str, to: &Path) -> Result<u64> {
     }
     // Paths, not bytes: a track's source folder runs to hundreds of megabytes and only one
     // file of it is ever held at a time.
-    let mut files: Vec<(String, Source)> = Vec::new();
+    let mut files: Vec<(String, PathBuf)> = Vec::new();
     let mut stack = vec![root.clone()];
     while let Some(at) = stack.pop() {
         for e in std::fs::read_dir(&at)
@@ -928,7 +926,7 @@ pub fn pack_dir(dir: &Path, slug: &str, to: &Path) -> Result<u64> {
                 .unwrap_or(&path)
                 .to_string_lossy()
                 .replace('\\', "/");
-            files.push((rel, Source::OnDisk(path)));
+            files.push((rel, path));
         }
     }
     if files.is_empty() {
@@ -937,49 +935,22 @@ pub fn pack_dir(dir: &Path, slug: &str, to: &Path) -> Result<u64> {
     write_pkz(files, to)
 }
 
-/// The same archive, from entries already in hand rather than from a folder.
-///
-/// For a track lifted straight out of another archive — a stock track out of the install's
-/// `tracks.pkz` — where staging a copy on disk just to zip it back up would double the write
-/// for nothing. Names are as they should appear in the archive, so the caller has already put
-/// them under the track's own folder. Same writer, so see [`pack_dir`] for why that matters.
-pub fn pack_entries(entries: Vec<(String, Vec<u8>)>, to: &Path) -> Result<u64> {
-    if entries.is_empty() {
-        bail!("nothing to package: no entries");
-    }
-    write_pkz(
-        entries.into_iter().map(|(n, b)| (n, Source::InMemory(b))).collect(),
-        to,
-    )
-}
-
-/// Where one entry's bytes come from.
-enum Source {
-    OnDisk(PathBuf),
-    InMemory(Vec<u8>),
-}
-
 /// The one writer. Sorted by name, no directory entries, no extra fields.
 ///
 /// Sorted so the archive doesn't come out in whatever order the filesystem handed the
 /// directory over in, and two builds of the same source produce the same bytes. Nothing but a
 /// file is written: the game's reader wants files, and a zero-length folder record is one more
 /// thing for it to have an opinion about.
-fn write_pkz(mut files: Vec<(String, Source)>, to: &Path) -> Result<u64> {
+fn write_pkz(mut files: Vec<(String, PathBuf)>, to: &Path) -> Result<u64> {
     use std::io::Write;
     files.sort_by(|a, b| a.0.cmp(&b.0));
     let file = std::fs::File::create(to).with_context(|| format!("create {to:?}"))?;
     let mut zip = zip::ZipWriter::new(file);
     let opts: zip::write::FileOptions<'_, ()> =
         zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
-    for (name, src) in files {
+    for (name, path) in files {
         zip.start_file(&name, opts)?;
-        match src {
-            Source::OnDisk(path) => {
-                zip.write_all(&std::fs::read(&path).with_context(|| format!("read {path:?}"))?)?
-            }
-            Source::InMemory(bytes) => zip.write_all(&bytes)?,
-        }
+        zip.write_all(&std::fs::read(&path).with_context(|| format!("read {path:?}"))?)?;
     }
     zip.finish()?;
     Ok(std::fs::metadata(to).map(|m| m.len()).unwrap_or(0))
