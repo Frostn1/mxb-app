@@ -235,7 +235,7 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
         <GetStarted
           onDone={finishGetStarted}
           onBrowse={browseFor}
-          onOpenMod={openMod}
+          onOpenMod={openModTarget}
           refreshKey={libraryVersion}
         />
       )}

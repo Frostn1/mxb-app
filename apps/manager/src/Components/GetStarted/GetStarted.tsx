@@ -26,8 +26,11 @@ import { useInstall } from "../../Context/Install";
  * because there is exactly one pack a new rider wants and sending them to a page of fifty
  * bike mods to find it is the problem this screen exists to solve. GP Bikes has no
  * equivalent post, so it gets the category like the other steps.
+ *
+ * It carries its subpath because the page it opens installs to whichever mod type Browse is
+ * on — open it from the Tracks tab and a bike pack is filed under `mods/tracks`.
  */
-const OEM_PACK = { slug: "oem-bike-pack", categoryId: 45 };
+const OEM_PACK = { slug: "oem-bike-pack", subpath: "mods/bikes", categoryId: 45 };
 
 /** One step. `subpath` is what decides whether it's already satisfied. */
 interface Step {
@@ -63,8 +66,8 @@ interface GetStartedProps {
   onDone: () => void;
   /** Open Browse on one of the mod types. */
   onBrowse: (id: Step["id"]) => void;
-  /** Open one mod's page in Browse. */
-  onOpenMod: (slug: string, categoryId: number) => void;
+  /** Open one mod's page in Browse, on the mod type its `subpath` names. */
+  onOpenMod: (target: { slug: string; subpath: string; categoryId: number }) => void;
   /** Bumped by every install, so the counts land without the player reopening anything. */
   refreshKey: number;
 }
@@ -124,7 +127,7 @@ export default function GetStarted({
   /** Where a step's button goes. The bikes step is the only one that names a mod. */
   const go = (step: Step) => {
     if (step.id === "bikes" && game.id === "mxb") {
-      onOpenMod(OEM_PACK.slug, OEM_PACK.categoryId);
+      onOpenMod(OEM_PACK);
     } else {
       onBrowse(step.id);
     }
