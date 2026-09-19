@@ -1261,6 +1261,7 @@ export const es: Translation = {
   "library.star": "Añadir a favoritos",
   "library.unstar": "Quitar de favoritos",
   "library.starred": "Favoritos",
+  "library.folders": "Carpetas",
   "swapActions.menu": "Mover o eliminar este modelo",
   "swapActions.move": "Mover a otra moto…",
   "swapActions.delete": "Eliminar modelo…",

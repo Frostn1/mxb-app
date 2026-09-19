@@ -1267,6 +1267,7 @@ export const de: Translation = {
   "library.star": "Zu Favoriten hinzufügen",
   "library.unstar": "Aus Favoriten entfernen",
   "library.starred": "Favoriten",
+  "library.folders": "Ordner",
   "swapActions.menu": "Dieses Modell verschieben oder löschen",
   "swapActions.move": "Auf ein anderes Bike verschieben…",
   "swapActions.delete": "Modell löschen…",

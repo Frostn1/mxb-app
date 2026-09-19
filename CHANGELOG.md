@@ -13,6 +13,9 @@
   sealed tracks and gear unlock on their own, anything you have bought is ready to install,
   and Ranked already knows who you are the first time you open it. It also stops asking
   where your folders are when it can find them itself.
+- The Library lists your tracks, bikes and rider gear down the left, each with its count, and
+  your folders under them. Click a folder to see only what's in it, or Favorites for the ones
+  you starred.
 - The app wears the mxbsecure look: the brand blue, black chrome, and rounded corners
   throughout. Every colorway but the default is untouched.
 - Buttons, switches and sliders are upright and rounded. The switch is a pill, the slider has
