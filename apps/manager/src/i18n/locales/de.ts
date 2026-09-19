@@ -62,7 +62,7 @@ export const de: Translation = {
   "nav.downloads": "Downloads",
   "nav.locker": "Spind",
   "nav.presets": "Presets",
-  "nav.servers": "Server",
+  "nav.servers": "Online",
   "nav.manage": "Rennmodus",
   "nav.settings": "Einstellungen",
 

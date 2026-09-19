@@ -57,7 +57,7 @@ export const it: Translation = {
   "nav.downloads": "Download",
   "nav.locker": "Armadietto",
   "nav.presets": "Preset",
-  "nav.servers": "Server",
+  "nav.servers": "Online",
   "nav.manage": "Modalità gara",
   "nav.settings": "Impostazioni",
 

@@ -60,7 +60,7 @@ export const ptBR: Translation = {
   "nav.downloads": "Downloads",
   "nav.locker": "Armário",
   "nav.presets": "Presets",
-  "nav.servers": "Servidores",
+  "nav.servers": "Online",
   "nav.manage": "Modo corrida",
   "nav.settings": "Configurações",
 

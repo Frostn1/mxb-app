@@ -56,7 +56,7 @@ export const en = {
   "nav.downloads": "Downloads",
   "nav.locker": "Locker",
   "nav.presets": "Presets",
-  "nav.servers": "Servers",
+  "nav.servers": "Online",
   "nav.manage": "Race mode",
   "nav.settings": "Settings",
 

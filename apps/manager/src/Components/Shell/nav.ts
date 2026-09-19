@@ -80,6 +80,8 @@ export function isModsView(view: DashboardView): view is ModsView {
 export const RAIL: RailItem[] = [
   {
     id: "servers",
+    // The rail says Online: it is where riding with other people lives, and the screen
+    // under it is a server browser plus Ranked, not servers alone.
     label: "nav.servers",
     view: "servers",
     tabs: [

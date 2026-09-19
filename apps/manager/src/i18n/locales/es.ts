@@ -57,7 +57,7 @@ export const es: Translation = {
   "nav.downloads": "Descargas",
   "nav.locker": "Taquilla",
   "nav.presets": "Presets",
-  "nav.servers": "Servidores",
+  "nav.servers": "En línea",
   "nav.manage": "Modo carrera",
   "nav.settings": "Ajustes",
 
