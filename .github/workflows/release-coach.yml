@@ -1,21 +1,30 @@
 name: Release MXB Coach
 
-# Build, sign and publish MXB Coach as a release of this repo, tagged `coach-v<version>`.
+# Build, sign and publish MXB Coach.
 #
-# Every Coach release is a GitHub pre-release, stable ones included, so this repo's
-# `releases/latest` (the manager's updater endpoint, baked into every install) never points at
-# one. The coach finds its own releases instead (core's update_channel, `coach-v` prefix):
-# stable takes versions with no pre-release part, beta takes them all. The manager's beta
-# channel only reads `v` tags, and `release.yml` triggers on `v*`, which `coach-v*` doesn't
-# match, so neither app ever sees the other's builds.
+# Source lives in this repo; releases go to Frostn1/mxb-coach. Every installed app checks for
+# its own updates against a repository's release list, and this repo's belongs to the manager:
+# for as long as the coach released from here, each build had to be published as a GitHub
+# pre-release so `releases/latest` — the manager's updater endpoint, baked into every install —
+# never pointed at a coach. Its own repo ends that: the coach's releases are real releases,
+# its version numbers stop appearing in the manager's list, and with its own signing key a
+# leaked coach release token still cannot sign a manager update.
+#
+# Tags are `coach-v0.1.17` here and land as `v0.1.17` over there, so neither repo's tag
+# namespace collides. `release.yml` triggers on `v*`, which does not match `coach-v*`.
+#
+# Installs from before the move look for `coach-v` releases in *this* repo, so the `bridge`
+# job below gives them one: a pre-release carrying nothing but the signed `latest.json` from
+# the release over there. See the job for when it can go.
 
 on:
   push:
     tags:
       - "coach-v*"
+  workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build:
@@ -99,10 +108,30 @@ jobs:
           test -f crates/core/src/sidecar.rs || { echo "::error::sidecar.rs missing after sync.sh"; exit 1; }
           test -f crates/core/src/mxbsecure.rs || { echo "::error::mxbsecure.rs missing after sync.sh"; exit 1; }
 
-      - name: Version without the coach- prefix
+      # `coach-v0.1.17-beta.17` → tag `v0.1.17-beta.17` over there, version `0.1.17-beta.17`.
+      # A workflow_dispatch run has a branch for a ref, so it builds a throwaway version.
+      - name: Tag without the coach- prefix
         id: tag
         shell: bash
-        run: echo "name=${GITHUB_REF_NAME#coach-}" >> "$GITHUB_OUTPUT"
+        run: |
+          raw="${{ github.ref_type == 'tag' && github.ref_name || format('coach-v0.0.{0}', github.run_number) }}"
+          tag="${raw#coach-}"
+          echo "name=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
+
+      # The release page should say what shipped, not only which file to download — so the
+      # body is composed from this tag's CHANGELOG section, the same one the changelog shows
+      # under `## <date> — MXB Coach v…`. Falls back to the download guidance alone when the
+      # version has no section yet.
+      - name: Compose release notes
+        id: notes
+        shell: bash
+        run: |
+          {
+            echo 'body<<RELEASE_NOTES_EOF'
+            bash scripts/release-notes.sh "${{ steps.tag.outputs.name }}" --app="MXB Coach"
+            echo 'RELEASE_NOTES_EOF'
+          } >> "$GITHUB_OUTPUT"
 
       # UPX for the Windows binary pack (scripts/pack-binary.sh runs as the app's
       # beforeBundleCommand). Windows leg only; the script no-ops without it and without MXB_PACK.
@@ -111,10 +140,12 @@ jobs:
         shell: bash
         run: choco install upx -y
 
-      - name: Build and publish pre-release
+      - name: Build and publish release
         uses: tauri-apps/tauri-action@v0
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # A fine-grained PAT with contents:write on mxb-coach only. Deliberately not
+          # GITHUB_TOKEN: that cannot write to another repository.
+          GITHUB_TOKEN: ${{ secrets.COACH_RELEASE_TOKEN }}
           VITE_APP_NAME: "MXB Coach"
           # Pack the Windows binary with UPX via the beforeBundleCommand (scripts/pack-binary.sh).
           # Windows leg only; empty elsewhere so the hook no-ops. See the script for the AV caveat.
@@ -130,23 +161,47 @@ jobs:
           # endpoint takes unsigned reports until MXB_USAGE_REQUIRE_SIGNATURE is turned on.
           MXB_USAGE_KEY: ${{ secrets.MXB_USAGE_KEY }}
         with:
+          owner: Frostn1
+          repo: mxb-coach
+          # Required when publishing across repositories: the action has no commit of its
+          # own over there to hang the release off.
+          releaseCommitish: main
           projectPath: apps/coach
-          tagName: ${{ github.ref_name }}
-          releaseName: "MXB Coach ${{ steps.tag.outputs.name }}"
-          releaseBody: |
-            **MXB Coach beta.** Records your laps in MX Bikes and tells you, corner by corner, where you lose time and what to change.
-
-            **Getting started**
-            1. Install MXB Coach (Windows: the `.exe` below).
-            2. Open **Settings** and press **Install** to add the recorder to MX Bikes. Restart the game if it's open.
-            3. Ride a few laps, ideally in Testing. Every stint on track becomes a session.
-            4. Open **Sessions**, pick the session and press **Review** on a lap. It's compared with your fastest whole lap on that track.
-
-            The recorder only saves your laps. It changes nothing in the game.
+          tagName: ${{ steps.tag.outputs.name }}
+          releaseName: "MXB Coach ${{ steps.tag.outputs.version }}"
+          # Named here rather than renamed afterwards: this applies before latest.json is
+          # written, so the manifest and the assets cannot disagree.
           assetNamePattern: "MXB-Coach-[version]-[arch][ext]"
           # The signed manifest the coach's updater reads.
           includeUpdaterJson: true
+          releaseBody: ${{ steps.notes.outputs.body }}
           releaseDraft: false
-          # Always, see the top of this file.
-          prerelease: true
+          # A suffixed tag is a beta of the version it names. Unlike before the move, a plain
+          # tag is a real release here: `releases/latest` in mxb-coach is the coach's own.
+          prerelease: ${{ github.ref_type != 'tag' || contains(github.ref_name, '-') }}
           args: ${{ matrix.args }}
+
+  # Installs from 0.1.3 to 0.1.16 shipped an updater that looks for `coach-v` releases in
+  # *this* repo, and nothing can change that in a binary already on someone's machine. So
+  # every release also gets a release here under its original `coach-v` tag, carrying only
+  # the signed `latest.json` from the one over there — the manifest's download URLs point at
+  # mxb-coach, which is public, so those installs update straight to the new build and from
+  # then on look in the right place.
+  #
+  # Always a pre-release, so this repo's `releases/latest` stays on the manager. This job can
+  # be deleted once no install older than the move is still checking in.
+  bridge:
+    needs: build
+    if: ${{ github.repository == 'Frostn1/mxb-app' && github.ref_type == 'tag' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Publish the update pointer for pre-move installs
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          COACH_REPO_TOKEN: ${{ secrets.COACH_RELEASE_TOKEN }}
+        run: bash scripts/coach-update-bridge.sh "$GITHUB_REF_NAME"

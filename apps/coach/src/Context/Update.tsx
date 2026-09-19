@@ -34,7 +34,7 @@ export function setBetaUpdates(on: boolean) {
   }
 }
 
-/** The coach releases from the manager's repo, so its own command finds its own releases. */
+/** The coach releases from its own repo, Frostn1/mxb-coach, which this command reads. */
 async function checkChannel(): Promise<Update | null> {
   const meta = await invoke<ConstructorParameters<typeof Update>[0] | null>("check_coach_update", {
     beta: betaUpdates(),
