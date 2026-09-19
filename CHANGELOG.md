@@ -22,6 +22,13 @@
   same thing, and it lands on the real tree wherever `mxbikes.ini` put it, rather than where
   the folder usually is. A tab the game hasn't made a folder for yet opens the tree above it.
 
+### Fixed
+- **A new bike can't be installed inside another bike.** The install picker offers every
+  bike you own as a destination, because that is where a livery, a sound or a model swap
+  belongs — but it offered them for whole bikes too, so the OEM pack could be filed under
+  `MX1OEM_2023_KTM_450_SX-F/paints`, 54 machines deep inside one of them. A post filed under
+  New Bikes now gets the bikes folder and the folders you made, and nothing else.
+
 ### Changed
 - **Settings is sorted by what a setting belongs to.** General had collected every switch
   that never got a home, so the paint sync toggle, the download preferences and the whole
