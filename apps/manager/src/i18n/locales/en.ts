@@ -1232,6 +1232,7 @@ export const en = {
   "library.star": "Add to favorites",
   "library.unstar": "Remove from favorites",
   "library.starred": "Favorites",
+  "library.folders": "Folders",
   "swapActions.menu": "Move or delete this model",
   "swapActions.move": "Move to another bike…",
   "swapActions.delete": "Delete model…",

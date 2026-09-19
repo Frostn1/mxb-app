@@ -3,6 +3,9 @@
 ## Unreleased
 
 ### Changed
+- The Library lists your tracks, bikes and rider gear down the left, each with its count, and
+  your folders under them. Click a folder to see only what's in it, or Favorites for the ones
+  you starred.
 - The app wears the mxbsecure look: the brand blue, black chrome, and rounded corners
   throughout. Every colorway but the default is untouched.
 - Buttons, switches and sliders are upright and rounded. The switch is a pill, the slider has

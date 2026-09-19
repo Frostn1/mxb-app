@@ -1247,6 +1247,7 @@ export const ptBR: Translation = {
   "library.star": "Adicionar aos favoritos",
   "library.unstar": "Remover dos favoritos",
   "library.starred": "Favoritos",
+  "library.folders": "Pastas",
   "swapActions.menu": "Mover ou excluir este modelo",
   "swapActions.move": "Mover para outra moto…",
   "swapActions.delete": "Excluir modelo…",
