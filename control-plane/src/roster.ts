@@ -401,6 +401,27 @@ export const SNAPSHOT_MAX_AGE_MS = 30 * 60 * 1000;
 /** The one row. There is only ever one snapshot, and it is the latest. */
 const SNAPSHOT_ID = "live";
 
+/**
+ * When an app last read the master server successfully, or null if no snapshot has ever landed.
+ *
+ * This is the only hard, *positive* evidence the control plane has about PiBoSo's master, and
+ * it comes for free. A Worker cannot probe the master itself — no UDP — so everything else it
+ * knows is a count of apps reporting failure, which says nothing about whether the failures
+ * are the master's or the reporters'. A stored snapshot is the other direction: the app only
+ * offers one when its sweep came back from the master (`MasterOutcome::Answered` gates the
+ * call), so a row written two minutes ago means the master answered somebody two minutes ago.
+ *
+ * `masterstatus` uses it as a floor on the verdict. It is deliberately the write timestamp
+ * rather than anything richer: what is wanted is "when was the master last known good", and
+ * that is exactly what this column is.
+ */
+export async function lastSweepAt(env: Env): Promise<number | null> {
+  const row = await env.DB.prepare("SELECT updated_at FROM server_snapshot WHERE id = ?")
+    .bind(SNAPSHOT_ID)
+    .first<{ updated_at: number }>();
+  return row ? Number(row.updated_at) : null;
+}
+
 /** One server as the tab draws it. Deliberately not everything the app knows. */
 export interface SnapshotRow {
   address: string;

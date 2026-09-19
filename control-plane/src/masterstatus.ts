@@ -41,6 +41,7 @@
  * read the answer is that your game is broken.
  */
 
+import { lastSweepAt } from "./roster";
 import { ipDigest } from "./voice";
 import { isInstallId, isProbeReason, type ProbeReason } from "./validate";
 
@@ -81,6 +82,71 @@ export const RETENTION_MS = 60 * 60 * 1000;
  */
 export const MIN_INSTALLS = 4;
 
+/**
+ * Failures that are facts about the reporting machine, not observations of the master.
+ *
+ * These are dropped from the window entirely — not counted as failing, not counted as an
+ * install — because an app that never got as far as asking has made no observation to fold in,
+ * and leaving it in means our own bugs are published as somebody else's outage.
+ *
+ * That is not hypothetical. On 2026-09-18 this page said `down` with 162 of 164 apps failing,
+ * and 152 of those were `auth` — a regression in *our* Steam ticket path, on a page whose
+ * headline reads "MX Bikes' servers aren't answering". The master was serving 69 servers at
+ * the time. `unsupported` was already excluded for exactly this reason; the mistake was
+ * treating it as one odd case rather than as the rule it is.
+ *
+ * `auth` is here **provisionally**, and should come out. Its own definition is the problem —
+ * the ticket "was refused, or couldn't be minted" — so one code covers both a master saying no
+ * and our own Steam path failing, and a reason that ambiguous cannot be allowed to convict
+ * anybody. Once shipped clients send `ticket` for the half they know is theirs, `auth` means
+ * only the master saying no and belongs back in the count. Until then, treating it as local
+ * costs us the ability to see a login-refusal outage, which is the rarer and less damaging
+ * mistake of the two.
+ */
+export const LOCAL_REASONS: ReadonlySet<string> = new Set([
+  "unsupported",
+  "offline",
+  "ticket",
+  "auth",
+]);
+
+/**
+ * The share of a window that can be dropped as local before the rest stops meaning anything.
+ *
+ * This is the guard that actually matters, and it is about sampling rather than about any one
+ * reason. Dropping local failures is right, but what is left afterwards is not a random sample
+ * of the population — it is the survivors of whatever took the others out. On 2026-09-18 a
+ * regression in our own ticket path removed 153 of 164 reports, and the 11 that could still
+ * ask were a self-selected remnant: 9 of them failed, which reads as 82% and would have been
+ * published as "MX Bikes' servers aren't answering" on the strength of nine machines.
+ *
+ * So when most of a window is our own faults, the answer is `unknown` — which the page already
+ * knows how to say, and which sends the reader to check their own machine instead of telling
+ * them a falsehood about somebody else's. In a real outage local reasons are a small minority
+ * and this never fires.
+ */
+export const UNSOUND_LOCAL_SHARE = 0.5;
+
+/**
+ * How recently a real master sweep has to have landed to contradict a `down` verdict.
+ *
+ * Every install that reads the master successfully offers the control plane its list, and the
+ * store keeps the latest (`roster.lastSweepAt`). So a sweep inside this window is proof the
+ * master answered somebody inside this window, and no count of failing apps can honestly be
+ * called an outage over the top of it — the failures are then something the failing machines
+ * have in common, which is the opposite of what `down` tells the reader.
+ *
+ * Five minutes. A healthy population rewrites that row every 60-90 s, so this is several missed
+ * rounds rather than a tight bar, and the cost is the honest one: a genuine outage beginning
+ * seconds after a good sweep reads `degraded` for its first few minutes before the row goes
+ * stale and `down` is allowed. Note what this is *not* good for — when our own client is the
+ * thing broken, sweeps are starved too (measured at one per 5-6 minutes on 2026-09-18, against
+ * 60-90 s healthy), so this floor thins out in exactly the case it would be most wanted.
+ * `UNSOUND_LOCAL_SHARE` is what covers that case; this covers a window that looks bad for
+ * reasons we cannot name at all.
+ */
+export const SWEEP_FRESH_MS = 5 * 60 * 1000;
+
 /** At or above this share of installs failing, it is not you. */
 export const DOWN_SHARE = 0.8;
 
@@ -113,10 +179,35 @@ export interface MasterStatus {
    * Null unless the state is `down`; see where it is filled in.
    */
   failingForMinutes: number | null;
+  /**
+   * When an app last read the master successfully, or null if not inside `RETENTION_MS`.
+   *
+   * On the page because it is the one number here that is evidence rather than inference: a
+   * reader who has been told for ten minutes that their internet is broken deserves to see
+   * that somebody else's sweep came back two minutes ago.
+   */
+  lastSweep: number | null;
+  /**
+   * Reports dropped as facts about the reporting machine rather than about the master.
+   *
+   * Published because it is the number that says how much to trust the rest. A window where
+   * this dwarfs `installs` is a window describing our own bug, and a reader — or whoever is
+   * looking at this during the next incident — should be able to see that at a glance.
+   */
+  local: number;
 }
 
 export interface StatusBody {
   state: State;
+  /**
+   * The headline, in the same voice and from the same place as `summary`.
+   *
+   * Added because the four states are not four *answers*: `unknown` covers both "nobody is
+   * awake at 3am" and "our own client is broken and the window means nothing", and a page
+   * picking its title from the state alone will say the first while the second is true.
+   * Clients that predate this field fall back to their own titles and are none the worse.
+   */
+  headline: string;
   /**
    * One sentence, already written, for whoever is reading. The page renders it and a Discord
    * bot can post it verbatim — the point of composing it here rather than in each client is
@@ -231,11 +322,21 @@ export async function masterStatus(env: Env): Promise<Response> {
     status = await readWindow(now, env);
   } catch (err) {
     console.error(JSON.stringify({ msg: "status read failed", error: String(err) }));
-    status = { state: "unknown", installs: 0, failing: 0, share: null, reasons: [], failingForMinutes: null };
+    status = {
+      state: "unknown",
+      installs: 0,
+      failing: 0,
+      share: null,
+      reasons: [],
+      failingForMinutes: null,
+      lastSweep: null,
+      local: 0,
+    };
   }
 
   const body: StatusBody = {
     state: status.state,
+    headline: headline(status),
     summary: summarize(status),
     master: status,
     windowMinutes: WINDOW_MS / 60_000,
@@ -290,10 +391,14 @@ async function readWindow(now: number, env: Env): Promise<MasterStatus> {
 
   let installs = 0;
   let failing = 0;
+  let local = 0;
   const reasons = new Map<ProbeReason, number>();
   for (const row of rows.results ?? []) {
     const ok = Number(row.ok);
-    if (row.reason === "unsupported" && ok === 0) continue;
+    if (ok === 0 && LOCAL_REASONS.has(row.reason ?? "")) {
+      local += 1;
+      continue;
+    }
     installs += 1;
     // A success anywhere in the install's latest minute is a working connection, whatever else
     // that minute holds: one fetch out of three getting through still proves the path is open.
@@ -303,7 +408,10 @@ async function readWindow(now: number, env: Env): Promise<MasterStatus> {
     reasons.set(reason, (reasons.get(reason) ?? 0) + 1);
   }
 
-  const state = stateFor(installs, failing);
+  // The sweep floor. Read unconditionally rather than only when the ratio says `down`, because
+  // the page shows it either way and one indexed row is not worth branching over.
+  const sweep = await lastSweep(now, env);
+  const state = verdict({ installs, failing, local, sweptAt: sweep, now });
   return {
     state,
     installs,
@@ -312,6 +420,8 @@ async function readWindow(now: number, env: Env): Promise<MasterStatus> {
     reasons: [...reasons]
       .map(([reason, count]): ReasonCount => ({ reason, installs: count }))
       .sort((a, b) => b.installs - a.installs || a.reason.localeCompare(b.reason)),
+    lastSweep: sweep,
+    local,
     // Only for a full outage. "How long has it been partly broken" has no honest answer from
     // this data — a degraded window has successes in every minute by definition, which is the
     // exact thing `failingSince` stops at — so it is left null rather than answered with a 1.
@@ -347,6 +457,62 @@ async function failingSince(now: number, env: Env): Promise<number | null> {
   return Math.max(1, Math.round((now - oldest) / 60_000));
 }
 
+/**
+ * The verdict: what the ratio says, floored by what we can prove.
+ *
+ * `stateFor` alone can only ever reason about failures, and a population of failures has two
+ * explanations — the master is down, or the apps are broken. Everything here is about refusing
+ * to publish the first when the evidence only supports the second, because `down` is printed on
+ * a public page as an accusation about somebody else's service.
+ *
+ * Neither guard can talk a window all the way up to `up`: the failures are real and the people
+ * hitting them still need the page to say something is wrong. They only stop it naming a party
+ * the evidence does not reach.
+ */
+export function verdict({
+  installs,
+  failing,
+  local,
+  sweptAt,
+  now,
+}: {
+  installs: number;
+  failing: number;
+  local: number;
+  sweptAt: number | null;
+  now: number;
+}): State {
+  const state = stateFor(installs, failing);
+  if (state !== "down") return state;
+
+  // Most of the window was our own faults, so what is left is a remnant rather than a sample.
+  // `unknown` is the honest answer and the page already says it well.
+  if (local > 0 && local / (local + installs) >= UNSOUND_LOCAL_SHARE) return "unknown";
+
+  // A corroborated list came back from the master recently, so "isn't answering" is false.
+  if (sweptAt !== null && now - sweptAt < SWEEP_FRESH_MS) return "degraded";
+
+  return "down";
+}
+
+/**
+ * The last confirmed master sweep, or null if there isn't one worth quoting.
+ *
+ * Bounded by `RETENTION_MS` for the same reason everything else here is: an hour-old sweep is
+ * not evidence about now, and showing it beside a live verdict would invite reading it as one.
+ * Never throws — the floor is a safety net, and a safety net that can take the endpoint down
+ * with it is worse than not having it.
+ */
+async function lastSweep(now: number, env: Env): Promise<number | null> {
+  try {
+    const at = await lastSweepAt(env);
+    return at !== null && now - at <= RETENTION_MS ? at : null;
+  } catch (err) {
+    console.error(JSON.stringify({ msg: "sweep read failed", error: String(err) }));
+    return null;
+  }
+}
+
 /** Where a count of failing installs out of a count of installs lands. */
 export function stateFor(installs: number, failing: number): State {
   if (installs < MIN_INSTALLS) return "unknown";
@@ -364,9 +530,36 @@ export function stateFor(installs: number, failing: number): State {
  * minutes that their internet is broken, so it says what is happening, how many people it is
  * happening to, and — the part the gist never had — whether it is theirs to fix.
  */
-export function summarize(status: MasterStatus): string {
-  const { state, installs, failing } = status;
+export function summarize(status: MasterStatus, now = Date.now()): string {
+  const { state, installs, failing, local } = status;
   const others = installs - failing;
+
+  // Floored by a recent sweep: the ratio said `down` and the evidence says otherwise. Worth its
+  // own sentence rather than the ordinary degraded one, because "lots of apps are failing and
+  // the master is demonstrably fine" is a different thing to be told than "it's patchy", and
+  // the reader's next move is different too — there is no point waiting this one out.
+  if (state === "degraded" && stateFor(installs, failing) === "down" && status.lastSweep !== null) {
+    const mins = Math.max(1, Math.round((now - status.lastSweep) / 60_000));
+    return (
+      `Something is failing for a lot of people — ${failing} of the last ${installs} apps that ` +
+      `tried — but MX Bikes' master server itself is answering: another app read the full server ` +
+      `list from it ${mins} minute${mins === 1 ? "" : "s"} ago. So this is not an outage at ` +
+      `PiBoSo's end, and it is worth checking whether your MXB App is up to date.`
+    );
+  }
+
+  // Unknown because most of the window was our own faults, rather than because nobody was
+  // awake. Both are "we can't say", and they send the reader somewhere completely different.
+  if (state === "unknown" && local > 0 && local / (local + installs) >= UNSOUND_LOCAL_SHARE) {
+    return (
+      `We can't tell you anything useful about MX Bikes' servers right now: ${local} of the last ` +
+      `${local + installs} apps that reported never got as far as asking them — they failed on ` +
+      `this end first — so the handful that did aren't enough to judge by. That's a fault in the ` +
+      `MXB App rather than in MX Bikes, and it's being worked on. Check you're on the latest ` +
+      `version, and use the Servers tab's Check my connection for your own machine.`
+    );
+  }
+
   switch (state) {
     case "down":
       return (
@@ -391,6 +584,24 @@ export function summarize(status: MasterStatus): string {
         `${MIN_INSTALLS} before this is worth trusting, and in the quiet hours there may not be ` +
         `that many people online.`
       );
+  }
+}
+
+/** The title over the sentence. Same rule as `summarize`, kept beside it so they cannot drift. */
+export function headline(status: MasterStatus): string {
+  const { state, installs, local } = status;
+  if (state === "unknown" && local > 0 && local / (local + installs) >= UNSOUND_LOCAL_SHARE) {
+    return "MXB App can't check right now — and that's ours, not MX Bikes'.";
+  }
+  switch (state) {
+    case "down":
+      return "MX Bikes' servers aren't answering.";
+    case "degraded":
+      return "MX Bikes' servers are answering some people and not others.";
+    case "up":
+      return "MX Bikes' servers are answering.";
+    case "unknown":
+      return "Not enough people have checked to say.";
   }
 }
 
