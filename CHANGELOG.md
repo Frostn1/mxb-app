@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased — Stock tracks in the Library
+## 2026-09-18 — v0.17.4 — Stock tracks in the Library
 
 ### Added
 - A first run for an install with an empty mods folder: three steps — the OEM bike pack,
