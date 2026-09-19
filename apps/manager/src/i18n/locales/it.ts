@@ -1033,6 +1033,7 @@ export const it: Translation = {
     "Tutti i server MX Bikes online, direttamente dal server master del gioco, con l'indirizzo per entrare. Scegline uno e premi Entra per avviare direttamente.",
   "serverBrowser.searchPlaceholder": "Cerca server…",
   "serverBrowser.count": "{{count}} online",
+  "serverBrowser.countOf": "{{count}} di {{total}} online",
   "serverBrowser.refresh": "Aggiorna",
   "serverBrowser.retry": "Riprova",
   "serverBrowser.loading": "Caricamento della lista server…",

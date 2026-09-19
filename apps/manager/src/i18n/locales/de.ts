@@ -1041,6 +1041,7 @@ export const de: Translation = {
     "Alle laufenden MX-Bikes-Server, direkt vom Master-Server des Spiels – mit der Adresse zum Beitreten. Wähle einen aus und klicke auf Beitreten, um direkt zu starten.",
   "serverBrowser.searchPlaceholder": "Server suchen…",
   "serverBrowser.count": "{{count}} online",
+  "serverBrowser.countOf": "{{count}} von {{total}} online",
   "serverBrowser.refresh": "Aktualisieren",
   "serverBrowser.retry": "Erneut versuchen",
   "serverBrowser.loading": "Serverliste wird geladen…",

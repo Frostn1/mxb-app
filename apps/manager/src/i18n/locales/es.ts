@@ -1035,6 +1035,7 @@ export const es: Translation = {
     "Todos los servidores de MX Bikes en directo, desde el servidor maestro del juego, con la dirección para unirte. Elige uno y pulsa Unirse para entrar directamente.",
   "serverBrowser.searchPlaceholder": "Buscar servidores…",
   "serverBrowser.count": "{{count}} en línea",
+  "serverBrowser.countOf": "{{count}} de {{total}} en línea",
   "serverBrowser.refresh": "Actualizar",
   "serverBrowser.retry": "Reintentar",
   "serverBrowser.loading": "Cargando la lista de servidores…",

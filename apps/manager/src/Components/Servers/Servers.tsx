@@ -435,6 +435,10 @@ const Servers = () => {
     });
   }, [servers, query, showHidden, favesOnly, favs, region, hideEmpty, sort, dir]);
 
+  /** Everything the sweep found, minus what the app itself filtered out — the number the
+   *  count compares against. */
+  const reachable = (servers?.length ?? 0) - (showHidden ? 0 : hiddenCount);
+
   /** The server the pane is showing, looked up in the current list every render so it ticks
    *  along with the sweeps instead of freezing at the moment the row was clicked. Found in
    *  the whole list rather than the filtered one: narrowing the search shouldn't empty the
@@ -713,9 +717,15 @@ const Servers = () => {
               </div>
             </PopoverContent>
           </Popover>
+          {/* The number has to describe what is on screen. It used to count the whole list
+              while the filters — Has riders is on by default — were hiding most of it, so the
+              bar said 64 next to thirteen rows. When a filter is narrowing things it says
+              both, and the total is the one that needs explaining, not the rows you can see. */}
           {servers && servers.length > 0 && (
             <span className="shrink-0 tabular-figures text-[12.5px] text-faint">
-              {t("serverBrowser.count", { count: servers.length - (showHidden ? 0 : hiddenCount) })}
+              {shown.length === reachable
+                ? t("serverBrowser.count", { count: shown.length })
+                : t("serverBrowser.countOf", { count: shown.length, total: reachable })}
             </span>
           )}
           {/* What is on screen is a remembered list until the sweep lands, and it says so. The

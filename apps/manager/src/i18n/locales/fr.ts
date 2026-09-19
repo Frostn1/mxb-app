@@ -1040,6 +1040,7 @@ export const fr: Translation = {
     "Tous les serveurs MX Bikes en ligne, directement depuis le serveur maître du jeu, avec l'adresse pour les rejoindre. Choisis-en un et clique sur Rejoindre pour y entrer directement.",
   "serverBrowser.searchPlaceholder": "Rechercher des serveurs…",
   "serverBrowser.count": "{{count}} en ligne",
+  "serverBrowser.countOf": "{{count}} sur {{total}} en ligne",
   "serverBrowser.refresh": "Actualiser",
   "serverBrowser.retry": "Réessayer",
   "serverBrowser.loading": "Chargement de la liste des serveurs…",

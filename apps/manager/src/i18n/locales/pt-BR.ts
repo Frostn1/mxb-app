@@ -1035,6 +1035,7 @@ export const ptBR: Translation = {
     "Todos os servidores de MX Bikes online, direto do servidor mestre do jogo, com o endereço para entrar. Escolha um e clique em Entrar para iniciar direto nele.",
   "serverBrowser.searchPlaceholder": "Buscar servidores…",
   "serverBrowser.count": "{{count}} online",
+  "serverBrowser.countOf": "{{count}} de {{total}} online",
   "serverBrowser.refresh": "Atualizar",
   "serverBrowser.retry": "Tentar de novo",
   "serverBrowser.loading": "Lendo a lista de servidores…",

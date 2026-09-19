@@ -42,7 +42,10 @@ interface DashboardProps {
 
 const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
   const { config, game } = useConfig();
-  const [view, setView] = useState<DashboardView>("browse");
+  // Opens on Online. Riding with other people is what the app is opened for most often, and
+  // the server list is the one screen that is worth nothing five minutes later — a mod list
+  // is the same whenever you get to it.
+  const [view, setView] = useState<DashboardView>("servers");
 
   const showBrowse = useCallback(() => setView("browse"), []);
   const {

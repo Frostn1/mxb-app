@@ -1021,6 +1021,7 @@ export const en = {
     "Every live MX Bikes server, straight from the game's master server — with the address you need to join. Pick one and press Join to launch straight into it.",
   "serverBrowser.searchPlaceholder": "Search servers…",
   "serverBrowser.count": "{{count}} online",
+  "serverBrowser.countOf": "{{count}} of {{total}} online",
   "serverBrowser.refresh": "Refresh",
   "serverBrowser.retry": "Try again",
   "serverBrowser.loading": "Reading the server list…",
