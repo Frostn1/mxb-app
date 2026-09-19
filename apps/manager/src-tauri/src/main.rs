@@ -14,7 +14,6 @@ pub(crate) use mxb_core::viewer;
 pub(crate) use mxb_core::config;
 pub(crate) use mxb_core::{antidebug, appgate as gate};
 mod cookie_session;
-mod creator_page;
 mod crashreports;
 mod downloads;
 mod dropzone;
@@ -7010,8 +7009,6 @@ fn main() {
             // The macro is generic over the runtime; naming `Wry` here is what lets the
             // wrapper below infer what it is wrapping.
             let handler: fn(tauri::ipc::Invoke<tauri::Wry>) -> bool = tauri::generate_handler![
-            creator_page::open_creator_page,
-            creator_page::close_creator_page,
             window_painted,
             studio_install,
             launch_studio,
@@ -7877,7 +7874,6 @@ mod window_tests {
         for transient in [
             mxb_fetch::WINDOW,
             shop_fetch::WINDOW,
-            creator_page::WINDOW,
             SHOP_LOGIN_WINDOW,
             HUB_LOGIN_WINDOW,
             hub_clearance::WINDOW,

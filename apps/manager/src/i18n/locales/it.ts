@@ -2326,17 +2326,4 @@ export const it: Translation = {
   "ranked.mxp": "MXP",
   "ranked.penalty": "Penalità",
   "ranked.finished": "Disputata",
-  // Showing the creator's ad-supported page — see lib/adSupport & creator_page.rs.
-  "settings.adSupport": "Sostieni i creatori di mod",
-  "settings.adSupportDesc": "Apre la pagina del mod su {{site}} dietro all'app mentre sfogli e installi, così il sito mantiene i suoi introiti pubblicitari. L'installazione funziona allo stesso modo; questo dà solo ai creatori la visita che altrimenti perderebbero.",
-  "settings.adSupportKeepOn": "Continua a sostenerli",
-  "settings.adSupportOff1Title": "Disattivare il sostegno ai creatori di mod?",
-  "settings.adSupportOff1Body": "{{site}} e chi crea e ospita questi mod guadagna dalle pubblicità sulle proprie pagine. Se lo lasci attivo, quella pagina viene mostrata mentre sfogli e installi; se lo disattivi, i tuoi download non portano loro nulla. Per favore, non toglierglielo con leggerezza.",
-  "settings.adSupportOff1Continue": "Disattiva comunque",
-  "settings.adSupportOff2Title": "Vuoi davvero disattivarlo? Questo danneggia la community.",
-  "settings.adSupportOff2Body": "Sono gli introiti che permettono ai mod che stai installando di continuare a esistere. Disattivarlo toglie direttamente a chi li mantiene. Sei assolutamente sicuro?",
-  "settings.adSupportOff2Confirm": "Sì, disattivalo",
-  "modDetail.creatorPageNote": "La pagina di questo mod è aperta su {{site}} dietro all'app, così il creatore mantiene gli introiti pubblicitari che la tua installazione salterebbe. Puoi disattivarlo in Impostazioni → Generali.",
-  "settings.adSupportBehind": "Tienila dietro all'app",
-  "settings.adSupportBehindDesc": "Per impostazione predefinita la pagina si apre accanto all'app, ben visibile — ed è questo che conta come visualizzazione di un annuncio. Attiva questa opzione per nasconderla dietro all'app; più ordinato, ma il creatore potrebbe non guadagnare nulla da una pagina che nessuno vede.",
 };
