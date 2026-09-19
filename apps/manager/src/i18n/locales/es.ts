@@ -223,6 +223,26 @@ export const es: Translation = {
   "tour.done.body":
     "Fin del recorrido. Ve a Explorar e instala tu primer mod.",
 
+  // ── Lista del primer arranque ──────────────────────────────────────────────
+  "getStarted.title": "Vamos a ponerte en pista",
+  "getStarted.body":
+    "Tu carpeta de mods está vacía. Aquí es donde empieza casi todo el mundo.",
+  "getStarted.bikes.title": "Motos",
+  "getStarted.bikes.body":
+    "El pack OEM son todas las motos de serie en una sola descarga. Marca las que pilotas y deja el resto.",
+  "getStarted.bikes.action": "Instalar el pack OEM",
+  "getStarted.tracks.title": "Circuitos",
+  "getStarted.tracks.body":
+    "{{site}} tiene cientos. Un clic instala uno y el juego lo reconoce.",
+  "getStarted.tracks.action": "Explorar circuitos",
+  "getStarted.rider.title": "Equipación",
+  "getStarted.rider.body":
+    "Cascos, botas, guantes y equipaciones. Pruébalos en el piloto 3D antes de salir.",
+  "getStarted.rider.action": "Explorar equipación",
+  "getStarted.installed_one": "{{count}} instalado.",
+  "getStarted.installed_other": "{{count}} instalados.",
+  "getStarted.later": "Lo haré más tarde",
+
   // ── Actualizaciones ────────────────────────────────────────────────────────
   "update.available": "{{version}} ya está disponible.",
   "update.downloading": "Descargando…",

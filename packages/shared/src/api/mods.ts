@@ -290,10 +290,12 @@ export function setModsPath(path: string): Promise<string> {
 export function setIntroSeen(opts: {
   welcome?: boolean;
   tour?: boolean;
+  getStarted?: boolean;
 }): Promise<void> {
   return invoke<void>("set_intro_seen", {
     welcome: opts.welcome ?? false,
     tour: opts.tour ?? false,
+    getStarted: opts.getStarted ?? false,
   });
 }
 

@@ -131,6 +131,10 @@ pub struct AppConfig {
     /// The first-run guided tour has been finished or skipped. Persisted alongside
     /// `welcome_seen`, for the same reason.
     pub tour_done: bool,
+    /// The first-run checklist has been finished or skipped. It only ever shows itself
+    /// to an install with no bikes in the mods tree, so an existing player sets this on
+    /// the first launch after updating without ever seeing it.
+    pub get_started_done: bool,
     /// Register the global hotkey that summons the in-game overlay.
     pub overlay_enabled: bool,
     /// The combo that toggles the overlay, in Tauri accelerator syntax
@@ -425,6 +429,7 @@ impl Default for AppConfig {
             secure_content_inject: false,
             welcome_seen: false,
             tour_done: false,
+            get_started_done: false,
             overlay_enabled: true,
             overlay_hotkey: DEFAULT_OVERLAY_HOTKEY.to_string(),
             preview_tyres: String::new(),

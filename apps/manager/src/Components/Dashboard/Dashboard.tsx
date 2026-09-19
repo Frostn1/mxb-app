@@ -21,6 +21,7 @@ import UpdateBanner from "../UpdateBanner/UpdateBanner";
 import SecurePrompt from "./SecurePrompt";
 import Settings, { type SectionId } from "../Settings/Settings";
 import Tour, { TourContext, TOUR_DONE_KEY } from "../Tour/Tour";
+import GetStarted from "../GetStarted/GetStarted";
 import ReleaseShowcase from "../Showcase/ReleaseShowcase";
 import { useReleaseShowcase } from "../Showcase/useReleaseShowcase";
 import { InstallProvider } from "../../Context/Install";
@@ -151,6 +152,25 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
     startTour();
   }, [welcomeActive, startTour, config.tourDone]);
 
+  // The first-run checklist, after the tour rather than before it: it hands someone to
+  // Browse and to the import picker, and neither means anything until the tour has said
+  // what they are. It shows itself only to an install with no bikes — the component
+  // decides that — and marks itself done either way, so it asks once.
+  const [getStartedShut, setGetStartedShut] = useState(false);
+  const closeGetStarted = useCallback(() => setGetStartedShut(true), []);
+  const finishGetStarted = useCallback(() => {
+    setGetStartedShut(true);
+    void setIntroSeen({ getStarted: true }).catch(() => {});
+  }, []);
+  const browseFor = useCallback(
+    (id: string) => {
+      const target = modTypes.find((mt) => mt.id === id);
+      if (target) changeType(target);
+      navigate("browse");
+    },
+    [modTypes, changeType, navigate],
+  );
+
   // Jump from a download row to the mod it installed: the right library tab, searched for
   // by name. A fresh object each time so repeating the same jump still re-applies it.
   const [libraryFocus, setLibraryFocus] = useState<{ name: string } | null>(null);
@@ -276,6 +296,17 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
         </div>
       </div>
       {tourRun && <Tour navigate={navigate} onDone={endTour} />}
+      {/* Waits for the intro and the tour, and stands down for the release showcase —
+          one modal at a time. */}
+      {!welcomeActive && !tourRun && !release && !getStartedShut && !config.getStartedDone && (
+        <GetStarted
+          onDone={finishGetStarted}
+          onClose={closeGetStarted}
+          onBrowse={browseFor}
+          onOpenMod={openMod}
+          refreshKey={libraryVersion}
+        />
+      )}
       {/* Never over the intro: a first run gets Welcome and the tour, and an update
           landing mid-tour would spotlight UI behind a modal. */}
       {release && !tourRun && !welcomeActive && (

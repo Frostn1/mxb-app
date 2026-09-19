@@ -270,6 +270,7 @@ fn create_config(
         Ok(prev) => {
             cfg.welcome_seen |= prev.welcome_seen;
             cfg.tour_done |= prev.tour_done;
+            cfg.get_started_done |= prev.get_started_done;
             cfg.seen_version = prev.seen_version;
         }
         // Nothing came before: this install is new, and nothing in the version someone
@@ -1417,17 +1418,23 @@ async fn set_mods_path(
     Ok(cfg.mods_path)
 }
 
-/// Remember that the intro slideshow / guided tour is done. No-ops before the config
-/// exists — writing one there would leave the app "configured" with no folder set;
-/// the webview flag covers that short window instead.
+/// Remember that the intro slideshow / guided tour / first-run checklist is done.
+/// No-ops before the config exists — writing one there would leave the app "configured"
+/// with no folder set; the webview flag covers that short window instead.
 #[tauri::command]
-fn set_intro_seen(app: tauri::AppHandle, welcome: bool, tour: bool) -> Result<(), String> {
+fn set_intro_seen(
+    app: tauri::AppHandle,
+    welcome: bool,
+    tour: bool,
+    get_started: bool,
+) -> Result<(), String> {
     if !config::exists(&app) {
         return Ok(());
     }
     let mut cfg = config::load(&app).unwrap_or_default();
     cfg.welcome_seen |= welcome;
     cfg.tour_done |= tour;
+    cfg.get_started_done |= get_started;
     config::save(&app, &cfg).map_err(|e| format!("{e:#}"))
 }
 
