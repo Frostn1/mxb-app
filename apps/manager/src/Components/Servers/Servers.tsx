@@ -62,7 +62,6 @@ import {
   type MasterServer,
 } from "@frost/shared/api/mods";
 import { useConfig } from "@frost/shared/Context/Config";
-import { openCreatorPage } from "@frost/shared/api/creatorPage";
 import { useInstall } from "../../Context/Install";
 import { useT, type TFunc, type TKey } from "@/i18n";
 import { useFavorites } from "@/lib/useFavorites";
@@ -519,9 +518,6 @@ const Servers = () => {
       const slug = product.slug;
       const tracks = modTypesFor(game.id).find((m) => m.id === "tracks");
       if (!slug || !tracks) return;
-      // Install & join is a download too — show the track's mxb-mods.com page behind the app
-      // so the creator keeps the ad revenue. No-ops for a shop track or when opted out.
-      if (product.source === "mods") void openCreatorPage(product.url);
       setInstalling((cur) => ({ ...cur, [slug]: s.address }));
       startPendingInstall({
         slug,

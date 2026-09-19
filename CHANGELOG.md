@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-09-19 — v0.17.5 — No extra window while you install
+
+### Removed
+- Viewing or installing a mod no longer opens its mxb-mods.com page beside the app.
+- The Support mod creators setting is gone with it.
+
 ## 2026-09-18 — v0.17.4 — Stock tracks in the Library
 
 ### Added
