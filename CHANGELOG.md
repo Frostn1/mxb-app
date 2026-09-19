@@ -6,6 +6,8 @@
 - Stock tracks now appear in the Library. All fifteen, with names and artwork, on the Tracks
   tab. Click one to view it in 3D.
 - Two buttons in the Library bar open your mods folder and your game folder.
+- Installing a mod opens its mxb-mods.com page beside the app, so the creator keeps the ad
+  revenue. Turn it off in Settings → Mods & downloads.
 
 ### Changed
 - Settings is sorted by section. Paint sync, Mods & downloads and Secure content each have
