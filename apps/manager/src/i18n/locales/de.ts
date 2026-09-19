@@ -230,24 +230,18 @@ export const de: Translation = {
     "Das war der Rundgang. Auf zu Entdecken und installiere deinen ersten Mod.",
 
   // ── Checkliste beim ersten Start ───────────────────────────────────────────
-  "getStarted.title": "Auf die Strecke",
-  "getStarted.body":
-    "In deinem Mods-Ordner ist noch nichts. Hier fangen die meisten an.",
+  "getStarted.title": "Erste Schritte",
+  "getStarted.body": "Dein Mods-Ordner ist leer.",
   "getStarted.bikes.title": "Bikes",
-  "getStarted.bikes.body":
-    "Das OEM-Paket enthält alle Serienmaschinen in einem Download. Hake die an, die du fährst, den Rest lässt du weg.",
   "getStarted.bikes.action": "OEM-Paket installieren",
   "getStarted.tracks.title": "Strecken",
-  "getStarted.tracks.body":
-    "Auf {{site}} gibt es Hunderte. Ein Klick installiert eine, das Spiel findet sie.",
   "getStarted.tracks.action": "Strecken entdecken",
   "getStarted.rider.title": "Ausrüstung",
-  "getStarted.rider.body":
-    "Helme, Stiefel, Handschuhe und Kits. Probier sie am 3D-Fahrer an, bevor du rausfährst.",
   "getStarted.rider.action": "Ausrüstung entdecken",
+  "getStarted.installing": "Wird installiert…",
   "getStarted.installed_one": "{{count}} installiert.",
   "getStarted.installed_other": "{{count}} installiert.",
-  "getStarted.later": "Mache ich später",
+  "getStarted.later": "Später",
 
   // ── Updates ────────────────────────────────────────────────────────────────
   "update.available": "{{version}} ist verfügbar.",

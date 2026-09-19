@@ -152,12 +152,10 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
     startTour();
   }, [welcomeActive, startTour, config.tourDone]);
 
-  // The first-run checklist, after the tour rather than before it: it hands someone to
-  // Browse and to the import picker, and neither means anything until the tour has said
-  // what they are. It shows itself only to an install with no bikes — the component
-  // decides that — and marks itself done either way, so it asks once.
+  // The first-run bar, after the tour rather than before it: it hands someone to Browse,
+  // which means nothing until the tour has said what Browse is. It shows itself only to an
+  // install with no bikes — the component decides that — and settles for good once closed.
   const [getStartedShut, setGetStartedShut] = useState(false);
-  const closeGetStarted = useCallback(() => setGetStartedShut(true), []);
   const finishGetStarted = useCallback(() => {
     setGetStartedShut(true);
     void setIntroSeen({ getStarted: true }).catch(() => {});
@@ -230,6 +228,17 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
       />
       <RuntimeBanner />
       <UpdateBanner />
+      {/* Waits for the intro and the tour so it isn't competing with them for attention,
+          then stays put: its steps open Browse, and a panel that closed on the first click
+          would strand a new player on a search page. */}
+      {!welcomeActive && !tourRun && !getStartedShut && !config.getStartedDone && (
+        <GetStarted
+          onDone={finishGetStarted}
+          onBrowse={browseFor}
+          onOpenMod={openMod}
+          refreshKey={libraryVersion}
+        />
+      )}
       <div className="flex min-h-0 flex-1">
         <div className="min-h-0 min-w-0 flex-1 overflow-hidden pt-3">
           <ContextSlots.Provider value={ctxSlots}>
@@ -296,17 +305,6 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
         </div>
       </div>
       {tourRun && <Tour navigate={navigate} onDone={endTour} />}
-      {/* Waits for the intro and the tour, and stands down for the release showcase —
-          one modal at a time. */}
-      {!welcomeActive && !tourRun && !release && !getStartedShut && !config.getStartedDone && (
-        <GetStarted
-          onDone={finishGetStarted}
-          onClose={closeGetStarted}
-          onBrowse={browseFor}
-          onOpenMod={openMod}
-          refreshKey={libraryVersion}
-        />
-      )}
       {/* Never over the intro: a first run gets Welcome and the tour, and an update
           landing mid-tour would spotlight UI behind a modal. */}
       {release && !tourRun && !welcomeActive && (

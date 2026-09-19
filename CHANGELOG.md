@@ -3,11 +3,11 @@
 ## Unreleased — The Library's folders, one click away
 
 ### Added
-- **A first run that says what to install first.** An install with an empty mods folder now
-  gets three numbered steps after the tour: the OEM bike pack, which opens straight on its
-  page rather than leaving you to find it among fifty bike mods, then tracks, then rider
-  gear. Each step says how many you already have and steps aside once you have any. Anyone
-  already riding never sees it.
+- **A first run that says what to install first.** An install with an empty mods folder gets
+  a bar across the top of the app after the tour: the OEM bike pack, tracks, rider gear. The
+  bike pack opens on its own page rather than leaving you to find it among fifty bike mods.
+  The bar stays while you browse, each button turns into what you have once you have some,
+  and says so while a download is still coming down. Anyone already riding never sees it.
 - **The tracks that came with the game are in your Library.** All fifteen of them, with their
   real names and their own artwork, in a section of their own on the Tracks tab. Click one to
   look around it in 3D, the same as any track you installed. They live inside the game's own

@@ -1,17 +1,18 @@
 import { useCallback, useEffect, useState } from "react";
+import { X } from "lucide-react";
 import { scanLibrary } from "@frost/shared/api/mods";
 import { Button } from "@frost/shared/Components/ui/button";
 import { useConfig } from "@frost/shared/Context/Config";
 import { cn } from "@frost/shared/lib/utils";
 import { useT, type TKey } from "@/i18n";
+import { useInstall } from "../../Context/Install";
 
 /**
- * The first-run checklist: what a brand new install is missing, and the one button each.
+ * The first-run bar: what a new install still has none of, and the one button each.
  *
- * The game arrives with no bikes and no tracks of its own, so the first thing a new player
- * meets is a manager with an empty library and no idea that the bikes are a download of
- * their own. Every step here already exists somewhere in the app — this is a route into
- * them, not a second way of doing them.
+ * A bar rather than a modal, and it does not close when a step is taken up: the steps send
+ * you into Browse, and a panel that disappeared on the first click would leave a new player
+ * on a search page with no way back to the other two.
  *
  * It shows itself only to an install whose `mods/bikes` is empty. Anyone who already rides
  * is marked done on the spot and never sees it, which is also what keeps it from appearing
@@ -21,50 +22,27 @@ import { useT, type TKey } from "@/i18n";
 /**
  * The stock bikes, on mxb-mods. Every other step opens a category; this one opens a post,
  * because there is exactly one pack a new rider wants and sending them to a page of fifty
- * bike mods to find it is the problem this screen exists to solve. GP Bikes has no
- * equivalent post, so it gets the category like the other steps.
+ * bike mods to find it is the problem this bar exists to solve. GP Bikes has no equivalent
+ * post, so it gets the category like the other steps.
  */
 const OEM_PACK = { slug: "oem-bike-pack", categoryId: 45 };
 
-/** One row. `subpath` is what decides whether it's already satisfied. */
+/** One step. `subpath` is what decides whether it's already satisfied. */
 interface Step {
   id: "bikes" | "tracks" | "rider";
   subpath: string;
-  title: TKey;
-  body: TKey;
   action: TKey;
 }
 
 const STEPS: Step[] = [
-  {
-    id: "bikes",
-    subpath: "mods/bikes",
-    title: "getStarted.bikes.title",
-    body: "getStarted.bikes.body",
-    action: "getStarted.bikes.action",
-  },
-  {
-    id: "tracks",
-    subpath: "mods/tracks",
-    title: "getStarted.tracks.title",
-    body: "getStarted.tracks.body",
-    action: "getStarted.tracks.action",
-  },
-  {
-    id: "rider",
-    subpath: "mods/rider",
-    title: "getStarted.rider.title",
-    body: "getStarted.rider.body",
-    action: "getStarted.rider.action",
-  },
+  { id: "bikes", subpath: "mods/bikes", action: "getStarted.bikes.action" },
+  { id: "tracks", subpath: "mods/tracks", action: "getStarted.tracks.action" },
+  { id: "rider", subpath: "mods/rider", action: "getStarted.rider.action" },
 ];
 
 interface GetStartedProps {
-  /** Skipped, or nothing left to do — persisted by the caller, so it doesn't come back. */
+  /** Dismissed, or nothing left to do — persisted by the caller, so it doesn't come back. */
   onDone: () => void;
-  /** Taken up on a step. Closes the checklist for this session without settling it: if the
-   *  install didn't happen, the next launch is entitled to ask once more. */
-  onClose: () => void;
   /** Open Browse on one of the mod types. */
   onBrowse: (id: Step["id"]) => void;
   /** Open one mod's page in Browse. */
@@ -75,19 +53,22 @@ interface GetStartedProps {
 
 export default function GetStarted({
   onDone,
-  onClose,
   onBrowse,
   onOpenMod,
   refreshKey,
 }: GetStartedProps) {
   const t = useT();
   const { game } = useConfig();
-  // `null` until the first scan comes back: an empty checklist drawn over a full mods
-  // folder, even for one frame, reads as "the app lost my mods".
+  // What is already on its way. A step whose content is mid-download must not still be
+  // offering the button that starts it — and the app can be left running on this bar while
+  // a four-gigabyte pack comes down, so "nothing has happened yet" has to be visibly wrong.
+  const { active } = useInstall();
+  // `null` until the first scan comes back: a bar saying the folder is empty, drawn over a
+  // full one even for a frame, reads as "the app lost my mods".
   const [counts, setCounts] = useState<Record<Step["id"], number> | null>(null);
-  // Did this install already have bikes before the checklist opened? Answered by the first
-  // scan and never revisited — installing the pack from here has to tick the row, not close
-  // the window out from under the two steps below it.
+  // Did this install already have bikes when the bar opened? Answered by the first scan and
+  // never revisited — installing the pack from here has to tick that step, not take the bar
+  // away while the other two are still undone.
   const [preexisting, setPreexisting] = useState<boolean | null>(null);
 
   const rescan = useCallback(async () => {
@@ -113,6 +94,13 @@ export default function GetStarted({
 
   if (counts === null || preexisting !== false) return null;
 
+  /** The install landing in this step's folder, if one is running. */
+  const running = (step: Step) =>
+    active.find(
+      (a) =>
+        a.subpath === step.subpath && a.stage !== "done" && a.stage !== "error",
+    );
+
   /** Where a step's button goes. The bikes step is the only one that names a mod. */
   const go = (step: Step) => {
     if (step.id === "bikes" && game.id === "mxb") {
@@ -120,64 +108,45 @@ export default function GetStarted({
     } else {
       onBrowse(step.id);
     }
-    onClose();
   };
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-background/80 backdrop-blur-sm px-10">
-      <div className="flex w-full max-w-[520px] flex-col gap-7 rounded-2xl border border-input bg-card p-9 shadow-2xl">
-        <div className="flex flex-col gap-2">
-          <h1 className="text-[22px] font-extrabold tracking-[-0.4px]">
-            {t("getStarted.title")}
-          </h1>
-          <p className="text-[13.5px] leading-relaxed text-muted-foreground">
-            {t("getStarted.body")}
-          </p>
-        </div>
+    <div className="flex items-center gap-3 border-b border-primary/25 bg-primary/10 px-4 py-2 text-sm text-foreground">
+      <span className="shrink-0 font-semibold">{t("getStarted.title")}</span>
+      <span className="min-w-0 truncate text-muted-foreground">
+        {t("getStarted.body")}
+      </span>
 
-        <div className="flex flex-col">
-          {STEPS.map((step, i) => {
-            const done = counts[step.id] > 0;
-            return (
-              <div
-                key={step.id}
-                className={cn(
-                  "flex items-start gap-4 border-t border-input py-4",
-                  i === STEPS.length - 1 && "border-b",
-                  done && "text-muted-foreground",
-                )}
-              >
-                <span className="mt-0.5 w-4 shrink-0 font-cond text-[15px] font-bold tabular-nums text-faint">
-                  {i + 1}
-                </span>
-                <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-                  <span className="text-[13.5px] font-semibold">{t(step.title)}</span>
-                  <span className="text-[12.5px] leading-relaxed text-muted-foreground">
-                    {done
-                      ? t("getStarted.installed", { count: counts[step.id] })
-                      : t(step.body)}
-                  </span>
-                </div>
-                {!done && (
-                  <Button
-                    size="sm"
-                    variant={step.id === "bikes" ? "default" : "outline"}
-                    className="mt-0.5 shrink-0"
-                    onClick={() => go(step)}
-                  >
-                    {t(step.action)}
-                  </Button>
-                )}
-              </div>
-            );
-          })}
-        </div>
-
-        <div className="flex items-center justify-end">
-          <Button variant="ghost" onClick={onDone}>
-            {t("getStarted.later")}
-          </Button>
-        </div>
+      <div className="ml-auto flex shrink-0 items-center gap-1.5">
+        {STEPS.map((step) => {
+          const done = counts[step.id] > 0;
+          const busy = done ? undefined : running(step);
+          return (
+            <Button
+              key={step.id}
+              size="sm"
+              variant={step.id === "bikes" && !done && !busy ? "default" : "outline"}
+              className={cn((done || busy) && "text-muted-foreground")}
+              disabled={done || !!busy}
+              onClick={() => go(step)}
+            >
+              {done
+                ? t("getStarted.installed", { count: counts[step.id] })
+                : busy
+                  ? t("getStarted.installing")
+                  : t(step.action)}
+            </Button>
+          );
+        })}
+        <Button
+          size="icon"
+          variant="ghost"
+          className="size-8"
+          onClick={onDone}
+          aria-label={t("getStarted.later")}
+        >
+          <X className="size-4" />
+        </Button>
       </div>
     </div>
   );
