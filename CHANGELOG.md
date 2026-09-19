@@ -66,6 +66,8 @@
 - The Studio tab. Frost's Studio is its own app.
 
 ### Fixed
+- A track identified in the server panel now shows its picture in the list beside it, and
+  on every other server running the same track.
 - A server's track now links to its page on mxb-mods.com even when you already have the
   track installed, and is found by its address on the site rather than by search, so
   tracks like Fort Red come up with their picture instead of a stranger's mod.

@@ -35,6 +35,7 @@ import {
 } from "@frost/shared/api/mods";
 import { formatPrice, openShopUrl } from "../../api/shop";
 import { isFull } from "@/lib/useServerQueue";
+import { guessFor, rememberGuess } from "./trackGuesses";
 
 /**
  * Everything one server publishes about itself.
@@ -57,10 +58,6 @@ import { isFull } from "@/lib/useServerQueue";
 
 /** One label/value line. Values that came back empty are dropped by {@link Facts}. */
 type Fact = { label: string; value: string };
-
-/** What each track id turned out to be, for the life of the app. Shared by every row: the
- *  same track is on a dozen servers and comes round again on every rotation. */
-const GUESSES = new Map<string, TrackGuess>();
 
 const Facts = ({
   title,
@@ -368,7 +365,7 @@ const ServerDetail = ({
     // four catalogue searches — mxb-mods, two shop passes, then the Hub — and a rotation
     // brings the same handful of tracks back every few minutes, off every row that runs
     // them. One answer per track per run of the app is enough.
-    const hit = GUESSES.get(track);
+    const hit = guessFor(track);
     if (hit) {
       setGuess(hit);
       setGuessing(false);
@@ -378,7 +375,7 @@ const ServerDetail = ({
     setGuessing(true);
     guessServerTrack(track)
       .then((g) => {
-        GUESSES.set(track, g);
+        rememberGuess(track, g);
         if (!cancelled) setGuess(g);
       })
       .catch(() => {})

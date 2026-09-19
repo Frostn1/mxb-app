@@ -64,6 +64,7 @@ import { useGameRunning } from "@/lib/useGameRunning";
 import { isFull, useServerQueue } from "@/lib/useServerQueue";
 import { REGION_LABEL_KEY, REGION_ORDER, canonicalRegion, type RegionKey } from "@/lib/serverRegion";
 import JoinServerDialog from "../Shell/JoinServerDialog";
+import { guessPicture, useTrackGuesses } from "./trackGuesses";
 import ServerDetail, { ServerDetailDialog, ServerDetailEmpty } from "./ServerDetail";
 import ServerCard from "./ServerCard";
 import ServerRow from "./ServerRow";
@@ -621,9 +622,15 @@ const Servers = () => {
   /** Everything the pane needs about whichever server is picked. The join decision is the
    *  tile's — Join, Install & join, Buy, Wait in line — so both are handed the same inputs
    *  and land on the same button rather than each working it out their own way. */
+  // A picture the detail pane learned. The list had only the installed preview and our own
+  // catalogue, so a track that is neither — Fort Red, found on mxb-mods — drew a full hero
+  // and an empty row beside it. Reading the same store fixes that the moment it is known.
+  useTrackGuesses();
+  const pictureFor = (track: string) => art[track] || guessPicture(track) || undefined;
+
   const detailProps = {
     server: detail,
-    art: detail ? art[detail.track] : undefined,
+    art: detail ? pictureFor(detail.track) : undefined,
     missing: !!detail?.track && ASKED.has(detail.track) && !(detail.track in art),
     product: detail ? catalog[detail.track] : undefined,
     installing: !!detail && installingAt.has(detail.address),
@@ -881,7 +888,7 @@ const Servers = () => {
               <ServerCard
                 key={`${s.address}-${i}`}
                 server={s}
-                art={art[s.track]}
+                art={pictureFor(s.track)}
                 missing={!!s.track && ASKED.has(s.track) && !(s.track in art)}
                 product={catalog[s.track]}
                 installing={installingAt.has(s.address)}
@@ -918,7 +925,7 @@ const Servers = () => {
                   <ServerRow
                     key={`${s.address}-${i}`}
                     server={s}
-                    art={art[s.track]}
+                    art={pictureFor(s.track)}
                     missing={!!s.track && ASKED.has(s.track) && !(s.track in art)}
                     product={catalog[s.track]}
                     selected={s.address === selected}
