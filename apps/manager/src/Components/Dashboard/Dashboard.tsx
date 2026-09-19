@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import TopRail from "../Shell/TopRail";
 import { ContextSlots } from "../Shell/ContextBar";
+import PurchaseWatcher from "../Shell/PurchaseWatcher";
 import { type DashboardView } from "../Shell/nav";
 import { parsePluginView, usePlugins } from "@frost/shared/lib/usePlugins";
 import Library from "../Library/Library";
@@ -218,6 +219,10 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
           there is nowhere to install to before the MX Bikes folder is known. The overlay
           window renders its own tree and deliberately gets no drop target. */}
       <DropZone />
+      {/* Nothing on screen: it watches a store the app just opened in the browser and queues
+          whatever turns up as a new purchase. Here because it needs the install queue and has
+          to outlive every view a store link can be clicked from. */}
+      <PurchaseWatcher />
       <SecurePrompt onOpenSettings={openSettingsSection} />
       <TopRail
         view={view}

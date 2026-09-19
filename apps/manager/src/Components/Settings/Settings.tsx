@@ -22,6 +22,7 @@ import { getVersion } from "@tauri-apps/api/app";
 import { toast } from "sonner";
 import PaintSync from "./PaintSync";
 import Plugins from "./Plugins";
+import Accounts from "./Accounts";
 import {
   countProfilesIn,
   detectGamePath,
@@ -163,6 +164,7 @@ const DISCORD_URL = "https://discord.gg/3994Rr3ywb";
 
 export type SectionId =
   | "game"
+  | "accounts"
   | "folder"
   | "general"
   | "downloads"
@@ -208,6 +210,7 @@ const GROUPS: { label: TKey; sections: { id: SectionId; label: TKey }[] }[] = [
     label: "settings.groupApp",
     sections: [
       { id: "general", label: "settings.general" },
+      { id: "accounts", label: "accounts.section" },
       { id: "appearance", label: "settings.appearance" },
       { id: "downloads", label: "settings.downloads" },
       { id: "overlay", label: "overlay.section" },
@@ -1440,6 +1443,16 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
               checked={queueRestartGame}
               onChange={toggleQueueRestartGame}
             />
+          </Section>
+          )}
+
+          {/* Every sign-in the app holds. Steam used to be findable only inside Secure
+              content and the two store sign-ins only inside each store's Purchases tab —
+              which meant the answer to "am I signed in?" was in three different places and
+              none of them was Settings. */}
+          {active === "accounts" && (
+          <Section title={t("accounts.section")} desc={t("accounts.desc")}>
+            <Accounts />
           </Section>
           )}
 

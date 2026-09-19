@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Added
+- Settings has an Accounts page. Steam, mxbikes-shop.com, MXB Hub and mxb-mods.com in one
+  list, each with whether you are signed in, what the account is for, and its own buttons.
+  mxb-mods.com needs no account at all.
+- Buy something on a store and the app installs it for you. After it opens a store page it
+  watches that store for about two minutes and queues anything new that shows up. Turn it off
+  in Settings, Accounts. A purchase that lands later is still one Refresh away in Purchases.
+
 ### Changed
 - The app wears the mxbsecure look: the brand blue, black chrome, and rounded corners
   throughout. Every colorway but the default is untouched.

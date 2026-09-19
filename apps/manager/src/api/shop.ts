@@ -111,8 +111,33 @@ export function shopCatalogRefresh(): Promise<ShopStatus> {
   return invoke<ShopStatus>("shop_catalog_refresh");
 }
 
-/** The stores the app browses. A URL has to be https on one of them to be openable. */
-const STORE_HOSTS = ["mxbikes-shop.com", "mxb-hub.com"];
+/** Which store a link belongs to. The two are read by different means — see `StoreVisit`. */
+export type StoreId = "shop" | "hub";
+
+/** The stores the app browses, and which id each one answers to. A URL has to be https on one
+ *  of them to be openable. */
+const STORE_HOSTS: { host: string; store: StoreId }[] = [
+  { host: "mxbikes-shop.com", store: "shop" },
+  { host: "mxb-hub.com", store: "hub" },
+];
+
+type StoreVisitHandler = (store: StoreId) => void;
+
+const visitHandlers = new Set<StoreVisitHandler>();
+
+/**
+ * Called every time the app hands a store page to the browser.
+ *
+ * This is the only moment the app knows a purchase might be about to happen: the stores have
+ * no webhook and nothing tells us when money changes hands. Everything that wants to watch for
+ * a new purchase hangs off this — see `lib/usePurchaseWatch`.
+ *
+ * Returns the unsubscribe.
+ */
+export function onStoreVisit(handler: StoreVisitHandler): () => void {
+  visitHandlers.add(handler);
+  return () => visitHandlers.delete(handler);
+}
 
 /**
  * Open a store page in the user's own browser.
@@ -130,9 +155,13 @@ export async function openShopUrl(url: string | null): Promise<void> {
   try {
     const parsed = new URL(url);
     const host = parsed.hostname.toLowerCase();
-    const onStore = STORE_HOSTS.some((s) => host === s || host.endsWith(`.${s}`));
+    const onStore = STORE_HOSTS.find(
+      (s) => host === s.host || host.endsWith(`.${s.host}`),
+    );
     if (parsed.protocol !== "https:" || !onStore) return;
     await open(url);
+    // After the browser is actually up, so a link that never opened never starts a watch.
+    for (const handler of visitHandlers) handler(onStore.store);
   } catch {
     // A malformed URL is not worth a toast; the button simply does nothing.
   }
