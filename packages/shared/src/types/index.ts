@@ -131,6 +131,8 @@ export interface Config {
   welcomeSeen?: boolean;
   /** First-run guided tour already finished or skipped. */
   tourDone?: boolean;
+  /** First-run checklist already finished or skipped. */
+  getStartedDone?: boolean;
   /** Register the global hotkey that summons the in-game overlay (default true). */
   overlayEnabled?: boolean;
   /** Overlay toggle combo in Tauri accelerator syntax, e.g. `"CommandOrControl+Shift+X"`. */

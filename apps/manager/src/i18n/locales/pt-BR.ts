@@ -225,6 +225,20 @@ export const ptBR: Translation = {
   "tour.done.body":
     "O tour acabou. Vá em Explorar e instale seu primeiro mod.",
 
+  // ── Checklist da primeira execução ─────────────────────────────────────────
+  "getStarted.title": "Para começar",
+  "getStarted.body": "Sua pasta de mods está vazia.",
+  "getStarted.bikes.title": "Motos",
+  "getStarted.bikes.action": "Instalar o pacote OEM",
+  "getStarted.tracks.title": "Pistas",
+  "getStarted.tracks.action": "Explorar pistas",
+  "getStarted.rider.title": "Equipamentos",
+  "getStarted.rider.action": "Explorar equipamentos",
+  "getStarted.installing": "Instalando…",
+  "getStarted.installed_one": "{{count}} instalado.",
+  "getStarted.installed_other": "{{count}} instalados.",
+  "getStarted.later": "Depois",
+
   // ── Atualizações ───────────────────────────────────────────────────────────
   "update.available": "{{version}} está disponível.",
   "update.downloading": "Baixando…",

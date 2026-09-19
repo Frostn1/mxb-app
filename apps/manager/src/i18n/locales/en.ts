@@ -219,6 +219,20 @@ export const en = {
   "tour.done.title": "You're all set",
   "tour.done.body": "That's the tour. Head to Browse and install your first mod.",
 
+  // ── First-run checklist ────────────────────────────────────────────────────
+  "getStarted.title": "Get started",
+  "getStarted.body": "Your mods folder is empty.",
+  "getStarted.bikes.title": "Bikes",
+  "getStarted.bikes.action": "Install the OEM pack",
+  "getStarted.tracks.title": "Tracks",
+  "getStarted.tracks.action": "Browse tracks",
+  "getStarted.rider.title": "Rider gear",
+  "getStarted.rider.action": "Browse gear",
+  "getStarted.installing": "Installing…",
+  "getStarted.installed_one": "{{count}} installed.",
+  "getStarted.installed_other": "{{count}} installed.",
+  "getStarted.later": "Later",
+
   // ── Updater banner ─────────────────────────────────────────────────────────
   "update.available": "{{version}} is available.",
   "update.downloading": "Downloading…",

@@ -290,10 +290,12 @@ export function setModsPath(path: string): Promise<string> {
 export function setIntroSeen(opts: {
   welcome?: boolean;
   tour?: boolean;
+  getStarted?: boolean;
 }): Promise<void> {
   return invoke<void>("set_intro_seen", {
     welcome: opts.welcome ?? false,
     tour: opts.tour ?? false,
+    getStarted: opts.getStarted ?? false,
   });
 }
 
@@ -1652,8 +1654,20 @@ export function buildDestinations(
 
   let guess = "";
   const suggestions: string[] = [];
-  if (modType.id === "bikes") {
-    const bikes = bikeNames(installed, bikeTargets);
+  // A whole bike is never installed *into* another bike. Liveries, sounds and swaps are, so
+  // every bike on the machine is normally offered as a destination — which left the OEM pack
+  // able to file 54 machines under `MX1OEM_2023_KTM_450_SX-F/paints`. The post says which it
+  // is: mxb-mods files a new bike under "New Bikes" and a paint under "Liveries", whatever
+  // tab it was opened from. Nothing else changes, so a purchase with no categories to read
+  // keeps every option it had.
+  const newBike = categories.some((c) => /\bnew bikes?\b/i.test(c));
+  const bikes = modType.id === "bikes" ? bikeNames(installed, bikeTargets) : [];
+  const ownedByABike = (folder: string) => {
+    const root = folder.split("/")[0].toLowerCase();
+    return bikes.some((b) => b.toLowerCase() === root);
+  };
+
+  if (modType.id === "bikes" && !newBike) {
     for (const b of bikes) {
       add(b, { label: "", labelKey: "dest.bikeFolder", labelVars: { name: b } });
       add(`${b}/paints`, { label: "", labelKey: "dest.bikePaints", labelVars: { name: b } });
@@ -1688,7 +1702,9 @@ export function buildDestinations(
   }
 
   for (const f of [...new Set(installed.map((i) => i.folder))].sort((a, b) => a.localeCompare(b))) {
-    if (f) add(f, { label: f });
+    // The folders content is already sitting in, minus the ones belonging to a bike when the
+    // mod is a bike: `KTM 450/paints` is a real folder, and it is not where a bike goes.
+    if (f && !(newBike && ownedByABike(f))) add(f, { label: f });
   }
 
   // Tracks live in folders — a series, a season, a pack — and the root is where they're

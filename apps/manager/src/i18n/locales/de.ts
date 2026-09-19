@@ -229,6 +229,20 @@ export const de: Translation = {
   "tour.done.body":
     "Das war der Rundgang. Auf zu Entdecken und installiere deinen ersten Mod.",
 
+  // ── Checkliste beim ersten Start ───────────────────────────────────────────
+  "getStarted.title": "Erste Schritte",
+  "getStarted.body": "Dein Mods-Ordner ist leer.",
+  "getStarted.bikes.title": "Bikes",
+  "getStarted.bikes.action": "OEM-Paket installieren",
+  "getStarted.tracks.title": "Strecken",
+  "getStarted.tracks.action": "Strecken entdecken",
+  "getStarted.rider.title": "Ausrüstung",
+  "getStarted.rider.action": "Ausrüstung entdecken",
+  "getStarted.installing": "Wird installiert…",
+  "getStarted.installed_one": "{{count}} installiert.",
+  "getStarted.installed_other": "{{count}} installiert.",
+  "getStarted.later": "Später",
+
   // ── Updates ────────────────────────────────────────────────────────────────
   "update.available": "{{version}} ist verfügbar.",
   "update.downloading": "Wird heruntergeladen…",

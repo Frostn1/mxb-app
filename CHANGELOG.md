@@ -3,6 +3,9 @@
 ## Unreleased — Stock tracks in the Library
 
 ### Added
+- A first run for an install with an empty mods folder: three steps — the OEM bike pack,
+  tracks, rider gear — that collapse to a bar across the top once you follow one, so the
+  other two stay reachable while you browse. Anyone already riding never sees it.
 - Stock tracks now appear in the Library. All fifteen, with names and artwork, on the Tracks
   tab. Click one to view it in 3D.
 - Two buttons in the Library bar open your mods folder and your game folder.
@@ -20,6 +23,8 @@
 - The Studio tab. Frost's Studio is its own app.
 
 ### Fixed
+- A bike can no longer be installed inside another bike. The picker offers every bike you
+  own as a destination, which is right for a livery or a sound and wrong for a whole bike.
 - Long profile paths stay inside their panel in Settings → Game folder.
 - Steam sign-in now gives you 30 minutes.
 
