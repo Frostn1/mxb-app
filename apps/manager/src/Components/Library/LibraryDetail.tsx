@@ -268,13 +268,19 @@ export default function LibraryDetail({
             images={image ? [image] : []}
             title={title}
             figures={figures}
-            emptyIcon={Icon}
+            /* Where it stands with you belongs on the thing itself. A locked mod says both:
+               it is yours, and it is sealed. */
             badge={
-              meta?.locked ? (
-                <>
-                  <Lock className="size-3" /> {t("libraryDetail.lockedWord")}
-                </>
-              ) : undefined
+              <>
+                <StateChip icon={Check} tone="success" overlay>
+                  {t("modDetail.inLibrary")}
+                </StateChip>
+                {meta?.locked && (
+                  <StateChip icon={Lock} overlay>
+                    {t("libraryDetail.lockedWord")}
+                  </StateChip>
+                )}
+              </>
             }
           />
 

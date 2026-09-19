@@ -216,6 +216,20 @@ export default function ShopDetail({
             images={detail.images}
             title={detail.title}
             figures={figures}
+            /* Read with the art, not beside the button. */
+            badge={
+              owned?.installed ? (
+                <StateChip icon={Check} tone="success" overlay>
+                  {t("purchases.installed")}
+                </StateChip>
+              ) : owned ? (
+                <StateChip overlay>{t("modDetail.notInstalled")}</StateChip>
+              ) : (
+                <StateChip tone="primary" overlay>
+                  {t("shopDetail.notOwned")}
+                </StateChip>
+              )
+            }
             emptyLabel={t("shopCatalog.noScreenshots")}
             fit="contain"
           />

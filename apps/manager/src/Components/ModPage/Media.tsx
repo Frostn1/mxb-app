@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { ChevronLeft, ChevronRight, Maximize2, X, type LucideIcon } from "lucide-react";
+import { ChevronLeft, ChevronRight, Maximize2, X } from "lucide-react";
 import { useT } from "@/i18n";
 import { cn } from "@frost/shared/lib/utils";
 import SmartImg from "./Img";
@@ -23,7 +23,6 @@ export default function MediaPanel({
   images,
   title,
   figures = [],
-  emptyIcon: Empty,
   emptyLabel,
   badge,
   fit = "contain",
@@ -32,7 +31,6 @@ export default function MediaPanel({
   title: string;
   /** Laid over the foot of the picture. Anything without a value is dropped by the caller. */
   figures?: Figure[];
-  emptyIcon?: LucideIcon;
   emptyLabel?: string;
   /** A corner note on the picture — "Locked", say. */
   badge?: ReactNode;
@@ -74,20 +72,16 @@ export default function MediaPanel({
             </span>
           </button>
         ) : (
-          <div className="grid size-full place-items-center bg-gradient-to-br from-[#25282d] to-[#131518] text-foreground/20">
-            {Empty ? (
-              <Empty className="size-9" strokeWidth={1.25} />
-            ) : (
-              <span className="font-cond text-[12.5px]">{emptyLabel}</span>
-            )}
+          /* A mountain glyph where a track's picture should be reads as the picture, not
+             as its absence. Words do not. */
+          <div className="grid size-full place-items-center bg-gradient-to-br from-[#25282d] to-[#131518]">
+            <span className="font-cond text-[12.5px] tracking-[-0.01em] text-foreground/35">
+              {emptyLabel}
+            </span>
           </div>
         )}
 
-        {badge && (
-          <span className="absolute left-3 top-3 flex items-center gap-1 rounded-lg bg-black/60 px-2 py-1 font-cond text-[11px] text-white/85">
-            {badge}
-          </span>
-        )}
+        {badge && <span className="absolute left-3 top-3 flex items-center gap-1.5">{badge}</span>}
 
         {/* The figures ride on the picture's foot. The scrim is only as tall as they are, so
             none of it washes over the part of the shot anyone is looking at. */}

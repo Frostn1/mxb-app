@@ -78,19 +78,27 @@ export function ActionBar({
 export function StateChip({
   icon: Icon,
   tone = "muted",
+  overlay = false,
   children,
 }: {
   icon?: LucideIcon;
   tone?: "success" | "primary" | "muted";
+  /** Riding on the picture rather than in the bar: the tint has to carry over a photograph,
+   *  so the chip brings its own dark ground and the tone only colours the text. */
+  overlay?: boolean;
   children: ReactNode;
 }) {
   return (
     <span
       className={cn(
         "flex h-7 items-center gap-1.5 rounded-full px-3 font-cond text-[11.5px] font-semibold tracking-[-0.01em]",
-        tone === "success" && "bg-success/[0.12] text-success",
-        tone === "primary" && "bg-primary/[0.14] text-primary",
-        tone === "muted" && "bg-foreground/[0.07] text-muted-foreground",
+        overlay && "bg-black/60 backdrop-blur-[2px]",
+        !overlay && tone === "success" && "bg-success/[0.12]",
+        !overlay && tone === "primary" && "bg-primary/[0.14]",
+        !overlay && tone === "muted" && "bg-foreground/[0.07]",
+        tone === "success" && "text-success",
+        tone === "primary" && "text-primary",
+        tone === "muted" && (overlay ? "text-white/85" : "text-muted-foreground"),
       )}
     >
       {Icon && <Icon className="size-3.5" strokeWidth={2.5} />}

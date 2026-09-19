@@ -378,11 +378,6 @@ export default function ModDetail({
         title={detail.title}
         meta={[t(modType.label), detail.author, detail.version]}
       >
-        {isInstalled && (
-          <StateChip icon={Check} tone="success">
-            In library
-          </StateChip>
-        )}
         {primary && (
           <Button onClick={openInstall} disabled={busy}>
             {busy && <Loader2 className="size-4 animate-spin" />}
@@ -398,6 +393,13 @@ export default function ModDetail({
             images={detail.images}
             title={detail.title}
             figures={figures}
+            /* Where this mod stands with you belongs on the thing itself, not beside the
+               button — you read the picture first. */
+            badge={
+              <StateChip icon={isInstalled ? Check : undefined} tone={isInstalled ? "success" : "muted"} overlay>
+                {isInstalled ? t("modDetail.inLibrary") : t("modDetail.notInstalled")}
+              </StateChip>
+            }
             emptyLabel={t("shopCatalog.noScreenshots")}
           />
 
