@@ -50,6 +50,18 @@
   go on is refused before Steam rather than after, so you find out having spent nothing, and the
   app keeps watching for the whole window instead of giving up while the sign-in is still good.
 
+## 2026-09-18 — Frost's Studio v0.4.1 — Starting from an existing track is off for now
+
+### Changed
+- **Starting a new track from one that already exists is off for now.** v0.4.0 could open one
+  of the game's own tracks, or a `.pkz` from your disk, and carry on from its ground and its
+  lap. That option is out of the Studio again while we settle what it should and should not
+  read — a track someone locked is not ours to take a shape out of, and the rule for that
+  belongs in the code rather than in a promise. Every other way of starting a track is
+  untouched: a blank lap, a random one, a saved project, or a real place from a survey.
+- A track you already built this way is yours and goes on working. Nothing about the tracks
+  in your folder changes.
+
 ## 2026-09-18 — Frost's Studio v0.4.0 — Start from a track you already have, and keep the replay you flew
 
 ### Added

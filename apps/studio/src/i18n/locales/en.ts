@@ -356,7 +356,6 @@ export const en = {
   "track.saved": "Saved “{{name}}”",
   "track.saveFailed": "Couldn't save it",
   "track.open": "Open track…",
-  "track.importTrack": "From a track…",
   "track.openFailed": "Couldn't open it",
   "track.projectFile": "Track project",
   "track.kind.tabletop": "Tabletop",

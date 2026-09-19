@@ -39,7 +39,6 @@ import { TrackViewer } from "@frost/shared/Components/Viewer/TrackViewer";
 import BuildCard from "./BuildCard";
 import LapPlan from "./LapPlan";
 import RealPlace from "./RealPlace";
-import ImportTrack from "./ImportTrack";
 import ElevationCurve from "./ElevationCurve";
 import { Switch } from "@frost/shared/Components/ui/switch";
 import { Segmented } from "@frost/shared/Components/ui/segmented";
@@ -111,7 +110,6 @@ export default function TrackStudio() {
   // Whether the real-place panel is open. Its own state, because it replaces the whole tab.
   const [fromPlace, setFromPlace] = useState(false);
   // Starting from a track somebody already compiled — one of the game's own, or any `.pkz`.
-  const [importing, setImporting] = useState(false);
   const [working, setWorking] = useState<"generate" | "preview" | "export" | null>(null);
   // The build itself lives above this component — see `Context/TrackBuild` — so that leaving
   // the tab doesn't take the bar with it. To everything here that asks "is the studio busy?"
@@ -917,13 +915,6 @@ export default function TrackStudio() {
               </Button>
               <Button
                 variant="ghost"
-                onClick={() => setImporting(true)}
-                disabled={busy !== null}
-              >
-                {t("track.importTrack")}
-              </Button>
-              <Button
-                variant="ghost"
                 onClick={() => setFromPlace(true)}
                 disabled={busy !== null}
               >
@@ -1695,13 +1686,6 @@ export default function TrackStudio() {
                   >
                     {t("track.open")}
                   </button>
-                  <button
-                    onClick={() => setImporting(true)}
-                    disabled={busy !== null}
-                    className="cursor-default font-cond text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground hover:text-foreground disabled:opacity-40"
-                  >
-                    {t("track.importTrack")}
-                  </button>
                 </div>
               </div>
             )}
@@ -1857,14 +1841,6 @@ export default function TrackStudio() {
           </Button>
         </div>
       )}
-
-      {/* Hands back a loader rather than a program, so an import goes through the same
-          "replace what you're working on?" guard every other way of starting a track does. */}
-      <ImportTrack
-        open={importing}
-        onOpenChange={setImporting}
-        onImport={(load) => void onLoad(load)}
-      />
 
       <AlertDialog open={confirming !== null} onOpenChange={(o) => !o && setConfirming(null)}>
         <AlertDialogContent>
