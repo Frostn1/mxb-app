@@ -700,10 +700,10 @@ export const de: Translation = {
   "settings.notRunning": "Läuft nicht",
   "settings.frostmodInstalled": "Installiert{{suffix}}",
   "settings.notInstalled": "Nicht installiert",
-  "settings.checkingGitHub":
-    "GitHub wird auf die neueste Version geprüft…",
+  "settings.checkingUpdates":
+    "mxbsecure.com wird auf die neueste Version geprüft…",
   "settings.updateCheckFailed":
-    "Updates konnten nicht geprüft werden — offline oder GitHub nicht erreichbar.",
+    "Updates konnten nicht geprüft werden — offline oder mxbsecure.com nicht erreichbar.",
   "settings.latestVersion": "Neueste: {{version}}",
   "settings.frostmodStrayMsvcr90":
     "Eine Datei in deinem Spielordner lässt MX Bikes mit \"R6034\" abstürzen — leg sie beiseite, dann ist es behoben.",

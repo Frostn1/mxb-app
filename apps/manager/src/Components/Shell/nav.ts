@@ -57,6 +57,15 @@ export interface RailItem extends Gated {
  * Race mode share GARAGE: they all decide what you take onto the track.
  */
 export const RAIL: RailItem[] = [
+  {
+    id: "servers",
+    label: "nav.servers",
+    view: "servers",
+    tabs: [
+      { view: "servers", label: "nav.serverBrowser" },
+      { view: "ranked", label: "nav.ranked" },
+    ],
+  },
   { id: "browse", label: "nav.browse", view: "browse" },
   { id: "shop", label: "nav.shop", view: "shop", cap: "shop" },
   { id: "hub", label: "nav.hub", view: "hub", cap: "shop" },
@@ -77,15 +86,6 @@ export const RAIL: RailItem[] = [
       { view: "locker", label: "nav.locker", cap: "viewer" },
       { view: "presets", label: "nav.presets" },
       { view: "manage", label: "nav.manage", cap: "manage" },
-    ],
-  },
-  {
-    id: "servers",
-    label: "nav.servers",
-    view: "servers",
-    tabs: [
-      { view: "servers", label: "nav.serverBrowser" },
-      { view: "ranked", label: "nav.ranked" },
     ],
   },
 ];

@@ -49,12 +49,21 @@
   corners, the track they're on, the bike, and last what the coach shows you while you ride.
 - The debrief fits the window. The step you are on scrolls on its own if it has to, so Next and
   Back stay where you left them instead of sitting at the bottom of a long page.
+- **Ranked follows the Steam account you're signed in as.** The tab shows the season of the
+  Steam account this app is signed in with, rather than whichever account the Steam client on
+  the machine was last opened with — so a shared PC, or a second Steam account, shows your
+  rider and not somebody else's. A GUID you typed in yourself still wins, and a machine that
+  has never signed in still works off Steam as before.
+- **Servers sits first in the top row**, before Browse.
+- About links to mxbsecure.com, and the update check says so.
 
 ### Removed
 - The **Studio** tab. Frost's Studio is an app of its own: open it from your desktop, or from
   **Settings → Plugins** when a plugin's panels live there.
 
 ### Fixed
+- A long profiles folder in **Settings → Game folder** stays inside its panel instead of
+  running off the side of it, with the end of the path a hover away.
 - **The Steam sign-in gives you time to actually sign in.** The window was ten minutes counted
   from the moment the app asked for the sign-in — before your browser had even opened — and it
   was only checked at the very end. So a password typed carefully, or a Steam Guard code waited

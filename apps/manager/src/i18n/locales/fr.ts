@@ -698,10 +698,10 @@ export const fr: Translation = {
   "settings.notRunning": "Inactif",
   "settings.frostmodInstalled": "Installé{{suffix}}",
   "settings.notInstalled": "Non installé",
-  "settings.checkingGitHub":
-    "Vérification de la dernière version sur GitHub…",
+  "settings.checkingUpdates":
+    "Vérification de la dernière version sur mxbsecure.com…",
   "settings.updateCheckFailed":
-    "Impossible de vérifier les mises à jour — hors ligne ou GitHub indisponible.",
+    "Impossible de vérifier les mises à jour — hors ligne ou mxbsecure.com indisponible.",
   "settings.latestVersion": "Dernière : {{version}}",
   "settings.frostmodStrayMsvcr90":
     "Un fichier de votre dossier de jeu fait planter MX Bikes avec « R6034 » — mettez-le de côté pour régler ça.",
