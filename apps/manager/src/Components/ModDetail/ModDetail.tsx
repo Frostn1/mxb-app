@@ -41,7 +41,7 @@ import RichDescription from "./RichDescription";
 import InstallDialog, { type InstallChoice } from "./InstallDialog";
 import { useInstall } from "../../Context/Install";
 import type { InstalledIndex } from "../../lib/installedMatch";
-import { fileFormat, formatDate } from "@frost/shared/lib/mods";
+import { formatDate } from "@frost/shared/lib/mods";
 import { Button } from "@frost/shared/Components/ui/button";
 import {
   AlertDialog,
@@ -59,7 +59,7 @@ import { openCreatorPage, closeCreatorPage } from "@frost/shared/api/creatorPage
 import { readAdSupport } from "@frost/shared/lib/adSupport";
 import { ActionBar, StateChip } from "../ModPage/ActionBar";
 import MediaPanel, { type Figure } from "../ModPage/Media";
-import { Facts, Note, Panel } from "../ModPage/Panels";
+import { Note, Panel } from "../ModPage/Panels";
 
 interface ModDetailProps {
   slug: string;
@@ -227,7 +227,6 @@ export default function ModDetail({
   // What the dialog would start on — the best playable file, so the card below the bar
   // describes the download that's actually about to run.
   const primary = mirrors[defaultMirrorIndex(mirrors)] ?? null;
-  const format = primary ? fileFormat(primary.url) : null;
   // Server builds aren't mirrors of the playable file, so they don't belong in this count.
   const mirrorNames = [
     ...new Set(mirrors.filter((m) => !m.isServer).map((m) => m.host)),
@@ -358,10 +357,14 @@ export default function ModDetail({
   const idx = myActive ? stageIndex(myActive.stage) : -1;
   const busy = idx >= 0 && myActive?.stage !== "done";
 
+  // What a rider decides on, laid over the picture. The file's plumbing — its format, its
+  // mirrors — is not a reason to install anything, so it does not get a figure.
   const figures: Figure[] = [
     { label: t("shopCatalog.updated"), value: formatDate(detail.date) },
     ...(detail.version ? [{ label: "Version", value: detail.version }] : []),
-    ...(format ? [{ label: t("modDetail.format"), value: format }] : []),
+    ...(detail.categories.length
+      ? [{ label: t("modDetail.categoryLabel"), value: detail.categories.slice(0, 2).join(", ") }]
+      : []),
   ];
 
   return (
@@ -396,7 +399,6 @@ export default function ModDetail({
             title={detail.title}
             figures={figures}
             emptyLabel={t("shopCatalog.noScreenshots")}
-            fit="cover"
           />
 
           <div className="flex flex-col gap-2">
@@ -468,17 +470,14 @@ export default function ModDetail({
                     {t("modDetail.serverOnlyNotice")}
                   </Note>
                 )}
-                <Facts
-                  rows={[
-                    { label: t("modDetail.host"), value: primary.host },
-                    { label: t("modDetail.mirrors"), value: mirrorNames },
-                    {
-                      label: t("modDetail.installsTo"),
-                      value: `${modType.installSubpath.replace(/\//g, "\\")}\\`,
-                      mono: true,
-                    },
-                  ]}
-                />
+                <p className="text-[11.5px] leading-relaxed text-faint">
+                  {t("modDetail.fromHost", { host: primary.host })}
+                  {mirrorNames.includes(",") ? ` (${mirrorNames})` : ""}
+                  {" · "}
+                  <span className="font-mono">
+                    {`${modType.installSubpath.replace(/\//g, "\\")}\\`}
+                  </span>
+                </p>
               </>
             ) : (
               <p className="text-[12.5px] text-muted-foreground">
@@ -491,25 +490,6 @@ export default function ModDetail({
               not its contents, and the download options are copies of one file rather than
               parts of it. Inventing a parts list out of them would be worse than the gap. */}
 
-          {/* What happens once the install finishes. FrostMod hot-reloads the game, but
-              it's an MX Bikes plugin — promising a reload for a title that has none is
-              worse than saying nothing, so that case gets the honest instruction. */}
-          <Note tone="success">
-            <span className="flex items-start gap-2.5">
-              <span className="mt-1.5 size-[7px] flex-none rounded-full bg-success" />
-              <span>
-                {t(game.caps.frostmod ? "modDetail.frostmodHint" : "modDetail.restartHint", {
-                  game: game.display,
-                  kind:
-                    modType.id === "rider"
-                      ? t("modDetail.kindRider")
-                      : modType.id === "bikes"
-                        ? t("modDetail.kindBike")
-                        : t("modDetail.kindTrack"),
-                })}
-              </span>
-            </span>
-          </Note>
         </div>
       </div>
 

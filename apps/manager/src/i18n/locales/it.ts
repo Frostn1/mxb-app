@@ -534,6 +534,8 @@ export const it: Translation = {
   "modDetail.copied": "Copiato",
   "modDetail.copy": "Copia",
   "modDetail.addToLibrary": "Aggiungi alla libreria",
+  "modDetail.fromHost": "Da {{host}}",
+  "modDetail.categoryLabel": "Categoria",
   "modDetail.host": "Host",
   "modDetail.installsTo": "Installa in",
   "modDetail.noDownloadLink": "Nessun link di download trovato in questa pagina — aprila su {{site}}.",

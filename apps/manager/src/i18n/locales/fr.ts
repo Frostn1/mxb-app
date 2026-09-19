@@ -539,6 +539,8 @@ export const fr: Translation = {
   "modDetail.copied": "Copié",
   "modDetail.copy": "Copier",
   "modDetail.addToLibrary": "Ajouter à la bibliothèque",
+  "modDetail.fromHost": "Depuis {{host}}",
+  "modDetail.categoryLabel": "Catégorie",
   "modDetail.host": "Hébergeur",
   "modDetail.installsTo": "Installe dans",
   "modDetail.noDownloadLink": "Aucun lien de téléchargement trouvé sur cette page — ouvrez-la sur {{site}}.",

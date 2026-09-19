@@ -537,6 +537,8 @@ export const ptBR: Translation = {
   "modDetail.copied": "Copiado",
   "modDetail.copy": "Copiar",
   "modDetail.addToLibrary": "Adicionar à biblioteca",
+  "modDetail.fromHost": "De {{host}}",
+  "modDetail.categoryLabel": "Categoria",
   "modDetail.host": "Host",
   "modDetail.installsTo": "Instala em",
   "modDetail.noDownloadLink": "Nenhum link de download foi encontrado nesta página — abra-a em {{site}}.",

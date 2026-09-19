@@ -528,6 +528,8 @@ export const en = {
   "modDetail.copied": "Copied",
   "modDetail.copy": "Copy",
   "modDetail.addToLibrary": "Add to Library",
+  "modDetail.fromHost": "From {{host}}",
+  "modDetail.categoryLabel": "Category",
   "modDetail.host": "Host",
   "modDetail.installsTo": "Installs to",
   "modDetail.noDownloadLink": "No download link was found on this page — open it on {{site}}.",
