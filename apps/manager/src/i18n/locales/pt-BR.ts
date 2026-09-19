@@ -2372,6 +2372,8 @@ export const ptBR: Translation = {
   "ranked.retry": "Tentar de novo",
   "ranked.refreshFailed": "Não foi possível atualizar pelo mxb-ranked.com",
   "ranked.noGuid": "O MXB Ranked identifica os pilotos pelo GUID do MX Bikes. O seu é deduzido da conta Steam conectada — se você comprou o MX Bikes direto, digite o GUID do seu perfil no mxb-ranked.",
+  "ranked.manualOverride": "Mostrando um GUID digitado, não sua conta Steam.",
+  "ranked.useSteam": "Usar minha conta Steam",
   "ranked.enterGuid": "Digitar GUID",
   "ranked.guidTitle": "GUID do MX Bikes",
   "ranked.guidHelp": "Qual perfil mostrar. Cole um GUID ou um link de perfil do mxb-ranked; deixe vazio para voltar à sua conta Steam.",

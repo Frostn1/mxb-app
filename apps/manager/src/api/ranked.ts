@@ -66,6 +66,9 @@ export interface RankedIdentity {
   guid: string;
   /** `"steam"` derived from the signed-in Steam account, `"manual"` typed by the player. */
   source: "steam" | "manual" | "";
+  /** What the Steam account would give, when a typed GUID is winning. Empty when there is
+   *  no sign-in to fall back to. */
+  steamGuid: string;
 }
 
 export function rankedIdentity(): Promise<RankedIdentity> {

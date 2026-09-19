@@ -85,7 +85,7 @@ const Ranked = () => {
         // Only when there is nothing to show: coming back to the tab reuses what was fetched.
         if (id.guid && !cached) load(id.guid);
       })
-      .catch(() => setIdentity({ guid: "", source: "" }));
+      .catch(() => setIdentity({ guid: "", source: "", steamGuid: "" }));
   }, [load]);
 
   const saveGuid = useCallback(
@@ -145,6 +145,18 @@ const Ranked = () => {
       />
 
       <div className="flex min-h-0 flex-1 flex-col px-7 pb-6">
+        {/* A GUID typed once shadows the Steam account for ever afterwards, silently — which
+            reads as Ranked ignoring the sign-in. Say so, and offer the way back. */}
+        {identity?.source === "manual" &&
+          identity.steamGuid &&
+          identity.steamGuid !== identity.guid && (
+            <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-xl border border-input bg-card px-3.5 py-2.5 text-[12.5px]">
+              <span className="text-muted-foreground">{t("ranked.manualOverride")}</span>
+              <Button variant="outline" size="sm" onClick={() => void saveGuid("")}>
+                {t("ranked.useSteam")}
+              </Button>
+            </div>
+          )}
         {identity && !identity.guid ? (
           <Centered>
             <Trophy className="size-6 text-faint" />

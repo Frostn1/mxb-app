@@ -4124,6 +4124,10 @@ struct RankedIdentity {
     /// player typed it. The tab says which, because a wrong-but-plausible GUID would
     /// otherwise show somebody else's season with no clue why.
     source: String,
+    /// What the Steam account WOULD give, when a typed one is winning. Reported so the tab
+    /// can offer to go back to it: a GUID entered once shadows the sign-in for ever
+    /// afterwards, silently, which reads as Ranked ignoring the account.
+    steam_guid: String,
 }
 
 /// The GUID this machine's profile lives under.
@@ -4142,14 +4146,26 @@ struct RankedIdentity {
 #[tauri::command]
 async fn ranked_identity(app: tauri::AppHandle) -> RankedIdentity {
     let cfg = config::load_or_detect(&app).unwrap_or_default();
-    if let Some(guid) = ranked::normalise_guid(&cfg.ranked_guid) {
-        return RankedIdentity { guid, source: "manual".into() };
+    let typed = ranked::normalise_guid(&cfg.ranked_guid);
+    // Worked out even when a typed one wins, so the tab can say "that is not your Steam
+    // account" and offer the swap in one click.
+    let from_steam = match signed_in_guid(&app, &cfg).await {
+        Some(guid) => Some(guid),
+        None => ranked::local_guid(),
+    };
+    if let Some(guid) = typed {
+        return RankedIdentity {
+            guid,
+            source: "manual".into(),
+            steam_guid: from_steam.unwrap_or_default(),
+        };
     }
-    if let Some(guid) = signed_in_guid(&app, &cfg).await {
-        return RankedIdentity { guid, source: "steam".into() };
-    }
-    match ranked::local_guid() {
-        Some(guid) => RankedIdentity { guid, source: "steam".into() },
+    match from_steam {
+        Some(guid) => RankedIdentity {
+            guid: guid.clone(),
+            source: "steam".into(),
+            steam_guid: guid,
+        },
         None => RankedIdentity::default(),
     }
 }

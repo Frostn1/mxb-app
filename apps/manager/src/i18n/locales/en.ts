@@ -2349,6 +2349,8 @@ export const en = {
   "ranked.retry": "Try again",
   "ranked.refreshFailed": "Couldn't refresh from mxb-ranked.com",
   "ranked.noGuid": "MXB Ranked identifies riders by their MX Bikes GUID. Yours is worked out from the Steam account you're signed into — if you bought MX Bikes direct instead, enter the GUID from your mxb-ranked profile.",
+  "ranked.manualOverride": "Showing a GUID you entered, not your Steam account.",
+  "ranked.useSteam": "Use my Steam account",
   "ranked.enterGuid": "Enter GUID",
   "ranked.guidTitle": "MX Bikes GUID",
   "ranked.guidHelp": "Whose profile to show. Paste a GUID or a link to an mxb-ranked profile; leave it empty to go back to your own Steam account.",
