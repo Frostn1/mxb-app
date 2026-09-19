@@ -9,6 +9,8 @@
   a round thumb, and the lean comes off everything except the logo.
 - Headings, tabs, buttons and labels are set in Geist Mono, the brand's face. Buttons read as
   words rather than shouting in capitals. Frost's Studio keeps the face it had.
+- New wordmark: MXB App, by mxbsecure. The icon is the brand's mark, a black rounded square
+  with a white m, and it is the same one on the window, the installer and the favicon.
 
 ## 2026-09-18 — v0.17.4 — Stock tracks in the Library
 

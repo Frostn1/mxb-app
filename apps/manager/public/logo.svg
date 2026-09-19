@@ -1,11 +1,9 @@
 <svg width="40" height="40" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="MXB App">
-  <!-- A motocross number plate: a leaning rectangle with the letterform cut out
-       of it. Drawn as paths rather than text so it renders identically wherever
-       it is used (favicon, installer, site) without Barlow Condensed present. -->
-  <g transform="translate(12.74, 0) skewX(-16)">
-    <rect x="0" y="6" width="26" height="28" fill="#9ccfec"/>
-    <path
-      d="M4 28V12h4.5L13 20.5 17.5 12H22v16h-3.6v-8.8L14.4 26h-2.8L7.6 19.2V28H4Z"
-      fill="#0d1216"/>
-  </g>
+  <!-- The mxbsecure mark: a near-black rounded square carrying the brand's
+       lowercase m, set in Geist Mono ExtraBold. The glyph is taken from the
+       vendored woff2 and written out as a path, so it renders identically
+       wherever it is used with no font present. Regenerate with
+       scripts/make-logo.py. -->
+  <rect width="40" height="40" rx="9" fill="#0b0b0c"/>
+  <path d="M12.32 28V12.35H14.6L14.69 15.84L14.39 15.78Q14.66 14.04 15.53 13.02Q16.4 12 17.76 12Q19.14 12 19.9 13Q20.65 14.01 20.83 15.96H20.53Q20.8 14.13 21.73 13.06Q22.66 12 24.07 12Q25.96 12 26.82 13.3Q27.68 14.6 27.68 17.61V28H25.2V17.96Q25.2 15.87 24.75 15.03Q24.31 14.18 23.37 14.18Q22.75 14.18 22.27 14.58Q21.8 14.98 21.52 15.84Q21.24 16.69 21.24 18.02V28H18.76V17.96Q18.76 15.96 18.33 15.07Q17.9 14.18 16.93 14.18Q16.31 14.18 15.84 14.58Q15.37 14.98 15.08 15.84Q14.8 16.69 14.8 18.02V28Z" fill="#ffffff"/>
 </svg>

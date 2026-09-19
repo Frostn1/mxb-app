@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
 import {
-  Snowflake,
   FolderOpen,
   Gamepad2,
   Loader2,
@@ -124,9 +123,7 @@ export default function Setup({ onComplete, game, games, firstRun }: SetupProps)
       <div className="grid min-h-0 flex-1 place-items-center px-10">
         <div className="flex w-full max-w-[480px] flex-col items-center gap-7 pb-16">
           <div className="flex flex-col items-center gap-3.5">
-            <Plate className="size-14">
-              <Snowflake className="size-7" strokeWidth={2.5} />
-            </Plate>
+            <Plate className="size-14" />
             <div className="flex flex-col items-center gap-1.5">
               <h1 className="text-[26px] font-extrabold tracking-[-0.4px]">
                 {t("setup.title")}
@@ -166,9 +163,7 @@ export default function Setup({ onComplete, game, games, firstRun }: SetupProps)
     <div className="grid min-h-0 flex-1 place-items-center px-10">
       <div className="flex w-full max-w-[480px] flex-col items-center gap-7 pb-16">
         <div className="flex flex-col items-center gap-3.5">
-          <Plate className="size-14">
-            <Snowflake className="size-7" strokeWidth={2.5} />
-          </Plate>
+          <Plate className="size-14" />
           <div className="flex flex-col items-center gap-1.5">
             <h1 className="text-[26px] font-extrabold tracking-[-0.4px]">
               {picked.display}
