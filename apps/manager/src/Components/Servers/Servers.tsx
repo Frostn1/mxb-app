@@ -49,6 +49,7 @@ import {
   serversWithPaintSync,
   serverTrackPreviews,
   serverTrackCatalog,
+  guessServerTrack,
   resolveQuickInstall,
   resetServerBrowser,
   modTypesFor,
@@ -64,7 +65,7 @@ import { useGameRunning } from "@/lib/useGameRunning";
 import { isFull, useServerQueue } from "@/lib/useServerQueue";
 import { REGION_LABEL_KEY, REGION_ORDER, canonicalRegion, type RegionKey } from "@/lib/serverRegion";
 import JoinServerDialog from "../Shell/JoinServerDialog";
-import { guessPicture, useTrackGuesses } from "./trackGuesses";
+import { guessPicture, useTrackGuesses, warmTracks } from "./trackGuesses";
 import ServerDetail, { ServerDetailDialog, ServerDetailEmpty } from "./ServerDetail";
 import ServerCard from "./ServerCard";
 import ServerRow from "./ServerRow";
@@ -252,6 +253,22 @@ const Servers = () => {
       })
       .catch(() => {});
   }, [servers, installed]);
+
+  // Identify every track in the list without waiting to be asked. Opening a server to find
+  // out what it is running, and to see a picture of it, is work the list can do itself — and
+  // with the answers kept on disk between runs, a settled install asks for nothing at all.
+  useEffect(() => {
+    if (!servers?.length) return;
+    let live = true;
+    void warmTracks(
+      servers.map((s) => s.track),
+      guessServerTrack,
+      () => live,
+    );
+    return () => {
+      live = false;
+    };
+  }, [servers]);
 
   // The tracks the player lacks, from our server: what they are, their picture, the price.
   const [catalog, setCatalog] = useState<Record<string, CatalogTrack>>(() => ({ ...CATALOG }));

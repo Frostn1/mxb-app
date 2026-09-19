@@ -15,6 +15,8 @@
   in Settings, Accounts. A purchase that lands later is still one Refresh away in Purchases.
 
 ### Changed
+- The server list works out what every track is on its own, so a row has its name, picture
+  and link without you opening it first.
 - Setting up the app now asks you to sign in with Steam before it asks about folders, so
   sealed tracks and gear unlock on their own, anything you have bought is ready to install,
   and Ranked already knows who you are the first time you open it. It also stops asking
