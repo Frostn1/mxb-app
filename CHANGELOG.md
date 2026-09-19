@@ -1,39 +1,8 @@
 # Changelog
 
-## Unreleased — A session reads itself out
+## Unreleased — The Library's folders, one click away
 
 ### Added
-- **Your own bike, in 3D, on the feel step.** The bike the session was ridden on, drawn from its
-  own files, beside the question about how it felt — with the fork travel your lap actually used
-  on it. It is loaded before you get there, so it is already on screen when you arrive.
-- **Saying how the bike feels moves the part you mean.** Pick "the front is harsh" and the fork
-  strokes, by the distance your own lap used. The shock squats, "slow to turn in" turns the
-  bars, "nervous at speed" shakes them, and gearing spins the rear wheel — fast when it revs
-  out, slow when it bogs.
-- **Open a session and it tells you about itself.** Where it used to hand you a lap table and
-  leave you to pick a lap and then a tab, a session now opens on a debrief: what you rode, what
-  the lap was about, the sections that cost you the most with the lap drawn on the track and
-  the one thing to change in each, and then how the bike felt. One thing per screen, Next and
-  Back. Read on your best whole lap, because the mistakes on your best lap are the ones worth
-  fixing.
-- The lap table and the full five-tab review are both still there, one click further in, from
-  **All laps** and **Full review** on any section.
-- **Watch the corner back, on the track, on your own bike.** Every turn in the debrief now has
-  two ways to look at it: the line from above, or what you actually did — your bike riding the
-  real track, along the line you rode, with the terrain and scenery around it. It plays the
-  corner through the way you rode it — the bars, both ends of the suspension by how much travel
-  you used, how far it was leaned and pitched, the wheels turning at the speed you were doing —
-  with your
-  speed, gear, throttle and brake on the bike instead of in a paragraph, and how far ahead or
-  behind your best lap was at the same point on the track.
-- Your rider moves with it, where the game told the recorder what you were asking for with your
-  body. Where it didn't, the bike moves and the body stays still, and the screen says why.
-- The camera rides with you, close enough to watch, and leaves your zoom where you put it. Click
-  anywhere on the track to jump there — inside the corner it moves the playhead, outside it
-  takes you to the corner you pointed at. At the end it can stop, play round again, or run on
-  to the next corner, whichever you pick.
-- Every line on the map has a key now, so you can tell your line from the fast lap's, and the
-  map travels to the corner you're on instead of leaving you to find it.
 - **Both of the Library's folders, one click from the list.** Two buttons in the Library's bar
   open the mods folder and the game's install folder in your file manager, for the times it's
   quicker to move a file by hand than to go through the app. The mods one opens the tab you're
@@ -42,13 +11,6 @@
   the folder usually is. A tab the game hasn't made a folder for yet opens the tree above it.
 
 ### Changed
-- **The lap's own tabs say what they hold.** Each tab carries a count for the lap you're on —
-  what the lap was about, the corners worth your time, the notes on the track, the changes for
-  the bike — so a clean lap says so on the tab instead of after five clicks. A line under them
-  says what the tab you're on is for, and they run in the order you'd use them: the lap, the
-  corners, the track they're on, the bike, and last what the coach shows you while you ride.
-- The debrief fits the window. The step you are on scrolls on its own if it has to, so Next and
-  Back stay where you left them instead of sitting at the bottom of a long page.
 - **Ranked follows the Steam account you're signed in as.** The tab shows the season of the
   Steam account this app is signed in with, rather than whichever account the Steam client on
   the machine was last opened with — so a shared PC, or a second Steam account, shows your
@@ -72,6 +34,61 @@
   starts when your browser reaches Steam, not when the app asked. A sign-in that genuinely can't
   go on is refused before Steam rather than after, so you find out having spent nothing, and the
   app keeps watching for the whole window instead of giving up while the sign-in is still good.
+
+## 2026-09-18 — MXB Coach v0.1.18-beta.18 — A session reads itself out, and you can watch it back
+
+### Added
+- **Your own bike, in 3D, on the feel step.** The bike the session was ridden on, drawn from its
+  own files, beside the question about how it felt — with the fork travel your lap actually used
+  on it. It is loaded before you get there, so it is already on screen when you arrive.
+- **Saying how the bike feels moves the part you mean.** Pick "the front is harsh" and the fork
+  strokes, by the distance your own lap used. The shock squats, "slow to turn in" turns the
+  bars, "nervous at speed" shakes them, and gearing spins the rear wheel — fast when it revs
+  out, slow when it bogs.
+- **Open a session and it tells you about itself.** Where it used to hand you a lap table and
+  leave you to pick a lap and then a tab, a session now opens on a debrief: what you rode, what
+  the lap was about, the sections that cost you the most with the lap drawn on the track and
+  the one thing to change in each, and then how the bike felt. One thing per screen, Next and
+  Back. Read on your best whole lap, because the mistakes on your best lap are the ones worth
+  fixing.
+- The lap table and the full five-tab review are both still there, one click further in, from
+  **All laps** and **Full review** on any section.
+- **Watch the corner back, on the track, on your own bike.** Every turn in the debrief now has
+  two ways to look at it: the line from above, or what you actually did — your bike riding the
+  real track, along the line you rode, with the terrain and scenery around it. It plays the
+  corner through the way you rode it — the bars, both ends of the suspension by how much travel
+  you used, how far it was leaned and pitched, the wheels turning at the speed you were doing —
+  with your speed, gear, throttle and brake on the bike instead of in a paragraph, and how far
+  ahead or behind your best lap was at the same point on the track.
+- Your rider moves with it, where the game told the recorder what you were asking for with your
+  body. Where it didn't, the bike moves and the body stays still, and the screen says why.
+- The camera rides with you, close enough to watch, and leaves your zoom where you put it. Click
+  anywhere on the track to jump there — inside the corner it moves the playhead, outside it
+  takes you to the corner you pointed at. At the end it can stop, play round again, or run on
+  to the next corner, whichever you pick.
+- Every line on the map has a key now, so you can tell your line from the fast lap's, and the
+  map travels to the corner you're on instead of leaving you to find it.
+- The lap's suspension is shown on a bike. How much of each end's travel the lap used fills down
+  the fork leg and along the shock, with a mark at the deepest it went, instead of two rows in a
+  list. It sits on the Setup tab, above what the coach would change.
+
+### Changed
+- MXB Coach has a home of its own: every version from now on is published at
+  [Frostn1/mxb-coach](https://github.com/Frostn1/mxb-coach), with the download and what changed
+  in it on the same page, instead of being mixed in with MXB App's. Nothing to do — the coach
+  updates itself to the new place.
+- **The lap's own tabs say what they hold.** Each tab carries a count for the lap you're on —
+  what the lap was about, the corners worth your time, the notes on the track, the changes for
+  the bike — so a clean lap says so on the tab instead of after five clicks. A line under them
+  says what the tab you're on is for, and they run in the order you'd use them: the lap, the
+  corners, the track they're on, the bike, and last what the coach shows you while you ride.
+- The debrief fits the window. The step you are on scrolls on its own if it has to, so Next and
+  Back stay where you left them instead of sitting at the bottom of a long page.
+
+### Fixed
+- The Steam sign-in gives you the time to sign in. The window was counted from the moment Coach
+  asked for it rather than from when your browser reached Steam, so a password typed carefully or
+  a Steam Guard code waited on could come back refused after Steam had already confirmed you.
 
 ## 2026-09-18 — v0.17.3 — The Servers tab is ready when you open it
 
@@ -100,7 +117,7 @@
 - A server running a track you don't have says **Not installed** on the track's own line,
   rather than putting a warning sign over the picture.
 
-## 2026-09-17 — v0.1.17-beta.17 — Coach says what it sees, and calls a corner by the same name twice
+## 2026-09-17 — MXB Coach v0.1.17-beta.17 — Coach says what it sees, and calls a corner by the same name twice
 
 ### Added
 - **Coach tells you when you're over-jumping or casing a landing**, on its own terms rather
@@ -305,19 +322,6 @@ the people who did reach it.
   and which title is active, plus which answer you tapped. The one thing that travels as typed
   is the optional note, which the card says so plainly; it is capped, stripped of addresses,
   links and folder paths on arrival, and deleted months before the answer it came with.
-
-## Unreleased — MXB Coach
-
-### Added
-- The lap's suspension is shown on a bike. How much of each end's travel the lap used fills down
-  the fork leg and along the shock, with a mark at the deepest it went, instead of two rows in a
-  list. It sits on the Setup tab, above what the coach would change.
-
-### Changed
-- MXB Coach has a home of its own: every version from now on is published at
-  [Frostn1/mxb-coach](https://github.com/Frostn1/mxb-coach), with the download and what changed
-  in it on the same page, instead of being mixed in with MXB App's. Nothing to do — the coach
-  updates itself to the new place.
 
 ## 2026-09-17 — MXB Coach v0.1.16-beta.16
 
