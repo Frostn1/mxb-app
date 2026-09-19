@@ -55,9 +55,10 @@ const ServerRow = memo(function ServerRow({
 }: Props) {
   const t = useT();
   // The player's own copy wins; a track they lack shows what it looks like, from the store.
-  // Cache and the library first, the store only when neither had one — a track the player
-  // has but whose file carries no preview still gets a picture.
-  const picture = art || product?.image || null;
+  // The player's own copy wins; a track they do NOT have shows what it looks like, from
+  // the store. Never the other way round: a store picture for an installed track is a
+  // guess at a name match, and a stock track called "forest" drew somebody else's photo.
+  const picture = art || (missing ? product?.image : null);
 
   return (
     <div

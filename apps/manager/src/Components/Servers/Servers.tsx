@@ -212,7 +212,7 @@ const Servers = () => {
 
   const [view, setView] = useState<ViewMode>(() => {
     try {
-      return localStorage.getItem(VIEW_KEY) === "list" ? "list" : "tiles";
+      return localStorage.getItem(VIEW_KEY) === "tiles" ? "tiles" : "list";
     } catch {
       return "tiles";
     }
@@ -261,11 +261,11 @@ const Servers = () => {
       (tr) =>
         tr &&
         ASKED.has(tr) &&
-        // `!art[tr]`, not `!(tr in art)`: a track the player HAS can come back with an empty
-        // string when its .pkz carries no picture, and that used to end the search — the row
-        // and the pane both drew a grey mountain next to "You have this track". Cache, then
-        // the library, then the store; an empty answer from the library is not an answer.
-        !art[tr] &&
+        // `!(tr in art)`, not `!art[tr]`: an empty string means "installed, carries no
+        // picture", and asking the store about a track the player already has buys a wrong
+        // answer — the name is all it can match on, and a stock track called "forest" came
+        // back as somebody else's product. A grey tile is better than the wrong track.
+        !(tr in art) &&
         !(tr in CATALOG) &&
         now - (CATALOG_ASKED.get(tr) ?? 0) > REASK_MS,
     );
@@ -415,6 +415,10 @@ const Servers = () => {
 
     const flip = dir === "desc" ? -1 : 1;
     return [...list].sort((a, b) => {
+      // A star is a standing instruction about where a server belongs, so it outranks the
+      // column: starring one used to change nothing at all about the order.
+      const star = Number(favs.has(b.address)) - Number(favs.has(a.address));
+      if (star !== 0) return star;
       // Name breaks ties, so rows that compare equal can't reshuffle between renders.
       const byName = a.name.localeCompare(b.name);
       switch (sort) {
@@ -753,14 +757,14 @@ const Servers = () => {
           onChange={setView}
           options={[
             {
+              value: "list",
+              label: <List className="size-3.5" aria-label={t("serverBrowser.viewList")} />,
+            },
+            {
               value: "tiles",
               label: (
                 <LayoutGrid className="size-3.5" aria-label={t("serverBrowser.viewTiles")} />
               ),
-            },
-            {
-              value: "list",
-              label: <List className="size-3.5" aria-label={t("serverBrowser.viewList")} />,
             },
           ]}
         />
@@ -900,7 +904,7 @@ const Servers = () => {
           // The list is the master, the pane is the detail. Both are on screen at once, so
           // reading the second server no longer means closing the first.
           <>
-            <div className="flex w-[400px] shrink-0 flex-col overflow-hidden rounded-xl border border-input">
+            <div className="flex w-[34%] min-w-[340px] max-w-[560px] shrink-0 flex-col overflow-hidden rounded-xl border border-input">
               {/* The table's sortable headers, kept as a strip. Seven columns don't fit
                   400px; the sorting they carried is still what orders the list. */}
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-input bg-card px-3 py-2">

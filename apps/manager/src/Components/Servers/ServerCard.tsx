@@ -81,9 +81,9 @@ const ServerCard = memo(function ServerCard({
   const cat = s.categories[0];
   const stop = (e: React.MouseEvent) => e.stopPropagation();
   // The player's own copy wins; a missing track shows what it looks like, from our server.
-  // Cache and the library first, the store after: an installed track whose .pkz carries no
-  // preview still shows what it looks like rather than a grey mountain.
-  const picture = art || product?.image || null;
+  // The player's own copy wins; a track they do NOT have shows what it looks like, from
+  // the store. Never the other way round — that is a guess at a name match.
+  const picture = art || (missing ? product?.image : null);
   const free = missing && product?.source === "mods" && !!product.slug;
   const sold = missing && product?.source === "shop" ? product : null;
   const price = sold?.price;

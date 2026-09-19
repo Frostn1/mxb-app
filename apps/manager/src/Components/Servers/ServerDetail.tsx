@@ -58,7 +58,17 @@ import { isFull } from "@/lib/useServerQueue";
 /** One label/value line. Values that came back empty are dropped by {@link Facts}. */
 type Fact = { label: string; value: string };
 
-const Facts = ({ title, facts }: { title: string; facts: Fact[] }) => {
+const Facts = ({
+  title,
+  facts,
+  columns = 1,
+}: {
+  title: string;
+  facts: Fact[];
+  /** Two pairs across. Halves the height of a list nobody reads top to bottom — the rules
+   *  are scanned for the one line that would stop you joining, not read in order. */
+  columns?: 1 | 2;
+}) => {
   const shown = facts.filter((f) => f.value);
   if (shown.length === 0) return null;
   return (
@@ -66,7 +76,14 @@ const Facts = ({ title, facts }: { title: string; facts: Fact[] }) => {
       <h3 className="font-cond text-[11px] font-bold uppercase tracking-[0.14em] text-faint">
         {title}
       </h3>
-      <dl className="grid grid-cols-[minmax(0,8rem)_1fr] gap-x-4 gap-y-1.5 text-[13px]">
+      <dl
+        className={cn(
+          "grid gap-x-4 gap-y-1.5 text-[13px]",
+          columns === 2
+            ? "grid-cols-[minmax(0,7rem)_1fr] xl:grid-cols-[minmax(0,7rem)_1fr_minmax(0,7rem)_1fr]"
+            : "grid-cols-[minmax(0,8rem)_1fr]",
+        )}
+      >
         {shown.map((f) => (
           <div key={f.label} className="contents">
             <dt className="truncate text-muted-foreground">{f.label}</dt>
@@ -91,19 +108,32 @@ const Riders = ({
   maxPlayers,
   riders,
   loading,
+  paintSync,
+  className,
 }: {
   players: number;
   maxPlayers: number;
   riders: ServerRiders | null;
   loading: boolean;
+  /** Riders here running paint sync. A chip beside the count when there are any, and
+   *  nothing at all when there are none — a dash for it on every server is a column of
+   *  nothing, which is what it was in the stat band. */
+  paintSync: number;
+  className?: string;
 }) => {
   const t = useT();
   const names = riders?.riders ?? [];
   return (
-    <section className="space-y-2">
+    <section className={cn("space-y-2", className)}>
       <h3 className="flex items-center gap-2 font-cond text-[11px] font-bold uppercase tracking-[0.14em] text-faint">
         {t("serverBrowser.ridersTitle")}
         {loading && <Loader2 className="size-3 animate-spin" />}
+        {paintSync > 0 && (
+          <span className="flex items-center gap-1 rounded-full bg-success/[0.14] px-2 py-0.5 text-[10px] font-semibold normal-case tracking-normal text-success">
+            <Palette className="size-3" />
+            {paintSync}
+          </span>
+        )}
       </h3>
       <p className="text-[13px]">
         {t("serverBrowser.ridersCount", { players, maxPlayers })}
@@ -140,7 +170,21 @@ const Riders = ({
  * offers where to get it, and says plainly when the name only resembles a product rather
  * than matching it. The artwork it used to carry as a thumbnail is the hero above instead.
  */
-const Track = ({ guess, loading }: { guess: TrackGuess | null; loading: boolean }) => {
+const Track = ({
+  guess,
+  loading,
+  track,
+  layout,
+  className,
+}: {
+  guess: TrackGuess | null;
+  loading: boolean;
+  /** What the server calls it, and which layout — the two rows the old "Running now" list
+   *  carried, brought up beside the have-it-or-not line they belong with. */
+  track: string;
+  layout: string;
+  className?: string;
+}) => {
   const t = useT();
   if (loading) {
     return (
@@ -150,15 +194,17 @@ const Track = ({ guess, loading }: { guess: TrackGuess | null; loading: boolean 
       </p>
     );
   }
-  if (!guess || (!guess.installed && !guess.source)) return null;
-
   return (
-    <section className="space-y-2">
+    <section className={cn("space-y-2", className)}>
       <h3 className="font-cond text-[11px] font-bold uppercase tracking-[0.14em] text-faint">
         {t("serverBrowser.trackTitle")}
       </h3>
       <div className="min-w-0 space-y-1.5">
-        {guess.installed ? (
+        <p className="min-w-0 text-[15px] font-semibold tracking-[-0.01em]">
+          <span className="break-words">{track || "—"}</span>
+          {layout ? <span className="text-muted-foreground"> · {layout}</span> : null}
+        </p>
+        {guess?.installed ? (
           <p className="flex items-center gap-1.5 text-[13px]">
             <CheckCircle2 className="size-3.5 shrink-0 text-faint" />
             <span className="truncate">
@@ -167,10 +213,12 @@ const Track = ({ guess, loading }: { guess: TrackGuess | null; loading: boolean 
                 : t("serverBrowser.trackInstalled", { name: guess.installed })}
             </span>
           </p>
-        ) : (
+        ) : guess?.productName ? (
           <>
             <p className="text-[13px]">
               <MapPin className="mr-1.5 inline size-3.5 text-faint" />
+              {/* Only with a name to put in it. "We think this is" on its own, which is what
+                  an empty productName rendered, is the app talking to itself. */}
               {guess.exact
                 ? guess.productName
                 : t("serverBrowser.trackMaybe", { name: guess.productName })}
@@ -190,7 +238,7 @@ const Track = ({ guess, loading }: { guess: TrackGuess | null; loading: boolean 
               </Button>
             )}
           </>
-        )}
+        ) : null}
       </div>
     </section>
   );
@@ -336,7 +384,7 @@ const ServerDetail = ({
 
   // The player's own copy of the track wins, then what our server knows it looks like, then
   // whatever the identification turned up — one picture, as wide as the pane.
-  const hero = art || product?.image || guess?.preview || guess?.productImage;
+  const hero = art || (missing ? product?.image : null) || guess?.preview || guess?.productImage;
 
   // The same four-way decision the tile makes, so a server offers the same thing whichever
   // way it is being looked at.
@@ -399,9 +447,11 @@ const ServerDetail = ({
         </div>
       </div>
 
-      {/* The figures a player reads before anything else, off the hero and in one grid, so
-          two servers can be compared by looking at the same spot twice. */}
-      <div className="grid shrink-0 grid-cols-3 gap-x-4 gap-y-3 border-b border-input px-4 py-3">
+      {/* The four figures a join is decided on, in one band so two servers can be compared by
+          looking at the same spot twice. Session and conditions used to sit here AND in a
+          "Running now" list below; paint sync is a chip in the riders line when there is any,
+          because a dash for it on every server is a column of nothing. */}
+      <div className="grid shrink-0 grid-cols-4 gap-x-4 border-b border-input px-4 py-3">
         <Stat
           label={t("serverBrowser.players")}
           value={`${s.players}/${s.maxPlayers}`}
@@ -412,68 +462,54 @@ const ServerDetail = ({
           value={s.pingMs === null ? "—" : `${s.pingMs} ms`}
           icon={<Signal className="size-3.5 text-faint" />}
         />
-        <Stat label={t("serverBrowser.location")} value={s.location || "—"} />
         <Stat label={t("serverBrowser.session")} value={s.session || "—"} />
         <Stat label={t("serverBrowser.conditions")} value={s.conditions || "—"} />
-        <Stat
-          label={t("settings.paintSync")}
-          value={paintSync > 0 ? String(paintSync) : "—"}
-          tone={paintSync > 0 ? "text-success" : undefined}
-          icon={paintSync > 0 ? <Palette className="size-3.5" /> : undefined}
-        />
       </div>
 
-      <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-4 py-4">
-        <Riders
-          players={s.players}
-          maxPlayers={s.maxPlayers}
-          riders={riders}
-          loading={ridersLoading}
-        />
+      <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-4">
+        {/* What is being ridden and who is on it, on one line pushed apart: two short answers
+            that used to be two stacked sections with a heading each. */}
+        <div className="flex items-start justify-between gap-8">
+          <Track
+            guess={guess}
+            loading={guessing}
+            track={s.track}
+            layout={s.trackLayout}
+            className="min-w-0 flex-1"
+          />
+          <Riders
+            players={s.players}
+            maxPlayers={s.maxPlayers}
+            riders={riders}
+            loading={ridersLoading}
+            paintSync={paintSync}
+            className="max-w-[45%] flex-none text-right"
+          />
+        </div>
 
-        <Track guess={guess} loading={guessing} />
-
+        {/* Rules and conditions in one two-column list. They were three stacked sections of
+            single pairs, which is the same content at three times the height — and the last
+            of them repeated the track, the session and the password that are already above. */}
         <Facts
-          title={t("serverBrowser.running")}
-          facts={[
-            { label: t("servers.track"), value: s.track },
-            { label: t("serverBrowser.layout"), value: s.trackLayout },
-            { label: t("serverBrowser.session"), value: s.session },
-            { label: t("serverBrowser.raceLength"), value: s.raceLength },
-            { label: t("serverBrowser.conditions"), value: s.conditions },
-            {
-              label: t("serverBrowser.changingWeather"),
-              value: flag(s.realisticWeather),
-            },
-          ]}
-        />
-
-        <Facts
+          columns={2}
           title={t("serverBrowser.rules")}
           facts={[
-            { label: t("serverBrowser.categories"), value: list(s.categories) },
             { label: t("serverBrowser.bikes"), value: list(s.bikes) },
+            { label: t("serverBrowser.categories"), value: list(s.categories) },
             { label: t("serverBrowser.rating"), value: s.rating },
+            { label: t("serverBrowser.raceLength"), value: s.raceLength },
+            { label: t("serverBrowser.changingWeather"), value: flag(s.realisticWeather) },
             { label: t("serverBrowser.forceCockpit"), value: flag(s.forceCockpit) },
             { label: t("serverBrowser.noAids"), value: flag(s.noAids) },
-            {
-              label: t("serverBrowser.limitedTyres"),
-              value: flag(s.limitedTyreSets),
-            },
-            {
-              label: t("serverBrowser.passworded"),
-              value: flag(s.passworded),
-            },
+            { label: t("serverBrowser.limitedTyres"), value: flag(s.limitedTyreSets) },
           ]}
         />
 
-        <Facts
-          title={t("serverBrowser.connection")}
-          facts={[
-            { label: t("serverBrowser.address"), value: s.address },
-            { label: t("serverBrowser.lanAddress"), value: s.lanAddress },
-          ]}
-        />
+        {/* Not a section of its own: an address is for pasting once, not for reading. */}
+        <p className="select-text pt-1 font-mono text-[11.5px] text-faint">
+          {s.address}
+          {s.lanAddress ? ` · ${s.lanAddress}` : ""}
+        </p>
       </div>
 
       <div className="shrink-0 space-y-2 border-t border-input px-4 py-3">
