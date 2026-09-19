@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- Uninstall a mod straight from its page. Under Reinstall, on anything already in your
+  Library, with the file going to the Recycle Bin like it does in the Library itself.
+
 ## 2026-09-19 — v0.17.6 — A sign-in link you can copy
 
 ### Fixed

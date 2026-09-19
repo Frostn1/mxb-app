@@ -250,6 +250,7 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
               modType={modType}
               categoryId={selectedCategoryId ?? modType.categoryId}
               installed={installed}
+              onChanged={onInstalled}
               onBack={closeMod}
             />
           ) : view === "browse" ? (
