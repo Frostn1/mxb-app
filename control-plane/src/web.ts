@@ -12,7 +12,7 @@
  * — who would then be signed in as them.
  */
 
-import { allowedOrigin, assetOrigins, cors, lockAllowance, refuseCrossSiteWrite } from "./assets";
+import { allowedOrigin, assetOrigins, cors, CREATOR_SIGNUP_NEEDED, lockAllowance, refuseCrossSiteWrite } from "./assets";
 import { tokenMatches } from "./auth";
 import { BANNED, banFor, isBanned } from "./bans";
 import { creatorSignupOpen, makeCreator, SIGNUP_CLOSED } from "./creators";
@@ -258,7 +258,7 @@ const LOCKWEB_FILES: Record<string, string> = {
 };
 
 /**
- * The in-browser locker, handed to any signed-in Steam account.
+ * The in-browser locker, handed to a creator.
  *
  * It cannot live on the site. mxbsecure.com is static assets, so everything it serves is
  * public — committing the locker there would publish the packer to anyone who guessed the
@@ -266,12 +266,12 @@ const LOCKWEB_FILES: Record<string, string> = {
  * here because this is the host the `__Host-` session cookie is bound to: mxbsecure.com never
  * receives that cookie and so could not tell one visitor from another even if it wanted to.
  *
- * The gate is the sign-in, not creator standing. The same WebAssembly does both locks, and the
- * GUID lock is for every rider sending a track to a friend — asking those people to declare
- * themselves creators of something they aren't would be a lie told to a form. Creator standing
- * is a click away in any case (`POST /v1/web/creator`), so gating the file on it would stop
- * nobody and only make the refusal harder to read. What the sign-in still buys is a Steam
- * account behind every fetch of it, which is what keeps this from being a public download.
+ * The gate is creator standing, for both locks. It was the sign-in alone while signing up was
+ * a click (`POST /v1/web/creator`): gating a file on a step anybody could take in a second
+ * would have stopped nobody. Creators are added by hand now, so the step is real, and the same
+ * WebAssembly that GUID-locks a file is the packer mxbsecure locks with — the one thing on
+ * this host worth taking. Handing that to every Steam account to save a rider the ask is the
+ * wrong trade, and the site says who it is for rather than letting the fetch fail.
  */
 async function lockweb(request: Request, url: URL, env: Env, origin: string | null): Promise<Response> {
   const name = url.pathname.slice("/v1/web/lockweb/".length);
@@ -286,6 +286,14 @@ async function lockweb(request: Request, url: URL, env: Env, origin: string | nu
   if (await isBanned(env, { steamId: session.steamId })) {
     return cors(json(403, { error: BANNED }), origin);
   }
+  // Same retry as `/v1/web/me`: a creator whose `steam_id` has been lost would otherwise be
+  // refused their own locker and told to sign up for something they already have.
+  const find = () =>
+    env.DB.prepare("SELECT creator_at FROM accounts WHERE steam_id = ?")
+      .bind(session.steamId)
+      .first<{ creator_at: number | null }>();
+  const account = (await find()) ?? ((await repairBySteamId(env, session.steamId)) ? await find() : null);
+  if (!account?.creator_at) return cors(json(403, { error: CREATOR_SIGNUP_NEEDED }), origin);
 
   const object = await env.LOCKWEB.get(name);
   // Nothing uploaded yet is a configuration problem, not a missing page: say so as 503 so it

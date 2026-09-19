@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { adminAssets } from "../src/assets";
+import { adminAssets, CREATOR_SIGNUP_NEEDED } from "../src/assets";
 import { landingSite, safeNext, webRoutes } from "../src/web";
 import { adminSteamIds } from "../src/webadmin";
 import { SIGNUP_CLOSED } from "../src/creators";
@@ -532,9 +532,9 @@ describe("creators on /admin/assets", () => {
     expect(theirs.locks).toEqual({ usedToday: 0, perDay: null, remaining: null });
   });
 
-  it("hands the locker to anyone signed in, and to nobody who isn't", async () => {
+  it("hands the locker to a creator, and to nobody else", async () => {
     const env = await deployment();
-    // Not signed in: the GUID lock is open to every rider, not to every request.
+    // Not signed in.
     expect((await web(env, req("GET", "/v1/web/lockweb/mxb_lockweb.js"))).status).toBe(401);
     // Signed in, nothing uploaded: a configuration problem, not a missing page.
     const frost = await cookieFor(CREATOR);
@@ -551,10 +551,12 @@ describe("creators on /admin/assets", () => {
     expect(got.headers.get("cache-control")).toBe("private, max-age=3600");
     expect(await got.text()).toBe("export default 1");
 
-    // Somebody who has never sold anything gets it too — that is the GUID lock working — and
-    // gets no closer to the assets for having it.
+    // Signed in but not a creator: both locks are creators-only, and the refusal says which
+    // step is missing rather than reading as a locker that isn't there.
     const rider = await cookieFor("76561198000000077");
-    expect((await web(env, req("GET", "/v1/web/lockweb/mxb_lockweb.js", { cookie: rider }))).status).toBe(200);
+    const refused = await web(env, req("GET", "/v1/web/lockweb/mxb_lockweb.js", { cookie: rider }));
+    expect(refused.status).toBe(403);
+    expect(await refused.json()).toEqual({ error: CREATOR_SIGNUP_NEEDED });
     expect((await assets(env, req("GET", "/admin/assets", { cookie: rider }))).status).toBe(403);
     // An expired session is not a session.
     const stale = await cookieFor(CREATOR, Date.now() - 1);
