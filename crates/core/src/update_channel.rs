@@ -154,19 +154,19 @@ mod tests {
         assert_eq!(newest_manifest(&list, "coach-v", false), None, "no stable coach yet");
     }
 
-    /// A pre-move coach install (0.1.3 to 0.1.16) scans the manager's releases for `coach-v`,
+    /// A pre-move coach install (0.1.3 to 0.1.17) scans the manager's releases for `coach-v`,
     /// where the pointer releases live. It must pick the newest of those and nothing else —
     /// a manager release would be the wrong app entirely.
     #[test]
     fn a_pre_move_coach_follows_the_pointer_releases() {
         let list = [
             release("v0.17.3", false, true),
-            release("coach-v0.1.16-beta.16", false, true),
             release("coach-v0.1.17-beta.17", false, true),
+            release("coach-v0.1.18-beta.18", false, true),
         ];
         assert_eq!(
             newest_manifest(&list, "coach-v", true),
-            Some("https://x/coach-v0.1.17-beta.17/latest.json")
+            Some("https://x/coach-v0.1.18-beta.18/latest.json")
         );
     }
 
@@ -174,11 +174,11 @@ mod tests {
     /// manager reads its own.
     #[test]
     fn the_coach_reads_plain_tags_in_its_own_repo() {
-        let list = [release("v0.1.17-beta.17", false, true), release("v0.1.17", false, true)];
-        assert_eq!(newest_manifest(&list, "v", false), Some("https://x/v0.1.17/latest.json"));
+        let list = [release("v0.1.18-beta.18", false, true), release("v0.1.18", false, true)];
+        assert_eq!(newest_manifest(&list, "v", false), Some("https://x/v0.1.18/latest.json"));
         assert_eq!(
             newest_manifest(&list, "v", true),
-            Some("https://x/v0.1.17/latest.json"),
+            Some("https://x/v0.1.18/latest.json"),
             "a release outranks its own beta"
         );
     }

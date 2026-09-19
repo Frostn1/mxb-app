@@ -10,7 +10,7 @@ name: Release MXB Coach
 # its version numbers stop appearing in the manager's list, and with its own signing key a
 # leaked coach release token still cannot sign a manager update.
 #
-# Tags are `coach-v0.1.17` here and land as `v0.1.17` over there, so neither repo's tag
+# Tags are `coach-v0.1.18` here and land as `v0.1.18` over there, so neither repo's tag
 # namespace collides. `release.yml` triggers on `v*`, which does not match `coach-v*`.
 #
 # Installs from before the move look for `coach-v` releases in *this* repo, so the `bridge`
@@ -108,7 +108,7 @@ jobs:
           test -f crates/core/src/sidecar.rs || { echo "::error::sidecar.rs missing after sync.sh"; exit 1; }
           test -f crates/core/src/mxbsecure.rs || { echo "::error::mxbsecure.rs missing after sync.sh"; exit 1; }
 
-      # `coach-v0.1.17-beta.17` → tag `v0.1.17-beta.17` over there, version `0.1.17-beta.17`.
+      # `coach-v0.1.18-beta.18` → tag `v0.1.18-beta.18` over there, version `0.1.18-beta.18`.
       # A workflow_dispatch run has a branch for a ref, so it builds a throwaway version.
       - name: Tag without the coach- prefix
         id: tag
@@ -181,7 +181,7 @@ jobs:
           prerelease: ${{ github.ref_type != 'tag' || contains(github.ref_name, '-') }}
           args: ${{ matrix.args }}
 
-  # Installs from 0.1.3 to 0.1.16 shipped an updater that looks for `coach-v` releases in
+  # Installs from 0.1.3 to 0.1.17 shipped an updater that looks for `coach-v` releases in
   # *this* repo, and nothing can change that in a binary already on someone's machine. So
   # every release also gets a release here under its original `coach-v` tag, carrying only
   # the signed `latest.json` from the one over there — the manifest's download URLs point at

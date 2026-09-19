@@ -2,10 +2,10 @@
 #
 # Point pre-move MXB Coach installs at a release that now lives in another repository.
 #
-#   scripts/coach-update-bridge.sh coach-v0.1.17
+#   scripts/coach-update-bridge.sh coach-v0.1.18
 #
-# MXB Coach releases from Frostn1/mxb-coach since 0.1.17, but every install from 0.1.3 to
-# 0.1.16 shipped an updater that lists *this* repo's releases and picks the newest `coach-v`
+# MXB Coach releases from Frostn1/mxb-coach since 0.1.18, but every install from 0.1.3 to
+# 0.1.17 shipped an updater that lists *this* repo's releases and picks the newest `coach-v`
 # tag carrying a `latest.json`. That is baked into binaries already on people's machines.
 #
 # So this publishes a release here under the original `coach-v` tag carrying nothing but the
