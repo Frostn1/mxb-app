@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   FolderOpen,
   Gamepad2,
@@ -80,6 +80,12 @@ export default function Setup({ onComplete, game, games, firstRun }: SetupProps)
   // Asked once per run of setup. Someone who backs up to change the game they picked has
   // already signed in, and the account doesn't change with the title.
   const [steamDone, setSteamDone] = useState(false);
+  /** Whether the silent "can detection answer the folders question?" attempt has been made. */
+  const attempted = useRef(false);
+  const goDetect = useCallback(() => {
+    attempted.current = false;
+    setPhase("detect");
+  }, []);
   const defaultHint = hintFor(usePlatform(), picked);
   const [chosen, setChosen] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -138,6 +144,10 @@ export default function Setup({ onComplete, game, games, firstRun }: SetupProps)
   // works, the end of setup; only a refusal puts the step on screen.
   useEffect(() => {
     if (phase !== "detect" || detecting) return;
+    // Once per arrival at the step. The effect is re-run by StrictMode in development and by
+    // a late `gamePath`, and this attempt writes a config when it succeeds.
+    if (attempted.current) return;
+    attempted.current = true;
     let cancelled = false;
     createConfig({ modsPath: "", gamePath: gamePath ?? "", activeGame: picked.id })
       .then(() => {
@@ -202,7 +212,8 @@ export default function Setup({ onComplete, game, games, firstRun }: SetupProps)
                 key={g.id}
                 onClick={() => {
                   setPicked(g);
-                  setPhase(askSteam && !steamDone ? "steam" : "detect");
+                  if (askSteam && !steamDone) setPhase("steam");
+                  else goDetect();
                 }}
                 className="flex cursor-default items-center gap-3 rounded-xl border border-input bg-card px-4 py-4 text-left transition-colors hover:border-primary/50 hover:bg-foreground/[0.03]"
               >
@@ -227,7 +238,7 @@ export default function Setup({ onComplete, game, games, firstRun }: SetupProps)
       <SteamStep
         onDone={() => {
           setSteamDone(true);
-          setPhase("detect");
+          goDetect();
         }}
         progress={progress}
       />

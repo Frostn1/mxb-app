@@ -3,6 +3,10 @@
 ## Unreleased
 
 ### Changed
+- Setting up the app now asks you to sign in with Steam before it asks about folders, so
+  sealed tracks and gear unlock on their own, anything you have bought is ready to install,
+  and Ranked already knows who you are the first time you open it. It also stops asking
+  where your folders are when it can find them itself.
 - The app wears the mxbsecure look: the brand blue, black chrome, and rounded corners
   throughout. Every colorway but the default is untouched.
 - Buttons, switches and sliders are upright and rounded. The switch is a pill, the slider has
