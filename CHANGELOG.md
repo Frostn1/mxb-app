@@ -68,6 +68,8 @@
 - The Studio tab. Frost's Studio is its own app.
 
 ### Fixed
+- The app now closes its session with the MX Bikes master server when it has finished
+  reading the list, so later refreshes aren't turned away.
 - Running a dedicated server on the same machine no longer stops the server browser from
   asking the master for the list.
 - Stock tracks no longer borrow a picture or a link from a mod that happens to share their
