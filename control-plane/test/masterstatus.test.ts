@@ -5,12 +5,14 @@ import {
   MAX_PROBES_PER_DAY,
   MIN_INSTALLS,
   RETENTION_MS,
+  SWEEP_FRESH_MS,
   WINDOW_MS,
   masterStatus,
   parseProbe,
   pruneMasterProbes,
   reportMasterProbe,
   stateFor,
+  headline,
   summarize,
   type StatusBody,
 } from "../src/masterstatus";
@@ -45,6 +47,21 @@ async function status(): Promise<StatusBody> {
   const res = await masterStatus(e);
   expect(res.status).toBe(200);
   return (await res.json()) as StatusBody;
+}
+
+/**
+ * Plant a successful master sweep, as the roster's snapshot endpoint would have.
+ *
+ * Only an app whose sweep came back from the master ever writes this row, so its timestamp is
+ * the control plane's one piece of positive evidence about PiBoSo's server.
+ */
+async function swept(at: number): Promise<void> {
+  await e.DB.prepare(
+    "INSERT INTO server_snapshot (id, payload, servers, updated_at) VALUES ('live', '[]', 0, ?)" +
+      " ON CONFLICT(id) DO UPDATE SET updated_at = excluded.updated_at",
+  )
+    .bind(at)
+    .run();
 }
 
 beforeEach(() => {
@@ -133,6 +150,8 @@ describe("the sentence", () => {
       share: 0.92,
       reasons: [{ reason: "timeout", installs: 23 }],
       failingForMinutes: 9,
+      lastSweep: null,
+      local: 0,
     });
     expect(line).toContain("23 of the last 25");
     expect(line).toContain("isn't your connection");
@@ -146,9 +165,45 @@ describe("the sentence", () => {
       share: 0.04,
       reasons: [],
       failingForMinutes: null,
+      lastSweep: null,
+      local: 0,
     });
     expect(line).toContain("24 of the last 25");
     expect(line).toContain("something at your end");
+  });
+
+  it("says whose fault it is when the window is mostly our own failures", () => {
+    // The two kinds of "we can't say" must not read alike: one means come back later, the
+    // other means update your app. Saying "not enough people have checked" over 164 reports
+    // is the version of this that sends people to reinstall a working game.
+    const status = {
+      state: "unknown" as const,
+      installs: 11,
+      failing: 9,
+      share: 0.82,
+      reasons: [{ reason: "timeout" as const, installs: 9 }],
+      failingForMinutes: null,
+      lastSweep: null,
+      local: 153,
+    };
+    expect(summarize(status)).toContain("never got as far as asking");
+    expect(summarize(status)).toContain("fault in the MXB App");
+    expect(summarize(status)).not.toContain("Not enough apps");
+    expect(headline(status)).toContain("that's ours, not MX Bikes'");
+  });
+
+  it("keeps the quiet-hours wording for a genuinely empty window", () => {
+    const line = summarize({
+      state: "unknown",
+      installs: 2,
+      failing: 2,
+      share: 1,
+      reasons: [],
+      failingForMinutes: null,
+      lastSweep: null,
+      local: 0,
+    });
+    expect(line).toContain("Not enough apps");
   });
 
   it("admits it doesn't know rather than guessing", () => {
@@ -159,6 +214,8 @@ describe("the sentence", () => {
       share: 1,
       reasons: [],
       failingForMinutes: null,
+      lastSweep: null,
+      local: 0,
     });
     expect(line).toContain("Not enough apps");
   });
@@ -219,6 +276,88 @@ describe("what the window is read from", () => {
     expect(body.state).toBe("up");
   });
 
+  it("drops failures that are facts about the machine, not the master", async () => {
+    // The bug this is for: on 2026-09-18 the page read `down` with 162 of 164 apps failing,
+    // and 152 of those were our own Steam ticket path breaking. An app that could not mint a
+    // ticket, or had no network at all, never asked the master and has observed nothing.
+    for (let n = 1; n <= 8; n += 1) await probe(n, false, "ticket");
+    for (let n = 9; n <= 10; n += 1) await probe(n, false, "offline");
+    for (let n = 11; n <= 14; n += 1) await probe(n, true);
+
+    const body = await status();
+    expect(body.master.installs).toBe(4);
+    expect(body.master.failing).toBe(0);
+    expect(body.state).toBe("up");
+  });
+
+  it("will not call an outage over the top of a sweep that just worked", async () => {
+    // A real sweep landed a minute ago, so the master answered somebody a minute ago. Whatever
+    // everyone else is hitting, it is not PiBoSo's server being down.
+    for (let n = 1; n <= 9; n += 1) await probe(n, false, "timeout");
+    await swept(clock - 60_000);
+
+    const body = await status();
+    expect(body.state).toBe("degraded");
+    expect(body.master.lastSweep).toBe(clock - 60_000);
+    expect(body.summary).toContain("master server itself is answering");
+    // Still `down` on the ratio alone — the floor is what moved it, not the count.
+    expect(stateFor(body.master.installs, body.master.failing)).toBe("down");
+  });
+
+  it("won't accuse anyone on the remnant left after our own bug", async () => {
+    // 2026-09-18, in miniature: a ticket regression takes most of the population out, and the
+    // few installs that can still ask are survivors rather than a sample. 9 of 11 failing is
+    // 82% and cleared the old threshold, so the page published "MX Bikes' servers aren't
+    // answering" on the strength of nine machines while the master was serving 69 servers.
+    for (let n = 1; n <= 40; n += 1) await probe(n, false, "auth");
+    for (let n = 41; n <= 49; n += 1) await probe(n, false, "timeout");
+    for (let n = 50; n <= 51; n += 1) await probe(n, true);
+
+    const body = await status();
+    expect(body.master.local).toBe(40);
+    expect(body.master.installs).toBe(11);
+    expect(body.master.failing).toBe(9);
+    // The ratio on its own still says down. The sampling guard is what stops it.
+    expect(stateFor(11, 9)).toBe("down");
+    expect(body.state).toBe("unknown");
+  });
+
+  it("still calls a real outage when local failures are a minority", async () => {
+    for (let n = 1; n <= 2; n += 1) await probe(n, false, "offline");
+    for (let n = 3; n <= 20; n += 1) await probe(n, false, "timeout");
+
+    const body = await status();
+    expect(body.master.local).toBe(2);
+    expect(body.state).toBe("down");
+  });
+
+  it("calls a real outage once the last good sweep goes stale", async () => {
+    for (let n = 1; n <= 9; n += 1) await probe(n, false, "timeout");
+    await swept(clock - SWEEP_FRESH_MS - 1);
+
+    const body = await status();
+    expect(body.state).toBe("down");
+    expect(body.summary).toContain("isn't your connection");
+  });
+
+  it("doesn't quote a sweep from an hour ago", async () => {
+    for (let n = 1; n <= 9; n += 1) await probe(n, false, "timeout");
+    await swept(clock - RETENTION_MS - 60_000);
+
+    const body = await status();
+    expect(body.state).toBe("down");
+    expect(body.master.lastSweep).toBeNull();
+  });
+
+  it("leaves a healthy window alone whether or not a sweep landed", async () => {
+    // The floor only ever softens `down`. It must not talk a real degradation up to `up`.
+    for (let n = 1; n <= 5; n += 1) await probe(n, false, "timeout");
+    for (let n = 6; n <= 10; n += 1) await probe(n, true);
+    await swept(clock - 60_000);
+
+    expect((await status()).state).toBe("degraded");
+  });
+
   it("forgets what falls out of the window", async () => {
     for (let n = 1; n <= 9; n += 1) await probe(n, false, "timeout");
     expect((await status()).state).toBe("down");
@@ -272,10 +411,10 @@ describe("what the window is read from", () => {
   it("ranks the reasons so the commonest is first", async () => {
     for (let n = 1; n <= 6; n += 1) await probe(n, false, "timeout");
     for (let n = 7; n <= 8; n += 1) await probe(n, false, "dns");
-    await probe(9, false, "auth");
+    await probe(9, false, "refused");
 
     const body = await status();
-    expect(body.master.reasons.map((r) => r.reason)).toEqual(["timeout", "dns", "auth"]);
+    expect(body.master.reasons.map((r) => r.reason)).toEqual(["timeout", "dns", "refused"]);
   });
 });
 

@@ -444,12 +444,15 @@ export function isCount(value: unknown, max: number): value is number {
  *
  * Closed for the same reason event names are constrained: this is reported by every install
  * and read back on a public page, so a free-text field is a field that eventually carries
- * somebody's address, their game path or their rider name. Eight words cover everything a
+ * somebody's address, their game path or their rider name. A short closed list covers everything a
  * client can actually distinguish, and a client that learns to tell two failures apart that
  * this list doesn't is a client that sends `error` until the list grows.
  *
- * `unsupported` is the odd one: it is a build with no server browser in it, which is not an
- * outage and must never be counted as one — see `summarize`.
+ * Some of these are observations of the master and some are facts about the machine that sent
+ * them. Only the first kind is evidence of an outage: `unsupported`, `offline` and `ticket`
+ * describe a client that never got as far as asking, and `masterstatus.LOCAL_REASONS` drops
+ * them from the window rather than counting them against PiBoSo. Anything added here has to be
+ * put in one camp or the other.
  */
 export const PROBE_REASONS = [
   /** No answer inside the client's own deadline. What a real master outage looks like. */
@@ -458,8 +461,18 @@ export const PROBE_REASONS = [
   "refused",
   /** The master's hostname didn't resolve. */
   "dns",
-  /** The Steam ticket the master wants was refused, or couldn't be minted. */
+  /** The master was asked for a login and said no. An observation of the master. */
   "auth",
+  /**
+   * This machine could not mint a Steam ticket, so it never asked the master at all.
+   *
+   * Split out of `auth` because the two are opposite kinds of fact and were being counted as
+   * one. A master refusing logins is an outage; our own ticket path failing is a bug of ours,
+   * and on 2026-09-18 it was 93% of every probe in the window while the master was demonstrably
+   * serving 69 servers. Accepted here before any build sends it, because a reason the control
+   * plane does not know is a 400 — the client half can only ship second.
+   */
+  "ticket",
   /** Something answered, and it wasn't the master. Captive portals land here. */
   "protocol",
   /** This machine has no working network at all, which the client knows before it asks. */
