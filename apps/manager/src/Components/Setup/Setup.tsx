@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   FolderOpen,
   Gamepad2,
@@ -14,6 +14,8 @@ import { useT } from "@/i18n";
 import { Button } from "@frost/shared/Components/ui/button";
 import type { GameInfo } from "@frost/shared/types";
 import { Plate } from "../Shell/Brand";
+import Progress from "./Progress";
+import SteamStep from "./SteamStep";
 
 interface SetupProps {
   onComplete: () => void;
@@ -43,15 +45,47 @@ function hintFor(platform: string | null, game: GameInfo): string {
   return `Documents\\PiBoSo\\${game.display}`;
 }
 
+/**
+ * First run, in the order the answers are needed:
+ *
+ *   1. which game — only when this build drives more than one, and only on a true first run;
+ *   2. sign in with Steam — the identity every entitlement is keyed to;
+ *   3. where the folders are — and only when detection couldn't work them out.
+ *
+ * Steam comes before the folders on purpose. The library is scanned the moment setup
+ * finishes, and what that scan can open depends on the account: sealed tracks and gear
+ * unlock for the account that owns them, and a store purchase is delivered to it. Asked
+ * afterwards, the first library the rider ever sees is the wrong one, and every locked
+ * mod in it has to be re-checked later from Settings.
+ *
+ * The folders step is skipped rather than shown pre-answered: detection either finds the
+ * folder, in which case there was never a question, or it doesn't, in which case the step
+ * has something real to ask. It used to appear either way, carrying a "Found" badge over a
+ * path nobody had to do anything about.
+ */
 export default function Setup({ onComplete, game, games, firstRun }: SetupProps) {
   const t = useT();
   // The pick is held here rather than saved as it's made: writing a config before setup
   // finishes would make `create_config` treat a fresh install as an upgrade (and replay
   // the release showcase). It reaches the backend once, with the folders.
   const [picked, setPicked] = useState<GameInfo>(game);
-  const [phase, setPhase] = useState<"game" | "folders">(
-    firstRun && games.length > 1 ? "game" : "folders",
+  const askGame = firstRun && games.length > 1;
+  // Steam is asked on a first run only. Arriving here by switching to a title whose folders
+  // weren't found is not a first run: that account was linked the first time round, and a
+  // step with no way past it is the wrong thing to put between a rider and a game switch.
+  const askSteam = firstRun;
+  const [phase, setPhase] = useState<"game" | "steam" | "detect" | "folders">(
+    askGame ? "game" : askSteam ? "steam" : "detect",
   );
+  // Asked once per run of setup. Someone who backs up to change the game they picked has
+  // already signed in, and the account doesn't change with the title.
+  const [steamDone, setSteamDone] = useState(false);
+  /** Whether the silent "can detection answer the folders question?" attempt has been made. */
+  const attempted = useRef(false);
+  const goDetect = useCallback(() => {
+    attempted.current = false;
+    setPhase("detect");
+  }, []);
   const defaultHint = hintFor(usePlatform(), picked);
   const [chosen, setChosen] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -63,8 +97,15 @@ export default function Setup({ onComplete, game, games, firstRun }: SetupProps)
   const [gamePath, setGamePath] = useState<string | null>(null);
   const [gameAuto, setGameAuto] = useState(false);
 
+  // Steps shown in the counter: the game question when it's asked, Steam when it's asked,
+  // and the folders, which are counted even though they're often skipped — the rider is
+  // told there are three, and finishing early is a pleasant surprise, not a missing step.
+  const total = (askGame ? 1 : 0) + (askSteam ? 1 : 0) + 1;
+  const current = phase === "game" ? 1 : phase === "steam" ? (askGame ? 2 : 1) : total;
+
   useEffect(() => {
     let cancelled = false;
+    setDetecting(true);
     detectGamePath(picked.id)
       .then((found) => {
         if (cancelled) return;
@@ -82,17 +123,44 @@ export default function Setup({ onComplete, game, games, firstRun }: SetupProps)
     };
   }, [picked.id]);
 
-  const finish = async (modsPath: string) => {
-    setBusy(true);
-    setError(null);
-    try {
-      await createConfig({ modsPath, gamePath: gamePath ?? "", activeGame: picked.id });
-      onComplete();
-    } catch (e) {
-      setError(String(e));
-      setBusy(false);
-    }
-  };
+  const finish = useCallback(
+    async (modsPath: string) => {
+      setBusy(true);
+      setError(null);
+      try {
+        await createConfig({ modsPath, gamePath: gamePath ?? "", activeGame: picked.id });
+        onComplete();
+      } catch (e) {
+        setError(String(e));
+        setBusy(false);
+      }
+    },
+    [gamePath, onComplete, picked.id],
+  );
+
+  // The folders question, asked of the backend first. `create_config` runs the same
+  // detection the folder step's own default button runs, and refuses — without writing
+  // anything — when it comes up empty. So a silent attempt is both the check and, when it
+  // works, the end of setup; only a refusal puts the step on screen.
+  useEffect(() => {
+    if (phase !== "detect" || detecting) return;
+    // Once per arrival at the step. The effect is re-run by StrictMode in development and by
+    // a late `gamePath`, and this attempt writes a config when it succeeds.
+    if (attempted.current) return;
+    attempted.current = true;
+    let cancelled = false;
+    createConfig({ modsPath: "", gamePath: gamePath ?? "", activeGame: picked.id })
+      .then(() => {
+        if (!cancelled) onComplete();
+      })
+      .catch(() => {
+        // Nothing to report: not finding the folder is exactly what the next step is for.
+        if (!cancelled) setPhase("folders");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [phase, detecting, gamePath, picked.id, onComplete]);
 
   const choose = async () => {
     const folder = await pickFolder({
@@ -115,6 +183,8 @@ export default function Setup({ onComplete, game, games, firstRun }: SetupProps)
     }
   };
 
+  const progress = <Progress total={total} current={current} />;
+
   // Step one on a first run: which game are we setting up? Everything after this — the
   // folder we suggest, the install we scan for, the catalog we browse — depends on it,
   // so it's asked before anything else rather than inferred.
@@ -122,10 +192,12 @@ export default function Setup({ onComplete, game, games, firstRun }: SetupProps)
     return (
       <div className="grid min-h-0 flex-1 place-items-center px-10">
         <div className="flex w-full max-w-[480px] flex-col items-center gap-7 pb-16">
+          {progress}
+
           <div className="flex flex-col items-center gap-3.5">
             <Plate className="size-14" />
             <div className="flex flex-col items-center gap-1.5">
-              <h1 className="text-[26px] font-extrabold tracking-[-0.4px]">
+              <h1 className="font-cond text-[26px] font-bold leading-[1.05] tracking-[-0.045em]">
                 {t("setup.title")}
               </h1>
               <p className="max-w-[380px] text-center text-[13.5px] leading-relaxed text-muted-foreground">
@@ -140,7 +212,8 @@ export default function Setup({ onComplete, game, games, firstRun }: SetupProps)
                 key={g.id}
                 onClick={() => {
                   setPicked(g);
-                  setPhase("folders");
+                  if (askSteam && !steamDone) setPhase("steam");
+                  else goDetect();
                 }}
                 className="flex cursor-default items-center gap-3 rounded-xl border border-input bg-card px-4 py-4 text-left transition-colors hover:border-primary/50 hover:bg-foreground/[0.03]"
               >
@@ -159,13 +232,45 @@ export default function Setup({ onComplete, game, games, firstRun }: SetupProps)
     );
   }
 
+  // Step two: the Steam account. Required — there is no way past it here.
+  if (phase === "steam") {
+    return (
+      <SteamStep
+        onDone={() => {
+          setSteamDone(true);
+          goDetect();
+        }}
+        progress={progress}
+      />
+    );
+  }
+
+  // Between the two: detection is being asked whether there is anything left to ask. It's
+  // usually a blink, but it can be a slow disk, so it says what it's doing.
+  if (phase === "detect") {
+    return (
+      <div className="grid min-h-0 flex-1 place-items-center px-10">
+        <div className="flex w-full max-w-[480px] flex-col items-center gap-7 pb-16">
+          {progress}
+          <Plate className="size-14" />
+          <div className="flex items-center gap-2.5 text-[13.5px] text-muted-foreground">
+            <Loader2 className="size-4 flex-none animate-spin text-primary" />
+            <span>{t("setup.finishing", { game: picked.display })}</span>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="grid min-h-0 flex-1 place-items-center px-10">
       <div className="flex w-full max-w-[480px] flex-col items-center gap-7 pb-16">
+        {progress}
+
         <div className="flex flex-col items-center gap-3.5">
           <Plate className="size-14" />
           <div className="flex flex-col items-center gap-1.5">
-            <h1 className="text-[26px] font-extrabold tracking-[-0.4px]">
+            <h1 className="font-cond text-[26px] font-bold leading-[1.05] tracking-[-0.045em]">
               {picked.display}
             </h1>
             <p className="max-w-[380px] text-center text-[13.5px] leading-relaxed text-muted-foreground">
@@ -187,7 +292,7 @@ export default function Setup({ onComplete, game, games, firstRun }: SetupProps)
             {t("setup.modsFolder", { game: picked.display })}
           </span>
           {chosen ? (
-            <div className="flex items-center gap-2.5 border border-input bg-card px-3.5 py-3 font-mono text-[12.5px] text-muted-foreground">
+            <div className="flex items-center gap-2.5 rounded-xl border border-input bg-card px-3.5 py-3 font-mono text-[12.5px] text-muted-foreground">
               <FolderOpen className="size-4 flex-none text-primary" />
               <span className="flex-1 truncate" title={chosen}>
                 {chosen}
@@ -218,13 +323,13 @@ export default function Setup({ onComplete, game, games, firstRun }: SetupProps)
             {t("setup.gameInstall", { game: picked.display })}
           </span>
           {detecting ? (
-            <div className="flex items-center gap-2.5 border border-input bg-card px-3.5 py-3 text-[12.5px] text-muted-foreground">
+            <div className="flex items-center gap-2.5 rounded-xl border border-input bg-card px-3.5 py-3 text-[12.5px] text-muted-foreground">
               <Loader2 className="size-4 flex-none animate-spin text-primary" />
               <span>{t("setup.detecting", { game: picked.display })}</span>
             </div>
           ) : gamePath ? (
             <>
-              <div className="flex items-center gap-2.5 border border-input bg-card px-3.5 py-3 font-mono text-[12.5px] text-muted-foreground">
+              <div className="flex items-center gap-2.5 rounded-xl border border-input bg-card px-3.5 py-3 font-mono text-[12.5px] text-muted-foreground">
                 <Gamepad2 className="size-4 flex-none text-primary" />
                 <span className="flex-1 truncate" title={gamePath}>
                   {gamePath}
@@ -270,7 +375,7 @@ export default function Setup({ onComplete, game, games, firstRun }: SetupProps)
         <Button
           className="h-12 w-full text-[14.5px]"
           disabled={busy}
-          onClick={() => finish(chosen ?? "")}
+          onClick={() => void finish(chosen ?? "")}
         >
           {chosen ? t("setup.startBrowsing") : t("setup.detectAndStart")}
         </Button>

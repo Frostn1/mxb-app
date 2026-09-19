@@ -117,6 +117,20 @@ export const de: Translation = {
   "setup.detectAndStart": "Erkennen und loslegen",
   "setup.pickModsFolder": "Wähle deinen Ordner von {{game}}",
   "setup.pickInstallFolder": "Wähle den Installationsordner von {{game}}",
+  "setup.step": "Schritt {{current}} von {{total}}",
+  "setup.finishing": "{{game}} wird eingerichtet…",
+  "setup.steamTitle": "Mit Steam anmelden",
+  "setup.steamLead":
+    "MX Bikes erkennt dich an deinem Steam-Konto — und alles, was du gekauft hast, ebenso.",
+  "setup.steamReasonSealed":
+    "Geschützte Tracks und Ausrüstung werden auf dem Konto freigeschaltet, dem sie gehören.",
+  "setup.steamReasonStore": "Alles, was du in einem Shop kaufst, steht startklar zur Installation bereit.",
+  "setup.steamReasonRanked": "Dein Ranked-Profil wird über dasselbe Konto gefunden.",
+  "setup.steamNote":
+    "Das öffnet Steam in deinem Browser. Die App sieht dein Passwort nie.",
+  "setup.steamWaiting": "Warten auf Steam…",
+  "setup.steamSignedIn": "Angemeldet als {{id}}",
+  "setup.steamContinue": "Weiter",
 
   // ── Willkommen ─────────────────────────────────────────────────────────────
   "welcome.intro.title": "Willkommen bei {{app}}",

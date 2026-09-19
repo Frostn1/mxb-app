@@ -112,6 +112,20 @@ export const es: Translation = {
   "setup.detectAndStart": "Detectar y empezar",
   "setup.pickModsFolder": "Selecciona tu carpeta de {{game}}",
   "setup.pickInstallFolder": "Selecciona la carpeta de instalación de {{game}}",
+  "setup.step": "Paso {{current}} de {{total}}",
+  "setup.finishing": "Configurando {{game}}…",
+  "setup.steamTitle": "Iniciar sesión con Steam",
+  "setup.steamLead":
+    "MX Bikes te identifica por tu cuenta de Steam, y lo mismo ocurre con todo lo que has comprado.",
+  "setup.steamReasonSealed":
+    "Los tracks y el equipamiento protegidos se desbloquean en la cuenta que los posee.",
+  "setup.steamReasonStore": "Lo que compres en una tienda aparece listo para instalar.",
+  "setup.steamReasonRanked": "Tu perfil de Ranked se encuentra desde esa misma cuenta.",
+  "setup.steamNote":
+    "Esto abre Steam en tu navegador. La app nunca ve tu contraseña.",
+  "setup.steamWaiting": "Esperando a Steam…",
+  "setup.steamSignedIn": "Sesión iniciada como {{id}}",
+  "setup.steamContinue": "Continuar",
 
   // ── Bienvenida ─────────────────────────────────────────────────────────────
   "welcome.intro.title": "Bienvenido a {{app}}",
