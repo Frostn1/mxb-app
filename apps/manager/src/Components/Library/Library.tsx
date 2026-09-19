@@ -38,10 +38,6 @@ import {
   Search as SearchIcon,
   Star,
   HardDrive,
-  Bike,
-  Mountain,
-  PersonStanding,
-  Sparkles,
   type LucideIcon,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -570,14 +566,6 @@ type Pick =
 const ALL: Pick = { kind: "all" };
 
 /** Icon per mod type, for the left list. A type we don't know gets the generic box. */
-const MOD_TYPE_ICON: Record<string, LucideIcon> = {
-  tracks: Mountain,
-  bikes: Bike,
-  rider: PersonStanding,
-  reshade: Sparkles,
-  misc: Package,
-};
-
 /**
  * What the grid actually shows for a type.
  *
@@ -604,13 +592,11 @@ function SideHeading({ label }: { label: string }) {
 
 /** One row of the left list: a mod type, or a folder inside it. */
 function SideRow({
-  icon: Icon,
   label,
   count,
   active,
   onSelect,
 }: {
-  icon: LucideIcon;
   label: string;
   /** Omitted while the number isn't known — a blank is honest, a 0 isn't. */
   count?: number;
@@ -629,7 +615,6 @@ function SideRow({
       )}
     >
       {active && <span className="absolute inset-y-1.5 left-0 w-[3px] rounded-full bg-primary" />}
-      <Icon className="size-3.5 flex-none" strokeWidth={1.75} />
       <span className="min-w-0 flex-1 truncate font-cond text-[13px] font-semibold tracking-[-0.02em]">
         {label}
       </span>
@@ -1486,7 +1471,6 @@ export default function Library({
           {modTypes.map((mt) => (
             <SideRow
               key={mt.id}
-              icon={MOD_TYPE_ICON[mt.id] ?? Package}
               label={t(mt.label)}
               count={typeCounts.get(mt.id)}
               active={mt.id === modType.id}
@@ -1499,14 +1483,12 @@ export default function Library({
           <div className="mx-4 my-2 h-px bg-border" />
           <SideHeading label={t("library.folders")} />
           <SideRow
-            icon={Layers}
             label={t("installDialog.allFolders")}
             count={inType.length}
             active={pick.kind === "all"}
             onSelect={() => setPick(ALL)}
           />
           <SideRow
-            icon={Star}
             label={t("library.starred")}
             count={starredCount}
             active={pick.kind === "starred"}
@@ -1515,7 +1497,6 @@ export default function Library({
           {folders.map((f) => (
             <SideRow
               key={f || "__root__"}
-              icon={Folder}
               label={folderLabel(f)}
               count={folderCounts.get(f)}
               active={pick.kind === "folder" && pick.folder === f}
@@ -1525,7 +1506,6 @@ export default function Library({
           {/* Only once the player has asked to see what's gone — off, it isn't a place. */}
           {showRemoved && (
             <SideRow
-              icon={History}
               label={t("library.showRemoved")}
               count={allGhosts.length}
               active={pick.kind === "removed"}

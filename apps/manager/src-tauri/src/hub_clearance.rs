@@ -229,8 +229,20 @@ async fn attempt(app: &AppHandle, mode: Mode) -> anyhow::Result<bool> {
         tokio::time::sleep(POLL).await;
 
         // A window the user was asked to finish is one they can also close. That is a decision,
-        // not a budget to sit out.
+        // not a budget to sit out — but it is not automatically a refusal either. The page may
+        // have come up clean, with nothing to click, and closing it is then the reasonable
+        // thing to do. The probe below runs on a timer, so the window is easily gone before
+        // the next one was due; ask the store once more before calling this a failure.
         if mode.visible() && app.get_webview_window(WINDOW).is_none() {
+            if probe().await {
+                crate::hub_session::adopt_clearance(app, &last_seen);
+                LAST.store(now(), Ordering::Relaxed);
+                log::info!(
+                    "the MXB Hub check window was closed and the store is letting us in ({})",
+                    crate::hub_session::cookie_names(&last_seen)
+                );
+                return Ok(true);
+            }
             log::info!("the MXB Hub check window was closed before the check was finished");
             return Ok(false);
         }
