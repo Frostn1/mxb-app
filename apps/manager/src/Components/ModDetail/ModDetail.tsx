@@ -420,7 +420,7 @@ export default function ModDetail({
 
         {/* right: the state card, then what holds for every state */}
         <div className="flex w-[320px] flex-none flex-col gap-3 overflow-y-auto pb-1">
-          <Panel label={t("modDetail.addToLibrary")}>
+          <Panel label={t("modDetail.stageDownload")}>
             {myActive && idx >= 0 ? (
               <InstallProgress
                 stage={myActive.stage}

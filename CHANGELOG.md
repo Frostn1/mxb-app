@@ -11,6 +11,11 @@
   words rather than shouting in capitals. Frost's Studio keeps the face it had.
 - New wordmark: MXB App, by mxbsecure. The icon is the brand's mark, a black rounded square
   with a white m, and it is the same one on the window, the installer and the favicon.
+- A mod now looks the same wherever you open it, from Browse, the Library, the Shop or the
+  Hub. Its name, its state and the one button you came for sit in a bar across the top that
+  stays put while you read, the screenshot is bigger with the figures along its foot, and a
+  fact with nothing in it is left out instead of shown blank. An installed track lists its
+  layouts, and a bike lists the model swaps, liveries and sounds that came with it.
 
 ## 2026-09-18 — v0.17.4 — Stock tracks in the Library
 
