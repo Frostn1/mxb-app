@@ -40,7 +40,7 @@ export default function ShopCard({ mod, currency, onOpen }: ShopCardProps) {
       <ContextMenuTrigger asChild>
         <button
           onClick={onOpen}
-          className="group u-notch relative flex cursor-default flex-col overflow-hidden bg-card text-left transition-colors"
+          className="group relative flex cursor-default flex-col overflow-hidden rounded-xl bg-card text-left transition-colors"
         >
           <div className="relative aspect-square overflow-hidden bg-gradient-to-br from-[#3a3f45] to-[#20242a]">
             {mod.image && !broken ? (
@@ -62,8 +62,8 @@ export default function ShopCard({ mod, currency, onOpen }: ShopCardProps) {
               </div>
             )}
             {mod.price.onSale && mod.price.discountPct !== null && (
-              <span className="u-skew absolute right-2 top-2 bg-success px-2 py-[3px]">
-                <span className="u-unskew block font-cond text-[11px] font-bold tracking-[0.06em] text-[#0d1216]">
+              <span className="absolute right-2 top-2 rounded-full bg-success px-2.5 py-[3px]">
+                <span className="block font-cond text-[11px] font-bold tracking-[0.06em] text-[#0d1216]">
                   −{mod.price.discountPct}%
                 </span>
               </span>

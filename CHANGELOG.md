@@ -5,6 +5,8 @@
 ### Changed
 - The app wears the mxbsecure look: the brand blue, black chrome, and rounded corners
   throughout. Every colorway but the default is untouched.
+- Buttons, switches and sliders are upright and rounded. The switch is a pill, the slider has
+  a round thumb, and the lean comes off everything except the logo.
 
 ## 2026-09-18 — v0.17.4 — Stock tracks in the Library
 

@@ -47,7 +47,7 @@ export function ContextTab({
       )}
     >
       {children}
-      {active && <span className="u-skew absolute inset-x-[-3px] bottom-0 h-[2px] bg-primary" />}
+      {active && <span className="absolute inset-x-[-3px] bottom-0 h-[2px] rounded-full bg-primary" />}
     </button>
   );
 }

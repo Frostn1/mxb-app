@@ -522,9 +522,12 @@ html[data-colorway="retro"]:not(.overlay-window) body::after {
 }
 
 /* ------------------------------------------------------------------ *
- * Shape utilities. The redesign's geometry comes from a motocross number
- * plate: a shallow left-leaning skew, and a corner cut off the card.
- * `.u-skew` always wraps `.u-unskew` on its text, or the label leans too.
+ * Shape utilities, kept for the apps that still lean.
+ *
+ * The manager's geometry used to come from a motocross number plate: a
+ * shallow left skew and a corner cut off the card. Under the brand it is
+ * rounded instead, so nothing in the manager applies these any more —
+ * Studio and the track tools still do, and they own the look there.
  * ------------------------------------------------------------------ */
 .u-skew {
   transform: skewX(-11deg);
@@ -542,27 +545,29 @@ html[data-colorway="retro"]:not(.overlay-window) body::after {
 input[type="range"] {
   -webkit-appearance: none;
   appearance: none;
-  height: 14px;
+  height: 18px;
   background: transparent;
   cursor: default;
 }
 input[type="range"]::-webkit-slider-runnable-track {
-  height: 3px;
+  height: 4px;
+  border-radius: 999px;
   background: linear-gradient(
     to right,
     var(--primary) 0,
     var(--primary) var(--fill, 0%),
-    color-mix(in srgb, var(--foreground) 12%, transparent) var(--fill, 0%)
+    color-mix(in srgb, var(--foreground) 13%, transparent) var(--fill, 0%)
   );
 }
 input[type="range"]::-webkit-slider-thumb {
   -webkit-appearance: none;
-  width: 8px;
+  width: 14px;
   height: 14px;
-  margin-top: -5.5px;
-  border: 0;
-  background: var(--primary);
-  transform: skewX(-11deg);
+  margin-top: -5px;
+  border: 1px solid color-mix(in srgb, #000 12%, transparent);
+  border-radius: 999px;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.22);
 }
 input[type="range"]:disabled {
   opacity: 0.45;
@@ -641,4 +646,22 @@ input[type="range"]:disabled {
 .frost-gallery .swiper-pagination-bullet-active {
   background: var(--primary);
   width: 16px;
+}
+
+/* A default radius for the controls that never asked for one.
+ *
+ * The shared primitives were written against a radius-0 theme, so a lot of them simply have
+ * no `rounded-*` class — there was nothing for `--radius` to change. Now there is, and a
+ * square input beside a rounded card is the tell that a restyle stopped halfway. Studio
+ * arrived at the same rule first, scoped to `.studio-skin`; this is that rule promoted to
+ * the default now that every app is rounded.
+ *
+ * `:where()` drops the selector to zero specificity, so an explicit `rounded-*` on the
+ * element still wins — including `rounded-none` where something means to stay square. */
+:where(button),
+:where([role="button"]),
+:where(select),
+:where(textarea),
+:where(input:not([type="range"]):not([type="checkbox"]):not([type="radio"])) {
+  border-radius: var(--radius);
 }

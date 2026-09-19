@@ -58,7 +58,7 @@ export default function ModCard({
         <button
           onClick={onOpen}
           className={cn(
-            "group u-notch relative flex h-[178px] cursor-default flex-col overflow-hidden bg-card text-left transition-all",
+            "group relative flex h-[178px] cursor-default flex-col overflow-hidden rounded-xl bg-card text-left transition-all",
             selected && "outline outline-2 -outline-offset-2 outline-primary",
           )}
         >
@@ -104,8 +104,8 @@ export default function ModCard({
           </span>
 
           {installed && (
-            <span className="u-skew absolute right-2 top-2 flex items-center gap-1 bg-[rgba(8,8,10,0.82)] px-1.5 py-[3px]">
-              <span className="u-unskew flex items-center gap-1 text-success">
+            <span className="absolute right-2 top-2 flex items-center gap-1 rounded-full bg-[rgba(8,8,10,0.82)] px-2 py-[3px]">
+              <span className="flex items-center gap-1 text-success">
                 <Check className="size-3" strokeWidth={3} />
                 <span className="font-cond text-[9px] font-bold uppercase tracking-[0.16em]">
                   {t("common.installed")}

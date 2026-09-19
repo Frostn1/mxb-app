@@ -7,7 +7,7 @@ interface SwitchProps {
   className?: string;
 }
 
-/** A small controlled toggle: a leaning plate with a square knob, like the buttons. */
+/** A small controlled toggle: a pill with a round knob. */
 export function Switch({ checked, onCheckedChange, disabled, className }: SwitchProps) {
   return (
     <button
@@ -17,14 +17,14 @@ export function Switch({ checked, onCheckedChange, disabled, className }: Switch
       disabled={disabled}
       onClick={() => onCheckedChange(!checked)}
       className={cn(
-        "u-skew relative h-5 w-9 shrink-0 cursor-default transition-colors disabled:opacity-50",
+        "relative h-5 w-9 shrink-0 cursor-default rounded-full transition-colors disabled:opacity-50",
         checked ? "bg-primary" : "bg-foreground/15",
         className,
       )}
     >
       <span
         className={cn(
-          "absolute top-[3px] h-[14px] w-[14px] transition-all",
+          "absolute top-[3px] h-[14px] w-[14px] rounded-full transition-all",
           checked ? "right-[3px] bg-primary-foreground" : "left-[3px] bg-foreground/70",
         )}
       />

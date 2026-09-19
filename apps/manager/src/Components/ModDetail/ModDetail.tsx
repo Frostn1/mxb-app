@@ -409,9 +409,9 @@ export default function ModDetail({
 
         <button
           onClick={onBack}
-          className="u-skew absolute left-7 top-5 flex h-8 cursor-default items-center border border-white/25 bg-black/40 px-3 text-white/85 transition-colors hover:text-white"
+          className="absolute left-7 top-5 flex h-8 cursor-default items-center rounded-full border border-white/25 bg-black/40 px-4 text-white/85 transition-colors hover:text-white"
         >
-          <span className="u-unskew flex items-center gap-1.5">
+          <span className="flex items-center gap-1.5">
             <ChevronLeft className="size-3.5" />
             <span className="font-cond text-[12px] font-semibold uppercase tracking-[0.14em]">
               {t(modType.label)}
@@ -455,7 +455,7 @@ export default function ModDetail({
                   key={img}
                   onClick={() => setHeroIdx(i)}
                   className={cn(
-                    "u-notch relative h-[62px] w-[104px] flex-none overflow-hidden bg-card transition-opacity",
+                    "relative h-[62px] w-[104px] flex-none overflow-hidden rounded-lg bg-card transition-opacity",
                     i === shotIdx ? "outline outline-2 -outline-offset-2 outline-primary" : "opacity-60 hover:opacity-100",
                   )}
                 >

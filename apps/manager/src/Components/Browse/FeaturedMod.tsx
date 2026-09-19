@@ -53,8 +53,8 @@ export default function FeaturedMod({
 
       <div className="absolute inset-y-0 left-0 flex max-w-[620px] flex-col justify-end p-8">
         <div className="mb-3 flex items-center gap-2.5">
-          <span className="u-skew bg-primary px-2 py-[3px]">
-            <span className="u-unskew block font-cond text-[10px] font-bold uppercase tracking-[0.22em] text-primary-foreground">
+          <span className="rounded-full bg-primary px-2.5 py-[3px]">
+            <span className="block font-cond text-[10px] font-bold uppercase tracking-[0.22em] text-primary-foreground">
               {t("browse.featured")}
             </span>
           </span>

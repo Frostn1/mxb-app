@@ -107,7 +107,7 @@ export default function TopRail({ view, plugins, onNavigate, leftRef, rightRef }
             >
               {item.rawLabel ?? t(item.label)}
               {on && (
-                <span className="u-skew absolute inset-x-[-3px] bottom-0 h-[3px] bg-primary" />
+                <span className="absolute inset-x-[-3px] bottom-0 h-[3px] rounded-full bg-primary" />
               )}
             </button>
           );
@@ -145,13 +145,13 @@ export default function TopRail({ view, plugins, onNavigate, leftRef, rightRef }
         disabled={gameRunning || starting}
         title={gameRunning ? t("game.running") : t("game.launch")}
         className={cn(
-          "u-skew flex h-8 cursor-default items-center px-5 transition-colors",
+          "flex h-8 cursor-default items-center rounded-full px-6 transition-colors",
           gameRunning || starting
             ? "border border-input text-muted-foreground"
             : "bg-primary text-primary-foreground hover:brightness-110 active:brightness-95",
         )}
       >
-        <span className="u-unskew flex items-center gap-2">
+        <span className="flex items-center gap-2">
           {gameRunning ? (
             <Gamepad2 className="size-3.5 text-success" />
           ) : starting ? (

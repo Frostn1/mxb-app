@@ -229,7 +229,7 @@ const podiumColor = (position: string) => {
 };
 
 /**
- * A rank badge as a number plate — the shape the whole app is built from (`.u-skew`, and the
+ * A rank badge: a rounded plate carrying the grade and the points under it. (The
  * cut corner on the cards). A rank is the one number a rider would put on a plate, so it is
  * the one place in the app where the motif is literal rather than decorative.
  */
@@ -246,10 +246,10 @@ const Plate = ({
 }) => (
   <span
     title={title}
-    className={cn("u-skew grid place-items-center px-2", className)}
+    className={cn("grid place-items-center rounded-lg px-2", className)}
     style={{ background: solid(color) }}
   >
-    <span className="u-unskew block font-cond font-bold leading-none tracking-[0.04em] text-[#0d1216]">
+    <span className="block font-cond font-bold leading-none tracking-[0.04em] text-[#0d1216]">
       {children}
     </span>
   </span>
@@ -273,7 +273,7 @@ const Profile = ({
     // never something you have to scroll back up for.
     <div className="flex min-h-0 flex-1 flex-col gap-3 pt-1">
       <div
-        className="u-notch relative shrink-0 overflow-hidden bg-card"
+        className="relative shrink-0 overflow-hidden rounded-xl bg-card"
         // A line of the rank's colour along the foot, tying the banner to the cards below.
         style={
           headline ? { boxShadow: `inset 0 -2px 0 ${tint(headline.color, 0.55)}` } : undefined
@@ -359,7 +359,7 @@ const Profile = ({
           {profile.cards.map((c) => (
             <div
               key={c.discipline}
-              className="u-notch overflow-hidden bg-card"
+              className="overflow-hidden rounded-xl bg-card"
               style={{
                 // The rank's colour washed off the top-left and drawn down the edge — enough
                 // to tell three cards apart across the room, without tinting the surface.
@@ -441,7 +441,7 @@ const Profile = ({
                       {/* A bar in the medal's colour, so scanning the list picks out the good
                           days without reading a single number. */}
                       <span
-                        className="mr-2.5 inline-block h-3.5 w-[3px] translate-y-[2px] u-skew"
+                        className="mr-2.5 inline-block h-3.5 w-[3px] translate-y-[2px] rounded-full"
                         style={{ background: medal || "transparent" }}
                       />
                       <span title={r.track}>{r.track}</span>
