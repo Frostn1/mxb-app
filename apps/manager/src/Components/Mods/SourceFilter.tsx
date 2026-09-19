@@ -23,7 +23,10 @@ export default function SourceFilter({ options, value, onChange }: SourceFilterP
   return (
     <div
       role="radiogroup"
-      className="flex h-7 items-center gap-0.5 rounded-full border border-input bg-card p-0.5"
+      // The bar's left slot is `items-stretch` so a tab can draw a full-height underline. A
+      // fixed-height item in that row aligns to the top instead of stretching, which reads as
+      // the control sitting high; centre it explicitly.
+      className="flex h-7 shrink-0 items-center gap-0.5 self-center rounded-full border border-input bg-card p-0.5"
     >
       {options.map((source) => {
         const on = source === value;
