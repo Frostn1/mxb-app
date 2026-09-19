@@ -23,7 +23,7 @@ import { useQuickInstall } from "../Browse/useQuickInstall";
 import ShopDetail from "../Shop/ShopDetail";
 import MyDownloads from "../Shop/MyDownloads";
 import HubPurchases from "../Hub/HubPurchases";
-import { ContextBarRight } from "../Shell/ContextBar";
+import { ContextBarLeft, ContextBarRight } from "../Shell/ContextBar";
 import type { ModsView } from "../Shell/nav";
 import ModsCard from "./ModsCard";
 import SourceFilter from "./SourceFilter";
@@ -316,6 +316,12 @@ export default function Mods({
       />
 
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+        {/* Where it comes from reads before what you are looking at, so it sits at the head
+            of the bar rather than trailing the search and sort that act on the result. */}
+        <ContextBarLeft>
+          <SourceFilter options={sources} value={source} onChange={setSource} />
+        </ContextBarLeft>
+
         <ContextBarRight>
           {browsing && (
             <>
@@ -343,7 +349,6 @@ export default function Mods({
             </>
           )}
           <HelpHint title={t("nav.mods")} description={t("mods.help")} />
-          <SourceFilter options={sources} value={source} onChange={setSource} />
         </ContextBarRight>
 
         {!browsing && store && (
