@@ -1104,6 +1104,7 @@ export const de: Translation = {
   "serverBrowser.trackGetShop": "Im Shop holen",
   "serverBrowser.trackGetMods": "Bei mxb-mods holen",
   "serverBrowser.trackGetHub": "Bei MXB Hub holen",
+  "serverBrowser.pickServer": "Wähle einen Server, um zu sehen, was darauf läuft.",
   "serverBrowser.favesOnly": "Favoriten",
   "serverBrowser.star": "Zu Favoriten hinzufügen",
   "serverBrowser.unstar": "Aus Favoriten entfernen",

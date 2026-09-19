@@ -1084,6 +1084,7 @@ export const en = {
   "serverBrowser.trackGetShop": "Get it from the shop",
   "serverBrowser.trackGetMods": "Get it from mxb-mods",
   "serverBrowser.trackGetHub": "Get it from MXB Hub",
+  "serverBrowser.pickServer": "Pick a server to see what it is running.",
   "serverBrowser.favesOnly": "Favorites",
   "serverBrowser.star": "Add to favorites",
   "serverBrowser.unstar": "Remove from favorites",
