@@ -31,7 +31,8 @@ export function useModBrowsing(
   const [selectedCategoryId, setSelectedCategoryId] = useState<number | null>(null);
   // Bumped after an install so the library re-scans.
   const [libraryVersion, setLibraryVersion] = useState(0);
-  // What's on disk for the active type, as a fuzzy lookup (for "in library" badges).
+  // What's on disk for the active type, as a fuzzy lookup — the "in library" badges, and
+  // the entry the mod page's Uninstall removes.
   const [installed, setInstalled] = useState<InstalledIndex>(EMPTY_INSTALLED_INDEX);
   // The grid's own state — filters, fetched pages, scroll offset. Held here, above the
   // Browse/ModDetail swap, so opening a mod and coming back lands on the same screen.
@@ -55,7 +56,7 @@ export function useModBrowsing(
     scanLibrary(modType.installSubpath)
       .then((entries) => {
         if (cancelled) return;
-        setInstalled(buildInstalledIndex(entries.map((e) => e.name)));
+        setInstalled(buildInstalledIndex(entries));
       })
       .catch(() => !cancelled && setInstalled(EMPTY_INSTALLED_INDEX));
     return () => {

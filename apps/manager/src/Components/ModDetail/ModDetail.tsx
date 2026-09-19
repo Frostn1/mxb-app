@@ -11,6 +11,7 @@ import {
   FileDown,
   Maximize2,
   ChevronRight,
+  Trash2,
   X,
 } from "lucide-react";
 import { open } from "@tauri-apps/plugin-shell";
@@ -29,6 +30,7 @@ import {
   isSoundContext,
   riderTarget,
   resolveInitialFolder,
+  uninstallMod,
   scanBikeTargets,
   scanRiderTargets,
   sortMirrors,
@@ -47,7 +49,7 @@ import RichDescription from "./RichDescription";
 import InstallDialog, { type InstallChoice } from "./InstallDialog";
 import { useInstall } from "../../Context/Install";
 import type { InstalledIndex } from "../../lib/installedMatch";
-import { fileFormat, formatDate } from "@frost/shared/lib/mods";
+import { displayName, fileFormat, formatDate } from "@frost/shared/lib/mods";
 import { Button } from "@frost/shared/Components/ui/button";
 import {
   AlertDialog,
@@ -61,6 +63,7 @@ import {
 } from "@frost/shared/Components/ui/alert-dialog";
 import { cn } from "@frost/shared/lib/utils";
 import { useConfig } from "@frost/shared/Context/Config";
+import { toast } from "sonner";
 
 interface ModDetailProps {
   slug: string;
@@ -68,6 +71,8 @@ interface ModDetailProps {
   /** Browse category the mod was opened under — drives bike-livery routing. */
   categoryId: number;
   installed: InstalledIndex;
+  /** Bump the library scan — an uninstall here changes what the badges say. */
+  onChanged: () => void;
   onBack: () => void;
 }
 
@@ -104,6 +109,7 @@ export default function ModDetail({
   modType,
   categoryId,
   installed,
+  onChanged,
   onBack,
 }: ModDetailProps) {
   const t = useT();
@@ -137,6 +143,8 @@ export default function ModDetail({
   } | null>(null);
   const [copied, setCopied] = useState(false);
   const [confirmReinstall, setConfirmReinstall] = useState(false);
+  const [confirmUninstall, setConfirmUninstall] = useState(false);
+  const [removing, setRemoving] = useState(false);
   // Bumped by the Retry button below. The load otherwise only re-runs when the slug changes,
   // so a user the catalog refused once had no way back short of leaving the page.
   const [reloadKey, setReloadKey] = useState(0);
@@ -231,7 +239,31 @@ export default function ModDetail({
     [game, modType, destOptions, guess, livery, sound, rider, derivedDest],
   );
 
-  const isInstalled = detail !== null && installed.has(detail.title);
+  // The file on disk this page's mod matched, when it matched one — what Uninstall removes.
+  // Same match as the "in library" badge, so the two can never disagree about which mod
+  // is already installed.
+  const installedEntry = detail ? installed.match(detail.title) : null;
+  const isInstalled = installedEntry !== null;
+
+  /** Remove the matched file without a trip to the Library. It goes to the Recycle Bin,
+   *  same as the Library's own Uninstall, so a wrong guess costs nothing. */
+  const doUninstall = async () => {
+    if (!installedEntry) return;
+    setConfirmUninstall(false);
+    setRemoving(true);
+    try {
+      await uninstallMod(installedEntry.path, modType.installSubpath);
+      toast.success(
+        t("library.uninstalledOne", { name: displayName(installedEntry.name) }),
+        { description: t("library.movedToBin") },
+      );
+      onChanged();
+    } catch (e) {
+      toast.error(t("library.uninstallFailed"), { description: String(e) });
+    } finally {
+      setRemoving(false);
+    }
+  };
 
   // Already have it? Confirm before overwriting; otherwise open the dialog.
   const openInstall = () => {
@@ -514,6 +546,18 @@ export default function ModDetail({
                 <Button className="h-11 w-full text-[14px]" onClick={openInstall}>
                   {isInstalled ? t("browse.reinstall") : t("modDetail.addToLibrary")}
                 </Button>
+                {/* Only once it's actually on disk. Riders asked for it here because a track
+                    they just downloaded and didn't like meant a trip to the Library. */}
+                {isInstalled && (
+                  <Button
+                    variant="outline"
+                    className="h-9 w-full text-[13px] text-destructive hover:text-destructive"
+                    disabled={removing}
+                    onClick={() => setConfirmUninstall(true)}
+                  >
+                    <Trash2 className="size-3.5" /> {t("library.uninstall")}
+                  </Button>
+                )}
                 <Row label={t("modDetail.host")} value={primary.host} />
                 <Row
                   label={t("modDetail.installsTo")}
@@ -592,6 +636,27 @@ export default function ModDetail({
               }}
             >
               {t("browse.reinstall")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={confirmUninstall} onOpenChange={setConfirmUninstall}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {t("library.confirmUninstall", {
+                name: installedEntry ? displayName(installedEntry.name) : "",
+              })}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {t("library.confirmUninstallBody")}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" onClick={() => void doUninstall()}>
+              {t("library.uninstall")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
