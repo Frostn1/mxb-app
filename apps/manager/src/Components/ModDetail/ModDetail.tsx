@@ -1,17 +1,12 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { createPortal } from "react-dom";
+import { useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
-  ChevronLeft,
-  ArrowLeft,
-  ExternalLink,
   Check,
   Copy,
   Snowflake,
   FileDown,
-  Maximize2,
-  ChevronRight,
-  X,
+  ExternalLink,
+  Loader2,
 } from "lucide-react";
 import { open } from "@tauri-apps/plugin-shell";
 import { open as pickFile } from "@tauri-apps/plugin-dialog";
@@ -42,7 +37,6 @@ import type {
   ModDetail as Detail,
 } from "@frost/shared/types";
 import { ContextBarLeft } from "../Shell/ContextBar";
-import CachedImg from "@frost/shared/Components/ui/cached-img";
 import RichDescription from "./RichDescription";
 import InstallDialog, { type InstallChoice } from "./InstallDialog";
 import { useInstall } from "../../Context/Install";
@@ -63,6 +57,9 @@ import { cn } from "@frost/shared/lib/utils";
 import { useConfig } from "@frost/shared/Context/Config";
 import { openCreatorPage, closeCreatorPage } from "@frost/shared/api/creatorPage";
 import { readAdSupport } from "@frost/shared/lib/adSupport";
+import { ActionBar, StateChip } from "../ModPage/ActionBar";
+import MediaPanel, { type Figure } from "../ModPage/Media";
+import { Facts, Note, Panel } from "../ModPage/Panels";
 
 interface ModDetailProps {
   slug: string;
@@ -101,6 +98,14 @@ function stageIndex(stage: InstallStage): number {
   }
 }
 
+/**
+ * One mod from the catalog, on the one mod page.
+ *
+ * The page is the same shape here, in the library and in the stores: a 60px action bar that
+ * never scrolls, the picture on the left with its figures on the foot, and a column of cards
+ * on the right. Only the bar and one card change with the state — here that card is the
+ * download: where it comes from, where it lands, and how far along it is.
+ */
 export default function ModDetail({
   slug,
   modType,
@@ -119,11 +124,6 @@ export default function ModDetail({
     [game, modType, categoryId],
   );
   const [derivedDest, setDerivedDest] = useState(false);
-  /** Which screenshot the hero is showing. Declared with the other hooks: it used to
-   *  sit below the loading and error returns, which is a rules-of-hooks violation. */
-  const [heroIdx, setHeroIdx] = useState(0);
-  /** Whether the screenshot is open full-window. */
-  const [zoom, setZoom] = useState(false);
   const [detail, setDetail] = useState<Detail | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   // The raw file list — only for destination folders and their counts. The badge uses
@@ -221,10 +221,10 @@ export default function ModDetail({
     return m;
   }, [installedFiles]);
 
-  // "Official" mirror + metadata for the collapsed install panel.
+  // "Official" mirror + metadata for the download card.
   const mirrors = useMemo(() => (detail ? sortMirrors(detail) : []), [detail]);
 
-  // What the dialog would start on — the best playable file, so the panel below the button
+  // What the dialog would start on — the best playable file, so the card below the bar
   // describes the download that's actually about to run.
   const primary = mirrors[defaultMirrorIndex(mirrors)] ?? null;
   const format = primary ? fileFormat(primary.url) : null;
@@ -304,10 +304,25 @@ export default function ModDetail({
     setTimeout(() => setCopied(false), 1500);
   };
 
+  const crumb = (title: string) => (
+    <ContextBarLeft>
+      <span className="flex items-center gap-2 font-cond text-[12.5px] font-semibold tracking-[-0.02em]">
+        <button
+          onClick={onBack}
+          className="cursor-default text-muted-foreground transition-colors hover:text-foreground"
+        >
+          {t(modType.label)}
+        </button>
+        <span className="text-faint">/</span>
+        <span className="max-w-[420px] truncate text-foreground">{title}</span>
+      </span>
+    </ContextBarLeft>
+  );
+
   if (loadError) {
     return (
       <div className="flex h-full flex-col px-7 py-5">
-        <Breadcrumb modType={modType} title="—" onBack={onBack} link={null} />
+        {crumb("—")}
         <div className="mt-6 flex flex-col items-start gap-3 rounded-xl border border-destructive/30 bg-destructive/[0.06] p-4">
           <p className="text-[13px] font-semibold text-destructive">
             {t("modDetail.loadFailed")}
@@ -328,7 +343,7 @@ export default function ModDetail({
   if (!detail) {
     return (
       <div className="flex h-full flex-col px-7 py-5">
-        <Breadcrumb modType={modType} title="…" onBack={onBack} link={null} />
+        {crumb("…")}
         <div className="grid flex-1 place-items-center text-muted-foreground">
           <Snowflake className="size-7 animate-spin [animation-duration:2.5s]" />
         </div>
@@ -341,149 +356,71 @@ export default function ModDetail({
       ? Math.round((myActive.received / myActive.total) * 100)
       : undefined;
   const idx = myActive ? stageIndex(myActive.stage) : -1;
+  const busy = idx >= 0 && myActive?.stage !== "done";
 
-  // Clamped once: opening a mod with fewer screenshots than the last one leaves the index
-  // past the end, and the thumbnail strip and the viewer have to agree with the hero on
-  // which picture that is.
-  const shotIdx = Math.min(heroIdx, Math.max(0, detail.images.length - 1));
-  const shot = detail.images[shotIdx];
+  const figures: Figure[] = [
+    { label: t("shopCatalog.updated"), value: formatDate(detail.date) },
+    ...(detail.version ? [{ label: "Version", value: detail.version }] : []),
+    ...(format ? [{ label: t("modDetail.format"), value: format }] : []),
+  ];
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
       {/* Browse's type tabs go with Browse, so the bar above would otherwise be an empty
           44px band. It carries where you are instead. */}
-      <ContextBarLeft>
-        <span className="flex items-center gap-2 font-cond text-[12.5px] font-semibold tracking-[-0.02em]">
-          <button
-            onClick={onBack}
-            className="cursor-default text-muted-foreground transition-colors hover:text-foreground"
-          >
-            {t(modType.label)}
-          </button>
-          <span className="text-faint">/</span>
-          <span className="max-w-[420px] truncate text-foreground">{detail.title}</span>
-        </span>
-      </ContextBarLeft>
+      {crumb(detail.title)}
 
-      {/* The artwork carries the name. A breadcrumb over a text column was the same page
-          every catalog has; this is the one the mockup drew. */}
-      <div className="relative h-[330px] flex-none overflow-hidden bg-card">
-        {shot && (
-          <>
-            {/* A blurred copy fills the band; the screenshot itself is shown whole beside it.
-                `object-cover` here cropped a 16:9 shot into a 4:1 slot — most of the picture
-                was off-screen, and cycling the thumbnails just swapped one sliver for another.
-                The 42% column is exactly the width a 16:9 image fills at this height, so the
-                two gradients below stop where the picture starts and never wash over it. */}
-            <CachedImg
-              src={shot}
-              width={640}
-              alt=""
-              aria-hidden
-              className="absolute inset-0 size-full scale-125 object-cover opacity-60 blur-[22px]"
-            />
-            <button
-              onClick={() => setZoom(true)}
-              aria-label={detail.title}
-              className="group absolute inset-y-0 right-0 w-[42%] cursor-default"
-            >
-              <CachedImg
-                src={shot}
-                width={1280}
-                alt={detail.title}
-                // `drop-shadow`, not `shadow`: with `object-contain` the element is the whole
-                // 42% column, so a box shadow would draw an edge where the picture isn't. A
-                // filter follows the pixels, which is what has to lift off the blur behind it.
-                className="size-full object-contain object-right drop-shadow-[-16px_0_26px_rgba(0,0,0,0.45)]"
-              />
-              <span className="absolute right-3 top-3 grid size-7 place-items-center border border-white/25 bg-black/45 text-white/85 opacity-0 transition-opacity group-hover:opacity-100">
-                <Maximize2 className="size-3.5" />
-              </span>
-            </button>
-          </>
+      <ActionBar
+        image={detail.images[0] ?? null}
+        title={detail.title}
+        meta={[t(modType.label), detail.author, detail.version]}
+      >
+        {isInstalled && (
+          <StateChip icon={Check} tone="success">
+            In library
+          </StateChip>
         )}
-        {/* Both scrims stop at 58% — the picture's edge — so the title stays readable over a
-            bright screenshot without any of it washing across the picture itself. */}
-        <div className="pointer-events-none absolute inset-0 bg-gradient-to-r from-[rgba(6,6,7,0.92)] via-[rgba(6,6,7,0.6)] via-35% to-transparent to-58%" />
-        <div className="pointer-events-none absolute bottom-0 left-0 h-[200px] w-[58%] bg-gradient-to-t from-[rgba(6,6,7,0.9)] via-[rgba(6,6,7,0.45)] via-50% to-transparent" />
-
-        <button
-          onClick={onBack}
-          className="absolute left-7 top-5 flex h-8 cursor-default items-center rounded-full border border-white/25 bg-black/40 px-4 text-white/85 transition-colors hover:text-white"
-        >
-          <span className="flex items-center gap-1.5">
-            <ChevronLeft className="size-3.5" />
-            <span className="font-cond text-[12px] font-semibold uppercase tracking-[0.14em]">
-              {t(modType.label)}
-            </span>
-          </span>
-        </button>
-
-        <div className="absolute inset-x-0 bottom-0 max-w-[58%] px-7 pb-5">
-          <h1 className="font-cond text-[42px] font-bold leading-[0.94] tracking-[-0.045em] text-white">
-            {detail.title}
-          </h1>
-          <div className="mt-2.5 flex flex-wrap items-center gap-2.5 text-[12.5px] text-white/65">
-            {detail.author && <span className="text-white/85">{detail.author}</span>}
-            {detail.author && <span className="text-white/30">/</span>}
-            <span className="tabular-figures">{formatDate(detail.date)}</span>
-            {detail.version && (
-              <>
-                <span className="text-white/30">/</span>
-                <span className="font-mono text-[11.5px]">{detail.version}</span>
-              </>
-            )}
-            {isInstalled && (
-              <>
-                <span className="text-white/30">/</span>
-                <span className="flex items-center gap-1 text-success">
-                  <Check className="size-3" strokeWidth={3} /> In library
-                </span>
-              </>
-            )}
-          </div>
-        </div>
-      </div>
+        {primary && (
+          <Button onClick={openInstall} disabled={busy}>
+            {busy && <Loader2 className="size-4 animate-spin" />}
+            {isInstalled ? t("browse.reinstall") : t("modDetail.addToLibrary")}
+          </Button>
+        )}
+      </ActionBar>
 
       <div className="flex min-h-0 flex-1 gap-6 px-7 pb-5 pt-4">
-        {/* left: gallery + description */}
-        <div className="flex min-w-0 flex-1 flex-col gap-3.5 overflow-y-auto pr-1">
-          {detail.images.length > 1 && (
-            <div className="flex flex-none gap-2 overflow-x-auto pb-1">
-              {detail.images.map((img, i) => (
-                <button
-                  key={img}
-                  onClick={() => setHeroIdx(i)}
-                  className={cn(
-                    "relative h-[62px] w-[104px] flex-none overflow-hidden rounded-lg bg-card transition-opacity",
-                    i === shotIdx ? "outline outline-2 -outline-offset-2 outline-primary" : "opacity-60 hover:opacity-100",
-                  )}
-                >
-                  <CachedImg src={img} width={240} alt="" className="size-full object-cover" />
-                </button>
-              ))}
-            </div>
-          )}
+        {/* left: the picture, then what the author wrote */}
+        <div className="flex min-w-0 flex-1 flex-col gap-4 overflow-y-auto pr-1">
+          <MediaPanel
+            images={detail.images}
+            title={detail.title}
+            figures={figures}
+            emptyLabel={t("shopCatalog.noScreenshots")}
+            fit="cover"
+          />
 
-          <div className="flex flex-col gap-2 pt-1">
-            <span className="text-[12px] font-bold uppercase tracking-[1.2px] text-faint">
-              About this {modType.id === "bikes" ? "bike" : modType.id === "rider" ? "rider gear" : "track"}
+          <div className="flex flex-col gap-2">
+            <span className="font-cond text-[10.5px] font-bold uppercase tracking-[0.14em] text-faint">
+              About this{" "}
+              {modType.id === "bikes"
+                ? t("modDetail.kindBike")
+                : modType.id === "rider"
+                  ? t("modDetail.kindRider")
+                  : t("modDetail.kindTrack")}
             </span>
             {/* Authored HTML from mxb-mods.com's REST API. */}
             <RichDescription html={detail.descriptionHtml} />
             {readAdSupport().enabled && (
-              <div className="mt-1 flex items-start gap-2 rounded-lg border border-input bg-muted/40 px-3 py-2 text-[11.5px] leading-relaxed text-muted-foreground">
-                <Snowflake className="mt-0.5 size-3.5 flex-none text-primary" />
-                <span>{t("modDetail.creatorPageNote", { site: game.catalogDomain })}</span>
-              </div>
+              <Note icon={Snowflake} tone="primary">
+                {t("modDetail.creatorPageNote", { site: game.catalogDomain })}
+              </Note>
             )}
           </div>
         </div>
 
-        {/* right rail */}
-        <div className="flex w-[340px] flex-none flex-col gap-3 overflow-y-auto">
-          {/* install panel */}
-          <div className="flex flex-col gap-3 rounded-xl border border-input bg-card p-4">
+        {/* right: the state card, then what holds for every state */}
+        <div className="flex w-[320px] flex-none flex-col gap-3 overflow-y-auto pb-1">
+          <Panel label={t("modDetail.stageDownload")}>
             {myActive && idx >= 0 ? (
               <InstallProgress
                 stage={myActive.stage}
@@ -506,7 +443,8 @@ export default function ModDetail({
                     {t("common.tryAgain")}
                   </Button>
                   <Button size="sm" variant="outline" onClick={copyError}>
-                    <Copy className="size-3.5" /> {copied ? t("modDetail.copied") : t("modDetail.copy")}
+                    <Copy className="size-3.5" />{" "}
+                    {copied ? t("modDetail.copied") : t("modDetail.copy")}
                   </Button>
                 </div>
               </div>
@@ -526,21 +464,20 @@ export default function ModDetail({
                     button, not after the install: it lands in the library either way and
                     then does nothing in-game, which reads as a broken mod. */}
                 {serverOnly && (
-                  <div className="flex items-start gap-2.5 border border-warning/30 bg-warning/[0.07] px-3 py-2.5">
-                    <AlertTriangle className="mt-px size-3.5 flex-none text-warning" />
-                    <span className="text-[12px] text-warning/90">
-                      {t("modDetail.serverOnlyNotice")}
-                    </span>
-                  </div>
+                  <Note icon={AlertTriangle} tone="warning">
+                    {t("modDetail.serverOnlyNotice")}
+                  </Note>
                 )}
-                <Button className="h-11 w-full text-[14px]" onClick={openInstall}>
-                  {isInstalled ? t("browse.reinstall") : t("modDetail.addToLibrary")}
-                </Button>
-                <Row label={t("modDetail.host")} value={primary.host} />
-                <Row
-                  label={t("modDetail.installsTo")}
-                  value={`${modType.installSubpath.replace(/\//g, "\\")}\\`}
-                  mono
+                <Facts
+                  rows={[
+                    { label: t("modDetail.host"), value: primary.host },
+                    { label: t("modDetail.mirrors"), value: mirrorNames },
+                    {
+                      label: t("modDetail.installsTo"),
+                      value: `${modType.installSubpath.replace(/\//g, "\\")}\\`,
+                      mono: true,
+                    },
+                  ]}
                 />
               </>
             ) : (
@@ -548,35 +485,31 @@ export default function ModDetail({
                 {t("modDetail.noDownloadLink", { site: game.catalogDomain })}
               </p>
             )}
-          </div>
+          </Panel>
+
+          {/* There is no "What's inside" here on purpose: mxb-mods states a mod's mirrors,
+              not its contents, and the download options are copies of one file rather than
+              parts of it. Inventing a parts list out of them would be worse than the gap. */}
 
           {/* What happens once the install finishes. FrostMod hot-reloads the game, but
               it's an MX Bikes plugin — promising a reload for a title that has none is
               worse than saying nothing, so that case gets the honest instruction. */}
-          <div className="flex items-center gap-2.5 border border-success/25 bg-success/[0.06] px-3 py-2.5">
-            <span className="size-[7px] flex-none rounded-full bg-success" />
-            <span className="text-[12px] text-success/90">
-              {t(game.caps.frostmod ? "modDetail.frostmodHint" : "modDetail.restartHint", {
-                game: game.display,
-                kind:
-                  modType.id === "rider"
-                    ? t("modDetail.kindRider")
-                    : modType.id === "bikes"
-                      ? t("modDetail.kindBike")
-                      : t("modDetail.kindTrack"),
-              })}
+          <Note tone="success">
+            <span className="flex items-start gap-2.5">
+              <span className="mt-1.5 size-[7px] flex-none rounded-full bg-success" />
+              <span>
+                {t(game.caps.frostmod ? "modDetail.frostmodHint" : "modDetail.restartHint", {
+                  game: game.display,
+                  kind:
+                    modType.id === "rider"
+                      ? t("modDetail.kindRider")
+                      : modType.id === "bikes"
+                        ? t("modDetail.kindBike")
+                        : t("modDetail.kindTrack"),
+                })}
+              </span>
             </span>
-          </div>
-
-          {/* details */}
-          <div className="flex flex-col gap-2.5 rounded-xl border border-white/[0.07] bg-card px-4 py-3.5">
-            <span className="text-[11px] font-bold uppercase tracking-[1.2px] text-faint">
-              {t("modDetail.details")}
-            </span>
-            {format && <Row label={t("modDetail.format")} value={format} mono />}
-            {mirrorNames && <Row label={t("modDetail.mirrors")} value={mirrorNames} />}
-            <Row label={t("modDetail.type")} value={t(modType.label)} />
-          </div>
+          </Note>
         </div>
       </div>
 
@@ -618,169 +551,6 @@ export default function ModDetail({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-
-      {zoom && shot && (
-        <Lightbox
-          images={detail.images}
-          index={shotIdx}
-          onIndex={setHeroIdx}
-          onClose={() => setZoom(false)}
-          title={detail.title}
-        />
-      )}
-    </div>
-  );
-}
-
-/**
- * One screenshot at the size the window allows.
- *
- * The hero band shows the whole picture but it is still a strip across the top of the page;
- * this is the look-at-it-properly view. Arrow keys walk the set, Escape and a click anywhere
- * off the picture leave.
- */
-function Lightbox({
-  images,
-  index,
-  onIndex,
-  onClose,
-  title,
-}: {
-  images: string[];
-  index: number;
-  onIndex: (i: number) => void;
-  onClose: () => void;
-  title: string;
-}) {
-  const t = useT();
-  const step = useCallback(
-    (d: number) => onIndex((index + d + images.length) % images.length),
-    [index, images.length, onIndex],
-  );
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-      else if (e.key === "ArrowRight") step(1);
-      else if (e.key === "ArrowLeft") step(-1);
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose, step]);
-
-  // Portalled: the detail page sits inside a clipped column, and a viewer that covers the
-  // window has to be a child of the window.
-  return createPortal(
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/92 px-16 py-12"
-      onClick={onClose}
-    >
-      <CachedImg
-        src={images[index]}
-        alt={title}
-        className="max-h-full max-w-full object-contain"
-        onClick={(e) => e.stopPropagation()}
-      />
-
-      <button
-        onClick={onClose}
-        aria-label={t("common.close")}
-        title={t("common.close")}
-        className="absolute right-5 top-5 grid size-9 cursor-default place-items-center border border-white/20 bg-black/50 text-white/75 transition-colors hover:text-white"
-      >
-        <X className="size-4" />
-      </button>
-
-      {images.length > 1 && (
-        <>
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              step(-1);
-            }}
-            aria-label={t("common.back")}
-            className="absolute left-4 top-1/2 grid size-10 -translate-y-1/2 cursor-default place-items-center border border-white/20 bg-black/50 text-white/75 transition-colors hover:text-white"
-          >
-            <ChevronLeft className="size-5" />
-          </button>
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              step(1);
-            }}
-            aria-label={t("common.next")}
-            className="absolute right-4 top-1/2 grid size-10 -translate-y-1/2 cursor-default place-items-center border border-white/20 bg-black/50 text-white/75 transition-colors hover:text-white"
-          >
-            <ChevronRight className="size-5" />
-          </button>
-          <span className="absolute inset-x-0 bottom-5 text-center font-mono text-[12px] tabular-figures text-white/55">
-            {index + 1} / {images.length}
-          </span>
-        </>
-      )}
-    </div>,
-    document.body,
-  );
-}
-
-function Breadcrumb({
-  modType,
-  title,
-  onBack,
-  link,
-}: {
-  modType: ModType;
-  title: string;
-  onBack: () => void;
-  link: string | null;
-}) {
-  const t = useT();
-  const { game } = useConfig();
-  return (
-    <div className="flex items-center gap-2 text-[12.5px] text-muted-foreground">
-      <button
-        onClick={onBack}
-        className="flex cursor-default items-center gap-1 font-semibold text-primary hover:brightness-110"
-      >
-        <ArrowLeft className="size-3.5" /> {t("nav.browse")}
-      </button>
-      <span className="text-faint">/</span>
-      <span>{t(modType.label)}</span>
-      <span className="text-faint">/</span>
-      <span className="truncate text-foreground/85">{title}</span>
-      {link && (
-        <button
-          onClick={() => open(link)}
-          className="ml-auto flex cursor-default items-center gap-1 text-[12px] text-primary hover:brightness-110"
-        >
-          {t("modDetail.viewOnSite", { site: game.catalogDomain })}{" "}
-          <ExternalLink className="size-3" />
-        </button>
-      )}
-    </div>
-  );
-}
-
-function Row({
-  label,
-  value,
-  mono,
-}: {
-  label: string;
-  value: string;
-  mono?: boolean;
-}) {
-  return (
-    <div className="flex items-center justify-between gap-3 text-[12px]">
-      <span className="text-muted-foreground">{label}</span>
-      <span
-        className={cn(
-          "truncate text-foreground/85",
-          mono && "font-mono text-[11px]",
-        )}
-      >
-        {value}
-      </span>
     </div>
   );
 }
@@ -816,8 +586,10 @@ function InstallProgress({
     <div className="flex flex-col gap-2">
       <div className="flex items-baseline justify-between">
         <span className="text-[12px] font-semibold text-foreground/85">{label}</span>
+        {/* The only place a size belongs: bytes we are actually moving. Neither catalog
+            states a file's size before the transfer starts, so nothing above claims one. */}
         {stage === "downloading" && total ? (
-          <span className="text-[11px] text-muted-foreground">
+          <span className="text-[11px] tabular-figures text-muted-foreground">
             {mb(received)} of {mb(total)} MB{pct !== undefined ? ` · ${pct}%` : ""}
           </span>
         ) : null}
@@ -839,7 +611,7 @@ function InstallProgress({
           }
         />
       </div>
-      <div className="flex flex-wrap items-center gap-1.5 text-[10.5px] text-faint">
+      <div className="flex flex-wrap items-center gap-1.5 font-cond text-[10.5px] text-faint">
         {CHAIN.map((s, i) => (
           <span key={s.key} className="flex items-center gap-1.5">
             <span
@@ -874,7 +646,7 @@ function BlockedHost({
   return (
     <div className="flex flex-col gap-3.5">
       <div className="flex flex-col gap-1">
-        <span className="text-[14px] font-bold">
+        <span className="font-cond text-[14px] font-bold tracking-[-0.03em]">
           {t("modDetail.finishInBrowser")}
         </span>
         <span className="text-[12px] leading-relaxed text-muted-foreground">
@@ -924,7 +696,7 @@ function Step({ n, done, active }: { n: number; done: boolean; active: boolean }
   return (
     <span
       className={cn(
-        "grid size-[22px] place-items-center rounded-full text-[11px] font-bold",
+        "grid size-[22px] place-items-center rounded-full font-cond text-[11px] font-bold",
         done || active
           ? "bg-primary text-primary-foreground"
           : "border border-foreground/20 text-muted-foreground",

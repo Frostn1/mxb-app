@@ -1,10 +1,19 @@
 import { useEffect, useState } from "react";
-import { ArrowLeft, Check, Download, ExternalLink, Loader2, Store, User } from "lucide-react";
-import type { ShopModDetail } from "@frost/shared/types";
+import {
+  ChevronLeft,
+  Check,
+  Download,
+  ExternalLink,
+  FileBox,
+  Loader2,
+  ShoppingBag,
+  Store,
+  User,
+} from "lucide-react";
+import type { HubModDetail, ShopModDetail } from "@frost/shared/types";
 import type { ShopItem } from "@frost/shared/api/mods";
-import { openShopUrl, shopCatalogDetail } from "../../api/shop";
+import { formatPrice, openShopUrl, shopCatalogDetail } from "../../api/shop";
 import PriceTag, { SaleEnds } from "./PriceTag";
-import Gallery from "../ModDetail/Gallery";
 import RichDescription from "../ModDetail/RichDescription";
 import { Button } from "@frost/shared/Components/ui/button";
 import { Skeleton } from "@frost/shared/Components/ui/skeleton";
@@ -15,8 +24,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@frost/shared/Components/ui/select";
-import { useT } from "@/i18n";
+import { useI18n, useT } from "@/i18n";
 import { formatDate } from "@frost/shared/lib/mods";
+import { ActionBar, StateChip } from "../ModPage/ActionBar";
+import MediaPanel, { type Figure } from "../ModPage/Media";
+import { Panel, SectionLabel, WhatsInside } from "../ModPage/Panels";
 
 /** What the right rail offers when the viewer already owns this. */
 export interface OwnedActions {
@@ -46,16 +58,12 @@ interface ShopDetailProps {
 }
 
 /**
- * One catalog item, in full.
+ * One catalog item, on the one mod page.
  *
- * A separate component from `ModDetail` rather than a mode of it. `ModDetail` is 690 lines
- * and most of them are install machinery — destination resolution, mirror sorting, the
- * install dialog, the blocked-host flow, the five-stage progress chain — none of which
- * applies to something we never download. The two genuinely shared pieces are the gallery
- * (now `ModDetail/Gallery.tsx`) and the `.mod-description` styling, and both are reused here.
- *
- * Served entirely from the catalog already in memory, so this opens instantly and works with
- * the network down.
+ * The same bar, picture and card column as Browse and the library — the state card here is
+ * the price (or, once it is yours, the download). What this page deliberately does not show
+ * is a file size: neither store states one anywhere in its catalog, and the only honest
+ * numbers are the ones the transfer itself reports.
  */
 export default function ShopDetail({
   id,
@@ -65,6 +73,7 @@ export default function ShopDetail({
   load = shopCatalogDetail,
 }: ShopDetailProps) {
   const t = useT();
+  const { resolved } = useI18n();
   const [detail, setDetail] = useState<ShopModDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Which file to install, for a product that ships more than one. Held here rather than in
@@ -83,10 +92,19 @@ export default function ShopDetail({
     };
   }, [id, load]);
 
+  // The store keeps its own Catalog/Purchases tabs in the context bar the whole time it is
+  // open, so the way back rides in the action bar rather than portalling in beside them.
+  const back = (
+    <Button variant="ghost" size="sm" onClick={onBack} className="flex-none self-start">
+      <ChevronLeft className="size-4" />
+      {t("common.back")}
+    </Button>
+  );
+
   if (error) {
     return (
-      <div className="flex min-h-0 flex-1 flex-col px-7">
-        <BackButton label={t("common.back")} onBack={onBack} />
+      <div className="flex min-h-0 flex-1 flex-col px-7 pt-4">
+        {back}
         <div className="mx-auto flex max-w-md flex-col items-center gap-3 py-20 text-center">
           <p className="text-[13px] font-semibold text-destructive">
             {t("shopCatalog.loadFailed")}
@@ -101,42 +119,110 @@ export default function ShopDetail({
 
   if (!detail) {
     return (
-      <div className="flex min-h-0 flex-1 flex-col px-7">
-        <BackButton label={t("common.back")} onBack={onBack} />
+      <div className="flex min-h-0 flex-1 flex-col px-7 pt-4">
+        {back}
         <div className="mt-4 flex gap-6">
           <Skeleton className="aspect-video flex-1 rounded-xl" />
-          <Skeleton className="h-64 w-[340px] flex-none rounded-xl" />
+          <Skeleton className="h-64 w-[320px] flex-none rounded-xl" />
         </div>
       </div>
     );
   }
 
-  return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-7 pb-6">
-      <div className="flex flex-none items-center gap-3">
-        <BackButton label={t("common.back")} onBack={onBack} />
-        <h1 className="truncate text-[17px] font-bold tracking-[-0.2px]">
-          {detail.title}
-        </h1>
-      </div>
+  // The Hub's own one-line statement of what ships ("in-game ready PKZ", "PSD included").
+  // The mxbikes-shop dump carries no equivalent, so this is simply absent there.
+  const summary = (detail as Partial<HubModDetail>).summary ?? null;
 
-      <div className="mt-4 flex min-h-0 flex-1 gap-6">
-        <div className="flex min-w-0 flex-1 flex-col gap-3.5 overflow-y-auto pr-1">
-          {/* Square, because the store's product images are. In a 16:9 frame they had to
-              be either cropped or heavily letterboxed; matching the frame to the content
-              means the image fills it and stays whole. */}
-          <Gallery
+  // One figure for the bar. A product sold in a range of options has no single price, so the
+  // button says "Buy" and the card below shows the range in full rather than the low end,
+  // which would read as the price and be wrong for every other option.
+  const price = detail.price;
+  const live = price.onSale ? price.sale : price.base;
+  const priceLabel = price.free
+    ? t("shopCatalog.free")
+    : live === null || price.hasRange
+      ? null
+      : formatPrice(live, currency, resolved);
+
+  const files = owned?.files ?? [];
+  const picked = files.find((f) => String(f.id) === pickedId) ?? files[0];
+
+  // The price is the bar's job and the state card's; on the picture it would be the third
+  // copy of one number.
+  const figures: Figure[] = [
+    ...(detail.updated !== null
+      ? [
+          {
+            label: t("shopCatalog.updated"),
+            value: formatDate(new Date(detail.updated * 1000).toISOString()),
+          },
+        ]
+      : []),
+  ];
+
+  return (
+    <div className="flex h-full min-h-0 flex-col overflow-hidden">
+      <ActionBar
+        image={detail.image ?? detail.images[0] ?? null}
+        fallbackIcon={ShoppingBag}
+        title={detail.title}
+        meta={[detail.author, detail.categoryNames[0]]}
+        onBack={onBack}
+        backLabel={t("common.back")}
+      >
+        {owned ? (
+          <>
+            {owned.installed && (
+              <StateChip icon={Check} tone="success">
+                {t("purchases.installed")}
+              </StateChip>
+            )}
+            {picked && (
+              <Button
+                variant={owned.installed ? "secondary" : "default"}
+                onClick={() => owned.onInstall(picked)}
+                disabled={owned.disabled || owned.busy}
+              >
+                {owned.busy ? (
+                  <Loader2 className="size-4 animate-spin" />
+                ) : (
+                  <Download className="size-4" />
+                )}
+                {owned.busy
+                  ? t("purchases.downloading")
+                  : owned.installed
+                    ? t("purchases.reinstall")
+                    : t("modDetail.addToLibrary")}
+              </Button>
+            )}
+          </>
+        ) : (
+          detail.url && (
+            <Button onClick={() => void openShopUrl(detail.url)}>
+              <ExternalLink className="size-4" />
+              {/* Short, because the bar is one row: what it costs, and that it opens the
+                  store, which the card below says in full. */}
+              {priceLabel ? `Buy · ${priceLabel}` : t("shopCatalog.buyOnStore")}
+            </Button>
+          )
+        )}
+      </ActionBar>
+
+      <div className="flex min-h-0 flex-1 gap-6 px-7 pb-5 pt-4">
+        <div className="flex min-w-0 flex-1 flex-col gap-4 overflow-y-auto pr-1">
+          {/* The store's product art is square; `contain` in a 16:9 frame keeps it whole
+              rather than slicing its top and bottom off to fill. */}
+          <MediaPanel
             images={detail.images}
             title={detail.title}
+            figures={figures}
             emptyLabel={t("shopCatalog.noScreenshots")}
-            aspect="square"
+            fit="contain"
           />
 
           {detail.descriptionHtml && (
-            <div className="flex flex-col gap-2 pt-1">
-              <span className="text-[12px] font-bold uppercase tracking-[1.2px] text-faint">
-                {t("shopCatalog.about")}
-              </span>
+            <div className="flex flex-col gap-2">
+              <SectionLabel>{t("shopCatalog.about")}</SectionLabel>
               {/* Authored HTML from the store's catalog. Sanitised in Rust before it ever
                   reaches here — see `sanitize_html` in `mods/shop_catalog.rs`. */}
               <RichDescription html={detail.descriptionHtml} />
@@ -144,111 +230,116 @@ export default function ShopDetail({
           )}
         </div>
 
-        {/* right rail */}
-        <div className="flex w-[340px] flex-none flex-col gap-3 overflow-y-auto">
+        <div className="flex w-[320px] flex-none flex-col gap-3 overflow-y-auto pb-1">
           {owned ? (
             <OwnedPanel
               owned={owned}
-              pickedId={pickedId}
+              picked={picked}
               setPickedId={setPickedId}
               storeUrl={detail.url}
             />
           ) : (
-            <div className="flex flex-col gap-2 rounded-xl border border-white/[0.07] bg-card p-4">
+            <Panel>
               <PriceTag price={detail.price} currency={currency} size="lg" />
               <SaleEnds price={detail.price} />
-
               {/* Buying happens on the store. We deliberately don't handle payment or
                   downloads — this app can browse the catalog and nothing more. */}
-              {detail.url ? (
-                <Button
-                  className="mt-2 w-full"
-                  onClick={() => void openShopUrl(detail.url)}
-                >
-                  <ExternalLink className="size-4" />
-                  {t("shopCatalog.buyOnStore")}
-                </Button>
-              ) : (
-                <p className="mt-2 text-[12px] text-muted-foreground">
+              {!detail.url && (
+                <p className="text-[12px] text-muted-foreground">
                   {t("shopCatalog.noProductLink")}
                 </p>
               )}
-              <p className="text-center text-[11px] text-faint">
-                {t("shopCatalog.buyNote")}
-              </p>
-            </div>
+              <p className="text-[11px] text-faint">{t("shopCatalog.buyNote")}</p>
+            </Panel>
           )}
 
-          <div className="flex flex-col gap-2.5 rounded-xl border border-white/[0.07] bg-card p-4 text-[12.5px]">
+          {/* What's inside, said before you own it wherever the store says it: the Hub's own
+              summary line, and — once it's yours — the files the product actually ships. */}
+          {summary && (
+            <Panel label="What's inside">
+              <p className="text-[12.5px] leading-relaxed text-muted-foreground">{summary}</p>
+            </Panel>
+          )}
+          <WhatsInside
+            groups={
+              files.length > 0
+                ? [
+                    {
+                      key: "files",
+                      label: t("purchases.fileCount", { count: files.length }),
+                      items: files.map((f) => ({
+                        key: String(f.id),
+                        label: f.fileLabel || f.title,
+                        icon: FileBox,
+                      })),
+                    },
+                  ]
+                : []
+            }
+          />
+
+          <Panel label={t("modDetail.details")}>
             {detail.author && (
-              <Row icon={<User className="size-3.5" />} label={t("shopCatalog.author")}>
+              <div className="flex items-start justify-between gap-4 text-[12px]">
+                <span className="flex flex-none items-center gap-1.5 text-muted-foreground">
+                  <User className="size-3.5" />
+                  {t("shopCatalog.author")}
+                </span>
                 {detail.authorUrl ? (
                   <button
                     onClick={() => void openShopUrl(detail.authorUrl)}
-                    className="cursor-default truncate text-left text-primary hover:underline"
+                    className="min-w-0 cursor-default truncate text-right text-primary hover:underline"
                   >
                     {detail.author}
                   </button>
                 ) : (
-                  <span className="truncate">{detail.author}</span>
+                  <span className="min-w-0 truncate text-right text-foreground/85">
+                    {detail.author}
+                  </span>
                 )}
-              </Row>
+              </div>
             )}
             {detail.categoryNames.length > 0 && (
-              <Row icon={<Store className="size-3.5" />} label={t("shopCatalog.category")}>
-                {/* Wraps rather than truncates: `truncate` on an inline span in a flex row
-                    doesn't clip a dozen categories, it pushes them out of the card. */}
-                <span className="block whitespace-normal break-words">
+              <div className="flex items-start justify-between gap-4 text-[12px]">
+                <span className="flex flex-none items-center gap-1.5 text-muted-foreground">
+                  <Store className="size-3.5" />
+                  {t("shopCatalog.category")}
+                </span>
+                {/* Wraps rather than truncates: a dozen categories on one line would push
+                    themselves out of the card instead of being clipped by it. */}
+                <span className="min-w-0 whitespace-normal break-words text-right text-foreground/85">
                   {detail.categoryNames.join(", ")}
                 </span>
-              </Row>
+              </div>
             )}
-            {detail.updated !== null && (
-              <Row label={t("shopCatalog.updated")}>
-                <span>{formatDate(new Date(detail.updated * 1000).toISOString())}</span>
-              </Row>
-            )}
-          </div>
+          </Panel>
         </div>
       </div>
     </div>
   );
 }
 
-/** The right rail for something already bought: pick a file, put it in the library. */
+/** The state card for something already bought: pick a file, watch it land. */
 function OwnedPanel({
   owned,
-  pickedId,
+  picked,
   setPickedId,
   storeUrl,
 }: {
   owned: OwnedActions;
-  pickedId: string | null;
+  picked: ShopItem | undefined;
   setPickedId: (id: string) => void;
   storeUrl: string | null;
 }) {
   const t = useT();
-  const { files, installed, busy, progress, disabled, onInstall } = owned;
-
-  const picked = files.find((f) => String(f.id) === pickedId) ?? files[0];
+  const { files, busy, progress, disabled } = owned;
   const multi = files.length > 1;
 
   return (
-    <div className="flex flex-col gap-2.5 rounded-xl border border-white/[0.07] bg-card p-4">
-      {installed && (
-        <span className="flex items-center gap-1.5 text-[12.5px] font-semibold text-emerald-400">
-          <Check className="size-3.5" strokeWidth={3} />
-          {t("purchases.installed")}
-        </span>
-      )}
-
+    <Panel label={t("purchases.install")}>
       {/* Only a product with variants has anything to ask. */}
-      {multi && (
-        <Select
-          value={String(picked.id)}
-          onValueChange={setPickedId}
-          disabled={disabled}
-        >
+      {multi && picked && (
+        <Select value={String(picked.id)} onValueChange={setPickedId} disabled={disabled}>
           <SelectTrigger className="h-8 w-full bg-background text-[12.5px]">
             <SelectValue />
           </SelectTrigger>
@@ -261,24 +352,6 @@ function OwnedPanel({
           </SelectContent>
         </Select>
       )}
-
-      <Button
-        className="w-full"
-        variant={installed ? "outline" : "default"}
-        onClick={() => onInstall(picked)}
-        disabled={disabled}
-      >
-        {busy ? (
-          <Loader2 className="size-4 animate-spin" />
-        ) : (
-          <Download className="size-4" />
-        )}
-        {busy
-          ? t("purchases.downloading")
-          : installed
-            ? t("purchases.reinstall")
-            : t("modDetail.addToLibrary")}
-      </Button>
 
       {/* No bar when nothing reported a length — an invented one would be a lie. */}
       {busy && progress !== null && (
@@ -306,36 +379,6 @@ function OwnedPanel({
           {t("shopCatalog.openOnStore")}
         </Button>
       )}
-    </div>
-  );
-}
-
-function BackButton({ label, onBack }: { label: string; onBack: () => void }) {
-  return (
-    <Button variant="ghost" size="sm" onClick={onBack} className="flex-none">
-      <ArrowLeft className="size-4" />
-      {label}
-    </Button>
-  );
-}
-
-function Row({
-  icon,
-  label,
-  children,
-}: {
-  icon?: React.ReactNode;
-  label: string;
-  children: React.ReactNode;
-}) {
-  return (
-    // `items-start` keeps the label at the top when the value wraps.
-    <div className="flex items-start gap-2">
-      <span className="flex flex-none items-center gap-1.5 pt-px text-muted-foreground">
-        {icon}
-        {label}
-      </span>
-      <span className="ml-auto min-w-0 text-right">{children}</span>
-    </div>
+    </Panel>
   );
 }
