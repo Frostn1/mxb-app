@@ -518,6 +518,73 @@ export async function readSnapshot(env: Env): Promise<Response> {
   });
 }
 
+/**
+ * Server names that exist to sell cheats, folded the same way the names are.
+ *
+ * These are not servers in any useful sense. They sit on the master list at 42/42 with a
+ * password set so nobody can ever join one, because the row itself is the product: the name is
+ * a billboard in everybody's server browser. On 2026-09-18, 28 of the 69 rows in the shared
+ * snapshot were this one advertiser.
+ *
+ * A domain list is narrow on purpose. The snapshot is the one place the control plane repeats
+ * operator text into everybody's app, so a rule here has to be something we can defend rather
+ * than a guess at what looks spammy — "this is a shop that sells cheats for this game" is a
+ * fact, and the list is short enough to keep honest.
+ */
+export const CHEAT_SHOPS = ["kaizopro"];
+
+/**
+ * Fold the tricks out of a name so a match survives them.
+ *
+ * `BUY CHE4TS 4TH JULY 50% OFF WWW.KAlZ0.PR0` is written that way for a reason: the digits and
+ * the lowercase L are there to slip a literal match while still reading as the domain to a
+ * human. So confusable characters collapse to one representative and everything else goes,
+ * and the needles are folded with the same function — that is what makes the comparison fair
+ * rather than a list of hand-written spellings to be kept up to date.
+ */
+export function fold(name: string): string {
+  const swap: Record<string, string> = {
+    "0": "o",
+    "1": "i",
+    l: "i",
+    "|": "i",
+    "!": "i",
+    "3": "e",
+    "4": "a",
+    "@": "a",
+    "5": "s",
+    $: "s",
+    "7": "t",
+    "8": "b",
+    "9": "g",
+    "6": "g",
+  };
+  return name
+    .toLowerCase()
+    .split("")
+    .map((c) => swap[c] ?? c)
+    .join("")
+    .replace(/[^a-z]/g, "");
+}
+
+/**
+ * Whether a row is an advertisement rather than a server.
+ *
+ * Two rules. A known cheat shop's domain in the name, which is the narrow and certain one. And
+ * a name that both talks about cheats and carries a web address, which catches the same
+ * advertiser the day they move domain — `NO CHEATING` stays, `BUY CHEATS WWW.SOMEWHERE` goes.
+ *
+ * A false positive costs little and costs it briefly: this only drops a row from the head start
+ * the app paints while its own sweep runs, and the sweep — which this never touches — puts the
+ * server back a second later. Getting it wrong in the other direction means the control plane
+ * spends its own bandwidth putting a cheat shop in front of every player who opens the tab.
+ */
+export function isAdvert(name: string): boolean {
+  const folded = fold(name);
+  if (CHEAT_SHOPS.some((shop) => folded.includes(fold(shop)))) return true;
+  return folded.includes("cheat") && (folded.includes("www") || folded.includes("http"));
+}
+
 /** Check a snapshot, returning the reason it was refused rather than a bare false. */
 export function parseSnapshot(raw: string): SnapshotRow[] | string {
   let body: unknown;
@@ -544,10 +611,15 @@ export function parseSnapshot(raw: string): SnapshotRow[] | string {
     if (!isPublicGameAddress(s.address)) continue;
     const address = (s.address as string).trim();
     if (seen.has(address)) continue;
+    const name = text(s.name, 64);
+    // Dropped here rather than at the read, so the stored payload is already clean and the
+    // served answer stays one lookup. The cost is that a change to the list takes effect on
+    // the next write rather than at once, which for a row rewritten every minute is nothing.
+    if (isAdvert(name)) continue;
     seen.add(address);
     rows.push({
       address,
-      name: text(s.name, 64),
+      name,
       players: count(s.players, 999),
       maxPlayers: count(s.maxPlayers, 999),
       track: text(s.track, 64),

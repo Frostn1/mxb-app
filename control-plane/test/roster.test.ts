@@ -9,6 +9,7 @@ import {
   SNAPSHOT_MIN_GAP_MS,
   claimRoster,
   parseReport,
+  isAdvert,
   parseSnapshot,
   pruneRoster,
   readRoster,
@@ -382,6 +383,42 @@ describe("the shared snapshot", () => {
     expect(only.name).toBe("a b c");
     expect(only.players).toBe(0);
     expect(only.maxPlayers).toBe(999);
+  });
+
+  it("drops the rows that are adverts rather than servers", () => {
+    // The real one, verbatim off the master list on 2026-09-18 — 28 of the 69 rows in the
+    // shared snapshot, all from one host, all 42/42 and passworded so nobody can ever join.
+    // The digits and the lowercase L are there to beat a literal match.
+    const rows = parseSnapshot(
+      JSON.stringify({
+        servers: [
+          row(A, { name: "BUY CHE4TS 4TH JULY 50% OFF WWW.KAlZ0.PR0" }),
+          row(B, { name: "1 | OPEN OEM | Stock Track Rotation 1 | CBRSERVERS.COM" }),
+        ],
+      }),
+    );
+    expect(Array.isArray(rows)).toBe(true);
+    expect((rows as { name: string }[]).map((r) => r.name)).toEqual([
+      "1 | OPEN OEM | Stock Track Rotation 1 | CBRSERVERS.COM",
+    ]);
+  });
+
+  it("knows an advert from a server that merely mentions one", () => {
+    expect(isAdvert("kaizo.pro")).toBe(true);
+    expect(isAdvert("K A I Z O . P R O")).toBe(true);
+    expect(isAdvert("BUY CHEATS WWW.SOMEWHEREELSE.NET")).toBe(true);
+    // Real names off the live list, several with a web address in them. All legitimate.
+    expect(isAdvert("2FastRacing |[AMATURE]| QUICKRACES/discord.2fast.racing")).toBe(false);
+    expect(isAdvert("AUS | TheFamilyRacing https://discord.gg/KdPby86yVG")).toBe(false);
+    expect(isAdvert("My New Server by SurvivalServers.comstanky")).toBe(false);
+    expect(isAdvert("No Cheating Allowed")).toBe(false);
+    expect(isAdvert("Anti-Cheat Enabled Server")).toBe(false);
+  });
+
+  it("refuses a snapshot that was nothing but adverts", () => {
+    expect(
+      parseSnapshot(JSON.stringify({ servers: [row(A, { name: "WWW.KAlZ0.PR0" })] })),
+    ).toBe("no usable servers in that snapshot");
   });
 
   it("drops a row nobody could join and refuses a snapshot of nothing else", () => {
