@@ -68,6 +68,18 @@ pub(crate) use mxb_core::proton;
 #[cfg(sidecar)]
 #[cfg(mxbsecure)]
 pub(crate) use mxb_core::mxbsecure;
+
+/// This Mac's hardware UUID, which secured content is keyed on — handed to the game at launch so
+/// the DLL inside it can unwrap a macOS `.mxbkey` (see `mxbsecure::mac_machine_id`). `None` on a
+/// build without the secure module, off macOS, or when IOKit won't answer.
+#[cfg(mxbsecure)]
+pub(crate) fn mxbsecure_machine_id() -> Option<String> {
+    mxbsecure::mac_machine_id()
+}
+#[cfg(not(mxbsecure))]
+pub(crate) fn mxbsecure_machine_id() -> Option<String> {
+    None
+}
 /// The world-server browser: speaks the master-server protocol to list live servers.
 /// Local-only, like [`sidecar`] — the public tree neither has the file nor the feature.
 #[cfg(worldnet)]

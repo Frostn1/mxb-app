@@ -124,6 +124,17 @@ jobs:
           rustup target add x86_64-pc-windows-gnu
           cargo build --release --manifest-path .sidecar-src/secure/Cargo.toml --target x86_64-pc-windows-gnu
 
+      # A Mac buyer plays under CrossOver, Whisky or Wine, so the Mac bundle carries the same two
+      # Windows PEs the Linux one does — the DLL and the attach injector — cross-built here with
+      # mingw. `--cask` because the formula is keg-only bottles; it is a couple of minutes.
+      - name: Build secure-content DLL + injector (macOS)
+        if: ${{ github.repository == 'Frostn1/mxb-app' && startsWith(matrix.platform, 'macos') }}
+        shell: bash
+        run: |
+          brew install mingw-w64
+          rustup target add x86_64-pc-windows-gnu
+          cargo build --release --manifest-path .sidecar-src/secure/Cargo.toml --target x86_64-pc-windows-gnu
+
       - name: Apply sidecar module
         if: ${{ github.repository == 'Frostn1/mxb-app' }}
         shell: bash
@@ -138,14 +149,15 @@ jobs:
       # `resources` glob is a hard error when it matches nothing, so keeping it in the committed
       # config broke every build without the private module. By now sync.sh has put the files in
       # src/ and build.rs has copied them into resources/. Windows ships just the DLL (injected
-      # in-process); Linux ships the DLL + `mxbsecure-inject.exe` (the Proton attach injector).
+      # in-process); Linux and macOS ship the DLL + `mxbsecure-inject.exe`, the attach injector
+      # the app launches inside the Proton prefix or the Wine bottle.
       # The `resources/mxbsecure*` glob matches whichever files the leg produced.
       - name: Bundle the secure-content files
-        if: ${{ github.repository == 'Frostn1/mxb-app' && (startsWith(matrix.platform, 'windows') || startsWith(matrix.platform, 'ubuntu')) }}
+        if: ${{ github.repository == 'Frostn1/mxb-app' }}
         shell: bash
         run: |
           test -f apps/manager/src-tauri/src/mxbsecure.dll || { echo "::error::mxbsecure.dll missing after sync.sh"; exit 1; }
-          if [[ "${{ matrix.platform }}" == ubuntu* ]]; then
+          if [[ "${{ matrix.platform }}" == ubuntu* || "${{ matrix.platform }}" == macos* ]]; then
             test -f apps/manager/src-tauri/src/mxbsecure-inject.exe || { echo "::error::mxbsecure-inject.exe missing after sync.sh"; exit 1; }
           fi
           jq '.bundle.resources = ["resources/mxbsecure*"]' apps/manager/src-tauri/tauri.conf.json > tauri.conf.patched
