@@ -272,7 +272,7 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
           ) : view === "servers" ? (
             <Servers />
           ) : view === "ranked" ? (
-            <Ranked />
+            <Ranked onFindServers={() => setView("servers")} />
           ) : view === "library" ? (
             <Library
               modType={modType}

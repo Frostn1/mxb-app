@@ -40,7 +40,7 @@ import GuidDialog from "./GuidDialog";
  */
 let cached: RankedProfile | null = null;
 
-const Ranked = () => {
+const Ranked = ({ onFindServers }: { onFindServers?: () => void }) => {
   const t = useT();
   const { reloadConfig } = useConfig();
   const [identity, setIdentity] = useState<RankedIdentity | null>(null);
@@ -182,7 +182,12 @@ const Ranked = () => {
             </Button>
           </Centered>
         ) : profile ? (
-          <Profile profile={profile} identity={identity} />
+          <Profile
+            profile={profile}
+            identity={identity}
+            onOpenSite={open}
+            onFindServers={onFindServers}
+          />
         ) : (
           <Centered>
             <Loader2 className="size-5 animate-spin text-faint" />
@@ -270,9 +275,14 @@ const Plate = ({
 const Profile = ({
   profile,
   identity,
+  onOpenSite,
+  onFindServers,
 }: {
   profile: RankedProfile;
   identity: RankedIdentity | null;
+  onOpenSite: () => void;
+  /** Takes a rider who has never raced to the server list. Absent where there isn't one. */
+  onFindServers?: () => void;
 }) => {
   const t = useT();
   const flag = flagOf(profile.country);
@@ -332,12 +342,19 @@ const Profile = ({
                   </span>
                 )}
               </div>
+              {/* The GUID is the heading itself when there is no name to show, and saying it
+                  twice was most of what a rider with no races got. Joined here rather than
+                  written as three fragments, so a missing piece doesn't leave a stray dot. */}
               <p className="mt-1.5 text-[11.5px] text-faint">
-                {profile.guid}
-                {profile.memberSince && ` · ${t("ranked.since", { date: profile.memberSince })}`}
-                {/* Whose profile this is, because a typed GUID is easy to get subtly wrong and
-                    somebody else's season looks exactly like a bad one of your own. */}
-                {identity?.source === "manual" && ` · ${t("ranked.manualGuid")}`}
+                {[
+                  profile.name ? profile.guid : "",
+                  profile.memberSince ? t("ranked.since", { date: profile.memberSince }) : "",
+                  // Whose profile this is: a typed GUID is easy to get subtly wrong, and
+                  // somebody else's season looks exactly like a bad one of your own.
+                  identity?.source === "manual" ? t("ranked.manualGuid") : "",
+                ]
+                  .filter(Boolean)
+                  .join(" · ")}
               </p>
             </div>
           </div>
@@ -409,6 +426,33 @@ const Profile = ({
               </dl>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* Nothing has been raced on this GUID. Everything below draws from results, so the
+          page was a name and a number — which reads like a fault in the app rather than a
+          season that hasn't started. Say which it is, and give the one thing that changes it. */}
+      {profile.cards.length === 0 && profile.races.length === 0 && (
+        <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-4 rounded-xl border border-input px-6 py-12 text-center">
+          <Trophy className="size-8 text-faint" strokeWidth={1.5} />
+          <div className="max-w-[520px] space-y-2">
+            <h3 className="font-cond text-[19px] font-bold tracking-[-0.03em]">
+              {t("ranked.unracedTitle")}
+            </h3>
+            <p className="text-[13px] leading-relaxed text-muted-foreground">
+              {t("ranked.unracedBody")}
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center justify-center gap-2">
+            {onFindServers && (
+              <Button onClick={onFindServers}>{t("ranked.unracedFind")}</Button>
+            )}
+            <Button variant="outline" onClick={onOpenSite}>
+              <ExternalLink className="size-3.5" />
+              {t("ranked.openSite")}
+            </Button>
+          </div>
+          <p className="max-w-[420px] text-[11.5px] text-faint">{t("ranked.unracedNotYou")}</p>
         </div>
       )}
 
