@@ -23,8 +23,10 @@ use std::path::{Path, PathBuf};
 ///
 /// Bumped whenever identification changes in a way that could give a different answer for the
 /// same id, which retires every row written by the old way. Slug lookup on mxb-mods made
-/// version 2: version 1 searched, and its misses are not this version's misses.
-pub const VERSION: u32 = 2;
+/// version 2: version 1 searched, and its misses are not this version's misses. Version 3
+/// stopped a stock track being matched to a mod that merely shares its address, which retires
+/// every row that mistake wrote — `forest` among them.
+pub const VERSION: u32 = 3;
 
 /// How long a found track is trusted. A page does not move, and if it ever does the worst
 /// case is a dead link on one panel until the row ages out.

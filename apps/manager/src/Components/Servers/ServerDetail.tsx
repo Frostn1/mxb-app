@@ -395,7 +395,13 @@ const ServerDetail = ({
 
   // The player's own copy of the track wins, then what our server knows it looks like, then
   // whatever the identification turned up — one picture, as wide as the pane.
-  const hero = art || (missing ? product?.image : null) || guess?.preview || guess?.productImage;
+  // Same rule as the list: a catalogue photo only stands in for a track the player doesn't
+  // have. For one they do, it is their own preview or nothing.
+  const hero =
+    art ||
+    (missing ? product?.image : null) ||
+    guess?.preview ||
+    (guess?.installed ? "" : guess?.productImage);
 
   // The same four-way decision the tile makes, so a server offers the same thing whichever
   // way it is being looked at.

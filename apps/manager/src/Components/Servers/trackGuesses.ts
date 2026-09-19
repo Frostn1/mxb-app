@@ -29,10 +29,17 @@ const subscribe = (l: () => void) => {
   return () => void listeners.delete(l);
 };
 
-/** The picture a guess carries, best first: the installed track's own, then the shop's. */
+/**
+ * The picture a guess carries.
+ *
+ * A track the player has shows its own artwork or nothing at all. A catalogue photo is only
+ * ever offered for a track they don't have, because the match behind it is a fold of one name
+ * onto another — and a stranger's mod wearing the same name is worse than a blank tile.
+ */
 export const guessPicture = (track: string): string => {
   const g = GUESSES.get(track);
-  return g ? g.preview || g.productImage || "" : "";
+  if (!g) return "";
+  return g.installed ? g.preview : g.preview || g.productImage || "";
 };
 
 /** Re-renders whatever draws a track when any guess lands. */

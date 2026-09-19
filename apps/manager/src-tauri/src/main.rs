@@ -3713,12 +3713,11 @@ async fn guess_server_track(app: tauri::AppHandle, track: String) -> Result<Trac
         guess.preview = stock.preview;
         guess.stock = true;
         guess.exact = true;
-        // A stock track is the one case that really is finished here: it came with the game,
-        // so there is no page to link and nothing to buy. Only a missing picture is worth
-        // another look.
-        if !guess.preview.is_empty() {
-            return Ok(guess);
-        }
+        // A stock track is finished here, picture or no picture. It came with the game, so
+        // there is no page to link and nothing to buy — and letting it fall through to the
+        // catalogues on a missing preview, which is what this did, is how `forest` ended up
+        // wearing a photo of somebody's "forest SX". A blank tile is the honest answer.
+        return Ok(guess);
     }
 
     // What this id turned out to be last time, on any server and on any run of the app.
@@ -3745,15 +3744,21 @@ async fn guess_server_track(app: tauri::AppHandle, track: String) -> Result<Trac
     // are the same shape, so `fort-red` is a direct hit where its search engine returns
     // TheBackForty and Silver Rock and never the track itself. One request, no ranking.
     for slug in slug_candidates(&id) {
-        if let Ok(Some(hit)) = mods::mxb::by_slug(&slug, tracks_category).await {
-            guess.source = "mods".into();
-            guess.product_id = hit.id;
-            guess.product_name = hit.title;
-            guess.product_url = hit.link;
-            guess.product_image = hit.image.unwrap_or_default();
-            guess.exact = true;
-            return Ok(learned(&app, guess));
-        }
+        let Ok(Some(hit)) = mods::mxb::by_slug(&slug, tracks_category).await else { continue };
+        // A slug that resolves is not on its own a match. `forest` is a stock track and also
+        // the address of a mod called "forest SX", so the title still has to fold onto the id
+        // — the same test a search result gets — before this claims to have found the track.
+        let Some((hit, true)) = best_track_hit(&id, vec![hit], |m| m.title.clone(), |_| true)
+        else {
+            continue;
+        };
+        guess.source = "mods".into();
+        guess.product_id = hit.id;
+        guess.product_name = hit.title;
+        guess.product_url = hit.link;
+        guess.product_image = hit.image.unwrap_or_default();
+        guess.exact = true;
+        return Ok(learned(&app, guess));
     }
 
     // mxb-mods.com. Scoped to its Tracks category: an unscoped search for `forest` comes

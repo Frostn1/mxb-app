@@ -68,6 +68,8 @@
 - The Studio tab. Frost's Studio is its own app.
 
 ### Fixed
+- Stock tracks no longer borrow a picture or a link from a mod that happens to share their
+  name. Forest is Forest, not somebody's Forest SX.
 - Ranked says what it means when you haven't raced yet, instead of showing your GUID
   twice and nothing else.
 - A track only has to be looked up once. What each one turned out to be is kept between
