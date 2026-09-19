@@ -1563,6 +1563,10 @@ export const de: Translation = {
   "downloads.stageDownloading": "Wird heruntergeladen",
   "downloads.stageExtracting": "Wird entpackt",
   "downloads.stagePlacing": "Wird installiert",
+  "downloads.timeLeft": "noch {{time}}",
+  "downloads.moveToFront": "An den Anfang der Warteschlange",
+  "downloads.sectionActive": "Läuft",
+  "downloads.sectionQueued": "Wartet",
   "downloads.stageReview": "Wartet auf dich",
 
   // ── Downloads (Verlauf) ────────────────────────────────────────────────────

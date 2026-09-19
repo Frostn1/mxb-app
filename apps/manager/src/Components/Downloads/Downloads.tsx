@@ -50,6 +50,7 @@ import {
   AlertDialogAction,
 } from "@frost/shared/Components/ui/alert-dialog";
 import { cn } from "@frost/shared/lib/utils";
+import LiveQueue, { useLiveQueueCount } from "./LiveQueue";
 
 type Filter = "all" | DownloadStatus;
 
@@ -107,6 +108,8 @@ export default function Downloads({
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
   const [clearOpen, setClearOpen] = useState(false);
+  // Something in flight means the screen is not empty, whatever the history says.
+  const liveCount = useLiveQueueCount();
 
   // Being here is what "seen" means — it retires the sidebar's failure badge.
   useEffect(markSeen, [markSeen, records.length]);
@@ -208,14 +211,21 @@ export default function Downloads({
 
 
       <div className="min-h-0 flex-1 overflow-y-auto px-7 pb-6">
+        {/* What is happening right now, above what already happened. The history below is a
+            record of finished attempts and can never show a transfer in flight, which is why
+            a download in progress used to be invisible on the one screen named after it. */}
+        <LiveQueue />
+
         {loading ? (
           <p className="py-16 text-center text-[13px] text-muted-foreground">
             {t("common.loading")}
           </p>
         ) : groups.length === 0 ? (
-          <p className="py-16 text-center text-[13px] text-muted-foreground">
-            {records.length === 0 ? t("downloads.empty") : t("downloads.noMatches")}
-          </p>
+          liveCount === 0 && (
+            <p className="py-16 text-center text-[13px] text-muted-foreground">
+              {records.length === 0 ? t("downloads.empty") : t("downloads.noMatches")}
+            </p>
+          )
         ) : (
           <div className="flex flex-col gap-6">
             {groups.map((group) => (

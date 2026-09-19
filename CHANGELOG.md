@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Added
+- The download button in the top bar opens the queue: what is downloading now, how fast it
+  is going and how long it has left, then everything waiting behind it.
+- Downloads shows what is in flight above the history, with the same speed and time left.
+- A mod waiting in the queue can be moved to the front, so it is the next one to start.
+
 ### Changed
 - The app wears the mxbsecure look: the brand blue, black chrome, and rounded corners
   throughout. Every colorway but the default is untouched.

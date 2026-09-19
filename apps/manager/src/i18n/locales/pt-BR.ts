@@ -1546,6 +1546,10 @@ export const ptBR: Translation = {
   "downloads.stageDownloading": "Baixando",
   "downloads.stageExtracting": "Extraindo",
   "downloads.stagePlacing": "Instalando",
+  "downloads.timeLeft": "faltam {{time}}",
+  "downloads.moveToFront": "Mover para o início da fila",
+  "downloads.sectionActive": "Em andamento",
+  "downloads.sectionQueued": "Aguardando",
   "downloads.stageReview": "Aguardando você",
 
   // ── Downloads (histórico) ──────────────────────────────────────────────────
