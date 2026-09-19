@@ -529,6 +529,15 @@ export const ptBR: Translation = {
   "settings.groupApp": "App",
   "settings.groupAdvanced": "Avançado",
   "settings.groupAbout": "Sobre",
+  "settings.downloads": "Mods e downloads",
+  "settings.downloadsDesc":
+    "O que acontece enquanto uma mod instala — qual arquivo é escolhido quando há mais de um, e o que o criador ganha com o seu download.",
+  "settings.secure": "Conteúdo protegido",
+  "settings.secureDesc":
+    "As mods bloqueadas que você comprou e as chaves que as abrem nesta máquina. Só aparece em uma build capaz de lê-las.",
+  "settings.paintSyncOn": "Sincronizar pinturas automaticamente",
+  "settings.paintSyncOnDesc":
+    "Desligado, nada seu é publicado e nenhuma pintura dos outros é instalada.",
   "settings.gameFolder": "Pasta do jogo",
   "settings.general": "Geral",
   "settings.appearance": "Aparência",

@@ -534,6 +534,15 @@ export const de: Translation = {
   "settings.groupApp": "App",
   "settings.groupAdvanced": "Erweitert",
   "settings.groupAbout": "Über",
+  "settings.downloads": "Mods & Downloads",
+  "settings.downloadsDesc":
+    "Was beim Installieren einer Mod passiert — welche Datei genommen wird, wenn es mehrere gibt, und was der Creator von deinem Download hat.",
+  "settings.secure": "Geschützte Inhalte",
+  "settings.secureDesc":
+    "Gesperrte Mods, die du gekauft hast, und die Schlüssel, die sie auf diesem Rechner öffnen. Nur in einem Build zu sehen, der sie lesen kann.",
+  "settings.paintSyncOn": "Lackierungen automatisch synchronisieren",
+  "settings.paintSyncOnDesc":
+    "Ausgeschaltet wird nichts von dir veröffentlicht und keine Lackierung von anderen installiert.",
   "settings.gameFolder": "Spielordner",
   "settings.general": "Allgemein",
   "settings.appearance": "Darstellung",

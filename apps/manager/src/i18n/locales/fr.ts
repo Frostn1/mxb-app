@@ -531,6 +531,15 @@ export const fr: Translation = {
   "settings.groupApp": "App",
   "settings.groupAdvanced": "Avancé",
   "settings.groupAbout": "À propos",
+  "settings.downloads": "Mods et téléchargements",
+  "settings.downloadsDesc":
+    "Ce qui se passe pendant l'installation d'un mod — quel fichier est pris quand il y a le choix, et ce que le créateur retire de ton téléchargement.",
+  "settings.secure": "Contenu protégé",
+  "settings.secureDesc":
+    "Les mods verrouillés que tu as achetés, et les clés qui les ouvrent sur cette machine. Affiché uniquement sur une version capable de les lire.",
+  "settings.paintSyncOn": "Synchroniser les décos automatiquement",
+  "settings.paintSyncOnDesc":
+    "Désactivé, rien de ce qui t'appartient n'est publié et aucune déco des autres n'est installée.",
   "settings.gameFolder": "Dossier de jeu",
   "settings.general": "Général",
   "settings.appearance": "Apparence",

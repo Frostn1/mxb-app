@@ -165,6 +165,7 @@ export type SectionId =
   | "game"
   | "folder"
   | "general"
+  | "downloads"
   | "overlay"
   | "voice"
   | "appearance"
@@ -173,6 +174,7 @@ export type SectionId =
   | "logs"
   | "paintsync"
   | "plugins"
+  | "secure"
   | "supporters"
   | "about";
 
@@ -183,9 +185,14 @@ export type SectionId =
  * you to an anchor — which meant the folder settings and the version number shared a
  * scrollbar, and finding anything in the middle meant reading past everything else.
  *
- * Grouped because twelve flat entries is its own kind of list. The groups are about where
+ * Grouped because a dozen flat entries is its own kind of list. The groups are about where
  * a setting *lives* — the game, the app, the things you only touch when something's wrong
  * — not about how often they're used.
+ *
+ * General is for the app's own behaviour and nothing else. Anything that belongs to a
+ * feature with a section of its own goes there instead — the paint sync switch beside what
+ * paint sync has done, the download preferences beside each other — because General had
+ * grown into the place every setting landed when nobody picked one.
  */
 const GROUPS: { label: TKey; sections: { id: SectionId; label: TKey }[] }[] = [
   {
@@ -202,6 +209,7 @@ const GROUPS: { label: TKey; sections: { id: SectionId; label: TKey }[] }[] = [
     sections: [
       { id: "general", label: "settings.general" },
       { id: "appearance", label: "settings.appearance" },
+      { id: "downloads", label: "settings.downloads" },
       { id: "overlay", label: "overlay.section" },
       { id: "voice", label: "voice.section" },
       { id: "paintsync", label: "settings.paintSync" },
@@ -211,6 +219,7 @@ const GROUPS: { label: TKey; sections: { id: SectionId; label: TKey }[] }[] = [
   {
     label: "settings.groupAdvanced",
     sections: [
+      { id: "secure", label: "settings.secure" },
       { id: "logs", label: "settings.logs" },
       // Had no nav entry at all before this, and rendered in the middle of the scroll
       // with nothing pointing at it.
@@ -304,15 +313,21 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
   // itself here. `getVersion()` covers the moment before that call lands.
   const shownVersion = experimental?.version || version;
   const [wanted, setActive] = useState<SectionId>(initialSection ?? "folder");
+  // Whether the local packer module is present. Declared up here because the nav below
+  // asks it, not just the section: without the module there is nothing for the secure
+  // content section to do.
+  const [secureAvailable, setSecureAvailable] = useState(false);
   // FrostMod is a Win32 DLL injected into the game and has no GP Bikes build, so its
   // section isn't there to open either — and neither is the game picker when there's only
-  // one game to pick. A group left with nothing in it drops out of the nav entirely.
+  // one game to pick, nor secure content without the module behind it. A group left with
+  // nothing in it drops out of the nav entirely.
   const groups = GROUPS.map((g) => ({
     ...g,
     sections: g.sections.filter(
       (s) =>
         (s.id !== "frostmod" || (hasFrostmod && caps.frostmod)) &&
-        (s.id !== "game" || multiGame),
+        (s.id !== "game" || multiGame) &&
+        (s.id !== "secure" || secureAvailable),
     ),
   })).filter((g) => g.sections.length > 0);
   // Only one section is on screen, so being sent to one this build doesn't have would
@@ -485,7 +500,6 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
   // Off unless it was turned on, matching the backend's default.
   const paintSyncEnabled = config.paintSyncEnabled ?? false;
   const mxbsecureEnabled = config.mxbsecureEnabled ?? true;
-  const [secureAvailable, setSecureAvailable] = useState(false);
   const [unlocking, setUnlocking] = useState(false);
   const [repairing, setRepairing] = useState(false);
   const [linkedSteam, setLinkedSteam] = useState<string | null>(null);
@@ -1417,16 +1431,23 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
               onChange={toggleInstantRefresh}
             />
             <div className="h-px bg-border" />
-            {/* Paint sync. In General rather than behind the experimental toggle because it
-                is on by default and runs by itself — the one thing a player needs is the
-                switch that stops it. */}
+            {/* Closing the game for a server turn sits here rather than with the queue:
+                it is the app deciding it may shut the game down, which is the same kind of
+                permission as launching at startup. */}
             <ToggleRow
-              label={t("settings.paintSync")}
-              desc={t("settings.paintSyncDesc")}
-              checked={paintSyncEnabled}
-              onChange={togglePaintSync}
+              label={t("settings.queueRestartGame")}
+              desc={t("settings.queueRestartGameDesc")}
+              checked={queueRestartGame}
+              onChange={toggleQueueRestartGame}
             />
-            <div className="h-px bg-border" />
+          </Section>
+          )}
+
+          {/* Mods and downloads. These four used to be four rows in the middle of General,
+              where the one thing they have in common — what the app does when you install a
+              mod — was the one thing the page never said. */}
+          {active === "downloads" && (
+          <Section title={t("settings.downloads")} desc={t("settings.downloadsDesc")}>
             {/* Show the creator's own mxb-mods.com page (ads and all) while a mod is open or
                 installing, so the site keeps the ad revenue the app's direct install strips.
                 On by default; turning it off passes two confirmations first. */}
@@ -1445,13 +1466,6 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
               checked={adSupport.behindApp}
               disabled={!adSupport.enabled}
               onChange={(v) => saveAdSupport({ ...adSupport, behindApp: v })}
-            />
-            <div className="h-px bg-border" />
-            <ToggleRow
-              label={t("settings.queueRestartGame")}
-              desc={t("settings.queueRestartGameDesc")}
-              checked={queueRestartGame}
-              onChange={toggleQueueRestartGame}
             />
             <div className="h-px bg-border" />
             {/* Which file to take when a mod ships the same thing twice. Both of these are
@@ -1493,133 +1507,145 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
                 </SelectContent>
               </Select>
             </div>
-
-            {secureAvailable && (
-              <>
-                <div className="h-px bg-border" />
-                {/* Experimental content locking. Only shown when the local packer module is
-                    present, since without it the tab it reveals could do nothing. */}
-                <ToggleRow
-                  label={t("settings.mxbsecure")}
-                  desc={t("settings.mxbsecureDesc")}
-                  checked={mxbsecureEnabled}
-                  onChange={toggleMxbsecure}
-                />
-                {mxbsecureEnabled && (
-                  <>
-                    <div className="flex items-center justify-between gap-4">
-                      <div className="min-w-0">
-                        <p className="flex items-center gap-1.5 text-[13px] font-medium">
-                          <span
-                            className={`inline-block size-2 flex-none rounded-full ${
-                              linkedSteam ? "bg-success" : "bg-warning"
-                            }`}
-                          />
-                          {t("settings.steamLink")}
-                        </p>
-                        <p className="mt-0.5 text-[12px] text-muted-foreground">
-                          {linkedSteam
-                            ? t("settings.steamLinkedAs", { id: linkedSteam })
-                            : t("settings.steamLinkDesc")}
-                        </p>
-                      </div>
-                      <Button
-                        size="sm"
-                        variant={linkedSteam ? "outline" : "default"}
-                        className="flex-none"
-                        disabled={linking}
-                        onClick={() => void linkSteam()}
-                      >
-                        {linking
-                          ? t("settings.steamLinking")
-                          : linkedSteam
-                            ? t("settings.steamRelink")
-                            : t("settings.steamLinkBtn")}
-                      </Button>
-                    </div>
-                    <div className="flex items-center justify-between gap-4">
-                      <div className="min-w-0">
-                        <p className="text-[13px] font-medium">{t("settings.mxbsecureUnlock")}</p>
-                        <p className="mt-0.5 text-[12px] text-muted-foreground">
-                          {t("settings.mxbsecureUnlockDesc")}
-                        </p>
-                      </div>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="flex-none"
-                        disabled={unlocking}
-                        onClick={() => void unlockSecured()}
-                      >
-                        {t("settings.mxbsecureUnlockBtn")}
-                      </Button>
-                    </div>
-                    <div className="flex items-center justify-between gap-4">
-                      <div className="min-w-0">
-                        <p className="text-[13px] font-medium">{t("settings.secRepair")}</p>
-                        <p className="mt-0.5 text-[12px] text-muted-foreground">
-                          {t("settings.secRepairDesc")}
-                        </p>
-                      </div>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="flex-none"
-                        disabled={repairing}
-                        onClick={() => void repairSecureKeys()}
-                      >
-                        {repairing ? t("settings.secRepairBusy") : t("settings.secRepairBtn")}
-                      </Button>
-                    </div>
-                    {secureItems.length > 0 && (
-                      <div>
-                        <p className="text-[13px] font-medium">{t("settings.secStatusTitle")}</p>
-                        <ul className="mt-2 space-y-1">
-                          {secureItems.map((it) => {
-                            const b = secureBadge(it);
-                            return (
-                              <li
-                                key={it.blobPath}
-                                className="flex items-center justify-between gap-3 rounded-md bg-foreground/[0.03] px-2.5 py-1.5"
-                              >
-                                <span className="min-w-0 flex-1">
-                                  <span
-                                    className="block truncate text-[12px]"
-                                    title={it.gameName}
-                                  >
-                                    {it.title ?? it.gameName}
-                                  </span>
-                                  {b.reason && (
-                                    <span className="block truncate text-[11px] text-muted-foreground">
-                                      {b.reason}
-                                    </span>
-                                  )}
-                                </span>
-                                <span
-                                  className={`flex-none rounded px-1.5 py-0.5 text-[10.5px] font-medium ${b.cls}`}
-                                >
-                                  {b.label}
-                                </span>
-                              </li>
-                            );
-                          })}
-                        </ul>
-                      </div>
-                    )}
-                  </>
-                )}
-              </>
-            )}
           </Section>
           )}
 
-          {/* Paint sync's own state. The General toggle turns it on and off; this says what
-              it has actually managed — both halves run in the background off things the
-              player didn't ask for, so without this the only record was a log file. */}
           {active === "plugins" && <Plugins />}
+
+          {/* Paint sync: the switch, then what it has actually managed. The switch lived in
+              General and its record lived here, so turning it off meant finding one page and
+              checking it had worked meant finding another. Both halves run in the background
+              off things the player didn't ask for, so without this the only record was a log
+              file. */}
           {active === "paintsync" && (
           <Section title={t("settings.paintSync")} desc={t("settings.paintSyncDesc")}>
+            {/* Short label and a short reason: the card's own description already says what
+                paint sync is, so repeating it here would say it twice on one screen. */}
+            <ToggleRow
+              label={t("settings.paintSyncOn")}
+              desc={t("settings.paintSyncOnDesc")}
+              checked={paintSyncEnabled}
+              onChange={togglePaintSync}
+            />
             <PaintSync />
+          </Section>
+          )}
+
+          {/* Secure content. Gated on the local packer module, which is also why the nav
+              entry is: without it there is nothing here to do. Its own section because the
+              switch, the Steam sign-in, the unlock, the key repair and the per-file status
+              list came to eight rows of General on the machines that have it. */}
+          {active === "secure" && (
+          <Section title={t("settings.secure")} desc={t("settings.secureDesc")}>
+            <ToggleRow
+              label={t("settings.mxbsecure")}
+              desc={t("settings.mxbsecureDesc")}
+              checked={mxbsecureEnabled}
+              onChange={toggleMxbsecure}
+            />
+            {mxbsecureEnabled && (
+              <>
+                <div className="flex items-center justify-between gap-4">
+                  <div className="min-w-0">
+                    <p className="flex items-center gap-1.5 text-[13px] font-medium">
+                      <span
+                        className={`inline-block size-2 flex-none rounded-full ${
+                          linkedSteam ? "bg-success" : "bg-warning"
+                        }`}
+                      />
+                      {t("settings.steamLink")}
+                    </p>
+                    <p className="mt-0.5 text-[12px] text-muted-foreground">
+                      {linkedSteam
+                        ? t("settings.steamLinkedAs", { id: linkedSteam })
+                        : t("settings.steamLinkDesc")}
+                    </p>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant={linkedSteam ? "outline" : "default"}
+                    className="flex-none"
+                    disabled={linking}
+                    onClick={() => void linkSteam()}
+                  >
+                    {linking
+                      ? t("settings.steamLinking")
+                      : linkedSteam
+                        ? t("settings.steamRelink")
+                        : t("settings.steamLinkBtn")}
+                  </Button>
+                </div>
+                <div className="flex items-center justify-between gap-4">
+                  <div className="min-w-0">
+                    <p className="text-[13px] font-medium">{t("settings.mxbsecureUnlock")}</p>
+                    <p className="mt-0.5 text-[12px] text-muted-foreground">
+                      {t("settings.mxbsecureUnlockDesc")}
+                    </p>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="flex-none"
+                    disabled={unlocking}
+                    onClick={() => void unlockSecured()}
+                  >
+                    {t("settings.mxbsecureUnlockBtn")}
+                  </Button>
+                </div>
+                <div className="flex items-center justify-between gap-4">
+                  <div className="min-w-0">
+                    <p className="text-[13px] font-medium">{t("settings.secRepair")}</p>
+                    <p className="mt-0.5 text-[12px] text-muted-foreground">
+                      {t("settings.secRepairDesc")}
+                    </p>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="flex-none"
+                    disabled={repairing}
+                    onClick={() => void repairSecureKeys()}
+                  >
+                    {repairing ? t("settings.secRepairBusy") : t("settings.secRepairBtn")}
+                  </Button>
+                </div>
+                {secureItems.length > 0 && (
+                  <div>
+                    <p className="text-[13px] font-medium">{t("settings.secStatusTitle")}</p>
+                    <ul className="mt-2 space-y-1">
+                      {secureItems.map((it) => {
+                        const b = secureBadge(it);
+                        return (
+                          <li
+                            key={it.blobPath}
+                            className="flex items-center justify-between gap-3 rounded-md bg-foreground/[0.03] px-2.5 py-1.5"
+                          >
+                            <span className="min-w-0 flex-1">
+                              <span
+                                className="block truncate text-[12px]"
+                                title={it.gameName}
+                              >
+                                {it.title ?? it.gameName}
+                              </span>
+                              {b.reason && (
+                                <span className="block truncate text-[11px] text-muted-foreground">
+                                  {b.reason}
+                                </span>
+                              )}
+                            </span>
+                            <span
+                              className={`flex-none rounded px-1.5 py-0.5 text-[10.5px] font-medium ${b.cls}`}
+                            >
+                              {b.label}
+                            </span>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </div>
+                )}
+              </>
+            )}
           </Section>
           )}
 
