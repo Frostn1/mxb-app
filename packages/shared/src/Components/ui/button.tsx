@@ -8,7 +8,7 @@ import { cn } from "../../lib/utils";
 export const CHIP = "bg-foreground/[0.10] text-foreground hover:bg-foreground/[0.18]";
 
 const buttonVariants = cva(
-  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md font-cond font-semibold uppercase tracking-[0.14em] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 cursor-default select-none",
+  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md font-cond font-semibold tracking-[-0.01em] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 cursor-default select-none",
   {
     variants: {
       variant: {
@@ -21,16 +21,16 @@ const buttonVariants = cva(
           "bg-secondary text-secondary-foreground hover:bg-foreground/[0.14] active:bg-foreground/[0.10]",
         outline: "border border-input text-foreground hover:bg-foreground/[0.06]",
         ghost:
-          "text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground tracking-[0.12em]",
+          "text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground",
         chip: CHIP,
         destructive:
           "border border-destructive/40 text-destructive hover:bg-destructive/[0.10]",
-        link: "text-primary underline-offset-4 hover:underline normal-case tracking-normal font-sans",
+        link: "text-primary underline-offset-4 hover:underline tracking-normal font-sans",
       },
       size: {
         default: "h-9 px-5 text-[14px]",
         sm: "h-8 px-3.5 text-[12.5px]",
-        lg: "h-11 px-7 text-[15px] font-bold tracking-[0.16em]",
+        lg: "h-11 px-7 text-[15px] font-bold tracking-[-0.02em]",
         icon: "h-9 w-9 px-0",
       },
     },

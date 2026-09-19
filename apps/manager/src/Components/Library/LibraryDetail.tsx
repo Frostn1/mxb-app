@@ -172,7 +172,7 @@ export default function LibraryDetail({
   return (
     <div className="flex h-full flex-col">
       <ContextBarLeft>
-        <span className="flex items-center gap-2 font-cond text-[12.5px] font-semibold uppercase tracking-[0.16em]">
+        <span className="flex items-center gap-2 font-cond text-[12.5px] font-semibold tracking-[-0.02em]">
           <button
             onClick={onClose}
             className="flex cursor-default items-center gap-1.5 text-muted-foreground transition-colors hover:text-foreground"
@@ -267,7 +267,7 @@ export default function LibraryDetail({
                   ? t(CATEGORY_LABEL[entry.category])
                   : t("libraryDetail.mod")}
               </div>
-              <h1 className="font-cond text-[26px] font-bold uppercase leading-[1.05] tracking-[0.04em]">
+              <h1 className="font-cond text-[26px] font-bold leading-[1.05] tracking-[-0.045em]">
                 {title}
               </h1>
             </div>

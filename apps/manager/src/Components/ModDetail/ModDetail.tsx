@@ -353,7 +353,7 @@ export default function ModDetail({
       {/* Browse's type tabs go with Browse, so the bar above would otherwise be an empty
           44px band. It carries where you are instead. */}
       <ContextBarLeft>
-        <span className="flex items-center gap-2 font-cond text-[12.5px] font-semibold uppercase tracking-[0.16em]">
+        <span className="flex items-center gap-2 font-cond text-[12.5px] font-semibold tracking-[-0.02em]">
           <button
             onClick={onBack}
             className="cursor-default text-muted-foreground transition-colors hover:text-foreground"
@@ -420,7 +420,7 @@ export default function ModDetail({
         </button>
 
         <div className="absolute inset-x-0 bottom-0 max-w-[58%] px-7 pb-5">
-          <h1 className="font-cond text-[42px] font-bold uppercase leading-[0.94] tracking-[0.005em] text-white">
+          <h1 className="font-cond text-[42px] font-bold leading-[0.94] tracking-[-0.045em] text-white">
             {detail.title}
           </h1>
           <div className="mt-2.5 flex flex-wrap items-center gap-2.5 text-[12.5px] text-white/65">

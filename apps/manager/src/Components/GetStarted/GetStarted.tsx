@@ -200,7 +200,7 @@ export default function GetStarted({
                 i === STEPS.length - 1 && "border-b",
               )}
             >
-              <span className="w-4 shrink-0 font-cond text-[15px] font-bold tabular-nums text-faint">
+              <span className="w-4 shrink-0 font-cond tracking-[-0.02em] text-[15px] font-bold tabular-nums text-faint">
                 {i + 1}
               </span>
               <span className="min-w-0 flex-1 text-[13.5px] font-semibold">

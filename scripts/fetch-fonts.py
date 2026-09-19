@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Re-vendor Barlow + Barlow Condensed into packages/shared/src/fonts and regenerate packages/shared/src/fonts.css.
+"""Re-vendor Barlow + Geist Mono into packages/shared/src/fonts and regenerate packages/shared/src/fonts.css.
 
 The app must render offline, so the faces are bundled rather than pulled from
 Google at runtime. Only the latin and latin-ext subsets are kept — between them
@@ -9,7 +9,8 @@ import os, re, subprocess, sys
 
 UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/120 Safari/537.36"
 URL = ("https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700"
-       "&family=Barlow+Condensed:wght@600;700&display=swap")
+       "&family=Barlow+Condensed:wght@600;700"
+       "&family=Geist+Mono:wght@500;600;700;800&display=swap")
 KEEP = {"latin", "latin-ext"}
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -34,12 +35,12 @@ while i < len(parts) - 1:
                     os.path.join(ROOT, "packages/shared/src/fonts", name), url], check=True)
     out.append("@font-face {\n  font-family: '%s';\n  font-style: normal;\n"
                "  font-weight: %s;\n  font-display: swap;\n"
-               "  src: url('/fonts/%s') format('woff2');\n  unicode-range: %s;\n}"
+               "  src: url('./fonts/%s') format('woff2');\n  unicode-range: %s;\n}"
                % (fam, wt, name, rng))
 
 with open(os.path.join(ROOT, "packages/shared/src/fonts.css"), "w") as fh:
-    fh.write("/* Barlow + Barlow Condensed (SIL Open Font License 1.1), vendored so the app\n"
-             "   renders correctly offline. latin + latin-ext only: those cover all six\n"
-             "   shipped locales. Regenerate with scripts/fetch-fonts.py. */\n\n"
+    fh.write("/* Barlow, Barlow Condensed and Geist Mono (SIL Open Font License 1.1), vendored\n"
+             "   so the app renders correctly offline. latin + latin-ext only: those cover\n"
+             "   all six shipped locales. Regenerate with scripts/fetch-fonts.py. */\n\n"
              + "\n\n".join(out) + "\n")
 print("wrote packages/shared/src/fonts.css with %d faces" % len(out))

@@ -54,14 +54,14 @@ export default function FeaturedMod({
       <div className="absolute inset-y-0 left-0 flex max-w-[620px] flex-col justify-end p-8">
         <div className="mb-3 flex items-center gap-2.5">
           <span className="rounded-full bg-primary px-2.5 py-[3px]">
-            <span className="block font-cond text-[10px] font-bold uppercase tracking-[0.22em] text-primary-foreground">
+            <span className="block font-cond text-[10px] font-bold uppercase tracking-[0.14em] text-primary-foreground">
               {t("browse.featured")}
             </span>
           </span>
           {rating && rating.count > 0 && <RatingStars rating={rating} />}
         </div>
 
-        <h2 className="font-cond text-[46px] font-bold uppercase leading-[0.92] tracking-[0.005em] text-white">
+        <h2 className="font-cond text-[46px] font-bold leading-[0.92] tracking-[-0.045em] text-white">
           {mod.title}
         </h2>
 

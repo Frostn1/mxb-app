@@ -459,7 +459,10 @@ html[data-colorway="retro"]:not(.overlay-window) body::after {
   --color-ring: var(--ring);
 
   --font-sans: "Barlow", system-ui, -apple-system, "Segoe UI", sans-serif;
-  --font-cond: "Barlow Condensed", "Barlow", system-ui, sans-serif;
+  /* The display face. Geist Mono is the brand's, used for the wordmark, the rail,
+     section labels and any figure that wants to line up. Studio pins this back to
+     Barlow Condensed under `.studio-skin`; Coach maps the utility to its own. */
+  --font-cond: "Geist Mono", ui-monospace, Menlo, Consolas, monospace;
   --font-mono: ui-monospace, Menlo, Consolas, monospace;
 }
 
@@ -603,9 +606,8 @@ input[type="range"]:disabled {
 .mod-description :is(h1, h2, h3, h4) {
   color: var(--foreground);
   font-family: var(--font-cond);
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+  font-weight: 800;
+  letter-spacing: -0.03em;
   margin: 1.2em 0 0.45em;
   line-height: 1.25;
 }

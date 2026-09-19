@@ -53,7 +53,7 @@ export default function GameSwitcher({ compact = false }: { compact?: boolean })
         )}
       >
         {compact ? (
-          <span className="truncate font-cond text-[12.5px] font-semibold uppercase tracking-[0.1em]">
+          <span className="truncate font-cond text-[12.5px] font-semibold tracking-[-0.02em]">
             {game.display}
           </span>
         ) : (

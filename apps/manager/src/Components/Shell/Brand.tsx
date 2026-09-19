@@ -27,11 +27,11 @@ export default function Brand() {
       {/* Both halves are set at the same size: the plate was carrying 12px type next to a
           17px word, which read as two different logos sitting together. */}
       <span className="u-skew grid h-[26px] place-items-center bg-primary px-2">
-        <span className="u-unskew font-cond text-[16px] font-bold leading-none tracking-[0.04em] text-primary-foreground">
+        <span className="u-unskew font-cond text-[16px] font-bold leading-none tracking-[-0.02em] text-primary-foreground">
           MXB
         </span>
       </span>
-      <span className="ml-[9px] font-cond text-[16px] font-semibold leading-none tracking-[0.12em] text-muted-foreground">
+      <span className="ml-[9px] font-cond text-[16px] font-semibold leading-none tracking-[-0.02em] text-muted-foreground">
         App
       </span>
     </div>

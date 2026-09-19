@@ -249,7 +249,7 @@ const Plate = ({
     className={cn("grid place-items-center rounded-lg px-2", className)}
     style={{ background: solid(color) }}
   >
-    <span className="block font-cond font-bold leading-none tracking-[0.04em] text-[#0d1216]">
+    <span className="block font-cond font-bold leading-none tracking-[-0.02em] text-[#0d1216]">
       {children}
     </span>
   </span>
@@ -308,12 +308,12 @@ const Profile = ({
             <div>
               <div className="flex items-center gap-2.5">
                 {flag && <span className="text-[18px] leading-none">{flag}</span>}
-                <h2 className="font-cond text-[26px] font-bold uppercase leading-none tracking-[0.02em]">
+                <h2 className="font-cond text-[26px] font-bold leading-none tracking-[-0.045em]">
                   {profile.name || profile.guid}
                 </h2>
                 {headline?.rankName && (
                   <span
-                    className="font-cond text-[13px] font-semibold uppercase tracking-[0.1em]"
+                    className="font-cond text-[13px] font-semibold tracking-[-0.02em]"
                     style={{ color: solid(headline.color) }}
                   >
                     {headline.rankName}
@@ -370,7 +370,7 @@ const Profile = ({
             >
               <div className="flex items-center justify-between gap-3 px-4 pt-3.5">
                 <div>
-                  <p className="font-cond text-[17px] font-bold uppercase leading-none tracking-[0.06em]">
+                  <p className="font-cond text-[17px] font-bold leading-none tracking-[-0.02em]">
                     {c.discipline}
                   </p>
                   <p className="mt-1 text-[11.5px] text-faint">
@@ -381,7 +381,7 @@ const Profile = ({
                   <Plate color={c.color} className="h-[30px] w-[38px]">
                     <span className="block text-[13px]">{c.badge}</span>
                   </Plate>
-                  <span className="font-cond text-[27px] font-bold leading-none tabular-nums">
+                  <span className="font-cond tracking-[-0.045em] text-[27px] font-bold leading-none tabular-nums">
                     {c.mxp}
                   </span>
                 </div>
@@ -423,7 +423,7 @@ const Profile = ({
                   <th
                     key={key}
                     className={cn(
-                      "sticky top-0 z-10 border-b border-input bg-card py-2.5 font-cond font-semibold",
+                      "sticky top-0 z-10 border-b border-input bg-card py-2.5 font-cond tracking-[-0.02em] font-semibold",
                       width,
                     )}
                   >
@@ -455,7 +455,7 @@ const Profile = ({
                       {lobbyName(r.server)}
                     </td>
                     <td
-                      className="border-b border-input/50 px-2 py-2.5 font-cond text-[15px] font-bold tabular-nums group-last:border-0"
+                      className="border-b border-input/50 px-2 py-2.5 font-cond tracking-[-0.02em] text-[15px] font-bold tabular-nums group-last:border-0"
                       style={medal ? { color: medal } : undefined}
                     >
                       {r.position}

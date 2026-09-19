@@ -440,7 +440,7 @@ export default function Locker() {
             <aside className="flex w-[288px] flex-none flex-col border-r border-border">
               <div className="flex flex-none items-center gap-2.5 px-4 pb-2.5 pt-1">
                 <span className="h-3 w-1 rounded-full bg-primary" />
-                <span className="font-cond text-[12px] font-bold uppercase tracking-[0.2em] text-foreground">
+                <span className="font-cond text-[12px] font-bold uppercase tracking-[0.14em] text-foreground">
                   {t("nav.locker")}
                 </span>
                 <span className="ml-auto tabular-figures text-[11.5px] text-faint">
@@ -460,7 +460,7 @@ export default function Locker() {
                       )}
                     >
                       {on && <span className="absolute inset-y-2 left-0 w-[3px] rounded-full bg-primary" />}
-                      <span className="truncate font-cond text-[13px] font-semibold uppercase tracking-[0.06em]">
+                      <span className="truncate font-cond text-[13px] font-semibold tracking-[-0.02em]">
                         {r.bike}
                       </span>
                     </button>

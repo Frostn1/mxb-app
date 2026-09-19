@@ -107,7 +107,7 @@ export default function ModCard({
             <span className="absolute right-2 top-2 flex items-center gap-1 rounded-full bg-[rgba(8,8,10,0.82)] px-2 py-[3px]">
               <span className="flex items-center gap-1 text-success">
                 <Check className="size-3" strokeWidth={3} />
-                <span className="font-cond text-[9px] font-bold uppercase tracking-[0.16em]">
+                <span className="font-cond text-[9px] font-bold uppercase tracking-[0.14em]">
                   {t("common.installed")}
                 </span>
               </span>
@@ -123,7 +123,7 @@ export default function ModCard({
               </span>
             )}
             <span
-              className="truncate font-cond text-[15px] font-bold uppercase leading-[1.1] tracking-[0.05em] text-white"
+              className="truncate font-cond text-[15px] font-bold leading-[1.1] tracking-[-0.02em] text-white"
               title={mod.title}
             >
               {mod.title}

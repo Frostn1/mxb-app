@@ -63,7 +63,7 @@ export default function ShopCard({ mod, currency, onOpen }: ShopCardProps) {
             )}
             {mod.price.onSale && mod.price.discountPct !== null && (
               <span className="absolute right-2 top-2 rounded-full bg-success px-2.5 py-[3px]">
-                <span className="block font-cond text-[11px] font-bold tracking-[0.06em] text-[#0d1216]">
+                <span className="block font-cond text-[11px] font-bold tracking-[-0.02em] text-[#0d1216]">
                   −{mod.price.discountPct}%
                 </span>
               </span>
@@ -71,7 +71,7 @@ export default function ShopCard({ mod, currency, onOpen }: ShopCardProps) {
           </div>
           <div className="flex flex-col gap-1 px-3 py-2.5">
             <span
-              className="truncate font-cond text-[14px] font-bold uppercase tracking-[0.05em]"
+              className="truncate font-cond text-[14px] font-bold tracking-[-0.02em]"
               title={mod.title}
             >
               {mod.title}

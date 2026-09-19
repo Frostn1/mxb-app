@@ -1169,7 +1169,7 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
   return (
     <div className="flex h-full">
       <ContextBarLeft>
-      <span className="flex items-center font-cond text-[12.5px] font-semibold uppercase tracking-[0.16em] text-foreground">
+      <span className="flex items-center font-cond text-[12.5px] font-semibold tracking-[-0.02em] text-foreground">
         {t("nav.settings")}
       </span>
     </ContextBarLeft>
