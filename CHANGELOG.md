@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-09-19 — v0.17.6 — A sign-in link you can copy
+
+### Fixed
+- The Steam sign-in screen now shows the sign-in link itself, with a Copy link button. If your
+  browser doesn't open on its own, sign in by pasting the link into it.
+
 ## 2026-09-19 — v0.17.5 — No extra window while you install
 
 ### Removed
