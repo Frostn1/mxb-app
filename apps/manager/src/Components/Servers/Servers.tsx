@@ -224,6 +224,11 @@ const Servers = () => {
       // Storage disabled; the choice still holds for this session.
     }
   }, [view]);
+  // Changing view drops the selection. In tiles a picked server is an open dialog, and one
+  // appearing because somebody pressed the view toggle would be a surprise.
+  useEffect(() => {
+    setSelected(null);
+  }, [view]);
 
   // One request for every track in the list, not one per tile. Tracks already drawn aren't
   // asked again; the ones the player lacks are, in case they installed one since.
