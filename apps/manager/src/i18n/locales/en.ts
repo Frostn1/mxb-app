@@ -39,6 +39,15 @@ export const en = {
   "window.close": "Close",
 
   // ── Sidebar navigation ─────────────────────────────────────────────────────
+  "nav.mods": "Mods",
+  "mods.type": "Type",
+  "mods.category": "Category",
+  "mods.sourceAll": "All sources",
+  "mods.sourceMods": "mxb-mods",
+  "mods.searchPlaceholder": "Search mods…",
+  "mods.empty": "Nothing matches that.",
+  "mods.shopStale": "Shop prices may be out of date.",
+  "mods.help": "One screen for every catalog. Pick what you are after on the left, then use the source filter to show mxb-mods, MXB Hub, the shop, or all three at once. Paid items show their price; everything else says Free.",
   "nav.browse": "Browse",
   "nav.shop": "Shop",
   "nav.hub": "MXB Hub",

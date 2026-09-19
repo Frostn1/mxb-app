@@ -43,6 +43,15 @@ export const ptBR: Translation = {
   "window.close": "Fechar",
 
   // ── Navegação ──────────────────────────────────────────────────────────────
+  "nav.mods": "Mods",
+  "mods.type": "Tipo",
+  "mods.category": "Categoria",
+  "mods.sourceAll": "Todas as fontes",
+  "mods.sourceMods": "mxb-mods",
+  "mods.searchPlaceholder": "Buscar mods…",
+  "mods.empty": "Nada corresponde a isso.",
+  "mods.shopStale": "Os preços da loja podem estar desatualizados.",
+  "mods.help": "Uma tela só para todos os catálogos. Escolha à esquerda o que você procura e use o filtro de fonte para mostrar mxb-mods, MXB Hub, a loja ou os três de uma vez. Itens pagos mostram o preço; o resto diz Grátis.",
   "nav.browse": "Explorar",
   "nav.shop": "Loja",
   "nav.hub": "MXB Hub",

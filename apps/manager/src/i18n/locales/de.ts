@@ -45,6 +45,15 @@ export const de: Translation = {
   "window.close": "Schließen",
 
   // ── Navigation ─────────────────────────────────────────────────────────────
+  "nav.mods": "Mods",
+  "mods.type": "Typ",
+  "mods.category": "Kategorie",
+  "mods.sourceAll": "Alle Quellen",
+  "mods.sourceMods": "mxb-mods",
+  "mods.searchPlaceholder": "Mods suchen…",
+  "mods.empty": "Keine Treffer.",
+  "mods.shopStale": "Die Shop-Preise sind möglicherweise nicht aktuell.",
+  "mods.help": "Ein Bildschirm für alle Kataloge. Wähle links, was du suchst, und zeige über den Quellenfilter mxb-mods, MXB Hub, den Shop oder alle drei zugleich. Kostenpflichtige Inhalte zeigen ihren Preis; alles andere steht auf Gratis.",
   "nav.browse": "Entdecken",
   "nav.shop": "Shop",
   "nav.hub": "MXB Hub",
