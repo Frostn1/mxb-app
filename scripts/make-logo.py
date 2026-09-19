@@ -15,9 +15,10 @@ from fontTools.pens.boundsPen import BoundsPen
 from fontTools.pens.svgPathPen import SVGPathPen
 from fontTools.pens.transformPen import TransformPen
 from fontTools.ttLib import TTFont
+from fontTools.varLib import instancer
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-FONT = os.path.join(ROOT, "packages/shared/src/fonts/geistmono-800-latin.woff2")
+FONT = os.path.join(ROOT, "packages/shared/src/fonts/geistmono-500-latin.woff2")
 OUT = os.path.join(ROOT, "apps/manager/public/logo.svg")
 
 BOX = 40.0        # the viewBox the app, the installer and the favicon all use
@@ -25,6 +26,10 @@ RADIUS = 9.0      # the squircle of the brand's own favicon
 GLYPH_H = 16.0    # x-height of the m inside that box
 
 font = TTFont(FONT)
+# Geist Mono ships as ONE variable file; its default instance is Regular, so a glyph
+# taken straight off it is the wrong weight. Pin the axis to ExtraBold first.
+if "fvar" in font:
+    font = instancer.instantiateVariableFont(font, {"wght": 800}, inplace=True)
 glyphs = font.getGlyphSet()
 glyph = glyphs[font.getBestCmap()[ord("m")]]
 
