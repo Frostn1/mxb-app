@@ -1,6 +1,6 @@
 import { memo } from "react";
 import { Lock, Users, Wifi, Palette, Star, Mountain, Hourglass, Download } from "lucide-react";
-import type { MasterServer } from "@frost/shared/api/mods";
+import type { CatalogTrack, MasterServer } from "@frost/shared/api/mods";
 import { cn } from "@frost/shared/lib/utils";
 import { useT } from "@/i18n";
 
@@ -18,6 +18,10 @@ interface Props {
   art?: string;
   /** The player doesn't have this track. False until that's known. */
   missing: boolean;
+  /** What the store knows about a track the player lacks — its picture, mostly. The tile
+   *  has always fallen back to this; a row that did not showed an empty slot beside a tile
+   *  showing the artwork. */
+  product?: CatalogTrack;
   /** This is the row the pane beside the list is showing. */
   selected: boolean;
   favourite: boolean;
@@ -41,6 +45,7 @@ const ServerRow = memo(function ServerRow({
   server: s,
   art,
   missing,
+  product,
   selected,
   favourite,
   paintSync,
@@ -49,6 +54,11 @@ const ServerRow = memo(function ServerRow({
   onToggleFavourite,
 }: Props) {
   const t = useT();
+  // The player's own copy wins; a track they lack shows what it looks like, from the store.
+  // Cache and the library first, the store only when neither had one — a track the player
+  // has but whose file carries no preview still gets a picture.
+  const picture = art || product?.image || null;
+
   return (
     <div
       onClick={() => onSelect(s)}
@@ -64,9 +74,9 @@ const ServerRow = memo(function ServerRow({
       {selected && <span className="absolute inset-y-0 left-0 w-[3px] bg-primary" />}
 
       <div className="relative h-8 w-[52px] shrink-0 overflow-hidden rounded-md bg-gradient-to-br from-[#3a3f45] to-[#20242a]">
-        {art ? (
+        {picture ? (
           <img
-            src={art}
+            src={picture}
             alt=""
             decoding="async"
             loading="lazy"

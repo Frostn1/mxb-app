@@ -127,12 +127,7 @@ const Riders = ({
             </span>
           ))}
         </div>
-      ) : (
-        !loading &&
-        players > 0 && (
-          <p className="text-[12px] text-faint">{t("serverBrowser.ridersUnknown")}</p>
-        )
-      )}
+      ) : null}
     </section>
   );
 };
@@ -341,7 +336,7 @@ const ServerDetail = ({
 
   // The player's own copy of the track wins, then what our server knows it looks like, then
   // whatever the identification turned up — one picture, as wide as the pane.
-  const hero = art || (missing ? product?.image : null) || guess?.preview || guess?.productImage;
+  const hero = art || product?.image || guess?.preview || guess?.productImage;
 
   // The same four-way decision the tile makes, so a server offers the same thing whichever
   // way it is being looked at.

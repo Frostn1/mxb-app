@@ -266,10 +266,15 @@ function LibraryCardBody({
             {location && <p className="text-muted-foreground">{location}</p>}
           </TooltipContent>
         </Tooltip>
-        <span className="truncate text-[11px] text-muted-foreground" title={subtitle}>
-          {subtitle}
+        {/* The models affordance rides on this line rather than under it. On its own row it
+            made the one bike that has swaps taller than its neighbours, so a grid of cards
+            stepped up and down as you scanned it. */}
+        <span className="flex min-w-0 items-center gap-2 text-[11px] text-muted-foreground">
+          <span className="truncate" title={subtitle}>
+            {subtitle}
+          </span>
+          {footer}
         </span>
-        {footer}
       </div>
     </>
   );
@@ -594,12 +599,15 @@ function SideHeading({ label }: { label: string }) {
 function SideRow({
   label,
   count,
+  bytes,
   active,
   onSelect,
 }: {
   label: string;
   /** Omitted while the number isn't known — a blank is honest, a 0 isn't. */
   count?: number;
+  /** What that many mods weigh. Same rule: absent rather than 0 when it isn't known. */
+  bytes?: number;
   active: boolean;
   onSelect: () => void;
 }) {
@@ -618,8 +626,15 @@ function SideRow({
       <span className="min-w-0 flex-1 truncate font-cond text-[13px] font-semibold tracking-[-0.02em]">
         {label}
       </span>
+      {bytes !== undefined && (
+        <span className="tabular-figures flex-none text-[11px] text-faint">
+          {formatBytes(bytes)}
+        </span>
+      )}
       {count !== undefined && (
-        <span className="tabular-figures flex-none text-[11px] text-faint">{count}</span>
+        <span className="tabular-figures w-8 flex-none text-right text-[11px] text-faint">
+          {count}
+        </span>
       )}
     </button>
   );
@@ -856,8 +871,21 @@ export default function Library({
     return by;
   }, [inType]);
 
+  /** And what they weigh. Which folder is eating the disk is the question a folder list
+   *  gets asked, and the sizes are already on the entries. */
+  const folderBytes = useMemo(() => {
+    const by = new Map<string, number>();
+    for (const e of inType) by.set(e.folder, (by.get(e.folder) ?? 0) + e.size);
+    return by;
+  }, [inType]);
+
+
   const starredCount = useMemo(
     () => inType.filter(isStarred).length,
+    [inType, isStarred],
+  );
+  const starredBytes = useMemo(
+    () => inType.filter(isStarred).reduce((n, e) => n + e.size, 0),
     [inType, isStarred],
   );
 
@@ -961,6 +989,18 @@ export default function Library({
       }
       const hit = cachedScan<LibraryEntry[]>(mt.installSubpath);
       if (hit) by.set(mt.id, countable(hit.value, mt).length);
+    }
+    return by;
+  }, [game.id, modType, inType]);
+  const typeBytes = useMemo(() => {
+    const by = new Map<string, number>();
+    for (const mt of modTypesFor(game.id)) {
+      if (mt.id === modType.id) {
+        by.set(mt.id, inType.reduce((n, e) => n + e.size, 0));
+        continue;
+      }
+      const hit = cachedScan<LibraryEntry[]>(mt.installSubpath);
+      if (hit) by.set(mt.id, countable(hit.value, mt).reduce((n, e) => n + e.size, 0));
     }
     return by;
   }, [game.id, modType, inType]);
@@ -1470,6 +1510,7 @@ export default function Library({
               key={mt.id}
               label={t(mt.label)}
               count={typeCounts.get(mt.id)}
+              bytes={typeBytes.get(mt.id)}
               active={mt.id === modType.id}
               onSelect={() => {
                 setPick(ALL);
@@ -1482,12 +1523,14 @@ export default function Library({
           <SideRow
             label={t("installDialog.allFolders")}
             count={inType.length}
+            bytes={inType.reduce((n, e) => n + e.size, 0)}
             active={pick.kind === "all"}
             onSelect={() => setPick(ALL)}
           />
           <SideRow
             label={t("library.starred")}
             count={starredCount}
+            bytes={starredBytes}
             active={pick.kind === "starred"}
             onSelect={() => setPick({ kind: "starred" })}
           />
@@ -1496,6 +1539,7 @@ export default function Library({
               key={f || "__root__"}
               label={folderLabel(f)}
               count={folderCounts.get(f)}
+              bytes={folderBytes.get(f)}
               active={pick.kind === "folder" && pick.folder === f}
               onSelect={() => setPick({ kind: "folder", folder: f })}
             />
@@ -1598,7 +1642,7 @@ export default function Library({
                                         });
                                       }}
                                       className={cn(
-                                        "-ml-1 mt-0.5 flex w-fit max-w-full cursor-default items-center gap-1 truncate rounded px-1 py-0.5 text-[10.5px] font-semibold transition-colors hover:bg-foreground/[0.06]",
+                                        "flex flex-none cursor-default items-center gap-1 rounded-full px-1.5 py-0.5 text-[10.5px] font-semibold transition-colors hover:bg-foreground/[0.06]",
                                         swapsOpen ? "text-primary" : "text-faint hover:text-primary",
                                       )}
                                     >

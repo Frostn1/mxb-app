@@ -261,7 +261,11 @@ const Servers = () => {
       (tr) =>
         tr &&
         ASKED.has(tr) &&
-        !(tr in art) &&
+        // `!art[tr]`, not `!(tr in art)`: a track the player HAS can come back with an empty
+        // string when its .pkz carries no picture, and that used to end the search — the row
+        // and the pane both drew a grey mountain next to "You have this track". Cache, then
+        // the library, then the store; an empty answer from the library is not an answer.
+        !art[tr] &&
         !(tr in CATALOG) &&
         now - (CATALOG_ASKED.get(tr) ?? 0) > REASK_MS,
     );
@@ -913,6 +917,7 @@ const Servers = () => {
                     server={s}
                     art={art[s.track]}
                     missing={!!s.track && ASKED.has(s.track) && !(s.track in art)}
+                    product={catalog[s.track]}
                     selected={s.address === selected}
                     favourite={favs.has(s.address)}
                     paintSync={paintSync[s.address] ?? 0}
