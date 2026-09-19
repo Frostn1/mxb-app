@@ -1207,9 +1207,6 @@ export const fr: Translation = {
   "library.stockSection": "Pistes d'origine",
   "library.stockSectionHint":
     "Les pistes livrées avec MX Bikes. Elles se trouvent dans le tracks.pkz du jeu : il n'y a donc ici aucun fichier à déplacer ou à supprimer — voyez-en une en 3D, ou extrayez-la dans son propre .pkz.",
-  "library.extractStock": "Extraire en .pkz",
-  "library.extractingStock": "Extraction de {{name}}…",
-  "library.extractedStock": "Extraite — {{size}}",
   "library.searchPlaceholder": "Rechercher parmi les installés…",
   "library.sortFolder": "Par dossier",
   "library.sortRecent": "Ajoutés récemment",

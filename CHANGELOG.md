@@ -7,9 +7,6 @@
   real names and their own artwork, in a section of their own on the Tracks tab. Click one to
   look around it in 3D, the same as any track you installed. They live inside the game's own
   files rather than your mods folder, which is why they have never shown up here before.
-- **Extract a stock track as its own .pkz.** From the card menu or its page. You get a normal
-  track file, packaged the way the game reads them, wherever you asked for it — to open in the
-  Studio, or to pick apart. Nothing about your game install changes.
 - **Both of the Library's folders, one click from the list.** Two buttons in the Library's bar
   open the mods folder and the game's install folder in your file manager, for the times it's
   quicker to move a file by hand than to go through the app. The mods one opens the tab you're

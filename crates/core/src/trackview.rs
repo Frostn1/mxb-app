@@ -139,28 +139,6 @@ pub async fn list_stock_tracks(
     .map_err(|e| format!("list_stock_tracks task failed: {e}"))
 }
 
-/// Lift one stock track out of the install's shared archive into a `.pkz` of its own.
-///
-/// `to` is where the player asked for it — never the mods tree, because a mod track sharing a
-/// stock track's id gives the game two sources for one name. Returns the bytes written.
-#[tauri::command]
-pub async fn extract_stock_track(
-    app: tauri::AppHandle,
-    track_id: String,
-    to: String,
-) -> Result<u64, String> {
-    let cfg = crate::config::load(&app).map_err(|e| format!("{e:#}"))?;
-    tauri::async_runtime::spawn_blocking(move || {
-        let install = cfg.install_dir();
-        let track = crate::trackstock::find(&install, &track_id)
-            .ok_or_else(|| format!("no stock track called {track_id}"))?;
-        crate::trackstock::extract(&install, &track, std::path::Path::new(&to))
-            .map_err(|e| format!("{e:#}"))
-    })
-    .await
-    .map_err(|e| format!("extract_stock_track task failed: {e}"))?
-}
-
 /// A track's metadata and contents. Cheap by construction — nothing is inflated — so the
 /// track view can paint everything except the terrain immediately.
 ///
