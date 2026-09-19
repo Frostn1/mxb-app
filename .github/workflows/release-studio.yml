@@ -105,6 +105,19 @@ jobs:
           raw="${{ github.ref_type == 'tag' && github.ref_name || format('studio-v0.0.{0}', github.run_number) }}"
           echo "name=${raw#studio-}" >> "$GITHUB_OUTPUT"
 
+      # What shipped, for the release page. Reads this tag's section of CHANGELOG.md,
+      # headed `## <date> — Frost's Studio v…`, so the Studio's v0.4.0 can't come out
+      # reading the MXB App's. Falls back to the download guidance alone with no section.
+      - name: Compose release notes
+        id: notes
+        shell: bash
+        run: |
+          {
+            echo 'body<<RELEASE_NOTES_EOF'
+            bash scripts/release-notes.sh "${{ steps.tag.outputs.name }}" --app="Frost's Studio"
+            echo 'RELEASE_NOTES_EOF'
+          } >> "$GITHUB_OUTPUT"
+
       # UPX for the Windows binary pack (scripts/pack-binary.sh runs as the app's
       # beforeBundleCommand). Windows leg only; the script no-ops without it and without MXB_PACK.
       - name: Install UPX (Windows)
@@ -140,6 +153,8 @@ jobs:
           projectPath: apps/studio
           tagName: ${{ steps.tag.outputs.name }}
           releaseName: "Frost's Studio ${{ steps.tag.outputs.name }}"
+          # What shipped, then which file to download — worded in scripts/release-notes.sh.
+          releaseBody: ${{ steps.notes.outputs.body }}
           # Named here rather than renamed afterwards: this applies before latest.json is
           # written, so the manifest and the assets cannot disagree.
           assetNamePattern: "Frost-Studio-[version]-[arch][ext]"

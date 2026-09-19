@@ -3,6 +3,13 @@
 ## Unreleased — The Library's folders, one click away
 
 ### Added
+- **The tracks that came with the game are in your Library.** All fifteen of them, with their
+  real names and their own artwork, in a section of their own on the Tracks tab. Click one to
+  look around it in 3D, the same as any track you installed. They live inside the game's own
+  files rather than your mods folder, which is why they have never shown up here before.
+- **Extract a stock track as its own .pkz.** From the card menu or its page. You get a normal
+  track file, packaged the way the game reads them, wherever you asked for it — to open in the
+  Studio, or to pick apart. Nothing about your game install changes.
 - **Both of the Library's folders, one click from the list.** Two buttons in the Library's bar
   open the mods folder and the game's install folder in your file manager, for the times it's
   quicker to move a file by hand than to go through the app. The mods one opens the tab you're
@@ -43,16 +50,9 @@
   go on is refused before Steam rather than after, so you find out having spent nothing, and the
   app keeps watching for the whole window instead of giving up while the sign-in is still good.
 
-## 2026-09-18 — MXB Coach v0.1.18-beta.18 — A session reads itself out, and you can watch it back
+## 2026-09-18 — Frost's Studio v0.4.0 — Start from a track you already have, and keep the replay you flew
 
 ### Added
-- **The tracks that came with the game are in your Library.** All fifteen of them, with their
-  real names and their own artwork, in a section of their own on the Tracks tab. Click one to
-  look around it in 3D, the same as any track you installed. They live inside the game's own
-  files rather than your mods folder, which is why they have never shown up here before.
-- **Extract a stock track as its own .pkz.** From the card menu or its page. You get a normal
-  track file, packaged the way the game reads them, wherever you asked for it — to open in the
-  Studio, or to pick apart. Nothing about your game install changes.
 - **Track Studio can start from a track that already exists.** One of the game's own, or any
   `.pkz` on your disk. It reads the terrain and the lap the track was built around, and you
   carry on from there. Three ways to take the ground: **as it is**, every jump and camber the
@@ -60,6 +60,64 @@
   racing line; or **recut**, keeping the landform and the layout while the Studio cuts its own
   corners and jumps into it. Textures, scenery and objects do not come across — a finished
   track has nothing in it to read those back from — so what you build wears the Studio's own.
+- **Replay is a tab in Frost's Studio.** Fly a camera path in the game and the take is on
+  disk when you come back, as an mp4 named for the track and the slot. No OBS, no scene to
+  set up, nothing to remember to press — the mod says a shot has started and the Studio keeps
+  it. The recording runs whether or not the Studio's window is even open.
+- The Replay screen shows what is happening and what is missing: recording and for how long,
+  or which piece is not there yet — no encoder, no mod, no game, nothing playing. Under it are
+  your recordings, with the folder they are in, and the camera paths saved on this machine.
+- **Record** and a hotkey (`Ctrl+Shift+R`) for the shots the mod does not announce. The
+  hotkey works from inside the game, so starting one never costs an alt-tab.
+- Quality, frame rate, encoder and where recordings are saved, in the same screen. The encoder
+  is your graphics card's by default, which leaves the processor to the game it is recording.
+- **Get ffmpeg**, for a machine that has none. It lands in the Studio's own folder, checked
+  against the digest published with it; nothing is installed into Windows, and deleting the
+  folder undoes all of it.
+- The Studio can be opened straight onto a screen — `--view replay` — which is what
+  **Open in Studio** on MXB App's Plugins page does.
+- **Tracks near here**, in From a real place. Search the nearest town — which a gazetteer
+  always knows — press it, and every motocross circuit within 40 km comes back off
+  OpenStreetMap, nearest first, with how far away each one is. Pick yours and the plot is
+  centred on it. Nobody has to read a latitude off a map for their local track any more.
+
+### Changed
+- **A paid plugin's panels open in Frost's Studio, not in MXB App.** Cutting a replay is the
+  same errand as painting a bike or building a track, and none of it is managing mods. MXB App
+  keeps the half that is its own — buying the licence, installing the bundle and updating it —
+  and sends you to the window the panels are in. A plugin can still ask for a row in the
+  manager (`"host": "manager"` in its manifest); saying nothing means the Studio, so the Replay
+  Mod's existing bundle lands in the right place without a byte of it changing.
+- Plugin licensing is shared rather than the manager's alone, so both apps check one licence,
+  in one way, from one copy of the code.
+
+### Fixed
+- **Every hill in a supercross rhythm lane has a lip.** A jump's take-off is built as a curve
+  at the foot and a straight run to the lip, and a lane of hills was getting that on its first
+  crest only: the rest arrived flat, which is a wave. You cannot leave a wave, so you roll the
+  crest, drop into the trough compressed and get fired off whatever the suspension gives back —
+  which is the G-out and the trip to the moon. Measured on a stadium lap, the last metre into
+  each lip now stands at 25–29° where it stood at 12–15° — the first hill, the one that always
+  had its lip, is unchanged. A triple's far crest was the same shape and is fixed by the same
+  change.
+- **A tuff block is one colour again.** Each block was mapped across the whole texture, so
+  every one of them wore the red half and the white half split down its middle, with the grime
+  shaded along its top instead of its foot — a row of them read as popcorn rather than as a
+  border. They now alternate red and white down the row, one colour a block, dirty at the
+  bottom where they actually stand. They also stand *on* the ground now: a block was sat at
+  the height under its own middle, and since the strip between two lanes is the flank of the
+  mound a jump spills into, one end of every sixth block was up in the air — by a quarter of
+  a metre at the worst. Each one is seated on the lowest ground its own footprint covers.
+- **A track name the gazetteer has never heard of now finds the track.** Searching a real place
+  asked OpenStreetMap's place index, which knows addresses rather than circuits, and a club's
+  own name for its field is usually not in it — so the search said "try coordinates instead",
+  which is not something anybody wants to go and look up. It now asks the map for a motocross
+  circuit of that name before giving up, and says what to do next when there genuinely isn't
+  one.
+
+## 2026-09-18 — MXB Coach v0.1.18-beta.18 — A session reads itself out, and you can watch it back
+
+### Added
 - **Your own bike, in 3D, on the feel step.** The bike the session was ridden on, drawn from its
   own files, beside the question about how it felt — with the fork travel your lap actually used
   on it. It is loaded before you get there, so it is already on screen when you arrive.
@@ -95,6 +153,9 @@
   list. It sits on the Setup tab, above what the coach would change.
 
 ### Changed
+- **Coach calls the line where it used to stay quiet.** A line call now carries the same weight
+  as a gear call, so on a short sheet it holds its place instead of losing every time to the
+  braking call in the same corner.
 - MXB Coach has a home of its own: every version from now on is published at
   [Frostn1/mxb-coach](https://github.com/Frostn1/mxb-coach), with the download and what changed
   in it on the same page, instead of being mixed in with MXB App's. Nothing to do — the coach
@@ -168,42 +229,9 @@
 - The Steam sign-in card takes your click when a dialog opened behind it at launch. It looked
   normal and did nothing, which is why it kept coming back after the other sign-in fixes.
 
-## Unreleased — Replay moves into the Studio, and records itself
-
-### Added
-- **Replay is a tab in Frost's Studio.** Fly a camera path in the game and the take is on
-  disk when you come back, as an mp4 named for the track and the slot. No OBS, no scene to
-  set up, nothing to remember to press — the mod says a shot has started and the Studio keeps
-  it. The recording runs whether or not the Studio's window is even open.
-- The Replay screen shows what is happening and what is missing: recording and for how long,
-  or which piece is not there yet — no encoder, no mod, no game, nothing playing. Under it are
-  your recordings, with the folder they are in, and the camera paths saved on this machine.
-- **Record** and a hotkey (`Ctrl+Shift+R`) for the shots the mod does not announce. The
-  hotkey works from inside the game, so starting one never costs an alt-tab.
-- Quality, frame rate, encoder and where recordings are saved, in the same screen. The encoder
-  is your graphics card's by default, which leaves the processor to the game it is recording.
-- **Get ffmpeg**, for a machine that has none. It lands in the Studio's own folder, checked
-  against the digest published with it; nothing is installed into Windows, and deleting the
-  folder undoes all of it.
-- The Studio can be opened straight onto a screen — `--view replay` — which is what
-  **Open in Studio** on MXB App's Plugins page does.
-- **Tracks near here**, in From a real place. Search the nearest town — which a gazetteer
-  always knows — press it, and every motocross circuit within 40 km comes back off
-  OpenStreetMap, nearest first, with how far away each one is. Pick yours and the plot is
-  centred on it. Nobody has to read a latitude off a map for their local track any more.
+## Unreleased — Creator sign-ups, and the ban list on the site
 
 ### Changed
-- **Coach calls the line where it used to stay quiet.** A line call now carries the same weight
-  as a gear call, so on a short sheet it holds its place instead of losing every time to the
-  braking call in the same corner.
-- **A paid plugin's panels open in Frost's Studio, not in MXB App.** Cutting a replay is the
-  same errand as painting a bike or building a track, and none of it is managing mods. MXB App
-  keeps the half that is its own — buying the licence, installing the bundle and updating it —
-  and sends you to the window the panels are in. A plugin can still ask for a row in the
-  manager (`"host": "manager"` in its manifest); saying nothing means the Studio, so the Replay
-  Mod's existing bundle lands in the right place without a byte of it changing.
-- Plugin licensing is shared rather than the manager's alone, so both apps check one licence,
-  in one way, from one copy of the code.
 - **Signing yourself up as a creator is off.** mxbsecure is taking new creators by hand again:
   the sign-up button is replaced by a line saying so, and asking us is how you get in. Nothing
   changes for anyone already selling through it — same standing, same daily allowance, same
@@ -213,30 +241,6 @@
 - **A banned Steam account is refused on the site even with no MXB App account behind it.** For
   a Steam copy the MX Bikes GUID *is* the Steam account written in hex, so the ban is recognised
   from the sign-in alone — deleting an account, or never having made one, is not a way round it.
-
-### Fixed
-- **Every hill in a supercross rhythm lane has a lip.** A jump's take-off is built as a curve
-  at the foot and a straight run to the lip, and a lane of hills was getting that on its first
-  crest only: the rest arrived flat, which is a wave. You cannot leave a wave, so you roll the
-  crest, drop into the trough compressed and get fired off whatever the suspension gives back —
-  which is the G-out and the trip to the moon. Measured on a stadium lap, the last metre into
-  each lip now stands at 25–29° where it stood at 12–15° — the first hill, the one that always
-  had its lip, is unchanged. A triple's far crest was the same shape and is fixed by the same
-  change.
-- **A tuff block is one colour again.** Each block was mapped across the whole texture, so
-  every one of them wore the red half and the white half split down its middle, with the grime
-  shaded along its top instead of its foot — a row of them read as popcorn rather than as a
-  border. They now alternate red and white down the row, one colour a block, dirty at the
-  bottom where they actually stand. They also stand *on* the ground now: a block was sat at
-  the height under its own middle, and since the strip between two lanes is the flank of the
-  mound a jump spills into, one end of every sixth block was up in the air — by a quarter of
-  a metre at the worst. Each one is seated on the lowest ground its own footprint covers.
-- **A track name the gazetteer has never heard of now finds the track.** Searching a real place
-  asked OpenStreetMap's place index, which knows addresses rather than circuits, and a club's
-  own name for its field is usually not in it — so the search said "try coordinates instead",
-  which is not something anybody wants to go and look up. It now asks the map for a motocross
-  circuit of that name before giving up, and says what to do next when there genuinely isn't
-  one.
 
 ## 2026-09-17 — v0.17.1 — Signing in with Steam works
 
