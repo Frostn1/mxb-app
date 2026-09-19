@@ -14,105 +14,106 @@
 @custom-variant dark (&:is(.dark *));
 
 /* ------------------------------------------------------------------ *
- * "Paddock" — the launcher redesign. Dark is the primary theme.
+ * The mxbsecure look. Dark is the primary theme.
  *
- * Two rules carry the look, and both are easy to undo by accident:
- *   - the ground is near-black and almost achromatic, so the blue is the
- *     only saturated thing on screen. Don't tint the surfaces.
- *   - geometry is square. Radius is 0 by design; corners are cut with
- *     `.u-notch` and emphasis comes from `.u-skew`, not from rounding.
+ * Two rules carry it, and both are easy to undo by accident:
+ *   - the ground is black and achromatic, so the brand blue is the only
+ *     saturated thing on screen. Don't tint the surfaces.
+ *   - geometry is rounded. `--radius` is the one dial: every `rounded-*`
+ *     utility in both apps resolves to it through the aliases below, so
+ *     changing it here is what rounds the whole window.
  * ------------------------------------------------------------------ */
 :root {
-  --radius: 0px;
+  --radius: 0.75rem;
 
   /* Chrome + surfaces */
-  --window: #08080a; /* top rail */
-  --background: #0c0c0e; /* main content area */
+  --window: #000000; /* top rail */
+  --background: #09090b; /* main content area */
   --foreground: #f2f3f5;
-  --card: #141417;
+  --card: #1c1c1e;
   --card-foreground: #f2f3f5;
-  --popover: #1c1c21; /* menus, toasts */
+  --popover: #2c2c2e; /* menus, toasts */
   --popover-foreground: #f2f3f5;
 
-  /* Accent — unchanged from the previous theme on purpose. */
-  --primary: #9ccfec;
-  --primary-foreground: #0d1216;
+  /* Accent — the brand blue. One colour, four weights, three roles. */
+  --primary: #0a84ff;
+  --primary-foreground: #ffffff;
 
   /* Segmented / neutral fills */
-  --secondary: #26262c;
+  --secondary: #2c2c2e;
   --secondary-foreground: #f2f3f5;
-  --muted: #141417;
-  --muted-foreground: #97979f;
-  --faint: #6d6d76;
+  --muted: #1c1c1e;
+  --muted-foreground: #a1a1a6;
+  --faint: #8e8e93;
 
   /* Selected/hover wash, same shape as every colorway's */
-  --accent: rgba(156, 207, 236, 0.12);
-  --accent-foreground: #c3e3f7;
+  --accent: rgba(10, 132, 255, 0.16);
+  --accent-foreground: #2997ff;
 
   /* Status */
-  --destructive: #ef8078;
+  --destructive: #ff6961;
   --destructive-foreground: #1a0c0b;
-  --success: #6fd99a;
-  --warning: #e8bd6a;
+  --success: #30d158;
+  --warning: #ffd60a;
 
   /* Lines + controls */
-  --border: rgba(255, 255, 255, 0.08);
-  --input: rgba(255, 255, 255, 0.12);
-  --ring: #9ccfec;
+  --border: rgba(255, 255, 255, 0.12);
+  --input: rgba(255, 255, 255, 0.16);
+  --ring: #0a84ff;
 }
 
 .dark {
-  --window: #08080a;
-  --background: #0c0c0e;
+  --window: #000000;
+  --background: #09090b;
   --foreground: #f2f3f5;
-  --card: #141417;
+  --card: #1c1c1e;
   --card-foreground: #f2f3f5;
-  --popover: #1c1c21;
+  --popover: #2c2c2e;
   --popover-foreground: #f2f3f5;
-  --primary: #9ccfec;
-  --primary-foreground: #0d1216;
-  --secondary: #26262c;
+  --primary: #0a84ff;
+  --primary-foreground: #ffffff;
+  --secondary: #2c2c2e;
   --secondary-foreground: #f2f3f5;
-  --muted: #141417;
-  --muted-foreground: #97979f;
-  --faint: #6d6d76;
-  --accent: rgba(156, 207, 236, 0.12);
-  --accent-foreground: #c3e3f7;
-  --destructive: #ef8078;
+  --muted: #1c1c1e;
+  --muted-foreground: #a1a1a6;
+  --faint: #8e8e93;
+  --accent: rgba(10, 132, 255, 0.16);
+  --accent-foreground: #2997ff;
+  --destructive: #ff6961;
   --destructive-foreground: #1a0c0b;
-  --success: #6fd99a;
-  --warning: #e8bd6a;
-  --border: rgba(255, 255, 255, 0.08);
-  --input: rgba(255, 255, 255, 0.12);
-  --ring: #9ccfec;
+  --success: #30d158;
+  --warning: #ffd60a;
+  --border: rgba(255, 255, 255, 0.12);
+  --input: rgba(255, 255, 255, 0.16);
+  --ring: #0a84ff;
 }
 
 /* Light theme — same structure, inverted ground. The accent darkens because
-   #9ccfec has nowhere near enough contrast against a light surface. */
+   #0a84ff has nowhere near enough contrast against a white surface. */
 .light {
-  --window: #e4e4e2;
-  --background: #f1f1ef;
-  --foreground: #131317;
+  --window: #f5f5f7;
+  --background: #ffffff;
+  --foreground: #1d1d1f;
   --card: #ffffff;
-  --card-foreground: #131317;
+  --card-foreground: #1d1d1f;
   --popover: #ffffff;
-  --popover-foreground: #131317;
-  --primary: #1c7897;
+  --popover-foreground: #1d1d1f;
+  --primary: #0071e3;
   --primary-foreground: #ffffff;
-  --secondary: #e0e0de;
-  --secondary-foreground: #131317;
-  --muted: #eaeae8;
-  --muted-foreground: #5a5a63;
-  --faint: #85858e;
-  --accent: rgba(28, 120, 151, 0.12);
-  --accent-foreground: #155f78;
-  --destructive: #b93a31;
+  --secondary: #e8e8ed;
+  --secondary-foreground: #1d1d1f;
+  --muted: #f5f5f7;
+  --muted-foreground: #6e6e73;
+  --faint: #86868b;
+  --accent: rgba(0, 113, 227, 0.12);
+  --accent-foreground: #0060c0;
+  --destructive: #d70015;
   --destructive-foreground: #ffffff;
-  --success: #1c8a5c;
-  --warning: #96690f;
-  --border: rgba(0, 0, 0, 0.11);
-  --input: rgba(0, 0, 0, 0.16);
-  --ring: #1c7897;
+  --success: #248a3d;
+  --warning: #8a6a00;
+  --border: rgba(0, 0, 0, 0.13);
+  --input: rgba(0, 0, 0, 0.18);
+  --ring: #0071e3;
 }
 
 /* ------------------------------------------------------------------ *

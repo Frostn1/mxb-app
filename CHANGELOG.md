@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+- The app wears the mxbsecure look: the brand blue, black chrome, and rounded corners
+  throughout. Every colorway but the default is untouched.
+
 ## 2026-09-18 — v0.17.4 — Stock tracks in the Library
 
 ### Added
