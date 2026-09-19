@@ -1,5 +1,49 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- The download button in the top bar opens the queue: what is downloading now, how fast it
+  is going and how long it has left, then everything waiting behind it.
+- Downloads shows what is in flight above the history, with the same speed and time left.
+- A mod waiting in the queue can be moved to the front, so it is the next one to start.
+- Settings has an Accounts page. Steam, mxbikes-shop.com, MXB Hub and mxb-mods.com in one
+  list, each with whether you are signed in, what the account is for, and its own buttons.
+  mxb-mods.com needs no account at all.
+- Buy something on a store and the app installs it for you. After it opens a store page it
+  watches that store for about two minutes and queues anything new that shows up. Turn it off
+  in Settings, Accounts. A purchase that lands later is still one Refresh away in Purchases.
+
+### Changed
+- Setting up the app now asks you to sign in with Steam before it asks about folders, so
+  sealed tracks and gear unlock on their own, anything you have bought is ready to install,
+  and Ranked already knows who you are the first time you open it. It also stops asking
+  where your folders are when it can find them itself.
+- The Library lists your tracks, bikes and rider gear down the left, each with its count, and
+  your folders under them. Click a folder to see only what's in it, or Favorites for the ones
+  you starred.
+- The Servers list view puts a server's details beside the list instead of over it. Click a
+  row and the pane on the right fills with the track art, who's on, the session and the rules,
+  and the same Join button the tile gives you. Picking the next row swaps the pane, so you can
+  read two servers without closing the first.
+- Browse, Shop and MXB Hub are one MODS screen. Pick tracks, bikes, rider or ReShade down the
+  left, then choose where it comes from: mxb-mods, MXB Hub, the shop, or all three in one
+  grid. Every card says which site it is from, who made it, and what it costs. Free mods say
+  Free. Your purchases are still there, at the bottom of the left column.
+- The app wears the mxbsecure look: the brand blue, black chrome, and rounded corners
+  throughout. Every colorway but the default is untouched.
+- Buttons, switches and sliders are upright and rounded. The switch is a pill, the slider has
+  a round thumb, and the lean comes off everything except the logo.
+- Headings, tabs, buttons and labels are set in Geist Mono, the brand's face. Buttons read as
+  words rather than shouting in capitals. Frost's Studio keeps the face it had.
+- New wordmark: MXB App, by mxbsecure. The icon is the brand's mark, a black rounded square
+  with a white m, and it is the same one on the window, the installer and the favicon.
+- A mod now looks the same wherever you open it, from Browse, the Library, the Shop or the
+  Hub. Its name, its state and the one button you came for sit in a bar across the top that
+  stays put while you read, the screenshot is bigger with the figures along its foot, and a
+  fact with nothing in it is left out instead of shown blank. An installed track lists its
+  layouts, and a bike lists the model swaps, liveries and sounds that came with it.
+
 ## 2026-09-18 — v0.17.4 — Stock tracks in the Library
 
 ### Added

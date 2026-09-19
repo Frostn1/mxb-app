@@ -112,6 +112,17 @@ export interface ActiveInstall extends StartParams {
   /** The user asked to stop this one and the backend hasn't unwound yet. Deliberately not an
    *  `InstallStage`: that union mirrors the stages Rust actually emits. */
   cancelling?: boolean;
+  /** Bytes per second over the last few seconds of transfer, worked out here — the backend
+   *  event carries no rate. Absent until there is enough of a window to mean anything, and
+   *  outside the downloading stage. */
+  speed?: number;
+  /** Seconds left at that rate. Absent whenever `speed` is, and whenever the server sent no
+   *  Content-Length: with no total there is no honest answer, and a made-up one is worse
+   *  than none. */
+  eta?: number;
+  /** `performance.now()` at the last progress event that produced a `speed`. A reader can
+   *  tell a live rate from one frozen by a stall. */
+  sampledAt?: number;
 }
 
 /** One install waiting its turn, as the queue panel needs to show it. */
@@ -154,6 +165,22 @@ const MAX_CONCURRENT = 2;
 /** How far ahead of the running jobs to resolve download links. See `prefetch`. */
 const PREFETCH_AHEAD = 2;
 
+/**
+ * How much of the recent past the transfer rate is measured over.
+ *
+ * Not total elapsed: divide the whole download by the whole wall clock and a line that
+ * stalled for twenty seconds and then recovered reads as half its real speed for the rest
+ * of the transfer, with an ETA to match. A few seconds of history tracks what the line is
+ * doing now, which is the only thing a "time left" can honestly be built on.
+ */
+const RATE_WINDOW_MS = 5000;
+
+/** Too short a window is just noise — 512 KiB lands in bursts. Wait for this much span. */
+const RATE_MIN_SPAN_MS = 700;
+
+/** Cap on samples kept, so a very fast line can't grow the window unboundedly. */
+const RATE_MAX_SAMPLES = 64;
+
 interface InstallContextValue {
   /** Everything in flight or just finished, oldest first. */
   active: ActiveInstall[];
@@ -167,6 +194,10 @@ interface InstallContextValue {
   /** Drop an install by `key`: a queued one never starts, the active one is stopped mid-transfer.
    *  A no-op once the bytes are down — extraction and placement can't be interrupted safely. */
   cancel: (key: string) => void;
+  /** Move a waiting install to the head of the queue, so it is the next one to run. Nothing
+   *  already transferring is disturbed: this changes what the next free lane picks up, not
+   *  what the busy ones are doing. A no-op for anything not still waiting. */
+  promote: (key: string) => void;
   startInstall: (
     p: Omit<StartParams, "source"> & { url: string; host: string },
   ) => void;
@@ -282,17 +313,53 @@ export function InstallProvider({
     // big the download was, and a failed one leaves nothing at all.
     let bytes: number | null = null;
 
+    // When each progress event landed and how much had arrived by then, newest last. The
+    // backend sends no rate and no timestamp, so this is where both come from: the event's
+    // own arrival is the clock. Local to the run, which is also its lifetime.
+    const samples: { at: number; received: number }[] = [];
+
     // Matched on slug because that is all the backend's event carries. Safe with several
     // installs in flight only because `pump` refuses to run one slug twice at once.
     const unlisten = await onInstallProgress((p) => {
       if (p.slug !== slug) return;
       if (p.total) bytes = p.total;
+
+      let at: number | undefined;
+      let speed: number | undefined;
+      let eta: number | undefined;
+      if (p.stage === "downloading" && p.received !== undefined) {
+        at = performance.now();
+        const last = samples[samples.length - 1];
+        // `received` is monotonic within one transfer, so a drop means the transfer started
+        // over (a redirect, a retry) and the old window describes a different file.
+        if (last && p.received < last.received) samples.length = 0;
+        samples.push({ at, received: p.received });
+        while (
+          samples.length > 2 &&
+          (at - samples[0].at > RATE_WINDOW_MS || samples.length > RATE_MAX_SAMPLES)
+        ) {
+          samples.shift();
+        }
+        const first = samples[0];
+        const span = at - first.at;
+        const moved = p.received - first.received;
+        if (span >= RATE_MIN_SPAN_MS && moved > 0) {
+          speed = (moved / span) * 1000;
+          // No total means no ETA. The shop's WebView download sends no Content-Length, and
+          // a guess there would be a number that only looks like an answer.
+          if (p.total && p.total > p.received) eta = (p.total - p.received) / speed;
+        }
+      }
+
       patch(key, (cur) => ({
         ...cur,
         stage: p.stage,
         received: p.received,
         total: p.total,
         message: p.message,
+        speed,
+        eta,
+        sampledAt: speed === undefined ? undefined : at,
       }));
     });
     const unlistenFrost = await onFrostmodReload((p) => {
@@ -598,6 +665,21 @@ export function InstallProvider({
     [patch, syncQueue],
   );
 
+  const promote = useCallback(
+    (key: string) => {
+      const at = queueRef.current.findIndex((q) => q.key === key);
+      // Already at the front, or not waiting any more — either way there is nothing to move.
+      if (at <= 0) return;
+      const [item] = queueRef.current.splice(at, 1);
+      queueRef.current.unshift(item);
+      syncQueue();
+      // It is next up now, so start looking its link up rather than waiting for a lane to
+      // free and then sitting idle for the page fetch.
+      prefetch();
+    },
+    [prefetch, syncQueue],
+  );
+
   const startInstall: InstallContextValue["startInstall"] = useCallback(
     ({ url, host, ...rest }) =>
       enqueue({ ...rest, source: { kind: "download", url, host } }),
@@ -638,6 +720,7 @@ export function InstallProvider({
       queued,
       queueLength: queued.length,
       cancel,
+      promote,
       startInstall,
       startImport,
       startHubInstall,
@@ -650,6 +733,7 @@ export function InstallProvider({
       activeFor,
       queued,
       cancel,
+      promote,
       startInstall,
       startImport,
       startHubInstall,

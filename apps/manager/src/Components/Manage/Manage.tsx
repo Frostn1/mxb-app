@@ -644,28 +644,28 @@ function ModsPanel({
           it. */}
       <div className="flex flex-none items-end gap-8 border-b border-border px-7 pb-3 pt-1">
         <div>
-          <div className="font-cond text-[22px] font-bold leading-none tabular-nums text-foreground">
+          <div className="font-cond tracking-[-0.045em] text-[22px] font-bold leading-none tabular-nums text-foreground">
             {mounted.length}
             <span className="text-[14px] text-muted-foreground"> / {mods.length}</span>
           </div>
-          <div className="mt-1.5 font-cond text-[10px] font-semibold uppercase tracking-[0.2em] text-faint">
+          <div className="mt-1.5 font-cond text-[10px] font-semibold uppercase tracking-[0.14em] text-faint">
             {t("manage.tabMods")}
           </div>
         </div>
         <div>
-          <div className="font-cond text-[22px] font-bold leading-none tabular-nums text-foreground">
+          <div className="font-cond tracking-[-0.045em] text-[22px] font-bold leading-none tabular-nums text-foreground">
             {formatBytes(mounted.reduce((n, m) => n + (m.size ?? 0), 0))}
           </div>
-          <div className="mt-1.5 font-cond text-[10px] font-semibold uppercase tracking-[0.2em] text-faint">
+          <div className="mt-1.5 font-cond text-[10px] font-semibold uppercase tracking-[0.14em] text-faint">
             {t("manage.loadCostLabel")}
           </div>
         </div>
         {parked > 0 && (
           <div>
-            <div className="font-cond text-[22px] font-bold leading-none tabular-nums text-warning">
+            <div className="font-cond tracking-[-0.045em] text-[22px] font-bold leading-none tabular-nums text-warning">
               {parked}
             </div>
-            <div className="mt-1.5 font-cond text-[10px] font-semibold uppercase tracking-[0.2em] text-faint">
+            <div className="mt-1.5 font-cond text-[10px] font-semibold uppercase tracking-[0.14em] text-faint">
               {t("manage.parkedLabel")}
             </div>
           </div>

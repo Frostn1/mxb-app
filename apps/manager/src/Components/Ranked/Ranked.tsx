@@ -229,7 +229,7 @@ const podiumColor = (position: string) => {
 };
 
 /**
- * A rank badge as a number plate — the shape the whole app is built from (`.u-skew`, and the
+ * A rank badge: a rounded plate carrying the grade and the points under it. (The
  * cut corner on the cards). A rank is the one number a rider would put on a plate, so it is
  * the one place in the app where the motif is literal rather than decorative.
  */
@@ -246,10 +246,10 @@ const Plate = ({
 }) => (
   <span
     title={title}
-    className={cn("u-skew grid place-items-center px-2", className)}
+    className={cn("grid place-items-center rounded-lg px-2", className)}
     style={{ background: solid(color) }}
   >
-    <span className="u-unskew block font-cond font-bold leading-none tracking-[0.04em] text-[#0d1216]">
+    <span className="block font-cond font-bold leading-none tracking-[-0.02em] text-[#0d1216]">
       {children}
     </span>
   </span>
@@ -273,7 +273,7 @@ const Profile = ({
     // never something you have to scroll back up for.
     <div className="flex min-h-0 flex-1 flex-col gap-3 pt-1">
       <div
-        className="u-notch relative shrink-0 overflow-hidden bg-card"
+        className="relative shrink-0 overflow-hidden rounded-xl bg-card"
         // A line of the rank's colour along the foot, tying the banner to the cards below.
         style={
           headline ? { boxShadow: `inset 0 -2px 0 ${tint(headline.color, 0.55)}` } : undefined
@@ -308,12 +308,12 @@ const Profile = ({
             <div>
               <div className="flex items-center gap-2.5">
                 {flag && <span className="text-[18px] leading-none">{flag}</span>}
-                <h2 className="font-cond text-[26px] font-bold uppercase leading-none tracking-[0.02em]">
+                <h2 className="font-cond text-[26px] font-bold leading-none tracking-[-0.045em]">
                   {profile.name || profile.guid}
                 </h2>
                 {headline?.rankName && (
                   <span
-                    className="font-cond text-[13px] font-semibold uppercase tracking-[0.1em]"
+                    className="font-cond text-[13px] font-semibold tracking-[-0.02em]"
                     style={{ color: solid(headline.color) }}
                   >
                     {headline.rankName}
@@ -359,7 +359,7 @@ const Profile = ({
           {profile.cards.map((c) => (
             <div
               key={c.discipline}
-              className="u-notch overflow-hidden bg-card"
+              className="overflow-hidden rounded-xl bg-card"
               style={{
                 // The rank's colour washed off the top-left and drawn down the edge — enough
                 // to tell three cards apart across the room, without tinting the surface.
@@ -370,7 +370,7 @@ const Profile = ({
             >
               <div className="flex items-center justify-between gap-3 px-4 pt-3.5">
                 <div>
-                  <p className="font-cond text-[17px] font-bold uppercase leading-none tracking-[0.06em]">
+                  <p className="font-cond text-[17px] font-bold leading-none tracking-[-0.02em]">
                     {c.discipline}
                   </p>
                   <p className="mt-1 text-[11.5px] text-faint">
@@ -381,7 +381,7 @@ const Profile = ({
                   <Plate color={c.color} className="h-[30px] w-[38px]">
                     <span className="block text-[13px]">{c.badge}</span>
                   </Plate>
-                  <span className="font-cond text-[27px] font-bold leading-none tabular-nums">
+                  <span className="font-cond tracking-[-0.045em] text-[27px] font-bold leading-none tabular-nums">
                     {c.mxp}
                   </span>
                 </div>
@@ -423,7 +423,7 @@ const Profile = ({
                   <th
                     key={key}
                     className={cn(
-                      "sticky top-0 z-10 border-b border-input bg-card py-2.5 font-cond font-semibold",
+                      "sticky top-0 z-10 border-b border-input bg-card py-2.5 font-cond tracking-[-0.02em] font-semibold",
                       width,
                     )}
                   >
@@ -441,7 +441,7 @@ const Profile = ({
                       {/* A bar in the medal's colour, so scanning the list picks out the good
                           days without reading a single number. */}
                       <span
-                        className="mr-2.5 inline-block h-3.5 w-[3px] translate-y-[2px] u-skew"
+                        className="mr-2.5 inline-block h-3.5 w-[3px] translate-y-[2px] rounded-full"
                         style={{ background: medal || "transparent" }}
                       />
                       <span title={r.track}>{r.track}</span>
@@ -455,7 +455,7 @@ const Profile = ({
                       {lobbyName(r.server)}
                     </td>
                     <td
-                      className="border-b border-input/50 px-2 py-2.5 font-cond text-[15px] font-bold tabular-nums group-last:border-0"
+                      className="border-b border-input/50 px-2 py-2.5 font-cond tracking-[-0.02em] text-[15px] font-bold tabular-nums group-last:border-0"
                       style={medal ? { color: medal } : undefined}
                     >
                       {r.position}

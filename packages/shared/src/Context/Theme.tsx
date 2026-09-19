@@ -41,7 +41,7 @@ export type UiScale = (typeof UI_SCALES)[number];
 
 /** `[accent, chrome]` — what a colorway's swatch is drawn from. */
 export const COLORWAY_SWATCH: Record<Colorway, [string, string]> = {
-  frost: ["#9ccfec", "#1a1d22"],
+  frost: ["#0a84ff", "#1c1c1e"],
   ember: ["#f0a878", "#221b16"],
   moss: ["#8fd6a8", "#16211c"],
   violet: ["#b9a3f0", "#1e1a28"],

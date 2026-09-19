@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
-"""Re-vendor Barlow + Barlow Condensed into packages/shared/src/fonts and regenerate packages/shared/src/fonts.css.
+"""Re-vendor Barlow + Geist Mono into packages/shared/src/fonts and regenerate packages/shared/src/fonts.css.
 
 The app must render offline, so the faces are bundled rather than pulled from
 Google at runtime. Only the latin and latin-ext subsets are kept — between them
 they cover all six locales the app ships.
 """
-import os, re, subprocess, sys
+import hashlib, os, re, subprocess, sys
 
 UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/120 Safari/537.36"
 URL = ("https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700"
-       "&family=Barlow+Condensed:wght@600;700&display=swap")
+       "&family=Barlow+Condensed:wght@600;700"
+       "&family=Geist+Mono:wght@500;600;700;800&display=swap")
 KEEP = {"latin", "latin-ext"}
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -20,7 +21,7 @@ if "@font-face" not in css:
 
 os.makedirs(os.path.join(ROOT, "packages/shared/src/fonts"), exist_ok=True)
 parts = re.split(r"/\*\s*([a-z-]+)\s*\*/", css)
-out, i = [], 1
+out, seen, i = [], {}, 1
 while i < len(parts) - 1:
     subset, block, i = parts[i], parts[i + 1], i + 2
     if subset not in KEEP:
@@ -30,16 +31,25 @@ while i < len(parts) - 1:
     url = re.search(r"url\((https://[^)]+\.woff2)\)", block).group(1)
     rng = re.search(r"unicode-range:\s*([^;]+);", block).group(1).strip()
     name = (fam.replace(" ", "") + "-" + wt + "-" + subset + ".woff2").lower()
-    subprocess.run(["curl", "-s", "--max-time", "30", "-A", UA, "-o",
-                    os.path.join(ROOT, "packages/shared/src/fonts", name), url], check=True)
+    dest = os.path.join(ROOT, "packages/shared/src/fonts", name)
+    subprocess.run(["curl", "-s", "--max-time", "30", "-A", UA, "-o", dest, url], check=True)
+    # Google serves ONE variable file for every weight of a variable family, so four
+    # @font-face rules would otherwise vendor four identical copies. Keep the first and
+    # point the rest at it; the UA instantiates the wght axis from `font-weight`.
+    digest = hashlib.sha256(open(dest, "rb").read()).hexdigest()
+    if digest in seen:
+        os.remove(dest)
+        name = seen[digest]
+    else:
+        seen[digest] = name
     out.append("@font-face {\n  font-family: '%s';\n  font-style: normal;\n"
                "  font-weight: %s;\n  font-display: swap;\n"
-               "  src: url('/fonts/%s') format('woff2');\n  unicode-range: %s;\n}"
+               "  src: url('./fonts/%s') format('woff2');\n  unicode-range: %s;\n}"
                % (fam, wt, name, rng))
 
 with open(os.path.join(ROOT, "packages/shared/src/fonts.css"), "w") as fh:
-    fh.write("/* Barlow + Barlow Condensed (SIL Open Font License 1.1), vendored so the app\n"
-             "   renders correctly offline. latin + latin-ext only: those cover all six\n"
-             "   shipped locales. Regenerate with scripts/fetch-fonts.py. */\n\n"
+    fh.write("/* Barlow, Barlow Condensed and Geist Mono (SIL Open Font License 1.1), vendored\n"
+             "   so the app renders correctly offline. latin + latin-ext only: those cover\n"
+             "   all six shipped locales. Regenerate with scripts/fetch-fonts.py. */\n\n"
              + "\n\n".join(out) + "\n")
 print("wrote packages/shared/src/fonts.css with %d faces" % len(out))
