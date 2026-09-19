@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import {
+  ExternalLink,
   Lock,
   Plug,
   Loader2,
@@ -104,50 +105,28 @@ const Facts = ({
  * MXB App said they were here. That is a subset, and the label says so.
  */
 const Riders = ({
-  players,
-  maxPlayers,
   riders,
   loading,
-  paintSync,
   className,
 }: {
-  players: number;
-  maxPlayers: number;
   riders: ServerRiders | null;
   loading: boolean;
-  /** Riders here running paint sync. A chip beside the count when there are any, and
-   *  nothing at all when there are none — a dash for it on every server is a column of
-   *  nothing, which is what it was in the stat band. */
-  paintSync: number;
   className?: string;
 }) => {
   const t = useT();
   const names = riders?.riders ?? [];
+  // The count is already the first figure under the hero. Saying "12 of 30 riders" again
+  // here made the section a second copy of it; the names are the only thing this block
+  // knows that the band does not, so with no names there is nothing to show.
+  if (names.length === 0 && !loading) return null;
   return (
     <section className={cn("space-y-2", className)}>
-      <h3 className="flex items-center gap-2 font-cond text-[11px] font-bold uppercase tracking-[0.14em] text-faint">
+      <h3 className="flex items-center justify-end gap-2 font-cond text-[11px] font-bold uppercase tracking-[0.14em] text-faint">
         {t("serverBrowser.ridersTitle")}
         {loading && <Loader2 className="size-3 animate-spin" />}
-        {paintSync > 0 && (
-          <span className="flex items-center gap-1 rounded-full bg-success/[0.14] px-2 py-0.5 text-[10px] font-semibold normal-case tracking-normal text-success">
-            <Palette className="size-3" />
-            {paintSync}
-          </span>
-        )}
       </h3>
-      <p className="text-[13px]">
-        {t("serverBrowser.ridersCount", { players, maxPlayers })}
-        {names.length > 0 && (
-          <span className="text-muted-foreground">
-            {" · "}
-            {riders?.source === "session"
-              ? t("serverBrowser.ridersFromSession")
-              : t("serverBrowser.ridersFromApp", { count: names.length })}
-          </span>
-        )}
-      </p>
       {names.length > 0 ? (
-        <div className="flex flex-wrap gap-1.5">
+        <div className="flex flex-wrap justify-end gap-1.5">
           {names.map((n) => (
             <span
               key={n}
@@ -175,6 +154,7 @@ const Track = ({
   loading,
   track,
   layout,
+  missing,
   className,
 }: {
   guess: TrackGuess | null;
@@ -183,6 +163,8 @@ const Track = ({
    *  carried, brought up beside the have-it-or-not line they belong with. */
   track: string;
   layout: string;
+  /** The player doesn't have it. Said here rather than on the hero. */
+  missing: boolean;
   className?: string;
 }) => {
   const t = useT();
@@ -196,53 +178,83 @@ const Track = ({
   }
   return (
     <section className={cn("space-y-2", className)}>
-      <h3 className="font-cond text-[11px] font-bold uppercase tracking-[0.14em] text-faint">
+      <h3 className="flex items-center gap-2 font-cond text-[11px] font-bold uppercase tracking-[0.14em] text-faint">
         {t("serverBrowser.trackTitle")}
+        {/* Beside the track, not over the artwork: it is a fact about this track, and at the
+            top of the hero it read as a label on the picture. */}
+        {missing && (
+          <Badge variant="count" title={t("serverBrowser.trackMissing")}>
+            <Download className="size-3" />
+            {t("serverBrowser.notInstalled")}
+          </Badge>
+        )}
       </h3>
-      <div className="min-w-0 space-y-1.5">
+      <div className="min-w-0 space-y-1">
+        {/* The name IS the link. It was rendered three times over — once as the title, once
+            inside "You have this track — X", and once more on a button that opened the page
+            the title now opens. One name, one place to click. */}
         <p className="min-w-0 text-[15px] font-semibold tracking-[-0.01em]">
-          <span className="break-words">{track || "—"}</span>
+          {guess?.productUrl ? (
+            <LinkedName href={guess.productUrl}>{track || "—"}</LinkedName>
+          ) : (
+            <span className="break-words">{track || "—"}</span>
+          )}
           {layout ? <span className="text-muted-foreground"> · {layout}</span> : null}
         </p>
+
+        {/* One short line about where you stand with it, and the identified name only when
+            it is not the name above. */}
         {guess?.installed ? (
-          <p className="flex items-center gap-1.5 text-[13px]">
+          <p className="flex items-center gap-1.5 text-[12.5px] text-muted-foreground">
             <CheckCircle2 className="size-3.5 shrink-0 text-faint" />
             <span className="truncate">
-              {guess.stock
-                ? t("serverBrowser.trackStock", { name: guess.installed })
-                : t("serverBrowser.trackInstalled", { name: guess.installed })}
+              {guess.stock ? t("serverBrowser.trackIsStock") : t("serverBrowser.trackIsYours")}
+              {guess.installed && guess.installed !== track ? ` — ${guess.installed}` : ""}
             </span>
           </p>
         ) : guess?.productName ? (
-          <>
-            <p className="text-[13px]">
-              <MapPin className="mr-1.5 inline size-3.5 text-faint" />
-              {/* Only with a name to put in it. "We think this is" on its own, which is what
-                  an empty productName rendered, is the app talking to itself. */}
-              {guess.exact
-                ? guess.productName
+          <p className="flex items-center gap-1.5 text-[12.5px] text-muted-foreground">
+            <MapPin className="size-3.5 shrink-0 text-faint" />
+            <span className="truncate">
+              {guess.productName === track
+                ? t("serverBrowser.trackFrom", { where: sourceName(guess.source, t) })
                 : t("serverBrowser.trackMaybe", { name: guess.productName })}
-            </p>
-            {guess.productUrl && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => void openUrl(guess.productUrl)}
-              >
-                <Download className="size-3.5" />
-                {guess.source === "mods"
-                  ? t("serverBrowser.trackGetMods")
-                  : guess.source === "hub"
-                    ? t("serverBrowser.trackGetHub")
-                    : t("serverBrowser.trackGetShop")}
-              </Button>
-            )}
-          </>
+            </span>
+          </p>
         ) : null}
       </div>
     </section>
   );
 };
+
+/** Which catalogue a guess came from, in words. */
+const sourceName = (source: string | null | undefined, t: ReturnType<typeof useT>): string =>
+  source === "mods"
+    ? t("serverBrowser.trackGetMods")
+    : source === "hub"
+      ? t("serverBrowser.trackGetHub")
+      : t("serverBrowser.trackGetShop");
+
+/**
+ * A name that goes somewhere.
+ *
+ * Faded underline at rest, so it reads as text with somewhere to go rather than as a
+ * control; the arrow only appears under the pointer, where it answers "where would this
+ * take me" without shouting it on every row of every server.
+ */
+const LinkedName = ({ href, children }: { href: string; children: ReactNode }) => (
+  <button
+    type="button"
+    onClick={() => void openUrl(href)}
+    title={href}
+    className="group inline-flex min-w-0 max-w-full cursor-default items-center gap-1 text-left"
+  >
+    <span className="truncate underline decoration-foreground/25 underline-offset-[3px] transition-colors group-hover:decoration-foreground/60">
+      {children}
+    </span>
+    <ExternalLink className="size-3 flex-none opacity-0 transition-opacity group-hover:opacity-70" />
+  </button>
+);
 
 /** One figure from the strip under the hero: a quiet label over the value that matters. */
 const Stat = ({
@@ -424,12 +436,6 @@ const ServerDetail = ({
               {paintSync}
             </Badge>
           )}
-          {missing && (
-            <Badge variant="count" title={t("serverBrowser.trackMissing")}>
-              <Download className="size-3" />
-              {t("serverBrowser.notInstalled")}
-            </Badge>
-          )}
         </div>
         <div className="absolute inset-x-0 bottom-0 flex items-end gap-2 p-4">
           {s.passworded && (
@@ -475,14 +481,12 @@ const ServerDetail = ({
             loading={guessing}
             track={s.track}
             layout={s.trackLayout}
+            missing={missing}
             className="min-w-0 flex-1"
           />
           <Riders
-            players={s.players}
-            maxPlayers={s.maxPlayers}
             riders={riders}
             loading={ridersLoading}
-            paintSync={paintSync}
             className="max-w-[45%] flex-none text-right"
           />
         </div>
@@ -505,11 +509,16 @@ const ServerDetail = ({
           ]}
         />
 
-        {/* Not a section of its own: an address is for pasting once, not for reading. */}
-        <p className="select-text pt-1 font-mono text-[11.5px] text-faint">
-          {s.address}
-          {s.lanAddress ? ` · ${s.lanAddress}` : ""}
-        </p>
+        {/* Not a section of its own: an address is for pasting once, not for reading. It sits
+            on the rules block's own line, labelled like every pair above it, so it lands in
+            the column the eye is already following rather than floating loose at the end. */}
+        <dl className="grid grid-cols-[minmax(0,7rem)_1fr] gap-x-4 gap-y-1.5 border-t border-input pt-3 text-[13px]">
+          <dt className="truncate text-muted-foreground">{t("serverBrowser.address")}</dt>
+          <dd className="select-text min-w-0 break-all font-mono text-[12px]">
+            {s.address}
+            {s.lanAddress ? <span className="text-faint"> · {s.lanAddress}</span> : null}
+          </dd>
+        </dl>
       </div>
 
       <div className="shrink-0 space-y-2 border-t border-input px-4 py-3">

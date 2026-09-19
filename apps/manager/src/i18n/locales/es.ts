@@ -1151,6 +1151,9 @@ export const es: Translation = {
   "serverBrowser.ridersFromApp": "{{count}} con sincronización de pinturas",
   "serverBrowser.ridersUnknown":
     "MX Bikes solo le dice a la app cuántos pilotos hay en un servidor. Los nombres vienen de los jugadores que usan {{app}}.",
+  "serverBrowser.trackIsStock": "Viene con el juego",
+  "serverBrowser.trackIsYours": "Tienes esta pista",
+  "serverBrowser.trackFrom": "En {{where}}",
   "serverBrowser.trackTitle": "Circuito",
   "serverBrowser.trackChecking": "Averiguando qué circuito es…",
   "serverBrowser.trackInstalled": "Ya tienes este circuito — {{name}}",

@@ -1137,6 +1137,9 @@ export const en = {
   "serverBrowser.ridersFromApp": "{{count}} using paint sync",
   "serverBrowser.ridersUnknown":
     "MX Bikes only tells the app how many riders are on a server. Names come from the players who run {{app}}.",
+  "serverBrowser.trackIsStock": "Comes with the game",
+  "serverBrowser.trackIsYours": "You have this track",
+  "serverBrowser.trackFrom": "On {{where}}",
   "serverBrowser.trackTitle": "Track",
   "serverBrowser.trackChecking": "Working out which track this is…",
   "serverBrowser.trackInstalled": "You have this track — {{name}}",
