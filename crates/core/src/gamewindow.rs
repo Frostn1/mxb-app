@@ -135,7 +135,10 @@ pub fn is_game_running() -> bool {
 /// `ps` finds it. Without this Play would cheerfully start a second copy.
 #[cfg(target_os = "macos")]
 pub fn is_game_running() -> bool {
-    crate::winehost::running_exe(
+    // The *client*, not any process wearing the image name — a dedicated server run under
+    // Wine carries `mxbikes.exe` in its argv too, and it is neither playing nor holding a
+    // Steam account. See [`crate::winehost::running_client`].
+    crate::winehost::running_client(
         &crate::winehost::process_table(),
         crate::game::active().exe,
         std::process::id(),
