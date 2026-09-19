@@ -1,5 +1,5 @@
 import { memo } from "react";
-import { Lock, Users, Wifi, Palette, Star, Mountain, Hourglass, Download } from "lucide-react";
+import { Lock, Users, Wifi, Palette, Star, Mountain, Hourglass } from "lucide-react";
 import type { CatalogTrack, MasterServer } from "@frost/shared/api/mods";
 import { cn } from "@frost/shared/lib/utils";
 import { useT } from "@/i18n";
@@ -105,12 +105,6 @@ const ServerRow = memo(function ServerRow({
             <Hourglass
               className="size-3 shrink-0 text-primary"
               aria-label={t("serverBrowser.inLine", { position: queuePosition })}
-            />
-          )}
-          {missing && (
-            <Download
-              className="size-3 shrink-0 text-faint"
-              aria-label={t("serverBrowser.trackMissing")}
             />
           )}
         </div>

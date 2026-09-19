@@ -3690,7 +3690,14 @@ async fn guess_server_track(app: tauri::AppHandle, track: String) -> Result<Trac
                 .ok()
                 .flatten()
                 .unwrap_or_default();
-            return Ok(guess);
+            // A track whose `.pkz` carries no preview used to end here with nothing to show
+            // and nowhere to go: the panel had a name, no picture and no link, because
+            // finding it installed skipped every catalogue below. The searches still run for
+            // that case — what they must not do is undo `installed`, which is what keeps the
+            // buy button off a track the player already has.
+            if !guess.preview.is_empty() {
+                return Ok(guess);
+            }
         }
     }
 
@@ -3702,7 +3709,11 @@ async fn guess_server_track(app: tauri::AppHandle, track: String) -> Result<Trac
         guess.preview = stock.preview;
         guess.stock = true;
         guess.exact = true;
-        return Ok(guess);
+        // A stock track is never bought, so there is nothing a catalogue could add but a
+        // picture — and only when the archive had none.
+        if !guess.preview.is_empty() {
+            return Ok(guess);
+        }
     }
 
     // The id is snake_case and a product title is not, so the underscores become spaces
@@ -3720,7 +3731,9 @@ async fn guess_server_track(app: tauri::AppHandle, track: String) -> Result<Trac
             guess.product_name = hit.title;
             guess.product_url = hit.link;
             guess.product_image = hit.image.unwrap_or_default();
-            guess.exact = exact;
+            // `exact` describes the name fold, and it is already true for something found on
+            // disk — a catalogue's opinion must not downgrade that to "we think".
+            guess.exact = guess.exact || exact;
             return Ok(guess);
         }
     }
@@ -3756,7 +3769,7 @@ async fn guess_server_track(app: tauri::AppHandle, track: String) -> Result<Trac
             guess.product_name = hit.title;
             guess.product_url = hit.url.unwrap_or_default();
             guess.product_image = hit.image.unwrap_or_default();
-            guess.exact = exact;
+            guess.exact = guess.exact || exact;
         }
     }
     Ok(guess)
@@ -4032,7 +4045,8 @@ fn shop_guess(mut guess: TrackGuess, hit: mods::shop_catalog::ShopMod, exact: bo
     guess.product_name = hit.title;
     guess.product_url = hit.url.unwrap_or_default();
     guess.product_image = hit.image.unwrap_or_default();
-    guess.exact = exact;
+    // Same rule as the other catalogues: a name fold cannot downgrade a track found on disk.
+    guess.exact = guess.exact || exact;
     guess
 }
 

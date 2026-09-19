@@ -59,6 +59,10 @@ import { isFull } from "@/lib/useServerQueue";
 /** One label/value line. Values that came back empty are dropped by {@link Facts}. */
 type Fact = { label: string; value: string };
 
+/** What each track id turned out to be, for the life of the app. Shared by every row: the
+ *  same track is on a dozen servers and comes round again on every rotation. */
+const GUESSES = new Map<string, TrackGuess>();
+
 const Facts = ({
   title,
   facts,
@@ -375,10 +379,23 @@ const ServerDetail = ({
       setGuess(null);
       return;
     }
+    // Answered from the cache when it has been asked before. Identifying a track can cost
+    // four catalogue searches — mxb-mods, two shop passes, then the Hub — and a rotation
+    // brings the same handful of tracks back every few minutes, off every row that runs
+    // them. One answer per track per run of the app is enough.
+    const hit = GUESSES.get(track);
+    if (hit) {
+      setGuess(hit);
+      setGuessing(false);
+      return;
+    }
     let cancelled = false;
     setGuessing(true);
     guessServerTrack(track)
-      .then((g) => !cancelled && setGuess(g))
+      .then((g) => {
+        GUESSES.set(track, g);
+        if (!cancelled) setGuess(g);
+      })
       .catch(() => {})
       .finally(() => !cancelled && setGuessing(false));
     return () => {
