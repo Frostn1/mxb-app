@@ -4,8 +4,6 @@ import { Dialog, DialogClose, DialogContent } from "../ui/dialog";
 import { ModelViewer, type ViewerMode } from "./ModelViewer";
 import {
   unpackPaint,
-  loadBikeModel,
-  previewModelSwap,
   loadRiderBodyModel,
   loadGearModel,
   loadStockGearModel,
@@ -15,7 +13,8 @@ import {
   watchPaintFiles,
   watchViewerSource,
 } from "../../api/mods";
-import type { PaintTexture, BikeModel, EdfNode, RiderPart, GearPaints } from "../../types";
+import type { PaintTexture, EdfNode, RiderPart, GearPaints } from "../../types";
+import { useBikeModel } from "./useBikeModel";
 import { useT } from "../../i18n/context";
 import { TyresPicker } from "./TyresPicker";
 import { useTyresPick } from "./tyresPick";
@@ -104,8 +103,6 @@ export function ViewerDialog({
   const [paintPick, setPaintPick] = useState<string | null>(null);
   const tyresPick = useTyresPick();
   const [gogglesPick, setGogglesPick] = useState<number | null>(null);
-  const [model, setModel] = useState<BikeModel | null>(null);
-  const [loadingModel, setLoadingModel] = useState(false);
   // Gear-paint path (no bike model): textures unpacked straight from a `.pnt`.
   const [gearTextures, setGearTextures] = useState<PaintTexture[] | null>(null);
   const [loadingPaint, setLoadingPaint] = useState(false);
@@ -113,9 +110,6 @@ export function ViewerDialog({
   const [gear, setGear] = useState<RiderPart | null>(null);
   const [gearPaints, setGearPaints] = useState<GearPaints>(EMPTY_GEAR_PAINTS);
   const [err, setErr] = useState<string | null>(null);
-  // Why the bike itself wouldn't load — a swap preview can be refused (an incomplete set,
-  // a bike with nothing behind it), and that reason is worth showing.
-  const [modelErr, setModelErr] = useState<string | null>(null);
   // A bike paint re-decoded after its file changed, and the file it came from — so a pick
   // that moves on drops it rather than dressing the new paint in the old one's sheets.
   const [hot, setHot] = useState<{ path: string; textures: PaintTexture[] } | null>(null);
@@ -129,9 +123,32 @@ export function ViewerDialog({
   // Ticks when the bike changes on disk, to load it again.
   const [generation, setGeneration] = useState(0);
 
+  // The bike itself — the same loader the mod page's stage uses.
+  const {
+    model,
+    loading: loadingModel,
+    error: modelErr,
+    reloads: bikeReloads,
+  } = useBikeModel({
+    enabled: open,
+    modelSource,
+    modelSwap,
+    tyres: tyresPick.tyres,
+    generation,
+  });
+
+  // A bike drawn again gets the same chip a re-dressed paint does, in its own words.
+  useEffect(() => {
+    if (!bikeReloads) return;
+    setChip("viewer.bikeReloaded");
+    setReloads((n) => n + 1);
+  }, [bikeReloads]);
+
   const nodes = model?.nodes ?? null;
   const rig = model?.rig ?? null;
-  const paints = model?.paints ?? [];
+  // Memoised only because it feeds a `useMemo` below: a fresh [] each render would
+  // re-run that on every one.
+  const paints = useMemo(() => model?.paints ?? [], [model]);
 
   // The names behind each picker, in order — the labels shown are decorated versions of
   // these, and matching happens here so a decoration can never break the match.
@@ -145,55 +162,6 @@ export function ViewerDialog({
     : [];
   const paintIdx = indexOfName(paintNames, paintPick ?? initialPaint);
   const gogglesIdx = gogglesPick ?? indexOfName(goggleNames, initialGoggles);
-
-  // Load the real bike geometry + its paints once per open (cached backend-side). A swap
-  // preview takes the same shape — it's the same bike, assembled from a different set.
-  const swapBike = modelSwap?.bike;
-  const swapVariant = modelSwap?.variant;
-  useEffect(() => {
-    if (!open) {
-      setModel(null);
-      return;
-    }
-    const load =
-      swapBike && swapVariant
-        ? previewModelSwap(swapBike, swapVariant, tyresPick.tyres)
-        : modelSource
-          ? loadBikeModel(modelSource, tyresPick.tyres)
-          : null;
-    if (!load) {
-      setModel(null);
-      return;
-    }
-    let alive = true;
-    const reload = generation > 0;
-    setLoadingModel(true);
-    setModelErr(null);
-    load
-      .then((m) => {
-        if (!alive) return;
-        setModel(m);
-        if (reload) {
-          setChip("viewer.bikeReloaded");
-          setReloads((n) => n + 1);
-        }
-      })
-      .catch((e) => {
-        if (!alive) return;
-        // A reload caught mid-write fails where the one after the write's last event won't,
-        // so keep the bike on screen rather than blank it in between.
-        if (reload) {
-          console.warn("[viewer] bike changed but wouldn't load:", e);
-          return;
-        }
-        setModelErr(String(e).replace(/^Error:\s*/, ""));
-        setModel(null);
-      })
-      .finally(() => alive && setLoadingModel(false));
-    return () => {
-      alive = false;
-    };
-  }, [open, modelSource, swapBike, swapVariant, tyresPick.tyres, generation]);
 
   // Drop any pick each time it opens, so the next thing shown starts from its own paint
   // rather than the one left behind by the last.

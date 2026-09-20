@@ -8,6 +8,7 @@ import {
   ShieldCheck,
   Box,
   Check,
+  Maximize2,
   Mountain,
   Share2,
   type LucideIcon,
@@ -22,6 +23,8 @@ import {
 import { readTrackInfo } from "@frost/shared/api/tracks";
 import type { LibraryEntry, PkzMeta } from "@frost/shared/types";
 import { ViewerDialog } from "@frost/shared/Components/Viewer/ViewerDialog";
+import { ModelViewer } from "@frost/shared/Components/Viewer/ModelViewer";
+import { useBikeModel } from "@frost/shared/Components/Viewer/useBikeModel";
 import { TrackViewerDialog } from "@frost/shared/Components/Viewer/TrackViewerDialog";
 import { entryViewerProps } from "@frost/shared/Components/Viewer/entryViewer";
 import { useConfig } from "@frost/shared/Context/Config";
@@ -177,11 +180,29 @@ export default function LibraryDetail({
     return [...byCat.entries()];
   }, [entries, entry]);
 
-  const { bikePreview } = useConfig();
+  const { bikePreview, config } = useConfig();
   const view = useMemo(
     () => entryViewerProps(entry, entries, bikePreview),
     [entry, entries, bikePreview],
   );
+
+  // A bike's "picture" is its paint sheet blown up to 16:9 — a flat grid of panels that
+  // tells you almost nothing about the bike. Where the model can be drawn, it is drawn here
+  // instead, on the same loader the viewer dialog uses.
+  const bike = useBikeModel({
+    enabled: view?.mode === "bike" && !!view.modelSource,
+    modelSource: view?.modelSource,
+    tyres: config.previewTyres ?? undefined,
+  });
+  const bikeNodes = bike.model?.nodes?.length ? bike.model.nodes : null;
+  // Whichever paint the model leads with — the dialog is where you go to try the others.
+  const bikeTextures = bike.model?.paints[0]?.textures ?? [];
+  const standIn =
+    bikeTextures.find((tex) => ["livery", "bike_parts"].includes(tex.name.toLowerCase())) ??
+    null;
+  // Nothing loaded and nothing still coming: fall back to the picture rather than leave an
+  // empty frame where a bike should be.
+  const showStage = view?.mode === "bike" && !!view.modelSource && (bike.loading || !!bikeNodes);
 
   // A track's layouts, and everything a bike or a gear model carries under it — the model
   // swaps, the liveries, the sounds. Each group is what a real scan found, so a mod with
@@ -264,6 +285,30 @@ export default function LibraryDetail({
 
       <div className="flex min-h-0 flex-1 gap-6 px-7 pb-5 pt-4">
         <div className="flex min-w-0 flex-1 flex-col gap-4 overflow-y-auto pr-1">
+          {showStage ? (
+            <div className="relative aspect-video w-full overflow-hidden rounded-xl border border-border bg-black/40">
+              <ModelViewer
+                mode="bike"
+                texture={standIn}
+                textures={bikeTextures}
+                nodes={bikeNodes}
+                rig={bike.model?.rig ?? null}
+                loading={bike.loading}
+                noStandIn
+                className="absolute inset-0"
+              />
+              {/* The one control the stage needs: the dialog is where the paints, the tyres
+                  and a canvas worth turning the bike on live. */}
+              <button
+                onClick={() => setView3d(true)}
+                title={t("library.quick3d")}
+                aria-label={t("library.quick3d")}
+                className="absolute right-3 top-3 grid size-7 cursor-default place-items-center rounded-lg border border-white/25 bg-black/45 text-white/85 transition-colors hover:text-white"
+              >
+                <Maximize2 className="size-3.5" />
+              </button>
+            </div>
+          ) : (
           <MediaPanel
             images={image ? [image] : []}
             title={title}
@@ -283,6 +328,7 @@ export default function LibraryDetail({
               </>
             }
           />
+          )}
 
           {securedLocked && (
             <Note icon={ShieldCheck} tone="primary">

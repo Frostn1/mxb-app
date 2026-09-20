@@ -3,6 +3,10 @@
 ## Unreleased
 
 ### Added
+- The Library has an Owned list: everything you have bought on the shop and MXB Hub in one
+  place, each saying whether it is installed yet.
+- The Library has a Wishlist. Press Add to wishlist on any mod page and it waits there until
+  you are ready for it.
 - The download button in the top bar opens the queue: what is downloading now, how fast it
   is going and how long it has left, then everything waiting behind it.
 - Downloads shows what is in flight above the history, with the same speed and time left.
@@ -30,6 +34,8 @@
   sealed tracks and gear unlock on their own, anything you have bought is ready to install,
   and Ranked already knows who you are the first time you open it. It also stops asking
   where your folders are when it can find them itself.
+- A bike card shows the maker's name where there is no picture in the mod, and a bike page
+  opens on the bike itself, turnable, instead of a blown-up paint sheet.
 - The Library lists your tracks, bikes and rider gear down the left, each with its count, and
   your folders under them. Click a folder to see only what's in it, or Favorites for the ones
   you starred.
