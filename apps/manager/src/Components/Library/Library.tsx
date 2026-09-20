@@ -236,11 +236,14 @@ function LibraryCardBody({
           // Second, not first: the question a card answers is "which bike is this", and a
           // picture of the bike answers it where a KTM mark only narrows it to nine of them.
           // On its own plate and contained rather than cropped — it's a mark, not a photo.
-          <img
-            src={meta.logo}
-            alt={brand ?? ""}
-            className="h-full w-full bg-badge-plate object-contain p-1.5"
-          />
+          <span className="grid h-full w-full place-items-center bg-badge-plate p-1.5">
+            <img
+              src={meta.logo}
+              alt={brand ?? ""}
+              className="h-full w-full object-contain"
+              style={{ transform: "translateY(-2px)" }}
+            />
+          </span>
         ) : brand ? (
           // A bike with neither picture nor mark used to get the same grey box as every
           // other one, which told you nothing. The maker's name does.
