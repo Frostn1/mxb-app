@@ -26,6 +26,10 @@ const LAST_ADDRESS_KEY = "mxb:lastServerAddress";
 interface JoinServerDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** An address to open on — what an `mxb://server?addr=…` link carries. Fills the field
+   *  in and shows it; joining is still the button, because a link a website can open must
+   *  not be able to start the game. */
+  initialAddress?: string;
   /** Lets the sidebar refresh its running-state probe once the game is up. */
   onJoined?: () => void;
 }
@@ -46,6 +50,7 @@ interface JoinServerDialogProps {
 const JoinServerDialog = ({
   open,
   onOpenChange,
+  initialAddress,
   onJoined,
 }: JoinServerDialogProps) => {
   const t = useT();
@@ -62,6 +67,14 @@ const JoinServerDialog = ({
   // the app launches the game itself, which leaves it behind our own window, so a player who
   // never alt-tabbed has no idea it is up and reads "close the game first" as nonsense.
   const [gameRunning, setGameRunning] = useState(false);
+
+  // A shared link names one server, and it is the reason the dialog is open — show the
+  // address rather than the registry list it almost certainly isn't in.
+  useEffect(() => {
+    if (!open || !initialAddress) return;
+    setAddress(initialAddress);
+    setManual(true);
+  }, [open, initialAddress]);
 
   // Re-read each time it opens rather than once per mount: the registry is the one thing
   // here that changes without the player doing anything.

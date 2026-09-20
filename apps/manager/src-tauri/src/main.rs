@@ -2787,51 +2787,143 @@ fn now_ms() -> u64 {
         .unwrap_or(0)
 }
 
-/// The event the frontend listens on to open enrollment with the code already filled in.
-const DEEP_LINK_ENROLL_EVENT: &str = "deep-link-enroll";
+/// The event the frontend listens on when an `mxb://` link is opened.
+const DEEP_LINK_EVENT: &str = "deep-link";
 
-/// The invite code out of an `mxb://enroll?code=…` link.
+/// What an `mxb://` link asks the app to open.
 ///
-/// Parsed by hand rather than with a URL crate because only one shape is accepted and the
-/// value goes straight into a form: anything that isn't the enroll route, or carries a code
-/// that isn't a plain token, is dropped rather than guessed at. A deep link is reachable by
-/// any page the player visits, so this is untrusted input and treated as such.
-fn enroll_code_from_link(url: &str) -> Option<String> {
+/// Every variant only ever *takes the player somewhere* with the fields filled in — none of
+/// them acts on its own. A link is reachable by any page the player visits, so joining a
+/// server, spending an invite and installing a mod all stay behind the button they always
+/// were.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+enum DeepLink {
+    /// `mxb://enroll?code=…` — opens enrollment with the invite code filled in.
+    Enroll { code: String },
+    /// `mxb://server?addr=1.2.3.4:54210` — opens the join dialog on that address.
+    Server { address: String },
+    /// `mxb://mod?game=mxb&type=tracks&slug=…&cat=12` — opens the mod's page.
+    #[serde(rename_all = "camelCase")]
+    Mod {
+        game: String,
+        slug: String,
+        mod_type: String,
+        category: Option<u32>,
+    },
+}
+
+/// One parameter out of a link's query string, undecoded.
+///
+/// Percent-encoding isn't decoded on purpose: every value we accept is a plain token, and
+/// a `%` in one means it is either not what we asked for or an attempt to smuggle
+/// something through the checks below.
+fn link_param<'a>(query: &'a str, key: &str) -> Option<&'a str> {
+    query
+        .split('&')
+        .find_map(|pair| pair.split_once('=').filter(|(k, _)| k.eq_ignore_ascii_case(key)))
+        .map(|(_, v)| v.trim())
+}
+
+/// Whether a value is a plain token — what every field in a link is allowed to be.
+fn plain_token(value: &str, max: usize) -> bool {
+    !value.is_empty()
+        && value.len() <= max
+        && value.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+}
+
+/// Whether a value is an `host:port` address the join dialog can be opened on.
+///
+/// The real check lives next to the spawn in `join_server` — this one only decides whether
+/// the field is worth prefilling, so it stays deliberately narrow.
+fn plain_address(value: &str) -> bool {
+    let Some((host, port)) = value.rsplit_once(':') else {
+        return false;
+    };
+    let port_ok = !port.is_empty()
+        && port.len() <= 5
+        && port.chars().all(|c| c.is_ascii_digit())
+        && port.parse::<u32>().is_ok_and(|p| p > 0 && p <= u16::MAX as u32);
+    let host_ok = !host.is_empty()
+        && host.len() <= 64
+        && host
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-');
+    port_ok && host_ok
+}
+
+/// What an `mxb://…` link asks for, or `None` if it isn't one of ours.
+///
+/// Parsed by hand rather than with a URL crate because only a handful of shapes are
+/// accepted and the values go straight into the UI: anything that isn't a route we know,
+/// or carries a field that isn't a plain token, is dropped rather than guessed at. A deep
+/// link is reachable by any page the player visits, so this is untrusted input and treated
+/// as such.
+fn parse_deep_link(url: &str) -> Option<DeepLink> {
     let rest = url.strip_prefix("mxb://")?;
     // `mxb://enroll?code=X` — the host is the route. A trailing slash is what some launchers
     // add, so it's tolerated rather than made to fail.
     let (route, query) = rest.split_once('?')?;
     let route = route.trim_end_matches('/');
-    // Both spellings, because the link is written by a human handing out an invite and the
+    // Both spellings, because a link is written by a person handing out an invite and the
     // two are a genuine trap. Accepting one costs a comparison; rejecting it costs someone
     // an invite that silently does nothing.
-    if !route.eq_ignore_ascii_case("enroll") && !route.eq_ignore_ascii_case("enroll") {
-        return None;
+    if route.eq_ignore_ascii_case("enroll") || route.eq_ignore_ascii_case("enrol") {
+        // Invite codes are opaque tokens.
+        let code = link_param(query, "code")?;
+        return plain_token(code, 128).then(|| DeepLink::Enroll { code: code.to_string() });
     }
-    let code = query.split('&').find_map(|pair| pair.strip_prefix("code="))?.trim();
-    // Invite codes are opaque tokens. Anything with punctuation or spacing in it is either
-    // percent-encoding we don't want to guess at or an attempt to smuggle something else.
-    if code.is_empty()
-        || code.len() > 128
-        || !code.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
-    {
-        return None;
+    if route.eq_ignore_ascii_case("server") {
+        let address = link_param(query, "addr").or_else(|| link_param(query, "address"))?;
+        return plain_address(address).then(|| DeepLink::Server {
+            address: address.to_string(),
+        });
     }
-    Some(code.to_string())
+    if route.eq_ignore_ascii_case("mod") {
+        let slug = link_param(query, "slug")?;
+        // Catalog slugs are lowercase words joined by dashes — the tail of the mod's page
+        // URL, and nothing else.
+        if !plain_token(slug, 128) {
+            return None;
+        }
+        // Which game's catalog, and which of its browse tabs. Both are needed to open the
+        // page on the right folders; the frontend decides what to do when the link names a
+        // game that isn't the one running.
+        let game = link_param(query, "game").unwrap_or("mxb");
+        let mod_type = link_param(query, "type")?;
+        if !plain_token(game, 8) || !plain_token(mod_type, 32) {
+            return None;
+        }
+        // The browse category the mod was opened under. Optional: without it the page falls
+        // back to the tab's own category, which is what Browse does anyway.
+        let category = match link_param(query, "cat") {
+            Some(c) => Some(c.parse::<u32>().ok()?),
+            None => None,
+        };
+        return Some(DeepLink::Mod {
+            game: game.to_string(),
+            slug: slug.to_string(),
+            mod_type: mod_type.to_string(),
+            category,
+        });
+    }
+    None
 }
 
-/// Bring the window up and hand the frontend the code from an `mxb://enroll` link.
+/// Bring the window up and hand the frontend what the link asked for.
 ///
-/// The link only ever *prefills* the field — enrolling still needs the player to press the
-/// button. A URL a website can open must not be able to spend an invite on its own.
+/// Nothing here acts on the player's behalf: enrollment still needs the button, a server
+/// link opens the join dialog rather than launching the game, and a mod link opens the
+/// mod's page rather than installing it. A URL a website can open must not be able to do
+/// any of those by itself.
 fn handle_deep_link(app: &tauri::AppHandle, urls: &[String]) {
-    let Some(code) = urls.iter().find_map(|u| enroll_code_from_link(u)) else {
-        log::warn!("[deep-link] ignored {urls:?} — not an enroll link");
+    let Some(link) = urls.iter().find_map(|u| parse_deep_link(u)) else {
+        log::warn!("[deep-link] ignored {urls:?} — not a link we answer");
         return;
     };
     show_main(app);
-    if let Err(e) = app.emit(DEEP_LINK_ENROLL_EVENT, code) {
-        log::warn!("[deep-link] couldn't hand the code to the UI: {e}");
+    if let Err(e) = app.emit(DEEP_LINK_EVENT, link) {
+        log::warn!("[deep-link] couldn't hand the link to the UI: {e}");
     }
 }
 
@@ -6582,9 +6674,22 @@ fn main() {
     // `RunEvent::Exit` — where this one releases the guard — before it spawns anything.
     // A restart that skipped the event loop would not be safe.
     #[cfg(not(debug_assertions))]
-    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
         log::info!("another instance was launched — showing the window already running");
         show_main(app);
+        // Windows and Linux deliver an `mxb://` link by launching the app with the URL as
+        // its only argument, so with the app already up the link arrives *here* and
+        // nowhere else. Without this hand-off, every shared link clicked while MXB App is
+        // running would do nothing but raise the window.
+        #[cfg(any(windows, target_os = "linux"))]
+        {
+            use tauri_plugin_deep_link::DeepLinkExt;
+            app.deep_link().handle_cli_arguments(argv.iter());
+        }
+        // macOS delivers links through `on_open_url` instead, so nothing reads the
+        // arguments there.
+        #[cfg(not(any(windows, target_os = "linux")))]
+        let _ = argv;
     }));
 
     builder
@@ -7950,28 +8055,35 @@ mod window_tests {
 
 #[cfg(test)]
 mod deep_link_tests {
-    use super::enroll_code_from_link;
+    use super::{parse_deep_link, DeepLink};
+
+    fn enroll_code(url: &str) -> Option<String> {
+        match parse_deep_link(url) {
+            Some(DeepLink::Enroll { code }) => Some(code),
+            _ => None,
+        }
+    }
 
     #[test]
     fn reads_the_code_out_of_an_enroll_link() {
-        assert_eq!(enroll_code_from_link("mxb://enroll?code=ABC-123").as_deref(), Some("ABC-123"));
+        assert_eq!(enroll_code("mxb://enroll?code=ABC-123").as_deref(), Some("ABC-123"));
         // A launcher that adds a trailing slash to the host must still work.
-        assert_eq!(enroll_code_from_link("mxb://enroll/?code=xyz_9").as_deref(), Some("xyz_9"));
+        assert_eq!(enroll_code("mxb://enroll/?code=xyz_9").as_deref(), Some("xyz_9"));
     }
 
     #[test]
     fn accepts_the_british_spelling_too() {
         // Whoever writes the invite link is a person, and the two spellings are a trap.
-        assert_eq!(enroll_code_from_link("mxb://enroll?code=A1").as_deref(), Some("A1"));
+        assert_eq!(enroll_code("mxb://enrol?code=A1").as_deref(), Some("A1"));
     }
 
     #[test]
     fn finds_the_code_among_other_parameters() {
-        assert_eq!(enroll_code_from_link("mxb://enroll?ref=discord&code=A1").as_deref(), Some("A1"));
+        assert_eq!(enroll_code("mxb://enroll?ref=discord&code=A1").as_deref(), Some("A1"));
     }
 
     #[test]
-    fn ignores_links_that_are_not_the_enroll_route() {
+    fn ignores_links_that_are_not_a_route_we_answer() {
         // Any page the player visits can open one of these, so anything unrecognised has
         // to be dropped rather than interpreted.
         for bad in [
@@ -7981,7 +8093,7 @@ mod deep_link_tests {
             "mxb://",
             "",
         ] {
-            assert!(enroll_code_from_link(bad).is_none(), "{bad:?} must be ignored");
+            assert!(parse_deep_link(bad).is_none(), "{bad:?} must be ignored");
         }
     }
 
@@ -7995,14 +8107,80 @@ mod deep_link_tests {
             "mxb://enroll?code=%2E%2E",
             "mxb://enroll?code=<script>",
         ] {
-            assert!(enroll_code_from_link(bad).is_none(), "{bad:?} must be refused");
+            assert!(parse_deep_link(bad).is_none(), "{bad:?} must be refused");
         }
     }
 
     #[test]
     fn refuses_an_absurdly_long_code() {
         let long = format!("mxb://enroll?code={}", "a".repeat(200));
-        assert!(enroll_code_from_link(&long).is_none());
+        assert!(parse_deep_link(&long).is_none());
+    }
+
+    #[test]
+    fn reads_a_server_link() {
+        assert_eq!(
+            parse_deep_link("mxb://server?addr=1.2.3.4:54210"),
+            Some(DeepLink::Server { address: "1.2.3.4:54210".into() })
+        );
+        // A hostname is as valid an address as an IP, and `address=` is the spelling
+        // someone writing one by hand reaches for.
+        assert_eq!(
+            parse_deep_link("mxb://server?address=eu.example.com:54210"),
+            Some(DeepLink::Server { address: "eu.example.com:54210".into() })
+        );
+    }
+
+    #[test]
+    fn refuses_an_address_that_is_not_one() {
+        for bad in [
+            "mxb://server?addr=",
+            "mxb://server?addr=1.2.3.4",
+            "mxb://server?addr=1.2.3.4:0",
+            "mxb://server?addr=1.2.3.4:99999",
+            "mxb://server?addr=1.2.3.4:54210%20&x=1",
+            "mxb://server?addr=localhost:54210;calc",
+            "mxb://server?track=x",
+        ] {
+            assert!(parse_deep_link(bad).is_none(), "{bad:?} must be refused");
+        }
+    }
+
+    #[test]
+    fn reads_a_mod_link() {
+        assert_eq!(
+            parse_deep_link("mxb://mod?game=mxb&type=tracks&slug=some-track&cat=12"),
+            Some(DeepLink::Mod {
+                game: "mxb".into(),
+                slug: "some-track".into(),
+                mod_type: "tracks".into(),
+                category: Some(12),
+            })
+        );
+        // The game defaults to MX Bikes and the category is optional — the page falls back
+        // to the tab's own category, exactly as Browse does.
+        assert_eq!(
+            parse_deep_link("mxb://mod?type=bikes&slug=a-bike"),
+            Some(DeepLink::Mod {
+                game: "mxb".into(),
+                slug: "a-bike".into(),
+                mod_type: "bikes".into(),
+                category: None,
+            })
+        );
+    }
+
+    #[test]
+    fn refuses_a_mod_link_that_is_missing_or_malformed() {
+        for bad in [
+            "mxb://mod?type=tracks",
+            "mxb://mod?slug=some-track",
+            "mxb://mod?type=tracks&slug=../../etc",
+            "mxb://mod?type=../x&slug=some-track",
+            "mxb://mod?type=tracks&slug=a&cat=abc",
+        ] {
+            assert!(parse_deep_link(bad).is_none(), "{bad:?} must be refused");
+        }
     }
 }
 

@@ -11,6 +11,7 @@ import {
   FileDown,
   Maximize2,
   ChevronRight,
+  Link2,
   Trash2,
   X,
 } from "lucide-react";
@@ -28,6 +29,7 @@ import {
   isLiveryContext,
   isServerOnly,
   isSoundContext,
+  modLink,
   riderTarget,
   resolveInitialFolder,
   uninstallMod,
@@ -43,7 +45,7 @@ import type {
   InstallStage,
   ModDetail as Detail,
 } from "@frost/shared/types";
-import { ContextBarLeft } from "../Shell/ContextBar";
+import { ContextBarLeft, ContextBarRight } from "../Shell/ContextBar";
 import CachedImg from "@frost/shared/Components/ui/cached-img";
 import RichDescription from "./RichDescription";
 import InstallDialog, { type InstallChoice } from "./InstallDialog";
@@ -63,6 +65,7 @@ import {
 } from "@frost/shared/Components/ui/alert-dialog";
 import { cn } from "@frost/shared/lib/utils";
 import { useConfig } from "@frost/shared/Context/Config";
+import { copyText } from "../../lib/clipboard";
 import { toast } from "sonner";
 
 interface ModDetailProps {
@@ -313,6 +316,16 @@ export default function ModDetail({
     });
   };
 
+  /** The `mxb://` link that opens this page in someone else's copy of the app. */
+  const copyLink = () => {
+    void copyText(modLink({ game: game.id, modType: modType.id, slug, category: categoryId }))
+      .then((ok) =>
+        ok
+          ? toast.success(t("modDetail.linkCopied"))
+          : toast.error(t("modDetail.copyLinkFailed")),
+      );
+  };
+
   const copyError = () => {
     if (!myActive?.message) return;
     navigator.clipboard.writeText(myActive.message);
@@ -380,6 +393,21 @@ export default function ModDetail({
           <span className="max-w-[420px] truncate text-foreground">{detail.title}</span>
         </span>
       </ContextBarLeft>
+
+      {/* Sharing a mod used to mean pasting the catalog URL, which opens a browser and
+          leaves the reader to find the mod again in here. This link opens the app on this
+          page. */}
+      <ContextBarRight>
+        <button
+          type="button"
+          onClick={copyLink}
+          title={t("modDetail.copyLinkHint")}
+          className="flex h-7 shrink-0 items-center gap-1.5 whitespace-nowrap border border-input px-2.5 text-[12px] text-faint hover:text-muted-foreground"
+        >
+          <Link2 className="size-3.5" />
+          {t("modDetail.copyLink")}
+        </button>
+      </ContextBarRight>
 
       {/* The artwork carries the name. A breadcrumb over a text column was the same page
           every catalog has; this is the one the mockup drew. */}
