@@ -240,8 +240,8 @@ function LibraryCardBody({
             <img
               src={meta.logo}
               alt={brand ?? ""}
-              className="h-full w-full object-contain"
-              style={{ transform: "translateY(-5px)" }}
+              className="w-full object-contain"
+              style={{ height: "28px", transform: "translateY(-2px)" }}
             />
           </span>
         ) : brand ? (
