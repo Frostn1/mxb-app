@@ -241,7 +241,7 @@ function LibraryCardBody({
               src={meta.logo}
               alt={brand ?? ""}
               className="h-full w-full object-contain"
-              style={{ transform: "translateY(-2px)" }}
+              style={{ transform: "translateY(-5px)" }}
             />
           </span>
         ) : brand ? (
