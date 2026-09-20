@@ -48,7 +48,6 @@ import {
   setWatchModsReload,
   setBetaUpdates,
   setAutoUpdates,
-  setSecureContentInject,
   setWineRunner,
   wineHostInfo,
   type WineHostInfo,
@@ -472,8 +471,6 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
   const watchModsReload = config.watchModsReload ?? true;
   const betaUpdates = config.betaUpdates ?? false;
   const autoUpdates = config.autoUpdates ?? true;
-  const secureContentInject = config.secureContentInject ?? false;
-
   const overlayEnabled = config.overlayEnabled ?? true;
   const overlayHotkey = config.overlayHotkey || FALLBACK_HOTKEY;
   // Same shape as the overlay pair above: the config's fields are optional (an install
@@ -889,15 +886,6 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
   const toggleAutoUpdates = async (v: boolean) => {
     try {
       await setAutoUpdates(v);
-      await reloadConfig();
-    } catch (e) {
-      toast.error(t("settings.updateFailed"), { description: String(e) });
-    }
-  };
-
-  const toggleSecureContentInject = async (v: boolean) => {
-    try {
-      await setSecureContentInject(v);
       await reloadConfig();
     } catch (e) {
       toast.error(t("settings.updateFailed"), { description: String(e) });
@@ -2276,15 +2264,6 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
               desc={t("settings.watchModsReloadDesc")}
               checked={watchModsReload}
               onChange={toggleWatchModsReload}
-            />
-
-            {/* Off unless asked for: this puts a DLL into the running game. With it on, it
-                injects however the game was started — Play or Steam — like FrostMod. */}
-            <ToggleRow
-              label={t("settings.secureContentInject")}
-              desc={t("settings.secureContentInjectDesc")}
-              checked={secureContentInject}
-              onChange={toggleSecureContentInject}
             />
 
             {/* FrostMod's own flags, typed. A plain field rather than a toggle each: these
