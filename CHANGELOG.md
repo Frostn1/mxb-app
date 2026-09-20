@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Changed
+- The live look refresh now runs only on the game build it was built for. On any other build
+  it stays out of the way, and everything else works as it always has.
+
 ### Added
 - Uninstall a mod straight from its page. Under Reinstall, on anything already in your
   Library, with the file going to the Recycle Bin like it does in the Library itself.
