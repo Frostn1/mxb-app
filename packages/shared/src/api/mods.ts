@@ -3784,7 +3784,8 @@ export function serverProbe(url: string, token: string): Promise<ServerStatus> {
 /**
  * What an `mxb://` link asked the app to open.
  *
- * Shapes the app writes when something is shared, and the only ones it answers:
+ * The only shapes it answers — and what a shared https link (see `serverLink` and
+ * `modLink`) sends the browser on to:
  *
  * - `mxb://enroll?code=…` — enrollment, with the invite code filled in
  * - `mxb://server?addr=1.2.3.4:54210` — the join dialog, on that address
@@ -3814,30 +3815,30 @@ export function onDeepLink(cb: (link: DeepLink) => void): Promise<UnlistenFn> {
 }
 
 /**
- * The `mxb://` link that opens a server's join dialog with the address filled in.
+ * Where a shared link points — the page that hands a browser the `mxb://` link above.
  *
- * The address goes in as it reads. It is `host:port` and nothing else, and the backend
- * refuses anything that isn't — percent-encoding the colon would only make the link
- * unreadable in the chat message it is pasted into, and be rejected on the other side.
+ * What gets copied is an ordinary https link, not the `mxb://` one: a custom scheme does
+ * nothing at all in the browser of someone who hasn't installed the app, which is most of
+ * the people a server or a mod gets shared with. The page at the other end opens the app
+ * for everyone who has it, and says what the link was for and where to get it for everyone
+ * who doesn't. It lives in `links/` in the mxbsecure-web repo.
  */
+const SHARE_HOST = "https://open.mxbsecure.com";
+
+/** The link to share a server: opens its join dialog, address filled in. */
 export function serverLink(address: string): string {
-  return `mxb://server?addr=${address.trim()}`;
+  return `${SHARE_HOST}/server/${address.trim()}`;
 }
 
-/** The `mxb://` link that opens a mod's page in the app. */
+/** The link to share a mod: opens its page, on the right tab and category. */
 export function modLink(opts: {
   game: string;
   modType: string;
   slug: string;
   category?: number | null;
 }): string {
-  const q = new URLSearchParams({
-    game: opts.game,
-    type: opts.modType,
-    slug: opts.slug,
-  });
-  if (opts.category != null) q.set("cat", String(opts.category));
-  return `mxb://mod?${q.toString()}`;
+  const path = `${SHARE_HOST}/mod/${opts.game}/${opts.modType}/${opts.slug}`;
+  return opts.category == null ? path : `${path}?cat=${opts.category}`;
 }
 
 /** Where a server can be hosted, as the control plane will accept it. */

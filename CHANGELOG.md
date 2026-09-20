@@ -3,8 +3,9 @@
 ## Unreleased
 
 ### Added
-- Copy link on a server's page, and on a mod's page. The link opens MXB App on that server's
-  join dialog or on that mod, so a server or a mod pasted in Discord is one click to open.
+- Copy link on a server's page, and on a mod's page. Paste it in Discord and whoever clicks
+  it lands in MXB App on that server's join dialog or on that mod. Anyone without the app
+  gets a page telling them what the link was for and where to get it.
 - Uninstall a mod straight from its page. Under Reinstall, on anything already in your
   Library, with the file going to the Recycle Bin like it does in the Library itself.
 
