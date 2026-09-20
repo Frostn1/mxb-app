@@ -178,22 +178,12 @@ jobs:
             echo 'RELEASE_NOTES_EOF'
           } >> "$GITHUB_OUTPUT"
 
-      # UPX for the Windows binary pack (scripts/pack-binary.sh runs as the app's
-      # beforeBundleCommand). Windows leg only; the script no-ops without it and without MXB_PACK.
-      - name: Install UPX (Windows)
-        if: startsWith(matrix.platform, 'windows')
-        shell: bash
-        run: choco install upx -y
-
       - name: Build and publish release
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Frontend reads this at build time (see .env.production).
           VITE_APP_NAME: "MXB App"
-          # Pack the Windows binary with UPX via the beforeBundleCommand (scripts/pack-binary.sh).
-          # Windows leg only; empty elsewhere so the hook no-ops. See the script for the AV caveat.
-          MXB_PACK: ${{ startsWith(matrix.platform, 'windows') && '1' || '' }}
           # Sign the updater artifacts so the app can verify self-updates.
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
