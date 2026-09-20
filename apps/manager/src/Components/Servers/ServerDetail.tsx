@@ -566,7 +566,7 @@ const ServerDetail = ({
             <div className="flex flex-1 items-center gap-2">
               <Button
                 variant="outline"
-                className="flex-1"
+                className="shrink-0"
                 onClick={() => onInstall(s, product)}
                 title={t("serverBrowser.installHint", { title: product.name })}
               >

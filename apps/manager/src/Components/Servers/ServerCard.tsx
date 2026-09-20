@@ -240,6 +240,7 @@ const ServerCard = memo(function ServerCard({
             <>
               <CardButton
                 primary={!s.joinable}
+                className="flex-none"
                 onClick={(e) => {
                   stop(e);
                   onInstall(s, product);
