@@ -2026,6 +2026,14 @@ fn launch_with(cfg: &AppConfig, address: Option<&str>) -> anyhow::Result<LaunchO
         for (key, value) in &plan.env {
             cmd.env(key, value);
         }
+        // Secured content is keyed on this Mac's hardware UUID, and the only way it reaches the
+        // DLL inside the game is the game's own environment — which exists here because on macOS
+        // we are what starts the game, there being no Mac build for Steam to start. Set for every
+        // launch, not just when something is locked: which mods are secured is decided later, by
+        // the scan that arms the DLL, and a value nothing reads costs nothing.
+        if let Some(id) = crate::mxbsecure_machine_id() {
+            cmd.env("MXBSECURE_MACHINEID", id);
+        }
         cmd.spawn().map_err(|e| {
             anyhow::anyhow!("Couldn't start {} through {}: {e}", exe.display(), runner.via())
         })?;

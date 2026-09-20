@@ -57,7 +57,6 @@ import {
   type MasterServer,
 } from "@frost/shared/api/mods";
 import { useConfig } from "@frost/shared/Context/Config";
-import { openCreatorPage } from "@frost/shared/api/creatorPage";
 import { useInstall } from "../../Context/Install";
 import { useT, type TFunc, type TKey } from "@/i18n";
 import { useFavorites } from "@/lib/useFavorites";
@@ -153,7 +152,13 @@ function readFlag(key: string, fallback: boolean): boolean {
  * behind it. A build without the browser, or a master that won't answer, comes back as a
  * plain error string this renders rather than a blank tab.
  */
-const Servers = () => {
+interface ServersProps {
+  /** A server someone shared, as an `mxb://server?addr=…` link. A fresh object each time,
+   *  so the same address arriving twice still opens the dialog. */
+  link?: { address: string } | null;
+}
+
+const Servers = ({ link }: ServersProps) => {
   const t = useT();
   const [servers, setServers] = useState<MasterServer[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -165,11 +170,23 @@ const Servers = () => {
   const [joining, setJoining] = useState<string | null>(null);
   const queue = useServerQueue();
   const [joinOpen, setJoinOpen] = useState(false);
+  // The address a shared link named, held until the dialog has it. Opening the dialog is
+  // as far as a link goes — the game is started by the button, not by the URL.
+  const [linkAddress, setLinkAddress] = useState<string | undefined>();
   const [registerOpen, setRegisterOpen] = useState(false);
   // Only offered while the game is up: with nothing running there is no half-open session to
   // close, and the button would be a puzzle rather than a fix.
   const { running: gameRunning } = useGameRunning();
   const [unwedging, setUnwedging] = useState(false);
+
+  // A shared link lands here: open the join dialog on the address it named. The server is
+  // very unlikely to be in the registry the dialog lists, which is why the address is
+  // handed over rather than the dialog left to find it.
+  useEffect(() => {
+    if (!link) return;
+    setLinkAddress(link.address);
+    setJoinOpen(true);
+  }, [link]);
 
   /** Close the game's half-open master session so its own Browse screen works again. */
   const unwedgeBrowser = useCallback(() => {
@@ -564,9 +581,6 @@ const Servers = () => {
       const slug = product.slug;
       const tracks = modTypesFor(game.id).find((m) => m.id === "tracks");
       if (!slug || !tracks) return;
-      // Install & join is a download too — show the track's mxb-mods.com page behind the app
-      // so the creator keeps the ad revenue. No-ops for a shop track or when opted out.
-      if (product.source === "mods") void openCreatorPage(product.url);
       setInstalling((cur) => ({ ...cur, [slug]: s.address }));
       startPendingInstall({
         slug,
@@ -861,7 +875,17 @@ const Servers = () => {
         <HelpHint title={t("servers.title")} description={t("serverBrowser.help")} />
       </ContextBarRight>
 
-      <JoinServerDialog open={joinOpen} onOpenChange={setJoinOpen} onJoined={load} />
+      <JoinServerDialog
+        open={joinOpen}
+        onOpenChange={(open) => {
+          setJoinOpen(open);
+          // Cleared on the way out, so opening the dialog by hand later starts on the
+          // address the player last typed rather than on someone else's link.
+          if (!open) setLinkAddress(undefined);
+        }}
+        initialAddress={linkAddress}
+        onJoined={load}
+      />
       <RegisterServerDialog open={registerOpen} onOpenChange={setRegisterOpen} />
       {/* A tile has no list beside it to put the pane next to, so from the grid it still
           opens over the top — the same pane, in a dialog. */}

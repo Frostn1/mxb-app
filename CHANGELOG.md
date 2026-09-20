@@ -3,6 +3,11 @@
 ## Unreleased
 
 ### Added
+- Copy link on a server's page, and on a mod's page. Paste it in Discord and whoever clicks
+  it lands in MXB App on that server's join dialog or on that mod. Anyone without the app
+  gets a page telling them what the link was for and where to get it.
+- Uninstall a mod straight from its page. Under Reinstall, on anything already in your
+  Library, with the file going to the Recycle Bin like it does in the Library itself.
 - The Library has an Owned list: everything you have bought on the shop and MXB Hub in one
   place, each saying whether it is installed yet.
 - The Library has a Wishlist. Press Add to wishlist on any mod page and it waits there until
@@ -62,6 +67,17 @@
   stays put while you read, the screenshot is bigger with the figures along its foot, and a
   fact with nothing in it is left out instead of shown blank. An installed track lists its
   layouts, and a bike lists the model swaps, liveries and sounds that came with it.
+## 2026-09-19 — v0.17.6 — A sign-in link you can copy
+
+### Fixed
+- The Steam sign-in screen now shows the sign-in link itself, with a Copy link button. If your
+  browser doesn't open on its own, sign in by pasting the link into it.
+
+## 2026-09-19 — v0.17.5 — No extra window while you install
+
+### Removed
+- Viewing or installing a mod no longer opens its mxb-mods.com page beside the app.
+- The Support mod creators setting is gone with it.
 
 ## 2026-09-18 — v0.17.4 — Stock tracks in the Library
 

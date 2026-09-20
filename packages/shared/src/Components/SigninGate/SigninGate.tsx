@@ -36,6 +36,19 @@ export default function SigninGate() {
   const [waiting, setWaiting] = useState(false);
   const [note, setNote] = useState<string | null>(null);
   /**
+   * The sign-in URL we last minted, kept so it can be shown.
+   *
+   * `openUrl` resolving is not proof a browser opened. On Windows it hands the URL to the
+   * shell and reports success as soon as the shell accepts it, which it does when there is no
+   * default browser association and when an elevated app cannot reach the desktop session. The
+   * rows show what that looks like: one account minted nineteen sign-in URLs over two days and
+   * not one of them ever reached `/v1/steam/start` — nineteen clicks, no browser, and an app
+   * that said "Waiting for Steam to confirm it's you…" every time. So the URL is shown rather
+   * than only opened, and the sign-in stops depending on a call that cannot report this failure.
+   */
+  const [url, setUrl] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+  /**
    * Which attempt is the live one. Bumped by every click, so a poll left over from an earlier
    * attempt sees it has been superseded and stops touching the screen — the alternative being an
    * old loop's "Steam hasn't come back" landing on top of the attempt the person is watching.
@@ -51,6 +64,7 @@ export default function SigninGate() {
         setOpening(false);
         setWaiting(false);
         setNote(null);
+        setUrl(null);
       }
     });
 
@@ -87,14 +101,30 @@ export default function SigninGate() {
     setWaiting(false);
     setNote("Opening Steam in your browser…");
 
+    let minted: string;
     try {
-      const url = await invoke<string>("steam_link_start");
-      await openUrl(url);
+      minted = await invoke<string>("steam_link_start");
     } catch (e) {
       if (!mineStill()) return;
       setOpening(false);
       setNote(typeof e === "string" ? e : "Couldn't start the sign-in. Try again.");
       return;
+    }
+    if (!mineStill()) return;
+    // Shown from here on, whatever the browser does. A minted URL is good for an hour before
+    // it is even opened (`LOGIN_START_TTL_MS`), so there is no hurry and nothing is wasted by
+    // putting it on screen.
+    setUrl(minted);
+    setCopied(false);
+
+    // A failure here is worth saying out loud, but it is not the end of the sign-in: the link
+    // below still works, and the poll below still watches for it. This used to return, leaving
+    // the rider with an error and no way through.
+    try {
+      await openUrl(minted);
+    } catch {
+      if (!mineStill()) return;
+      setNote("Couldn't open your browser. Use the link below to sign in.");
     }
     if (!mineStill()) return;
 
@@ -103,7 +133,7 @@ export default function SigninGate() {
     // said "sign-in expired" needs.
     setOpening(false);
     setWaiting(true);
-    setNote("Waiting for Steam to confirm it's you…");
+    setNote((n) => n ?? "Waiting for Steam to confirm it's you…");
 
     // Poll until the link lands, then let the gate have the final word. The ceiling matches the
     // control plane's own sign-in window, which is now thirty minutes counted from the browser
@@ -144,8 +174,8 @@ export default function SigninGate() {
       // The browser tab is where the answer is, and it is the half that can fail on its own —
       // so say so, rather than going quiet.
       setNote(
-        "Steam hasn't come back. Check the browser tab that opened: if it says the sign-in " +
-          "expired or couldn't be confirmed, start it again here.",
+        "Steam hasn't come back. If no browser opened, use the link below. If a tab did open " +
+          "and says the sign-in expired or couldn't be confirmed, start it again here.",
       );
     }
   };
@@ -178,6 +208,28 @@ export default function SigninGate() {
           </Button>
         </div>
         {note && <p className="mt-4 text-xs text-muted-foreground">{note}</p>}
+        {url && (
+          // The escape hatch from a browser that never opened. `openUrl` cannot tell us that
+          // happened, so the rider is given the URL itself rather than a reassurance.
+          <div className="mt-4 rounded-lg border border-border bg-muted/40 p-3 text-left">
+            <p className="text-xs text-muted-foreground">
+              No browser? Copy this link and open it yourself:
+            </p>
+            <p className="mt-1 break-all font-mono text-[11px] text-muted-foreground/80">{url}</p>
+            <button
+              type="button"
+              className="mt-2 text-xs font-medium text-primary underline-offset-2 hover:underline"
+              onClick={() => {
+                void navigator.clipboard
+                  .writeText(url)
+                  .then(() => setCopied(true))
+                  .catch(() => setCopied(false));
+              }}
+            >
+              {copied ? "Copied" : "Copy link"}
+            </button>
+          </div>
+        )}
         <p className="mt-6 text-xs text-muted-foreground/70">
           {waiting
             ? "Finish the sign-in in your browser · press the button again for a fresh one"

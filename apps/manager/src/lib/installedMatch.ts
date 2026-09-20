@@ -9,6 +9,7 @@
  */
 
 import { normalizeModName } from "@frost/shared/api/mods";
+import type { LibraryEntry } from "@frost/shared/types";
 
 /** Packaged-file extensions, stripped before a name is read as words. */
 const EXT = /\.(pkz|zip|rar|7z|pnt)$/i;
@@ -113,11 +114,17 @@ interface Indexed {
   tokens: Set<string>;
 }
 
-export interface InstalledIndex {
+export interface InstalledIndex<T = LibraryEntry> {
   /** How many installed items back this index (0 = nothing scanned / scan failed). */
   readonly size: number;
   /** Whether a catalog title looks like something already on disk. */
   has(title: string): boolean;
+  /**
+   * The installed item a catalog title matched, or `null`. Same matching as {@link has} —
+   * this is the one an Uninstall on the mod page aims at, so a badge and the file it
+   * removes can never disagree.
+   */
+  match(title: string): T | null;
 }
 
 function jaccard(a: Set<string>, b: Set<string>): { shared: number; score: number } {
@@ -128,23 +135,31 @@ function jaccard(a: Set<string>, b: Set<string>): { shared: number; score: numbe
 }
 
 /**
- * Build a lookup over installed file/folder names (`LibraryEntry.name` — packed
- * `.pkz`, extracted track folders, and `.pnt` paints alike).
+ * Build a lookup over installed items — `LibraryEntry`s (packed `.pkz`, extracted track
+ * folders and `.pnt` paints alike), or bare names where the caller only needs the badge.
+ * Whatever goes in comes back out of {@link InstalledIndex.match}.
  *
  * Candidates are narrowed through an inverted token index, so checking a card costs
  * the handful of entries that share a word with it rather than the whole library.
  */
-export function buildInstalledIndex(names: Iterable<string>): InstalledIndex {
+export function buildInstalledIndex<T extends string | { name: string }>(
+  items: Iterable<T>,
+): InstalledIndex<T> {
+  const source: T[] = [];
   const entries: Indexed[] = [];
-  const keys = new Set<string>();
+  const byKey = new Map<string, number>();
   const byToken = new Map<string, number[]>();
 
-  for (const name of names) {
+  for (const item of items) {
+    const name = typeof item === "string" ? item : item.name;
     const key = normalizeModName(name);
     if (!key) continue;
-    keys.add(key);
     const tokens = significantTokens(name);
     const i = entries.push({ key, tokens }) - 1;
+    source.push(item);
+    // First one wins: two files can normalize to the same key, and the earlier entry is
+    // the one the scan listed first — an arbitrary but stable choice.
+    if (!byKey.has(key)) byKey.set(key, i);
     for (const t of tokens) {
       const bucket = byToken.get(t);
       if (bucket) bucket.push(i);
@@ -152,10 +167,12 @@ export function buildInstalledIndex(names: Iterable<string>): InstalledIndex {
     }
   }
 
-  const has = (title: string): boolean => {
+  /** Index of the installed item a title matches, or -1. */
+  const find = (title: string): number => {
     const key = normalizeModName(title);
-    if (!key) return false;
-    if (keys.has(key)) return true;
+    if (!key) return -1;
+    const exact = byKey.get(key);
+    if (exact !== undefined) return exact;
 
     const tokens = significantTokens(title);
     const candidates = new Set<number>();
@@ -176,23 +193,30 @@ export function buildInstalledIndex(names: Iterable<string>): InstalledIndex {
       //   the catalog. Needs two distinctive words, or one long enough to be a name.
       const titleInFile = entry.key.includes(key);
       const fileInTitle = key.includes(entry.key);
-      if (titleInFile && key.length >= MIN_CONTAINED_LEN && tokens.size >= 1) return true;
+      if (titleInFile && key.length >= MIN_CONTAINED_LEN && tokens.size >= 1) return i;
       if (
         fileInTitle &&
         entry.key.length >= MIN_CONTAINED_LEN &&
         (entry.tokens.size >= 2 || entry.key.length >= MIN_LONE_WORD_LEN)
       )
-        return true;
+        return i;
 
       const { shared, score } = jaccard(tokens, entry.tokens);
-      if (shared >= MIN_SHARED_TOKENS && score >= MIN_TOKEN_OVERLAP) return true;
-      if (subsetMatch(tokens, entry.tokens, shared)) return true;
+      if (shared >= MIN_SHARED_TOKENS && score >= MIN_TOKEN_OVERLAP) return i;
+      if (subsetMatch(tokens, entry.tokens, shared)) return i;
     }
-    return false;
+    return -1;
   };
 
-  return { size: entries.length, has };
+  return {
+    size: entries.length,
+    has: (title) => find(title) >= 0,
+    match: (title) => {
+      const i = find(title);
+      return i < 0 ? null : source[i];
+    },
+  };
 }
 
 /** Stand-in for "nothing scanned yet" — matches nothing. */
-export const EMPTY_INSTALLED_INDEX: InstalledIndex = buildInstalledIndex([]);
+export const EMPTY_INSTALLED_INDEX: InstalledIndex = buildInstalledIndex<LibraryEntry>([]);

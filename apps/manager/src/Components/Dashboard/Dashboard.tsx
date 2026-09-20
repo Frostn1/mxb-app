@@ -28,7 +28,8 @@ import { DownloadsProvider } from "../../Context/Downloads";
 import { DropReviewProvider } from "../../Context/DropReview";
 import { ShareProvider } from "../../Context/Share";
 import { useConfig } from "@frost/shared/Context/Config";
-import { modTypesFor, setIntroSeen } from "@frost/shared/api/mods";
+import { useT } from "@/i18n";
+import { modTypesFor, onDeepLink, setIntroSeen } from "@frost/shared/api/mods";
 import { useModBrowsing } from "../../lib/useModBrowsing";
 import { displayName } from "@frost/shared/lib/mods";
 import { track } from "../../lib/analytics";
@@ -41,7 +42,8 @@ interface DashboardProps {
 }
 
 const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
-  const { config, game } = useConfig();
+  const { config, game, games } = useConfig();
+  const t = useT();
   // Opens on Online. Riding with other people is what the app is opened for most often, and
   // the server list is the one screen that is worth nothing five minutes later — a mod list
   // is the same whenever you get to it.
@@ -198,6 +200,42 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
     [openMod, modType.categoryId, navigate],
   );
 
+  // The server an `mxb://server` link named, handed to the Servers tab. A fresh object
+  // every time, so the same address shared twice still opens the dialog.
+  const [serverLink, setServerLink] = useState<{ address: string } | null>(null);
+
+  // Links shared between players: a server address, or a mod's page. Both only ever open
+  // the screen with the fields filled in — the backend has already checked the link, and
+  // joining and installing stay behind the buttons they always were.
+  useEffect(() => {
+    const pending = onDeepLink((link) => {
+      if (link.kind === "server") {
+        setServerLink({ address: link.address });
+        navigate("servers");
+        return;
+      }
+      if (link.kind !== "mod") return;
+      // The two catalogs don't share slugs or category ids, so a GP Bikes link opened
+      // while MX Bikes is active would look up the wrong site and come back empty. Say so
+      // rather than showing an empty page: switching games is one click away in the rail.
+      if (link.game !== game.id) {
+        const other = games.find((g) => g.id === link.game);
+        toast.info(t("deepLink.otherGame", { game: other?.display ?? link.game }));
+        return;
+      }
+      const type = modTypesFor(game.id).find((mt) => mt.id === link.modType);
+      if (!type) return;
+      openModTarget({
+        slug: link.slug,
+        subpath: type.installSubpath,
+        categoryId: link.category ?? type.categoryId,
+      });
+    });
+    return () => {
+      void pending.then((off) => off()).catch(() => {});
+    };
+  }, [game.id, games, navigate, openModTarget, t]);
+
   const [ctxLeft, setCtxLeft] = useState<HTMLDivElement | null>(null);
   const [ctxRight, setCtxRight] = useState<HTMLDivElement | null>(null);
   const ctxSlots = useMemo(() => ({ left: ctxLeft, right: ctxRight }), [ctxLeft, ctxRight]);
@@ -256,6 +294,7 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
               modType={modType}
               categoryId={selectedCategoryId ?? modType.categoryId}
               installed={installed}
+              onChanged={onInstalled}
               onBack={closeMod}
             />
           ) : isModsView(view) ? (
@@ -270,7 +309,7 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
               onChangeType={changeType}
             />
           ) : view === "servers" ? (
-            <Servers />
+            <Servers link={serverLink} />
           ) : view === "ranked" ? (
             <Ranked onFindServers={() => setView("servers")} />
           ) : view === "library" ? (

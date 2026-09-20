@@ -406,10 +406,11 @@ fn stage_dll(app: &AppHandle, run_dir: &std::path::Path) -> Result<PathBuf, Stri
     Ok(dst)
 }
 
-/// Where the shipped `mxbsecure-inject.exe` is found (Linux/Proton only), same priority as the
-/// DLL: an explicit override, the Tauri resource dir, then beside the app's executable. The
-/// release build cross-builds it on the Linux leg and bundles it alongside the DLL.
-#[cfg(target_os = "linux")]
+/// Where the shipped `mxbsecure-inject.exe` is found (the Wine platforms — Linux/Proton and
+/// macOS), same priority as the DLL: an explicit override, the Tauri resource dir, then beside
+/// the app's executable. The release build cross-builds it once with mingw and both bundles
+/// carry it alongside the DLL.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 fn source_injector(app: &AppHandle) -> Option<PathBuf> {
     const NAME: &str = "mxbsecure-inject.exe";
     if let Ok(p) = std::env::var("MXB_SECURE_INJECTOR") {
@@ -433,7 +434,7 @@ fn source_injector(app: &AppHandle) -> Option<PathBuf> {
 /// Stage the injector beside the DLL so both are reachable from inside the prefix. Byte-compared
 /// like [`stage_dll`], so a rebuilt injector replaces the old one but an unchanged one isn't
 /// recopied while the prefix might hold it open.
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 fn stage_injector(app: &AppHandle) -> Option<PathBuf> {
     let dir = run_dir(app)?;
     let src = source_injector(app)?;
@@ -455,6 +456,38 @@ fn write_manifest(assets: &[SecureAsset], dir: &std::path::Path) -> Result<(), S
     }
     std::fs::write(dir.join("manifest.tsv"), out).map_err(|e| e.to_string())
 }
+
+/// Name the signed-in account for the DLL — an `identity` file in the run dir, the SteamID64 on
+/// one line.
+///
+/// Only the Wine platforms need it, and only because of where the game comes from. Inside a
+/// bottle the DLL's own lookup reads an empty Wine registry and a `C:\` Steam that was never
+/// installed; the environment can't carry the answer either, since a DLL loaded into the game
+/// sees the *game's* environment and under Proton the game is Steam's child, not ours. A file
+/// beside the DLL crosses the wall whoever started the game. On Windows the DLL reads the real
+/// Steam install and this is never written.
+///
+/// It only names the account a key is checked against — the key itself is bound to that account,
+/// the machine and a per-provision secret — so a wrong or stale id unseals nothing.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn write_identity(dir: &std::path::Path) {
+    let path = dir.join("identity");
+    match crate::steamid::current_steam_id64() {
+        Some(id) => {
+            if let Err(e) = std::fs::write(&path, format!("{id}\n")) {
+                log::warn!("[secure] couldn't name the account for the DLL: {e}");
+            }
+        }
+        // Nobody signed in: take the stale name away rather than leave the DLL checking keys
+        // against whoever played last.
+        None => {
+            let _ = std::fs::remove_file(&path);
+        }
+    }
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+fn write_identity(_dir: &std::path::Path) {}
 
 /// Watch for the game and, if this install has opted in, inject shortly after it appears —
 /// early matters, because MX Bikes reads a track's content to list it, so the hook has to be
@@ -525,6 +558,7 @@ pub fn arm(app: &AppHandle) {
         log::warn!("[secure] couldn't write the manifest: {e}");
         return;
     }
+    write_identity(&dir);
     // Where the DLL's log is now, so we only read what this injection adds.
     let dll_log = dir.join("mxbsecure.log");
     let log_from = std::fs::metadata(&dll_log).map(|m| m.len()).unwrap_or(0);
@@ -604,6 +638,15 @@ fn inject(_app: &AppHandle, dll: &std::path::Path) -> Result<(), String> {
     win::inject_into(pid, dll)
 }
 
+/// The injector's argv: attach to the running game by name and load `dll_win`, which is the DLL
+/// as the *prefix* sees it. Pure, so the shape both Wine arms hand to a wrapper is covered by a
+/// test on any host — the one thing that must not drift, since a wrong argv fails inside Wine,
+/// where nothing on this side of the wall can see it.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn attach_args(exe_name: &str, dll_win: String) -> Vec<String> {
+    vec!["--attach".into(), exe_name.into(), dll_win]
+}
+
 /// Inject `dll` into the running game under Proton (Linux/SteamOS).
 ///
 /// The DLL is a Windows PE and the game runs under Wine, so the injection has to happen from
@@ -611,8 +654,10 @@ fn inject(_app: &AppHandle, dll: &std::path::Path) -> Result<(), String> {
 /// `--attach` mode through the game's Proton runner: it finds the running `mxbikes.exe` in the
 /// prefix and `LoadLibraryW`s the DLL, which it reads through Wine's `Z:` drive.
 ///
-/// The live Steam ID is resolved natively here and passed on the injector's environment
-/// (`MXBSECURE_STEAMID`), because the DLL's own lookup reads an empty Wine registry under Proton.
+/// The DLL's own Steam lookup reads an empty Wine registry under Proton, so the live id is
+/// resolved natively and left in the `identity` file beside the DLL (see [`write_identity`]).
+/// Not the injector's environment: a DLL loaded into the game reads the *game's* environment, and
+/// under Proton the game is Steam's child, not ours — nothing we set here would ever reach it.
 #[cfg(target_os = "linux")]
 fn inject(app: &AppHandle, dll: &std::path::Path) -> Result<(), String> {
     let cfg = crate::config::load(app).unwrap_or_default();
@@ -624,12 +669,9 @@ fn inject(app: &AppHandle, dll: &std::path::Path) -> Result<(), String> {
     // FrostMod is a Windows program: hand it the DLL as the prefix sees it (`Z:\…`), not `/home/…`.
     let dll_win = crate::proton::windows_path(&runner.prefix(), dll);
     let exe_name = cfg.game().exe; // e.g. "mxbikes.exe" — matched by name inside the prefix.
-    let args: Vec<String> = vec!["--attach".into(), exe_name.into(), dll_win];
+    let args = attach_args(exe_name, dll_win);
 
     let mut cmd = runner.command(&injector, &args);
-    if let Some(id) = crate::steamid::current_steam_id64() {
-        cmd.env("MXBSECURE_STEAMID", id);
-    }
     // Proton is voluble on its way to starting a Windows program; keep it beside the DLL, next to
     // the log the collector already picks up, so a failed injection under Proton has an account.
     if let Ok(f) = std::fs::OpenOptions::new()
@@ -658,9 +700,78 @@ fn inject(app: &AppHandle, dll: &std::path::Path) -> Result<(), String> {
     }
 }
 
-#[cfg(not(any(windows, target_os = "linux")))]
+/// Inject `dll` into the running game under Wine (macOS — CrossOver, Whisky or plain Wine).
+///
+/// Same shape as the Proton arm and for the same reason: the DLL is a Windows PE, so the
+/// `LoadLibraryW` has to come from inside the bottle that holds `mxbikes.exe`. The difference is
+/// which wrapper owns that bottle, which [`crate::winehost`] answers — the same pair Play and
+/// FrostMod's start already ask for.
+///
+/// What the DLL needs from this side of the wall does *not* ride on this command: a DLL loaded
+/// into the game reads the game's environment, not the injector's. The Mac's hardware UUID — what
+/// the macOS `.mxbkey` machine layer is keyed on — is put on the game at launch instead (see
+/// [`crate::gameproc`]), which works because on macOS this app is what launches it, there being
+/// no Mac build for Steam to launch. The Steam ID goes in a file beside the DLL, which the DLL
+/// reads on attach, so it survives a game the player started themselves.
+#[cfg(target_os = "macos")]
+fn inject(app: &AppHandle, dll: &std::path::Path) -> Result<(), String> {
+    let cfg = crate::config::load(app).unwrap_or_default();
+    let (prefix, runner) =
+        crate::gameproc::game_prefix_and_runner(&cfg).map_err(|e| format!("{e:#}"))?;
+    // Without a Z: drive the bottle cannot see our data folder at all, so neither the injector
+    // nor the DLL beside it is reachable. Say which setting fixes it rather than failing at a
+    // path the player never typed.
+    if !crate::winehost::has_z_drive(&prefix) {
+        return Err(
+            "This bottle has no Z: drive, so secured content can't be reached from inside it. \
+             Add one mapped to / in your wrapper's drive settings (CrossOver: Bottle → Control \
+             Panel → Drives), then start the game again."
+                .into(),
+        );
+    }
+
+    let injector = stage_injector(app).ok_or("no mxbsecure-inject.exe shipped with the app")?;
+    let dll_win = crate::winehost::windows_path(&prefix, dll);
+    let exe_name = cfg.game().exe;
+    let args = attach_args(exe_name, dll_win);
+    let launch = crate::winehost::plan(&runner, &prefix, &injector, &args);
+
+    let mut cmd = std::process::Command::new(&launch.program);
+    cmd.args(&launch.args);
+    for (key, value) in &launch.env {
+        cmd.env(key, value);
+    }
+    // Wine is voluble on its way to starting a Windows program, and none of it would otherwise
+    // be anywhere a player can reach. Beside the DLL, next to the log the collector picks up.
+    if let Ok(f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(dll.with_file_name("wine.log"))
+    {
+        if let Ok(err) = f.try_clone() {
+            cmd.stdout(f).stderr(err);
+        }
+    }
+    log::info!(
+        "[secure] injecting via {}: {} --attach {} {}",
+        runner.via(),
+        injector.display(),
+        exe_name,
+        dll.display()
+    );
+    let status = cmd
+        .status()
+        .map_err(|e| format!("couldn't start the injector through {}: {e}", runner.via()))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("injector exited with {status} — see wine.log beside the DLL"))
+    }
+}
+
+#[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
 fn inject(_app: &AppHandle, _dll: &std::path::Path) -> Result<(), String> {
-    Err("injection is supported on Windows and Linux (Proton)".into())
+    Err("injection is supported on Windows, macOS and Linux (Proton)".into())
 }
 
 #[cfg(windows)]
@@ -732,6 +843,41 @@ mod win {
 mod tests {
     use super::*;
     use std::time::Duration;
+
+    /// The whole macOS injection, short of Wine running it: the injector is started through the
+    /// wrapper that owns the bottle, told to attach to the game by name, and handed the DLL as a
+    /// `Z:` path — our data folder is outside the bottle, so `C:` could not name it.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn the_mac_injector_attaches_through_the_wrapper_with_a_z_path() {
+        let prefix = std::path::Path::new("/Users/rider/Bottles/MXB");
+        let dll = std::path::Path::new(
+            "/Users/rider/Library/Application Support/mxb-app/secure/mxbsecure.dll",
+        );
+        let runner = crate::winehost::Runner {
+            program: "/usr/local/bin/wine".into(),
+            kind: crate::winehost::RunnerKind::Wine { via: "Wine" },
+        };
+        let args = attach_args("mxbikes.exe", crate::winehost::windows_path(prefix, dll));
+        let launch =
+            crate::winehost::plan(&runner, prefix, std::path::Path::new("/opt/inject.exe"), &args);
+
+        assert_eq!(launch.program, std::path::PathBuf::from("/usr/local/bin/wine"));
+        assert_eq!(
+            launch.args,
+            vec![
+                "/opt/inject.exe".to_string(),
+                "--attach".into(),
+                "mxbikes.exe".into(),
+                r"Z:\Users\rider\Library\Application Support\mxb-app\secure\mxbsecure.dll"
+                    .into(),
+            ]
+        );
+        assert_eq!(
+            launch.env,
+            vec![("WINEPREFIX".to_string(), "/Users/rider/Bottles/MXB".to_string())]
+        );
+    }
 
     #[test]
     fn waits_for_this_injections_hooks_only() {

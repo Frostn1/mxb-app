@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import {
   ExternalLink,
+  Link2,
   Lock,
   Plug,
   Loader2,
@@ -17,13 +18,16 @@ import {
   ServerOff,
 } from "lucide-react";
 import { open as openUrl } from "@tauri-apps/plugin-shell";
+import { toast } from "sonner";
 import { Button } from "@frost/shared/Components/ui/button";
 import { Badge } from "@frost/shared/Components/ui/badge";
 import { Dialog, DialogContent, DialogTitle } from "@frost/shared/Components/ui/dialog";
 import { cn } from "@frost/shared/lib/utils";
 import { useI18n, useT } from "@/i18n";
+import { copyText } from "@/lib/clipboard";
 import {
   probeServer,
+  serverLink,
   queueCounts,
   serverRiders,
   guessServerTrack,
@@ -529,6 +533,23 @@ const ServerDetail = ({
           </p>
         )}
         <div className="flex items-center gap-2">
+          {/* A link, not just the address: pasted in Discord it opens MXB App on this
+              server for anyone who has it, and reads as the address for anyone who
+              doesn't. */}
+          <Button
+            variant="outline"
+            onClick={() => {
+              void copyText(serverLink(s.address)).then((ok) =>
+                ok
+                  ? toast.success(t("serverBrowser.linkCopied"))
+                  : toast.error(t("serverBrowser.copyFailed")),
+              );
+            }}
+            title={t("serverBrowser.copyLinkHint")}
+          >
+            <Link2 className="size-3.5" />
+            {t("serverBrowser.copyLink")}
+          </Button>
           {queue?.address === s.address ? (
             <Button variant="outline" className="flex-1" disabled>
               <Hourglass className="size-3.5" />

@@ -3782,14 +3782,63 @@ export function serverProbe(url: string, token: string): Promise<ServerStatus> {
 }
 
 /**
- * An `mxb://enroll?code=…` link was opened.
+ * What an `mxb://` link asked the app to open.
  *
- * Fires with the invite code alone — the backend has already checked the link is the enroll
- * route and that the code is a plain token. It only ever *prefills* the field; enrolling is
- * still a button the player presses, so a link can't spend an invite by itself.
+ * The only shapes it answers — and what a shared https link (see `serverLink` and
+ * `modLink`) sends the browser on to:
+ *
+ * - `mxb://enroll?code=…` — enrollment, with the invite code filled in
+ * - `mxb://server?addr=1.2.3.4:54210` — the join dialog, on that address
+ * - `mxb://mod?game=mxb&type=tracks&slug=…&cat=12` — that mod's page
+ *
+ * Every field has already been checked by the backend. None of them acts on its own: a
+ * link fills a form in or opens a page, and joining, enrolling and installing stay behind
+ * the button they always were — any page the player visits can open one of these.
  */
-export function onEnrollLink(cb: (code: string) => void): Promise<UnlistenFn> {
-  return listen<string>("deep-link-enroll", (event) => cb(event.payload));
+export type DeepLink =
+  | { kind: "enroll"; code: string }
+  | { kind: "server"; address: string }
+  | {
+      kind: "mod";
+      /** Which catalog the slug belongs to — `mxb` or `gpb`. */
+      game: string;
+      slug: string;
+      /** The browse tab's id, e.g. `tracks`. */
+      modType: string;
+      /** The browse category it was shared from, when the sharer's page knew one. */
+      category: number | null;
+    };
+
+/** An `mxb://` link was opened. */
+export function onDeepLink(cb: (link: DeepLink) => void): Promise<UnlistenFn> {
+  return listen<DeepLink>("deep-link", (event) => cb(event.payload));
+}
+
+/**
+ * Where a shared link points — the page that hands a browser the `mxb://` link above.
+ *
+ * What gets copied is an ordinary https link, not the `mxb://` one: a custom scheme does
+ * nothing at all in the browser of someone who hasn't installed the app, which is most of
+ * the people a server or a mod gets shared with. The page at the other end opens the app
+ * for everyone who has it, and says what the link was for and where to get it for everyone
+ * who doesn't. It lives in `links/` in the mxbsecure-web repo.
+ */
+const SHARE_HOST = "https://open.mxbsecure.com";
+
+/** The link to share a server: opens its join dialog, address filled in. */
+export function serverLink(address: string): string {
+  return `${SHARE_HOST}/server/${address.trim()}`;
+}
+
+/** The link to share a mod: opens its page, on the right tab and category. */
+export function modLink(opts: {
+  game: string;
+  modType: string;
+  slug: string;
+  category?: number | null;
+}): string {
+  const path = `${SHARE_HOST}/mod/${opts.game}/${opts.modType}/${opts.slug}`;
+  return opts.category == null ? path : `${path}?cat=${opts.category}`;
 }
 
 /** Where a server can be hosted, as the control plane will accept it. */

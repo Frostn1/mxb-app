@@ -214,6 +214,7 @@ export default function Overlay() {
                           modType={modType}
                           categoryId={selectedCategoryId ?? modType.categoryId}
                           installed={installed}
+                          onChanged={onInstalled}
                           onBack={closeMod}
                         />
                       ) : (

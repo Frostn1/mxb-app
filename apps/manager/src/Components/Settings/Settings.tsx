@@ -118,12 +118,6 @@ import {
   writeDownloadPrefs,
   type DownloadPrefs,
 } from "@frost/shared/lib/downloadPrefs";
-import {
-  readAdSupport,
-  writeAdSupport,
-  type AdSupportPrefs,
-} from "@frost/shared/lib/adSupport";
-import { closeCreatorPage } from "@frost/shared/api/creatorPage";
 import { useFrostmod } from "../../Context/FrostmodContext";
 import { formatBytes, formatDateShort } from "@frost/shared/lib/mods";
 import { copyText } from "../../lib/clipboard";
@@ -141,16 +135,6 @@ import {
   SelectValue,
 } from "@frost/shared/Components/ui/select";
 import { Switch } from "@frost/shared/Components/ui/switch";
-import {
-  AlertDialog,
-  AlertDialogContent,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogCancel,
-  AlertDialogAction,
-} from "@frost/shared/Components/ui/alert-dialog";
 import SurveySetting from "@frost/shared/Components/Survey/SurveySetting";
 import { cn } from "@frost/shared/lib/utils";
 
@@ -285,26 +269,6 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
     writeDownloadPrefs(next);
     setDlPrefsState(next);
   }, []);
-  // Whether the app shows the creator's mxb-mods.com page (with its ads) while a mod is open
-  // or installing — see `lib/adSupport`. On by default; turning it off is what the two
-  // confirmations below guard, because it takes the ad revenue away from the mod site.
-  const [adSupport, setAdSupportState] = useState<AdSupportPrefs>(readAdSupport);
-  const [optOutStep1, setOptOutStep1] = useState(false);
-  const [optOutStep2, setOptOutStep2] = useState(false);
-  const saveAdSupport = useCallback((next: AdSupportPrefs) => {
-    writeAdSupport(next);
-    setAdSupportState(next);
-    // Turning it off with a mod open should take its page down now, not on the next navigation.
-    if (!next.enabled) void closeCreatorPage();
-  }, []);
-  // Turning it on is frictionless; turning it off has to pass both dialogs first.
-  const onToggleAdSupport = useCallback(
-    (v: boolean) => {
-      if (v) saveAdSupport({ ...adSupport, enabled: true });
-      else setOptOutStep1(true);
-    },
-    [saveAdSupport, adSupport],
-  );
   const { running, reload, status, installing, checking, statusError, install, start, stop, refreshStatus, missingRuntime, installRuntime, installingRuntime, repairRuntimes, repairingRuntimes, strayMsvcr90, clearingStray, clearStrayMsvcr90 } =
     useFrostmod();
   const { check: checkForUpdates } = useUpdate();
@@ -1456,31 +1420,11 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
           </Section>
           )}
 
-          {/* Mods and downloads. These four used to be four rows in the middle of General,
-              where the one thing they have in common — what the app does when you install a
-              mod — was the one thing the page never said. */}
+          {/* Mods and downloads. These two used to be rows in the middle of General, where
+              the one thing they have in common — what the app does when you install a mod —
+              was the one thing the page never said. */}
           {active === "downloads" && (
           <Section title={t("settings.downloads")} desc={t("settings.downloadsDesc")}>
-            {/* Show the creator's own mxb-mods.com page (ads and all) while a mod is open or
-                installing, so the site keeps the ad revenue the app's direct install strips.
-                On by default; turning it off passes two confirmations first. */}
-            <ToggleRow
-              label={t("settings.adSupport")}
-              desc={t("settings.adSupportDesc", { site: game.catalogDomain })}
-              checked={adSupport.enabled}
-              onChange={onToggleAdSupport}
-            />
-            {/* Where the page opens. Beside the app it's fully visible — which is what an ad
-                network counts as a view; behind the app tucks it away but may earn nothing.
-                Only meaningful while the page is being shown at all. */}
-            <ToggleRow
-              label={t("settings.adSupportBehind")}
-              desc={t("settings.adSupportBehindDesc")}
-              checked={adSupport.behindApp}
-              disabled={!adSupport.enabled}
-              onChange={(v) => saveAdSupport({ ...adSupport, behindApp: v })}
-            />
-            <div className="h-px bg-border" />
             {/* Which file to take when a mod ships the same thing twice. Both of these are
                 one-click-install problems: without them a dedicated-server rig picks the
                 server build by hand on every mod, and a Drive link that answers "too many
@@ -2589,57 +2533,6 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
           )}
         </div>
       </div>
-
-      {/* Opting out of showing the creator's page. Two gates on the way out, because it
-          quietly takes income from the people who make and host the mods this app installs.
-          Opting back in is a single click. */}
-      <AlertDialog open={optOutStep1} onOpenChange={setOptOutStep1}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t("settings.adSupportOff1Title")}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {t("settings.adSupportOff1Body", { site: game.catalogDomain })}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel onClick={() => setOptOutStep1(false)}>
-              {t("settings.adSupportKeepOn")}
-            </AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() => {
-                setOptOutStep1(false);
-                setOptOutStep2(true);
-              }}
-            >
-              {t("settings.adSupportOff1Continue")}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      <AlertDialog open={optOutStep2} onOpenChange={setOptOutStep2}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t("settings.adSupportOff2Title")}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {t("settings.adSupportOff2Body")}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel onClick={() => setOptOutStep2(false)}>
-              {t("settings.adSupportKeepOn")}
-            </AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() => {
-                setOptOutStep2(false);
-                saveAdSupport({ ...adSupport, enabled: false });
-              }}
-            >
-              {t("settings.adSupportOff2Confirm")}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </div>
   );
 }

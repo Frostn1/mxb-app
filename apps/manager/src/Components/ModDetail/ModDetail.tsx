@@ -6,7 +6,9 @@ import {
   Snowflake,
   FileDown,
   ExternalLink,
+  Link2,
   Loader2,
+  Trash2,
 } from "lucide-react";
 import { open } from "@tauri-apps/plugin-shell";
 import { open as pickFile } from "@tauri-apps/plugin-dialog";
@@ -22,8 +24,10 @@ import {
   isLiveryContext,
   isServerOnly,
   isSoundContext,
+  modLink,
   riderTarget,
   resolveInitialFolder,
+  uninstallMod,
   scanBikeTargets,
   scanRiderTargets,
   sortMirrors,
@@ -41,7 +45,7 @@ import RichDescription from "./RichDescription";
 import InstallDialog, { type InstallChoice } from "./InstallDialog";
 import { useInstall } from "../../Context/Install";
 import type { InstalledIndex } from "../../lib/installedMatch";
-import { formatDate } from "@frost/shared/lib/mods";
+import { displayName, formatDate } from "@frost/shared/lib/mods";
 import { Button } from "@frost/shared/Components/ui/button";
 import {
   AlertDialog,
@@ -55,8 +59,8 @@ import {
 } from "@frost/shared/Components/ui/alert-dialog";
 import { cn } from "@frost/shared/lib/utils";
 import { useConfig } from "@frost/shared/Context/Config";
-import { openCreatorPage, closeCreatorPage } from "@frost/shared/api/creatorPage";
-import { readAdSupport } from "@frost/shared/lib/adSupport";
+import { copyText } from "../../lib/clipboard";
+import { toast } from "sonner";
 import { ActionBar, StateChip, WishButton } from "../ModPage/ActionBar";
 import { useWishlist, wishId } from "../../lib/useWishlist";
 import MediaPanel, { type Figure } from "../ModPage/Media";
@@ -68,6 +72,8 @@ interface ModDetailProps {
   /** Browse category the mod was opened under — drives bike-livery routing. */
   categoryId: number;
   installed: InstalledIndex;
+  /** Bump the library scan — an uninstall here changes what the badges say. */
+  onChanged: () => void;
   onBack: () => void;
 }
 
@@ -112,6 +118,7 @@ export default function ModDetail({
   modType,
   categoryId,
   installed,
+  onChanged,
   onBack,
 }: ModDetailProps) {
   const t = useT();
@@ -142,6 +149,8 @@ export default function ModDetail({
   } | null>(null);
   const [copied, setCopied] = useState(false);
   const [confirmReinstall, setConfirmReinstall] = useState(false);
+  const [confirmUninstall, setConfirmUninstall] = useState(false);
+  const [removing, setRemoving] = useState(false);
   // Bumped by the Retry button below. The load otherwise only re-runs when the slug changes,
   // so a user the catalog refused once had no way back short of leaving the page.
   const [reloadKey, setReloadKey] = useState(0);
@@ -207,17 +216,6 @@ export default function ModDetail({
     };
   }, [slug, modType, livery, sound, game, rider, reloadKey]);
 
-  // Show the mod's own mxb-mods.com page behind the app while it's open, so the site keeps the
-  // ad revenue the app's direct install would otherwise strip. No-ops when the player has
-  // opted out (Settings → General); closes when they leave the mod.
-  useEffect(() => {
-    if (!detail?.link) return;
-    void openCreatorPage(detail.link);
-    return () => {
-      void closeCreatorPage();
-    };
-  }, [detail?.link]);
-
   const folderCounts = useMemo(() => {
     const m = new Map<string, number>();
     for (const it of installedFiles) m.set(it.folder, (m.get(it.folder) ?? 0) + 1);
@@ -246,7 +244,31 @@ export default function ModDetail({
     [game, modType, destOptions, guess, livery, sound, rider, derivedDest],
   );
 
-  const isInstalled = detail !== null && installed.has(detail.title);
+  // The file on disk this page's mod matched, when it matched one — what Uninstall removes.
+  // Same match as the "in library" badge, so the two can never disagree about which mod
+  // is already installed.
+  const installedEntry = detail ? installed.match(detail.title) : null;
+  const isInstalled = installedEntry !== null;
+
+  /** Remove the matched file without a trip to the Library. It goes to the Recycle Bin,
+   *  same as the Library's own Uninstall, so a wrong guess costs nothing. */
+  const doUninstall = async () => {
+    if (!installedEntry) return;
+    setConfirmUninstall(false);
+    setRemoving(true);
+    try {
+      await uninstallMod(installedEntry.path, modType.installSubpath);
+      toast.success(
+        t("library.uninstalledOne", { name: displayName(installedEntry.name) }),
+        { description: t("library.movedToBin") },
+      );
+      onChanged();
+    } catch (e) {
+      toast.error(t("library.uninstallFailed"), { description: String(e) });
+    } finally {
+      setRemoving(false);
+    }
+  };
 
   // Already have it? Confirm before overwriting; otherwise open the dialog.
   const openInstall = () => {
@@ -265,9 +287,6 @@ export default function ModDetail({
       // pre-remember the chosen folder for the import step
       localStorage.setItem(destKey, destFolder);
     } else if (detail) {
-      // Installing is the download the creator most wants credited — make sure their page is
-      // up for it, even if it was closed since the mod opened.
-      void openCreatorPage(detail.link);
       startInstall({
         slug,
         title: detail.title,
@@ -297,6 +316,16 @@ export default function ModDetail({
       categoryId,
       path: picked,
     });
+  };
+
+  /** The `mxb://` link that opens this page in someone else's copy of the app. */
+  const copyLink = () => {
+    void copyText(modLink({ game: game.id, modType: modType.id, slug, category: categoryId }))
+      .then((ok) =>
+        ok
+          ? toast.success(t("modDetail.linkCopied"))
+          : toast.error(t("modDetail.copyLinkFailed")),
+      );
   };
 
   const copyError = () => {
@@ -398,6 +427,13 @@ export default function ModDetail({
             }
           />
         )}
+        {/* Sharing a mod used to mean pasting the catalog URL, which opens a browser and
+            leaves the reader to find the mod again in here. This link opens the app on this
+            page instead, for anyone who has it. */}
+        <Button variant="outline" onClick={copyLink} title={t("modDetail.copyLinkHint")}>
+          <Link2 className="size-3.5" />
+          {t("modDetail.copyLink")}
+        </Button>
         {primary && (
           <Button onClick={openInstall} disabled={busy}>
             {busy && <Loader2 className="size-4 animate-spin" />}
@@ -434,11 +470,6 @@ export default function ModDetail({
             </span>
             {/* Authored HTML from mxb-mods.com's REST API. */}
             <RichDescription html={detail.descriptionHtml} />
-            {readAdSupport().enabled && (
-              <Note icon={Snowflake} tone="primary">
-                {t("modDetail.creatorPageNote", { site: game.catalogDomain })}
-              </Note>
-            )}
           </div>
         </div>
 
@@ -500,6 +531,18 @@ export default function ModDetail({
                     {`${modType.installSubpath.replace(/\//g, "\\")}\\`}
                   </span>
                 </p>
+                {/* Only once it's actually on disk. Riders asked for it here because a track
+                    they just downloaded and didn't like meant a trip to the Library. */}
+                {isInstalled && (
+                  <Button
+                    variant="outline"
+                    className="h-9 w-full text-[13px] text-destructive hover:text-destructive"
+                    disabled={removing}
+                    onClick={() => setConfirmUninstall(true)}
+                  >
+                    <Trash2 className="size-3.5" /> {t("library.uninstall")}
+                  </Button>
+                )}
               </>
             ) : (
               <p className="text-[12.5px] text-muted-foreground">
@@ -549,6 +592,27 @@ export default function ModDetail({
               }}
             >
               {t("browse.reinstall")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={confirmUninstall} onOpenChange={setConfirmUninstall}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {t("library.confirmUninstall", {
+                name: installedEntry ? displayName(installedEntry.name) : "",
+              })}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {t("library.confirmUninstallBody")}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" onClick={() => void doUninstall()}>
+              {t("library.uninstall")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
