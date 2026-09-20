@@ -1633,6 +1633,47 @@ fn watch_for_start(via: &'static str) {
     });
 }
 
+/// Which of the two ways of starting a Steam copy a launch takes.
+#[cfg_attr(not(windows), allow(dead_code))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SteamRoute {
+    /// Hand Steam the `steam://` URL and let it start its own game.
+    Url,
+    /// Start the exe ourselves. Carries the line that says why, for the log.
+    Exe(&'static str),
+}
+
+/// How to start a Steam copy, given what this launch carries and what Steam believes.
+///
+/// The URL is the better route when it is available — Steam counts the playtime, brings up
+/// the overlay, and keeps our own `CreateProcess` of a game exe off the path security
+/// software vetoes. Two things take it away.
+///
+/// Arguments are the one a rider actually meets. A `rungameid/…//args` URL makes Steam ask
+/// permission for the extra command line, and that dialog opens *behind* Steam's own
+/// "Launching …" splash: the splash sits there forever, the game never starts, and nothing
+/// on screen says why. The game reads the same argv from us directly, so a launch carrying
+/// arguments — joining a server — goes straight to the exe.
+///
+/// The other is Steam holding a session for an app with no process behind it, where a
+/// launch URL is simply ignored.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn steam_route(address: Option<&str>, steam_thinks_running: Option<bool>) -> SteamRoute {
+    if address.is_some() {
+        return SteamRoute::Exe(
+            "joining a server needs command-line arguments, and a Steam launch URL that \
+             carries them puts Steam's approval dialog behind its own launch splash",
+        );
+    }
+    if steam_thinks_running == Some(true) {
+        return SteamRoute::Exe(
+            "Steam has the app down as running while no game process exists, so a launch \
+             URL would be ignored",
+        );
+    }
+    SteamRoute::Url
+}
+
 /// The `steam://` URL that asks Steam to start the game, connect flag and all.
 ///
 /// Launch arguments go after a `//` separator, space-separated. The separator is
@@ -1917,27 +1958,27 @@ fn launch_with(cfg: &AppConfig, address: Option<&str>) -> anyhow::Result<LaunchO
             if let Some(reason) = steam_elevation_conflict() {
                 anyhow::bail!("{reason}");
             }
-            // We already know there is no game process — that is the check at the top of this
-            // function. So Steam saying otherwise means it is holding a session that isn't a
-            // game, and handing it a launch URL would do nothing at all. Run the exe instead,
-            // which the Steam layer in the build hands straight back to the client anyway.
+            // We already know there is no game process — that is the check at the top of
+            // this function — so the only question left is whether Steam is the one to ask.
+            // Either way the exe below is a real route: the build's Steam layer hands itself
+            // straight back to the client.
             let appid = cfg.game().steam_appid;
-            if steam_thinks_running(appid) == Some(true) {
-                log::warn!(
-                    "Steam has app {appid} down as running while no {} process exists — \
-                     starting the exe directly, since a launch URL would be ignored",
+            match steam_route(address, steam_thinks_running(appid)) {
+                SteamRoute::Exe(why) => log::info!(
+                    "starting {} directly rather than through Steam: {why}",
                     cfg.game().exe
-                );
-            } else {
-                let url = steam_url(appid, address);
-                match shell_open(&url) {
-                    Ok(()) => {
-                        watch_for_start("Steam");
-                        return Ok(LaunchOutcome::Launched);
+                ),
+                SteamRoute::Url => {
+                    let url = steam_url(appid, address);
+                    match shell_open(&url) {
+                        Ok(()) => {
+                            watch_for_start("Steam");
+                            return Ok(LaunchOutcome::Launched);
+                        }
+                        // A Steam whose own URL scheme isn't registered is a broken install,
+                        // not a reason to leave Play dead — the exe is still sitting right there.
+                        Err(e) => log::warn!("{e:#}; running {} directly instead", exe.display()),
                     }
-                    // A Steam whose own URL scheme isn't registered is a broken install, not a
-                    // reason to leave Play dead — the exe is still sitting right there.
-                    Err(e) => log::warn!("{e:#}; running {} directly instead", exe.display()),
                 }
             }
         }
@@ -1957,7 +1998,9 @@ fn launch_with(cfg: &AppConfig, address: Option<&str>) -> anyhow::Result<LaunchO
     {
         let _ = dir;
         // Under Proton this is the only way to reach the exe's argv, since Steam — not
-        // us — spawns it.
+        // us — spawns it. So a join here still meets Steam's approval dialog for the extra
+        // command line, which Windows now sidesteps by running the exe; there is no
+        // sidestep to offer when Steam owns the prefix.
         let url = steam_url(cfg.game().steam_appid, address);
         std::process::Command::new("xdg-open").arg(&url).spawn().map_err(|e| {
             anyhow::anyhow!("Couldn't ask Steam to launch {} ({url}): {e}", cfg.game().display)
@@ -2065,6 +2108,27 @@ mod tests {
             steam_url("655500", Some("203.0.113.10:54210")),
             "steam://rungameid/655500//-directconnect%20203.0.113.10:54210"
         );
+    }
+
+    #[test]
+    fn a_plain_play_press_on_a_steam_copy_goes_through_steam() {
+        assert_eq!(steam_route(None, Some(false)), SteamRoute::Url);
+        assert_eq!(steam_route(None, None), SteamRoute::Url);
+    }
+
+    /// The rider's report: Steam's "Launching MX Bikes" splash sat there forever with the
+    /// approval dialog for the extra command line hidden underneath it.
+    #[test]
+    fn joining_a_server_runs_the_exe_so_steam_never_asks_about_the_arguments() {
+        assert!(matches!(
+            steam_route(Some("203.0.113.10:54210"), Some(false)),
+            SteamRoute::Exe(_)
+        ));
+    }
+
+    #[test]
+    fn a_steam_session_with_no_game_behind_it_runs_the_exe_too() {
+        assert!(matches!(steam_route(None, Some(true)), SteamRoute::Exe(_)));
     }
 
     #[test]

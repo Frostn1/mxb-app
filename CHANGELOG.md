@@ -68,6 +68,8 @@
 - The Studio tab. Frost's Studio is its own app.
 
 ### Fixed
+- Joining a server from the app starts the game straight away. Steam no longer sits on
+  "Launching MX Bikes" with a question about the command line hidden behind it.
 - The app now closes its session with the MX Bikes master server when it has finished
   reading the list, so later refreshes aren't turned away.
 - Running a dedicated server on the same machine no longer stops the server browser from
