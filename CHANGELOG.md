@@ -15,6 +15,10 @@
   in Settings, Accounts. A purchase that lands later is still one Refresh away in Purchases.
 
 ### Changed
+- Mods opens a tab you have already been on straight away, with the mods still there, and
+  brings it up to date behind you instead of making you watch it load again.
+- Pictures that could not be loaded are remembered, so the app stops asking the mod sites for
+  them over and over.
 - The server list works out what every track is on its own, so a row has its name, picture
   and link without you opening it first.
 - Setting up the app now asks you to sign in with Steam before it asks about folders, so

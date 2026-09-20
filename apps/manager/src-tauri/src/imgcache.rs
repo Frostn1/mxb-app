@@ -80,8 +80,22 @@ const MAX_CONCURRENT_HUB_FETCHES: usize = 2;
 /// store's own product images, the largest thing normally seen here, are ~0.5 MB.
 const MAX_FETCH_BYTES: usize = 32 * 1024 * 1024;
 
-/// How long a failed URL is remembered, so a dead thumbnail isn't refetched on every pass.
-const NEGATIVE_TTL: Duration = Duration::from_secs(5 * 60);
+/// How a refusal was arrived at. Bumped when the reasoning below changes in a way that
+/// could give a different answer for the same URL, which retires every row the old way wrote.
+const MISS_VERSION: u32 = 1;
+
+/// How long a URL that answered with nothing an image could be made of is left alone. Long,
+/// because that is the answer least likely to change: a thumbnail a catalog 404s today, or an
+/// `<img>` pointing at a file that was never an image, is the same tomorrow — and it is
+/// exactly the URL a grid would otherwise re-ask for on every pass, every session.
+const KEEP_DEAD: u64 = 7 * 24 * 60 * 60 * 1000;
+
+/// How long a refusal that was about this moment rather than this URL is left alone — a robot
+/// challenge, a timeout, a 5xx. Minutes, because the picture is probably still there.
+const KEEP_BUSY: u64 = 5 * 60 * 1000;
+
+/// The most refusals the book will hold. Oldest-checked rows go first.
+const MAX_MISSES: usize = 4096;
 
 /// Sweep for size every this many writes, plus once at startup.
 const PRUNE_EVERY: u64 = 200;
@@ -229,7 +243,7 @@ async fn load(app: &AppHandle, url: &str, width: Option<u32>) -> Option<(Vec<u8>
     if let Some(hit) = read_entry(&path) {
         return Some(hit);
     }
-    if recently_failed(url, width) {
+    if recently_failed(app, url, width) {
         return None;
     }
 
@@ -258,9 +272,12 @@ async fn load(app: &AppHandle, url: &str, width: Option<u32>) -> Option<(Vec<u8>
         fetch(url).await
     };
 
-    let Some(bytes) = bytes else {
-        remember_failure(url, width);
-        return None;
+    let bytes = match bytes {
+        Ok(bytes) => bytes,
+        Err(why) => {
+            remember_failure(app, url, width, why);
+            return None;
+        }
     };
 
     // Sniffing decides whether this is cacheable at all, so an origin that answers a dead
@@ -268,7 +285,7 @@ async fn load(app: &AppHandle, url: &str, width: Option<u32>) -> Option<(Vec<u8>
     // an "image".
     let Some(mime) = sniff(&bytes) else {
         log::debug!("imgcache: {url} did not answer with a recognisable image");
-        remember_failure(url, width);
+        remember_failure(app, url, width, Refusal::Dead);
         return None;
     };
 
@@ -445,15 +462,18 @@ fn client_for(url: &str) -> Option<&'static reqwest::Client> {
     }
 }
 
-async fn fetch(url: &str) -> Option<Vec<u8>> {
+async fn fetch(url: &str) -> Result<Vec<u8>, Refusal> {
     use futures_util::StreamExt;
 
-    let resp = client_for(url)?
+    let resp = client_for(url)
+        .ok_or(Refusal::Busy)?
         .get(url)
         .header("accept", "image/avif,image/webp,image/*,*/*;q=0.8")
         .send()
         .await
-        .ok()?;
+        // A connection that never landed says nothing about the URL, only about the minute
+        // it was tried in.
+        .map_err(|_| Refusal::Busy)?;
     // A robot challenge is a `202` full of HTML, which `is_success` waves through — so
     // without this the cache would happily store a web page under an image's name and keep
     // serving it long after the challenge was cleared. Refused rather than retried: the
@@ -461,10 +481,10 @@ async fn fetch(url: &str) -> Option<Vec<u8>> {
     // all trying to solve the same challenge is the request storm that caused it.
     if crate::mods::hub::challenged(&resp) {
         log::debug!("imgcache: {url} came back as a robot challenge — not caching it");
-        return None;
+        return Err(Refusal::Busy);
     }
     if !resp.status().is_success() {
-        return None;
+        return Err(refusal_for(resp.status()));
     }
 
     // Refuse an oversized body before a byte of it is read, when the origin says how big it
@@ -472,7 +492,7 @@ async fn fetch(url: &str) -> Option<Vec<u8>> {
     if let Some(len) = resp.content_length() {
         if len > MAX_FETCH_BYTES as u64 {
             log::warn!("imgcache: {url} declares {len} bytes, past the cap — not fetching it");
-            return None;
+            return Err(Refusal::Dead);
         }
     }
     // ...and again as it arrives, because that header is optional and can be wrong. Streaming
@@ -481,12 +501,24 @@ async fn fetch(url: &str) -> Option<Vec<u8>> {
     let mut body: Vec<u8> = Vec::new();
     let mut chunks = resp.bytes_stream();
     while let Some(chunk) = chunks.next().await {
-        if !push_capped(&mut body, &chunk.ok()?) {
+        let chunk = chunk.map_err(|_| Refusal::Busy)?;
+        if !push_capped(&mut body, &chunk) {
             log::warn!("imgcache: {url} went past the cap mid-download — dropped");
-            return None;
+            return Err(Refusal::Dead);
         }
     }
-    Some(body)
+    Ok(body)
+}
+
+/// What a status code says about the URL rather than the moment.
+///
+/// A 404 or a 410 is the file; a 403 is the app, and neither changes on the next scroll. A
+/// 429 or a 5xx is the server having a minute, so that one is worth another look soon.
+fn refusal_for(status: http::StatusCode) -> Refusal {
+    match status.as_u16() {
+        404 | 410 | 403 | 401 | 400 => Refusal::Dead,
+        _ => Refusal::Busy,
+    }
 }
 
 /// Append `chunk`, unless doing so would take `body` past [`MAX_FETCH_BYTES`].
@@ -517,30 +549,131 @@ fn inflight_gate(url: &str, width: Option<u32>) -> Arc<tokio::sync::Mutex<()>> {
     gates.entry(key_of(url, width)).or_default().clone()
 }
 
-fn negative() -> &'static Mutex<HashMap<u64, SystemTime>> {
-    static NEG: OnceLock<Mutex<HashMap<u64, SystemTime>>> = OnceLock::new();
-    NEG.get_or_init(|| Mutex::new(HashMap::new()))
+// ───────────────────────── remembering refusals ─────────────────────────
+
+/// Why a URL didn't come back as an image.
+///
+/// The distinction is the whole point of writing refusals down: one of these is about the
+/// URL and one is about the minute it was asked in, and they are worth remembering for very
+/// different lengths of time.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Refusal {
+    /// There is nothing here to fetch — a 404, a body that was never an image, a file past
+    /// the cap. Asking again tomorrow gets the same answer.
+    Dead,
+    /// The origin wouldn't answer *now* — a robot challenge, a 429, a dropped connection.
+    Busy,
 }
 
-fn recently_failed(url: &str, width: Option<u32>) -> bool {
-    let key = key_of(url, width);
-    let mut map = lock(negative());
-    match map.get(&key) {
-        Some(at) if at.elapsed().map(|e| e < NEGATIVE_TTL).unwrap_or(false) => true,
-        Some(_) => {
-            map.remove(&key);
-            false
+impl Refusal {
+    fn tag(self) -> &'static str {
+        match self {
+            Refusal::Dead => "dead",
+            Refusal::Busy => "busy",
         }
-        None => false,
     }
 }
 
-fn remember_failure(url: &str, width: Option<u32>) {
-    let mut map = lock(negative());
-    if map.len() > 4096 {
-        map.clear();
+/// One refused URL, keyed by the same hash the cache entry would have used.
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", default)]
+struct Miss {
+    /// `"dead"` or `"busy"`; see [`Refusal`]. Anything else reads as busy, which is the
+    /// forgiving way round.
+    reason: String,
+    /// Milliseconds since the epoch, from when the fetch was refused.
+    checked: u64,
+    /// The [`MISS_VERSION`] that wrote this row.
+    version: u32,
+}
+
+impl Miss {
+    fn new(why: Refusal, now: u64) -> Self {
+        Self { reason: why.tag().into(), checked: now, version: MISS_VERSION }
     }
-    map.insert(key_of(url, width), SystemTime::now());
+
+    /// Still worth believing at `now`.
+    fn fresh(&self, now: u64) -> bool {
+        if self.version != MISS_VERSION {
+            return false;
+        }
+        let keep = if self.reason == Refusal::Dead.tag() { KEEP_DEAD } else { KEEP_BUSY };
+        now.saturating_sub(self.checked) < keep
+    }
+}
+
+/// Every refusal worth remembering, keyed by the cache key's hex.
+type MissBook = HashMap<String, Miss>;
+
+fn miss_key(url: &str, width: Option<u32>) -> String {
+    format!("{:016x}", key_of(url, width))
+}
+
+/// Beside the cache rather than inside it: [`prune`] walks `CACHE_DIR` deleting whatever it
+/// finds by age, and the book is not a thumbnail.
+fn miss_path(app: &AppHandle) -> Option<PathBuf> {
+    Some(app.path().app_cache_dir().ok()?.join("image-misses.json"))
+}
+
+/// The book, in memory for the run and written through on every new refusal.
+///
+/// It is on disk because what it saves is a whole session's worth of doomed requests: a
+/// catalog full of dead thumbnails, or a description embedding an image that was never
+/// there, used to be re-asked five minutes later and again from scratch on every launch.
+fn miss_book(app: &AppHandle) -> &'static Mutex<MissBook> {
+    static BOOK: OnceLock<Mutex<MissBook>> = OnceLock::new();
+    BOOK.get_or_init(|| {
+        let book = miss_path(app)
+            .and_then(|p| std::fs::read_to_string(p).ok())
+            .and_then(|text| serde_json::from_str::<MissBook>(&text).ok())
+            .unwrap_or_default();
+        Mutex::new(book)
+    })
+}
+
+fn recently_failed(app: &AppHandle, url: &str, width: Option<u32>) -> bool {
+    let book = lock(miss_book(app));
+    book.get(&miss_key(url, width))
+        .is_some_and(|m| m.fresh(crate::trackbook::now_ms()))
+}
+
+/// Write a refusal down, and the book back to disk.
+///
+/// Best-effort: a book we couldn't write costs a repeated request next launch, not an error.
+fn remember_failure(app: &AppHandle, url: &str, width: Option<u32>, why: Refusal) {
+    let now = crate::trackbook::now_ms();
+    let snapshot = {
+        let mut book = lock(miss_book(app));
+        book.insert(miss_key(url, width), Miss::new(why, now));
+        prune_misses(&mut book, now);
+        book.clone()
+    };
+    write_misses(app, &snapshot);
+}
+
+/// Drop what has aged out, then the oldest rows until the book fits.
+fn prune_misses(book: &mut MissBook, now: u64) {
+    book.retain(|_, m| m.fresh(now));
+    if book.len() <= MAX_MISSES {
+        return;
+    }
+    let mut ages: Vec<(u64, String)> = book.iter().map(|(k, m)| (m.checked, k.clone())).collect();
+    ages.sort_unstable();
+    for (_, key) in ages.into_iter().take(book.len() - MAX_MISSES) {
+        book.remove(&key);
+    }
+}
+
+fn write_misses(app: &AppHandle, book: &MissBook) {
+    let Some(p) = miss_path(app) else { return };
+    if let Some(dir) = p.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    if let Ok(text) = serde_json::to_string(book) {
+        if let Err(e) = std::fs::write(&p, text) {
+            log::warn!("imgcache: couldn't write {}: {e}", p.display());
+        }
+    }
 }
 
 /// Poison-tolerant: a panic in one request must not disable every thumbnail afterwards.
@@ -815,22 +948,76 @@ mod tests {
         assert_eq!(sniff(b"RIFF"), None, "truncated, not a webp");
     }
 
+    /// The saving: a thumbnail that isn't there is left alone for days, while a store that
+    /// was merely busy gets another chance in minutes.
     #[test]
-    fn the_negative_cache_remembers_then_forgets() {
+    fn a_dead_url_is_left_alone_far_longer_than_a_busy_one() {
+        let now = 10 * KEEP_DEAD;
+        let dead = Miss::new(Refusal::Dead, now - KEEP_BUSY - 1);
+        let busy = Miss::new(Refusal::Busy, now - KEEP_BUSY - 1);
+        assert!(dead.fresh(now), "a 404 is still a 404 five minutes later");
+        assert!(!busy.fresh(now), "a challenge is worth another look soon");
+        assert!(!Miss::new(Refusal::Dead, now - KEEP_DEAD - 1).fresh(now));
+    }
+
+    #[test]
+    fn a_row_written_by_an_older_way_of_refusing_is_never_used() {
+        let now = 10 * KEEP_DEAD;
+        let stale = Miss { version: MISS_VERSION - 1, ..Miss::new(Refusal::Dead, now) };
+        assert!(!stale.fresh(now));
+    }
+
+    /// An unreadable row must not refuse a picture for a week on the strength of a word we
+    /// don't recognise.
+    #[test]
+    fn an_unknown_reason_is_treated_as_the_forgiving_one() {
+        let now = 10 * KEEP_DEAD;
+        let odd = Miss { reason: "something else".into(), ..Miss::new(Refusal::Dead, now) };
+        assert!(odd.fresh(now));
+        assert!(!Miss { checked: now - KEEP_BUSY - 1, ..odd }.fresh(now));
+    }
+
+    #[test]
+    fn a_width_is_refused_on_its_own_merits() {
         let url = "https://mxb-mods.com/gone.jpg";
-        assert!(!recently_failed(url, None));
-        remember_failure(url, None);
-        assert!(recently_failed(url, None));
+        assert_ne!(miss_key(url, None), miss_key(url, Some(600)));
+    }
 
-        // A different width is a different entry — one dead size must not blacklist another.
-        assert!(!recently_failed(url, Some(600)));
+    /// What the status code is taken to mean. A 404 is the file and a 429 is the moment.
+    #[test]
+    fn a_status_code_says_whether_the_url_or_the_moment_refused() {
+        use http::StatusCode;
+        assert_eq!(refusal_for(StatusCode::NOT_FOUND), Refusal::Dead);
+        assert_eq!(refusal_for(StatusCode::GONE), Refusal::Dead);
+        assert_eq!(refusal_for(StatusCode::FORBIDDEN), Refusal::Dead);
+        assert_eq!(refusal_for(StatusCode::TOO_MANY_REQUESTS), Refusal::Busy);
+        assert_eq!(refusal_for(StatusCode::BAD_GATEWAY), Refusal::Busy);
+        assert_eq!(refusal_for(StatusCode::SERVICE_UNAVAILABLE), Refusal::Busy);
+    }
 
-        // Backdate past the TTL and it should be retried rather than refused forever.
-        lock(negative()).insert(
-            key_of(url, None),
-            SystemTime::now() - NEGATIVE_TTL - Duration::from_secs(1),
-        );
-        assert!(!recently_failed(url, None));
+    #[test]
+    fn pruning_misses_drops_what_aged_out_then_the_coldest() {
+        let now = 10 * KEEP_DEAD;
+        let mut book = MissBook::new();
+        book.insert("gone".into(), Miss::new(Refusal::Busy, now - KEEP_BUSY - 1));
+        for i in 0..MAX_MISSES + 10 {
+            book.insert(format!("m{i}"), Miss::new(Refusal::Dead, now - i as u64));
+        }
+        prune_misses(&mut book, now);
+        assert!(!book.contains_key("gone"), "an aged-out row goes first");
+        assert_eq!(book.len(), MAX_MISSES);
+        assert!(book.contains_key("m0"), "the most recent refusal stays");
+        assert!(!book.contains_key(&format!("m{}", MAX_MISSES + 9)), "the coldest goes");
+    }
+
+    /// The book has to survive a restart — re-asking for a session's worth of dead
+    /// thumbnails on every launch is the traffic this is here to stop.
+    #[test]
+    fn the_book_survives_a_round_trip_through_json() {
+        let mut book = MissBook::new();
+        book.insert("abc".into(), Miss::new(Refusal::Dead, 1_700_000_000_000));
+        let text = serde_json::to_string(&book).unwrap();
+        assert_eq!(serde_json::from_str::<MissBook>(&text).unwrap(), book);
     }
 
     #[test]
