@@ -560,10 +560,12 @@ const Servers = ({ link }: ServersProps) => {
     [t],
   );
 
-  // Install & join: a free track goes through the install queue, and the server is joined
-  // once it lands. Keyed by the mod's slug, since that is all the queue reports by.
+  // A free track goes through the install queue. It only joins the server afterward when
+  // the player chose the explicit Install & join action.
   const { startPendingInstall, active } = useInstall();
-  const [installing, setInstalling] = useState<Record<string, string>>({});
+  const [installing, setInstalling] = useState<
+    Record<string, { address: string; joinAfter: boolean }>
+  >({});
   // Slugs whose install has been seen running. A finished card left over from an earlier
   // install of the same track must not join the server before this one has even started.
   const started = useRef(new Set<string>());
@@ -576,12 +578,12 @@ const Servers = ({ link }: ServersProps) => {
     });
   }, []);
 
-  const installAndJoin = useCallback(
-    (s: MasterServer, product: CatalogTrack) => {
+  const installTrack = useCallback(
+    (s: MasterServer, product: CatalogTrack, joinAfter = false) => {
       const slug = product.slug;
       const tracks = modTypesFor(game.id).find((m) => m.id === "tracks");
       if (!slug || !tracks) return;
-      setInstalling((cur) => ({ ...cur, [slug]: s.address }));
+      setInstalling((cur) => ({ ...cur, [slug]: { address: s.address, joinAfter } }));
       startPendingInstall({
         slug,
         title: product.name,
@@ -614,8 +616,18 @@ const Servers = ({ link }: ServersProps) => {
     [game, startPendingInstall, doneInstalling, t],
   );
 
+  const installOnly = useCallback(
+    (s: MasterServer, product: CatalogTrack) => installTrack(s, product),
+    [installTrack],
+  );
+
+  const installAndJoin = useCallback(
+    (s: MasterServer, product: CatalogTrack) => installTrack(s, product, true),
+    [installTrack],
+  );
+
   useEffect(() => {
-    for (const [slug, address] of Object.entries(installing)) {
+    for (const [slug, intent] of Object.entries(installing)) {
       const job = active.find((a) => a.slug === slug);
       if (!job) continue;
       const finished = job.stage === "done" || job.stage === "error" || job.stage === "review";
@@ -627,18 +639,22 @@ const Servers = ({ link }: ServersProps) => {
       doneInstalling(slug);
       // A pack goes to review and an error has its own card; neither is ready to ride.
       if (job.stage !== "done") continue;
-      const s = servers?.find((x) => x.address === address);
+      const s = servers?.find((x) => x.address === intent.address);
       if (s?.track) {
         delete ART[s.track];
         ASKED.delete(s.track);
         setInstalled((n) => n + 1);
       }
+      if (!intent.joinAfter) continue;
       if (s && isFull(s)) void wait(s);
-      else void join(address);
+      else void join(intent.address);
     }
   }, [active, installing, servers, join, wait, doneInstalling]);
 
-  const installingAt = useMemo(() => new Set(Object.values(installing)), [installing]);
+  const installingAt = useMemo(
+    () => new Set(Object.values(installing).map(({ address }) => address)),
+    [installing],
+  );
 
   const copy = useCallback(
     (address: string) => {
@@ -671,6 +687,7 @@ const Servers = ({ link }: ServersProps) => {
     queue,
     onJoin: join,
     onWait: wait,
+    onInstall: installOnly,
     onInstallJoin: installAndJoin,
     onCopy: copy,
     onToggleFavourite: favs.toggle,
@@ -933,6 +950,7 @@ const Servers = ({ link }: ServersProps) => {
                 missing={!!s.track && ASKED.has(s.track) && !(s.track in art)}
                 product={catalog[s.track]}
                 installing={installingAt.has(s.address)}
+                onInstall={installOnly}
                 onInstallJoin={installAndJoin}
                 favourite={favs.has(s.address)}
                 paintSync={paintSync[s.address] ?? 0}

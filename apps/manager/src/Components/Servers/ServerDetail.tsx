@@ -285,7 +285,7 @@ export interface ServerDetailProps {
   missing: boolean;
   /** Where a missing track comes from, when our server knows. */
   product?: CatalogTrack;
-  /** Its track is installing, to join once it lands. */
+  /** Its track is installing. */
   installing: boolean;
   favourite: boolean;
   /** The address a join is starting for, app-wide. */
@@ -295,6 +295,7 @@ export interface ServerDetailProps {
   queue: QueueState | null;
   onJoin: (address: string) => void;
   onWait: (server: MasterServer) => void;
+  onInstall: (s: MasterServer, product: CatalogTrack) => void;
   onInstallJoin: (s: MasterServer, product: CatalogTrack) => void;
   onCopy: (address: string) => void;
   onToggleFavourite: (address: string) => void;
@@ -313,6 +314,7 @@ const ServerDetail = ({
   queue,
   onJoin,
   onWait,
+  onInstall,
   onInstallJoin,
   onCopy,
   onToggleFavourite,
@@ -560,16 +562,29 @@ const ServerDetail = ({
               <Loader2 className="size-3.5 animate-spin" />
               {t("serverBrowser.installing")}
             </Button>
-          ) : free && s.joinable && product ? (
-            <Button
-              className="flex-1"
-              disabled={busy}
-              onClick={() => onInstallJoin(s, product)}
-              title={t("serverBrowser.installJoinHint", { title: product.name })}
-            >
-              <Download className="size-3.5" />
-              {t("serverBrowser.installJoin")}
-            </Button>
+          ) : free && product ? (
+            <div className="flex flex-1 items-center gap-2">
+              <Button
+                variant="outline"
+                className="flex-1"
+                onClick={() => onInstall(s, product)}
+                title={t("serverBrowser.installHint", { title: product.name })}
+              >
+                <Download className="size-3.5" />
+                {t("serverBrowser.install")}
+              </Button>
+              {s.joinable && (
+                <Button
+                  className="flex-1"
+                  disabled={busy}
+                  onClick={() => onInstallJoin(s, product)}
+                  title={t("serverBrowser.installJoinHint", { title: product.name })}
+                >
+                  <Plug className="size-3.5" />
+                  {t("serverBrowser.installJoin")}
+                </Button>
+              )}
+            </div>
           ) : sold ? (
             <Button
               className="flex-1"
