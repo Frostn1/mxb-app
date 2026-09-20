@@ -126,7 +126,7 @@ export default function SupportersCard() {
                 {group.people.map((person) => (
                   <span
                     key={`${group.tier ?? ""}:${person.name}`}
-                    className="flex items-center gap-1.5 rounded-full border border-input bg-foreground/[0.03] px-2.5 py-1 text-[12px] text-foreground/85"
+                    className="flex items-center gap-1.5 rounded-full bg-foreground/[0.06] px-2.5 py-1 text-[12px] text-foreground/85"
                   >
                     <Coffee className="size-3 flex-none text-primary" />
                     {person.name}
@@ -143,7 +143,7 @@ export default function SupportersCard() {
         </div>
       ) : (
         !loading && (
-          <div className="flex flex-col gap-1 rounded-lg border border-input bg-foreground/[0.03] p-3">
+          <div className="flex flex-col gap-1 rounded-lg bg-foreground/[0.04] p-3">
             <span className="text-[12px] font-semibold text-foreground/85">
               {t("supporters.empty")}
             </span>
@@ -170,7 +170,7 @@ export default function SupportersCard() {
                 // once in each group, and the bare name would collide.
                 <span
                   key={`${group.kind ?? ""}:${person.name}`}
-                  className="flex items-center gap-1.5 rounded-full border border-input bg-foreground/[0.03] px-2.5 py-1 text-[12px] text-foreground/85"
+                  className="flex items-center gap-1.5 rounded-full bg-foreground/[0.06] px-2.5 py-1 text-[12px] text-foreground/85"
                 >
                   <Icon className="size-3 flex-none text-primary" />
                   {person.name}

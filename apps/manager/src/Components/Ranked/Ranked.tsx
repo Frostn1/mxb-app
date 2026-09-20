@@ -150,7 +150,7 @@ const Ranked = ({ onFindServers }: { onFindServers?: () => void }) => {
         {identity?.source === "manual" &&
           identity.steamGuid &&
           identity.steamGuid !== identity.guid && (
-            <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-xl border border-input bg-card px-3.5 py-2.5 text-[12.5px]">
+            <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-xl bg-card px-3.5 py-2.5 text-[12.5px]">
               <span className="text-muted-foreground">{t("ranked.manualOverride")}</span>
               <Button variant="outline" size="sm" onClick={() => void saveGuid("")}>
                 {t("ranked.useSteam")}
@@ -433,7 +433,7 @@ const Profile = ({
           page was a name and a number — which reads like a fault in the app rather than a
           season that hasn't started. Say which it is, and give the one thing that changes it. */}
       {profile.cards.length === 0 && profile.races.length === 0 && (
-        <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-4 rounded-xl border border-input px-6 py-12 text-center">
+        <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-4 px-6 py-12 text-center">
           <Trophy className="size-8 text-faint" strokeWidth={1.5} />
           <div className="max-w-[520px] space-y-2">
             <h3 className="font-cond text-[19px] font-bold tracking-[-0.03em]">
@@ -459,7 +459,7 @@ const Profile = ({
       {profile.races.length > 0 && (
         // `min-h-0` is what actually makes this scroll instead of stretching the page: a flex
         // child refuses to shrink below its content without it.
-        <div className="min-h-0 flex-1 overflow-auto border border-input">
+        <div className="min-h-0 flex-1 overflow-auto">
           {/* `separate` rather than `collapse`, so the sticky header keeps its own bottom
               border — a collapsed border belongs to the table and scrolls away with it. */}
           <table className="w-full border-separate border-spacing-0 text-[13px]">

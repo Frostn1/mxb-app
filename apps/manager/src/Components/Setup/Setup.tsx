@@ -292,7 +292,7 @@ export default function Setup({ onComplete, game, games, firstRun }: SetupProps)
             {t("setup.modsFolder", { game: picked.display })}
           </span>
           {chosen ? (
-            <div className="flex items-center gap-2.5 rounded-xl border border-input bg-card px-3.5 py-3 font-mono text-[12.5px] text-muted-foreground">
+            <div className="flex items-center gap-2.5 rounded-xl bg-card px-3.5 py-3 font-mono text-[12.5px] text-muted-foreground">
               <FolderOpen className="size-4 flex-none text-primary" />
               <span className="flex-1 truncate" title={chosen}>
                 {chosen}
@@ -323,13 +323,13 @@ export default function Setup({ onComplete, game, games, firstRun }: SetupProps)
             {t("setup.gameInstall", { game: picked.display })}
           </span>
           {detecting ? (
-            <div className="flex items-center gap-2.5 rounded-xl border border-input bg-card px-3.5 py-3 text-[12.5px] text-muted-foreground">
+            <div className="flex items-center gap-2.5 rounded-xl bg-card px-3.5 py-3 text-[12.5px] text-muted-foreground">
               <Loader2 className="size-4 flex-none animate-spin text-primary" />
               <span>{t("setup.detecting", { game: picked.display })}</span>
             </div>
           ) : gamePath ? (
             <>
-              <div className="flex items-center gap-2.5 rounded-xl border border-input bg-card px-3.5 py-3 font-mono text-[12.5px] text-muted-foreground">
+              <div className="flex items-center gap-2.5 rounded-xl bg-card px-3.5 py-3 font-mono text-[12.5px] text-muted-foreground">
                 <Gamepad2 className="size-4 flex-none text-primary" />
                 <span className="flex-1 truncate" title={gamePath}>
                   {gamePath}

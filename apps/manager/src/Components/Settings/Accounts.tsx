@@ -256,7 +256,7 @@ export default function Accounts() {
 
       {/* Under the switch, because it is what the switch is actually doing. Neither store can
           be asked "what's new?", so the honest word for this is watching. */}
-      <div className="mt-2 flex items-start gap-2.5 rounded-lg border border-input bg-foreground/[0.03] p-3">
+      <div className="mt-2 flex items-start gap-2.5 rounded-lg bg-foreground/[0.04] p-3">
         <Info className="mt-[1px] size-4 flex-none text-muted-foreground" />
         <div className="flex flex-col gap-0.5">
           <span className="font-cond text-[12px] font-semibold tracking-[-0.01em] text-foreground/85">

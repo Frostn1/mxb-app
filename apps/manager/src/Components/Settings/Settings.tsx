@@ -1222,7 +1222,7 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
             desc={t("settings.modsFolderDesc")}
           >
             <div className="flex gap-2">
-              <div className="flex min-w-0 flex-1 items-center gap-2 rounded-lg border border-input bg-background px-3 py-2.5 font-mono text-[12px] text-muted-foreground">
+              <div className="flex min-w-0 flex-1 items-center gap-2 rounded-lg bg-background px-3 py-2.5 font-mono text-[12px] text-muted-foreground">
                 {/* Named rather than a bare "Not set": switching to a title the player
                     hasn't installed lands here, and "Not set" says neither what to set
                     nor which game it's for. */}
@@ -1290,7 +1290,7 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
               <div className="mt-2 flex gap-2">
                 <div
                   className={cn(
-                    "flex min-w-0 flex-1 items-center gap-2 rounded-lg border border-input bg-background px-3 py-2 font-mono text-[12px]",
+                    "flex min-w-0 flex-1 items-center gap-2 rounded-lg bg-background px-3 py-2 font-mono text-[12px]",
                     config.profilesPath ? "text-muted-foreground" : "text-faint",
                   )}
                 >
@@ -1336,7 +1336,7 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
               />
             </p>
             <div className="flex gap-2">
-              <div className="flex min-w-0 flex-1 items-center gap-2 rounded-lg border border-input bg-background px-3 py-2.5 font-mono text-[12px] text-muted-foreground">
+              <div className="flex min-w-0 flex-1 items-center gap-2 rounded-lg bg-background px-3 py-2.5 font-mono text-[12px] text-muted-foreground">
                 <span className="flex-1 truncate" title={config.gamePath}>
                   {config.gamePath || t("settings.notSet")}
                 </span>
@@ -1366,7 +1366,7 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
                   {t("settings.wineRunnerDesc", { game: game.display })}
                 </p>
                 <div className="flex gap-2">
-                  <div className="flex min-w-0 flex-1 items-center gap-2 rounded-lg border border-input bg-background px-3 py-2.5 font-mono text-[12px] text-muted-foreground">
+                  <div className="flex min-w-0 flex-1 items-center gap-2 rounded-lg bg-background px-3 py-2.5 font-mono text-[12px] text-muted-foreground">
                     <span className="flex-1 truncate" title={wineHost?.runner}>
                       {wineHost?.runner || t("settings.wineRunnerNone")}
                     </span>
@@ -1783,7 +1783,7 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
             {/* The room. Nothing here is a control except mute: joining happens because
                 the rider is on a server, which is the whole point of the feature. */}
             {voiceEnabled && (
-              <div className="space-y-2 rounded-md border border-border/60 p-3">
+              <div className="space-y-2 rounded-lg bg-background p-3">
                 <div className="flex items-center gap-2">
                   <span
                     className={cn(
@@ -2160,7 +2160,7 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
               {APP_NAME} installs it, keeps it updated, and runs it for you.
             </p>
 
-            <div className="flex items-center justify-between rounded-lg border border-input bg-background px-3 py-2.5">
+            <div className="flex items-center justify-between rounded-lg bg-background px-3 py-2.5">
               <div className="flex flex-col">
                 <span className="text-[12.5px] text-foreground/85">
                   {status?.installed
@@ -2741,7 +2741,7 @@ function LogRow({
         <span className="text-[11.5px] text-muted-foreground">{hint}</span>
       </div>
       <div className="flex gap-2">
-        <div className="flex min-w-0 flex-1 items-center rounded-lg border border-input bg-background px-3 py-2 font-mono text-[12px] text-muted-foreground">
+        <div className="flex min-w-0 flex-1 items-center rounded-lg bg-background px-3 py-2 font-mono text-[12px] text-muted-foreground">
           <span className="flex-1 truncate" title={group?.dir || undefined}>
             {group?.dir || t("settings.notSet")}
           </span>
@@ -2881,7 +2881,7 @@ function Section({
   children: React.ReactNode;
 }) {
   return (
-    <div className="flex flex-col gap-3 rounded-xl border border-input bg-card p-[18px]">
+    <div className="flex flex-col gap-3 rounded-xl bg-card p-[18px]">
       <div className="flex items-center gap-2">
         <span className="flex-1 text-[14px] font-bold">{title}</span>
         {titleRight}
