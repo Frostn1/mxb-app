@@ -130,6 +130,19 @@ export function guidFromSteamId(steamId: string): string | null {
 }
 
 /**
+ * A Steam-derived MX Bikes GUID back to its SteamID64.
+ *
+ * Only `FF` GUIDs have this reversible meaning. A GUID from a non-Steam / Piboso copy is an
+ * opaque game identity, not a Steam account, so it deliberately returns `null` here.
+ */
+export function steamIdFromGuid(guid: string): string | null {
+  const normalized = guid.trim().toUpperCase();
+  if (!/^FF[0-9A-F]{16}$/.test(normalized)) return null;
+  const steamId = BigInt(`0x${normalized.slice(2)}`).toString();
+  return guidFromSteamId(steamId) === normalized ? steamId : null;
+}
+
+/**
  * Is this assertion addressed to us?
  *
  * An OpenID assertion is only meaningful for the `return_to` it was minted for. Without

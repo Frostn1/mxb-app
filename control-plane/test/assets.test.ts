@@ -15,6 +15,8 @@ const ADMIN = "s3cret";
 const OWNER = "acc_owner";
 const BUYER = "76561198000000042";
 const OTHER = "76561198000000043";
+const GUID_BUYER = "FF011000010A22A002";
+const GUID_STEAM_ID = "76561198130307074";
 const SITE = "https://mxbsecure.com";
 
 function masterKey(): string {
@@ -304,6 +306,7 @@ describe("grants", () => {
     const { assetId } = await create(env);
     const inputs = [
       BUYER,
+      GUID_BUYER.toLowerCase(),
       `https://steamcommunity.com/profiles/${OTHER}/`,
       "steamcommunity.com/id/frostn1",
       "https://steamcommunity.com/id/frostn1/?l=english",
@@ -321,6 +324,7 @@ describe("grants", () => {
     };
     expect(body.added).toEqual([
       { input: BUYER, steamId: BUYER },
+      { input: GUID_BUYER.toLowerCase(), steamId: GUID_STEAM_ID },
       { input: `https://steamcommunity.com/profiles/${OTHER}/`, steamId: OTHER },
       { input: "steamcommunity.com/id/frostn1", steamId: BUYER },
       { input: "https://steamcommunity.com/id/frostn1/?l=english", steamId: BUYER },
@@ -342,13 +346,17 @@ describe("grants", () => {
     const grants = await env.DB.prepare("SELECT steam_id FROM entitlements WHERE asset_id = ? ORDER BY steam_id")
       .bind(assetId)
       .all<{ steam_id: string }>();
-    expect(grants.results.map((r) => r.steam_id)).toEqual([BUYER, OTHER]);
+    expect(grants.results.map((r) => r.steam_id)).toEqual([BUYER, OTHER, GUID_STEAM_ID]);
   });
 
   it("parses without asking Steam where it can", () => {
     expect(parseSteamInput(` ${BUYER} `)).toEqual({ steamId: BUYER });
+    expect(parseSteamInput(` ${GUID_BUYER.toLowerCase()} `)).toEqual({ steamId: GUID_STEAM_ID });
     expect(parseSteamInput(`http://www.steamcommunity.com/profiles/${BUYER}`)).toEqual({ steamId: BUYER });
     expect(parseSteamInput("https://steamcommunity.com/id/Some-Name_1/")).toEqual({ vanity: "Some-Name_1" });
+    expect(parseSteamInput("ABCDEF0123456789AB")).toEqual({
+      error: "only a Steam-derived MX Bikes GUID beginning FF can identify a buyer",
+    });
     expect(parseSteamInput("https://example.com/id/x")).toHaveProperty("error");
   });
 

@@ -17,7 +17,7 @@ import { currentMasterVersion, wrapContentKey } from "./assetkey";
 import { hashToken, newToken, tokenMatches } from "./auth";
 import { BANNED, isBanned } from "./bans";
 import { repairBySteamId } from "./steamlink";
-import { isSteamId64, steamPersonaName } from "./steam";
+import { isSteamId64, steamIdFromGuid, steamPersonaName } from "./steam";
 import { adminAllowed } from "./usage";
 import { webSession } from "./websession";
 
@@ -93,6 +93,9 @@ const VANITY_CONCURRENCY = 6;
 
 /** A Steam custom URL name. Steam allows letters, digits, `_` and `-`. */
 const VANITY = /^[A-Za-z0-9_-]{2,32}$/;
+
+/** The 18 hexadecimal characters MX Bikes shows as a rider GUID. */
+const MXB_GUID = /^[0-9A-F]{18}$/i;
 
 /** Is this one of the routes below? */
 export function isAssetsPath(path: string): boolean {
@@ -804,12 +807,18 @@ async function resolveAll(
 /**
  * What an admin typed, as far as it can be read without asking Steam.
  *
- * A SteamID64, a `steamcommunity.com/profiles/<id>` URL, a `steamcommunity.com/id/<name>`
- * URL, or a bare custom URL name. The last two still need a lookup.
+ * A SteamID64, its Steam-derived MX Bikes GUID, a `steamcommunity.com/profiles/<id>` URL,
+ * a `steamcommunity.com/id/<name>` URL, or a bare custom URL name. The last two still need a
+ * lookup. A non-Steam / Piboso GUID is not reversible to the Steam account grants require.
  */
 export function parseSteamInput(raw: string): { steamId: string } | { vanity: string } | { error: string } {
   const s = raw.trim();
   if (isSteamId64(s)) return { steamId: s };
+  const fromGuid = steamIdFromGuid(s);
+  if (fromGuid) return { steamId: fromGuid };
+  if (MXB_GUID.test(s)) {
+    return { error: "only a Steam-derived MX Bikes GUID beginning FF can identify a buyer" };
+  }
   const url = /^(?:https?:\/\/)?(?:www\.)?steamcommunity\.com\/(profiles|id)\/([^/?#\s]+)(?:[/?#].*)?$/i.exec(s);
   if (url) {
     if (url[1].toLowerCase() === "profiles") {
@@ -818,7 +827,7 @@ export function parseSteamInput(raw: string): { steamId: string } | { vanity: st
     return VANITY.test(url[2]) ? { vanity: url[2] } : { error: "that is not a Steam custom URL" };
   }
   if (VANITY.test(s)) return { vanity: s };
-  return { error: "not a SteamID64, a Steam profile URL or a custom URL name" };
+  return { error: "not an MX Bikes Steam GUID, a SteamID64, a Steam profile URL or a custom URL name" };
 }
 
 /** One input to a SteamID64, asking Steam for custom URL names. */
