@@ -8,6 +8,13 @@ import {
   type ModType,
 } from "@frost/shared/api/mods";
 import type { ModRating, ModSummary } from "@frost/shared/types";
+import { clearListings, listingKey, readListing, writeListing } from "./listingCache";
+
+/** What one set of filters answered last time, kept by `listingCache`. */
+interface CachedPage {
+  mods: ModSummary[];
+  hasMore: boolean;
+}
 
 /**
  * What the browse grid is showing: the filters, the pages fetched under them, and where
@@ -29,9 +36,12 @@ export function useModListing(modType: ModType) {
   const [mods, setMods] = useState<ModSummary[]>([]);
   const [ratings, setRatings] = useState<Map<number, ModRating>>(new Map());
   // Ids we've already asked about, so a mod the site had no answer for isn't re-requested
-  // on every render. Cleared when the listing is rebuilt (the Rust side caches, so asking
-  // again after a category switch costs nothing).
+  // on every render. Kept across a listing switch rather than cleared with it: the same mod
+  // turns up under several of them, and its score is already on screen.
   const askedForRatings = useRef<Set<number>>(new Set());
+  // Set by `reload`, so the retry button goes to the catalog rather than repainting the
+  // cached answer the player just told us was wrong.
+  const skipCache = useRef(false);
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -49,6 +59,11 @@ export function useModListing(modType: ModType) {
   // kept, so clearing the search puts it back.
   const sortOptions = MOD_SORTS.filter((s) => !s.noSearch || !debounced);
   const activeSort = sortOptions.some((s) => s.value === sort) ? sort : "newest";
+
+  // The filters that decide what the first page holds. A switch between two of these is
+  // what the cache is for: the grid is painted from the last answer before the request that
+  // refreshes it is even sent.
+  const key = listingKey([modType.id, debounced, categoryId, activeSort]);
 
   // Reset the category filter (and any selection) when the mod type changes —
   // selection + quick-install resolve against the current type's folders.
@@ -83,28 +98,46 @@ export function useModListing(modType: ModType) {
     return () => clearTimeout(timer);
   }, [query]);
 
-  // (Re)load the first page whenever the query, category or sort changes.
+  // (Re)load the first page whenever the query, category or sort changes — from the last
+  // answer first, where there is one, so the grid is never replaced by skeletons for a
+  // listing we already have.
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
+    const cached = skipCache.current ? undefined : readListing<CachedPage>(key);
+    skipCache.current = false;
     setError(null);
     setPage(1);
-    askedForRatings.current = new Set();
     // A different listing starts at the top; the offset we were holding belongs to the
     // old one.
     scrollTop.current = 0;
+
+    if (cached) {
+      setMods(cached.value.mods);
+      setHasMore(cached.value.hasMore);
+      setLoading(false);
+      // Asked a moment ago, so asking again would only cost the catalog a request to be
+      // told the same thing.
+      if (cached.fresh) return;
+    } else {
+      setLoading(true);
+    }
+
     searchMods(debounced, categoryId, 1, activeSort)
       .then((res) => {
+        writeListing<CachedPage>(key, { mods: res, hasMore: res.length >= SEARCH_PAGE_SIZE });
         if (cancelled) return;
         setMods(res);
         setHasMore(res.length >= SEARCH_PAGE_SIZE);
       })
-      .catch((e) => !cancelled && setError(String(e)))
+      // A refresh that fails behind a grid that is already up leaves it up: the player is
+      // looking at real mods, and replacing them with an error would be a worse answer than
+      // the slightly older one on screen.
+      .catch((e) => !cancelled && !cached && setError(String(e)))
       .finally(() => !cancelled && setLoading(false));
     return () => {
       cancelled = true;
     };
-  }, [debounced, categoryId, activeSort, reloadKey]);
+  }, [key, debounced, categoryId, activeSort, reloadKey]);
 
   // Scores aren't part of the search response — they come in a second pass keyed by post
   // id, for whatever is on screen. Never awaited by the grid: cards paint immediately and
@@ -144,7 +177,13 @@ export function useModListing(modType: ModType) {
     }
   }, [debounced, categoryId, activeSort, page]);
 
-  const reload = useCallback(() => setReloadKey((k) => k + 1), []);
+  const reload = useCallback(() => {
+    // Nothing stored is worth painting once the player has asked for it again.
+    clearListings();
+    skipCache.current = true;
+    askedForRatings.current = new Set();
+    setReloadKey((k) => k + 1);
+  }, []);
 
   return {
     query,
