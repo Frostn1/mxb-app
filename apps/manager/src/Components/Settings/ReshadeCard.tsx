@@ -256,11 +256,11 @@ export default function ReshadeCard() {
         </div>
       )}
 
-      <div className="flex flex-col overflow-hidden rounded-lg border border-input">
+      <div className="flex flex-col">
         {rows.map((p) => (
           <div
             key={p.name}
-            className="flex items-center gap-2 border-b border-input px-3 py-2.5 last:border-b-0"
+            className="flex items-center gap-2 border-b border-border px-3 py-2.5 last:border-b-0"
           >
             <button
               type="button"

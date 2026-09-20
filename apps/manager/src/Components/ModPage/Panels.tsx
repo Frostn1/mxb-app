@@ -15,7 +15,7 @@ export function Panel({
   return (
     <div
       className={cn(
-        "flex flex-col gap-2.5 rounded-xl border border-border bg-card p-4",
+        "flex flex-col gap-2.5 rounded-xl bg-card p-4",
         className,
       )}
     >
@@ -126,7 +126,7 @@ export function WhatsInside({ groups }: { groups: InsideGroup[] }) {
   const shown = groups.filter((g) => g.items.length > 0);
   if (shown.length === 0) return null;
   return (
-    <div className="flex flex-col gap-3 rounded-xl border border-border bg-card p-4">
+    <div className="flex flex-col gap-3 rounded-xl bg-card p-4">
       <SectionLabel>What&rsquo;s inside</SectionLabel>
       {shown.map((g) => (
         <div key={g.key} className="flex flex-col gap-1.5">

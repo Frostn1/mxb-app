@@ -369,7 +369,7 @@ export default function InstallDialog({
             {/* A ReShade preset doesn't live in the mods tree and has exactly one home, so
                 it shows where it lands and offers no folder to change. */}
             {outsideMods ? (
-              <div className="flex items-center gap-2.5 border border-input bg-background px-3 py-2.5">
+              <div className="flex items-center gap-2.5 bg-background px-3 py-2.5">
                 <ChevronRight className="size-3.5 flex-none text-primary" />
                 <span className="flex-1 truncate text-left font-mono text-[12px] text-muted-foreground">
                   <b className="text-foreground">{RESHADE_DEST}</b>
@@ -392,7 +392,7 @@ export default function InstallDialog({
             )}
 
             {folderOpen && !outsideMods && (
-              <div className="flex flex-col overflow-hidden border border-input bg-popover shadow-[0_12px_32px_rgba(0,0,0,0.5)]">
+              <div className="flex flex-col overflow-hidden bg-popover shadow-[0_12px_32px_rgba(0,0,0,0.5)]">
                 {/* command-style search */}
                 <div className="flex items-center gap-2 border-b border-border px-3 py-2">
                   <Search className="size-3.5 flex-none text-faint" />

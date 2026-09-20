@@ -222,7 +222,7 @@ export default function Tour({ navigate, onDone }: TourProps) {
       {/* Coach-mark bubble */}
       <div
         ref={bubbleRef}
-        className="absolute flex w-[340px] flex-col gap-5 rounded-2xl border border-input bg-card p-6 shadow-2xl transition-all duration-300 ease-out"
+        className="absolute flex w-[340px] flex-col gap-5 rounded-2xl bg-card p-6 shadow-2xl transition-all duration-300 ease-out"
         style={bubbleStyle(rect, bubbleH)}
       >
         <div className="flex flex-col gap-3">

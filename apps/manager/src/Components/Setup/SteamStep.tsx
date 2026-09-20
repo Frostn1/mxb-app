@@ -78,7 +78,7 @@ export default function SteamStep({ onDone, progress }: SteamStepProps) {
           {REASONS.map(({ icon: Icon, body }) => (
             <div
               key={body}
-              className="flex items-start gap-3 rounded-xl border border-input bg-card px-4 py-3.5"
+              className="flex items-start gap-3 rounded-xl bg-card px-4 py-3.5"
             >
               <Icon className="mt-px size-4 flex-none text-primary" />
               <span className="flex-1 text-[13px] leading-relaxed text-muted-foreground">

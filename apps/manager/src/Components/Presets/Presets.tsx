@@ -19,7 +19,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@frost/shared/lib/utils";
-import { Button, CHIP } from "@frost/shared/Components/ui/button";
+import { Button } from "@frost/shared/Components/ui/button";
 import { ContextBarLeft, ContextBarRight, ContextTab } from "../Shell/ContextBar";
 import HelpHint from "@frost/shared/Components/ui/help-hint";
 import { Input } from "@frost/shared/Components/ui/input";
@@ -496,7 +496,7 @@ export default function Presets({
             {profilesDir && !profilesDir.exists
               ? "No profiles folder here — this folder doesn’t exist:"
               : "No MX Bikes profiles found in:"}
-            <div className="mt-2 break-all rounded-lg border border-border bg-card/40 px-3 py-2 font-mono text-[11.5px] text-foreground/80">
+            <div className="mt-2 break-all rounded-lg bg-card px-3 py-2 font-mono text-[11.5px] text-foreground/80">
               {profilesDir?.dir || "your MX Bikes folder"}
             </div>
             <p className="mt-2.5">
@@ -845,7 +845,9 @@ function PresetCard({
     <div
       className={cn(
         "flex flex-col gap-2 rounded-xl border p-3",
-        editing ? "border-primary/50 bg-primary/[0.06]" : "border-white/[0.07] bg-card/50",
+        // Only the card being edited is lifted. The rest are told apart by their fill, so a
+        // list of presets reads as a list rather than a grid of outlined boxes.
+        editing ? "border-primary/50 bg-primary/[0.06]" : "border-transparent bg-card",
       )}
     >
       <div className="flex items-start justify-between gap-2">
@@ -878,7 +880,7 @@ function PresetCard({
           <IconBtn title={t("presets.duplicate")} onClick={onDuplicate}>
             <CopyPlus className="size-3.5" />
           </IconBtn>
-          <IconBtn chip title={t("presets.share")} onClick={onShare}>
+          <IconBtn title={t("presets.share")} onClick={onShare}>
             <Share2 className="size-3.5" />
           </IconBtn>
           <IconBtn title={t("common.delete")} onClick={onDelete}>
@@ -898,13 +900,10 @@ function IconBtn({
   title,
   onClick,
   children,
-  chip = false,
 }: {
   title: string;
   onClick: () => void;
   children: React.ReactNode;
-  /** Keep a background at rest, so the action doesn't read as one more grey glyph. */
-  chip?: boolean;
 }) {
   return (
     <button
@@ -912,9 +911,7 @@ function IconBtn({
       onClick={onClick}
       className={cn(
         "cursor-default rounded-md p-1.5 transition-colors",
-        chip
-          ? CHIP
-          : "text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground",
+        "text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground",
       )}
     >
       {children}

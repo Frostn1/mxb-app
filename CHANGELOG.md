@@ -15,6 +15,11 @@
   in Settings, Accounts. A purchase that lands later is still one Refresh away in Purchases.
 
 ### Changed
+- The screens are quieter. Panels are told apart by their background instead of an outline
+  around everything, so what matters on a page stands out. On the light theme the page
+  behind the panels is a light grey, which is what makes them read as panels.
+- Sharing a preset is a quiet button next to the others on the card, instead of a
+  highlighted one that pulled the eye away from the preset itself.
 - The server list works out what every track is on its own, so a row has its name, picture
   and link without you opening it first.
 - Setting up the app now asks you to sign in with Steam before it asks about folders, so

@@ -129,7 +129,7 @@ const ConnectionCheck = ({ error, onRetry }: { error: string; onRetry: () => voi
       </div>
 
       {test ? (
-        <div className="w-full rounded-lg border border-border/60 bg-popover/40 p-3">
+        <div className="w-full rounded-lg bg-popover/40 p-3">
           <p className="mb-2 px-1 text-[12.5px] font-medium">
             {t(`connection.verdict.${test.verdict}` as "connection.verdict.upstream")}
           </p>

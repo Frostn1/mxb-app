@@ -40,7 +40,7 @@ export default function Welcome({ onDone }: WelcomeProps) {
 
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-background/80 backdrop-blur-sm px-10">
-      <div className="flex w-full max-w-[480px] flex-col items-center gap-8 rounded-2xl border border-input bg-card p-9 shadow-2xl">
+      <div className="flex w-full max-w-[480px] flex-col items-center gap-8 rounded-2xl bg-card p-9 shadow-2xl">
         <div className="flex flex-col items-center gap-4">
           <Plate className="size-14">
             <Icon className="size-7" strokeWidth={2.5} />

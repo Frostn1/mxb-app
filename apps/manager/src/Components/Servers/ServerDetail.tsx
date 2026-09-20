@@ -130,7 +130,7 @@ const Riders = ({
           {names.map((n) => (
             <span
               key={n}
-              className="rounded-md border border-input bg-card px-2 py-0.5 text-[12px] text-muted-foreground"
+              className="rounded-md bg-card px-2 py-0.5 text-[12px] text-muted-foreground"
             >
               {n}
             </span>
