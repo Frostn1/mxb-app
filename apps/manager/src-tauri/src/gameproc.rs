@@ -49,8 +49,19 @@ const GUID_OFFSET: usize = 0x000e_5522c;
 /// requiring a match against an empty list would take the feature away from everyone.
 /// Filling this in is what turns the guard on, and `refresh_look` logs the running build's
 /// stamp every time so any player's log yields the value to put here.
+///
+/// It is filled in now. A player on any other build keeps every other feature and loses only
+/// the live look refresh, which is the right way round: the alternative is starting a thread
+/// at an address that is still perfectly good code, just not the function we meant.
+///
+/// **Adding a build:** only after the offsets have been re-derived against it and still
+/// resolve to the customization loader — `mxbapp-private/tools/re/newbuild.py <exe>` does
+/// that and prints the line to paste. Never add a stamp just because a player reported it.
 #[cfg(windows)]
-const KNOWN_GOOD_BUILDS: &[u32] = &[];
+const KNOWN_GOOD_BUILDS: &[u32] = &[
+    // beta21e, 2026-06-04. The build LOADER_OFFSET and GUID_OFFSET were derived from.
+    0x6a21_833d,
+];
 
 /// The flag that makes a fresh game process connect straight to a server.
 ///

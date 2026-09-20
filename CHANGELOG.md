@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Changed
+- The live look refresh now runs only on the game build it was built for. On any other build
+  it stays out of the way, and everything else works as it always has.
+
 ### Added
 - Copy link on a server's page, and on a mod's page. Paste it in Discord and whoever clicks
   it lands in MXB App on that server's join dialog or on that mod. Anyone without the app
