@@ -96,6 +96,11 @@ import { useImport } from "../Dropzone/useImport";
 import { useShare } from "../../Context/Share";
 import { cachedScan, dropScans, putScan } from "./scanCache";
 import { useFavorites } from "../../lib/useFavorites";
+import { brandOf } from "./bikeBrand";
+import { useOwned } from "../../lib/useOwned";
+import { useWishlist } from "../../lib/useWishlist";
+import { OwnedGrid, WishlistGrid } from "./Yours";
+import type { StoreId } from "../../api/shop";
 
 /** Starred mods, by tab and file name — a name survives a move between folders, a path doesn't. */
 const FAVORITES_KEY = "mxb:libraryFavorites:v1";
@@ -207,6 +212,8 @@ function LibraryCardBody({
 
   const title = meta?.name?.trim() || displayName(item.name);
   const folder = item.name;
+  // Only a bike has a maker worth naming — a track called "Honda Hills" is not a Honda.
+  const brand = item.category === "bike" ? brandOf(meta?.name, item.name) : null;
   const location = meta?.location?.trim();
   const parts: string[] = [];
   if (meta?.author) parts.push(t("library.byAuthor", { author: meta.author }));
@@ -225,6 +232,12 @@ function LibraryCardBody({
       >
         {meta?.thumbnail ? (
           <img src={meta.thumbnail} alt="" className="h-full w-full object-cover" />
+        ) : brand ? (
+          // A bike with no picture in its archive used to get the same grey box as every
+          // other one, which told you nothing. The maker's name does.
+          <span className="px-1 font-cond text-[13px] font-extrabold uppercase tracking-[0.06em] text-foreground/45">
+            {brand}
+          </span>
         ) : (
           <TypeIcon className="size-5" strokeWidth={1.5} />
         )}
@@ -566,7 +579,11 @@ type Pick =
   | { kind: "all" }
   | { kind: "starred" }
   | { kind: "folder"; folder: string }
-  | { kind: "removed" };
+  | { kind: "removed" }
+  /** Neither of these is about the mods tree, so both replace the grid rather than
+   *  filtering it — see `Yours.tsx`. */
+  | { kind: "owned" }
+  | { kind: "wishlist" };
 
 const ALL: Pick = { kind: "all" };
 
@@ -653,6 +670,9 @@ interface LibraryProps {
   /** Open a catalog mod's page. Lets a hit from "Find it again" go straight to the mod,
    *  rather than leaving the player to search Browse for the name a second time. */
   onOpenMod?: (slug: string) => void;
+  /** Go to a store. What the Owned list points at: the purchase itself lives there, and
+   *  installing one is that screen's job, not this one's. */
+  onOpenStore?: (store: StoreId) => void;
 }
 
 export default function Library({
@@ -663,6 +683,7 @@ export default function Library({
   focus,
   onFocusApplied,
   onOpenMod,
+  onOpenStore,
 }: LibraryProps) {
   const t = useT();
   const { pickAndImport, staging } = useImport();
@@ -848,6 +869,11 @@ export default function Library({
     setSelected(new Set());
   }, []);
   useEffect(() => exitSelect(), [modType, exitSelect]);
+  // Owned and Wishlist hold nothing the bulk actions can move, share or uninstall, so the
+  // select bar has to go with the grid it belonged to.
+  useEffect(() => {
+    if (pick.kind === "owned" || pick.kind === "wishlist") exitSelect();
+  }, [pick, exitSelect]);
 
   const allFolders = useMemo(
     () => [...new Set(entries.map((e) => e.folder))].sort((a, b) => a.localeCompare(b)),
@@ -855,6 +881,9 @@ export default function Library({
   );
 
   const favs = useFavorites(FAVORITES_KEY);
+  // Both stores, read only once the player asks for them — see `useOwned`.
+  const owned = useOwned(pick.kind === "owned", refreshKey);
+  const wishlist = useWishlist();
   const isStarred = useCallback(
     (e: LibraryEntry) => favs.has(starId(modType, e)),
     [favs, modType],
@@ -879,6 +908,32 @@ export default function Library({
     return by;
   }, [inType]);
 
+
+  // The search box narrows these two the same way it narrows the grid — they are on screen
+  // in its place, and a toolbar that does nothing to what you are looking at reads as broken.
+  const q = search.trim().toLowerCase();
+  const ownedShown = useMemo(
+    () =>
+      q
+        ? owned.rows.filter(
+            (r) =>
+              r.product.toLowerCase().includes(q) ||
+              (r.author ?? "").toLowerCase().includes(q),
+          )
+        : owned.rows,
+    [owned.rows, q],
+  );
+  const wishShown = useMemo(
+    () =>
+      q
+        ? wishlist.items.filter(
+            (w) =>
+              w.title.toLowerCase().includes(q) ||
+              (w.author ?? "").toLowerCase().includes(q),
+          )
+        : wishlist.items,
+    [wishlist.items, q],
+  );
 
   const starredCount = useMemo(
     () => inType.filter(isStarred).length,
@@ -907,7 +962,8 @@ export default function Library({
   const shownEntries = useMemo(() => {
     if (pick.kind === "starred") return entries.filter(isStarred);
     if (pick.kind === "folder") return entries.filter((e) => e.folder === pick.folder);
-    if (pick.kind === "removed") return [];
+    if (pick.kind === "removed" || pick.kind === "owned" || pick.kind === "wishlist")
+      return [];
     return entries;
   }, [entries, pick, isStarred]);
 
@@ -932,7 +988,13 @@ export default function Library({
   // A folder row shows the mods that folder has lost as well as the ones it still holds;
   // Favorites is about mods you can ride, so it shows none.
   const ghosts = useMemo(() => {
-    if (!showRemoved || pick.kind === "starred") return [];
+    if (
+      !showRemoved ||
+      pick.kind === "starred" ||
+      pick.kind === "owned" ||
+      pick.kind === "wishlist"
+    )
+      return [];
     const rows = ghostsFor(ledger, modType, search);
     return pick.kind === "folder" ? rows.filter((r) => r.folder === pick.folder) : rows;
   }, [showRemoved, ledger, modType, search, pick]);
@@ -1519,6 +1581,22 @@ export default function Library({
             />
           ))}
           <div className="mx-4 my-2 h-px bg-border" />
+          {/* Neither of these belongs to a mod type: what you bought and what you want are
+              facts about you, not about the folder you happen to be in. */}
+          <SideHeading label={t("library.yours")} />
+          <SideRow
+            label={t("owned.title")}
+            count={owned.loaded ? ownedShown.length : undefined}
+            active={pick.kind === "owned"}
+            onSelect={() => setPick({ kind: "owned" })}
+          />
+          <SideRow
+            label={t("wishlist.title")}
+            count={wishShown.length}
+            active={pick.kind === "wishlist"}
+            onSelect={() => setPick({ kind: "wishlist" })}
+          />
+          <div className="mx-4 my-2 h-px bg-border" />
           <SideHeading label={t("library.folders")} />
           <SideRow
             label={t("installDialog.allFolders")}
@@ -1556,7 +1634,22 @@ export default function Library({
         </aside>
 
         <div className="min-h-0 min-w-0 flex-1 overflow-y-auto px-7 pb-6 pt-3">
-          {error ? (
+          {pick.kind === "owned" ? (
+            <OwnedGrid
+              rows={ownedShown}
+              loading={owned.loading}
+              signedIn={owned.signedIn}
+              error={owned.error}
+              onOpenStore={onOpenStore}
+            />
+          ) : pick.kind === "wishlist" ? (
+            <WishlistGrid
+              items={wishShown}
+              onRemove={wishlist.remove}
+              onOpenMod={onOpenMod}
+              onOpenStore={onOpenStore}
+            />
+          ) : error ? (
             <p className="select-text py-16 text-center text-[13px] text-destructive">
               {error}
             </p>

@@ -282,6 +282,7 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
               focus={libraryFocus}
               onFocusApplied={clearLibraryFocus}
               onOpenMod={openFoundMod}
+              onOpenStore={navigate}
             />
           ) : view === "downloads" ? (
             <Downloads

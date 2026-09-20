@@ -1,6 +1,8 @@
 import type { ReactNode } from "react";
-import { ChevronLeft, type LucideIcon } from "lucide-react";
+import { ChevronLeft, Heart, type LucideIcon } from "lucide-react";
 import { cn } from "@frost/shared/lib/utils";
+import { Button } from "@frost/shared/Components/ui/button";
+import { useT } from "@/i18n";
 import SmartImg from "./Img";
 
 /**
@@ -104,5 +106,29 @@ export function StateChip({
       {Icon && <Icon className="size-3.5" strokeWidth={2.5} />}
       {children}
     </span>
+  );
+}
+
+/**
+ * The bar's "I want this" toggle, for a mod that isn't yours yet.
+ *
+ * Lives beside the primary action rather than inside each page's card column, so a mod page
+ * reached from Browse, a store or a search offers it in the same place. The list it writes to
+ * is read by the Library — see `lib/useWishlist`.
+ */
+export function WishButton({
+  wished,
+  onToggle,
+}: {
+  wished: boolean;
+  onToggle: () => void;
+}) {
+  const t = useT();
+  const label = wished ? t("wishlist.remove") : t("wishlist.add");
+  return (
+    <Button variant={wished ? "secondary" : "outline"} onClick={onToggle} title={label}>
+      <Heart className={cn("size-3.5", wished && "fill-current text-primary")} />
+      {label}
+    </Button>
   );
 }

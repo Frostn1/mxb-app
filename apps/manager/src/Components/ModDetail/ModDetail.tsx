@@ -57,7 +57,8 @@ import { cn } from "@frost/shared/lib/utils";
 import { useConfig } from "@frost/shared/Context/Config";
 import { openCreatorPage, closeCreatorPage } from "@frost/shared/api/creatorPage";
 import { readAdSupport } from "@frost/shared/lib/adSupport";
-import { ActionBar, StateChip } from "../ModPage/ActionBar";
+import { ActionBar, StateChip, WishButton } from "../ModPage/ActionBar";
+import { useWishlist, wishId } from "../../lib/useWishlist";
 import MediaPanel, { type Figure } from "../ModPage/Media";
 import { Note, Panel } from "../ModPage/Panels";
 
@@ -115,6 +116,8 @@ export default function ModDetail({
 }: ModDetailProps) {
   const t = useT();
   const { game } = useConfig();
+  const wishlist = useWishlist();
+  const wishKey = wishId("browse", slug);
   const livery = isLiveryContext(modType, categoryId);
   const sound = isSoundContext(modType, categoryId);
   // Which rider folder this category installs into — a gear model's paints, something worn
@@ -378,6 +381,23 @@ export default function ModDetail({
         title={detail.title}
         meta={[t(modType.label), detail.author, detail.version]}
       >
+        {/* Nothing to want about a mod you already have, so the wish is offered only while
+            it isn't in the library. */}
+        {!isInstalled && (
+          <WishButton
+            wished={wishlist.has(wishKey)}
+            onToggle={() =>
+              wishlist.toggle({
+                id: wishKey,
+                source: "browse",
+                slug,
+                title: detail.title,
+                author: detail.author ?? undefined,
+                image: detail.images[0],
+              })
+            }
+          />
+        )}
         {primary && (
           <Button onClick={openInstall} disabled={busy}>
             {busy && <Loader2 className="size-4 animate-spin" />}
