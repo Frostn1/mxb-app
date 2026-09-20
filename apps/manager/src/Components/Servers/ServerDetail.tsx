@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import {
+  Link2,
   Lock,
   Plug,
   Loader2,
@@ -11,6 +12,7 @@ import {
   Hourglass,
 } from "lucide-react";
 import { open as openUrl } from "@tauri-apps/plugin-shell";
+import { toast } from "sonner";
 import { Button } from "@frost/shared/Components/ui/button";
 import {
   Dialog,
@@ -19,8 +21,10 @@ import {
   DialogTitle,
 } from "@frost/shared/Components/ui/dialog";
 import { useT } from "@/i18n";
+import { copyText } from "@/lib/clipboard";
 import {
   probeServer,
+  serverLink,
   queueCounts,
   serverRiders,
   guessServerTrack,
@@ -360,17 +364,36 @@ const ServerDetail = ({
         </div>
 
         <div className="flex items-center justify-between gap-3 border-t border-input pt-3">
-          {/* A server the game can't be pointed at says so, rather than offering a button
-              that fails every time. */}
-          <p className="text-[12px] text-faint">
-            {!s.joinable
-              ? t("serverBrowser.notJoinable")
-              : waiting > 0
-                ? t("serverBrowser.waitingCount", { count: waiting })
-                : isFull(s)
-                  ? t("serverBrowser.queueHint")
-                  : ""}
-          </p>
+          <div className="flex min-w-0 items-center gap-3">
+            {/* A link, not just the address: pasted in Discord it opens MXB App on this
+                server for anyone who has it, and reads as the address for anyone who
+                doesn't. */}
+            <Button
+              variant="outline"
+              onClick={() => {
+                void copyText(serverLink(s.address)).then((ok) =>
+                  ok
+                    ? toast.success(t("serverBrowser.linkCopied"))
+                    : toast.error(t("serverBrowser.copyFailed")),
+                );
+              }}
+              title={t("serverBrowser.copyLinkHint")}
+            >
+              <Link2 className="size-3.5" />
+              {t("serverBrowser.copyLink")}
+            </Button>
+            {/* A server the game can't be pointed at says so, rather than offering a button
+                that fails every time. */}
+            <p className="text-[12px] text-faint">
+              {!s.joinable
+                ? t("serverBrowser.notJoinable")
+                : waiting > 0
+                  ? t("serverBrowser.waitingCount", { count: waiting })
+                  : isFull(s)
+                    ? t("serverBrowser.queueHint")
+                    : ""}
+            </p>
+          </div>
           {queue?.address === s.address ? (
             <Button variant="outline" disabled>
               <Hourglass className="size-3.5" />
