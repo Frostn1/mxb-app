@@ -26,6 +26,12 @@
 :root {
   --radius: 0.75rem;
 
+  /* The ground a manufacturer's mark sits on. Deliberately outside light/dark and every
+     colorway: those marks are drawn for a light page — Yamaha's is black — and on our own
+     near-black surfaces half of them would simply vanish. Defined here only, so nothing
+     below restates it. */
+  --badge-plate: #f5f5f7;
+
   /* Chrome + surfaces */
   --window: #000000; /* top rail */
   --background: #09090b; /* main content area */
@@ -435,6 +441,7 @@ html[data-colorway="retro"]:not(.overlay-window) body::after {
   --radius-lg: var(--radius);
   --radius-xl: var(--radius);
 
+  --color-badge-plate: var(--badge-plate);
   --color-window: var(--window);
   --color-background: var(--background);
   --color-foreground: var(--foreground);

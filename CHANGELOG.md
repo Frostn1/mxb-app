@@ -19,6 +19,8 @@
   in Settings, Accounts. A purchase that lands later is still one Refresh away in Purchases.
 
 ### Changed
+- A bike in the Library shows its manufacturer's badge, taken from the bike itself. Bikes
+  that carry no badge still show the maker's name.
 - Mods opens a tab you have already been on straight away, with the mods still there, and
   brings it up to date behind you instead of making you watch it load again.
 - Pictures that could not be loaded are remembered, so the app stops asking the mod sites for

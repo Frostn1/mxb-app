@@ -17,6 +17,10 @@ const THUMB_MAX: u32 = 192;
 /// Longest edge of the full-size preview, in pixels.
 const PREVIEW_MAX: u32 = 1100;
 
+/// Longest edge of a manufacturer badge. It rides in the corner of a card, so it needs a
+/// fraction of the pixels the card's own art does.
+const LOGO_MAX: u32 = 96;
+
 /// Ceiling on what a single preview decode may allocate. Track previews are often
 /// uncompressed TGAs, and one oversized file shouldn't be able to claim hundreds of
 /// megabytes just to end up as a 192px thumbnail.
@@ -93,6 +97,9 @@ pub struct PkzMeta {
     /// In metres.
     pub altitude: Option<i32>,
     pub thumbnail: Option<String>,
+    /// The manufacturer's mark, as a `data:image/png;base64,…` badge. A bike ships one as
+    /// `logo.tga`; tracks have none, and plenty of community bikes don't either.
+    pub logo: Option<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -236,8 +243,9 @@ fn write_cache(cache_file: &Path, path: &str, prefix: Option<&str>, stamp: Stamp
 
 /// Bumped when the key changes shape, so stale entries are ignored rather than
 /// misread. The previous generation was keyed on the absolute path.
-// v3: image ranking now prefers a bike's `logo.tga`, so v2 thumbnails are stale.
-const CACHE_DIR: &str = "pkz-meta-v3";
+// v4: a bike's `logo.tga` is carried as its own badge rather than ranked as preview art,
+// so every v3 bike entry holds the wrong picture.
+const CACHE_DIR: &str = "pkz-meta-v4";
 
 fn cache_path(
     app: &tauri::AppHandle,
@@ -259,7 +267,7 @@ fn cache_path(
 fn drop_stale_cache(cache_root: &Path) {
     static ONCE: Once = Once::new();
     ONCE.call_once(|| {
-        for old in ["pkz-meta", "pkz-meta-v2"] {
+        for old in ["pkz-meta", "pkz-meta-v2", "pkz-meta-v3"] {
             let _ = std::fs::remove_dir_all(cache_root.join(old));
         }
     });
@@ -399,6 +407,15 @@ fn inspect_zip_under(
         }
     }
 
+    if let Some(logo_idx) = logo_index(&names) {
+        if let Ok(mut f) = archive.by_index(at(logo_idx)) {
+            let mut bytes = Vec::new();
+            if f.read_to_end(&mut bytes).is_ok() {
+                meta.logo = make_badge(&names[logo_idx], &bytes, LOGO_MAX);
+            }
+        }
+    }
+
     Ok((meta, image))
 }
 
@@ -437,6 +454,12 @@ fn inspect_dir(dir: &Path) -> Result<(PkzMeta, Option<(String, Vec<u8>)>)> {
         if let Ok(bytes) = std::fs::read(&rels[img_idx].1) {
             meta.thumbnail = make_thumbnail(&names[img_idx], &bytes, THUMB_MAX);
             image = Some((names[img_idx].clone(), bytes));
+        }
+    }
+
+    if let Some(logo_idx) = logo_index(&names) {
+        if let Ok(bytes) = std::fs::read(&rels[logo_idx].1) {
+            meta.logo = make_badge(&names[logo_idx], &bytes, LOGO_MAX);
         }
     }
 
@@ -479,6 +502,10 @@ fn meta_from_entries(entries: &[(String, Vec<u8>)]) -> (PkzMeta, Option<(String,
         let bytes = &entries[img_idx].1;
         meta.thumbnail = make_thumbnail(&names[img_idx], bytes, THUMB_MAX);
         image = Some((names[img_idx].clone(), bytes.clone()));
+    }
+
+    if let Some(logo_idx) = logo_index(&names) {
+        meta.logo = make_badge(&names[logo_idx], &entries[logo_idx].1, LOGO_MAX);
     }
     (meta, image)
 }
@@ -554,8 +581,34 @@ fn pick_image(names: &[String], ini_dir: &str, pic: Option<&str>) -> Option<usiz
     names
         .iter()
         .enumerate()
-        .filter(|(_, n)| is_image(n))
+        .filter(|(_, n)| is_image(n) && !is_bike_artwork(n))
         .max_by_key(|(_, n)| image_score(n))
+        .map(|(i, _)| i)
+}
+
+/// A path's file name without its extension, folded to lower case.
+fn base_stem(name: &str) -> String {
+    let base = name.rsplit('/').next().unwrap_or(name);
+    base.rsplit_once('.').map_or(base, |(stem, _)| stem).to_ascii_lowercase()
+}
+
+/// The three image slots a bike fills with its own artwork, none of which is a picture of
+/// the bike: `logo` is the maker's mark (carried as a badge instead), `team` a 32x64 number
+/// strip, `garage` the backdrop behind it. Ranked against each other one of them always won,
+/// and since all three are drawn on transparency the card got a solid slab of whatever colour
+/// sat under the alpha. An explicit `pic =` in the `.ini` still wins, as it always did.
+fn is_bike_artwork(name: &str) -> bool {
+    matches!(base_stem(name).as_str(), "logo" | "team" | "garage")
+}
+
+/// Where the manufacturer's mark lives, shallowest first. Only `logo` counts: the `team.tga`
+/// beside it is the team's mark, not the maker's.
+fn logo_index(names: &[String]) -> Option<usize> {
+    names
+        .iter()
+        .enumerate()
+        .filter(|(_, n)| is_image(n) && base_stem(n) == "logo")
+        .min_by_key(|(_, n)| (n.matches('/').count(), n.len()))
         .map(|(i, _)| i)
 }
 
@@ -582,12 +635,6 @@ fn image_score(name: &str) -> i32 {
     if n.contains("image") || n.contains("info") || n.contains("thumb") {
         score += 10;
     }
-    // A bike ships its manufacturer mark as `logo.tga` — a real thumbnail, and far better
-    // than the `team.tga` strip (32x64 on the OEM Kawasaki) it would otherwise tie with.
-    // Below a genuine preview, which stays the first choice when the mod has one.
-    if n.contains("logo") {
-        score += 5;
-    }
     // Browser-native formats are cheaper/safer to decode than TGA.
     if n.ends_with(".png") || n.ends_with(".jpg") || n.ends_with(".jpeg") {
         score += 2;
@@ -605,18 +652,37 @@ fn decode_limits() -> image::Limits {
     limits
 }
 
-fn make_thumbnail(name: &str, bytes: &[u8], max: u32) -> Option<String> {
-    let img = if name.to_ascii_lowercase().ends_with(".tga") {
+/// TGA carries no magic a format guess can find, so it is named by its extension; everything
+/// else is sniffed.
+fn decode_image(name: &str, bytes: &[u8]) -> Option<image::DynamicImage> {
+    if name.to_ascii_lowercase().ends_with(".tga") {
         let mut dec = image::codecs::tga::TgaDecoder::new(Cursor::new(bytes)).ok()?;
         dec.set_limits(decode_limits()).ok()?;
-        image::DynamicImage::from_decoder(dec).ok()?
+        image::DynamicImage::from_decoder(dec).ok()
     } else {
         let mut reader = image::ImageReader::new(Cursor::new(bytes))
             .with_guessed_format()
             .ok()?;
         reader.limits(decode_limits());
-        reader.decode().ok()?
-    };
+        reader.decode().ok()
+    }
+}
+
+/// A logo, kept as PNG so its transparency survives. Every one of these marks is drawn on an
+/// empty background — flattening a Honda badge to RGB hands you a solid red square.
+fn make_badge(name: &str, bytes: &[u8], max: u32) -> Option<String> {
+    let img = decode_image(name, bytes)?;
+    let badge = image::DynamicImage::ImageRgba8(img.thumbnail(max, max).to_rgba8());
+    let mut png = Vec::new();
+    badge
+        .write_to(&mut Cursor::new(&mut png), image::ImageFormat::Png)
+        .ok()?;
+    let b64 = base64::engine::general_purpose::STANDARD.encode(&png);
+    Some(format!("data:image/png;base64,{b64}"))
+}
+
+fn make_thumbnail(name: &str, bytes: &[u8], max: u32) -> Option<String> {
+    let img = decode_image(name, bytes)?;
 
     // Drop to RGB — JPEG can't hold the alpha a TGA may decode to.
     let thumb = image::DynamicImage::ImageRgb8(img.thumbnail(max, max).to_rgb8());
@@ -1232,6 +1298,88 @@ mod tests {
     fn no_image_returns_none() {
         let names = vec!["T/T.ini".to_string(), "T/T.map".to_string()];
         assert_eq!(pick_image(&names, "T", None), None);
+    }
+
+    /// An OEM bike carries no picture of itself at all — only these three, and every one of
+    /// them is drawn on transparency, so picking any of them paints the card a solid colour.
+    #[test]
+    fn a_bikes_own_artwork_is_never_its_preview() {
+        let names = vec![
+            "B/B.cfg".to_string(),
+            "B/logo.tga".to_string(),
+            "B/team.tga".to_string(),
+            "B/garage.tga".to_string(),
+        ];
+        assert_eq!(pick_image(&names, "B", None), None);
+        // A mod that names one of them outright still gets what it asked for.
+        assert_eq!(pick_image(&names, "B", Some("garage.tga")), Some(3));
+    }
+
+    #[test]
+    fn the_logo_is_found_case_insensitively_and_the_team_mark_ignored() {
+        let names = vec![
+            "MX1OEM_2023_TM_MX_250/Logo.TGA".to_string(),
+            "MX1OEM_2023_TM_MX_250/team.tga".to_string(),
+        ];
+        assert_eq!(logo_index(&names), Some(0));
+    }
+
+    #[test]
+    fn a_bike_without_a_logo_simply_has_none() {
+        let names = vec!["K85M/k85m.cfg".to_string(), "K85M/team.tga".to_string()];
+        assert_eq!(logo_index(&names), None);
+    }
+
+    /// The shallowest wins: a paint folder deep inside a mod may carry a sponsor's `logo.tga`
+    /// of its own, and the bike's is the one beside its config.
+    #[test]
+    fn the_shallowest_logo_wins() {
+        let names = vec![
+            "B/paints/red/logo.tga".to_string(),
+            "B/logo.tga".to_string(),
+        ];
+        assert_eq!(logo_index(&names), Some(1));
+    }
+
+    /// PNG, because these marks are transparent and JPEG would flatten a Honda badge into a
+    /// solid red square.
+    #[test]
+    fn a_badge_keeps_its_transparency() {
+        let mut png = Vec::new();
+        image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(
+            8,
+            8,
+            image::Rgba([204, 0, 0, 0]),
+        ))
+        .write_to(&mut Cursor::new(&mut png), image::ImageFormat::Png)
+        .unwrap();
+
+        let badge = make_badge("logo.png", &png, LOGO_MAX).expect("badge");
+        assert!(badge.starts_with("data:image/png;base64,"));
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(badge.trim_start_matches("data:image/png;base64,"))
+            .unwrap();
+        let decoded = image::load_from_memory(&bytes).unwrap().to_rgba8();
+        assert_eq!(decoded.get_pixel(0, 0).0[3], 0);
+    }
+
+    /// Against a bike off a real install, which is the only place the game's own archives are.
+    ///
+    /// `MXB_REAL_BIKE=<…/mods/bikes/MX1OEM_2023_TM_MX_250.pkz> cargo test
+    /// a_real_bike_yields_a_logo_badge -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn a_real_bike_yields_a_logo_badge() {
+        let Ok(src) = std::env::var("MXB_REAL_BIKE") else {
+            eprintln!("set MXB_REAL_BIKE to run");
+            return;
+        };
+        let meta = read_meta(Path::new(&src)).unwrap();
+        let logo = meta.logo.expect("the bike carries a logo");
+        assert!(logo.starts_with("data:image/png;base64,"));
+        // An OEM bike ships no picture of itself, so the badge is all the card gets.
+        assert_eq!(meta.thumbnail, None);
+        eprintln!("{src}: logo badge of {} chars", logo.len());
     }
 
     /// `MXB_REAL_PKZ=<file> MXB_OUT=<dir> cargo test extract_pkz_to_env -- --ignored`

@@ -232,8 +232,17 @@ function LibraryCardBody({
       >
         {meta?.thumbnail ? (
           <img src={meta.thumbnail} alt="" className="h-full w-full object-cover" />
+        ) : meta?.logo ? (
+          // Second, not first: the question a card answers is "which bike is this", and a
+          // picture of the bike answers it where a KTM mark only narrows it to nine of them.
+          // On its own plate and contained rather than cropped — it's a mark, not a photo.
+          <img
+            src={meta.logo}
+            alt={brand ?? ""}
+            className="h-full w-full bg-badge-plate object-contain p-1.5"
+          />
         ) : brand ? (
-          // A bike with no picture in its archive used to get the same grey box as every
+          // A bike with neither picture nor mark used to get the same grey box as every
           // other one, which told you nothing. The maker's name does.
           <span className="px-1 font-cond text-[13px] font-extrabold uppercase tracking-[0.06em] text-foreground/45">
             {brand}

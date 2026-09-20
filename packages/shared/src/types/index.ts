@@ -632,6 +632,9 @@ export interface PkzMeta {
   altitude: number | null;
   /** Preview image as a `data:image/png;base64,…` URI, if one was found. */
   thumbnail: string | null;
+  /** The manufacturer's mark, as a `data:image/png;base64,…` badge. A bike ships one as
+   *  `logo.tga`; tracks have none, and plenty of community bikes don't either. */
+  logo: string | null;
 }
 
 /** One file inside a track. `role` is a key the UI translates, not prose. */
