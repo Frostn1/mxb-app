@@ -35,6 +35,13 @@ use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
 /// or its label stays registered and the next handshake silently cannot build one.
 pub const WINDOW: &str = "hub-clearance";
 
+/// Open the URL that actually triggered the challenge. SiteGround redirects back here after
+/// solving its proof of work, which also makes the verification useful even when protection
+/// is enabled for the API but not the storefront homepage.
+fn challenge_url() -> String {
+    format!("{HUB_BASE}/wp-json/wc/store/v1/products?per_page=1")
+}
+
 /// How long the hidden window gets to run the challenge by itself. The proof of work is a
 /// second or two on a modern machine; the rest is page load, and being generous costs nothing
 /// when it succeeds.
@@ -130,12 +137,12 @@ pub async fn earn(app: &AppHandle) -> anyhow::Result<()> {
         // A window left over from a previous attempt is on a page that has already been decided
         // one way or the other, so it is dropped rather than reused: the point is a fresh
         // navigation, which is what re-serves the challenge and lets the browser answer it.
-        close(app);
+        close_and_settle(app).await;
         if attempt(app, Mode::Hidden).await? {
             return anyhow::Ok(true);
         }
         log::info!("the hidden window could not answer the MXB Hub check — asking the user to");
-        close(app);
+        close_and_settle(app).await;
         attempt(app, Mode::Visible).await
     }
     .await;
@@ -183,7 +190,7 @@ impl Mode {
 /// out of budget, or of a visible window the user closed. Only something that stopped the pass
 /// from happening at all is an `Err`.
 async fn attempt(app: &AppHandle, mode: Mode) -> anyhow::Result<bool> {
-    let url: tauri::Url = HUB_BASE.parse()?;
+    let url: tauri::Url = challenge_url().parse()?;
     log::info!(
         "opening the {} MXB Hub window to answer the robot challenge",
         if mode.visible() { "visible" } else { "hidden" }
@@ -195,12 +202,10 @@ async fn attempt(app: &AppHandle, mode: Mode) -> anyhow::Result<bool> {
         } else {
             "MXB Hub"
         })
-        // Deliberately **no** `.user_agent()` override. Forcing `HUB_SITE.ua` on it here was
-        // tried and was worse than doing nothing: the string claims Chrome on Windows while
-        // the window is WKWebView on macOS, and the challenge fingerprints the browser — so a
-        // page that had been serving a solvable challenge started answering 403 outright.
-        // [`crate::shop_session::UA`] records the same lesson for Cloudflare. The window
-        // introduces itself honestly and earns what it can.
+        // SiteGround binds the challenge result to this identity. HUB_SITE uses a
+        // platform-appropriate value, so WKWebView is no longer made to claim it is Windows
+        // Chrome and the HTTP probe does not replay the result as a different browser.
+        .user_agent(HUB_SITE.ua)
         // Never given a way to talk to the app, shown or not — see the module comment.
         .visible(mode.visible())
         .decorations(mode.visible())
@@ -220,7 +225,11 @@ async fn attempt(app: &AppHandle, mode: Mode) -> anyhow::Result<bool> {
         builder.inner_size(1024.0, 768.0).position(-32000.0, -32000.0)
     };
 
-    let window = builder.build()?;
+    let window = builder.build().inspect_err(|e| {
+        // Mute until now: the caller turns this into "still refused", which reads as the store
+        // saying no when in fact the app never opened anything.
+        log::error!("the MXB Hub challenge window could not be built: {e}");
+    })?;
 
     let deadline = std::time::Instant::now() + mode.budget();
     let mut last_seen: Vec<(String, String)> = Vec::new();
@@ -229,8 +238,20 @@ async fn attempt(app: &AppHandle, mode: Mode) -> anyhow::Result<bool> {
         tokio::time::sleep(POLL).await;
 
         // A window the user was asked to finish is one they can also close. That is a decision,
-        // not a budget to sit out.
+        // not a budget to sit out — but it is not automatically a refusal either. The page may
+        // have come up clean, with nothing to click, and closing it is then the reasonable
+        // thing to do. The probe below runs on a timer, so the window is easily gone before
+        // the next one was due; ask the store once more before calling this a failure.
         if mode.visible() && app.get_webview_window(WINDOW).is_none() {
+            if probe().await {
+                crate::hub_session::adopt_clearance(app, &last_seen);
+                LAST.store(now(), Ordering::Relaxed);
+                log::info!(
+                    "the MXB Hub check window was closed and the store is letting us in ({})",
+                    crate::hub_session::cookie_names(&last_seen)
+                );
+                return Ok(true);
+            }
             log::info!("the MXB Hub check window was closed before the check was finished");
             return Ok(false);
         }
@@ -290,7 +311,7 @@ async fn probe() -> bool {
         return false;
     };
     let request = client
-        .get(format!("{HUB_BASE}/wp-json/wc/store/v1/products?per_page=1"))
+        .get(challenge_url())
         .send();
     match tokio::time::timeout(PROBE_TIMEOUT, request).await {
         Ok(Ok(resp)) => !mods::hub::challenged(&resp) && resp.status().is_success(),
@@ -302,8 +323,30 @@ async fn probe() -> bool {
 
 pub fn close(app: &AppHandle) {
     if let Some(win) = app.get_webview_window(WINDOW) {
-        let _ = win.close();
+        // `close()` only *asks* the window to go, and the label stays taken until it actually
+        // does. The next pass then fails to build with "a window with label … already
+        // exists" — which is how the visible window came to never open at all: the hidden one
+        // timed out, the app told the user to finish the check in a window that was never
+        // there, and the error went nowhere because a build failure is an `Err` this function
+        // never sees. `destroy()` tears it down rather than asking.
+        let _ = win.destroy();
     }
+}
+
+/// Close the window and wait for its label to come free.
+///
+/// Even `destroy()` unwinds on the main thread, so a builder that runs in the same breath can
+/// still land on a label that is on its way out. A short wait costs nothing next to a pass
+/// that is about to sit out a 40 second budget.
+async fn close_and_settle(app: &AppHandle) {
+    close(app);
+    for _ in 0..40 {
+        if app.get_webview_window(WINDOW).is_none() {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    log::warn!("the MXB Hub window did not go away; the next pass may fail to open");
 }
 
 #[cfg(test)]

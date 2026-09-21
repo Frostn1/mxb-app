@@ -5,12 +5,13 @@ import { open as openUrl } from "@tauri-apps/plugin-shell";
 import { Button } from "../ui/button";
 
 /**
- * The Steam sign-in wall — shared by every app in the lineup.
+ * The Steam sign-in page — shared by every app in the lineup.
  *
  * When the deployment requires a Valve-confirmed Steam sign-in (`MXB_REQUIRE_STEAM` on the
  * control plane), the startup gate answers `signin` and the Rust side emits
  * `mxb-signin-required`. This overlay covers the whole window on that event and nothing behind
- * it can be used until the account is linked — the enforcement is the gate, this is the door.
+ * it can be used until the account is linked — the enforcement is the gate, this is the welcome
+ * page that explains why sign-in is needed.
  *
  * The flow reuses the commands the secure-content link already had: `steam_link_start` returns a
  * Steam OpenID URL, the browser half lands on the control plane and sets the Steam id, and
@@ -20,7 +21,7 @@ import { Button } from "../ui/button";
  * Honest throughout: this is a requirement to meet, not the disguised block a banned install
  * gets (that one closes the app instead of ever reaching here).
  *
- * The one rule this door has to keep: **the button is never dead**. It is the only control on
+ * The one rule this page has to keep: **the button is never dead**. It is the only control on
  * the only thing on screen, so a state it cannot be clicked out of is the app not opening. It
  * used to be disabled for the whole wait — minutes, on a sign-in that had already failed in the
  * browser, with no way to start another and no way to tell that from the app having hung. Now it
@@ -29,7 +30,6 @@ import { Button } from "../ui/button";
  */
 export default function SigninGate() {
   const [required, setRequired] = useState(false);
-  const [message, setMessage] = useState("Sign in with Steam to use MXB App.");
   /** The browser is being opened. The one moment when a second click has nothing to do. */
   const [opening, setOpening] = useState(false);
   /** The browser is open and we are waiting on Steam. Clicking again starts a fresh sign-in. */
@@ -58,7 +58,6 @@ export default function SigninGate() {
   useEffect(() => {
     const pending = listen<{ required: boolean; message: string }>("mxb-signin-required", (e) => {
       setRequired(e.payload.required);
-      if (e.payload.message) setMessage(e.payload.message);
       if (!e.payload.required) {
         attempt.current++;
         setOpening(false);
@@ -188,54 +187,125 @@ export default function SigninGate() {
     // A Radix dialog opened with `modal` (the default) sets `pointer-events: none` on
     // `document.body` and hands pointer events back only inside its own content. This wall is a
     // sibling of those dialogs, not a child, so while one is open every click on it lands on
-    // nothing — and because the wall is `z-[100]` and a dialog is `z-50`, the wall is still the
+    // nothing — and because the page is `z-[100]` and a dialog is `z-50`, the page is still the
     // thing being painted. The button looks completely ordinary, is not disabled, and does not
     // respond: "it won't let me click the sign in with Steam".
     //
     // `LooseSwapPrompt` is the one that makes this routine rather than rare — it opens itself
-    // at launch whenever it finds a loose model-swap folder, which is exactly when the wall is
+    // at launch whenever it finds a loose model-swap folder, which is exactly when the page is
     // going up — but any of the twenty-odd dialogs in the app does it. An explicit
     // `pointer-events: auto` on a descendant overrides the `none` it inherits from body, which
     // is the same mechanism Radix uses to re-enable its own content.
-    <div className="pointer-events-auto fixed inset-0 z-[100] flex items-center justify-center bg-background/95 backdrop-blur-sm">
-      <div className="mx-4 w-full max-w-md rounded-2xl border border-border bg-card p-8 text-center shadow-xl">
-        <h1 className="text-2xl font-bold tracking-tight text-foreground">Sign in with Steam to continue</h1>
-        <p className="mt-3 text-sm text-muted-foreground">{message}</p>
-        <p className="mt-1 text-sm text-muted-foreground">It takes one click and keeps your account yours.</p>
-        <div className="mt-7">
-          <Button size="lg" className="rounded-full px-8" disabled={opening} onClick={() => void signIn()}>
-            {opening ? "Opening Steam…" : waiting ? "Open Steam again" : "Sign in with Steam"}
-          </Button>
-        </div>
-        {note && <p className="mt-4 text-xs text-muted-foreground">{note}</p>}
-        {url && (
-          // The escape hatch from a browser that never opened. `openUrl` cannot tell us that
-          // happened, so the rider is given the URL itself rather than a reassurance.
-          <div className="mt-4 rounded-lg border border-border bg-muted/40 p-3 text-left">
-            <p className="text-xs text-muted-foreground">
-              No browser? Copy this link and open it yourself:
-            </p>
-            <p className="mt-1 break-all font-mono text-[11px] text-muted-foreground/80">{url}</p>
-            <button
-              type="button"
-              className="mt-2 text-xs font-medium text-primary underline-offset-2 hover:underline"
-              onClick={() => {
-                void navigator.clipboard
-                  .writeText(url)
-                  .then(() => setCopied(true))
-                  .catch(() => setCopied(false));
-              }}
-            >
-              {copied ? "Copied" : "Copy link"}
-            </button>
+    <div className="pointer-events-auto fixed inset-0 z-[100] overflow-y-auto bg-background/90 backdrop-blur-xl">
+      <main className="mx-auto grid min-h-full w-full max-w-[1280px] lg:grid-cols-[minmax(0,1fr)_440px]">
+        <section className="flex min-h-[380px] flex-col px-8 py-8 sm:px-12 sm:py-10 lg:min-h-full lg:px-16 lg:py-12">
+          <div className="flex select-none items-center" data-tauri-drag-region>
+            <span className="flex items-baseline gap-2 font-cond">
+              <span className="text-sm font-extrabold tracking-[-0.04em] text-foreground">
+                MXB App
+              </span>
+              <span className="text-[11px] font-medium text-faint">
+                by <span className="font-semibold text-muted-foreground">mxbsecure</span>
+              </span>
+            </span>
           </div>
-        )}
-        <p className="mt-6 text-xs text-muted-foreground/70">
-          {waiting
-            ? "Finish the sign-in in your browser · press the button again for a fresh one"
-            : "Opens Steam in your browser · nothing else works until you do"}
-        </p>
-      </div>
+
+          <div className="my-auto max-w-[650px] py-14 lg:py-20">
+            <p className="font-cond text-xs font-semibold uppercase tracking-[0.18em] text-primary">
+              Hello, rider.
+            </p>
+            <h1 className="mt-4 max-w-[620px] text-[clamp(2.6rem,5vw,5rem)] font-extrabold leading-[0.96] tracking-[-0.045em] text-foreground">
+              Your MX Bikes life, all in one place.
+            </h1>
+            <p className="mt-7 max-w-[570px] text-[15px] leading-7 text-muted-foreground sm:text-base">
+              MXB App makes it easier to discover and install mods, keep your library organized,
+              find a server, and use creator-protected content you own.
+            </p>
+
+            <div className="mt-10 grid max-w-[600px] gap-5 border-l border-primary-line pl-5 sm:grid-cols-3 sm:gap-7">
+              <div>
+                <p className="text-sm font-semibold text-foreground">Find what you want</p>
+                <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                  Browse tracks, bikes, gear, and more.
+                </p>
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-foreground">Install it simply</p>
+                <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                  Skip the folder hunting and manual setup.
+                </p>
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-foreground">Ride with confidence</p>
+                <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                  Your library and ownership stay connected.
+                </p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section className="flex items-center border-t border-border bg-window/80 px-8 py-12 backdrop-blur-2xl sm:px-12 lg:border-l lg:border-t-0 lg:px-14">
+          <div className="w-full">
+            <p className="font-cond text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+              Let’s get you set up
+            </p>
+            <h2 className="mt-3 text-3xl font-bold tracking-[-0.025em] text-foreground">
+              Sign in with Steam
+            </h2>
+            <p className="mt-4 text-sm leading-6 text-muted-foreground">
+              Use the Steam account you play MX Bikes with. We’ll open Steam in your browser and
+              bring you back when you’re done.
+            </p>
+
+            <Button
+              size="lg"
+              className="mt-8 w-full"
+              disabled={opening}
+              onClick={() => void signIn()}
+            >
+              {opening ? "Opening Steam…" : waiting ? "Open Steam again" : "Continue with Steam"}
+            </Button>
+
+            {note && (
+              <p className="mt-4 text-sm leading-5 text-muted-foreground" aria-live="polite">
+                {note}
+              </p>
+            )}
+
+            {url && (
+              // The escape hatch from a browser that never opened. `openUrl` cannot tell us that
+              // happened, so the rider is given the URL itself rather than a reassurance.
+              <div className="mt-6 border-t border-border pt-5">
+                <p className="text-xs text-muted-foreground">
+                  No browser? Copy this link and open it yourself:
+                </p>
+                <p className="mt-2 max-h-14 overflow-hidden break-all font-mono text-[11px] leading-5 text-muted-foreground/80">
+                  {url}
+                </p>
+                <button
+                  type="button"
+                  className="mt-3 text-xs font-semibold text-primary underline-offset-4 hover:underline focus-visible:underline"
+                  onClick={() => {
+                    void navigator.clipboard
+                      .writeText(url)
+                      .then(() => setCopied(true))
+                      .catch(() => setCopied(false));
+                  }}
+                >
+                  {copied ? "Copied" : "Copy sign-in link"}
+                </button>
+              </div>
+            )}
+
+            <p className="mt-8 border-t border-border pt-5 text-xs leading-5 text-muted-foreground/70">
+              {waiting
+                ? "Finish in your browser. If the tab expired, open Steam again for a fresh link."
+                : "You’ll return here automatically after Steam confirms your account."}
+            </p>
+          </div>
+        </section>
+      </main>
     </div>
   );
 }

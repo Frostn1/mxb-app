@@ -15,9 +15,10 @@ import { es } from "./locales/es";
 import { fr } from "./locales/fr";
 import { de } from "./locales/de";
 import { ptBR } from "./locales/pt-BR";
+import { sv } from "./locales/sv";
 
 // A side effect on import, deliberately — see the manager's copy for why.
-registerDicts({ en, it, es, fr, de, "pt-BR": ptBR });
+registerDicts({ en, it, es, fr, de, "pt-BR": ptBR, sv });
 
 export type Translation = Record<keyof typeof en, string>;
 type Key = keyof typeof en;

@@ -98,11 +98,11 @@ export default function Overlay() {
   const overlayGame =
     games.find((g) => g.id === (config?.activeGame ?? "mxb")) ?? MXB_FALLBACK;
 
-  // Every translated string can say `{{game}}` / `{{site}}` instead of naming one
-  // title — see `setAmbientVars`. Set as a layout effect so the first paint after a
+  // Every translated string can say `{{app}}` / `{{game}}` / `{{site}}` instead of naming
+  // the product or a title — see `setAmbientVars`. Set as a layout effect so the first paint after a
   // switch already reads right.
   useLayoutEffect(() => {
-    setAmbientVars({ game: overlayGame.display, site: overlayGame.catalogDomain });
+    setAmbientVars({ app: APP_NAME, game: overlayGame.display, site: overlayGame.catalogDomain });
   }, [overlayGame]);
 
   const tabs = useMemo(

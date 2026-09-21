@@ -3,7 +3,6 @@ import { useCallback, useEffect, useLayoutEffect, useState } from "react";
 import MiniRail from "./Components/Shell/MiniRail";
 import Dashboard from "./Components/Dashboard/Dashboard";
 import Setup from "./Components/Setup/Setup";
-import Welcome from "./Components/Welcome/Welcome";
 import LooseSwapPrompt from "./Components/Locker/LooseSwapPrompt";
 import { ThemeProvider } from "@frost/shared/Context/Theme";
 import { FrostmodProvider } from "./Context/Frostmod";
@@ -21,23 +20,13 @@ import {
 } from "@frost/shared/api/mods";
 import { TOUR_DONE_KEY } from "./Components/Tour/Tour";
 import { useI18n } from "@/i18n";
-import { setAmbientVars } from "@/i18n";
+import { APP_NAME, setAmbientVars } from "@/i18n";
 import { UpdateProvider } from "./Context/Update";
 import RuntimeBanner from "./Components/RuntimeBanner/RuntimeBanner";
 import SigninGate from "@frost/shared/Components/SigninGate/SigninGate";
 import SurveyPrompt from "@frost/shared/Components/Survey/SurveyPrompt";
 import UpdateBanner from "./Components/UpdateBanner/UpdateBanner";
 import type { Config, GameId, GameInfo } from "@frost/shared/types";
-
-/**
- * Bumped when the intro tour changes enough to warrant showing it again.
- *
- * The saved config (`welcomeSeen`) is the real record — this only covers the window
- * before one exists, i.e. while the setup screen is still up. Keeping it in the
- * webview's storage alone is what made the intro replay after that storage was
- * cleared.
- */
-const WELCOME_SEEN_KEY = "mxb:welcomeSeen:v1";
 
 const App = () => {
   const { t } = useI18n();
@@ -48,19 +37,6 @@ const App = () => {
   const [bikePreview, setBikePreview] = useState(false);
   // Static per build, so fetched once at startup alongside `bikePreview`.
   const [games, setGames] = useState<GameInfo[]>([MXB_FALLBACK]);
-  const [welcomeDismissed, setWelcomeDismissed] = useState(
-    () => localStorage.getItem(WELCOME_SEEN_KEY) === "1",
-  );
-  const showWelcome = !welcomeDismissed && !config?.welcomeSeen;
-
-  const dismissWelcome = useCallback(() => {
-    localStorage.setItem(WELCOME_SEEN_KEY, "1");
-    setWelcomeDismissed(true);
-    // No-ops when there's no config yet (dismissed from over the setup screen); the
-    // flag above holds until setup writes one, and the effect below persists it then.
-    void setIntroSeen({ welcome: true }).catch(() => {});
-  }, []);
-
   const reloadConfig = useCallback(async () => {
     setConfig(await getConfig());
   }, []);
@@ -75,21 +51,23 @@ const App = () => {
   const activeGame =
     games.find((g) => g.id === (config?.activeGame ?? "mxb")) ?? MXB_FALLBACK;
 
-  // Every translated string can say `{{game}}` / `{{site}}` instead of naming one
-  // title — see `setAmbientVars`. Set as a layout effect so the first paint after a
+  // Every translated string can say `{{app}}` / `{{game}}` / `{{site}}` instead of naming
+  // the product or a title — see `setAmbientVars`. Set as a layout effect so the first paint after a
   // switch already reads right.
   useLayoutEffect(() => {
-    setAmbientVars({ game: activeGame.display, site: activeGame.catalogDomain });
+    setAmbientVars({
+      app: APP_NAME || "MXB App",
+      game: activeGame.display,
+      site: activeGame.catalogDomain,
+    });
   }, [activeGame]);
 
   // Carry the old webview-only flags into the config once, so an existing install
   // doesn't get shown the intro again the first time that storage is lost.
   useEffect(() => {
     if (!config) return;
-    const welcome =
-      !config.welcomeSeen && localStorage.getItem(WELCOME_SEEN_KEY) === "1";
     const tour = !config.tourDone && localStorage.getItem(TOUR_DONE_KEY) === "1";
-    if (welcome || tour) void setIntroSeen({ welcome, tour }).catch(() => {});
+    if (tour) void setIntroSeen({ tour: true }).catch(() => {});
   }, [config]);
 
   useEffect(() => {
@@ -168,15 +146,16 @@ const App = () => {
                       switchGame,
                     }}
                   >
-                    {/* A config with no mods folder means setup hasn't finished — either a
-                        first run, or a switch to a game we couldn't locate.
+                    {/* Setup stays here until it has both a mods folder and the explicit
+                        final choice. A blank folder can also mean a switch to a game we
+                        couldn't locate.
 
                         The dashboard is keyed by game: switching titles changes every
                         folder it reads, and its views fetch on mount. Remounting is what
                         makes "switch game" mean "start over here" rather than leaving the
                         previous game's library and Manage list on screen. */}
-                    {config?.modsPath ? (
-                      <Dashboard key={activeGame.id} welcomeActive={showWelcome} />
+                    {config?.modsPath && config.setupComplete ? (
+                      <Dashboard key={activeGame.id} />
                     ) : (
                       <>
                       <MiniRail />
@@ -192,7 +171,7 @@ const App = () => {
                         // No saved config at all = a genuine first run, so ask which
                         // game before anything else. A blank `modsPath` on an existing
                         // config means we got here by switching, and that's already answered.
-                        firstRun={!config}
+                        firstRun={!config?.setupComplete}
                       />
                       </>
                     )}
@@ -205,10 +184,9 @@ const App = () => {
                 dashboard and the pre-config state alike. It shows itself only when the gate
                 says a sign-in is required. */}
             <SigninGate />
-            {ready && showWelcome && <Welcome onDone={dismissWelcome} />}
             {/* Offer to register loose model-swap folders once the app is set up and the
                 intro tour is out of the way. */}
-            {ready && config && !showWelcome && <LooseSwapPrompt />}
+            {ready && config && <LooseSwapPrompt />}
             {/* The survey prompt. Shows itself rarely and on its own schedule — the decision
                 is in `crates/core/src/survey.rs`, not here. Mounted last so it sits over the
                 shell and under the sign-in wall. */}

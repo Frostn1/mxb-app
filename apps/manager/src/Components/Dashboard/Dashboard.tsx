@@ -2,23 +2,23 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import TopRail from "../Shell/TopRail";
 import { ContextSlots } from "../Shell/ContextBar";
-import { type DashboardView } from "../Shell/nav";
+import PurchaseWatcher from "../Shell/PurchaseWatcher";
+import { isModsView, type DashboardView } from "../Shell/nav";
 import { parsePluginView, usePlugins } from "@frost/shared/lib/usePlugins";
 import Library from "../Library/Library";
 import Downloads from "../Downloads/Downloads";
 import Locker from "../Locker/Locker";
 import Presets from "../Presets/Presets";
 import Manage from "../Manage/Manage";
-import Browse from "../Browse/Browse";
+import Mods from "../Mods/Mods";
 import Servers from "../Servers/Servers";
 import Ranked from "../Ranked/Ranked";
-import Shop from "../Shop/Shop";
-import Hub from "../Hub/Hub";
 import ModDetail from "../ModDetail/ModDetail";
 import DropZone from "../Dropzone/DropZone";
 import RuntimeBanner from "../RuntimeBanner/RuntimeBanner";
 import UpdateBanner from "../UpdateBanner/UpdateBanner";
 import SecurePrompt from "./SecurePrompt";
+import GameIntegrationConsent from "../GameIntegration/GameIntegrationConsent";
 import Settings, { type SectionId } from "../Settings/Settings";
 import Tour, { TourContext, TOUR_DONE_KEY } from "../Tour/Tour";
 import GetStarted from "../GetStarted/GetStarted";
@@ -35,6 +35,7 @@ import { useModBrowsing } from "../../lib/useModBrowsing";
 import { displayName } from "@frost/shared/lib/mods";
 import { track } from "../../lib/analytics";
 import type { DownloadRecord } from "@frost/shared/types";
+import { useFrostmod } from "../../Context/FrostmodContext";
 
 interface DashboardProps {
   /** True while the Welcome slideshow is still up. The tour waits for it to close
@@ -44,8 +45,12 @@ interface DashboardProps {
 
 const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
   const { config, game, games } = useConfig();
+  const { integrationChoice } = useFrostmod();
   const t = useT();
-  const [view, setView] = useState<DashboardView>("browse");
+  // Opens on Online. Riding with other people is what the app is opened for most often, and
+  // the server list is the one screen that is worth nothing five minutes later — a mod list
+  // is the same whenever you get to it.
+  const [view, setView] = useState<DashboardView>("servers");
 
   const showBrowse = useCallback(() => setView("browse"), []);
   const {
@@ -62,9 +67,6 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
     openModTarget,
     closeMod,
   } = useModBrowsing(showBrowse, game.id);
-
-  // FrostMod installs itself silently on first run (see FrostmodProvider) —
-  // no prompt here.
 
   // Which Settings section to land on, when something sent us there on purpose.
   // Cleared on the way out so a later visit opens where Settings normally opens.
@@ -149,10 +151,10 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
   // Auto-start the first-run tour once — but only after the Welcome slideshow has
   // been dismissed, otherwise its spotlights sit behind the overlay and show nothing.
   useEffect(() => {
-    if (welcomeActive) return;
+    if (welcomeActive || integrationChoice === null) return;
     if (config.tourDone || localStorage.getItem(TOUR_DONE_KEY) === "1") return;
     startTour();
-  }, [welcomeActive, startTour, config.tourDone]);
+  }, [welcomeActive, integrationChoice, startTour, config.tourDone]);
 
   // The first-run bar, after the tour rather than before it: it hands someone to Browse,
   // which means nothing until the tour has said what Browse is. It shows itself only to an
@@ -256,6 +258,11 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
           there is nowhere to install to before the MX Bikes folder is known. The overlay
           window renders its own tree and deliberately gets no drop target. */}
       <DropZone />
+      {/* Nothing on screen: it watches a store the app just opened in the browser and queues
+          whatever turns up as a new purchase. Here because it needs the install queue and has
+          to outlive every view a store link can be clicked from. */}
+      <PurchaseWatcher />
+      <GameIntegrationConsent paused={welcomeActive} />
       <SecurePrompt onOpenSettings={openSettingsSection} />
       <TopRail
         view={view}
@@ -282,7 +289,7 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
           <ContextSlots.Provider value={ctxSlots}>
           {pluginPanel ? (
             <pluginPanel.component />
-          ) : view === "browse" && selectedSlug ? (
+          ) : isModsView(view) && selectedSlug ? (
             <ModDetail
               slug={selectedSlug}
               modType={modType}
@@ -291,23 +298,21 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
               onChanged={onInstalled}
               onBack={closeMod}
             />
-          ) : view === "browse" ? (
-            <Browse
+          ) : isModsView(view) ? (
+            <Mods
+              view={view}
               modType={modType}
               modTypes={modTypes}
               listing={listing}
               installed={installed}
+              refreshKey={libraryVersion}
               onOpenMod={openMod}
               onChangeType={changeType}
             />
           ) : view === "servers" ? (
             <Servers link={serverLink} />
           ) : view === "ranked" ? (
-            <Ranked />
-          ) : view === "shop" ? (
-            <Shop refreshKey={libraryVersion} />
-          ) : view === "hub" ? (
-            <Hub refreshKey={libraryVersion} />
+            <Ranked onFindServers={() => setView("servers")} />
           ) : view === "library" ? (
             <Library
               modType={modType}
@@ -317,6 +322,7 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
               focus={libraryFocus}
               onFocusApplied={clearLibraryFocus}
               onOpenMod={openFoundMod}
+              onOpenStore={navigate}
             />
           ) : view === "downloads" ? (
             <Downloads

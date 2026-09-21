@@ -1,16 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  Search,
   RefreshCw,
   Loader2,
-  Lock,
-  Users,
-  Signal,
-  Copy,
   Plug,
   ServerOff,
   EyeOff,
-  Palette,
   Star,
   ChevronUp,
   ChevronDown,
@@ -18,7 +12,6 @@ import {
   ServerCog,
   Unplug,
   UserCheck,
-  Hourglass,
   LayoutGrid,
   List,
   SlidersHorizontal,
@@ -26,6 +19,7 @@ import {
   Clock,
 } from "lucide-react";
 import { toast } from "sonner";
+import { SearchBox } from "@frost/shared/Components/ui/search-box";
 import { cn } from "@frost/shared/lib/utils";
 import { Button } from "@frost/shared/Components/ui/button";
 import { Segmented } from "@frost/shared/Components/ui/segmented";
@@ -49,12 +43,13 @@ import {
   listMasterServers,
   cachedMasterServers,
   onServersSwept,
-  joinServer,
-  closeAndJoin,
+  joinListedServer,
+  closeAndJoinListedServer,
   queueJoin,
   serversWithPaintSync,
   serverTrackPreviews,
   serverTrackCatalog,
+  guessServerTrack,
   resolveQuickInstall,
   resetServerBrowser,
   modTypesFor,
@@ -69,8 +64,10 @@ import { useGameRunning } from "@/lib/useGameRunning";
 import { isFull, useServerQueue } from "@/lib/useServerQueue";
 import { REGION_LABEL_KEY, REGION_ORDER, canonicalRegion, type RegionKey } from "@/lib/serverRegion";
 import JoinServerDialog from "../Shell/JoinServerDialog";
-import ServerDetail from "./ServerDetail";
+import { guessPicture, useTrackGuesses, warmTracks } from "./trackGuesses";
+import ServerDetail, { ServerDetailDialog, ServerDetailEmpty } from "./ServerDetail";
 import ServerCard from "./ServerCard";
+import ServerRow from "./ServerRow";
 import ConnectionCheck from "./ConnectionCheck";
 import RegisterServerDialog from "./RegisterServerDialog";
 
@@ -204,7 +201,11 @@ const Servers = ({ link }: ServersProps) => {
       .catch((e: unknown) => toast.error(typeof e === "string" ? e : String(e)))
       .finally(() => setUnwedging(false));
   }, [t]);
-  const [detail, setDetail] = useState<MasterServer | null>(null);
+  // The server the pane is showing, held by address rather than by object: the list is
+  // replaced every sweep, and a pane pinned to the object a row carried when it was clicked
+  // would go on showing rider counts from minutes ago.
+  const [selected, setSelected] = useState<string | null>(null);
+  const pick = useCallback((s: MasterServer) => setSelected(s.address), []);
   // Spam and cheat-advertising servers are marked by the backend, not dropped, so this can
   // reveal them. Off by default: the whole point is not to have to read past them.
   const [showHidden, setShowHidden] = useState(false);
@@ -230,7 +231,7 @@ const Servers = ({ link }: ServersProps) => {
 
   const [view, setView] = useState<ViewMode>(() => {
     try {
-      return localStorage.getItem(VIEW_KEY) === "list" ? "list" : "tiles";
+      return localStorage.getItem(VIEW_KEY) === "tiles" ? "tiles" : "list";
     } catch {
       return "tiles";
     }
@@ -242,14 +243,21 @@ const Servers = ({ link }: ServersProps) => {
       // Storage disabled; the choice still holds for this session.
     }
   }, [view]);
+  // Changing view drops the selection. In tiles a picked server is an open dialog, and one
+  // appearing because somebody pressed the view toggle would be a surprise.
+  useEffect(() => {
+    setSelected(null);
+  }, [view]);
 
   // One request for every track in the list, not one per tile. Tracks already drawn aren't
   // asked again; the ones the player lacks are, in case they installed one since.
   const [art, setArt] = useState<Record<string, string>>(() => ({ ...ART }));
   // Bumped when a track is installed from a tile, so its own art replaces the catalogue's.
   const [installed, setInstalled] = useState(0);
+  // Asked for either view now: the list's rows carry the art small, and the pane beside them
+  // shows it as the hero. It was tiles-only while the list was a table of text.
   useEffect(() => {
-    if (view !== "tiles" || !servers?.length) return;
+    if (!servers?.length) return;
     const tracks = [...new Set(servers.map((s) => s.track).filter((tr) => tr && !(tr in ART)))];
     if (tracks.length === 0) return;
     // Never dropped on a re-run: the next run skips whatever is in ART, so art that landed
@@ -261,17 +269,37 @@ const Servers = ({ link }: ServersProps) => {
         setArt({ ...ART });
       })
       .catch(() => {});
-  }, [view, servers, installed]);
+  }, [servers, installed]);
+
+  // Identify every track in the list without waiting to be asked. Opening a server to find
+  // out what it is running, and to see a picture of it, is work the list can do itself — and
+  // with the answers kept on disk between runs, a settled install asks for nothing at all.
+  useEffect(() => {
+    if (!servers?.length) return;
+    let live = true;
+    void warmTracks(
+      servers.map((s) => s.track),
+      guessServerTrack,
+      () => live,
+    );
+    return () => {
+      live = false;
+    };
+  }, [servers]);
 
   // The tracks the player lacks, from our server: what they are, their picture, the price.
   const [catalog, setCatalog] = useState<Record<string, CatalogTrack>>(() => ({ ...CATALOG }));
   useEffect(() => {
-    if (view !== "tiles" || !servers?.length) return;
+    if (!servers?.length) return;
     const now = Date.now();
     const tracks = [...new Set(servers.map((s) => s.track))].filter(
       (tr) =>
         tr &&
         ASKED.has(tr) &&
+        // `!(tr in art)`, not `!art[tr]`: an empty string means "installed, carries no
+        // picture", and asking the store about a track the player already has buys a wrong
+        // answer — the name is all it can match on, and a stock track called "forest" came
+        // back as somebody else's product. A grey tile is better than the wrong track.
         !(tr in art) &&
         !(tr in CATALOG) &&
         now - (CATALOG_ASKED.get(tr) ?? 0) > REASK_MS,
@@ -284,7 +312,7 @@ const Servers = ({ link }: ServersProps) => {
         setCatalog({ ...CATALOG });
       })
       .catch(() => {});
-  }, [view, servers, art]);
+  }, [servers, art]);
 
   // One fetch at a time. Two overlapping ones each sign in to Steam, and the loser's
   // failure used to replace the winner's list with an error.
@@ -422,6 +450,10 @@ const Servers = ({ link }: ServersProps) => {
 
     const flip = dir === "desc" ? -1 : 1;
     return [...list].sort((a, b) => {
+      // A star is a standing instruction about where a server belongs, so it outranks the
+      // column: starring one used to change nothing at all about the order.
+      const star = Number(favs.has(b.address)) - Number(favs.has(a.address));
+      if (star !== 0) return star;
       // Name breaks ties, so rows that compare equal can't reshuffle between renders.
       const byName = a.name.localeCompare(b.name);
       switch (sort) {
@@ -446,6 +478,19 @@ const Servers = ({ link }: ServersProps) => {
     });
   }, [servers, query, showHidden, favesOnly, favs, region, hideEmpty, sort, dir]);
 
+  /** Everything the sweep found, minus what the app itself filtered out — the number the
+   *  count compares against. */
+  const reachable = (servers?.length ?? 0) - (showHidden ? 0 : hiddenCount);
+
+  /** The server the pane is showing, looked up in the current list every render so it ticks
+   *  along with the sweeps instead of freezing at the moment the row was clicked. Found in
+   *  the whole list rather than the filtered one: narrowing the search shouldn't empty the
+   *  pane on whatever is being read in it. */
+  const detail = useMemo(
+    () => (servers ?? []).find((s) => s.address === selected) ?? null,
+    [servers, selected],
+  );
+
   /** How many filters are narrowing the list, for the trigger that now holds them. */
   const filterCount = useMemo(
     () =>
@@ -459,27 +504,36 @@ const Servers = ({ link }: ServersProps) => {
   const { game } = useConfig();
 
   /** Close the open game and join with the copy that replaces it. */
-  const closeThenJoin = useCallback(
-    async (address: string) => {
-      setJoining(address);
-      try {
-        await closeAndJoin(address);
-        toast.success(t("join.launching", { address }));
-      } catch (e) {
-        toast.error(typeof e === "string" ? e : t("serverBrowser.joinFailed"));
-      } finally {
-        setJoining(null);
-      }
+  const joinError = useCallback(
+    (e: unknown) => {
+      if (e === "server_bike_no_profile") return t("serverBrowser.bikeNoProfile");
+      if (e === "server_bike_no_match") return t("serverBrowser.bikeNoMatch");
+      return typeof e === "string" ? e : t("serverBrowser.joinFailed");
     },
     [t],
   );
 
-  const join = useCallback(
-    async (address: string) => {
-      if (joining) return;
-      setJoining(address);
+  const closeThenJoin = useCallback(
+    async (server: MasterServer) => {
+      setJoining(server.address);
       try {
-        const outcome = await joinServer(address);
+        await closeAndJoinListedServer(server.address, server.categories, server.bikes);
+        toast.success(t("join.launching", { address: server.address }));
+      } catch (e) {
+        toast.error(joinError(e));
+      } finally {
+        setJoining(null);
+      }
+    },
+    [t, joinError],
+  );
+
+  const join = useCallback(
+    async (server: MasterServer) => {
+      if (joining) return;
+      setJoining(server.address);
+      try {
+        const outcome = await joinListedServer(server.address, server.categories, server.bikes);
         if (outcome === "already_running") {
           // The game reads the connect flag only at startup, so an open copy can't be sent
           // anywhere — which used to be the end of it. The way through is to replace the
@@ -488,26 +542,26 @@ const Servers = ({ link }: ServersProps) => {
             duration: 12_000,
             action: {
               label: t("join.closeAndJoin"),
-              onClick: () => void closeThenJoin(address),
+              onClick: () => void closeThenJoin(server),
             },
           });
         } else {
-          toast.success(t("join.launching", { address }));
+          toast.success(t("join.launching", { address: server.address }));
         }
       } catch (e) {
-        toast.error(typeof e === "string" ? e : t("serverBrowser.joinFailed"));
+        toast.error(joinError(e));
       } finally {
         setJoining(null);
       }
     },
-    [joining, t, game.display, closeThenJoin],
+    [joining, t, game.display, closeThenJoin, joinError],
   );
 
   // A full server turns you away, so the button gets you in line instead of failing.
   const wait = useCallback(
     async (s: MasterServer) => {
       try {
-        await queueJoin(s.address, s.name);
+        await queueJoin(s.address, s.name, s.categories, s.bikes);
       } catch (e) {
         toast.error(typeof e === "string" ? e : t("queue.joinFailed"));
       }
@@ -515,10 +569,12 @@ const Servers = ({ link }: ServersProps) => {
     [t],
   );
 
-  // Install & join: a free track goes through the install queue, and the server is joined
-  // once it lands. Keyed by the mod's slug, since that is all the queue reports by.
+  // A free track goes through the install queue. It only joins the server afterward when
+  // the player chose the explicit Install & join action.
   const { startPendingInstall, active } = useInstall();
-  const [installing, setInstalling] = useState<Record<string, string>>({});
+  const [installing, setInstalling] = useState<
+    Record<string, { server: MasterServer; joinAfter: boolean }>
+  >({});
   // Slugs whose install has been seen running. A finished card left over from an earlier
   // install of the same track must not join the server before this one has even started.
   const started = useRef(new Set<string>());
@@ -531,12 +587,12 @@ const Servers = ({ link }: ServersProps) => {
     });
   }, []);
 
-  const installAndJoin = useCallback(
-    (s: MasterServer, product: CatalogTrack) => {
+  const installTrack = useCallback(
+    (s: MasterServer, product: CatalogTrack, joinAfter = false) => {
       const slug = product.slug;
       const tracks = modTypesFor(game.id).find((m) => m.id === "tracks");
       if (!slug || !tracks) return;
-      setInstalling((cur) => ({ ...cur, [slug]: s.address }));
+      setInstalling((cur) => ({ ...cur, [slug]: { server: s, joinAfter } }));
       startPendingInstall({
         slug,
         title: product.name,
@@ -569,8 +625,18 @@ const Servers = ({ link }: ServersProps) => {
     [game, startPendingInstall, doneInstalling, t],
   );
 
+  const installOnly = useCallback(
+    (s: MasterServer, product: CatalogTrack) => installTrack(s, product),
+    [installTrack],
+  );
+
+  const installAndJoin = useCallback(
+    (s: MasterServer, product: CatalogTrack) => installTrack(s, product, true),
+    [installTrack],
+  );
+
   useEffect(() => {
-    for (const [slug, address] of Object.entries(installing)) {
+    for (const [slug, intent] of Object.entries(installing)) {
       const job = active.find((a) => a.slug === slug);
       if (!job) continue;
       const finished = job.stage === "done" || job.stage === "error" || job.stage === "review";
@@ -582,18 +648,22 @@ const Servers = ({ link }: ServersProps) => {
       doneInstalling(slug);
       // A pack goes to review and an error has its own card; neither is ready to ride.
       if (job.stage !== "done") continue;
-      const s = servers?.find((x) => x.address === address);
+      const s = servers?.find((x) => x.address === intent.server.address) ?? intent.server;
       if (s?.track) {
         delete ART[s.track];
         ASKED.delete(s.track);
         setInstalled((n) => n + 1);
       }
+      if (!intent.joinAfter) continue;
       if (s && isFull(s)) void wait(s);
-      else void join(address);
+      else void join(s);
     }
   }, [active, installing, servers, join, wait, doneInstalling]);
 
-  const installingAt = useMemo(() => new Set(Object.values(installing)), [installing]);
+  const installingAt = useMemo(
+    () => new Set(Object.values(installing).map(({ server }) => server.address)),
+    [installing],
+  );
 
   const copy = useCallback(
     (address: string) => {
@@ -605,8 +675,35 @@ const Servers = ({ link }: ServersProps) => {
     [t],
   );
 
-  const head = (col: SortMode, label: string, className?: string) => (
-    <SortHead col={col} label={label} sort={sort} dir={dir} onSort={sortBy} className={className} />
+  /** Everything the pane needs about whichever server is picked. The join decision is the
+   *  tile's — Join, Install & join, Buy, Wait in line — so both are handed the same inputs
+   *  and land on the same button rather than each working it out their own way. */
+  // A picture the detail pane learned. The list had only the installed preview and our own
+  // catalogue, so a track that is neither — Fort Red, found on mxb-mods — drew a full hero
+  // and an empty row beside it. Reading the same store fixes that the moment it is known.
+  useTrackGuesses();
+  const pictureFor = (track: string) => art[track] || guessPicture(track) || undefined;
+
+  const detailProps = {
+    server: detail,
+    art: detail ? pictureFor(detail.track) : undefined,
+    missing: !!detail?.track && ASKED.has(detail.track) && !(detail.track in art),
+    product: detail ? catalog[detail.track] : undefined,
+    installing: !!detail && installingAt.has(detail.address),
+    favourite: !!detail && favs.has(detail.address),
+    joining,
+    busy: joining !== null,
+    queue,
+    onJoin: join,
+    onWait: wait,
+    onInstall: installOnly,
+    onInstallJoin: installAndJoin,
+    onCopy: copy,
+    onToggleFavourite: favs.toggle,
+  };
+
+  const chip = (col: SortMode, label: string) => (
+    <SortChip col={col} label={label} sort={sort} dir={dir} onSort={sortBy} />
   );
 
   return (
@@ -691,9 +788,15 @@ const Servers = ({ link }: ServersProps) => {
               </div>
             </PopoverContent>
           </Popover>
+          {/* The number has to describe what is on screen. It used to count the whole list
+              while the filters — Has riders is on by default — were hiding most of it, so the
+              bar said 64 next to thirteen rows. When a filter is narrowing things it says
+              both, and the total is the one that needs explaining, not the rows you can see. */}
           {servers && servers.length > 0 && (
             <span className="shrink-0 tabular-figures text-[12.5px] text-faint">
-              {t("serverBrowser.count", { count: servers.length - (showHidden ? 0 : hiddenCount) })}
+              {shown.length === reachable
+                ? t("serverBrowser.count", { count: shown.length })
+                : t("serverBrowser.countOf", { count: shown.length, total: reachable })}
             </span>
           )}
           {/* What is on screen is a remembered list until the sweep lands, and it says so. The
@@ -717,28 +820,25 @@ const Servers = ({ link }: ServersProps) => {
           onChange={setView}
           options={[
             {
+              value: "list",
+              label: <List className="size-3.5" aria-label={t("serverBrowser.viewList")} />,
+            },
+            {
               value: "tiles",
               label: (
                 <LayoutGrid className="size-3.5" aria-label={t("serverBrowser.viewTiles")} />
               ),
             },
-            {
-              value: "list",
-              label: <List className="size-3.5" aria-label={t("serverBrowser.viewList")} />,
-            },
           ]}
         />
         {/* The one control here that may shrink. Everything else keeps its width, so a
             narrow window trims the search box rather than wrapping four button labels. */}
-        <div className="flex h-7 w-[200px] min-w-[116px] shrink items-center gap-2 border border-input bg-card px-2.5">
-          <Search className="size-3.5 shrink-0 text-faint" />
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder={t("serverBrowser.searchPlaceholder")}
-            className="w-full min-w-0 bg-transparent text-[12.5px] placeholder:text-faint focus:outline-none"
-          />
-        </div>
+        <SearchBox
+          value={query}
+          onChange={setQuery}
+          placeholder={t("serverBrowser.searchPlaceholder")}
+          className="w-[200px] shrink"
+        />
         <Button
           variant="outline"
           size="sm"
@@ -813,16 +913,22 @@ const Servers = ({ link }: ServersProps) => {
         onJoined={load}
       />
       <RegisterServerDialog open={registerOpen} onOpenChange={setRegisterOpen} />
-      <ServerDetail
-        server={detail}
-        onOpenChange={(open) => !open && setDetail(null)}
-        onJoin={join}
-        onWait={wait}
-        joining={joining}
-        queue={queue}
-      />
+      {/* A tile has no list beside it to put the pane next to, so from the grid it still
+          opens over the top — the same pane, in a dialog. */}
+      {view === "tiles" && (
+        <ServerDetailDialog
+          {...detailProps}
+          onOpenChange={(open) => !open && setSelected(null)}
+        />
+      )}
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-7 pb-6">
+      <div
+        className={cn(
+          "min-h-0 flex-1 px-7 pb-6",
+          // The list view scrolls its two columns separately; everything else scrolls whole.
+          view === "list" && shown.length > 0 ? "flex gap-4" : "overflow-y-auto",
+        )}
+      >
         {servers === null ? (
           <Centered>
             <Loader2 className="size-5 animate-spin text-faint" />
@@ -849,17 +955,18 @@ const Servers = ({ link }: ServersProps) => {
               <ServerCard
                 key={`${s.address}-${i}`}
                 server={s}
-                art={art[s.track]}
+                art={pictureFor(s.track)}
                 missing={!!s.track && ASKED.has(s.track) && !(s.track in art)}
                 product={catalog[s.track]}
                 installing={installingAt.has(s.address)}
+                onInstall={installOnly}
                 onInstallJoin={installAndJoin}
                 favourite={favs.has(s.address)}
                 paintSync={paintSync[s.address] ?? 0}
                 joining={joining === s.address}
                 busy={joining !== null}
                 queuePosition={queue?.address === s.address ? queue.position : null}
-                onOpen={setDetail}
+                onOpen={pick}
                 onJoin={join}
                 onWait={wait}
                 onCopy={copy}
@@ -868,212 +975,81 @@ const Servers = ({ link }: ServersProps) => {
             ))}
           </div>
         ) : (
-          <div className="overflow-hidden rounded-xl border border-input">
-            <table className="w-full border-collapse text-[13px]">
-              <thead>
-                <tr className="border-b border-input bg-card text-left text-[11.5px] uppercase tracking-wide text-faint">
-                  <th className="w-[36px] py-2.5 pl-3.5" />
-                  {head("name", t("serverBrowser.name"), "px-2")}
-                  {head("players", t("serverBrowser.players"), "w-[92px] px-2")}
-                  {head("track", t("servers.track"), "px-2")}
-                  {head("region", t("serverBrowser.location"), "px-2")}
-                  {head("ping", t("serverBrowser.ping"), "w-[72px] px-2")}
-                  <th className="px-2 py-2.5 font-semibold">{t("serverBrowser.address")}</th>
-                  <th className="w-[110px] px-3.5 py-2.5" />
-                </tr>
-              </thead>
-              <tbody>
+          // The list is the master, the pane is the detail. Both are on screen at once, so
+          // reading the second server no longer means closing the first.
+          <>
+            <div className="flex w-[34%] min-w-[340px] max-w-[560px] shrink-0 flex-col overflow-hidden rounded-xl border border-input">
+              {/* The table's sortable headers, kept as a strip. Seven columns don't fit
+                  400px; the sorting they carried is still what orders the list. */}
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-input bg-card px-3 py-2">
+                {chip("name", t("serverBrowser.name"))}
+                {chip("players", t("serverBrowser.players"))}
+                {chip("track", t("servers.track"))}
+                {chip("region", t("serverBrowser.location"))}
+                {chip("ping", t("serverBrowser.ping"))}
+              </div>
+              <div className="min-h-0 flex-1 overflow-y-auto">
                 {shown.map((s, i) => (
-                  <tr
+                  <ServerRow
                     key={`${s.address}-${i}`}
-                    onClick={() => setDetail(s)}
-                    className={cn(
-                      "cursor-pointer border-b border-input/60 last:border-0 hover:bg-foreground/[0.03]",
-                      // Revealed rows stay legible but visibly demoted, so nobody mistakes one
-                      // for an ordinary result they just hadn't scrolled to.
-                      s.hidden && "opacity-55",
-                    )}
-                  >
-                    <td className="py-2.5 pl-3.5">
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          favs.toggle(s.address);
-                        }}
-                        title={
-                          favs.has(s.address) ? t("serverBrowser.unstar") : t("serverBrowser.star")
-                        }
-                        aria-label={
-                          favs.has(s.address) ? t("serverBrowser.unstar") : t("serverBrowser.star")
-                        }
-                        aria-pressed={favs.has(s.address)}
-                        className={cn(
-                          "inline-flex items-center justify-center rounded p-0.5",
-                          favs.has(s.address)
-                            ? "text-amber-400"
-                            : "text-faint hover:text-muted-foreground",
-                        )}
-                      >
-                        <Star className={cn("size-3.5", favs.has(s.address) && "fill-current")} />
-                      </button>
-                    </td>
-                    <td className="px-2 py-2.5">
-                      <div className="flex items-center gap-2">
-                        {s.passworded && (
-                          <Lock
-                            className="size-3.5 shrink-0 text-faint"
-                            aria-label={t("serverBrowser.passworded")}
-                          />
-                        )}
-                        <span className="truncate font-medium" title={s.name}>
-                          {s.name}
-                        </span>
-                        {s.hidden && (
-                          <span
-                            className="shrink-0 border border-input px-1.5 py-px text-[10.5px] uppercase tracking-wide text-faint"
-                            title={t("serverBrowser.hiddenBecause", { reason: s.hidden })}
-                          >
-                            {t("serverBrowser.filtered")}
-                          </span>
-                        )}
-                        {(paintSync[s.address] ?? 0) > 0 && (
-                          <span
-                            className="inline-flex shrink-0 items-center gap-1 border border-success/40 bg-success/10 px-1.5 py-px text-[10.5px] tabular-nums text-success"
-                            title={t("serverBrowser.paintSyncHere", {
-                              count: paintSync[s.address],
-                            })}
-                          >
-                            <Palette className="size-3" />
-                            {paintSync[s.address]}
-                          </span>
-                        )}
-                      </div>
-                    </td>
-                    <td className="px-2 py-2.5 tabular-nums text-muted-foreground">
-                      <span className="inline-flex items-center gap-1.5">
-                        <Users className="size-3.5 text-faint" />
-                        {s.players}/{s.maxPlayers}
-                      </span>
-                    </td>
-                    <td className="px-2 py-2.5 text-muted-foreground">
-                      <span
-                        className="block max-w-[220px] truncate"
-                        title={[s.track, s.trackLayout].filter(Boolean).join(" — ")}
-                      >
-                        {s.track || "—"}
-                        {s.trackLayout && (
-                          <span className="text-faint"> · {s.trackLayout}</span>
-                        )}
-                      </span>
-                    </td>
-                    <td className="px-2 py-2.5 text-muted-foreground">
-                      <span className="block max-w-[140px] truncate" title={s.location}>
-                        {s.location || "—"}
-                      </span>
-                    </td>
-                    <td className="px-2 py-2.5 tabular-nums text-muted-foreground">
-                      {s.pingMs === null ? (
-                        "—"
-                      ) : (
-                        <span className="inline-flex items-center gap-1.5">
-                          <Signal className="size-3.5 text-faint" />
-                          {s.pingMs}
-                        </span>
-                      )}
-                    </td>
-                    <td className="px-2 py-2.5">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          copy(s.address);
-                        }}
-                        title={t("serverBrowser.copyAddress")}
-                        className="inline-flex items-center gap-1.5 rounded-md px-1.5 py-0.5 font-mono text-[12px] text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground"
-                      >
-                        {s.address}
-                        <Copy className="size-3 text-faint" />
-                      </button>
-                    </td>
-                    <td className="px-3.5 py-2.5 text-right">
-                      {queue?.address === s.address ? (
-                        <Button size="sm" variant="outline" disabled>
-                          <Hourglass className="size-3.5" />
-                          {t("serverBrowser.inLine", { position: queue.position })}
-                        </Button>
-                      ) : s.joinable && isFull(s) ? (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            wait(s);
-                          }}
-                          title={t("serverBrowser.queueHint")}
-                        >
-                          <Hourglass className="size-3.5" />
-                          {t("serverBrowser.waitInLine")}
-                        </Button>
-                      ) : (
-                        <Button
-                          size="sm"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            join(s.address);
-                          }}
-                          disabled={joining !== null || !s.joinable}
-                          title={s.joinable ? undefined : t("serverBrowser.notJoinable")}
-                        >
-                          {joining === s.address ? (
-                            <Loader2 className="size-3.5 animate-spin" />
-                          ) : (
-                            <Plug className="size-3.5" />
-                          )}
-                          {t("serverBrowser.join")}
-                        </Button>
-                      )}
-                    </td>
-                  </tr>
+                    server={s}
+                    art={pictureFor(s.track)}
+                    missing={!!s.track && ASKED.has(s.track) && !(s.track in art)}
+                    product={catalog[s.track]}
+                    selected={s.address === selected}
+                    favourite={favs.has(s.address)}
+                    paintSync={paintSync[s.address] ?? 0}
+                    queuePosition={queue?.address === s.address ? queue.position : null}
+                    onSelect={pick}
+                    onToggleFavourite={favs.toggle}
+                  />
                 ))}
-              </tbody>
-            </table>
-          </div>
+              </div>
+            </div>
+            <div className="min-h-0 min-w-0 flex-1 overflow-hidden rounded-xl border border-input">
+              {detail ? (
+                // Keyed on the address so picking another row starts the pane clean rather
+                // than showing the last server's riders until the new probe lands.
+                <ServerDetail key={detail.address} {...detailProps} className="h-full" />
+              ) : (
+                <ServerDetailEmpty />
+              )}
+            </div>
+          </>
         )}
       </div>
     </div>
   );
 };
 
-/** A column header that sorts on click and flips on a second click. */
-const SortHead = ({
+/** One way of ordering the list, set on click and flipped on a second click. The column
+ *  headers it replaces sorted the same five things. */
+const SortChip = ({
   col,
   label,
   sort,
   dir,
   onSort,
-  className,
 }: {
   col: SortMode;
   label: string;
   sort: SortMode;
   dir: SortDir;
   onSort: (col: SortMode) => void;
-  className?: string;
 }) => (
-  <th
-    className={cn("py-2.5 font-semibold", className)}
-    aria-sort={sort === col ? (dir === "asc" ? "ascending" : "descending") : undefined}
+  <button
+    type="button"
+    onClick={() => onSort(col)}
+    aria-pressed={sort === col}
+    className={cn(
+      "inline-flex cursor-default items-center gap-0.5 font-cond text-[10.5px] font-bold uppercase tracking-[0.14em] transition-colors",
+      sort === col ? "text-primary" : "text-faint hover:text-muted-foreground",
+    )}
   >
-    <button
-      type="button"
-      onClick={() => onSort(col)}
-      className="inline-flex items-center gap-1 uppercase tracking-wide hover:text-muted-foreground"
-    >
-      {label}
-      {sort === col &&
-        (dir === "asc" ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />)}
-    </button>
-  </th>
+    {label}
+    {sort === col &&
+      (dir === "asc" ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />)}
+  </button>
 );
 
 /** `1723459200000` -> `2 minutes ago`. The paint-sync wording, which already exists in every

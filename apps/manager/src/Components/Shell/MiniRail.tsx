@@ -1,5 +1,6 @@
 import Brand from "./Brand";
-import WindowControls from "./WindowControls";
+import { cn } from "@frost/shared/lib/utils";
+import WindowControls, { IS_MAC } from "./WindowControls";
 
 /**
  * The chrome for screens that have nothing to navigate: startup, and the setup screen a
@@ -13,7 +14,10 @@ export default function MiniRail() {
   return (
     <div
       data-tauri-drag-region
-      className="flex h-[52px] flex-none select-none items-center border-b border-border bg-window pl-[18px]"
+      className={cn(
+        "flex h-[52px] flex-none select-none items-center border-b border-border bg-window",
+        IS_MAC ? "pl-[82px] pr-4" : "pl-[18px]",
+      )}
     >
       <Brand />
       <div data-tauri-drag-region className="flex-1" />

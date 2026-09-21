@@ -116,6 +116,19 @@ export interface Config {
   betaUpdates?: boolean;
   /** Install updates at launch or once the app sits unused, never mid-game. Default true. */
   autoUpdates?: boolean;
+  /**
+   * Inject `mxbsecure.dll` into the running game so locked content can be opened.
+   *
+   * **Off by default.** It reaches into a process the app usually didn't create, and the
+   * DLL hasn't been proven on a real Windows run — a build that armed it for everyone with
+   * locked content had the game dying on access violations seconds in, with quitting the
+   * app from the tray as the only way out. With it on, launch the game from Play: the app
+   * won't inject into a session it didn't start.
+   */
+  secureContentInject?: boolean;
+  /** Folder setup has been completed at least once. A device-token-only config is still a
+   * genuine first run and must show the full setup flow. */
+  setupComplete?: boolean;
   /** Intro slideshow already dismissed. Saved with the config (not in localStorage)
    *  so clearing the webview's storage doesn't replay the first-run flow. */
   welcomeSeen?: boolean;
@@ -622,6 +635,9 @@ export interface PkzMeta {
   altitude: number | null;
   /** Preview image as a `data:image/png;base64,…` URI, if one was found. */
   thumbnail: string | null;
+  /** The manufacturer's mark, as a `data:image/png;base64,…` badge. A bike ships one as
+   *  `logo.tga`; tracks have none, and plenty of community bikes don't either. */
+  logo: string | null;
 }
 
 /** One file inside a track. `role` is a key the UI translates, not prose. */

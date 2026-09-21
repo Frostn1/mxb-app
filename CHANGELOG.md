@@ -12,6 +12,65 @@
   gets a page telling them what the link was for and where to get it.
 - Uninstall a mod straight from its page. Under Reinstall, on anything already in your
   Library, with the file going to the Recycle Bin like it does in the Library itself.
+- The Library has an Owned list: everything you have bought on the shop and MXB Hub in one
+  place, each saying whether it is installed yet.
+- The Library has a Wishlist. Press Add to wishlist on any mod page and it waits there until
+  you are ready for it.
+- The download button in the top bar opens the queue: what is downloading now, how fast it
+  is going and how long it has left, then everything waiting behind it.
+- Downloads shows what is in flight above the history, with the same speed and time left.
+- A mod waiting in the queue can be moved to the front, so it is the next one to start.
+- Settings has an Accounts page. Steam, mxbikes-shop.com, MXB Hub and mxb-mods.com in one
+  list, each with whether you are signed in, what the account is for, and its own buttons.
+  mxb-mods.com needs no account at all.
+- Buy something on a store and the app installs it for you. After it opens a store page it
+  watches that store for about two minutes and queues anything new that shows up. Turn it off
+  in Settings, Accounts. A purchase that lands later is still one Refresh away in Purchases.
+
+### Changed
+- A bike in the Library shows its manufacturer's badge, taken from the bike itself. Bikes
+  that carry no badge still show the maker's name.
+- Mods opens a tab you have already been on straight away, with the mods still there, and
+  brings it up to date behind you instead of making you watch it load again.
+- Pictures that could not be loaded are remembered, so the app stops asking the mod sites for
+  them over and over.
+- The screens are quieter. Panels are told apart by their background instead of an outline
+  around everything, so what matters on a page stands out. On the light theme the page
+  behind the panels is a light grey, which is what makes them read as panels.
+- Sharing a preset is a quiet button next to the others on the card, instead of a
+  highlighted one that pulled the eye away from the preset itself.
+- The server list works out what every track is on its own, so a row has its name, picture
+  and link without you opening it first.
+- Setting up the app now asks you to sign in with Steam before it asks about folders, so
+  sealed tracks and gear unlock on their own, anything you have bought is ready to install,
+  and Ranked already knows who you are the first time you open it. It also stops asking
+  where your folders are when it can find them itself.
+- A bike card shows the maker's name where there is no picture in the mod, and a bike page
+  opens on the bike itself, turnable, instead of a blown-up paint sheet.
+- The Library lists your tracks, bikes and rider gear down the left, each with its count, and
+  your folders under them. Click a folder to see only what's in it, or Favorites for the ones
+  you starred.
+- The Servers list view puts a server's details beside the list instead of over it. Click a
+  row and the pane on the right fills with the track art, who's on, the session and the rules,
+  and the same Join button the tile gives you. Picking the next row swaps the pane, so you can
+  read two servers without closing the first.
+- Browse, Shop and MXB Hub are one MODS screen. Pick tracks, bikes, rider or ReShade down the
+  left, then choose where it comes from: mxb-mods, MXB Hub, the shop, or all three in one
+  grid. Every card says which site it is from, who made it, and what it costs. Free mods say
+  Free. Your purchases are still there, at the bottom of the left column.
+- The app wears the mxbsecure look: the brand blue, black chrome, and rounded corners
+  throughout. Every colorway but the default is untouched.
+- Buttons, switches and sliders are upright and rounded. The switch is a pill, the slider has
+  a round thumb, and the lean comes off everything except the logo.
+- Headings, tabs, buttons and labels are set in Geist Mono, the brand's face. Buttons read as
+  words rather than shouting in capitals. Frost's Studio keeps the face it had.
+- New wordmark: MXB App, by mxbsecure. The icon is the brand's mark, a black rounded square
+  with a white m, and it is the same one on the window, the installer and the favicon.
+- A mod now looks the same wherever you open it, from Browse, the Library, the Shop or the
+  Hub. Its name, its state and the one button you came for sit in a bar across the top that
+  stays put while you read, the screenshot is bigger with the figures along its foot, and a
+  fact with nothing in it is left out instead of shown blank. An installed track lists its
+  layouts, and a bike lists the model swaps, liveries and sounds that came with it.
 
 ## 2026-09-21 — MXB Coach v0.1.19-beta.19 — Learn the scrub, know the corner
 
@@ -89,6 +148,25 @@
 - The Studio tab. Frost's Studio is its own app.
 
 ### Fixed
+- Joining a server from the app starts the game straight away. Steam no longer sits on
+  "Launching MX Bikes" with a question about the command line hidden behind it.
+- The app now closes its session with the MX Bikes master server when it has finished
+  reading the list, so later refreshes aren't turned away.
+- Running a dedicated server on the same machine no longer stops the server browser from
+  asking the master for the list.
+- Stock tracks no longer borrow a picture or a link from a mod that happens to share their
+  name. Forest is Forest, not somebody's Forest SX.
+- Ranked says what it means when you haven't raced yet, instead of showing your GUID
+  twice and nothing else.
+- A track only has to be looked up once. What each one turned out to be is kept between
+  runs, so the same track on another server, a refresh or a restart draws straight away.
+- A track identified in the server panel now shows its picture in the list beside it, and
+  on every other server running the same track.
+- A server's track now links to its page on mxb-mods.com even when you already have the
+  track installed, and is found by its address on the site rather than by search, so
+  tracks like Fort Red come up with their picture instead of a stranger's mod.
+- The server panel no longer puts a paint sync chip and a Not installed chip over the
+  track photo.
 - A bike can no longer be installed inside another bike.
 - Long profile paths stay inside their panel in Settings → Game folder.
 - Steam sign-in now gives you 30 minutes.

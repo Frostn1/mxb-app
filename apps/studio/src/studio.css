@@ -21,6 +21,10 @@
      component would be reading nothing. */
   --radius: 0.5rem;
 
+  /* The Studio keeps Barlow Condensed for its panel titles. The shared theme moved the
+     display face to the brand's mono, which is the manager's voice, not this one's. */
+  --font-cond: "Barlow Condensed", "Barlow", system-ui, sans-serif;
+
   /* Light gray. The manager is near-black because it is a launcher you glance at; a studio
      is a window you stare into while judging colour, and a dark surround pushes every value
      you are looking at lighter than it really is. Four grounds: the rail frames, the app

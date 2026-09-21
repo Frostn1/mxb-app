@@ -183,7 +183,7 @@ export default function GetStarted({
 
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-background/80 backdrop-blur-sm px-10">
-      <div className="flex w-full max-w-[520px] flex-col gap-7 rounded-2xl border border-input bg-card p-9 shadow-2xl">
+      <div className="flex w-full max-w-[520px] flex-col gap-7 rounded-2xl bg-card p-9 shadow-2xl">
         <div className="flex flex-col gap-2">
           <h1 className="text-[22px] font-extrabold tracking-[-0.4px]">
             {t("getStarted.title")}
@@ -196,11 +196,11 @@ export default function GetStarted({
             <div
               key={step.id}
               className={cn(
-                "flex items-center gap-4 border-t border-input py-3.5",
+                "flex items-center gap-4 border-t border-border py-3.5",
                 i === STEPS.length - 1 && "border-b",
               )}
             >
-              <span className="w-4 shrink-0 font-cond text-[15px] font-bold tabular-nums text-faint">
+              <span className="w-4 shrink-0 font-cond tracking-[-0.02em] text-[15px] font-bold tabular-nums text-faint">
                 {i + 1}
               </span>
               <span className="min-w-0 flex-1 text-[13.5px] font-semibold">

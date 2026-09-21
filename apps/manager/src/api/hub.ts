@@ -62,14 +62,14 @@ export const HUB_SORTS: { value: HubSort; label: TKey }[] = [
 
 export function hubSearch(
   query: string,
-  categoryId: number | null,
+  categoryIds: number[],
   page: number,
   sort: HubSort,
   onSaleOnly: boolean,
 ): Promise<HubPage> {
   return invoke<HubPage>("hub_search", {
     query,
-    categoryId,
+    categoryIds,
     page,
     sort,
     onSaleOnly,

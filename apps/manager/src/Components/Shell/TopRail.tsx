@@ -101,13 +101,13 @@ export default function TopRail({ view, plugins, onNavigate, leftRef, rightRef }
               key={item.id}
               onClick={() => onNavigate(item.view)}
               className={cn(
-                "relative flex cursor-default items-center font-cond text-[14px] font-semibold uppercase tracking-[0.15em] transition-colors",
+                "relative flex cursor-default items-center font-cond text-[14px] font-semibold tracking-[-0.02em] transition-colors",
                 on ? "text-foreground" : "text-muted-foreground hover:text-foreground",
               )}
             >
               {item.rawLabel ?? t(item.label)}
               {on && (
-                <span className="u-skew absolute inset-x-[-3px] bottom-0 h-[3px] bg-primary" />
+                <span className="absolute inset-x-[-3px] bottom-0 h-[3px] rounded-full bg-primary" />
               )}
             </button>
           );
@@ -123,7 +123,7 @@ export default function TopRail({ view, plugins, onNavigate, leftRef, rightRef }
         {/* The server line, visible on every tab: the turn can come while you're elsewhere. */}
         <QueueBanner />
         <FrostmodBadge />
-        <DownloadQueue collapsed />
+        <DownloadQueue onOpenDownloads={() => onNavigate("downloads")} />
         <button
           onClick={() => onNavigate("settings")}
           title={t("nav.settings")}
@@ -145,13 +145,13 @@ export default function TopRail({ view, plugins, onNavigate, leftRef, rightRef }
         disabled={gameRunning || starting}
         title={gameRunning ? t("game.running") : t("game.launch")}
         className={cn(
-          "u-skew flex h-8 cursor-default items-center px-5 transition-colors",
+          "flex h-8 cursor-default items-center rounded-full px-6 transition-colors",
           gameRunning || starting
             ? "border border-input text-muted-foreground"
             : "bg-primary text-primary-foreground hover:brightness-110 active:brightness-95",
         )}
       >
-        <span className="u-unskew flex items-center gap-2">
+        <span className="flex items-center gap-2">
           {gameRunning ? (
             <Gamepad2 className="size-3.5 text-success" />
           ) : starting ? (
@@ -159,7 +159,7 @@ export default function TopRail({ view, plugins, onNavigate, leftRef, rightRef }
           ) : (
             <Play className="size-3.5 fill-current" />
           )}
-          <span className="font-cond text-[14.5px] font-bold uppercase tracking-[0.2em]">
+          <span className="font-cond text-[14.5px] font-bold tracking-[-0.02em]">
             {gameRunning ? t("game.running") : starting ? t("game.starting") : t("game.play")}
           </span>
         </span>

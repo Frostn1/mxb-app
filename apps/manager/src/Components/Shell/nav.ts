@@ -48,17 +48,40 @@ export interface RailItem extends Gated {
   /** Where clicking the rail item lands when it has no tabs, or its tabs are all hidden. */
   view: DashboardView;
   tabs?: RailTab[];
+  /**
+   * Views this item owns *without* offering them as tabs.
+   *
+   * Mods is one screen whose source is a filter inside it, so `shop` and `hub` still have to
+   * resolve — an old deep link, the Downloads row that jumps to the store it came from — and
+   * still have to light the right rail item. Putting them in `tabs` would put a second tab
+   * row back under the rail, which is the thing this screen exists to remove.
+   */
+  owns?: DashboardView[];
+}
+
+/** The views the Mods screen answers for. `browse` is where the rail lands. */
+export const MODS_VIEWS = ["browse", "hub", "shop"] as const;
+
+export type ModsView = (typeof MODS_VIEWS)[number];
+
+export function isModsView(view: DashboardView): view is ModsView {
+  return (MODS_VIEWS as readonly string[]).includes(view);
 }
 
 /**
  * The rail, left to right.
  *
- * Seven items is the ceiling before the row stops scanning, which is why Locker, Presets and
- * Race mode share GARAGE: they all decide what you take onto the track.
+ * Four items, because four errands is all the app has: race, find a mod, see what you own,
+ * set up the bike. Browse, Shop and MXB Hub were three rail items for one errand — three
+ * catalogues of the same thing — so they are one MODS screen now, with the store picked by a
+ * filter inside it rather than by the rail. Locker, Presets and Race mode share GARAGE for
+ * the same reason: they all decide what you take onto the track.
  */
 export const RAIL: RailItem[] = [
   {
     id: "servers",
+    // The rail says Online: it is where riding with other people lives, and the screen
+    // under it is a server browser plus Ranked, not servers alone.
     label: "nav.servers",
     view: "servers",
     tabs: [
@@ -66,9 +89,9 @@ export const RAIL: RailItem[] = [
       { view: "ranked", label: "nav.ranked" },
     ],
   },
-  { id: "browse", label: "nav.browse", view: "browse" },
-  { id: "shop", label: "nav.shop", view: "shop", cap: "shop" },
-  { id: "hub", label: "nav.hub", view: "hub", cap: "shop" },
+  // Never capability-gated: mxb-mods works for every title, and the two stores are what the
+  // screen's own source filter hides when `caps.shop` is off.
+  { id: "mods", label: "nav.mods", view: "browse", owns: ["shop", "hub"] },
   {
     id: "library",
     label: "nav.library",
@@ -94,6 +117,7 @@ export const RAIL: RailItem[] = [
 export function railItemFor(view: DashboardView, items: RailItem[]): RailItem | undefined {
   return (
     items.find((it) => it.tabs?.some((t) => t.view === view)) ??
+    items.find((it) => it.owns?.includes(view)) ??
     items.find((it) => it.view === view)
   );
 }

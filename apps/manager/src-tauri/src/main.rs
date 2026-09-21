@@ -6,12 +6,13 @@ mod bikeswap;
 mod bundle;
 mod cancel;
 pub(crate) use mxb_core::cfg;
+mod trackbook;
 mod trainerfix;
 mod trashbin;
 
 pub(crate) use mxb_core::cloudfiles;
-pub(crate) use mxb_core::viewer;
 pub(crate) use mxb_core::config;
+pub(crate) use mxb_core::viewer;
 pub(crate) use mxb_core::{antidebug, appgate as gate};
 mod cookie_session;
 mod crashreports;
@@ -41,10 +42,10 @@ pub(crate) use mxb_core::modelswap;
 mod mods;
 mod modstate;
 mod modwatch;
-mod profilewatch;
 mod mxb_fetch;
 mod mxb_session;
 mod overlay;
+mod profilewatch;
 pub(crate) use mxb_core::paint;
 pub(crate) use mxb_core::paintwatch;
 mod peident;
@@ -56,18 +57,18 @@ pub(crate) use mxb_core::plugins;
 /// What the running game has loaded, reported for diagnostics.
 mod procmods;
 mod roster;
-/// What the running game's own memory says about itself — digests of named regions, compared
-/// against a per-build baseline the control plane holds. The client half of state invariants.
-mod stateinvariants;
 /// Beta capture aid: logs the running build's fingerprint and, on request, a memory region's
 /// bytes, so a clean-install baseline can be read off the app log to arm state invariants.
 mod statedump;
-/// Linux only: the Proton prefix the game runs in, and how to put a Windows program in it.
-#[cfg(target_os = "linux")]
-pub(crate) use mxb_core::proton;
+/// What the running game's own memory says about itself — digests of named regions, compared
+/// against a per-build baseline the control plane holds. The client half of state invariants.
+mod stateinvariants;
 #[cfg(sidecar)]
 #[cfg(mxbsecure)]
 pub(crate) use mxb_core::mxbsecure;
+/// Linux only: the Proton prefix the game runs in, and how to put a Windows program in it.
+#[cfg(target_os = "linux")]
+pub(crate) use mxb_core::proton;
 
 /// This Mac's hardware UUID, which secured content is keyed on — handed to the game at launch so
 /// the DLL inside it can unwrap a macOS `.mxbkey` (see `mxbsecure::mac_machine_id`). `None` on a
@@ -122,14 +123,19 @@ mod offline_flow_test {
         let steam = crate::steamid::current_steam_id64().expect("steam id");
         assert_eq!(steam, "76561198000000001");
         let secret = b"a-server-minted-provision-secret";
-        let sealed = crate::mxbsecure::seal_key_to_identity(&locked.content_key, &steam, "", secret, true)
-            .expect("a debug build seals identity-only when DPAPI is unavailable");
+        let sealed =
+            crate::mxbsecure::seal_key_to_identity(&locked.content_key, &steam, "", secret, true)
+                .expect("a debug build seals identity-only when DPAPI is unavailable");
         std::fs::write(dir.join("track.pkz.mxbsecure.mxbkey"), &sealed).unwrap();
 
         // Open offline as the same account: unseal (the secret rides inside the envelope),
         // decrypt, compare.
-        let key = crate::mxbsecure::unseal_key(&sealed, &crate::steamid::current_steam_id64().unwrap(), "")
-            .expect("unseals for the same account");
+        let key = crate::mxbsecure::unseal_key(
+            &sealed,
+            &crate::steamid::current_steam_id64().unwrap(),
+            "",
+        )
+        .expect("unseals for the same account");
         let opened = crate::mxbsecure::open(&locked.blob, &key).unwrap();
         assert_eq!(opened, plaintext, "offline open matches the original");
 
@@ -173,18 +179,18 @@ mod voice;
 pub(crate) use mxb_core::winehost;
 
 use config::AppConfig;
-use mxb_core::viewer::BikeModel;
 use frostmod::ReloadOutcome;
 use frostmod_manage::{FrostmodProcess, FrostmodStatus, InstallReport};
 use library::InstalledMod;
 use modwatch::ModWatcher;
-use serverwatch::CachedServers;
+use mxb_core::viewer::BikeModel;
 use paintwatch::{LookWatcher, PaintWatcher, SourceWatcher};
+use serverwatch::CachedServers;
 // Decoding a paint's textures is per-texture CPU work over no shared state, and every path
 // that does it wants the same treatment — so this sits here rather than in one function.
-use profilewatch::ProfileWatcher;
 use mods::mxb::WpModsSource;
 use mods::{ModDetail, ModRating, ModSort, ModSource, ModSummary};
+use profilewatch::ProfileWatcher;
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
@@ -249,14 +255,50 @@ fn ipc_allowed(label: &str, command: &str) -> bool {
     command == "plugin:event|emit"
 }
 
-/// Whether the app is ready to use. Falls back to auto-detection when the config file
-/// is missing, so the setup screen only appears when the MX Bikes folder genuinely
-/// can't be found — not every time the saved config goes astray.
-#[tauri::command]
-fn is_configured(app: tauri::AppHandle) -> bool {
-    config::load_or_detect(&app).is_some()
+/// Whether first-run setup is actually complete.
+///
+/// This deliberately does not mean merely "a config can be loaded": folder detection and
+/// the Steam sign-in gate may write config before the final integration choice. Returning
+/// true for that partial state lets an older cached WebView call `get_config` and open Browse,
+/// bypassing the choice. Keep the backend boundary authoritative as well as the React branch.
+fn setup_ready(cfg: Option<&AppConfig>) -> bool {
+    cfg.is_some_and(|cfg| cfg.setup_complete && !cfg.mods_path.trim().is_empty())
 }
 
+#[tauri::command]
+fn is_configured(app: tauri::AppHandle) -> bool {
+    let cfg = config::load_or_detect(&app);
+    setup_ready(cfg.as_ref())
+}
+
+#[cfg(test)]
+mod setup_readiness_tests {
+    use super::{setup_ready, AppConfig};
+
+    #[test]
+    fn a_saved_folder_does_not_bypass_an_incomplete_first_run() {
+        let cfg = AppConfig {
+            mods_path: "/games/MX Bikes".into(),
+            setup_complete: false,
+            ..Default::default()
+        };
+
+        assert!(!setup_ready(Some(&cfg)));
+    }
+
+    #[test]
+    fn setup_needs_both_the_final_choice_and_a_folder() {
+        let mut cfg = AppConfig {
+            setup_complete: true,
+            ..Default::default()
+        };
+        assert!(!setup_ready(Some(&cfg)));
+
+        cfg.mods_path = "/games/MX Bikes".into();
+        assert!(setup_ready(Some(&cfg)));
+        assert!(!setup_ready(None));
+    }
+}
 
 #[tauri::command]
 fn create_config(
@@ -275,10 +317,17 @@ fn create_config(
             cfg.game().display
         ));
     }
+    // A valid game-user folder can exist before the game has created its children (or after
+    // the player cleaned an old install). Make it immediately usable: the Library resolves
+    // content through `mods_root`, while presets resolve profiles through `profiles_dir`.
+    // Using those same abstractions also handles a relocated mods tree without creating an
+    // accidental `mods/mods` directory.
+    config::ensure_game_user_folders(&cfg).map_err(|e| format!("{e:#}"))?;
     // Setup only sends the folders, so carry over first-run state from any config
     // that's already there — rewriting it would replay the intro and the tour.
     match config::load(&app) {
         Ok(prev) => {
+            cfg.setup_complete |= prev.setup_complete;
             cfg.welcome_seen |= prev.welcome_seen;
             cfg.tour_done |= prev.tour_done;
             cfg.get_started_done |= prev.get_started_done;
@@ -298,6 +347,40 @@ fn create_config(
     Ok(true)
 }
 
+/// Finish first-run setup only after the optional Game Integration decision has been made.
+/// Folder detection has to save a config first because both integration choices update it;
+/// keeping this as a separate final write prevents a restart between those steps from
+/// silently bypassing consent.
+#[tauri::command]
+fn complete_setup(app: tauri::AppHandle) -> Result<(), String> {
+    let mut cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+    cfg.setup_complete = true;
+    config::save(&app, &cfg).map_err(|e| format!("{e:#}"))
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct NormalizedGameFolder {
+    path: String,
+    correction: Option<&'static str>,
+}
+
+/// Preview how a folder-picker choice will be stored without writing configuration yet.
+/// Setup uses this to explain when `mods` or `profiles` was one level too deep.
+#[tauri::command]
+fn normalize_game_folder(path: String) -> NormalizedGameFolder {
+    match config::normalize_selected_game_folder(&path) {
+        Some((adopted, correction)) => NormalizedGameFolder {
+            path: adopted.to_string_lossy().into_owned(),
+            correction: Some(correction),
+        },
+        None => NormalizedGameFolder {
+            path,
+            correction: None,
+        },
+    }
+}
+
 /// Run an mxb-mods.com call; if Cloudflare refuses it, run it again from inside a real
 /// browser and keep using that transport for the rest of the session.
 ///
@@ -310,11 +393,7 @@ fn create_config(
 /// Once, not a loop: the second attempt is on a different transport, so if that is refused
 /// too, trying a third time changes nothing. Only refusals a browser could plausibly satisfy
 /// get this treatment — a 429 wants patience, not another request.
-async fn with_clearance<T, F, Fut>(
-    _app: &tauri::AppHandle,
-    what: &str,
-    op: F,
-) -> Result<T, String>
+async fn with_clearance<T, F, Fut>(_app: &tauri::AppHandle, what: &str, op: F) -> Result<T, String>
 where
     F: Fn() -> Fut,
     Fut: std::future::Future<Output = anyhow::Result<T>>,
@@ -446,15 +525,10 @@ async fn shop_catalog_refresh(
 }
 
 #[tauri::command]
-fn get_installed_mods(
-    app: tauri::AppHandle,
-    subpath: String,
-) -> Result<Vec<InstalledMod>, String> {
+fn get_installed_mods(app: tauri::AppHandle, subpath: String) -> Result<Vec<InstalledMod>, String> {
     let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
     library::scan_mods(&cfg.mods_path, &subpath).map_err(|e| format!("{e:#}"))
 }
-
-
 
 /// Rate-limit for the Library-scan trigger. Switching tabs fires a scan each time, and
 /// walking the whole tree once per tab would be work nobody asked for.
@@ -473,10 +547,6 @@ fn ledger_due() -> bool {
     *last = Some(now);
     true
 }
-
-
-
-
 
 #[tauri::command]
 async fn scan_model_swaps(app: tauri::AppHandle) -> Result<Vec<modelswap::BikeModels>, String> {
@@ -539,8 +609,7 @@ const LIVE_LOOK_COOLDOWN: std::time::Duration = std::time::Duration::from_secs(2
 
 /// When the last unattended refresh went out. Not shared with the apply paths — a refresh
 /// the player asked for by clicking is never worth withholding.
-static LAST_LIVE_LOOK: std::sync::Mutex<Option<std::time::Instant>> =
-    std::sync::Mutex::new(None);
+static LAST_LIVE_LOOK: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
 
 /// Has the cooldown passed? Records the attempt when it has, so two callers racing here
 /// produce one refresh.
@@ -589,7 +658,10 @@ fn refresh_live_look(app: &tauri::AppHandle) {
         log::debug!("[look] a refresh went out moments ago; folding this one into it");
         return;
     }
-    log::info!("[look] refreshing the live game: {:?}", gameproc::refresh_look());
+    log::info!(
+        "[look] refreshing the live game: {:?}",
+        gameproc::refresh_look()
+    );
 }
 
 /// The `.pnt` files the game is wearing right now — the bike's own paint and font, and every
@@ -696,7 +768,11 @@ async fn model_swap_liveries(
 ) -> Result<Vec<String>, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
-        Ok(modelswap::liveries_owned_by(&cfg.mods_path, &bike, &variant))
+        Ok(modelswap::liveries_owned_by(
+            &cfg.mods_path,
+            &bike,
+            &variant,
+        ))
     })
     .await
     .map_err(|e| format!("model_swap_liveries task failed: {e}"))?
@@ -841,7 +917,8 @@ async fn apply_sound_swap(
 ) -> Result<SwapApplyOutcome, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
-        soundmods::apply_sound_swap(&cfg.mods_path, &bike, &target).map_err(|e| format!("{e:#}"))?;
+        soundmods::apply_sound_swap(&cfg.mods_path, &bike, &target)
+            .map_err(|e| format!("{e:#}"))?;
         let content_reload = frostmod::signal_reload();
         Ok(SwapApplyOutcome {
             content_reload,
@@ -915,7 +992,12 @@ async fn delete_reshade_preset(app: tauri::AppHandle, name: String) -> Result<()
 }
 
 #[tauri::command]
-async fn bind_sound(app: tauri::AppHandle, bike: String, model: String, sound: String) -> Result<(), String> {
+async fn bind_sound(
+    app: tauri::AppHandle,
+    bike: String,
+    model: String,
+    sound: String,
+) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
         let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
         soundmods::bind_sound(&cfg.mods_path, &bike, &model, &sound).map_err(|e| format!("{e:#}"))
@@ -935,13 +1017,17 @@ async fn unbind_sound(app: tauri::AppHandle, bike: String, model: String) -> Res
 }
 
 #[tauri::command]
-async fn detect_loose_swaps(app: tauri::AppHandle) -> Result<Vec<modelswap::LooseSwapBike>, String> {
+async fn detect_loose_swaps(
+    app: tauri::AppHandle,
+) -> Result<Vec<modelswap::LooseSwapBike>, String> {
     tauri::async_runtime::spawn_blocking(move || detect_loose_swaps_blocking(app))
         .await
         .map_err(|e| format!("detect_loose_swaps task failed: {e}"))?
 }
 
-fn detect_loose_swaps_blocking(app: tauri::AppHandle) -> Result<Vec<modelswap::LooseSwapBike>, String> {
+fn detect_loose_swaps_blocking(
+    app: tauri::AppHandle,
+) -> Result<Vec<modelswap::LooseSwapBike>, String> {
     let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
     Ok(modelswap::detect_loose_swaps(&cfg.mods_path))
 }
@@ -986,9 +1072,6 @@ async fn repair_orphaned_setup(app: tauri::AppHandle, bike: String) -> Result<us
     .map_err(|e| format!("repair_orphaned_setup task failed: {e}"))?
 }
 
-
-
-
 // ── Paint studio ────────────────────────────────────────────────────────────────────
 //
 // A `.pnt` is a packed container no image editor can write, so a livery drawn in GIMP has
@@ -996,21 +1079,6 @@ async fn repair_orphaned_setup(app: tauri::AppHandle, bike: String) -> Result<us
 // both halves of that: images in (`paint_studio_save`), sheets out as editable TGA
 // templates (`paint_studio_extract`), and the texture names a destination expects
 // (`paint_studio_hints`) so a new paint binds to the same parts as the ones already there.
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 /// Draw `bike` as the model-swap variant `variant` would leave it, without applying the
 /// swap. The file set is assembled in memory (see `gather_preview_files`) — nothing on
@@ -1091,7 +1159,8 @@ async fn import_file(
 ) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
         let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
-        install::import_file(&app, &cfg, &path, &subpath, &dest_folder).map_err(|e| format!("{e:#}"))
+        install::import_file(&app, &cfg, &path, &subpath, &dest_folder)
+            .map_err(|e| format!("{e:#}"))
     })
     .await
     .map_err(|e| format!("import_file task failed: {e}"))?
@@ -1214,11 +1283,15 @@ async fn move_mod(
 }
 
 #[tauri::command]
-async fn uninstall_mod(app: tauri::AppHandle, from_path: String, subpath: String) -> Result<(), String> {
+async fn uninstall_mod(
+    app: tauri::AppHandle,
+    from_path: String,
+    subpath: String,
+) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
         let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
-        let landed =
-            trashbin::uninstall_mod(&cfg.mods_path, &from_path, &subpath).map_err(|e| format!("{e:#}"))?;
+        let landed = trashbin::uninstall_mod(&cfg.mods_path, &from_path, &subpath)
+            .map_err(|e| format!("{e:#}"))?;
         // Remember where the Trash put it, while we still know: that is what makes the
         // ledger row able to offer Restore rather than only a name to go hunting with.
         ledger_note_trashed(&app, &cfg, &from_path, landed);
@@ -1227,7 +1300,6 @@ async fn uninstall_mod(app: tauri::AppHandle, from_path: String, subpath: String
     .await
     .map_err(|e| format!("uninstall_mod task failed: {e}"))?
 }
-
 
 /// Put a line from the webview into the app's own log file.
 ///
@@ -1304,9 +1376,15 @@ async fn share_logs(app: tauri::AppHandle) -> Result<logs::ShareResult, String> 
     let cfg = config::load(&app).unwrap_or_default();
     let secure_dir = secure_launch::secure_dir(&app).unwrap_or_default();
     let info = logs::info(&log_dir, &frostmod_dir, &secure_dir, &cfg);
-    let summary =
-        logs::summary(&version, frostmod_manage::installed_version(&app).as_deref(), &cfg, &info);
-    logs::share(&app, &info, &summary).await.map_err(|e| format!("{e:#}"))
+    let summary = logs::summary(
+        &version,
+        frostmod_manage::installed_version(&app).as_deref(),
+        &cfg,
+        &info,
+    );
+    logs::share(&app, &info, &summary)
+        .await
+        .map_err(|e| format!("{e:#}"))
 }
 
 /// Whether the last session ended by crashing, and a dump is sitting here unasked about.
@@ -1359,7 +1437,6 @@ fn wine_host_info(app: tauri::AppHandle) -> winehost::HostInfo {
     winehost::describe(&cfg.wine_runner)
 }
 
-
 /// Switch which game the app is driving.
 ///
 /// The outgoing game's folders are parked and the incoming one's restored; a game being
@@ -1397,7 +1474,10 @@ async fn set_active_game(
         frostmod_manage::stop(&frostmod_state);
         frostmod_manage::force_stop_exe();
         if let Err(e) = frostmod_manage::start(&app, &frostmod_state) {
-            log::warn!("could not restart FrostMod for {}: {e:#}", cfg.game().display);
+            log::warn!(
+                "could not restart FrostMod for {}: {e:#}",
+                cfg.game().display
+            );
         }
     }
     Ok(cfg)
@@ -1527,8 +1607,6 @@ fn get_mods_root(app: tauri::AppHandle) -> ModsRootInfo {
         path: root.to_string_lossy().into_owned(),
     }
 }
-
-
 
 /// Whether this build can lock content with mxbsecure — the packer is the gitignored
 /// `mxbsecure` sidecar, so a public build reports false and the Secure tab stays hidden.
@@ -3487,6 +3565,68 @@ fn join_server(app: tauri::AppHandle, address: String) -> Result<gameproc::Launc
     Ok(outcome)
 }
 
+/// Point the active profile at a bike this server will accept before starting the game.
+///
+/// This is deliberately used only by joins originating from the live server list. A manual
+/// address or deep link does not carry the server's category/model lists, so it keeps the
+/// rider's selection untouched.
+fn select_bike_for_listed_server(
+    cfg: &AppConfig,
+    categories: &[String],
+    bike_ids: &[String],
+) -> Result<(), String> {
+    if categories.is_empty() && bike_ids.is_empty() {
+        return Ok(());
+    }
+
+    let profiles_dir = cfg.profiles_dir();
+    let profiles = presets::scan_profiles(&profiles_dir);
+    let profile = profiles
+        .active
+        .or_else(|| profiles.profiles.first().cloned())
+        .ok_or_else(|| "server_bike_no_profile".to_string())?;
+    let installed = bikeswap::scan_installed_bikes(&cfg.mods_path);
+    let active = presets::active_bike(&profiles_dir, &profile);
+
+    if active.as_deref().is_some_and(|id| {
+        installed.iter().any(|bike| {
+            bike.id.eq_ignore_ascii_case(id)
+                && bikeswap::server_accepts(bike, categories, bike_ids)
+        })
+    }) {
+        return Ok(());
+    }
+
+    let selected = bikeswap::compatible_bike(&installed, categories, bike_ids)
+        .ok_or_else(|| "server_bike_no_match".to_string())?;
+    presets::set_active_bike(&profiles_dir, &profile, &selected.id)
+        .map_err(|e| format!("{e:#}"))?;
+    log::info!(
+        "[servers] selected {} ({}) for categories {:?}, bikes {:?}",
+        selected.name,
+        selected.id,
+        categories,
+        bike_ids
+    );
+    Ok(())
+}
+
+/// Join from a row in the app's server list, selecting a compatible installed bike first.
+#[tauri::command]
+fn join_listed_server(
+    app: tauri::AppHandle,
+    address: String,
+    categories: Vec<String>,
+    bikes: Vec<String>,
+) -> Result<gameproc::LaunchOutcome, String> {
+    if gameproc::is_game_running() {
+        return Ok(gameproc::LaunchOutcome::AlreadyRunning);
+    }
+    let cfg = config::load_or_detect(&app).unwrap_or_default();
+    select_bike_for_listed_server(&cfg, &categories, &bikes)?;
+    join_server(app, address)
+}
+
 /// Close the running game, then join `address` with the copy that replaces it.
 ///
 /// The way forward from `already_running`, which the tab could previously only report. The
@@ -3514,6 +3654,23 @@ async fn close_and_join(
     join_server(app, address)
 }
 
+/// Close the running game, select a bike accepted by the listed server, then launch into it.
+#[tauri::command]
+async fn close_and_join_listed_server(
+    app: tauri::AppHandle,
+    address: String,
+    categories: Vec<String>,
+    bikes: Vec<String>,
+) -> Result<gameproc::LaunchOutcome, String> {
+    if gameproc::is_game_running() && !serverqueue::close_and_settle().await {
+        return Err(format!(
+            "{} wouldn't close. Close it yourself and press Join again.",
+            game::active().display
+        ));
+    }
+    join_listed_server(app, address, categories, bikes)
+}
+
 /// Wait in line for a full server; the app launches into it when a slot is ours.
 /// See [`serverqueue`].
 #[tauri::command]
@@ -3521,8 +3678,10 @@ async fn queue_join(
     app: tauri::AppHandle,
     address: String,
     name: String,
+    categories: Vec<String>,
+    bikes: Vec<String>,
 ) -> Result<serverqueue::QueueState, String> {
-    serverqueue::join(app, address, name).await
+    serverqueue::join(app, address, name, categories, bikes).await
 }
 
 #[tauri::command]
@@ -3793,7 +3952,17 @@ async fn guess_server_track(app: tauri::AppHandle, track: String) -> Result<Trac
                 .ok()
                 .flatten()
                 .unwrap_or_default();
-            return Ok(guess);
+            // Deliberately does NOT return. Finding the file answers "do I have it" and
+            // supplies the picture; it says nothing about where the track came from, and the
+            // panel links its title to that page. Gating the search on a missing preview —
+            // which is what this did first — meant the tracks that read fine were exactly the
+            // ones with no link on them.
+            //
+            // The cost is one search per distinct track, and the panel caches the answer for
+            // the run: a rotation brings the same handful back every few minutes.
+            //
+            // What the catalogues must not do is undo `installed`, which is what keeps the
+            // buy button off a track the player already has.
         }
     }
 
@@ -3805,6 +3974,24 @@ async fn guess_server_track(app: tauri::AppHandle, track: String) -> Result<Trac
         guess.preview = stock.preview;
         guess.stock = true;
         guess.exact = true;
+        // A stock track is finished here, picture or no picture. It came with the game, so
+        // there is no page to link and nothing to buy — and letting it fall through to the
+        // catalogues on a missing preview, which is what this did, is how `forest` ended up
+        // wearing a photo of somebody's "forest SX". A blank tile is the honest answer.
+        return Ok(guess);
+    }
+
+    // What this id turned out to be last time, on any server and on any run of the app.
+    // Identification is four requests at worst and the answer barely changes, so the panel
+    // reads the book before it touches a catalogue — and a remembered "nowhere" counts, or
+    // the tracks with no page would be the ones paying full price every rotation.
+    if let Some(known) = trackbook::get(&app, &id) {
+        guess.source = known.source;
+        guess.product_id = known.product_id;
+        guess.product_name = known.product_name;
+        guess.product_url = known.product_url;
+        guess.product_image = known.product_image;
+        guess.exact = guess.exact || known.exact;
         return Ok(guess);
     }
 
@@ -3812,6 +3999,28 @@ async fn guess_server_track(app: tauri::AppHandle, track: String) -> Result<Trac
     // before any catalogue sees it.
     let words = id.replace('_', " ");
     let tracks_category = game::active().catalog_tracks_category;
+
+    // Ask mxb-mods for the post whose slug is the track id before asking it to search. A
+    // server's id is the folder inside the `.pkz` — `fort_red` — and the site's permalinks
+    // are the same shape, so `fort-red` is a direct hit where its search engine returns
+    // TheBackForty and Silver Rock and never the track itself. One request, no ranking.
+    for slug in slug_candidates(&id) {
+        let Ok(Some(hit)) = mods::mxb::by_slug(&slug, tracks_category).await else { continue };
+        // A slug that resolves is not on its own a match. `forest` is a stock track and also
+        // the address of a mod called "forest SX", so the title still has to fold onto the id
+        // — the same test a search result gets — before this claims to have found the track.
+        let Some((hit, true)) = best_track_hit(&id, vec![hit], |m| m.title.clone(), |_| true)
+        else {
+            continue;
+        };
+        guess.source = "mods".into();
+        guess.product_id = hit.id;
+        guess.product_name = hit.title;
+        guess.product_url = hit.link;
+        guess.product_image = hit.image.unwrap_or_default();
+        guess.exact = true;
+        return Ok(learned(&app, guess));
+    }
 
     // mxb-mods.com. Scoped to its Tracks category: an unscoped search for `forest` comes
     // back four bike liveries deep, and a track is the only thing a server can be running.
@@ -3823,8 +4032,10 @@ async fn guess_server_track(app: tauri::AppHandle, track: String) -> Result<Trac
             guess.product_name = hit.title;
             guess.product_url = hit.link;
             guess.product_image = hit.image.unwrap_or_default();
-            guess.exact = exact;
-            return Ok(guess);
+            // `exact` describes the name fold, and it is already true for something found on
+            // disk — a catalogue's opinion must not downgrade that to "we think".
+            guess.exact = guess.exact || exact;
+            return Ok(learned(&app, guess));
         }
     }
 
@@ -3832,7 +4043,7 @@ async fn guess_server_track(app: tauri::AppHandle, track: String) -> Result<Trac
     // whether something is installed — reused here rather than a second opinion about names.
     if let Ok(hits) = mods::shop_catalog::match_products(&app, &[id.clone()]).await {
         if let Some(hit) = hits.into_iter().flatten().next() {
-            return Ok(shop_guess(guess, hit, true));
+            return Ok(learned(&app, shop_guess(guess, hit, true)));
         }
     }
     if let Ok(page) =
@@ -3841,7 +4052,7 @@ async fn guess_server_track(app: tauri::AppHandle, track: String) -> Result<Trac
         if let Some((hit, exact)) = best_track_hit(&id, page.items, |m| m.title.clone(), |m| {
             sells_tracks(&m.category_names)
         }) {
-            return Ok(shop_guess(guess, hit, exact));
+            return Ok(learned(&app, shop_guess(guess, hit, exact)));
         }
     }
 
@@ -3850,7 +4061,7 @@ async fn guess_server_track(app: tauri::AppHandle, track: String) -> Result<Trac
     // opening a browser, and this runs from opening a panel. A browser window appearing
     // because someone clicked a server row would be an ambush, so a challenge here simply
     // means no guess.
-    if let Ok(page) = mods::hub::search(&words, None, 1, mods::hub::HubSort::default(), false).await {
+    if let Ok(page) = mods::hub::search(&words, &[], 1, mods::hub::HubSort::default(), false).await {
         if let Some((hit, exact)) = best_track_hit(&id, page.items, |m| m.title.clone(), |m| {
             sells_tracks(&m.category_names)
         }) {
@@ -3859,10 +4070,55 @@ async fn guess_server_track(app: tauri::AppHandle, track: String) -> Result<Trac
             guess.product_name = hit.title;
             guess.product_url = hit.url.unwrap_or_default();
             guess.product_image = hit.image.unwrap_or_default();
-            guess.exact = exact;
+            guess.exact = guess.exact || exact;
         }
     }
-    Ok(guess)
+    // Reached whether or not the hub had it: a miss is worth remembering too.
+    Ok(learned(&app, guess))
+}
+
+/// Put what a lookup found into the book, and hand the guess straight back.
+///
+/// Only the catalogue half is stored. Whether the track is installed is worked out afresh on
+/// every call, because the library changes under us and a local scan is cheap.
+fn learned(app: &tauri::AppHandle, guess: TrackGuess) -> TrackGuess {
+    trackbook::remember(
+        app,
+        &guess.id,
+        trackbook::Entry {
+            source: guess.source.clone(),
+            product_id: guess.product_id,
+            product_name: guess.product_name.clone(),
+            product_url: guess.product_url.clone(),
+            product_image: guess.product_image.clone(),
+            exact: guess.exact,
+            checked: trackbook::now_ms(),
+            version: trackbook::VERSION,
+        },
+    );
+    guess
+}
+
+/// Slugs worth trying for a track id, best first.
+///
+/// WordPress slugs are lowercase words joined by hyphens, which is what a track id already
+/// nearly is. The second candidate drops a trailing revision — `mmx_supercross_2024` is a
+/// folder convention, not something a permalink carries.
+fn slug_candidates(id: &str) -> Vec<String> {
+    let base: String = id
+        .trim()
+        .to_ascii_lowercase()
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect();
+    let base = base.trim_matches('-').split('-').filter(|p| !p.is_empty()).collect::<Vec<_>>();
+    let mut out = vec![base.join("-")];
+    if base.len() > 1 && base.last().is_some_and(|p| p.chars().all(|c| c.is_ascii_digit())) {
+        out.push(base[..base.len() - 1].join("-"));
+    }
+    out.retain(|s| !s.is_empty());
+    out.dedup();
+    out
 }
 
 /// A stock track's display name and artwork, off the blocking pool.
@@ -4135,7 +4391,8 @@ fn shop_guess(mut guess: TrackGuess, hit: mods::shop_catalog::ShopMod, exact: bo
     guess.product_name = hit.title;
     guess.product_url = hit.url.unwrap_or_default();
     guess.product_image = hit.image.unwrap_or_default();
-    guess.exact = exact;
+    // Same rule as the other catalogues: a name fold cannot downgrade a track found on disk.
+    guess.exact = guess.exact || exact;
     guess
 }
 
@@ -4213,6 +4470,10 @@ struct RankedIdentity {
     /// player typed it. The tab says which, because a wrong-but-plausible GUID would
     /// otherwise show somebody else's season with no clue why.
     source: String,
+    /// What the Steam account WOULD give, when a typed one is winning. Reported so the tab
+    /// can offer to go back to it: a GUID entered once shadows the sign-in for ever
+    /// afterwards, silently, which reads as Ranked ignoring the account.
+    steam_guid: String,
 }
 
 /// The GUID this machine's profile lives under.
@@ -4231,14 +4492,26 @@ struct RankedIdentity {
 #[tauri::command]
 async fn ranked_identity(app: tauri::AppHandle) -> RankedIdentity {
     let cfg = config::load_or_detect(&app).unwrap_or_default();
-    if let Some(guid) = ranked::normalise_guid(&cfg.ranked_guid) {
-        return RankedIdentity { guid, source: "manual".into() };
+    let typed = ranked::normalise_guid(&cfg.ranked_guid);
+    // Worked out even when a typed one wins, so the tab can say "that is not your Steam
+    // account" and offer the swap in one click.
+    let from_steam = match signed_in_guid(&app, &cfg).await {
+        Some(guid) => Some(guid),
+        None => ranked::local_guid(),
+    };
+    if let Some(guid) = typed {
+        return RankedIdentity {
+            guid,
+            source: "manual".into(),
+            steam_guid: from_steam.unwrap_or_default(),
+        };
     }
-    if let Some(guid) = signed_in_guid(&app, &cfg).await {
-        return RankedIdentity { guid, source: "steam".into() };
-    }
-    match ranked::local_guid() {
-        Some(guid) => RankedIdentity { guid, source: "steam".into() },
+    match from_steam {
+        Some(guid) => RankedIdentity {
+            guid: guid.clone(),
+            source: "steam".into(),
+            steam_guid: guid,
+        },
         None => RankedIdentity::default(),
     }
 }
@@ -5171,13 +5444,13 @@ where
 async fn hub_search(
     app: tauri::AppHandle,
     query: String,
-    category_id: Option<u64>,
+    category_ids: Vec<u64>,
     page: u32,
     sort: mods::hub::HubSort,
     on_sale_only: bool,
 ) -> Result<mods::hub::HubPage, String> {
     with_hub_clearance(&app, "hub search", || {
-        mods::hub::search(&query, category_id, page, sort, on_sale_only)
+        mods::hub::search(&query, &category_ids, page, sort, on_sale_only)
     })
     .await
 }
@@ -7132,6 +7405,8 @@ fn main() {
             scan_library,
             is_configured,
             create_config,
+            complete_setup,
+            normalize_game_folder,
             mxb_core::viewer::app_platform,
             search_mods,
             get_mod_detail,
@@ -7278,7 +7553,9 @@ fn main() {
             frostmod_stop,
             launch_game,
             join_server,
+            join_listed_server,
             close_and_join,
+            close_and_join_listed_server,
             queue_join,
             queue_leave,
             queue_status,

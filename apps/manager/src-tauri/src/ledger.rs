@@ -594,6 +594,7 @@ mod tests {
             length: Some(1600),
             altitude: None,
             thumbnail: Some(format!("data:image/jpeg;base64,{jpeg}")),
+            logo: None,
         };
         let e = s.entries.get_mut("mods/tracks/redbud.pkz").unwrap();
         assert!(e.needs_snapshot());
@@ -650,6 +651,7 @@ mod tests {
             length: None,
             altitude: None,
             thumbnail: Some(format!("data:image/jpeg;base64,{jpeg}")),
+            logo: None,
         };
         let e = s.entries.get_mut("mods/tracks/redbud.pkz").unwrap();
         apply_snapshot(&dir, "mxb", e, &meta, 1_500);

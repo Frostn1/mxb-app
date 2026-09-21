@@ -20,7 +20,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@frost/shared/lib/utils";
-import { Button, CHIP } from "@frost/shared/Components/ui/button";
+import { Button } from "@frost/shared/Components/ui/button";
 import { Input } from "@frost/shared/Components/ui/input";
 import {
   Select,
@@ -197,7 +197,7 @@ export default function FeelPresets({ profiles, profile, onProfile }: Props) {
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-7 pb-6">
       {/* Capture row */}
-      <div className="flex flex-wrap items-end gap-3 rounded-xl border border-white/[0.07] bg-card/40 p-3.5">
+      <div className="flex flex-wrap items-end gap-3 rounded-xl bg-card p-3.5">
         <label className="flex min-w-[140px] flex-col gap-1">
           <span className="text-[11px] font-medium text-muted-foreground">
             {t("feel.profile")}
@@ -244,7 +244,7 @@ export default function FeelPresets({ profiles, profile, onProfile }: Props) {
         {t("feel.savedTitle")}
       </h2>
       {saved.length === 0 ? (
-        <div className="rounded-xl border border-white/[0.07] bg-card/40 px-4 py-6 text-center text-[12.5px] text-muted-foreground">
+        <div className="rounded-xl bg-card px-4 py-6 text-center text-[12.5px] text-muted-foreground">
           {t("feel.noneHint")}
         </div>
       ) : (
@@ -254,7 +254,7 @@ export default function FeelPresets({ profiles, profile, onProfile }: Props) {
             return (
               <div
                 key={feel.name}
-                className="flex flex-col gap-2.5 rounded-xl border border-white/[0.07] bg-card/40 p-3.5"
+                className="flex flex-col gap-2.5 rounded-xl bg-card p-3.5"
               >
                 <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
@@ -273,7 +273,7 @@ export default function FeelPresets({ profiles, profile, onProfile }: Props) {
                   <IconBtn title={t("presets.duplicate")} onClick={() => void duplicate(feel)}>
                     <CopyPlus className="size-3.5" />
                   </IconBtn>
-                  <IconBtn chip title={t("feel.share")} onClick={() => void openShare(feel)}>
+                  <IconBtn title={t("feel.share")} onClick={() => void openShare(feel)}>
                     <Share2 className="size-3.5" />
                   </IconBtn>
                   <IconBtn title={t("common.delete")} onClick={() => void remove(feel)}>
@@ -334,7 +334,7 @@ function ShareDialog({
           <DialogTitle>{t("feel.shareTitle", { name: share?.name ?? "" })}</DialogTitle>
           <DialogDescription>{t("feel.shareBody")}</DialogDescription>
         </DialogHeader>
-        <div className="max-h-[160px] overflow-y-auto break-all rounded-lg border border-border bg-card/40 px-3 py-2 font-mono text-[11px] text-foreground/80">
+        <div className="max-h-[160px] overflow-y-auto break-all rounded-lg bg-card px-3 py-2 font-mono text-[11px] text-foreground/80">
           {share?.code}
         </div>
         <DialogFooter>
@@ -418,12 +418,10 @@ function IconBtn({
   title,
   onClick,
   children,
-  chip = false,
 }: {
   title: string;
   onClick: () => void;
   children: React.ReactNode;
-  chip?: boolean;
 }) {
   return (
     <button
@@ -432,7 +430,7 @@ function IconBtn({
       onClick={onClick}
       className={cn(
         "cursor-default rounded-md p-1.5 transition-colors",
-        chip ? CHIP : "text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground",
+        "text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground",
       )}
     >
       {children}

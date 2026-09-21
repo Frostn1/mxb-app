@@ -13,13 +13,15 @@ import { useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
   CheckCircle2,
+  CircleAlert,
+  CircleCheck,
+  Info,
   Download,
   ExternalLink,
   FileArchive,
   Library as LibraryIcon,
   MoreHorizontal,
   RotateCw,
-  Search,
   Store,
   Trash2,
   X,
@@ -49,7 +51,15 @@ import {
   AlertDialogCancel,
   AlertDialogAction,
 } from "@frost/shared/Components/ui/alert-dialog";
+import { SearchBox } from "@frost/shared/Components/ui/search-box";
 import { cn } from "@frost/shared/lib/utils";
+import LiveQueue, { useLiveQueueCount } from "./LiveQueue";
+import {
+  clearActivityRecords,
+  readActivityRecords,
+  subscribeToActivity,
+  type ActivityRecord,
+} from "../../lib/activity";
 
 type Filter = "all" | DownloadStatus;
 
@@ -107,9 +117,13 @@ export default function Downloads({
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
   const [clearOpen, setClearOpen] = useState(false);
+  const [activityRecords, setActivityRecords] = useState(readActivityRecords);
+  // Something in flight means the screen is not empty, whatever the history says.
+  const liveCount = useLiveQueueCount();
 
   // Being here is what "seen" means — it retires the sidebar's failure badge.
   useEffect(markSeen, [markSeen, records.length]);
+  useEffect(() => subscribeToActivity(() => setActivityRecords(readActivityRecords())), []);
 
   const counts = useMemo(
     () => ({
@@ -134,6 +148,15 @@ export default function Downloads({
   }, [records, search, filter]);
 
   const groups = useMemo(() => groupByDay(shown), [shown]);
+  const shownActivity = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    if (!query) return activityRecords;
+    return activityRecords.filter(
+      (record) =>
+        record.title.toLowerCase().includes(query) ||
+        (record.detail ?? "").toLowerCase().includes(query),
+    );
+  }, [activityRecords, search]);
 
   /** Straight back through the install queue, with the same destination as last time. */
   const retry = (r: DownloadRecord) => {
@@ -186,15 +209,12 @@ export default function Downloads({
       </ContextBarLeft>
 
       <ContextBarRight>
-        <div className="flex h-7 w-[220px] items-center gap-2 border border-input bg-card px-2.5">
-          <Search className="size-3.5 text-faint" />
-          <input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder={t("downloads.searchPlaceholder")}
-            className="w-full bg-transparent text-[12.5px] placeholder:text-faint focus:outline-none"
-          />
-        </div>
+        <SearchBox
+          value={search}
+          onChange={setSearch}
+          placeholder={t("downloads.searchPlaceholder")}
+          className="w-[220px]"
+        />
         <Button
           variant="outline"
           size="sm"
@@ -206,16 +226,29 @@ export default function Downloads({
         <HelpHint title={t("nav.downloads")} description={t("downloads.help")} />
       </ContextBarRight>
 
-
       <div className="min-h-0 flex-1 overflow-y-auto px-7 pb-6">
+        {/* What is happening right now, above what already happened. The history below is a
+            record of finished attempts and can never show a transfer in flight, which is why
+            a download in progress used to be invisible on the one screen named after it. */}
+        <LiveQueue />
+
+        <SystemActivity
+          records={shownActivity}
+          totalCount={activityRecords.length}
+          onClear={clearActivityRecords}
+        />
+
         {loading ? (
           <p className="py-16 text-center text-[13px] text-muted-foreground">
             {t("common.loading")}
           </p>
         ) : groups.length === 0 ? (
-          <p className="py-16 text-center text-[13px] text-muted-foreground">
-            {records.length === 0 ? t("downloads.empty") : t("downloads.noMatches")}
-          </p>
+          liveCount === 0 &&
+          records.length > 0 && (
+            <p className="py-16 text-center text-[13px] text-muted-foreground">
+              {t("downloads.noMatches")}
+            </p>
+          )
         ) : (
           <div className="flex flex-col gap-6">
             {groups.map((group) => (
@@ -274,6 +307,112 @@ export default function Downloads({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+    </div>
+  );
+}
+
+function SystemActivity({
+  records,
+  totalCount,
+  onClear,
+}: {
+  records: ActivityRecord[];
+  totalCount: number;
+  onClear: () => void;
+}) {
+  const t = useT();
+
+  return (
+    <section className="mb-6 flex flex-col gap-2.5" aria-labelledby="automatic-activity-title">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <h2
+            id="automatic-activity-title"
+            className="text-[12px] font-bold uppercase tracking-[1.2px] text-faint"
+          >
+            ▸ {t("activity.automaticTitle")}
+          </h2>
+          <p className="mt-0.5 text-[11px] text-muted-foreground">
+            {t("activity.automaticDesc")}
+          </p>
+        </div>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={onClear}
+          disabled={totalCount === 0}
+          aria-label={t("activity.clearAria")}
+        >
+          <Trash2 className="size-3.5" /> {t("activity.clear")}
+        </Button>
+      </div>
+      {records.length === 0 ? (
+        <div className="rounded-xl border border-dashed border-white/[0.08] px-4 py-5 text-center text-[12px] text-muted-foreground">
+          {t(totalCount === 0 ? "activity.empty" : "activity.noMatches")}
+        </div>
+      ) : (
+        <div className="flex flex-col gap-2">
+          {records.map((record) => (
+            <ActivityRow key={record.id} record={record} />
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function ActivityRow({ record }: { record: ActivityRecord }) {
+  const t = useT();
+  const StatusIcon =
+    record.status === "success" ? CircleCheck : record.status === "error" ? CircleAlert : Info;
+  const statusLabel =
+    record.status === "success"
+      ? t("activity.completed")
+      : record.status === "error"
+        ? t("activity.failed")
+        : t("activity.notice");
+
+  return (
+    <div
+      className={cn(
+        "flex items-start gap-3 rounded-xl border bg-card p-3",
+        record.status === "error" ? "border-destructive/30" : "border-white/[0.07]",
+      )}
+    >
+      <StatusIcon
+        className={cn(
+          "mt-0.5 size-4 flex-none",
+          record.status === "error"
+            ? "text-destructive"
+            : record.status === "success"
+              ? "text-primary"
+              : "text-muted-foreground",
+        )}
+        aria-hidden="true"
+      />
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+          <span className="text-[13px] font-semibold">{record.title}</span>
+          <span className="text-[11px] text-faint">
+            {formatDay(record.at)} · {formatTime(record.at)}
+          </span>
+        </div>
+        {record.detail && (
+          <p className="mt-1 select-text text-[11.5px] text-muted-foreground">{record.detail}</p>
+        )}
+      </div>
+      <span
+        className={cn(
+          "flex-none rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide",
+          record.status === "error"
+            ? "border-destructive/30 text-destructive"
+            : record.status === "success"
+              ? "border-primary/25 text-primary"
+              : "border-white/[0.08] text-muted-foreground",
+        )}
+      >
+        {statusLabel}
+      </span>
     </div>
   );
 }

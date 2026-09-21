@@ -37,7 +37,7 @@ import {
 } from "@frost/shared/api/mods";
 import { PURCHASE_SORTS, type PurchaseSort } from "../../api/shop";
 import type { HubCategory, HubMod } from "@frost/shared/types";
-import { buildInstalledIndex } from "../../lib/installedMatch";
+import { groupPurchases } from "../../lib/purchases";
 import { useInstall } from "../../Context/Install";
 import { useConfig } from "@frost/shared/Context/Config";
 import { useT } from "@/i18n";
@@ -201,32 +201,10 @@ export default function HubPurchases({ refreshKey }: HubPurchasesProps) {
   }, [refreshKey, installedBump, loggedIn, game.id]);
 
   /** Purchases, one entry per product, with the catalog and library joins applied. */
-  const purchases = useMemo<HubPurchase[]>(() => {
-    const fuzzy = buildInstalledIndex(installedNames);
-    // Both the file name and its stem: the library lists `X.pkz` while an archive that
-    // extracts lands in a folder called `X`, and a record may name either.
-    const onDisk = new Set<string>();
-    for (const n of installedNames) {
-      const lower = n.toLowerCase();
-      onDisk.add(lower);
-      onDisk.add(lower.replace(/\.(pkz|zip|rar|7z|pnt)$/, ""));
-    }
-    const byProduct = new Map<string, HubItem[]>();
-    for (const item of items) {
-      const files = byProduct.get(item.product);
-      if (files) files.push(item);
-      else byProduct.set(item.product, [item]);
-    }
-    return [...byProduct].map(([product, files]) => ({
-      product,
-      files,
-      listing: listings[product] ?? null,
-      installed:
-        (installRecord[product] ?? []).some((f) =>
-          onDisk.has(f.toLowerCase().replace(/\.(pkz|zip|rar|7z|pnt)$/, "")),
-        ) || fuzzy.has(product),
-    }));
-  }, [items, listings, installedNames, installRecord]);
+  const purchases = useMemo<HubPurchase[]>(
+    () => groupPurchases(items, listings, installedNames, installRecord),
+    [items, listings, installedNames, installRecord],
+  );
 
   /** Category id → its root. Only roots become pills, so the row can't grow without bound. */
   const rootOf = useMemo(() => {

@@ -17,7 +17,7 @@
  * where its contents say it belongs and shows its collisions first — see `Context/DropReview`.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowUpDown, Check, Search, Store, LogOut, RefreshCw } from "lucide-react";
+import { ArrowUpDown, Check, Store, LogOut, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import {
   onShopAuth,
@@ -42,7 +42,7 @@ import {
   type PurchaseSort,
 } from "../../api/shop";
 import type { ShopCategory, ShopMod } from "@frost/shared/types";
-import { buildInstalledIndex } from "../../lib/installedMatch";
+import { groupPurchases } from "../../lib/purchases";
 import { useInstall } from "../../Context/Install";
 import { useConfig } from "@frost/shared/Context/Config";
 import { useT } from "@/i18n";
@@ -70,6 +70,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@frost/shared/Components/ui/select";
+import { SearchBox } from "@frost/shared/Components/ui/search-box";
 import { cn } from "@frost/shared/lib/utils";
 
 /** The pill for purchases the catalog doesn't list. */
@@ -208,34 +209,10 @@ export default function MyDownloads({ refreshKey }: MyDownloadsProps) {
   }, [refreshKey, installedBump, loggedIn, game.id]);
 
   /** Purchases, one entry per product, with the catalog and library joins applied. */
-  const purchases = useMemo<Purchase[]>(() => {
-    const fuzzy = buildInstalledIndex(installedNames);
-    // Both the file name and its stem: the library lists `X.pkz` while an archive that
-    // extracts lands in a folder called `X`, and a record may name either.
-    const onDisk = new Set<string>();
-    for (const n of installedNames) {
-      const lower = n.toLowerCase();
-      onDisk.add(lower);
-      onDisk.add(lower.replace(/\.(pkz|zip|rar|7z|pnt)$/, ""));
-    }
-    const byProduct = new Map<string, ShopItem[]>();
-    for (const item of items) {
-      const files = byProduct.get(item.product);
-      if (files) files.push(item);
-      else byProduct.set(item.product, [item]);
-    }
-    return [...byProduct].map(([product, files]) => ({
-      product,
-      files,
-      listing: listings[product] ?? null,
-      // Only believed while the folder it names is still there; fuzzy match as fallback.
-      installed:
-        (installRecord[product] ?? []).some((f) =>
-          onDisk.has(f.toLowerCase().replace(/\.(pkz|zip|rar|7z|pnt)$/, "")),
-        ) ||
-        fuzzy.has(product),
-    }));
-  }, [items, listings, installedNames, installRecord]);
+  const purchases = useMemo<Purchase[]>(
+    () => groupPurchases(items, listings, installedNames, installRecord),
+    [items, listings, installedNames, installRecord],
+  );
 
   /** Category id → its root. Only roots become pills, so the row can't grow without bound. */
   const rootOf = useMemo(() => {
@@ -539,15 +516,12 @@ export default function MyDownloads({ refreshKey }: MyDownloadsProps) {
         </span>
         {loggedIn && (
           <>
-            <div className="flex h-7 w-[220px] items-center gap-2 border border-input bg-card px-2.5">
-              <Search className="size-3.5 text-faint" />
-              <input
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder={t("purchases.searchPlaceholder")}
-                className="w-full bg-transparent text-[12.5px] placeholder:text-faint focus:outline-none"
-              />
-            </div>
+            <SearchBox
+          value={query}
+          onChange={setQuery}
+          placeholder={t("purchases.searchPlaceholder")}
+          className="w-[220px]"
+        />
             <Button
               variant="outline"
               size="sm"

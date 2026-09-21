@@ -1,7 +1,6 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ComponentType, ReactNode } from "react";
 import {
-  Search,
   RefreshCw,
   MoreHorizontal,
   FolderInput,
@@ -97,6 +96,11 @@ import { useImport } from "../Dropzone/useImport";
 import { useShare } from "../../Context/Share";
 import { cachedScan, dropScans, putScan } from "./scanCache";
 import { useFavorites } from "../../lib/useFavorites";
+import { brandOf } from "./bikeBrand";
+import { useOwned } from "../../lib/useOwned";
+import { useWishlist } from "../../lib/useWishlist";
+import { OwnedGrid, WishlistGrid } from "./Yours";
+import type { StoreId } from "../../api/shop";
 
 /** Starred mods, by tab and file name — a name survives a move between folders, a path doesn't. */
 const FAVORITES_KEY = "mxb:libraryFavorites:v1";
@@ -108,7 +112,7 @@ const starId = (modType: ModType, item: LibraryEntry) =>
 const SWAPS_KEY = "\u0000model-swaps";
 import { useInstall } from "../../Context/Install";
 import { Button } from "@frost/shared/Components/ui/button";
-import { ContextBarLeft, ContextBarRight, ContextTab } from "../Shell/ContextBar";
+import { ContextBarRight } from "../Shell/ContextBar";
 import HelpHint from "@frost/shared/Components/ui/help-hint";
 import {
   DropdownMenu,
@@ -142,6 +146,7 @@ import {
   AlertDialogCancel,
   AlertDialogAction,
 } from "@frost/shared/Components/ui/alert-dialog";
+import { SearchBox } from "@frost/shared/Components/ui/search-box";
 import { cn } from "@frost/shared/lib/utils";
 
 interface RowAction {
@@ -207,6 +212,8 @@ function LibraryCardBody({
 
   const title = meta?.name?.trim() || displayName(item.name);
   const folder = item.name;
+  // Only a bike has a maker worth naming — a track called "Honda Hills" is not a Honda.
+  const brand = item.category === "bike" ? brandOf(meta?.name, item.name) : null;
   const location = meta?.location?.trim();
   const parts: string[] = [];
   if (meta?.author) parts.push(t("library.byAuthor", { author: meta.author }));
@@ -225,6 +232,24 @@ function LibraryCardBody({
       >
         {meta?.thumbnail ? (
           <img src={meta.thumbnail} alt="" className="h-full w-full object-cover" />
+        ) : meta?.logo ? (
+          // Second, not first: the question a card answers is "which bike is this", and a
+          // picture of the bike answers it where a KTM mark only narrows it to nine of them.
+          // On its own plate and contained rather than cropped — it's a mark, not a photo.
+          <span className="grid h-full w-full place-items-center bg-badge-plate p-1.5">
+            <img
+              src={meta.logo}
+              alt={brand ?? ""}
+              className="w-full object-contain"
+              style={{ height: "28px", transform: "translateY(-2px)" }}
+            />
+          </span>
+        ) : brand ? (
+          // A bike with neither picture nor mark used to get the same grey box as every
+          // other one, which told you nothing. The maker's name does.
+          <span className="px-1 font-cond text-[13px] font-extrabold uppercase tracking-[0.06em] text-foreground/45">
+            {brand}
+          </span>
         ) : (
           <TypeIcon className="size-5" strokeWidth={1.5} />
         )}
@@ -266,10 +291,15 @@ function LibraryCardBody({
             {location && <p className="text-muted-foreground">{location}</p>}
           </TooltipContent>
         </Tooltip>
-        <span className="truncate text-[11px] text-muted-foreground" title={subtitle}>
-          {subtitle}
+        {/* The models affordance rides on this line rather than under it. On its own row it
+            made the one bike that has swaps taller than its neighbours, so a grid of cards
+            stepped up and down as you scanned it. */}
+        <span className="flex min-w-0 items-center gap-2 text-[11px] text-muted-foreground">
+          <span className="truncate" title={subtitle}>
+            {subtitle}
+          </span>
+          {footer}
         </span>
-        {footer}
       </div>
     </>
   );
@@ -539,10 +569,7 @@ function groupSections(
       }));
   }
 
-  const shown =
-    modType.id === "bikes"
-      ? filtered.filter((e) => e.category !== "bikePaint" && e.category !== "bikeModelSwap")
-      : filtered;
+  const shown = countable(filtered, modType);
   const byFolder = new Map<string, LibraryEntry[]>();
   for (const e of shown) {
     const list = byFolder.get(e.folder) ?? [];
@@ -552,6 +579,94 @@ function groupSections(
   return [...byFolder.entries()]
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([folder, items]) => ({ key: folder || "__root__", label: folderLabel(folder), items }));
+}
+
+/**
+ * What the left list is pointing at.
+ *
+ * The mod type is a prop — the shell owns it — so this is only the filter *inside* a
+ * type: everything, the starred ones, one folder, or the mods that are no longer there.
+ */
+type Pick =
+  | { kind: "all" }
+  | { kind: "starred" }
+  | { kind: "folder"; folder: string }
+  | { kind: "removed" }
+  /** Neither of these is about the mods tree, so both replace the grid rather than
+   *  filtering it — see `Yours.tsx`. */
+  | { kind: "owned" }
+  | { kind: "wishlist" };
+
+const ALL: Pick = { kind: "all" };
+
+/** Icon per mod type, for the left list. A type we don't know gets the generic box. */
+/**
+ * What the grid actually shows for a type.
+ *
+ * Bikes keeps liveries and model swaps out of its own list — they belong to a bike, not
+ * beside it — so a count that included them would never match what is on screen.
+ */
+function countable(entries: LibraryEntry[], modType: ModType): LibraryEntry[] {
+  return modType.id === "bikes"
+    ? entries.filter((e) => e.category !== "bikePaint" && e.category !== "bikeModelSwap")
+    : entries;
+}
+
+/** A group label in the left list. */
+function SideHeading({ label }: { label: string }) {
+  return (
+    <div className="flex flex-none items-center gap-2.5 px-4 pb-1.5 pt-2">
+      <span className="h-3 w-1 rounded-full bg-primary" />
+      <span className="font-cond text-[11.5px] font-bold uppercase tracking-[0.14em] text-foreground">
+        {label}
+      </span>
+    </div>
+  );
+}
+
+/** One row of the left list: a mod type, or a folder inside it. */
+function SideRow({
+  label,
+  count,
+  bytes,
+  active,
+  onSelect,
+}: {
+  label: string;
+  /** Omitted while the number isn't known — a blank is honest, a 0 isn't. */
+  count?: number;
+  /** What that many mods weigh. Same rule: absent rather than 0 when it isn't known. */
+  bytes?: number;
+  active: boolean;
+  onSelect: () => void;
+}) {
+  return (
+    <button
+      onClick={onSelect}
+      title={label}
+      className={cn(
+        "relative mx-2 flex cursor-default items-center gap-2 rounded-lg px-2.5 py-1.5 text-left transition-colors",
+        active
+          ? "bg-secondary text-foreground"
+          : "text-muted-foreground hover:bg-foreground/[0.04] hover:text-foreground",
+      )}
+    >
+      {active && <span className="absolute inset-y-1.5 left-0 w-[3px] rounded-full bg-primary" />}
+      <span className="min-w-0 flex-1 truncate font-cond text-[13px] font-semibold tracking-[-0.02em]">
+        {label}
+      </span>
+      {bytes !== undefined && (
+        <span className="tabular-figures flex-none text-[11px] text-faint">
+          {formatBytes(bytes)}
+        </span>
+      )}
+      {count !== undefined && (
+        <span className="tabular-figures w-8 flex-none text-right text-[11px] text-faint">
+          {count}
+        </span>
+      )}
+    </button>
+  );
 }
 
 interface LibraryProps {
@@ -567,6 +682,9 @@ interface LibraryProps {
   /** Open a catalog mod's page. Lets a hit from "Find it again" go straight to the mod,
    *  rather than leaving the player to search Browse for the name a second time. */
   onOpenMod?: (slug: string) => void;
+  /** Go to a store. What the Owned list points at: the purchase itself lives there, and
+   *  installing one is that screen's job, not this one's. */
+  onOpenStore?: (store: StoreId) => void;
 }
 
 export default function Library({
@@ -577,6 +695,7 @@ export default function Library({
   focus,
   onFocusApplied,
   onOpenMod,
+  onOpenStore,
 }: LibraryProps) {
   const t = useT();
   const { pickAndImport, staging } = useImport();
@@ -586,6 +705,8 @@ export default function Library({
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<LibrarySort>("folder");
+  // Which row of the left list is lit, inside the type the shell has us on.
+  const [pick, setPick] = useState<Pick>(ALL);
   const [busy, setBusy] = useState(false);
   const [detail, setDetail] = useState<LibraryEntry | null>(null);
   const [view3d, setView3d] = useState<LibraryEntry | null>(null);
@@ -744,6 +865,9 @@ export default function Library({
 
   useEffect(() => setDetail(null), [modType]);
 
+  // Another library, another set of folders — the row that was lit doesn't exist here.
+  useEffect(() => setPick(ALL), [modType]);
+
   // Arriving from a download row: search for that mod so the jump lands on it, not just on
   // the right tab. Consumed on arrival — a later visit is not still about that one mod.
   useEffect(() => {
@@ -757,6 +881,11 @@ export default function Library({
     setSelected(new Set());
   }, []);
   useEffect(() => exitSelect(), [modType, exitSelect]);
+  // Owned and Wishlist hold nothing the bulk actions can move, share or uninstall, so the
+  // select bar has to go with the grid it belonged to.
+  useEffect(() => {
+    if (pick.kind === "owned" || pick.kind === "wishlist") exitSelect();
+  }, [pick, exitSelect]);
 
   const allFolders = useMemo(
     () => [...new Set(entries.map((e) => e.folder))].sort((a, b) => a.localeCompare(b)),
@@ -764,14 +893,95 @@ export default function Library({
   );
 
   const favs = useFavorites(FAVORITES_KEY);
+  // Both stores, read only once the player asks for them — see `useOwned`.
+  const owned = useOwned(pick.kind === "owned", refreshKey);
+  const wishlist = useWishlist();
   const isStarred = useCallback(
     (e: LibraryEntry) => favs.has(starId(modType, e)),
     [favs, modType],
   );
 
+  // The mods of this type the grid can show, before the search box and the left list get
+  // to them — what the left list counts.
+  const inType = useMemo(() => countable(entries, modType), [entries, modType]);
+
+  /** How many mods sit in each folder of this type, for the left list. */
+  const folderCounts = useMemo(() => {
+    const by = new Map<string, number>();
+    for (const e of inType) by.set(e.folder, (by.get(e.folder) ?? 0) + 1);
+    return by;
+  }, [inType]);
+
+  /** And what they weigh. Which folder is eating the disk is the question a folder list
+   *  gets asked, and the sizes are already on the entries. */
+  const folderBytes = useMemo(() => {
+    const by = new Map<string, number>();
+    for (const e of inType) by.set(e.folder, (by.get(e.folder) ?? 0) + e.size);
+    return by;
+  }, [inType]);
+
+
+  // The search box narrows these two the same way it narrows the grid — they are on screen
+  // in its place, and a toolbar that does nothing to what you are looking at reads as broken.
+  const q = search.trim().toLowerCase();
+  const ownedShown = useMemo(
+    () =>
+      q
+        ? owned.rows.filter(
+            (r) =>
+              r.product.toLowerCase().includes(q) ||
+              (r.author ?? "").toLowerCase().includes(q),
+          )
+        : owned.rows,
+    [owned.rows, q],
+  );
+  const wishShown = useMemo(
+    () =>
+      q
+        ? wishlist.items.filter(
+            (w) =>
+              w.title.toLowerCase().includes(q) ||
+              (w.author ?? "").toLowerCase().includes(q),
+          )
+        : wishlist.items,
+    [wishlist.items, q],
+  );
+
+  const starredCount = useMemo(
+    () => inType.filter(isStarred).length,
+    [inType, isStarred],
+  );
+  const starredBytes = useMemo(
+    () => inType.filter(isStarred).reduce((n, e) => n + e.size, 0),
+    [inType, isStarred],
+  );
+
+  /** The folders of this type, in the order the left list shows them. */
+  const folders = useMemo(
+    () => [...folderCounts.keys()].sort((a, b) => a.localeCompare(b)),
+    [folderCounts],
+  );
+
+  // A row can stop existing under you: the last mod leaves a folder, or the Removed list is
+  // switched off. Fall back to the whole library rather than to an empty grid.
+  useEffect(() => {
+    if (pick.kind === "removed" && !showRemoved) setPick(ALL);
+    if (pick.kind === "folder" && entries.length > 0 && !folderCounts.has(pick.folder))
+      setPick(ALL);
+  }, [pick, showRemoved, entries.length, folderCounts]);
+
+  // The left list decides what the grid is a view of; the search box then narrows that.
+  const shownEntries = useMemo(() => {
+    if (pick.kind === "starred") return entries.filter(isStarred);
+    if (pick.kind === "folder") return entries.filter((e) => e.folder === pick.folder);
+    if (pick.kind === "removed" || pick.kind === "owned" || pick.kind === "wishlist")
+      return [];
+    return entries;
+  }, [entries, pick, isStarred]);
+
   const sections = useMemo(
-    () => buildSections(modType, entries, search, sort, isStarred, t),
-    [modType, entries, search, sort, isStarred, t],
+    () => buildSections(modType, shownEntries, search, sort, isStarred, t),
+    [modType, shownEntries, search, sort, isStarred, t],
   );
 
   // Installed items only — this feeds select-all and every bulk action, and a missing mod
@@ -780,10 +990,26 @@ export default function Library({
   const visibleCount = visibleItems.length;
 
 
-  const ghosts = useMemo(
-    () => (showRemoved ? ghostsFor(ledger, modType, search) : []),
-    [showRemoved, ledger, modType, search],
+  // Every mod the tree has lost for this type — what the left list's Removed row counts,
+  // search box and folder pick left out of it.
+  const allGhosts = useMemo(
+    () => (showRemoved ? ghostsFor(ledger, modType, "") : []),
+    [showRemoved, ledger, modType],
   );
+
+  // A folder row shows the mods that folder has lost as well as the ones it still holds;
+  // Favorites is about mods you can ride, so it shows none.
+  const ghosts = useMemo(() => {
+    if (
+      !showRemoved ||
+      pick.kind === "starred" ||
+      pick.kind === "owned" ||
+      pick.kind === "wishlist"
+    )
+      return [];
+    const rows = ghostsFor(ledger, modType, search);
+    return pick.kind === "folder" ? rows.filter((r) => r.folder === pick.folder) : rows;
+  }, [showRemoved, ledger, modType, search, pick]);
   // Parked and gone are different facts and get their own headings: one is a mod Manage can
   // hand straight back, the other is a mod that would have to be found again.
   const parked = useMemo(() => ghosts.filter((r) => r.state === "parked"), [ghosts]);
@@ -816,9 +1042,42 @@ export default function Library({
   const { bikePreview, game, config } = useConfig();
   const { startInstall } = useInstall();
   // The Library is a view of the mods tree, so the one type that installs outside it —
-  // ReShade presets, which live in the game's install folder — has no tab here. They're
-  // managed in Settings, where their install status can be shown alongside them.
+  // ReShade presets, which live in the game's install folder — has no row in the list.
+  // They're managed in Settings, where their install status can be shown alongside them.
   const modTypes = modTypesFor(game.id).filter((mt) => !installsOutsideMods(mt));
+
+  /**
+   * How many mods each library holds, for the left list.
+   *
+   * The library you're on is counted from the scan on screen. The others come from their
+   * last scan, when the session has one — walking three more mod trees to put a number
+   * beside a row nobody has clicked is exactly the cost the scan cache exists to avoid,
+   * and a row with no number is honest about not knowing yet.
+   */
+  const typeCounts = useMemo(() => {
+    const by = new Map<string, number>();
+    for (const mt of modTypesFor(game.id)) {
+      if (mt.id === modType.id) {
+        by.set(mt.id, inType.length);
+        continue;
+      }
+      const hit = cachedScan<LibraryEntry[]>(mt.installSubpath);
+      if (hit) by.set(mt.id, countable(hit.value, mt).length);
+    }
+    return by;
+  }, [game.id, modType, inType]);
+  const typeBytes = useMemo(() => {
+    const by = new Map<string, number>();
+    for (const mt of modTypesFor(game.id)) {
+      if (mt.id === modType.id) {
+        by.set(mt.id, inType.reduce((n, e) => n + e.size, 0));
+        continue;
+      }
+      const hit = cachedScan<LibraryEntry[]>(mt.installSubpath);
+      if (hit) by.set(mt.id, countable(hit.value, mt).reduce((n, e) => n + e.size, 0));
+    }
+    return by;
+  }, [game.id, modType, inType]);
   const view3dProps = view3d ? entryViewerProps(view3d, entries, bikePreview) : null;
 
   const doMove = async (item: LibraryEntry, toFolder: string) => {
@@ -1099,13 +1358,17 @@ export default function Library({
    * game itself shows them in and the only one anybody would want.
    */
   const stockSection = (() => {
+    // They aren't in the mods tree, so they sit in none of the left list's folders and are
+    // no part of what it has lost. Starring one still works, so Favorites keeps them.
+    if (pick.kind === "folder" || pick.kind === "removed") return null;
     const q = search.trim().toLowerCase();
+    const base = pick.kind === "starred" ? stock.filter(isStarred) : stock;
     const rows = q
-      ? stock.filter(
+      ? base.filter(
           (s) =>
             s.name.toLowerCase().includes(q) || s.folder.toLowerCase().includes(q),
         )
-      : stock;
+      : base;
     if (rows.length === 0) return null;
     return (
       <section key="__stock__" className="flex flex-col gap-2.5">
@@ -1197,35 +1460,15 @@ export default function Library({
         />
       ) : (
         <>
-      {/* Type tabs and the search/sort filters belong to the chrome; the buttons that
-          change what is on disk stay with the list they act on. */}
-      <ContextBarLeft>
-        {modTypes.map((mt) => (
-          <ContextTab
-            key={mt.id}
-            active={mt.id === modType.id}
-            onSelect={() => onChangeType(mt)}
-          >
-            <span className="flex items-center gap-1.5">
-              {t(mt.label)}
-              {mt.id === modType.id && (
-                <span className="tabular-figures text-faint">{visibleCount}</span>
-              )}
-            </span>
-          </ContextTab>
-        ))}
-      </ContextBarLeft>
-
+      {/* The bar is left with the controls that act on what you're looking at: the type
+          you're in, and the folder inside it, are the left list's job now. */}
       <ContextBarRight>
-        <div className="flex h-7 w-[220px] items-center gap-2 border border-input bg-card px-2.5">
-          <Search className="size-3.5 text-faint" />
-          <input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder={t("library.searchPlaceholder")}
-            className="w-full bg-transparent text-[12.5px] placeholder:text-faint focus:outline-none"
-          />
-        </div>
+        <SearchBox
+          value={search}
+          onChange={setSearch}
+          placeholder={t("library.searchPlaceholder")}
+          className="w-[220px]"
+        />
         {/* Sorting by arrival is the only way to find a mod whose name you never read —
             and it works for everything on disk, not just what the history remembers. */}
         <DropdownMenu>
@@ -1331,219 +1574,308 @@ export default function Library({
         <HelpHint title={t("nav.library")} description={t("library.help")} />
       </ContextBarRight>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-7 pb-6">
-        {error ? (
-          <p className="select-text py-16 text-center text-[13px] text-destructive">
-            {error}
-          </p>
-        ) : loading ? (
-          <p className="py-16 text-center text-[13px] text-muted-foreground">
-            {t("library.scanning")}
-          </p>
-        ) : sections.length === 0 && ghosts.length === 0 ? (
-          <p className="py-16 text-center text-[13px] text-muted-foreground">
-            {entries.length === 0
-              ? t("library.empty", { type: t(modType.labelInline) })
-              : t("library.noMatches")}
-          </p>
-        ) : (
-          <div className="flex flex-col gap-6">
-            {sections.map((section) => (
-              <section key={section.key} className="flex flex-col gap-2.5">
-                <div className="flex items-baseline gap-2">
-                  <span className="text-[12px] font-bold uppercase tracking-[1.2px] text-faint">
-                    ▸ {section.label}
-                  </span>
-                  <span className="text-[11px] text-faint">{section.items.length}</span>
-                </div>
-                <div className="grid grid-cols-3 gap-3">
-                  {section.items.map((item) => {
-                    const actions = rowActions(item);
-                    const Icon = categoryIcon(item.category);
-                    const canView3d = entryViewerProps(item, entries, bikePreview) !== null;
-                    const isSel = selected.has(item.path);
-                    const starred = isStarred(item);
-                    // A bike's model swaps. The Locker always lists the active set as a row
-                    // of its own, so a bike with nothing to switch between still reports one
-                    // variant — only two or more is a choice worth a badge.
-                    const models = swaps.get(displayName(item.name).toLowerCase());
-                    const showModels = !selectMode && (models?.variants.length ?? 0) > 1;
-                    const swapsOpen = openSwaps.has(item.path);
-                    return (
-                      <ContextMenu key={item.path}>
-                        <ContextMenuTrigger asChild>
-                          <div
-                            role="button"
-                            tabIndex={0}
-                            onClick={() =>
-                              selectMode ? toggleSelect(item.path) : setDetail(item)
-                            }
-                            onKeyDown={(e) =>
-                              e.key === "Enter" &&
-                              (selectMode ? toggleSelect(item.path) : setDetail(item))
-                            }
-                            className={cn(
-                              "group flex cursor-pointer flex-col self-start rounded-xl border bg-card p-3 transition-colors",
-                              isSel
-                                ? "border-primary/60 bg-primary/[0.06]"
-                                : "border-white/[0.07] hover:border-white/15",
-                            )}
-                          >
-                            <div className="flex w-full items-center gap-3">
-                            {selectMode && (
-                              <span className="flex-none">
-                                {isSel ? (
-                                  <CheckCircle2 className="size-5 text-primary" />
-                                ) : (
-                                  <Circle className="size-5 text-faint" />
-                                )}
-                              </span>
-                            )}
-                            <LibraryCardBody
-                              item={item}
-                              typeIcon={Icon}
-                              footer={
-                                showModels ? (
-                                  <button
-                                    title={t("library.modelsHint")}
-                                    aria-expanded={swapsOpen}
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      setOpenSwaps((prev) => {
-                                        const next = new Set(prev);
-                                        if (!next.delete(item.path)) next.add(item.path);
-                                        return next;
-                                      });
-                                    }}
-                                    className={cn(
-                                      "-ml-1 mt-0.5 flex w-fit max-w-full cursor-default items-center gap-1 truncate rounded px-1 py-0.5 text-[10.5px] font-semibold transition-colors hover:bg-foreground/[0.06]",
-                                      swapsOpen ? "text-primary" : "text-faint hover:text-primary",
-                                    )}
-                                  >
-                                    <Layers className="size-3 flex-none" />
-                                    {t("library.models", { count: models!.variants.length })}
-                                    <ChevronDown
-                                      className={cn(
-                                        "size-3 flex-none transition-transform",
-                                        swapsOpen && "rotate-180",
-                                      )}
-                                    />
-                                  </button>
-                                ) : undefined
+      <div className="flex min-h-0 flex-1">
+        {/* Separate libraries, not tabs of one screen — and the folders inside the one
+            you're in, which until now existed only inside the move dialog. */}
+        <aside className="flex w-[216px] flex-none flex-col overflow-y-auto border-r border-border pb-4">
+          <SideHeading label={t("nav.library")} />
+          {modTypes.map((mt) => (
+            <SideRow
+              key={mt.id}
+              label={t(mt.label)}
+              count={typeCounts.get(mt.id)}
+              bytes={typeBytes.get(mt.id)}
+              active={mt.id === modType.id}
+              onSelect={() => {
+                setPick(ALL);
+                if (mt.id !== modType.id) onChangeType(mt);
+              }}
+            />
+          ))}
+          <div className="mx-4 my-2 h-px bg-border" />
+          {/* Neither of these belongs to a mod type: what you bought and what you want are
+              facts about you, not about the folder you happen to be in. */}
+          <SideHeading label={t("library.yours")} />
+          <SideRow
+            label={t("owned.title")}
+            count={owned.loaded ? ownedShown.length : undefined}
+            active={pick.kind === "owned"}
+            onSelect={() => setPick({ kind: "owned" })}
+          />
+          <SideRow
+            label={t("wishlist.title")}
+            count={wishShown.length}
+            active={pick.kind === "wishlist"}
+            onSelect={() => setPick({ kind: "wishlist" })}
+          />
+          <div className="mx-4 my-2 h-px bg-border" />
+          <SideHeading label={t("library.folders")} />
+          <SideRow
+            label={t("installDialog.allFolders")}
+            count={inType.length}
+            bytes={inType.reduce((n, e) => n + e.size, 0)}
+            active={pick.kind === "all"}
+            onSelect={() => setPick(ALL)}
+          />
+          <SideRow
+            label={t("library.starred")}
+            count={starredCount}
+            bytes={starredBytes}
+            active={pick.kind === "starred"}
+            onSelect={() => setPick({ kind: "starred" })}
+          />
+          {folders.map((f) => (
+            <SideRow
+              key={f || "__root__"}
+              label={folderLabel(f)}
+              count={folderCounts.get(f)}
+              bytes={folderBytes.get(f)}
+              active={pick.kind === "folder" && pick.folder === f}
+              onSelect={() => setPick({ kind: "folder", folder: f })}
+            />
+          ))}
+          {/* Only once the player has asked to see what's gone — off, it isn't a place. */}
+          {showRemoved && (
+            <SideRow
+              label={t("library.showRemoved")}
+              count={allGhosts.length}
+              active={pick.kind === "removed"}
+              onSelect={() => setPick({ kind: "removed" })}
+            />
+          )}
+        </aside>
+
+        <div className="min-h-0 min-w-0 flex-1 overflow-y-auto px-7 pb-6 pt-3">
+          {pick.kind === "owned" ? (
+            <OwnedGrid
+              rows={ownedShown}
+              loading={owned.loading}
+              signedIn={owned.signedIn}
+              error={owned.error}
+              onOpenStore={onOpenStore}
+            />
+          ) : pick.kind === "wishlist" ? (
+            <WishlistGrid
+              items={wishShown}
+              onRemove={wishlist.remove}
+              onOpenMod={onOpenMod}
+              onOpenStore={onOpenStore}
+            />
+          ) : error ? (
+            <p className="select-text py-16 text-center text-[13px] text-destructive">
+              {error}
+            </p>
+          ) : loading ? (
+            <p className="py-16 text-center text-[13px] text-muted-foreground">
+              {t("library.scanning")}
+            </p>
+          ) : sections.length === 0 && ghosts.length === 0 ? (
+            <p className="py-16 text-center text-[13px] text-muted-foreground">
+              {pick.kind === "removed"
+                ? t("library.nothingRemoved")
+                : entries.length === 0
+                  ? t("library.empty", { type: t(modType.labelInline) })
+                  : t("library.noMatches")}
+            </p>
+          ) : (
+            <div className="flex flex-col gap-6">
+              {sections.map((section) => (
+                <section key={section.key} className="flex flex-col gap-2.5">
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-[12px] font-bold uppercase tracking-[1.2px] text-faint">
+                      ▸ {section.label}
+                    </span>
+                    <span className="text-[11px] text-faint">{section.items.length}</span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-3">
+                    {section.items.map((item) => {
+                      const actions = rowActions(item);
+                      const Icon = categoryIcon(item.category);
+                      const canView3d = entryViewerProps(item, entries, bikePreview) !== null;
+                      const isSel = selected.has(item.path);
+                      const starred = isStarred(item);
+                      // A bike's model swaps. The Locker always lists the active set as a row
+                      // of its own, so a bike with nothing to switch between still reports one
+                      // variant — only two or more is a choice worth a badge.
+                      const models = swaps.get(displayName(item.name).toLowerCase());
+                      const showModels = !selectMode && (models?.variants.length ?? 0) > 1;
+                      const swapsOpen = openSwaps.has(item.path);
+                      return (
+                        <ContextMenu key={item.path}>
+                          <ContextMenuTrigger asChild>
+                            <div
+                              role="button"
+                              tabIndex={0}
+                              onClick={() =>
+                                selectMode ? toggleSelect(item.path) : setDetail(item)
                               }
-                            />
-                            {!selectMode && (
-                              <button
-                                title={starred ? t("library.unstar") : t("library.star")}
-                                aria-label={starred ? t("library.unstar") : t("library.star")}
-                                aria-pressed={starred}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  favs.toggle(starId(modType, item));
-                                }}
-                                className={cn(
-                                  "flex-none cursor-default rounded-md p-1 transition-colors hover:bg-foreground/[0.06]",
-                                  starred
-                                    ? "text-amber-400"
-                                    : "text-faint opacity-0 hover:text-muted-foreground focus-visible:opacity-100 group-hover:opacity-100",
-                                )}
-                              >
-                                <Star className={cn("size-3.5", starred && "fill-current")} />
-                              </button>
-                            )}
-                            {!selectMode && canView3d && (
-                              <button
-                                title={t("library.quick3d")}
-                                aria-label={t("library.quick3d")}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setView3d(item);
-                                }}
-                                className="flex flex-none cursor-default items-center gap-1 whitespace-nowrap rounded-md px-1.5 py-1 text-[11px] font-semibold text-faint transition-colors hover:bg-foreground/[0.06] hover:text-primary"
-                              >
-                                <Box className="size-3.5" /> {t("library.quick3d")}
-                              </button>
-                            )}
-                            {!selectMode && (
-                              <DropdownMenu>
-                                <DropdownMenuTrigger asChild>
-                                  <button
-                                    disabled={busy}
-                                    onClick={(e) => e.stopPropagation()}
-                                    className="flex-none cursor-default rounded-md px-1 text-faint transition-colors hover:text-foreground"
-                                  >
-                                    <MoreHorizontal className="size-4" />
-                                  </button>
-                                </DropdownMenuTrigger>
-                                <DropdownMenuContent align="end">
-                                  {actions.map((a) => (
-                                    <Fragment key={a.key}>
-                                      {a.separatorBefore && <DropdownMenuSeparator />}
-                                      <DropdownMenuItem
-                                        variant={a.destructive ? "destructive" : "default"}
-                                        onSelect={a.onSelect}
-                                      >
-                                        <a.icon className="size-4" /> {a.label}
-                                      </DropdownMenuItem>
-                                    </Fragment>
-                                  ))}
-                                </DropdownMenuContent>
-                              </DropdownMenu>
-                            )}
-                            </div>
-                            {showModels && swapsOpen && (
-                              <ModelSwapList
-                                bike={models!.bike}
-                                variants={models!.variants}
-                                t={t}
-                                onChanged={onChanged}
-                                onPreview={
-                                  bikePreview
-                                    ? (variant) =>
-                                        setSwapView({ bike: models!.bike, variant })
-                                    : undefined
+                              onKeyDown={(e) =>
+                                e.key === "Enter" &&
+                                (selectMode ? toggleSelect(item.path) : setDetail(item))
+                              }
+                              className={cn(
+                                "group flex cursor-pointer flex-col self-start rounded-xl border bg-card p-3 transition-colors",
+                                isSel
+                                  ? "border-primary/60 bg-primary/[0.06]"
+                                  : "border-white/[0.07] hover:border-white/15",
+                              )}
+                            >
+                              <div className="flex w-full items-center gap-3">
+                              {selectMode && (
+                                <span className="flex-none">
+                                  {isSel ? (
+                                    <CheckCircle2 className="size-5 text-primary" />
+                                  ) : (
+                                    <Circle className="size-5 text-faint" />
+                                  )}
+                                </span>
+                              )}
+                              <LibraryCardBody
+                                item={item}
+                                typeIcon={Icon}
+                                footer={
+                                  showModels ? (
+                                    <button
+                                      title={t("library.modelsHint")}
+                                      aria-expanded={swapsOpen}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setOpenSwaps((prev) => {
+                                          const next = new Set(prev);
+                                          if (!next.delete(item.path)) next.add(item.path);
+                                          return next;
+                                        });
+                                      }}
+                                      className={cn(
+                                        "flex flex-none cursor-default items-center gap-1 rounded-full px-1.5 py-0.5 text-[10.5px] font-semibold transition-colors hover:bg-foreground/[0.06]",
+                                        swapsOpen ? "text-primary" : "text-faint hover:text-primary",
+                                      )}
+                                    >
+                                      <Layers className="size-3 flex-none" />
+                                      {t("library.models", { count: models!.variants.length })}
+                                      <ChevronDown
+                                        className={cn(
+                                          "size-3 flex-none transition-transform",
+                                          swapsOpen && "rotate-180",
+                                        )}
+                                      />
+                                    </button>
+                                  ) : undefined
                                 }
                               />
-                            )}
-                          </div>
-                        </ContextMenuTrigger>
-                        <ContextMenuContent>
-                          {actions.map((a) => (
-                            <Fragment key={a.key}>
-                              {a.separatorBefore && <ContextMenuSeparator />}
-                              <ContextMenuItem
-                                variant={a.destructive ? "destructive" : "default"}
-                                onSelect={a.onSelect}
-                              >
-                                <a.icon className="size-4" /> {a.label}
-                              </ContextMenuItem>
-                            </Fragment>
-                          ))}
-                        </ContextMenuContent>
-                      </ContextMenu>
-                    );
-                  })}
-                </div>
-              </section>
-            ))}
-            {/* After the installed grid, never mixed into it: these are a different kind of
-                fact and support a different set of actions. */}
-            {stockSection}
-            {ghostSection(
-              "__parked__",
-              t("section.parked"),
-              parked,
-              t("library.parkedNote"),
-            )}
-            {ghostSection("__gone__", t("section.removed"), gone, t("library.goneNote"))}
-            {showRemoved && ghosts.length === 0 && (
-              <p className="py-6 text-center text-[12.5px] text-faint">
-                <PackageOpen className="mr-1.5 inline size-3.5" />
-                {t("library.nothingRemoved")}
-              </p>
-            )}
-          </div>
-        )}
+                              {!selectMode && (
+                                <button
+                                  title={starred ? t("library.unstar") : t("library.star")}
+                                  aria-label={starred ? t("library.unstar") : t("library.star")}
+                                  aria-pressed={starred}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    favs.toggle(starId(modType, item));
+                                  }}
+                                  className={cn(
+                                    "flex-none cursor-default rounded-md p-1 transition-colors hover:bg-foreground/[0.06]",
+                                    starred
+                                      ? "text-amber-400"
+                                      : "text-faint opacity-0 hover:text-muted-foreground focus-visible:opacity-100 group-hover:opacity-100",
+                                  )}
+                                >
+                                  <Star className={cn("size-3.5", starred && "fill-current")} />
+                                </button>
+                              )}
+                              {!selectMode && canView3d && (
+                                <button
+                                  title={t("library.quick3d")}
+                                  aria-label={t("library.quick3d")}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setView3d(item);
+                                  }}
+                                  className="flex flex-none cursor-default items-center gap-1 whitespace-nowrap rounded-md px-1.5 py-1 text-[11px] font-semibold text-faint transition-colors hover:bg-foreground/[0.06] hover:text-primary"
+                                >
+                                  <Box className="size-3.5" /> {t("library.quick3d")}
+                                </button>
+                              )}
+                              {!selectMode && (
+                                <DropdownMenu>
+                                  <DropdownMenuTrigger asChild>
+                                    <button
+                                      disabled={busy}
+                                      onClick={(e) => e.stopPropagation()}
+                                      className="flex-none cursor-default rounded-md px-1 text-faint transition-colors hover:text-foreground"
+                                    >
+                                      <MoreHorizontal className="size-4" />
+                                    </button>
+                                  </DropdownMenuTrigger>
+                                  <DropdownMenuContent align="end">
+                                    {actions.map((a) => (
+                                      <Fragment key={a.key}>
+                                        {a.separatorBefore && <DropdownMenuSeparator />}
+                                        <DropdownMenuItem
+                                          variant={a.destructive ? "destructive" : "default"}
+                                          onSelect={a.onSelect}
+                                        >
+                                          <a.icon className="size-4" /> {a.label}
+                                        </DropdownMenuItem>
+                                      </Fragment>
+                                    ))}
+                                  </DropdownMenuContent>
+                                </DropdownMenu>
+                              )}
+                              </div>
+                              {showModels && swapsOpen && (
+                                <ModelSwapList
+                                  bike={models!.bike}
+                                  variants={models!.variants}
+                                  t={t}
+                                  onChanged={onChanged}
+                                  onPreview={
+                                    bikePreview
+                                      ? (variant) =>
+                                          setSwapView({ bike: models!.bike, variant })
+                                      : undefined
+                                  }
+                                />
+                              )}
+                            </div>
+                          </ContextMenuTrigger>
+                          <ContextMenuContent>
+                            {actions.map((a) => (
+                              <Fragment key={a.key}>
+                                {a.separatorBefore && <ContextMenuSeparator />}
+                                <ContextMenuItem
+                                  variant={a.destructive ? "destructive" : "default"}
+                                  onSelect={a.onSelect}
+                                >
+                                  <a.icon className="size-4" /> {a.label}
+                                </ContextMenuItem>
+                              </Fragment>
+                            ))}
+                          </ContextMenuContent>
+                        </ContextMenu>
+                      );
+                    })}
+                  </div>
+                </section>
+              ))}
+              {/* After the installed grid, never mixed into it: these are a different kind of
+                  fact and support a different set of actions. */}
+              {stockSection}
+              {ghostSection(
+                "__parked__",
+                t("section.parked"),
+                parked,
+                t("library.parkedNote"),
+              )}
+              {ghostSection("__gone__", t("section.removed"), gone, t("library.goneNote"))}
+              {showRemoved && ghosts.length === 0 && (
+                <p className="py-6 text-center text-[12.5px] text-faint">
+                  <PackageOpen className="mr-1.5 inline size-3.5" />
+                  {t("library.nothingRemoved")}
+                </p>
+              )}
+            </div>
+          )}
+        </div>
       </div>
 
       {selectMode && (

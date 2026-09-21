@@ -15,6 +15,7 @@ import {
   Share2,
   Copy,
   Loader2,
+  ChevronDown,
 } from "lucide-react";
 import { open as pickFolder, save as pickSavePath } from "@tauri-apps/plugin-dialog";
 import { open as openUrl } from "@tauri-apps/plugin-shell";
@@ -22,6 +23,7 @@ import { getVersion } from "@tauri-apps/api/app";
 import { toast } from "sonner";
 import PaintSync from "./PaintSync";
 import Plugins from "./Plugins";
+import Accounts from "./Accounts";
 import {
   countProfilesIn,
   detectGamePath,
@@ -107,7 +109,7 @@ import {
   type Colorway,
   type ThemeMode,
 } from "@frost/shared/Context/Theme";
-import { Trans, APP_NAME } from "@/i18n";
+import { APP_NAME, Trans } from "@/i18n";
 import { useI18n, type LocalePref, type TKey } from "@/i18n";
 import { getLocale, LOCALE_OPTIONS } from "@/i18n";
 import {
@@ -146,6 +148,7 @@ const DISCORD_URL = "https://discord.gg/3994Rr3ywb";
 
 export type SectionId =
   | "game"
+  | "accounts"
   | "folder"
   | "general"
   | "downloads"
@@ -177,35 +180,39 @@ export type SectionId =
  * paint sync has done, the download preferences beside each other — because General had
  * grown into the place every setting landed when nobody picked one.
  */
-const GROUPS: { label: TKey; sections: { id: SectionId; label: TKey }[] }[] = [
+const GROUPS: {
+  label: TKey;
+  advanced?: boolean;
+  sections: { id: SectionId; label: TKey }[];
+}[] = [
   {
     label: "settings.groupSetup",
     sections: [
       { id: "game", label: "game.label" },
       { id: "folder", label: "settings.gameFolder" },
       { id: "frostmod", label: "settings.frostmod" },
-      { id: "reshade", label: "settings.reshade" },
     ],
   },
   {
     label: "settings.groupApp",
     sections: [
       { id: "general", label: "settings.general" },
+      { id: "accounts", label: "accounts.section" },
       { id: "appearance", label: "settings.appearance" },
       { id: "downloads", label: "settings.downloads" },
-      { id: "overlay", label: "overlay.section" },
-      { id: "voice", label: "voice.section" },
-      { id: "paintsync", label: "settings.paintSync" },
-      { id: "plugins", label: "plugins.section" },
     ],
   },
   {
     label: "settings.groupAdvanced",
+    advanced: true,
     sections: [
+      { id: "overlay", label: "overlay.section" },
+      { id: "voice", label: "voice.section" },
+      { id: "paintsync", label: "settings.paintSync" },
+      { id: "reshade", label: "settings.reshade" },
+      { id: "plugins", label: "plugins.section" },
       { id: "secure", label: "settings.secure" },
       { id: "logs", label: "settings.logs" },
-      // Had no nav entry at all before this, and rendered in the middle of the scroll
-      // with nothing pointing at it.
     ],
   },
   {
@@ -216,6 +223,16 @@ const GROUPS: { label: TKey; sections: { id: SectionId; label: TKey }[] }[] = [
     ],
   },
 ];
+
+const ADVANCED_SECTIONS = new Set<SectionId>([
+  "overlay",
+  "voice",
+  "paintsync",
+  "reshade",
+  "plugins",
+  "secure",
+  "logs",
+]);
 
 /** Default shown before the backend answers, so the field is never blank. */
 const FALLBACK_HOTKEY = "CommandOrControl+Shift+X";
@@ -265,8 +282,29 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
     writeDownloadPrefs(next);
     setDlPrefsState(next);
   }, []);
-  const { running, reload, status, installing, checking, statusError, install, start, stop, refreshStatus, missingRuntime, installRuntime, installingRuntime, repairRuntimes, repairingRuntimes, strayMsvcr90, clearingStray, clearStrayMsvcr90 } =
-    useFrostmod();
+  const {
+    integrationChoice,
+    enableIntegration,
+    useAppOnly: chooseAppOnly,
+    running,
+    reload,
+    status,
+    installing,
+    checking,
+    statusError,
+    install,
+    start,
+    stop,
+    refreshStatus,
+    missingRuntime,
+    installRuntime,
+    installingRuntime,
+    repairRuntimes,
+    repairingRuntimes,
+    strayMsvcr90,
+    clearingStray,
+    clearStrayMsvcr90,
+  } = useFrostmod();
   const { check: checkForUpdates } = useUpdate();
   const { startTour } = useTour();
   const [version, setVersion] = useState("");
@@ -276,9 +314,13 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
   // itself here. `getVersion()` covers the moment before that call lands.
   const shownVersion = experimental?.version || version;
   const [wanted, setActive] = useState<SectionId>(initialSection ?? "folder");
-  // Whether the local packer module is present. Declared up here because the nav below
-  // asks it, not just the section: without the module there is nothing for the secure
-  // content section to do.
+  const [showAdvanced, setShowAdvanced] = useState(
+    () => initialSection != null && ADVANCED_SECTIONS.has(initialSection),
+  );
+  const [showIntegrationAdvanced, setShowIntegrationAdvanced] = useState(false);
+  const [showIntegrationDetails, setShowIntegrationDetails] = useState(false);
+  // Whether this build can open protected content. Declared here because the nav needs the
+  // capability too; unavailable controls should not be offered to the player.
   const [secureAvailable, setSecureAvailable] = useState(false);
   // FrostMod is a Win32 DLL injected into the game and has no GP Bikes build, so its
   // section isn't there to open either — and neither is the game picker when there's only
@@ -293,6 +335,8 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
         (s.id !== "secure" || secureAvailable),
     ),
   })).filter((g) => g.sections.length > 0);
+  const primaryGroups = groups.filter((g) => !g.advanced);
+  const advancedGroup = groups.find((g) => g.advanced);
   // Only one section is on screen, so being sent to one this build doesn't have would
   // leave the page empty rather than merely missing a card the way the old scroll did —
   // `initialSection="frostmod"` on a Mac, say. Fall back to the first section there is.
@@ -946,6 +990,7 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
   useEffect(() => {
     if (!initialSection) return;
     setActive(initialSection);
+    if (ADVANCED_SECTIONS.has(initialSection)) setShowAdvanced(true);
   }, [initialSection]);
 
   const changeFolder = async () => {
@@ -1121,7 +1166,7 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
   return (
     <div className="flex h-full">
       <ContextBarLeft>
-      <span className="flex items-center font-cond text-[12.5px] font-semibold uppercase tracking-[0.16em] text-foreground">
+      <span className="flex items-center font-cond text-[12.5px] font-semibold tracking-[-0.02em] text-foreground">
         {t("nav.settings")}
       </span>
     </ContextBarLeft>
@@ -1130,7 +1175,7 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
     </ContextBarRight>
 
     <nav className="flex w-[170px] flex-none flex-col gap-4 overflow-y-auto px-4 pb-5 pt-[70px]">
-        {groups.map((g) => (
+        {primaryGroups.map((g) => (
           <div key={g.label} className="flex flex-col gap-0.5">
             <span className="px-3 pb-1 text-[10.5px] font-semibold uppercase tracking-wide text-faint">
               {t(g.label)}
@@ -1151,6 +1196,46 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
             ))}
           </div>
         ))}
+        {advancedGroup && (
+          <div className="flex flex-col gap-0.5">
+            <button
+              type="button"
+              aria-expanded={showAdvanced}
+              onClick={() => {
+                const next = !showAdvanced;
+                setShowAdvanced(next);
+                if (!next && ADVANCED_SECTIONS.has(active)) {
+                  setActive("general");
+                  pane.current?.scrollTo({ top: 0 });
+                }
+              }}
+              className="flex cursor-default items-center justify-between rounded-md px-3 py-1.5 text-left text-[10.5px] font-semibold uppercase tracking-wide text-faint transition-colors hover:text-foreground"
+            >
+              {t(advancedGroup.label)}
+              <ChevronDown
+                className={cn(
+                  "size-3 transition-transform",
+                  showAdvanced && "rotate-180",
+                )}
+              />
+            </button>
+            {showAdvanced &&
+              advancedGroup.sections.map((s) => (
+                <button
+                  key={s.id}
+                  onClick={() => goto(s.id)}
+                  className={cn(
+                    "cursor-default rounded-md px-3 py-1.5 text-left text-[12.5px] transition-colors",
+                    active === s.id
+                      ? "bg-foreground/[0.07] font-semibold text-foreground"
+                      : "text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  {t(s.label)}
+                </button>
+              ))}
+          </div>
+        )}
       </nav>
 
       <div ref={pane} className="min-h-0 flex-1 overflow-y-auto px-2 py-5">
@@ -1171,7 +1256,7 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
             desc={t("settings.modsFolderDesc")}
           >
             <div className="flex gap-2">
-              <div className="flex min-w-0 flex-1 items-center gap-2 rounded-lg border border-input bg-background px-3 py-2.5 font-mono text-[12px] text-muted-foreground">
+              <div className="flex min-w-0 flex-1 items-center gap-2 rounded-lg bg-background px-3 py-2.5 font-mono text-[12px] text-muted-foreground">
                 {/* Named rather than a bare "Not set": switching to a title the player
                     hasn't installed lands here, and "Not set" says neither what to set
                     nor which game it's for. */}
@@ -1239,7 +1324,7 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
               <div className="mt-2 flex gap-2">
                 <div
                   className={cn(
-                    "flex min-w-0 flex-1 items-center gap-2 rounded-lg border border-input bg-background px-3 py-2 font-mono text-[12px]",
+                    "flex min-w-0 flex-1 items-center gap-2 rounded-lg bg-background px-3 py-2 font-mono text-[12px]",
                     config.profilesPath ? "text-muted-foreground" : "text-faint",
                   )}
                 >
@@ -1285,7 +1370,7 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
               />
             </p>
             <div className="flex gap-2">
-              <div className="flex min-w-0 flex-1 items-center gap-2 rounded-lg border border-input bg-background px-3 py-2.5 font-mono text-[12px] text-muted-foreground">
+              <div className="flex min-w-0 flex-1 items-center gap-2 rounded-lg bg-background px-3 py-2.5 font-mono text-[12px] text-muted-foreground">
                 <span className="flex-1 truncate" title={config.gamePath}>
                   {config.gamePath || t("settings.notSet")}
                 </span>
@@ -1315,7 +1400,7 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
                   {t("settings.wineRunnerDesc", { game: game.display })}
                 </p>
                 <div className="flex gap-2">
-                  <div className="flex min-w-0 flex-1 items-center gap-2 rounded-lg border border-input bg-background px-3 py-2.5 font-mono text-[12px] text-muted-foreground">
+                  <div className="flex min-w-0 flex-1 items-center gap-2 rounded-lg bg-background px-3 py-2.5 font-mono text-[12px] text-muted-foreground">
                     <span className="flex-1 truncate" title={wineHost?.runner}>
                       {wineHost?.runner || t("settings.wineRunnerNone")}
                     </span>
@@ -1392,6 +1477,16 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
               checked={queueRestartGame}
               onChange={toggleQueueRestartGame}
             />
+          </Section>
+          )}
+
+          {/* Every sign-in the app holds. Steam used to be findable only inside Secure
+              content and the two store sign-ins only inside each store's Purchases tab —
+              which meant the answer to "am I signed in?" was in three different places and
+              none of them was Settings. */}
+          {active === "accounts" && (
+          <Section title={t("accounts.section")} desc={t("accounts.desc")}>
+            <Accounts />
           </Section>
           )}
 
@@ -1702,7 +1797,7 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
             {/* The room. Nothing here is a control except mute: joining happens because
                 the rider is on a server, which is the whole point of the feature. */}
             {voiceEnabled && (
-              <div className="space-y-2 rounded-md border border-border/60 p-3">
+              <div className="space-y-2 rounded-lg bg-background p-3">
                 <div className="flex items-center gap-2">
                   <span
                     className={cn(
@@ -2017,7 +2112,7 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
               </Select>
             </div>
 
-            {/* A Select, not a Segmented control — seven options don't fit the
+            {/* A Select, not a Segmented control — eight options don't fit the
                 segmented track, and each is named in its own language so someone
                 who lands in a script they can't read can still get back out. */}
             <div className="mt-3 flex items-center justify-between">
@@ -2074,12 +2169,69 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
               </span>
             }
           >
-            <p className="text-[12px] leading-relaxed text-muted-foreground">
-              Live-reloads MX Bikes when mods change, so you don&apos;t restart the game.
-              {APP_NAME} installs it, keeps it updated, and runs it for you.
-            </p>
+            <div>
+              <p className="text-[12px] leading-relaxed text-muted-foreground">
+                {t("settings.integrationIntro")}
+              </p>
+              <p className="mt-1 text-[11px] font-medium text-muted-foreground">
+                {t("integration.poweredBy")}
+              </p>
+            </div>
 
-            <div className="flex items-center justify-between rounded-lg border border-input bg-background px-3 py-2.5">
+            <div className="rounded-lg border border-border/70">
+              <button
+                type="button"
+                aria-expanded={showIntegrationDetails}
+                onClick={() => setShowIntegrationDetails((open) => !open)}
+                className="flex w-full cursor-default items-center justify-between px-3 py-2.5 text-left text-[12.5px] font-medium text-foreground/85"
+              >
+                {t("integration.details")}
+                <ChevronDown
+                  className={cn(
+                    "size-3.5 text-muted-foreground transition-transform",
+                    showIntegrationDetails && "rotate-180",
+                  )}
+                />
+              </button>
+              {showIntegrationDetails && (
+                <div className="border-t border-border/70 px-3 py-3">
+                  <p className="mb-3 text-[12px] font-medium text-foreground/85">
+                    {t("integration.detailsTitle")}
+                  </p>
+                  <dl className="grid grid-cols-[120px_minmax(0,1fr)] gap-x-3 gap-y-2 text-[11.5px] leading-relaxed">
+                    <dt className="text-muted-foreground">{t("integration.components")}</dt>
+                    <dd className="text-foreground/80">{t("integration.componentsValue")}</dd>
+                    <dt className="text-muted-foreground">{t("integration.source")}</dt>
+                    <dd>
+                      <button
+                        type="button"
+                        onClick={() => openUrl("https://github.com/Frostn1/frostmod")}
+                        className="inline-flex cursor-default items-center gap-1 text-foreground/80 underline decoration-border underline-offset-2 hover:text-foreground"
+                      >
+                        {t("integration.sourceValue")}
+                        <ExternalLink className="size-3" />
+                      </button>
+                    </dd>
+                    <dt className="text-muted-foreground">
+                      {t("integration.installLocation")}
+                    </dt>
+                    <dd className="text-foreground/80">
+                      {t("integration.installLocationValue")}
+                    </dd>
+                    <dt className="text-muted-foreground">{t("integration.network")}</dt>
+                    <dd className="text-foreground/80">{t("integration.networkValue")}</dd>
+                    <dt className="text-muted-foreground">{t("integration.integrity")}</dt>
+                    <dd className="text-foreground/80">{t("integration.integrityValue")}</dd>
+                  </dl>
+                  <div className="mt-3 space-y-1 rounded-md bg-foreground/[0.03] px-2.5 py-2 text-[11.5px] leading-relaxed text-muted-foreground">
+                    <p>{t("integration.standardMods")}</p>
+                    <p>{t("integration.protectedMods")}</p>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center justify-between rounded-lg bg-background px-3 py-2.5">
               <div className="flex flex-col">
                 <span className="text-[12.5px] text-foreground/85">
                   {status?.installed
@@ -2227,44 +2379,67 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
               </div>
             </div>
 
-            <ToggleRow
-              label={t("settings.autoRunFrostmod")}
-              desc={t("settings.autoRunFrostmodDesc")}
-              checked={autoRunFrostmod}
-              onChange={toggleAutoRun}
-            />
+            {integrationChoice === "enabled" && (
+              <>
+                <ToggleRow
+                  label={t("settings.autoRunFrostmod")}
+                  desc={t("settings.autoRunFrostmodDesc", {
+                    app: APP_NAME || "MXB App",
+                  })}
+                  checked={autoRunFrostmod}
+                  onChange={toggleAutoRun}
+                />
 
-            <ToggleRow
-              label={t("settings.watchModsReload")}
-              desc={t("settings.watchModsReloadDesc")}
-              checked={watchModsReload}
-              onChange={toggleWatchModsReload}
-            />
+                <ToggleRow
+                  label={t("settings.watchModsReload")}
+                  desc={t("settings.watchModsReloadDesc", {
+                    app: APP_NAME || "MXB App",
+                  })}
+                  checked={watchModsReload}
+                  onChange={toggleWatchModsReload}
+                />
 
-            {/* FrostMod's own flags, typed. A plain field rather than a toggle each: these
-                are diagnostics that come and go with FrostMod's releases, and the app would
-                otherwise have to ship a new build to offer one. `--game` and `--mods` are
-                still sent by the app; anything typed here follows them. */}
-            <div className="flex flex-col gap-1.5">
-              <span className="text-[12.5px] text-foreground/85">
-                {t("settings.frostmodArgs")}
-              </span>
-              <input
-                value={frostmodArgs}
-                spellCheck={false}
-                placeholder="--probe-overjump"
-                onChange={(e) => setFrostmodArgsDraft(e.currentTarget.value)}
-                onBlur={saveFrostmodArgs}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") e.currentTarget.blur();
-                }}
-                className="min-w-0 flex-1 rounded-lg border border-input bg-background px-3 py-2 font-mono text-[12px] text-muted-foreground"
-              />
-              <span className="text-[11.5px] text-muted-foreground">
-                {t("settings.frostmodArgsDesc")}
-              </span>
-            </div>
-
+                <div className="rounded-lg border border-border/70">
+              <button
+                type="button"
+                aria-expanded={showIntegrationAdvanced}
+                onClick={() => setShowIntegrationAdvanced((open) => !open)}
+                className="flex w-full cursor-default items-center justify-between px-3 py-2.5 text-left text-[12.5px] font-medium text-foreground/85"
+              >
+                {t("settings.groupAdvanced")}
+                <ChevronDown
+                  className={cn(
+                    "size-3.5 text-muted-foreground transition-transform",
+                    showIntegrationAdvanced && "rotate-180",
+                  )}
+                />
+              </button>
+              {showIntegrationAdvanced && (
+                <div className="flex flex-col gap-4 border-t border-border/70 px-3 py-3">
+                  <div className="flex flex-col gap-1.5">
+                    <span className="text-[12.5px] text-foreground/85">
+                      {t("settings.frostmodArgs")}
+                    </span>
+                    <input
+                      value={frostmodArgs}
+                      spellCheck={false}
+                      placeholder="--probe-overjump"
+                      onChange={(e) => setFrostmodArgsDraft(e.currentTarget.value)}
+                      onBlur={saveFrostmodArgs}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") e.currentTarget.blur();
+                      }}
+                      className="min-w-0 flex-1 rounded-lg border border-input bg-background px-3 py-2 font-mono text-[12px] text-muted-foreground"
+                    />
+                    <span className="text-[11.5px] text-muted-foreground">
+                      {t("settings.frostmodArgsDesc")}
+                    </span>
+                  </div>
+                </div>
+              )}
+                </div>
+              </>
+            )}
             {/* Only once FrostMod is on disk: without an install there is no config to
                 edit, and the keys would be an offer that quietly does nothing. */}
 
@@ -2274,20 +2449,32 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
                   on `installed` left the one case that needs it most (something running
                   that we didn't put there) with no button at all. Start still needs an
                   install to start. */}
-              {running ? (
+              {integrationChoice === "enabled" && running ? (
                 <Button variant="outline" size="sm" onClick={stop}>
                   <Square className="size-3.5" /> {t("frostmod.stop")}
                 </Button>
               ) : (
-                status?.installed && (
+                integrationChoice === "enabled" && status?.installed && (
                   <Button variant="default" size="sm" onClick={start}>
                     <Play className="size-3.5" /> {t("frostmod.start")}
                   </Button>
                 )
               )}
-              <Button variant="outline" size="sm" onClick={reloadGame} disabled={!running}>
-                <RefreshCw className="size-3.5" /> Reload game now
-              </Button>
+              {integrationChoice === "enabled" && (
+                <Button variant="outline" size="sm" onClick={reloadGame} disabled={!running}>
+                  <RefreshCw className="size-3.5" /> {t("frostmod.reloadGame")}
+                </Button>
+              )}
+              {integrationChoice === "enabled" && (
+                <Button variant="ghost" size="sm" onClick={chooseAppOnly}>
+                  {t("setup.integrationUseAppOnly")}
+                </Button>
+              )}
+              {integrationChoice === "app-only" && (
+                <Button size="sm" onClick={() => void enableIntegration()}>
+                  {t("setup.integrationEnable")}
+                </Button>
+              )}
             </div>
           </Section>
           )}
@@ -2319,7 +2506,7 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
                 mention of it on the page. */}
             {hasFrostmod && caps.frostmod && (
               <LogRow
-                label="FrostMod"
+                label={t("integration.title")}
                 hint={t("logs.frostmodLogsDesc")}
                 group={logs?.frostmod}
                 onOpen={() => openLogs("frostmod")}
@@ -2600,7 +2787,7 @@ function LogRow({
         <span className="text-[11.5px] text-muted-foreground">{hint}</span>
       </div>
       <div className="flex gap-2">
-        <div className="flex min-w-0 flex-1 items-center rounded-lg border border-input bg-background px-3 py-2 font-mono text-[12px] text-muted-foreground">
+        <div className="flex min-w-0 flex-1 items-center rounded-lg bg-background px-3 py-2 font-mono text-[12px] text-muted-foreground">
           <span className="flex-1 truncate" title={group?.dir || undefined}>
             {group?.dir || t("settings.notSet")}
           </span>
@@ -2740,7 +2927,7 @@ function Section({
   children: React.ReactNode;
 }) {
   return (
-    <div className="flex flex-col gap-3 rounded-xl border border-input bg-card p-[18px]">
+    <div className="flex flex-col gap-3 rounded-xl bg-card p-[18px]">
       <div className="flex items-center gap-2">
         <span className="flex-1 text-[14px] font-bold">{title}</span>
         {titleRight}

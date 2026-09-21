@@ -5,11 +5,11 @@ import {
   Loader2,
   RefreshCw,
   RotateCcw,
-  Search,
   Share2,
   Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
+import { SearchBox } from "@frost/shared/Components/ui/search-box";
 import { cn } from "@frost/shared/lib/utils";
 import { Button } from "@frost/shared/Components/ui/button";
 import { ContextBarLeft, ContextBarRight, ContextTab } from "../Shell/ContextBar";
@@ -612,15 +612,12 @@ function ModsPanel({
       </ContextBarLeft>
 
       <ContextBarRight>
-        <div className="flex h-7 w-[210px] items-center gap-2 border border-input bg-card px-2.5">
-          <Search className="size-3.5 text-faint" />
-          <input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder={t("library.searchPlaceholder")}
-            className="w-full bg-transparent text-[12.5px] placeholder:text-faint focus:outline-none"
-          />
-        </div>
+        <SearchBox
+          value={search}
+          onChange={setSearch}
+          placeholder={t("library.searchPlaceholder")}
+          className="w-[210px]"
+        />
         <Button
           variant="outline"
           size="sm"
@@ -644,28 +641,28 @@ function ModsPanel({
           it. */}
       <div className="flex flex-none items-end gap-8 border-b border-border px-7 pb-3 pt-1">
         <div>
-          <div className="font-cond text-[22px] font-bold leading-none tabular-nums text-foreground">
+          <div className="font-cond tracking-[-0.045em] text-[22px] font-bold leading-none tabular-nums text-foreground">
             {mounted.length}
             <span className="text-[14px] text-muted-foreground"> / {mods.length}</span>
           </div>
-          <div className="mt-1.5 font-cond text-[10px] font-semibold uppercase tracking-[0.2em] text-faint">
+          <div className="mt-1.5 font-cond text-[10px] font-semibold uppercase tracking-[0.14em] text-faint">
             {t("manage.tabMods")}
           </div>
         </div>
         <div>
-          <div className="font-cond text-[22px] font-bold leading-none tabular-nums text-foreground">
+          <div className="font-cond tracking-[-0.045em] text-[22px] font-bold leading-none tabular-nums text-foreground">
             {formatBytes(mounted.reduce((n, m) => n + (m.size ?? 0), 0))}
           </div>
-          <div className="mt-1.5 font-cond text-[10px] font-semibold uppercase tracking-[0.2em] text-faint">
+          <div className="mt-1.5 font-cond text-[10px] font-semibold uppercase tracking-[0.14em] text-faint">
             {t("manage.loadCostLabel")}
           </div>
         </div>
         {parked > 0 && (
           <div>
-            <div className="font-cond text-[22px] font-bold leading-none tabular-nums text-warning">
+            <div className="font-cond tracking-[-0.045em] text-[22px] font-bold leading-none tabular-nums text-warning">
               {parked}
             </div>
-            <div className="mt-1.5 font-cond text-[10px] font-semibold uppercase tracking-[0.2em] text-faint">
+            <div className="mt-1.5 font-cond text-[10px] font-semibold uppercase tracking-[0.14em] text-faint">
               {t("manage.parkedLabel")}
             </div>
           </div>

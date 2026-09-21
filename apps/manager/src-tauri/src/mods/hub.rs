@@ -345,7 +345,7 @@ fn store_api(path: &str) -> String {
 
 pub async fn search(
     query: &str,
-    category_id: Option<u64>,
+    category_ids: &[u64],
     page: u32,
     sort: HubSort,
     on_sale_only: bool,
@@ -361,8 +361,9 @@ pub async fn search(
     if !query.is_empty() {
         req = req.query(&[("search", query)]);
     }
-    if let Some(id) = category_id {
-        req = req.query(&[("category", id.to_string())]);
+    if let Some(categories) = category_filter(category_ids) {
+        req = req.query(&[("category", categories)]);
+        req = req.query(&[("category_operator", "in")]);
     }
     if on_sale_only {
         req = req.query(&[("on_sale", "true")]);
@@ -411,6 +412,10 @@ pub async fn search(
         has_more: page < total_pages,
         currency,
     })
+}
+
+fn category_filter(ids: &[u64]) -> Option<String> {
+    (!ids.is_empty()).then(|| ids.iter().map(u64::to_string).collect::<Vec<_>>().join(","))
 }
 
 pub async fn detail(id: u64) -> anyhow::Result<HubModDetail> {
@@ -768,6 +773,15 @@ mod tests {
         serde_json::from_str(PRODUCTS).expect("the products fixture must still parse")
     }
 
+    #[test]
+    fn grouped_categories_use_the_store_api_comma_list() {
+        assert_eq!(category_filter(&[]), None);
+        assert_eq!(
+            category_filter(&[51, 108, 100, 23, 168, 136]).as_deref(),
+            Some("51,108,100,23,168,136")
+        );
+    }
+
     /// The fixtures are real responses, captured 2026-08-30. If the store changes shape, this
     /// is what says so.
     #[test]
@@ -917,7 +931,7 @@ mod tests {
     #[tokio::test]
     #[ignore = "hits shop.mxb-hub.com"]
     async fn hub_live_catalog_answers() {
-        let page = search("", None, 1, HubSort::Newest, false).await.unwrap();
+        let page = search("", &[], 1, HubSort::Newest, false).await.unwrap();
         assert_eq!(page.items.len(), PER_PAGE as usize);
         assert!(page.total > 100, "total was {}", page.total);
         assert!(page.has_more);
@@ -928,11 +942,15 @@ mod tests {
         assert!(cats.iter().any(|c| c.slug == "free-mods"));
 
         // Search, category filter and paging all narrow what comes back.
-        let free = search("", Some(163), 1, HubSort::PriceAsc, false).await.unwrap();
+        let free = search("", &[163], 1, HubSort::PriceAsc, false)
+            .await
+            .unwrap();
         assert!(free.total > 0 && free.total < page.total);
         assert!(free.items.iter().all(|i| i.price.free), "{:#?}", free.items);
 
-        let searched = search("honda", None, 1, HubSort::Newest, false).await.unwrap();
+        let searched = search("honda", &[], 1, HubSort::Newest, false)
+            .await
+            .unwrap();
         assert!(searched.total > 0 && searched.total < page.total);
 
         // Detail, on whatever the newest item happens to be.

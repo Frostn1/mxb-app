@@ -36,8 +36,9 @@ interface Props {
   missing: boolean;
   /** Where a missing track comes from, when our server knows. */
   product?: CatalogTrack;
-  /** Its track is installing, to join once it lands. */
+  /** Its track is installing. */
   installing: boolean;
+  onInstall: (s: MasterServer, product: CatalogTrack) => void;
   onInstallJoin: (s: MasterServer, product: CatalogTrack) => void;
   favourite: boolean;
   /** Riders on this server running paint sync. */
@@ -48,7 +49,7 @@ interface Props {
   /** The player's place, when they're in line for this server. */
   queuePosition: number | null;
   onOpen: (s: MasterServer) => void;
-  onJoin: (address: string) => void;
+  onJoin: (server: MasterServer) => void;
   onWait: (s: MasterServer) => void;
   onCopy: (address: string) => void;
   onToggleFavourite: (address: string) => void;
@@ -64,6 +65,7 @@ const ServerCard = memo(function ServerCard({
   missing,
   product,
   installing,
+  onInstall,
   onInstallJoin,
   favourite,
   paintSync,
@@ -81,6 +83,8 @@ const ServerCard = memo(function ServerCard({
   const cat = s.categories[0];
   const stop = (e: React.MouseEvent) => e.stopPropagation();
   // The player's own copy wins; a missing track shows what it looks like, from our server.
+  // The player's own copy wins; a track they do NOT have shows what it looks like, from
+  // the store. Never the other way round — that is a guess at a name match.
   const picture = art || (missing ? product?.image : null);
   const free = missing && product?.source === "mods" && !!product.slug;
   const sold = missing && product?.source === "shop" ? product : null;
@@ -232,19 +236,33 @@ const ServerCard = memo(function ServerCard({
               <Loader2 className="size-3.5 animate-spin" />
               {t("serverBrowser.installing")}
             </CardButton>
-          ) : free && s.joinable && product ? (
-            <CardButton
-              primary
-              disabled={busy}
-              onClick={(e) => {
-                stop(e);
-                onInstallJoin(s, product);
-              }}
-              title={t("serverBrowser.installJoinHint", { title: product.name })}
-            >
-              <Download className="size-3.5" />
-              {t("serverBrowser.installJoin")}
-            </CardButton>
+          ) : free && product ? (
+            <>
+              <CardButton
+                primary={!s.joinable}
+                className="flex-none"
+                onClick={(e) => {
+                  stop(e);
+                  onInstall(s, product);
+                }}
+                title={t("serverBrowser.installHint", { title: product.name })}
+              >
+                {t("serverBrowser.install")}
+              </CardButton>
+              {s.joinable && (
+                <CardButton
+                  primary
+                  disabled={busy}
+                  onClick={(e) => {
+                    stop(e);
+                    onInstallJoin(s, product);
+                  }}
+                  title={t("serverBrowser.installJoinHint", { title: product.name })}
+                >
+                  {t("serverBrowser.installJoin")}
+                </CardButton>
+              )}
+            </>
           ) : sold ? (
             <CardButton
               primary
@@ -274,7 +292,7 @@ const ServerCard = memo(function ServerCard({
               disabled={busy || !s.joinable}
               onClick={(e) => {
                 stop(e);
-                onJoin(s.address);
+                onJoin(s);
               }}
               title={s.joinable ? t("serverBrowser.join") : t("serverBrowser.notJoinable")}
             >

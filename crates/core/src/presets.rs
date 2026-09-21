@@ -243,7 +243,12 @@ impl IniDoc {
             }
             self.lines.insert(insert, format!("{key}={value}"));
         } else {
-            if self.lines.last().map(|l| !l.trim().is_empty()).unwrap_or(false) {
+            if self
+                .lines
+                .last()
+                .map(|l| !l.trim().is_empty())
+                .unwrap_or(false)
+            {
                 self.lines.push(String::new());
             }
             self.lines.push(format!("[{section}]"));
@@ -277,7 +282,10 @@ impl IniDoc {
     /// `protection`, since it bakes those into the rider model — so rather than ship a
     /// guessed list per title, the file is asked what it has.
     pub fn sections(&self) -> Vec<String> {
-        self.lines.iter().filter_map(|l| Self::header_name(l).map(str::to_string)).collect()
+        self.lines
+            .iter()
+            .filter_map(|l| Self::header_name(l).map(str::to_string))
+            .collect()
     }
 
     pub fn has_section(&self, section: &str) -> bool {
@@ -461,6 +469,31 @@ pub fn active_bike(profiles_dir: &Path, profile: &str) -> Option<String> {
         .filter(|b| !b.is_empty())
 }
 
+/// Change only the bike the game will start on, preserving every per-bike cosmetic value.
+///
+/// This is the narrow write used before a server-list launch chooses a compatible installed
+/// bike. It follows the same encoding, rolling-backup, and Windows error path as loadout
+/// application, without manufacturing empty paint/rider rows for a bike the profile has not
+/// used before.
+pub fn set_active_bike(profiles_dir: &Path, profile: &str, bikeid: &str) -> anyhow::Result<()> {
+    let bikeid = bikeid.trim();
+    anyhow::ensure!(!bikeid.is_empty(), "bike id is empty");
+    anyhow::ensure!(
+        !bikeid.contains(['\r', '\n']),
+        "bike id contains a line break"
+    );
+
+    let path = profile_ini_path(profiles_dir, profile);
+    let bytes = fs::read(&path).with_context(|| format!("reading {}", path.display()))?;
+    let bak = PathBuf::from(format!("{}.bak", path.display()));
+    let _ = fs::write(&bak, &bytes);
+
+    let (text, was_utf8) = decode_ini(&bytes);
+    let mut doc = IniDoc::parse(&text);
+    doc.set("info", "bikeid", bikeid);
+    write_profile_ini(&path, encode_ini(&doc.render(), was_utf8))
+}
+
 fn loadout_in(doc: &IniDoc, bikeid: &str) -> Loadout {
     let mut lo = Loadout::default();
     for section in SLOT_SECTIONS {
@@ -480,7 +513,9 @@ fn loadout_in(doc: &IniDoc, bikeid: &str) -> Loadout {
 
 /// Whether a `profile.ini` section is a cosmetic slot rather than bookkeeping.
 fn is_slot_section(section: &str) -> bool {
-    !NON_SLOT_SECTIONS.iter().any(|s| s.eq_ignore_ascii_case(section))
+    !NON_SLOT_SECTIONS
+        .iter()
+        .any(|s| s.eq_ignore_ascii_case(section))
 }
 
 /// The slots a profile actually has, in file order. Lets the UI show the pickers this
@@ -639,8 +674,8 @@ pub fn find_preset(dir: &Path, name: &str) -> Option<Preset> {
 const CODE_PREFIX: &str = "MXBP1-";
 
 pub fn export_code(dir: &Path, name: &str) -> anyhow::Result<String> {
-    let preset = find_preset(dir, name)
-        .ok_or_else(|| anyhow::anyhow!("no preset named '{name}'"))?;
+    let preset =
+        find_preset(dir, name).ok_or_else(|| anyhow::anyhow!("no preset named '{name}'"))?;
     Ok(encode_code(&preset))
 }
 
@@ -761,8 +796,10 @@ mod tests {
         assert!(denied.contains("profile.ini"));
         assert_eq!(denied.contains("Controlled folder access"), cfg!(windows));
 
-        let missing =
-            format!("{:#}", profile_write_error(path, std::io::ErrorKind::NotFound.into()));
+        let missing = format!(
+            "{:#}",
+            profile_write_error(path, std::io::ErrorKind::NotFound.into())
+        );
         assert!(missing.starts_with("writing "));
         assert!(!missing.contains("Controlled folder access"));
     }
@@ -863,13 +900,19 @@ BSB23_Ducati_V4R=BS_Racing_Battlax
         write_gp_sample(&root, "rider1");
         let slots = slots_for(&root.join("profiles"), "rider1").unwrap();
 
-        assert!(slots.contains(&"riding_style".to_string()), "shared slot: {slots:?}");
+        assert!(
+            slots.contains(&"riding_style".to_string()),
+            "shared slot: {slots:?}"
+        );
         assert!(slots.contains(&"helmet_paint".to_string()));
         assert!(!slots.contains(&"info".to_string()), "[info] is not a slot");
         // The proof the list is the file's and not MX Bikes': these three are in
         // `SLOT_SECTIONS` but not in this profile, so a hardcoded list would offer them.
         for mx_only in ["goggles_paint", "boots", "protection"] {
-            assert!(!slots.contains(&mx_only.to_string()), "GP has no {mx_only}: {slots:?}");
+            assert!(
+                !slots.contains(&mx_only.to_string()),
+                "GP has no {mx_only}: {slots:?}"
+            );
         }
         let _ = fs::remove_dir_all(&root);
     }
@@ -889,17 +932,32 @@ BSB23_Ducati_V4R=BS_Racing_Battlax
         let profiles = root.join("profiles");
 
         let mut lo = read_loadout(&profiles, "rider1", "BSB23_Ducati_V4R").unwrap();
-        assert_eq!(lo.extra.get("visor_tint").map(String::as_str), Some("Smoke"));
-        assert_eq!(lo.helmet, "AGV Pista GP RR", "shared slots still use their fields");
-        assert_eq!(lo.riding_style, "Elbow Down", "riding_style is a named field, not extra");
+        assert_eq!(
+            lo.extra.get("visor_tint").map(String::as_str),
+            Some("Smoke")
+        );
+        assert_eq!(
+            lo.helmet, "AGV Pista GP RR",
+            "shared slots still use their fields"
+        );
+        assert_eq!(
+            lo.riding_style, "Elbow Down",
+            "riding_style is a named field, not extra"
+        );
 
         lo.set_slot("visor_tint", "Clear".into());
         apply_loadout(&profiles, "rider1", "BSB23_Ducati_V4R", &lo, false).unwrap();
 
         let text = fs::read_to_string(&ini).unwrap();
-        assert!(text.contains("BSB23_Ducati_V4R=Clear"), "visor_tint was written: {text}");
+        assert!(
+            text.contains("BSB23_Ducati_V4R=Clear"),
+            "visor_tint was written: {text}"
+        );
         let back = read_loadout(&profiles, "rider1", "BSB23_Ducati_V4R").unwrap();
-        assert_eq!(back.extra.get("visor_tint").map(String::as_str), Some("Clear"));
+        assert_eq!(
+            back.extra.get("visor_tint").map(String::as_str),
+            Some("Clear")
+        );
         let _ = fs::remove_dir_all(&root);
     }
 
@@ -916,7 +974,12 @@ BSB23_Ducati_V4R=BS_Racing_Battlax
         apply_loadout(&profiles, "rider1", "BSB23_Ducati_V4R", &lo, false).unwrap();
 
         let text = fs::read_to_string(&ini).unwrap();
-        for absent in ["[goggles_paint]", "[boots]", "[protection]", "[gloves_paint]"] {
+        for absent in [
+            "[goggles_paint]",
+            "[boots]",
+            "[protection]",
+            "[gloves_paint]",
+        ] {
             assert!(!text.contains(absent), "{absent} must not appear:\n{text}");
         }
         let _ = fs::remove_dir_all(&root);
@@ -966,7 +1029,10 @@ BSB23_Ducati_V4R=BS_Racing_Battlax
         let empty = root.join("profiles");
         fs::create_dir_all(&empty).unwrap();
         let scan = scan_profiles(&empty);
-        assert!(scan.exists, "the folder is there, it just holds no profiles");
+        assert!(
+            scan.exists,
+            "the folder is there, it just holds no profiles"
+        );
         assert!(scan.profiles.is_empty());
 
         // A subdir without a profile.ini isn't a profile, but the folder still exists.
@@ -996,13 +1062,27 @@ BSB23_Ducati_V4R=BS_Racing_Battlax
         // Set mtimes deliberately: `zzz` newest, `aaa` middle, `mmm` oldest — so neither
         // "first alphabetically" nor "last alphabetically" happens to be the newest.
         let base = std::time::SystemTime::now();
-        set_mtime(&dir.join("mmm/profile.ini"), base - std::time::Duration::from_secs(3600));
-        set_mtime(&dir.join("aaa/profile.ini"), base - std::time::Duration::from_secs(1800));
+        set_mtime(
+            &dir.join("mmm/profile.ini"),
+            base - std::time::Duration::from_secs(3600),
+        );
+        set_mtime(
+            &dir.join("aaa/profile.ini"),
+            base - std::time::Duration::from_secs(1800),
+        );
         set_mtime(&dir.join("zzz/profile.ini"), base);
 
         let scan = scan_profiles(&dir);
-        assert_eq!(scan.profiles, vec!["aaa", "mmm", "zzz"], "picker order stays alphabetical");
-        assert_eq!(scan.active.as_deref(), Some("zzz"), "the newest profile.ini wins");
+        assert_eq!(
+            scan.profiles,
+            vec!["aaa", "mmm", "zzz"],
+            "picker order stays alphabetical"
+        );
+        assert_eq!(
+            scan.active.as_deref(),
+            Some("zzz"),
+            "the newest profile.ini wins"
+        );
 
         let _ = fs::remove_dir_all(&root);
     }
@@ -1053,7 +1133,11 @@ BSB23_Ducati_V4R=BS_Racing_Battlax
             "same bikes, same order"
         );
         for (bike, lo) in &all {
-            assert_eq!(*lo, read_loadout(&profiles, "main", bike).unwrap(), "{bike}");
+            assert_eq!(
+                *lo,
+                read_loadout(&profiles, "main", bike).unwrap(),
+                "{bike}"
+            );
         }
         let _ = fs::remove_dir_all(&root);
     }
@@ -1064,7 +1148,10 @@ BSB23_Ducati_V4R=BS_Racing_Battlax
     fn the_active_bike_is_the_one_the_game_will_start_on() {
         let root = tmp("active");
         write_sample(&root, "main");
-        assert_eq!(active_bike(&root.join("profiles"), "main").as_deref(), Some("YZ450F"));
+        assert_eq!(
+            active_bike(&root.join("profiles"), "main").as_deref(),
+            Some("YZ450F")
+        );
         let _ = fs::remove_dir_all(&root);
     }
 
@@ -1072,6 +1159,42 @@ BSB23_Ducati_V4R=BS_Racing_Battlax
     fn no_profile_means_no_active_bike_rather_than_a_panic() {
         let root = tmp("active-missing");
         assert_eq!(active_bike(&root.join("profiles"), "nobody"), None);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn setting_active_bike_changes_only_info_and_backs_up() {
+        let root = tmp("set-active");
+        let ini = write_sample(&root, "main");
+        let profiles = root.join("profiles");
+        let before = fs::read(&ini).unwrap();
+
+        set_active_bike(&profiles, "main", " KTM250 ").unwrap();
+
+        assert_eq!(active_bike(&profiles, "main").as_deref(), Some("KTM250"));
+        assert_eq!(
+            read_loadout(&profiles, "main", "YZ450F").unwrap().paint,
+            "RedBud",
+            "the previous bike's loadout stays intact"
+        );
+        assert_eq!(
+            fs::read(root.join("profiles/main/profile.ini.bak")).unwrap(),
+            before,
+            "the pre-change profile is recoverable"
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn setting_active_bike_rejects_ini_injection() {
+        let root = tmp("set-active-invalid");
+        write_sample(&root, "main");
+        let profiles = root.join("profiles");
+        assert!(set_active_bike(&profiles, "main", "x\n[info]\nbikeid=y").is_err());
+        assert_eq!(
+            active_bike(&profiles, "main").as_deref(),
+            Some("YZ450F")
+        );
         let _ = fs::remove_dir_all(&root);
     }
 
@@ -1115,7 +1238,11 @@ BSB23_Ducati_V4R=BS_Racing_Battlax
         assert_eq!(list_bikes(&profiles, "main").unwrap(), vec!["YZ450F"]);
         let doc = IniDoc::parse(&fs::read_to_string(&ini).unwrap());
         for section in ["paint", "helmet", "helmet_paint", "rider", "tyres"] {
-            assert_eq!(doc.get(section, "KTM250"), None, "[{section}] still has the bike");
+            assert_eq!(
+                doc.get(section, "KTM250"),
+                None,
+                "[{section}] still has the bike"
+            );
         }
         // The bike that stays keeps every value it had.
         let other = read_loadout(&profiles, "main", "YZ450F").unwrap();
@@ -1177,7 +1304,10 @@ BSB23_Ducati_V4R=BS_Racing_Battlax
         let profiles = root.join("profiles");
 
         // Read no longer errors on the non-UTF-8 byte.
-        assert_eq!(list_bikes(&profiles, "main").unwrap(), vec!["KTM250", "YZ450F"]);
+        assert_eq!(
+            list_bikes(&profiles, "main").unwrap(),
+            vec!["KTM250", "YZ450F"]
+        );
 
         let mut lo = Loadout::default();
         lo.paint = "SnowWhite".into();
@@ -1242,7 +1372,10 @@ BSB23_Ducati_V4R=BS_Racing_Battlax
         let json = r#"{"name":"RedBud #92","loadout":{"paint":"CLUTCH Deeg F REDB","modelSwap":"2024 Factory"},"content":{"tracks":["mods/tracks/EU/RedBud.pkz"],"keep":["mods/bikes/OEM Pack.pkz"]},"bundle":{"url":"https://files.catbox.moe/a.zip","host":"catbox","size":10}}"#;
         let back = decode_code(json).unwrap();
         assert_eq!(back.loadout.model_swap, "2024 Factory");
-        assert_eq!(back.content.unwrap().tracks, vec!["mods/tracks/EU/RedBud.pkz"]);
+        assert_eq!(
+            back.content.unwrap().tracks,
+            vec!["mods/tracks/EU/RedBud.pkz"]
+        );
     }
 
     /// Presets saved before Manage existed have no `content` key at all. They have to keep

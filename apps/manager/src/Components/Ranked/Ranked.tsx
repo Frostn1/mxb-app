@@ -40,7 +40,7 @@ import GuidDialog from "./GuidDialog";
  */
 let cached: RankedProfile | null = null;
 
-const Ranked = () => {
+const Ranked = ({ onFindServers }: { onFindServers?: () => void }) => {
   const t = useT();
   const { reloadConfig } = useConfig();
   const [identity, setIdentity] = useState<RankedIdentity | null>(null);
@@ -85,7 +85,7 @@ const Ranked = () => {
         // Only when there is nothing to show: coming back to the tab reuses what was fetched.
         if (id.guid && !cached) load(id.guid);
       })
-      .catch(() => setIdentity({ guid: "", source: "" }));
+      .catch(() => setIdentity({ guid: "", source: "", steamGuid: "" }));
   }, [load]);
 
   const saveGuid = useCallback(
@@ -145,6 +145,18 @@ const Ranked = () => {
       />
 
       <div className="flex min-h-0 flex-1 flex-col px-7 pb-6">
+        {/* A GUID typed once shadows the Steam account for ever afterwards, silently — which
+            reads as Ranked ignoring the sign-in. Say so, and offer the way back. */}
+        {identity?.source === "manual" &&
+          identity.steamGuid &&
+          identity.steamGuid !== identity.guid && (
+            <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-xl bg-card px-3.5 py-2.5 text-[12.5px]">
+              <span className="text-muted-foreground">{t("ranked.manualOverride")}</span>
+              <Button variant="outline" size="sm" onClick={() => void saveGuid("")}>
+                {t("ranked.useSteam")}
+              </Button>
+            </div>
+          )}
         {identity && !identity.guid ? (
           <Centered>
             <Trophy className="size-6 text-faint" />
@@ -170,7 +182,12 @@ const Ranked = () => {
             </Button>
           </Centered>
         ) : profile ? (
-          <Profile profile={profile} identity={identity} />
+          <Profile
+            profile={profile}
+            identity={identity}
+            onOpenSite={open}
+            onFindServers={onFindServers}
+          />
         ) : (
           <Centered>
             <Loader2 className="size-5 animate-spin text-faint" />
@@ -229,7 +246,7 @@ const podiumColor = (position: string) => {
 };
 
 /**
- * A rank badge as a number plate — the shape the whole app is built from (`.u-skew`, and the
+ * A rank badge: a rounded plate carrying the grade and the points under it. (The
  * cut corner on the cards). A rank is the one number a rider would put on a plate, so it is
  * the one place in the app where the motif is literal rather than decorative.
  */
@@ -246,10 +263,10 @@ const Plate = ({
 }) => (
   <span
     title={title}
-    className={cn("u-skew grid place-items-center px-2", className)}
+    className={cn("grid place-items-center rounded-lg px-2", className)}
     style={{ background: solid(color) }}
   >
-    <span className="u-unskew block font-cond font-bold leading-none tracking-[0.04em] text-[#0d1216]">
+    <span className="block font-cond font-bold leading-none tracking-[-0.02em] text-[#0d1216]">
       {children}
     </span>
   </span>
@@ -258,9 +275,14 @@ const Plate = ({
 const Profile = ({
   profile,
   identity,
+  onOpenSite,
+  onFindServers,
 }: {
   profile: RankedProfile;
   identity: RankedIdentity | null;
+  onOpenSite: () => void;
+  /** Takes a rider who has never raced to the server list. Absent where there isn't one. */
+  onFindServers?: () => void;
 }) => {
   const t = useT();
   const flag = flagOf(profile.country);
@@ -273,7 +295,7 @@ const Profile = ({
     // never something you have to scroll back up for.
     <div className="flex min-h-0 flex-1 flex-col gap-3 pt-1">
       <div
-        className="u-notch relative shrink-0 overflow-hidden bg-card"
+        className="relative shrink-0 overflow-hidden rounded-xl bg-card"
         // A line of the rank's colour along the foot, tying the banner to the cards below.
         style={
           headline ? { boxShadow: `inset 0 -2px 0 ${tint(headline.color, 0.55)}` } : undefined
@@ -308,24 +330,31 @@ const Profile = ({
             <div>
               <div className="flex items-center gap-2.5">
                 {flag && <span className="text-[18px] leading-none">{flag}</span>}
-                <h2 className="font-cond text-[26px] font-bold uppercase leading-none tracking-[0.02em]">
+                <h2 className="font-cond text-[26px] font-bold leading-none tracking-[-0.045em]">
                   {profile.name || profile.guid}
                 </h2>
                 {headline?.rankName && (
                   <span
-                    className="font-cond text-[13px] font-semibold uppercase tracking-[0.1em]"
+                    className="font-cond text-[13px] font-semibold tracking-[-0.02em]"
                     style={{ color: solid(headline.color) }}
                   >
                     {headline.rankName}
                   </span>
                 )}
               </div>
+              {/* The GUID is the heading itself when there is no name to show, and saying it
+                  twice was most of what a rider with no races got. Joined here rather than
+                  written as three fragments, so a missing piece doesn't leave a stray dot. */}
               <p className="mt-1.5 text-[11.5px] text-faint">
-                {profile.guid}
-                {profile.memberSince && ` · ${t("ranked.since", { date: profile.memberSince })}`}
-                {/* Whose profile this is, because a typed GUID is easy to get subtly wrong and
-                    somebody else's season looks exactly like a bad one of your own. */}
-                {identity?.source === "manual" && ` · ${t("ranked.manualGuid")}`}
+                {[
+                  profile.name ? profile.guid : "",
+                  profile.memberSince ? t("ranked.since", { date: profile.memberSince }) : "",
+                  // Whose profile this is: a typed GUID is easy to get subtly wrong, and
+                  // somebody else's season looks exactly like a bad one of your own.
+                  identity?.source === "manual" ? t("ranked.manualGuid") : "",
+                ]
+                  .filter(Boolean)
+                  .join(" · ")}
               </p>
             </div>
           </div>
@@ -359,7 +388,7 @@ const Profile = ({
           {profile.cards.map((c) => (
             <div
               key={c.discipline}
-              className="u-notch overflow-hidden bg-card"
+              className="overflow-hidden rounded-xl bg-card"
               style={{
                 // The rank's colour washed off the top-left and drawn down the edge — enough
                 // to tell three cards apart across the room, without tinting the surface.
@@ -370,7 +399,7 @@ const Profile = ({
             >
               <div className="flex items-center justify-between gap-3 px-4 pt-3.5">
                 <div>
-                  <p className="font-cond text-[17px] font-bold uppercase leading-none tracking-[0.06em]">
+                  <p className="font-cond text-[17px] font-bold leading-none tracking-[-0.02em]">
                     {c.discipline}
                   </p>
                   <p className="mt-1 text-[11.5px] text-faint">
@@ -381,7 +410,7 @@ const Profile = ({
                   <Plate color={c.color} className="h-[30px] w-[38px]">
                     <span className="block text-[13px]">{c.badge}</span>
                   </Plate>
-                  <span className="font-cond text-[27px] font-bold leading-none tabular-nums">
+                  <span className="font-cond tracking-[-0.045em] text-[27px] font-bold leading-none tabular-nums">
                     {c.mxp}
                   </span>
                 </div>
@@ -400,10 +429,37 @@ const Profile = ({
         </div>
       )}
 
+      {/* Nothing has been raced on this GUID. Everything below draws from results, so the
+          page was a name and a number — which reads like a fault in the app rather than a
+          season that hasn't started. Say which it is, and give the one thing that changes it. */}
+      {profile.cards.length === 0 && profile.races.length === 0 && (
+        <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-4 px-6 py-12 text-center">
+          <Trophy className="size-8 text-faint" strokeWidth={1.5} />
+          <div className="max-w-[520px] space-y-2">
+            <h3 className="font-cond text-[19px] font-bold tracking-[-0.03em]">
+              {t("ranked.unracedTitle")}
+            </h3>
+            <p className="text-[13px] leading-relaxed text-muted-foreground">
+              {t("ranked.unracedBody")}
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center justify-center gap-2">
+            {onFindServers && (
+              <Button onClick={onFindServers}>{t("ranked.unracedFind")}</Button>
+            )}
+            <Button variant="outline" onClick={onOpenSite}>
+              <ExternalLink className="size-3.5" />
+              {t("ranked.openSite")}
+            </Button>
+          </div>
+          <p className="max-w-[420px] text-[11.5px] text-faint">{t("ranked.unracedNotYou")}</p>
+        </div>
+      )}
+
       {profile.races.length > 0 && (
         // `min-h-0` is what actually makes this scroll instead of stretching the page: a flex
         // child refuses to shrink below its content without it.
-        <div className="min-h-0 flex-1 overflow-auto border border-input">
+        <div className="min-h-0 flex-1 overflow-auto">
           {/* `separate` rather than `collapse`, so the sticky header keeps its own bottom
               border — a collapsed border belongs to the table and scrolls away with it. */}
           <table className="w-full border-separate border-spacing-0 text-[13px]">
@@ -423,7 +479,7 @@ const Profile = ({
                   <th
                     key={key}
                     className={cn(
-                      "sticky top-0 z-10 border-b border-input bg-card py-2.5 font-cond font-semibold",
+                      "sticky top-0 z-10 border-b border-input bg-card py-2.5 font-cond tracking-[-0.02em] font-semibold",
                       width,
                     )}
                   >
@@ -441,7 +497,7 @@ const Profile = ({
                       {/* A bar in the medal's colour, so scanning the list picks out the good
                           days without reading a single number. */}
                       <span
-                        className="mr-2.5 inline-block h-3.5 w-[3px] translate-y-[2px] u-skew"
+                        className="mr-2.5 inline-block h-3.5 w-[3px] translate-y-[2px] rounded-full"
                         style={{ background: medal || "transparent" }}
                       />
                       <span title={r.track}>{r.track}</span>
@@ -455,7 +511,7 @@ const Profile = ({
                       {lobbyName(r.server)}
                     </td>
                     <td
-                      className="border-b border-input/50 px-2 py-2.5 font-cond text-[15px] font-bold tabular-nums group-last:border-0"
+                      className="border-b border-input/50 px-2 py-2.5 font-cond tracking-[-0.02em] text-[15px] font-bold tabular-nums group-last:border-0"
                       style={medal ? { color: medal } : undefined}
                     >
                       {r.position}

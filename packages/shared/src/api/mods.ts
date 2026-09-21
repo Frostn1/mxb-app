@@ -279,6 +279,21 @@ export function createConfig(config: Config): Promise<boolean> {
   return invoke<boolean>("create_config", { config });
 }
 
+/** Mark the first-run flow complete after the optional integration choice is settled. */
+export function completeSetup(): Promise<void> {
+  return invoke<void>("complete_setup");
+}
+
+export type GameFolderCorrection = "mods-subfolder" | "profiles-subfolder";
+
+/** Preview the game-folder path setup will save, including a one-level correction. */
+export function normalizeGameFolder(path: string): Promise<{
+  path: string;
+  correction: GameFolderCorrection | null;
+}> {
+  return invoke("normalize_game_folder", { path });
+}
+
 /** Change only the MX Bikes folder — an empty string re-runs auto-detection. Unlike
  *  `createConfig`, the rest of the settings are preserved. Resolves to the folder actually
  *  adopted: picking the `mods` folder settles on the game folder above it. */
@@ -2000,7 +2015,14 @@ export function buildRiderDestinations(
  * blocks. There is no direct link to resolve. Listing it here also sorts it *below* any
  * other mirror on the same mod, so a MediaFire alternative is preferred automatically.
  */
-const BLOCKED_HOST_PATTERNS: string[] = ["drive.proton.me", "proton.me"];
+const BLOCKED_HOST_PATTERNS: string[] = [
+  "drive.proton.me",
+  "proton.me",
+  // Project OEM publishes release notes here and sends players back to the mxb-mods
+  // listing for the actual MediaFire / MEGA / Drive files. It is a web page, not a file
+  // host; leave it available as the manual/info choice but never try to unpack its HTML.
+  "oem.mxb-mods.com",
+];
 
 export function isBlockedDownload(opt: { url: string; host: string }): boolean {
   const s = `${opt.url} ${opt.host}`.toLowerCase();
@@ -2562,6 +2584,16 @@ export function joinServer(address: string): Promise<LaunchOutcome> {
   return invoke<LaunchOutcome>("join_server", { address });
 }
 
+/** Join from the app's live server list, selecting a compatible installed bike first when
+ *  the server restricts its bike categories/models. */
+export function joinListedServer(
+  address: string,
+  categories: string[],
+  bikes: string[],
+): Promise<LaunchOutcome> {
+  return invoke<LaunchOutcome>("join_listed_server", { address, categories, bikes });
+}
+
 /**
  * Close the running game, then join `address` with the copy that replaces it.
  *
@@ -2571,6 +2603,15 @@ export function joinServer(address: string): Promise<LaunchOutcome> {
  */
 export function closeAndJoin(address: string): Promise<LaunchOutcome> {
   return invoke<LaunchOutcome>("close_and_join", { address });
+}
+
+/** Close the running game, select a bike accepted by a listed server, and launch into it. */
+export function closeAndJoinListedServer(
+  address: string,
+  categories: string[],
+  bikes: string[],
+): Promise<LaunchOutcome> {
+  return invoke<LaunchOutcome>("close_and_join_listed_server", { address, categories, bikes });
 }
 
 /** Is MX Bikes currently running? Probes for real on all three platforms — under Wine and
@@ -3609,8 +3650,13 @@ export interface QueueState {
  * Wait in line for a full server. The app watches the server and launches the game into it
  * when a slot is ours. Only riders using MXB App are in the line.
  */
-export function queueJoin(address: string, name: string): Promise<QueueState> {
-  return invoke<QueueState>("queue_join", { address, name });
+export function queueJoin(
+  address: string,
+  name: string,
+  categories: string[],
+  bikes: string[],
+): Promise<QueueState> {
+  return invoke<QueueState>("queue_join", { address, name, categories, bikes });
 }
 
 export function queueLeave(): Promise<void> {

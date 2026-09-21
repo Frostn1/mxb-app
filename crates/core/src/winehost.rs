@@ -353,6 +353,30 @@ pub fn pids_running(ps_output: &str, exe: &str, own_pid: u32) -> Vec<u32> {
         .collect()
 }
 
+/// The flag a headless server carries, and the game client never does.
+///
+/// `mxbikes.exe -dedicated 54210 …` is the same image as the game, run without a window and
+/// without Steam. Everything that asks "is the game running" means the client: whether Play
+/// would start a second copy, whether the rider is mid-session, and — the one that sent this
+/// looking — whether the game is holding the Steam account the master login needs. A
+/// dedicated server answers no to all three, and a developer with two of them up on the same
+/// machine had a server browser that never once asked the master.
+pub const DEDICATED_FLAG: &str = "-dedicated";
+
+/// Is the game *client* running? Same as [`running_exe`], with dedicated servers excluded.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn running_client(ps_output: &str, exe: &str, own_pid: u32) -> bool {
+    let needle = exe.to_ascii_lowercase();
+    ps_output.lines().any(|line| {
+        let Some((pid, args)) = line.trim_start().split_once(char::is_whitespace) else {
+            return false;
+        };
+        let Ok(pid) = pid.parse::<u32>() else { return false };
+        let args = args.to_ascii_lowercase();
+        pid != own_pid && args.contains(&needle) && !args.contains(DEDICATED_FLAG)
+    })
+}
+
 /// The process table, as `ps` reports it. Empty when we couldn't ask.
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub fn process_table() -> String {
@@ -823,5 +847,33 @@ mod tests {
         assert!(resolve(&dir.join("gone").to_string_lossy(), None).is_none());
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The bug this was written for: a developer with dedicated servers up on the same
+    /// machine had a server browser that never asked the master, because every refresh read
+    /// their headless servers as "the game is running, it holds the Steam account".
+    #[test]
+    fn a_dedicated_server_is_not_the_game_running() {
+        let ps = "\
+ 21870 mxbikes.exe -dedicated 54210 -set params dedicated.ini -log
+ 67846 mxbikes.exe -dedicated 54216 -set params dedicated.ini
+";
+        assert!(running_exe(ps, "mxbikes.exe", 1), "it is still the game's image");
+        assert!(!running_client(ps, "mxbikes.exe", 1), "but it is not the client");
+    }
+
+    #[test]
+    fn the_client_is_still_found_beside_a_dedicated_server() {
+        let ps = "\
+ 21870 mxbikes.exe -dedicated 54210 -set params dedicated.ini
+ 30001 /Users/x/MX Bikes/mxbikes.exe
+";
+        assert!(running_client(ps, "mxbikes.exe", 1));
+    }
+
+    #[test]
+    fn our_own_process_never_counts_as_the_client() {
+        let ps = " 4242 mxb-app --launch mxbikes.exe\n";
+        assert!(!running_client(ps, "mxbikes.exe", 4242));
     }
 }
