@@ -34,13 +34,15 @@ import {
   MODS_SORTS,
   fromModSummary,
   sortMerged,
-  storeRootFor,
+  storeRootsFor,
   toModSort,
   type MergedMod,
   type ModSource,
   type ModsSort,
   type StoreId,
 } from "./sources";
+
+const GROUPED_CATEGORY_ID = -1;
 
 interface ModsProps {
   /** `browse`, `hub` or `shop` — an old deep link still lands on the source it named. */
@@ -196,18 +198,26 @@ export default function Mods({
     const map = new Map<string, number>();
     if (!active) return map;
     for (const mt of modTypes) {
-      const root = storeRootFor(mt, active.categories);
-      if (root) map.set(mt.id, root.count);
+      const roots = storeRootsFor(store!, mt, active.categories);
+      // Separate branches can contain the same product, so summing them would overstate the
+      // group. A count is optional; omit it until the grouped search response supplies one.
+      if (roots.length === 1) map.set(mt.id, roots[0].count);
     }
     return map;
-  }, [active, modTypes]);
+  }, [active, modTypes, store]);
 
   const categories = useMemo<TypeListCategory[]>(() => {
     if (!active) {
       return modType.categories.map((c) => ({ id: c.id, label: t(c.label) }));
     }
-    const root = active.root;
+    const { root, roots } = active;
     if (!root) return [];
+    if (roots.length > 1) {
+      return [
+        { id: GROUPED_CATEGORY_ID, label: t("shopCatalog.allCategories") },
+        ...roots.map((category) => ({ id: category.id, label: category.name })),
+      ];
+    }
     const children = active.categories.filter((c) => c.parent === root.id);
     return [
       { id: root.id, label: t("shopCatalog.allCategories") },
@@ -216,13 +226,15 @@ export default function Mods({
   }, [active, modType, t]);
 
   const activeCategoryId = active
-    ? (storeCategoryId ?? active.root?.id ?? null)
+    ? (storeCategoryId ?? (active.roots.length > 1 ? GROUPED_CATEGORY_ID : active.root?.id) ?? null)
     : listing.categoryId;
 
   const selectCategory = useCallback(
     (id: number) => {
-      if (store) setStoreCategoryId(id === active?.root?.id ? null : id);
-      else listing.setCategoryId(id);
+      if (store) {
+        const allId = active && active.roots.length > 1 ? GROUPED_CATEGORY_ID : active?.root?.id;
+        setStoreCategoryId(id === allId ? null : id);
+      } else listing.setCategoryId(id);
     },
     [store, active, listing],
   );

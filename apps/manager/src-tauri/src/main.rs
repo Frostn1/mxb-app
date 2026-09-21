@@ -3903,7 +3903,7 @@ async fn guess_server_track(app: tauri::AppHandle, track: String) -> Result<Trac
     // opening a browser, and this runs from opening a panel. A browser window appearing
     // because someone clicked a server row would be an ambush, so a challenge here simply
     // means no guess.
-    if let Ok(page) = mods::hub::search(&words, None, 1, mods::hub::HubSort::default(), false).await {
+    if let Ok(page) = mods::hub::search(&words, &[], 1, mods::hub::HubSort::default(), false).await {
         if let Some((hit, exact)) = best_track_hit(&id, page.items, |m| m.title.clone(), |m| {
             sells_tracks(&m.category_names)
         }) {
@@ -5297,13 +5297,13 @@ where
 async fn hub_search(
     app: tauri::AppHandle,
     query: String,
-    category_id: Option<u64>,
+    category_ids: Vec<u64>,
     page: u32,
     sort: mods::hub::HubSort,
     on_sale_only: bool,
 ) -> Result<mods::hub::HubPage, String> {
     with_hub_clearance(&app, "hub search", || {
-        mods::hub::search(&query, category_id, page, sort, on_sale_only)
+        mods::hub::search(&query, &category_ids, page, sort, on_sale_only)
     })
     .await
 }

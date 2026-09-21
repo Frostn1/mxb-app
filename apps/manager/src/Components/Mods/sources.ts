@@ -193,3 +193,37 @@ export function storeRootFor(
     categories.find(matches)
   );
 }
+
+/**
+ * The real category branches that make up one app-level type.
+ *
+ * MXB Hub has no single Bikes parent: its bike catalogue is split between setups, blends,
+ * modelswaps, paints and source files. Other stores retain their single-root behaviour.
+ */
+const HUB_TYPE_SLUGS: Partial<Record<string, Set<string>>> = {
+  tracks: new Set(["tracks"]),
+  bikes: new Set([
+    "bike-psds",
+    "bike-setups",
+    "blends",
+    "modelswaps",
+    "bike-paints",
+    "bike-pnt-creation",
+  ]),
+  rider: new Set(["gear-psds", "rider-protection", "gear-pnt-creation"]),
+  reshade: new Set(),
+  misc: new Set(),
+};
+
+export function storeRootsFor(
+  store: StoreId,
+  modType: ModType,
+  categories: ShopCategory[],
+): ShopCategory[] {
+  const hubSlugs = store === "hub" ? HUB_TYPE_SLUGS[modType.id] : undefined;
+  if (hubSlugs !== undefined) {
+    return categories.filter((category) => hubSlugs.has(category.slug));
+  }
+  const root = storeRootFor(modType, categories);
+  return root ? [root] : [];
+}

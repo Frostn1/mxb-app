@@ -18,7 +18,7 @@ import {
 } from "../../lib/listingCache";
 import {
   fromStoreMod,
-  storeRootFor,
+  storeRootsFor,
   toHubSort,
   toShopSort,
   type MergedMod,
@@ -48,6 +48,8 @@ export interface StoreListing {
   categories: ShopCategory[];
   /** The store's own top-level category for the active type, when it has one. */
   root: ShopCategory | undefined;
+  /** Every real store branch represented by the active app-level type. */
+  roots: ShopCategory[];
   currency: string;
   loading: boolean;
   loadingMore: boolean;
@@ -137,23 +139,36 @@ export function useStoreListing({
     };
   }, [store, enabled, reloadKey]);
 
-  const root = useMemo(() => storeRootFor(modType, categories), [modType, categories]);
+  const roots = useMemo(
+    () => storeRootsFor(store, modType, categories),
+    [store, modType, categories],
+  );
+  const root = roots[0];
   const effectiveCategory = categoryId ?? root?.id ?? null;
+  const hubCategoryIds = categoryId === null ? roots.map((category) => category.id) : [categoryId];
+  const unsupported = store === "hub" && categories.length > 0 && roots.length === 0;
+  const categoryKey = store === "hub" ? hubCategoryIds.join(",") : effectiveCategory;
 
   const fetchPage = useCallback(
     (next: number) =>
       store === "shop"
         ? shopCatalogSearch(debounced, effectiveCategory, next, toShopSort(sort), false)
-        : hubSearch(debounced, effectiveCategory, next, toHubSort(sort), false),
-    [store, debounced, effectiveCategory, sort],
+        : hubSearch(debounced, hubCategoryIds, next, toHubSort(sort), false),
+    [store, debounced, effectiveCategory, hubCategoryIds.join(","), sort],
   );
 
   // (Re)load page 1 whenever a filter changes — from the last answer first, so coming back
   // to a tab shows its mods rather than a block of skeletons.
   useEffect(() => {
     if (!enabled || !catsSettled) return;
+    if (unsupported) {
+      setItems([]);
+      setHasMore(false);
+      setLoading(false);
+      return;
+    }
     let cancelled = false;
-    const key = listingKey([store, debounced, effectiveCategory, sort]);
+    const key = listingKey([store, debounced, categoryKey, sort]);
     const cached = skipCache.current ? undefined : readListing<CachedPage>(key);
     skipCache.current = false;
     setError(null);
@@ -186,7 +201,17 @@ export function useStoreListing({
     return () => {
       cancelled = true;
     };
-  }, [enabled, catsSettled, fetchPage, store, debounced, effectiveCategory, sort, reloadKey]);
+  }, [
+    enabled,
+    catsSettled,
+    unsupported,
+    fetchPage,
+    store,
+    debounced,
+    categoryKey,
+    sort,
+    reloadKey,
+  ]);
 
   // The shop's catalogue is a dump the backend refreshes in the background; the hub's is
   // live, so it has neither a staleness bar nor anything to say here.
@@ -248,6 +273,7 @@ export function useStoreListing({
     items: enabled ? items : [],
     categories,
     root,
+    roots,
     currency,
     loading: enabled && (loading || !catsSettled),
     loadingMore: enabled && loadingMore,
