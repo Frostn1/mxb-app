@@ -35,6 +35,13 @@ use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
 /// or its label stays registered and the next handshake silently cannot build one.
 pub const WINDOW: &str = "hub-clearance";
 
+/// Open the URL that actually triggered the challenge. SiteGround redirects back here after
+/// solving its proof of work, which also makes the verification useful even when protection
+/// is enabled for the API but not the storefront homepage.
+fn challenge_url() -> String {
+    format!("{HUB_BASE}/wp-json/wc/store/v1/products?per_page=1")
+}
+
 /// How long the hidden window gets to run the challenge by itself. The proof of work is a
 /// second or two on a modern machine; the rest is page load, and being generous costs nothing
 /// when it succeeds.
@@ -183,7 +190,7 @@ impl Mode {
 /// out of budget, or of a visible window the user closed. Only something that stopped the pass
 /// from happening at all is an `Err`.
 async fn attempt(app: &AppHandle, mode: Mode) -> anyhow::Result<bool> {
-    let url: tauri::Url = HUB_BASE.parse()?;
+    let url: tauri::Url = challenge_url().parse()?;
     log::info!(
         "opening the {} MXB Hub window to answer the robot challenge",
         if mode.visible() { "visible" } else { "hidden" }
@@ -195,12 +202,10 @@ async fn attempt(app: &AppHandle, mode: Mode) -> anyhow::Result<bool> {
         } else {
             "MXB Hub"
         })
-        // Deliberately **no** `.user_agent()` override. Forcing `HUB_SITE.ua` on it here was
-        // tried and was worse than doing nothing: the string claims Chrome on Windows while
-        // the window is WKWebView on macOS, and the challenge fingerprints the browser — so a
-        // page that had been serving a solvable challenge started answering 403 outright.
-        // [`crate::shop_session::UA`] records the same lesson for Cloudflare. The window
-        // introduces itself honestly and earns what it can.
+        // SiteGround binds the challenge result to this identity. HUB_SITE uses a
+        // platform-appropriate value, so WKWebView is no longer made to claim it is Windows
+        // Chrome and the HTTP probe does not replay the result as a different browser.
+        .user_agent(HUB_SITE.ua)
         // Never given a way to talk to the app, shown or not — see the module comment.
         .visible(mode.visible())
         .decorations(mode.visible())
@@ -306,7 +311,7 @@ async fn probe() -> bool {
         return false;
     };
     let request = client
-        .get(format!("{HUB_BASE}/wp-json/wc/store/v1/products?per_page=1"))
+        .get(challenge_url())
         .send();
     match tokio::time::timeout(PROBE_TIMEOUT, request).await {
         Ok(Ok(resp)) => !mods::hub::challenged(&resp) && resp.status().is_success(),

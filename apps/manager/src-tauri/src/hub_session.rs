@@ -19,6 +19,14 @@ use tauri::{AppHandle, Manager, WebviewWindow};
 
 pub const HUB_BASE: &str = "https://shop.mxb-hub.com";
 
+// SiteGround binds its challenge state to the browser identity that earned it. Keep this
+// platform-honest: presenting WKWebView as Windows Chrome makes the challenge reject the
+// browser before there is anything useful to hand back to the HTTP client.
+#[cfg(target_os = "macos")]
+pub const HUB_UA: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko)";
+#[cfg(not(target_os = "macos"))]
+pub const HUB_UA: &str = crate::mxb_session::UA;
+
 /// The store is one host — `mxbhub.com` and `mxb-hub.com` both redirect here — so the cookie
 /// domain is the full subdomain rather than the registrable one. Scoping it wider would put
 /// the session cookie on requests to any other `mxb-hub.com` host we ever add.
@@ -26,13 +34,9 @@ pub const HUB_SITE: Site = Site {
     base: HUB_BASE,
     domain: "shop.mxb-hub.com",
     file: "hub_session.json",
-    // The realistic full-version string, not [`crate::shop_session::UA`], whose two-part
-    // `Chrome/126.0` is documented over there as a bot-filter signal in its own right. It
-    // matters more here than anywhere else in the app: the clearance window is opened wearing
-    // this exact string, so what the browser earns is what the HTTP client presents. A token
-    // minted under one User-Agent and replayed under another is simply refused, which reads
-    // from the outside as a challenge that never clears.
-    ua: crate::mxb_session::UA,
+    // The clearance window is opened wearing this exact string, so the browser and the HTTP
+    // client remain the same visitor when the cookies are handed across.
+    ua: HUB_UA,
     // Purchased tracks run to hundreds of megabytes; `install::download` streams with this
     // client, so the ceiling has to cover a whole transfer rather than a page load.
     timeout: Duration::from_secs(60 * 30),
