@@ -123,6 +123,16 @@ export default function Mods({
   const canHub = storesAllowed;
   const canShop = storesAllowed && shopAvailable === true;
 
+  // MXB Hub's catalogue is primarily bike content (setups, blends, model swaps and paints),
+  // so put Bikes first in its type list without changing mxb-mods' familiar track-first order.
+  const typeListModTypes = useMemo(
+    () =>
+      source === "hub"
+        ? [...modTypes].sort((a, b) => Number(b.id === "bikes") - Number(a.id === "bikes"))
+        : modTypes,
+    [modTypes, source],
+  );
+
   const sources = useMemo<ModSource[]>(() => {
     const stores: ModSource[] = [];
     if (canHub) stores.push("hub");
@@ -314,7 +324,7 @@ export default function Mods({
   return (
     <div className="flex h-full min-h-0">
       <TypeList
-        modTypes={modTypes}
+        modTypes={typeListModTypes}
         modType={modType}
         counts={counts}
         categories={browsing ? categories : []}

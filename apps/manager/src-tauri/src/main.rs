@@ -4019,7 +4019,7 @@ async fn guess_server_track(app: tauri::AppHandle, track: String) -> Result<Trac
         guess.product_url = hit.link;
         guess.product_image = hit.image.unwrap_or_default();
         guess.exact = true;
-        return Ok(learned(&app, guess));
+        return Ok(learned(&app, with_shop_track_art(&app, &id, &words, guess).await));
     }
 
     // mxb-mods.com. Scoped to its Tracks category: an unscoped search for `forest` comes
@@ -4035,7 +4035,7 @@ async fn guess_server_track(app: tauri::AppHandle, track: String) -> Result<Trac
             // `exact` describes the name fold, and it is already true for something found on
             // disk — a catalogue's opinion must not downgrade that to "we think".
             guess.exact = guess.exact || exact;
-            return Ok(learned(&app, guess));
+            return Ok(learned(&app, with_shop_track_art(&app, &id, &words, guess).await));
         }
     }
 
@@ -4393,6 +4393,49 @@ fn shop_guess(mut guess: TrackGuess, hit: mods::shop_catalog::ShopMod, exact: bo
     guess.product_image = hit.image.unwrap_or_default();
     // Same rule as the other catalogues: a name fold cannot downgrade a track found on disk.
     guess.exact = guess.exact || exact;
+    guess
+}
+
+/// Keep mxb-mods as the source and install route for a free track, but borrow the Shop's
+/// artwork when it knows the same track. Some creators publish a bare mxb-mods post beside the
+/// paid/secured release, so returning as soon as the first catalogue matched left server rows
+/// with no picture even though the Shop had the one players recognise.
+async fn with_shop_track_art(
+    app: &tauri::AppHandle,
+    id: &str,
+    words: &str,
+    mut guess: TrackGuess,
+) -> TrackGuess {
+    let image = mods::shop_catalog::match_products(app, &[id.to_string()])
+        .await
+        .ok()
+        .and_then(|hits| hits.into_iter().flatten().next())
+        .filter(|hit| sells_tracks(&hit.category_names))
+        .and_then(|hit| hit.image);
+
+    let image = match image {
+        Some(image) => Some(image),
+        None => mods::shop_catalog::search(
+            app,
+            words,
+            None,
+            1,
+            mods::shop_catalog::ShopSort::default(),
+            false,
+        )
+        .await
+        .ok()
+        .and_then(|page| {
+            best_track_hit(&id, page.items, |m| m.title.clone(), |m| {
+                sells_tracks(&m.category_names)
+            })
+            .and_then(|(hit, _)| hit.image)
+        }),
+    };
+
+    if let Some(image) = image {
+        guess.product_image = image;
+    }
     guess
 }
 
