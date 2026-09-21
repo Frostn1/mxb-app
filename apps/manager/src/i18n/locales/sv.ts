@@ -750,9 +750,6 @@ export const sv: Translation = {
   "settings.watchModsReload": "Ladda automatiskt om katalogändringar",
   "settings.watchModsReloadDesc":
     "Ladda om spelet automatiskt när spår eller cyklar läggs till i din mods mapp – även laddas ner manuellt utanför {{app}}.",
-  "settings.secureContentInject": "Använd låst innehåll i spelet",
-  "settings.secureContentInjectDesc":
-    "Låter köpta låsta spår öppnas genom att lägga till en liten hjälpare till det pågående spelet. Av som standard. Fungerar dock du startar spelet — från {{app}} eller från Steam.",
   "settings.checking": "Kollar...",
   "settings.runningConnected": "Körande · spel uppkopplat",
   "settings.notRunning": "Kör inte",
@@ -1021,6 +1018,8 @@ export const sv: Translation = {
   "serverBrowser.passworded": "Lösenord krävs",
   "serverBrowser.join": "Gå med",
   "serverBrowser.joinFailed": "Kunde inte ansluta till servern",
+  "serverBrowser.bikeNoProfile": "Ingen MX Bikes-profil hittades, så appen kunde inte välja en motorcykel för servern.",
+  "serverBrowser.bikeNoMatch": "Ingen av dina installerade motorcyklar matchar serverns tillåtna kategorier och modeller.",
   "serverBrowser.waitInLine": "Vänta i kön",
   "serverBrowser.trackMissing": "Du har inte den här banan.",
   "serverBrowser.notInstalled": "Inte installerad",
@@ -2391,6 +2390,7 @@ export const sv: Translation = {
   "setup.steamSkip": "Hoppa över för tillfället",
   "setup.integrationTitle": "Lägg till spelintegration",
   "setup.integrationIntro": "{{app}} fungerar utan den. Aktivera den för skyddade moddar, direkt omladdning och färgsynkronisering i spelet.",
+  "setup.integrationCrashFixes": "Dessutom ingår riktade korrigeringar för kända krascher i {{game}}.",
   "setup.integrationInstallDisclosure": "Installerar FrostMod från den officiella GitHub-versionen i {{app}}:s privata datamapp. Nedladdningen kontrolleras innan något ändras.",
   "setup.integrationUseAppOnly": "Fortsätt utan den",
   "setup.integrationEnable": "Aktivera spelintegration",

@@ -9,6 +9,7 @@ import {
 import { open as pickFolder } from "@tauri-apps/plugin-dialog";
 import {
   createConfig,
+  completeSetup,
   detectGamePath,
   normalizeGameFolder,
   type GameFolderCorrection,
@@ -72,16 +73,18 @@ function hintFor(platform: string | null, game: GameInfo): string {
 export default function Setup({ onComplete, game, games, firstRun }: SetupProps) {
   const t = useT();
   const {
-    integrationChoice,
     enableIntegration,
     useAppOnly,
   } = useFrostmod();
-  // The pick is held here rather than saved as it's made: writing a config before setup
-  // finishes would make `create_config` treat a fresh install as an upgrade (and replay
-  // the release showcase). It reaches the backend once, with the folders.
+  // The pick is held here until the folder step. `create_config` then saves the paths as an
+  // explicitly incomplete setup so the integration choice can update that same config;
+  // `complete_setup` is the only thing that opens the dashboard afterwards.
   const [picked, setPicked] = useState<GameInfo>(game);
   const askGame = firstRun && games.length > 1;
-  const needsIntegration = firstRun && integrationChoice === null;
+  // A first run always asks explicitly. The provider may infer "enabled" for an existing
+  // FrostMod install as a backwards-compatibility measure, but that is not consent for a
+  // new setup (and a stale localStorage choice should not silently skip this screen).
+  const needsIntegration = firstRun;
   const [phase, setPhase] = useState<
     "game" | "detect" | "folders" | "integration"
   >(
@@ -223,10 +226,14 @@ export default function Setup({ onComplete, game, games, firstRun }: SetupProps)
 
   const finishIntegration = async (enabled: boolean) => {
     setIntegrationBusy(true);
+    setError(null);
     try {
       if (enabled) await enableIntegration();
       else await useAppOnly();
+      await completeSetup();
       onComplete();
+    } catch (e) {
+      setError(String(e));
     } finally {
       setIntegrationBusy(false);
     }
@@ -299,6 +306,9 @@ export default function Setup({ onComplete, game, games, firstRun }: SetupProps)
             <p className="max-w-[450px] text-[13.5px] leading-relaxed text-muted-foreground">
               {t("setup.integrationIntro")}
             </p>
+            <p className="max-w-[450px] text-[13px] font-medium leading-relaxed text-foreground/85">
+              {t("setup.integrationCrashFixes", { game: picked.display })}
+            </p>
             <p className="max-w-[450px] text-[12px] leading-relaxed text-faint">
               {t("setup.integrationInstallDisclosure")}
             </p>
@@ -322,6 +332,11 @@ export default function Setup({ onComplete, game, games, firstRun }: SetupProps)
               {t("setup.integrationUseAppOnly")}
             </button>
           </div>
+          {error && (
+            <p className="select-text text-center text-[12px] text-destructive">
+              {error}
+            </p>
+          )}
         </div>
       </div>
     );

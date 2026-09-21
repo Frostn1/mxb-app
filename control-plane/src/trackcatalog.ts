@@ -310,6 +310,18 @@ async function resolveOne(
     }
   }
 
+  // Keep the free mxb-mods product as the actionable result, but do not throw away good
+  // artwork from the Shop just because that post has no featured image. Both catalogues
+  // describe the same track here; the source still controls the link/install action while
+  // the image is simply the best picture available for the server card.
+  if (answer?.source === "mods" && !answer.image && !refused) {
+    const items = await shopItems();
+    const best = items
+      ? pickBest(row.track_id, items, (i) => i.title, (i) => sellsTracks(i.categories) && !!i.image)
+      : null;
+    if (best) answer.image = best[0].image;
+  }
+
   if (!answer && !refused) {
     const items = await shopItems();
     const best = items ? pickBest(row.track_id, items, (i) => i.title, (i) => sellsTracks(i.categories)) : null;

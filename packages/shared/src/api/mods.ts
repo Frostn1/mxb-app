@@ -279,6 +279,11 @@ export function createConfig(config: Config): Promise<boolean> {
   return invoke<boolean>("create_config", { config });
 }
 
+/** Mark the first-run flow complete after the optional integration choice is settled. */
+export function completeSetup(): Promise<void> {
+  return invoke<void>("complete_setup");
+}
+
 export type GameFolderCorrection = "mods-subfolder" | "profiles-subfolder";
 
 /** Preview the game-folder path setup will save, including a one-level correction. */
@@ -2572,6 +2577,16 @@ export function joinServer(address: string): Promise<LaunchOutcome> {
   return invoke<LaunchOutcome>("join_server", { address });
 }
 
+/** Join from the app's live server list, selecting a compatible installed bike first when
+ *  the server restricts its bike categories/models. */
+export function joinListedServer(
+  address: string,
+  categories: string[],
+  bikes: string[],
+): Promise<LaunchOutcome> {
+  return invoke<LaunchOutcome>("join_listed_server", { address, categories, bikes });
+}
+
 /**
  * Close the running game, then join `address` with the copy that replaces it.
  *
@@ -2581,6 +2596,15 @@ export function joinServer(address: string): Promise<LaunchOutcome> {
  */
 export function closeAndJoin(address: string): Promise<LaunchOutcome> {
   return invoke<LaunchOutcome>("close_and_join", { address });
+}
+
+/** Close the running game, select a bike accepted by a listed server, and launch into it. */
+export function closeAndJoinListedServer(
+  address: string,
+  categories: string[],
+  bikes: string[],
+): Promise<LaunchOutcome> {
+  return invoke<LaunchOutcome>("close_and_join_listed_server", { address, categories, bikes });
 }
 
 /** Is MX Bikes currently running? Probes for real on all three platforms — under Wine and
@@ -3619,8 +3643,13 @@ export interface QueueState {
  * Wait in line for a full server. The app watches the server and launches the game into it
  * when a slot is ours. Only riders using MXB App are in the line.
  */
-export function queueJoin(address: string, name: string): Promise<QueueState> {
-  return invoke<QueueState>("queue_join", { address, name });
+export function queueJoin(
+  address: string,
+  name: string,
+  categories: string[],
+  bikes: string[],
+): Promise<QueueState> {
+  return invoke<QueueState>("queue_join", { address, name, categories, bikes });
 }
 
 export function queueLeave(): Promise<void> {

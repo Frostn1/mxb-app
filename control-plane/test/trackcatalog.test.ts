@@ -170,6 +170,49 @@ describe("GET /v1/tracks", () => {
     });
   });
 
+  it("uses Shop artwork when the matching mxb-mods post has none", async () => {
+    e = { ...e, SHOP_CATALOG_AUTH: "bearer", SHOP_CATALOG_KEY: "k" } as Env;
+    await ask("Fox Raceway 2023");
+    site = (url) => {
+      if (url.host === "mxbikes-shop.com") {
+        return Response.json({
+          currency: "EUR",
+          categories: [{ id: 7, name: "Tracks" }],
+          mods: [
+            {
+              id: 1,
+              name: "Fox Raceway 2023",
+              url: "https://mxbikes-shop.com/fox",
+              image: "https://mxbikes-shop.com/fox.jpg",
+              price: 9.99,
+              sale_price: null,
+              free: false,
+              categories: [7],
+            },
+          ],
+        });
+      }
+      return Response.json([
+        {
+          id: 1,
+          slug: "fox-raceway-2023",
+          link: "https://mxb-mods.com/fox-raceway-2023/",
+          title: { rendered: "Fox Raceway 2023" },
+        },
+      ]);
+    };
+    await resolveTrackCatalog(e);
+
+    const tracks = await ask("Fox Raceway 2023");
+    expect(tracks["Fox Raceway 2023"]).toMatchObject({
+      source: "mods",
+      slug: "fox-raceway-2023",
+      image: "https://api.mxbsecure.com/v1/tracks/art/foxraceway2023",
+      price: null,
+    });
+    expect(r2.objects.has("trackart/foxraceway2023")).toBe(true);
+  });
+
   it("ignores made-up input", async () => {
     expect(await ask("", "   ", "x".repeat(65))).toEqual({});
     const n = await e.DB.prepare("SELECT COUNT(*) AS n FROM track_catalog").first<{ n: number }>();

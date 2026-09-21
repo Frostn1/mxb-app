@@ -49,7 +49,7 @@ interface Props {
   /** The player's place, when they're in line for this server. */
   queuePosition: number | null;
   onOpen: (s: MasterServer) => void;
-  onJoin: (address: string) => void;
+  onJoin: (server: MasterServer) => void;
   onWait: (s: MasterServer) => void;
   onCopy: (address: string) => void;
   onToggleFavourite: (address: string) => void;
@@ -292,7 +292,7 @@ const ServerCard = memo(function ServerCard({
               disabled={busy || !s.joinable}
               onClick={(e) => {
                 stop(e);
-                onJoin(s.address);
+                onJoin(s);
               }}
               title={s.joinable ? t("serverBrowser.join") : t("serverBrowser.notJoinable")}
             >

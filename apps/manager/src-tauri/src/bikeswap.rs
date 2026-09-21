@@ -36,12 +36,20 @@ pub struct BikeIdentity {
 /// Class/category from a bike `.ini`'s `[data] cat`. `cfg::parse` flattens section
 /// headers, so a flat `cat` lookup is correct. Empty when absent.
 pub fn class_from_ini(bytes: &[u8]) -> String {
-    cfg::parse(bytes).get("cat").unwrap_or("").trim().to_string()
+    cfg::parse(bytes)
+        .get("cat")
+        .unwrap_or("")
+        .trim()
+        .to_string()
 }
 
 /// Display name from a bike `.ini`'s `[info] name`. Empty when absent.
 pub fn name_from_ini(bytes: &[u8]) -> String {
-    cfg::parse(bytes).get("name").unwrap_or("").trim().to_string()
+    cfg::parse(bytes)
+        .get("name")
+        .unwrap_or("")
+        .trim()
+        .to_string()
 }
 
 /// Bike ID from a bike `.cfg`'s top-level `ID`. `None` when absent. (Engine-mapping
@@ -71,7 +79,41 @@ pub fn class_matches(bike_class: &str, allowed: &str) -> bool {
 // Class matching: exercised by the tests below, with no caller in the app yet.
 #[allow(dead_code)]
 pub fn bikes_in_class<'a>(bikes: &'a [BikeIdentity], allowed: &str) -> Vec<&'a BikeIdentity> {
-    bikes.iter().filter(|b| class_matches(&b.class, allowed)).collect()
+    bikes
+        .iter()
+        .filter(|b| class_matches(&b.class, allowed))
+        .collect()
+}
+
+/// Whether a bike satisfies the two allow-lists advertised by a server-browser row.
+///
+/// A non-empty category list and a non-empty bike-id list are both gates: the server can
+/// reject a bike it does not have separately from rejecting its category. Empty lists mean
+/// that gate is open, matching what the browser shows as "Any".
+pub fn server_accepts(bike: &BikeIdentity, categories: &[String], bike_ids: &[String]) -> bool {
+    let category_ok = categories.is_empty()
+        || categories
+            .iter()
+            .any(|category| class_eq(&bike.class, category));
+    let id_ok = bike_ids.is_empty()
+        || bike_ids
+            .iter()
+            .any(|id| bike.id.trim().eq_ignore_ascii_case(id.trim()));
+    category_ok && id_ok
+}
+
+/// Pick the first compatible installed bike.
+///
+/// [`scan_installed_bikes`] gives this function a deterministic display-name/id/path order,
+/// so two joins with an unchanged install always make the same choice.
+pub fn compatible_bike<'a>(
+    bikes: &'a [BikeIdentity],
+    categories: &[String],
+    bike_ids: &[String],
+) -> Option<&'a BikeIdentity> {
+    bikes
+        .iter()
+        .find(|bike| server_accepts(bike, categories, bike_ids))
 }
 
 /// Read a bike's identity from a loose folder (`<dir>/<name>.ini` + `.cfg`) or a
@@ -96,7 +138,11 @@ pub fn read_identity(path: &Path) -> Option<BikeIdentity> {
         let want_cfg = format!("{}.cfg", stem.to_ascii_lowercase());
         let found = pkz::read_selected(path, |n| {
             let base = n.replace('\\', "/");
-            let base = base.rsplit('/').next().unwrap_or(&base).to_ascii_lowercase();
+            let base = base
+                .rsplit('/')
+                .next()
+                .unwrap_or(&base)
+                .to_ascii_lowercase();
             base == want_ini || base == want_cfg
         })
         .unwrap_or_default();
@@ -158,7 +204,13 @@ pub fn scan_installed_bikes(mods_path: &str) -> Vec<BikeIdentity> {
             }
         }
     }
-    out.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    out.sort_by(|a, b| {
+        a.name
+            .to_lowercase()
+            .cmp(&b.name.to_lowercase())
+            .then_with(|| a.id.to_lowercase().cmp(&b.id.to_lowercase()))
+            .then_with(|| a.path.cmp(&b.path))
+    });
     out
 }
 
@@ -219,7 +271,10 @@ engine
         assert_eq!(class_from_ini(CR250_INI), "Classic MX1 OEM");
         assert_eq!(name_from_ini(CR250_INI), "Honda CR250 1996");
         // The nested engine-mapping `id`/`name` must not shadow the top-level ID.
-        assert_eq!(id_from_cfg(CR250_CFG).as_deref(), Some("MX1OEM_1996_Honda_CR250"));
+        assert_eq!(
+            id_from_cfg(CR250_CFG).as_deref(),
+            Some("MX1OEM_1996_Honda_CR250")
+        );
     }
 
     #[test]
@@ -261,7 +316,11 @@ engine
 
         let all = scan_installed_bikes(&root.to_string_lossy());
         let names: Vec<&str> = all.iter().map(|b| b.id.as_str()).collect();
-        assert_eq!(names, vec!["MX1_A", "MX1_C", "MX2_B"], "sorted, non-bike skipped");
+        assert_eq!(
+            names,
+            vec!["MX1_A", "MX1_C", "MX2_B"],
+            "sorted, non-bike skipped"
+        );
 
         let mx1: Vec<&str> = bikes_in_class(&all, "MX1 OEM")
             .iter()
@@ -280,15 +339,54 @@ engine
             class: class.into(),
             path: String::new(),
         };
-        let bikes = vec![
-            mk("a", "MX1 OEM"),
-            mk("b", "MX2 OEM"),
-            mk("c", "MX1 OEM"),
-        ];
+        let bikes = vec![mk("a", "MX1 OEM"), mk("b", "MX2 OEM"), mk("c", "MX1 OEM")];
         let got: Vec<&str> = bikes_in_class(&bikes, "MX1 OEM")
             .iter()
             .map(|b| b.id.as_str())
             .collect();
         assert_eq!(got, vec!["a", "c"]);
+    }
+
+    #[test]
+    fn server_allow_lists_are_both_enforced_and_case_insensitive() {
+        let bike = BikeIdentity {
+            id: "MX2_B".into(),
+            name: "Bike B".into(),
+            class: "MX2 OEM".into(),
+            path: String::new(),
+        };
+        assert!(server_accepts(&bike, &[], &[]));
+        assert!(server_accepts(
+            &bike,
+            &["mx2 oem".into()],
+            &["mx2_b".into()]
+        ));
+        assert!(!server_accepts(
+            &bike,
+            &["MX1 OEM".into()],
+            &["MX2_B".into()]
+        ));
+        assert!(!server_accepts(
+            &bike,
+            &["MX2 OEM".into()],
+            &["MX1_A".into()]
+        ));
+    }
+
+    #[test]
+    fn compatible_bike_uses_the_scan_order() {
+        let mk = |id: &str, class: &str| BikeIdentity {
+            id: id.into(),
+            name: id.into(),
+            class: class.into(),
+            path: String::new(),
+        };
+        let bikes = vec![
+            mk("first", "MX2 OEM"),
+            mk("second", "MX2 OEM"),
+            mk("other", "MX1 OEM"),
+        ];
+        let picked = compatible_bike(&bikes, &["MX2 OEM".into()], &[]).unwrap();
+        assert_eq!(picked.id, "first");
     }
 }

@@ -26,7 +26,13 @@ const QueueBanner = () => {
       } else if (q.phase === "ended" && q.error === "missed") {
         toast.warning(t("queue.missed", { name }));
       } else if (q.phase === "ended" && q.error) {
-        toast.error(q.error);
+        toast.error(
+          q.error === "server_bike_no_profile"
+            ? t("serverBrowser.bikeNoProfile")
+            : q.error === "server_bike_no_match"
+              ? t("serverBrowser.bikeNoMatch")
+              : q.error,
+        );
       }
     });
     return () => {

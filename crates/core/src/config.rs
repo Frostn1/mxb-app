@@ -487,6 +487,20 @@ pub const PAINT_SYNC_REV: u32 = 1;
 /// v1: it shipped on by default and shouldn't have.
 pub const LAUNCH_AT_STARTUP_REV: u32 = 1;
 
+/// Carry old configs across the addition of `setupComplete` without completing a setup that
+/// is currently paused on its final consent step. Serde gives an absent bool and an explicit
+/// `false` the same value, so the caller must report whether the raw JSON named the field.
+fn migrate_setup_complete(cfg: &mut AppConfig, field_was_present: bool) -> bool {
+    if !field_was_present
+        && (!cfg.mods_path.trim().is_empty()
+            || cfg.games.values().any(|paths| !paths.mods_path.trim().is_empty()))
+    {
+        cfg.setup_complete = true;
+        return true;
+    }
+    false
+}
+
 /// Bring a config written by an older build up to date.
 ///
 /// Applied on every read rather than in a one-shot upgrade step: the config is also
@@ -497,22 +511,14 @@ pub const LAUNCH_AT_STARTUP_REV: u32 = 1;
 /// in memory is decided — and logged — again on every read.
 pub fn migrate(cfg: &mut AppConfig) -> bool {
     let mut changed = false;
-    // Every released config predating `setupComplete` belongs to a player who completed setup
-    // when it has a saved mods folder for any game. A token-only config created by the startup
-    // gate has no such folder and must remain a first run.
-    if !cfg.setup_complete
-        && (!cfg.mods_path.trim().is_empty()
-            || cfg.games.values().any(|paths| !paths.mods_path.trim().is_empty()))
-    {
-        cfg.setup_complete = true;
-        changed = true;
-    }
     // The one-shot described on `paint_sync_rev`. A config that never had the field is at
     // rev 0 too, and forcing an already-off setting off is a no-op, so this needs no way to
     // tell those two apart.
     if cfg.paint_sync_rev < PAINT_SYNC_REV {
         if cfg.paint_sync_enabled {
-            log::info!("turning paint sync off: it is off by default while the freeze is understood");
+            log::info!(
+                "turning paint sync off: it is off by default while the freeze is understood"
+            );
         }
         cfg.paint_sync_enabled = false;
         cfg.paint_sync_rev = PAINT_SYNC_REV;
@@ -641,7 +647,9 @@ impl AppConfig {
         // `…\MX Bikes\mods` on an install the game has never run — no `profiles/` inside
         // the tree, and none to fall back to in `Documents` either, but the right folder
         // is one level up and about to be written.
-        let beside = self.mods_tree_parent().map(|p| crate::library::resolve_child(&p, "profiles"));
+        let beside = self
+            .mods_tree_parent()
+            .map(|p| crate::library::resolve_child(&p, "profiles"));
         resolve_profiles_dir(primary, || {
             beside
                 .filter(|p| p.is_dir())
@@ -684,10 +692,17 @@ fn resolve_profiles_dir(primary: PathBuf, fallback: impl FnOnce() -> Option<Path
 /// prefix wherever the game runs as a Windows process (Proton on Linux, a bottle on
 /// macOS), `Documents\PiBoSo\<game>` on Windows.
 pub fn default_user_dir(game: &GameProfile) -> Option<PathBuf> {
+    if let Some(root) = dev_profile_root() {
+        return Some(root.join("Documents").join("PiBoSo").join(game.user_dir));
+    }
     if let Some(p) = detect_prefix_mods_path(game) {
         return Some(PathBuf::from(p));
     }
-    Some(dirs_next::document_dir()?.join("PiBoSo").join(game.user_dir))
+    Some(
+        dirs_next::document_dir()?
+            .join("PiBoSo")
+            .join(game.user_dir),
+    )
 }
 
 /// The folder every binary in this workspace keeps its shared state under.
@@ -704,11 +719,30 @@ pub fn default_user_dir(game: &GameProfile) -> Option<PathBuf> {
 /// Frozen, like the identifier it names: every install already has this folder.
 pub const DATA_ID: &str = "com.frost.mxbikes";
 
+/// A disposable profile root for development and first-run QA.
+///
+/// This is deliberately debug-only: a packaged app must always use the platform's real app
+/// data and game locations. Pointing a dev run here isolates config/cache state and also makes
+/// folder detection look inside the disposable profile, so testing an empty machine never
+/// reads or writes the developer's actual MX Bikes install.
+pub fn dev_profile_root() -> Option<PathBuf> {
+    if !cfg!(debug_assertions) {
+        return None;
+    }
+    std::env::var_os("MXB_DEV_PROFILE_ROOT")
+        .filter(|root| !root.is_empty())
+        .map(PathBuf::from)
+        .filter(|root| root.is_absolute())
+}
+
 /// The shared app-data root.
 ///
 /// Keeps `app` in the signature: every caller already has one, so nothing downstream
 /// changes, and a platform quirk would have somewhere to live.
 pub fn data_dir(_app: &AppHandle) -> Option<PathBuf> {
+    if let Some(root) = dev_profile_root() {
+        return Some(root.join("data"));
+    }
     Some(dirs_next::data_local_dir()?.join(DATA_ID))
 }
 
@@ -717,6 +751,9 @@ pub fn data_dir(_app: &AppHandle) -> Option<PathBuf> {
 /// Shared for the same reason as [`data_dir`], and for one more: a track the manager has
 /// just drawn should not be decoded again the moment the studio opens it.
 pub fn cache_dir(_app: &AppHandle) -> Option<PathBuf> {
+    if let Some(root) = dev_profile_root() {
+        return Some(root.join("cache"));
+    }
     Some(dirs_next::cache_dir()?.join(DATA_ID))
 }
 
@@ -745,8 +782,13 @@ fn infer_game(cfg: &AppConfig) -> Option<Game> {
             }
         }
     }
-    let leaf = Path::new(cfg.mods_path.trim()).file_name()?.to_string_lossy().to_string();
-    Game::ALL.into_iter().find(|g| leaf.eq_ignore_ascii_case(g.profile().user_dir))
+    let leaf = Path::new(cfg.mods_path.trim())
+        .file_name()?
+        .to_string_lossy()
+        .to_string();
+    Game::ALL
+        .into_iter()
+        .find(|g| leaf.eq_ignore_ascii_case(g.profile().user_dir))
 }
 
 pub fn load(app: &AppHandle) -> anyhow::Result<AppConfig> {
@@ -755,7 +797,15 @@ pub fn load(app: &AppHandle) -> anyhow::Result<AppConfig> {
     // A truncated/corrupt file is an error, not a silent empty config: callers that
     // can rebuild one (see `load_or_detect`) get the chance to, instead of the app
     // coming up pointed at nothing.
-    let mut cfg: AppConfig = serde_json::from_str(&text)?;
+    let raw: serde_json::Value = serde_json::from_str(&text)?;
+    let mut cfg: AppConfig = serde_json::from_value(raw.clone())?;
+
+    // Every released config predating `setupComplete` belongs to a player who completed
+    // setup when it has a saved mods folder. An explicit `setupComplete: false`, however,
+    // is the in-progress config written before the integration-consent step and must stay
+    // false across restarts. Looking at the raw document is the only way to distinguish it
+    // from serde's default for an absent legacy field.
+    let setup_migrated = migrate_setup_complete(&mut cfg, raw.get("setupComplete").is_some());
 
     // Recover the active game when the file doesn't name one.
     //
@@ -769,10 +819,7 @@ pub fn load(app: &AppHandle) -> anyhow::Result<AppConfig> {
     // driven as if it were an MX Bikes one. `activeGame` absent is not the same as
     // `activeGame: "mxb"`, so check the raw JSON rather than the deserialized value,
     // and re-derive the game from the folders instead of assuming.
-    let names_game = serde_json::from_str::<serde_json::Value>(&text)
-        .ok()
-        .and_then(|v| v.get("activeGame").cloned())
-        .is_some();
+    let names_game = raw.get("activeGame").is_some();
     if !names_game {
         if let Some(g) = infer_game(&cfg) {
             if g != cfg.active_game {
@@ -789,7 +836,10 @@ pub fn load(app: &AppHandle) -> anyhow::Result<AppConfig> {
 
     // A migration only sticks once it is written down. `load` is on the FrostMod status
     // poll and the game watcher, so an unsaved one runs, and logs, four times a minute.
-    if migrate(&mut cfg) {
+    // Do not short-circuit this: a legacy config gaining `setupComplete` may also need
+    // unrelated one-shot migrations from the same read.
+    let other_migrations = migrate(&mut cfg);
+    if setup_migrated || other_migrations {
         if let Err(e) = save(app, &cfg) {
             log::warn!("couldn't write the migrated config back: {e:#}");
         }
@@ -826,8 +876,7 @@ fn is_user_dir(dir: &Path) -> bool {
     crate::library::resolve_child(dir, "profiles").is_dir()
 }
 
-/// The parent of `path` when the pick is the `mods` folder *inside the game's user
-/// folder*, else `None`.
+/// Correct a folder-picker choice that landed one level inside the game's user folder.
 ///
 /// In a folder picker those two are one click apart, and getting it wrong used to be
 /// invisible afterwards: every scan then looked under `<mods>/mods`, found nothing, and
@@ -922,7 +971,10 @@ pub fn save(app: &AppHandle, cfg: &AppConfig) -> anyhow::Result<()> {
 
 /// Set single keys in `config.json`, leaving every other field as it is, the ones this
 /// build doesn't know included. For an app that doesn't own the config (Coach).
-pub fn patch_json(app: &AppHandle, keys: serde_json::Map<String, serde_json::Value>) -> anyhow::Result<()> {
+pub fn patch_json(
+    app: &AppHandle,
+    keys: serde_json::Map<String, serde_json::Value>,
+) -> anyhow::Result<()> {
     patch_file(&config_path(app), keys)
 }
 
@@ -967,7 +1019,11 @@ pub fn finalize(mut cfg: AppConfig) -> AppConfig {
     // without checking. Only reached on a game switch or a fresh setup — never on plain
     // startup — so a drive that happens to be offline right now isn't forgotten.
     if !cfg.mods_path.trim().is_empty() && !Path::new(cfg.mods_path.trim()).is_dir() {
-        log::info!("saved {} folder is gone ({}) — re-detecting", game.display, cfg.mods_path);
+        log::info!(
+            "saved {} folder is gone ({}) — re-detecting",
+            game.display,
+            cfg.mods_path
+        );
         cfg.mods_path.clear();
     }
     if cfg.mods_path.trim().is_empty() {
@@ -998,6 +1054,39 @@ pub fn finalize(mut cfg: AppConfig) -> AppConfig {
     adopt_relocated_mods_folder(&mut cfg);
     cfg.stash_active();
     cfg
+}
+
+/// Create the two roots a fresh game-user folder needs before the rest of the app starts
+/// scanning it.
+///
+/// `mods_path` can describe either the ordinary user folder (`.../MX Bikes`) or a relocated
+/// mods tree. Going through the same resolvers as every reader prevents a picked/relocated
+/// tree from becoming `mods/mods`, and keeps profiles beside the user folder when an explicit
+/// profiles path was discovered.
+pub fn ensure_game_user_folders(cfg: &AppConfig) -> anyhow::Result<()> {
+    let base = Path::new(cfg.mods_path.trim());
+    let mods = crate::library::mods_root(&cfg.mods_path);
+    // `profiles_dir` is a read-time resolver: when the selected root has no profiles yet it
+    // may deliberately fall back to an existing stock Documents folder. During setup the
+    // ordinary layout must instead initialize the sibling in the root the player selected.
+    // A real relocated mods tree has no such sibling contract, so keep its explicit/fallback
+    // resolution.
+    let profiles = if !cfg.profiles_path.trim().is_empty() || mods == base {
+        cfg.profiles_dir()
+    } else {
+        crate::library::resolve_child(base, "profiles")
+    };
+    std::fs::create_dir_all(&mods).map_err(|e| {
+        anyhow::anyhow!("couldn't create the mods folder at {}: {e}", mods.display())
+    })?;
+
+    std::fs::create_dir_all(&profiles).map_err(|e| {
+        anyhow::anyhow!(
+            "couldn't create the profiles folder at {}: {e}",
+            profiles.display()
+        )
+    })?;
+    Ok(())
 }
 
 /// Follow `mxbikes.ini`'s `[mods] folder` when the player has pointed the game at a mods
@@ -1092,8 +1181,13 @@ fn parse_ini_mods_folder(bytes: &[u8]) -> Option<String> {
             section = name.trim().to_ascii_lowercase();
             continue;
         }
-        let Some((k, v)) = line.split_once('=') else { continue };
-        let (k, v) = (k.trim().to_ascii_lowercase(), v.trim().trim_matches('"').trim());
+        let Some((k, v)) = line.split_once('=') else {
+            continue;
+        };
+        let (k, v) = (
+            k.trim().to_ascii_lowercase(),
+            v.trim().trim_matches('"').trim(),
+        );
         if v.is_empty() {
             continue;
         }
@@ -1131,8 +1225,13 @@ pub fn parse_master_servers(bytes: &[u8]) -> Vec<String> {
         if section != "master" {
             continue;
         }
-        let Some((k, v)) = line.split_once('=') else { continue };
-        let (k, v) = (k.trim().to_ascii_lowercase(), v.trim().trim_matches('"').trim());
+        let Some((k, v)) = line.split_once('=') else {
+            continue;
+        };
+        let (k, v) = (
+            k.trim().to_ascii_lowercase(),
+            v.trim().trim_matches('"').trim(),
+        );
         if v.is_empty() {
             continue;
         }
@@ -1176,6 +1275,9 @@ pub fn master_servers(cfg: &AppConfig) -> Vec<String> {
 /// Returns the first prefix that actually looks like a mods dir, so a stale prefix from an
 /// uninstalled copy can't win over a real one.
 fn detect_prefix_mods_path(game: &GameProfile) -> Option<String> {
+    if dev_profile_root().is_some() {
+        return None;
+    }
     wine_prefixes(game)
         .iter()
         .find_map(|prefix| mods_dir_in_prefix(prefix, game))
@@ -1222,6 +1324,9 @@ fn mods_dir_in_prefix(prefix: &Path, game: &GameProfile) -> Option<String> {
 /// Steam libraries. Returns `None` when it can't be found (e.g. non-Steam install —
 /// GP Bikes is also sold directly by PiBoSo, so this missing is unremarkable there).
 pub fn detect_game_path(game: &GameProfile) -> Option<String> {
+    if dev_profile_root().is_some() {
+        return None;
+    }
     for lib in steam_libraries() {
         let dir = lib.join("steamapps").join("common").join(game.steam_common);
         // Case-tolerant: a case-sensitive filesystem can hold `GPBikes.exe`.
@@ -1253,7 +1358,10 @@ pub(crate) fn steam_libraries() -> Vec<PathBuf> {
             }
         }
         for drive in ['C', 'D', 'E', 'F'] {
-            push(&mut roots, PathBuf::from(format!("{drive}:\\Program Files (x86)\\Steam")));
+            push(
+                &mut roots,
+                PathBuf::from(format!("{drive}:\\Program Files (x86)\\Steam")),
+            );
             push(&mut roots, PathBuf::from(format!("{drive}:\\Steam")));
             push(&mut roots, PathBuf::from(format!("{drive}:\\SteamLibrary")));
         }
@@ -1273,7 +1381,10 @@ pub(crate) fn steam_libraries() -> Vec<PathBuf> {
                 &mut roots,
                 home.join(".var/app/com.valvesoftware.Steam/data/Steam"),
             );
-            push(&mut roots, home.join("snap/steam/common/.local/share/Steam"));
+            push(
+                &mut roots,
+                home.join("snap/steam/common/.local/share/Steam"),
+            );
         }
         // macOS: the game is a Windows title, so a Steam that owns it is a *Windows* Steam
         // installed inside a Wine bottle. The native paths above can never hold it.
@@ -1321,6 +1432,98 @@ fn parse_library_paths(vdf: &str) -> Vec<String> {
 mod tests {
     use super::*;
 
+    #[test]
+    fn legacy_folder_config_is_treated_as_setup_complete() {
+        let mut cfg = AppConfig {
+            mods_path: "/games/MX Bikes".into(),
+            ..Default::default()
+        };
+
+        assert!(migrate_setup_complete(&mut cfg, false));
+        assert!(cfg.setup_complete);
+    }
+
+    #[test]
+    fn explicit_in_progress_setup_survives_a_restart() {
+        let mut cfg = AppConfig {
+            mods_path: "/games/MX Bikes".into(),
+            setup_complete: false,
+            ..Default::default()
+        };
+
+        assert!(!migrate_setup_complete(&mut cfg, true));
+        assert!(!cfg.setup_complete);
+    }
+
+    #[test]
+    fn setup_creates_missing_mods_and_profiles_folders() {
+        let root = std::env::temp_dir().join(format!(
+            "frost-setup-folders-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let cfg = AppConfig {
+            mods_path: root.to_string_lossy().into_owned(),
+            ..Default::default()
+        };
+
+        ensure_game_user_folders(&cfg).unwrap();
+
+        assert!(root.join("mods").is_dir());
+        assert!(root.join("profiles").is_dir());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn setup_uses_a_relocated_mods_tree_without_nesting_another_one() {
+        let root = std::env::temp_dir().join(format!(
+            "frost-setup-relocated-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        let tree = root.join("content");
+        let profiles = root.join("game-user").join("profiles");
+        std::fs::create_dir_all(tree.join("tracks")).unwrap();
+        let cfg = AppConfig {
+            mods_path: tree.to_string_lossy().into_owned(),
+            profiles_path: profiles.to_string_lossy().into_owned(),
+            ..Default::default()
+        };
+
+        ensure_game_user_folders(&cfg).unwrap();
+
+        assert!(tree.is_dir());
+        assert!(!tree.join("mods").exists());
+        assert!(profiles.is_dir());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn setup_reports_the_folder_it_could_not_create() {
+        let root = std::env::temp_dir().join(format!(
+            "frost-setup-folder-error-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("mods"), b"not a directory").unwrap();
+        let cfg = AppConfig {
+            mods_path: root.to_string_lossy().into_owned(),
+            ..Default::default()
+        };
+
+        let error = ensure_game_user_folders(&cfg).unwrap_err().to_string();
+
+        assert!(error.contains("couldn't create the mods folder at"));
+        assert!(error.contains(&root.join("mods").to_string_lossy().into_owned()));
+        assert!(!root.join("profiles").exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     /// Coach sets the overlay keys in a file MXB App owns: every other field, known to this
     /// build or not, must come through as it was.
     #[test]
@@ -1328,7 +1531,11 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("frost-patch-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("config.json");
-        std::fs::write(&path, r#"{"modsPath":"C:\\mods","someFutureField":[1,2],"overlayHotkey":"Alt+F1"}"#).unwrap();
+        std::fs::write(
+            &path,
+            r#"{"modsPath":"C:\\mods","someFutureField":[1,2],"overlayHotkey":"Alt+F1"}"#,
+        )
+        .unwrap();
 
         let mut keys = serde_json::Map::new();
         keys.insert("overlayHotkey".into(), serde_json::json!("Alt+F2"));
@@ -1340,7 +1547,10 @@ mod tests {
         assert_eq!(v["overlayEnabled"], false);
         assert_eq!(v["modsPath"], "C:\\mods");
         assert_eq!(v["someFutureField"], serde_json::json!([1, 2]));
-        assert!(!path.with_extension("json.tmp").exists(), "moved in, not left aside");
+        assert!(
+            !path.with_extension("json.tmp").exists(),
+            "moved in, not left aside"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -1359,7 +1569,11 @@ mod tests {
         let mut cfg = serde_json::from_str::<AppConfig>(json).unwrap();
         migrate(&mut cfg);
 
-        assert_eq!(cfg.active_game, Game::Mxb, "an old config is an MX Bikes one");
+        assert_eq!(
+            cfg.active_game,
+            Game::Mxb,
+            "an old config is an MX Bikes one"
+        );
         assert_eq!(cfg.mods_path, "/games/MX Bikes", "folders are untouched");
         assert_eq!(cfg.game_path, "/steam/common/MX Bikes");
         // ...and they've been seeded into the map, so switching away and back keeps them.
@@ -1381,7 +1595,10 @@ mod tests {
         let cfg = serde_json::from_str::<AppConfig>(json).unwrap();
 
         assert!(!cfg.paint_sync_enabled, "an absent field means off");
-        assert!(!cfg.voice_enabled, "and a field that is there still means what it says");
+        assert!(
+            !cfg.voice_enabled,
+            "and a field that is there still means what it says"
+        );
     }
 
     /// The hotfix's whole job: a v0.12.4 config says `paintSyncEnabled: true` in so many
@@ -1392,8 +1609,14 @@ mod tests {
         let mut cfg = serde_json::from_str::<AppConfig>(json).unwrap();
 
         assert!(migrate(&mut cfg), "and the caller is told to write it down");
-        assert!(!cfg.paint_sync_enabled, "the explicit true is overridden once");
-        assert_eq!(cfg.paint_sync_rev, PAINT_SYNC_REV, "and the config is caught up");
+        assert!(
+            !cfg.paint_sync_enabled,
+            "the explicit true is overridden once"
+        );
+        assert_eq!(
+            cfg.paint_sync_rev, PAINT_SYNC_REV,
+            "and the config is caught up"
+        );
     }
 
     /// And it lands once, not on every read: before `load` wrote the result back, the flip
@@ -1419,8 +1642,14 @@ mod tests {
         let mut cfg = serde_json::from_str::<AppConfig>(json).unwrap();
 
         assert!(migrate(&mut cfg), "and the caller is told to write it down");
-        assert!(!cfg.launch_at_startup, "the explicit true is overridden once");
-        assert_eq!(cfg.launch_at_startup_rev, LAUNCH_AT_STARTUP_REV, "and it is caught up");
+        assert!(
+            !cfg.launch_at_startup,
+            "the explicit true is overridden once"
+        );
+        assert_eq!(
+            cfg.launch_at_startup_rev, LAUNCH_AT_STARTUP_REV,
+            "and it is caught up"
+        );
 
         // Read back the way the next poll reads it: the flip lands once, not forever.
         let saved = serde_json::to_string(&cfg).unwrap();
@@ -1433,8 +1662,14 @@ mod tests {
     fn turning_launch_at_startup_back_on_survives_the_next_launch() {
         let mut cfg = AppConfig::default();
         cfg.launch_at_startup = true;
-        assert!(!migrate(&mut cfg), "a caught-up config has nothing to migrate");
-        assert!(cfg.launch_at_startup, "and the setting is left where it was put");
+        assert!(
+            !migrate(&mut cfg),
+            "a caught-up config has nothing to migrate"
+        );
+        assert!(
+            cfg.launch_at_startup,
+            "and the setting is left where it was put"
+        );
     }
 
     /// Once. Someone who turns it back on afterwards keeps it — otherwise the setting is
@@ -1447,7 +1682,10 @@ mod tests {
 
         let saved = serde_json::to_string(&cfg).unwrap();
         let mut reloaded = serde_json::from_str::<AppConfig>(&saved).unwrap();
-        assert!(!migrate(&mut reloaded), "a caught-up config needs no second write");
+        assert!(
+            !migrate(&mut reloaded),
+            "a caught-up config needs no second write"
+        );
         assert!(reloaded.paint_sync_enabled, "their choice stands");
     }
 
@@ -1456,7 +1694,9 @@ mod tests {
     fn mxbsecure_is_off_by_default() {
         let cfg = serde_json::from_str::<AppConfig>(r#"{ "modsPath": "/x" }"#).unwrap();
         assert!(!cfg.mxbsecure_enabled, "an absent flag means off");
-        let on = serde_json::from_str::<AppConfig>(r#"{ "modsPath": "/x", "mxbsecureEnabled": true }"#).unwrap();
+        let on =
+            serde_json::from_str::<AppConfig>(r#"{ "modsPath": "/x", "mxbsecureEnabled": true }"#)
+                .unwrap();
         assert!(on.mxbsecure_enabled, "and it round-trips when set");
     }
 
@@ -1469,7 +1709,10 @@ mod tests {
 
         let round_tripped =
             serde_json::from_str::<AppConfig>(&serde_json::to_string(&cfg).unwrap()).unwrap();
-        assert!(!round_tripped.paint_sync_enabled, "and it is written back out");
+        assert!(
+            !round_tripped.paint_sync_enabled,
+            "and it is written back out"
+        );
     }
 
     /// Switching parks the outgoing game's folders and restores the incoming one's, so a
@@ -1480,7 +1723,10 @@ mod tests {
         cfg.mods_path = "/mx/mods".into();
         cfg.game_path = "/mx/install".into();
 
-        assert!(cfg.switch_game(Game::Gpb), "a real switch reports the change");
+        assert!(
+            cfg.switch_game(Game::Gpb),
+            "a real switch reports the change"
+        );
         assert_eq!(cfg.active_game, Game::Gpb);
         assert_eq!(cfg.mods_path, "", "GP Bikes has nothing saved yet");
 
@@ -1542,7 +1788,11 @@ mod tests {
     fn a_config_stripped_of_its_game_is_recovered_from_the_folders() {
         let mut cfg = AppConfig::default();
         cfg.mods_path = "/Users/x/Documents/PiBoSo/GP Bikes".into();
-        assert_eq!(infer_game(&cfg), Some(Game::Gpb), "the user folder names the game");
+        assert_eq!(
+            infer_game(&cfg),
+            Some(Game::Gpb),
+            "the user folder names the game"
+        );
 
         cfg.mods_path = "/Users/x/Documents/PiBoSo/MX Bikes".into();
         assert_eq!(infer_game(&cfg), Some(Game::Mxb));
@@ -1564,7 +1814,11 @@ mod tests {
         let mut cfg = AppConfig::default();
         cfg.game_path = root.to_string_lossy().into_owned();
         cfg.mods_path = "/somewhere/custom/my mods".into();
-        assert_eq!(infer_game(&cfg), Some(Game::Gpb), "gpbikes.exe is conclusive");
+        assert_eq!(
+            infer_game(&cfg),
+            Some(Game::Gpb),
+            "gpbikes.exe is conclusive"
+        );
 
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -1587,9 +1841,10 @@ mod tests {
     /// a failure, so the assertion is on the *shape* of a path when there is one.
     #[test]
     fn each_game_has_its_own_user_folder() {
-        let (Some(mxb), Some(gpb)) =
-            (default_user_dir(&crate::game::MXB), default_user_dir(&crate::game::GPB))
-        else {
+        let (Some(mxb), Some(gpb)) = (
+            default_user_dir(&crate::game::MXB),
+            default_user_dir(&crate::game::GPB),
+        ) else {
             return; // no Documents folder on this host — nothing to assert about
         };
         assert!(mxb.ends_with("PiBoSo/MX Bikes"), "{}", mxb.display());
@@ -1704,7 +1959,12 @@ mod tests {
             std::fs::create_dir_all(game.join("profiles")).unwrap();
             let mut cfg = AppConfig::default();
             cfg.mods_path = game.to_string_lossy().into_owned();
-            assert_eq!(Path::new(&finalize(cfg).mods_path), game, "{}", game.display());
+            assert_eq!(
+                Path::new(&finalize(cfg).mods_path),
+                game,
+                "{}",
+                game.display()
+            );
         }
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -1760,7 +2020,8 @@ mod tests {
     /// profiles folder on the wrong drive entirely.
     #[test]
     fn profiles_are_found_beside_a_mods_tree() {
-        let root = std::env::temp_dir().join(format!("frost-profiles-beside-{}", std::process::id()));
+        let root =
+            std::env::temp_dir().join(format!("frost-profiles-beside-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         let game = root.join("D_Games").join("MX Bikes");
         std::fs::create_dir_all(game.join("mods").join("bikes")).unwrap();
@@ -1796,7 +2057,10 @@ mod tests {
         std::fs::create_dir_all(tree.join("rider")).unwrap();
         std::fs::write(
             install.join("mxbikes.ini"),
-            format!("[master]\nserver = master.mx-bikes.com:54200\n\n[mods]\nfolder = {}\n", tree.display()),
+            format!(
+                "[master]\nserver = master.mx-bikes.com:54200\n\n[mods]\nfolder = {}\n",
+                tree.display()
+            ),
         )
         .unwrap();
 
@@ -1849,10 +2113,16 @@ mod tests {
             parse_ini_mods_folder(b"[mods]\nfolder = \"D:\\My Mods\"\n"),
             Some("D:\\My Mods".to_string()),
         );
-        assert_eq!(parse_ini_mods_folder(b"mods = E:\\stuff\n"), Some("E:\\stuff".to_string()));
+        assert_eq!(
+            parse_ini_mods_folder(b"mods = E:\\stuff\n"),
+            Some("E:\\stuff".to_string())
+        );
 
         // A `folder` key belonging to some other section is not ours.
-        assert_eq!(parse_ini_mods_folder(b"[replay]\nfolder = C:\\replays\n"), None);
+        assert_eq!(
+            parse_ini_mods_folder(b"[replay]\nfolder = C:\\replays\n"),
+            None
+        );
         // Nothing to say, an empty value, and a non-UTF-8 file must all be survivable.
         assert_eq!(parse_ini_mods_folder(b"[mods]\nfolder =\n"), None);
         assert_eq!(parse_ini_mods_folder(b""), None);
@@ -1869,7 +2139,9 @@ mod tests {
     fn parses_the_master_servers_out_of_a_piboso_ini() {
         // One server, the stock file.
         assert_eq!(
-            parse_master_servers(b"[master]\nserver = master.mx-bikes.com:54200\n\n[mods]\nfolder = C:\\mods\n"),
+            parse_master_servers(
+                b"[master]\nserver = master.mx-bikes.com:54200\n\n[mods]\nfolder = C:\\mods\n"
+            ),
             vec!["master.mx-bikes.com:54200".to_string()],
         );
 
@@ -1881,9 +2153,18 @@ mod tests {
 
         // A `server` key outside `[master]`, an empty value, and a non-numbered stray are all
         // ignored; nothing to read yields nothing (the caller falls back to the default).
-        assert_eq!(parse_master_servers(b"[net]\nserver = elsewhere:1\n"), Vec::<String>::new());
-        assert_eq!(parse_master_servers(b"[master]\nserver =\n"), Vec::<String>::new());
-        assert_eq!(parse_master_servers(b"[master]\nserverfoo = x:1\n"), Vec::<String>::new());
+        assert_eq!(
+            parse_master_servers(b"[net]\nserver = elsewhere:1\n"),
+            Vec::<String>::new()
+        );
+        assert_eq!(
+            parse_master_servers(b"[master]\nserver =\n"),
+            Vec::<String>::new()
+        );
+        assert_eq!(
+            parse_master_servers(b"[master]\nserverfoo = x:1\n"),
+            Vec::<String>::new()
+        );
         assert_eq!(parse_master_servers(b""), Vec::<String>::new());
     }
 
@@ -1921,8 +2202,7 @@ mod tests {
 
     #[test]
     fn only_a_real_mx_bikes_folder_is_adopted_automatically() {
-        let root = std::env::temp_dir()
-            .join(format!("frost-config-detect-{}", std::process::id()));
+        let root = std::env::temp_dir().join(format!("frost-config-detect-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).unwrap();
 
@@ -1957,7 +2237,10 @@ mod tests {
         assert_eq!(cfg.mods_path, "C:\\MXB");
         assert_eq!(cfg.game_path, "C:\\Steam\\MX Bikes");
         assert!(!cfg.run_in_background);
-        assert!(!cfg.launch_at_startup, "unset fields fall back to the defaults");
+        assert!(
+            !cfg.launch_at_startup,
+            "unset fields fall back to the defaults"
+        );
         assert!(!cfg.welcome_seen);
         assert!(!cfg.tour_done);
         assert!(
@@ -1972,7 +2255,10 @@ mod tests {
     fn the_retired_default_hotkey_moves_to_the_current_one() {
         let mut cfg = AppConfig::default();
         cfg.overlay_hotkey = "CommandOrControl+Shift+M".into();
-        assert!(migrate(&mut cfg), "and the move is written down rather than redone");
+        assert!(
+            migrate(&mut cfg),
+            "and the move is written down rather than redone"
+        );
         assert_eq!(cfg.overlay_hotkey, DEFAULT_OVERLAY_HOTKEY);
     }
 

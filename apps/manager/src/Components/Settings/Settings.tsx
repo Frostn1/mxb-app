@@ -2416,14 +2416,6 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
               </button>
               {showIntegrationAdvanced && (
                 <div className="flex flex-col gap-4 border-t border-border/70 px-3 py-3">
-                  {/* This is a player control; creator packaging remains on the website and
-                      in partner tools rather than in this app. */}
-                  <ToggleRow
-                    label={t("settings.secureContentInject")}
-                    desc={t("settings.secureContentInjectDesc")}
-                    checked={secureContentInject}
-                    onChange={toggleSecureContentInject}
-                  />
                   <div className="flex flex-col gap-1.5">
                     <span className="text-[12.5px] text-foreground/85">
                       {t("settings.frostmodArgs")}

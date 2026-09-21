@@ -97,12 +97,20 @@ pub fn is_my_turn(players: u32, max: u32, ahead: u32) -> bool {
 }
 
 /// Get in line for `address`, leaving any other line first.
-pub async fn join(app: AppHandle, address: String, name: String) -> Result<QueueState, String> {
+pub async fn join(
+    app: AppHandle,
+    address: String,
+    name: String,
+    categories: Vec<String>,
+    bikes: Vec<String>,
+) -> Result<QueueState, String> {
     let key = gameproc::parse_server_address(&address).map_err(|e| format!("{e:#}"))?;
     let cfg = crate::config::load_or_detect(&app).unwrap_or_default();
     let token = crate::voice::signal::account(&app, &cfg).await?;
 
-    let place = beat(&token, &key, false, None).await.map_err(|e| format!("{e:#}"))?;
+    let place = beat(&token, &key, false, None)
+        .await
+        .map_err(|e| format!("{e:#}"))?;
     let state = QueueState {
         address: key.clone(),
         name,
@@ -120,7 +128,15 @@ pub async fn join(app: AppHandle, address: String, name: String) -> Result<Queue
         active.0
     };
     let _ = app.emit(EVENT, &state);
-    tauri::async_runtime::spawn(run(app, token, key, generation, place.probe));
+    tauri::async_runtime::spawn(run(
+        app,
+        token,
+        key,
+        generation,
+        place.probe,
+        categories,
+        bikes,
+    ));
     Ok(state)
 }
 
@@ -180,7 +196,15 @@ pub async fn counts(app: &AppHandle, addresses: Vec<String>) -> Result<Vec<(Stri
 }
 
 /// The loop behind one line. Ends when a newer [`join`] or a [`leave`] bumps the generation.
-async fn run(app: AppHandle, token: String, key: String, generation: u64, mut probe_next: bool) {
+async fn run(
+    app: AppHandle,
+    token: String,
+    key: String,
+    generation: u64,
+    mut probe_next: bool,
+    categories: Vec<String>,
+    bikes: Vec<String>,
+) {
     let mut launched_at: Option<Instant> = None;
     let mut turn_at: Option<Instant> = None;
     // The server an already-open game was on when the turn came. Still being there isn't a join.
@@ -188,7 +212,9 @@ async fn run(app: AppHandle, token: String, key: String, generation: u64, mut pr
 
     loop {
         tokio::time::sleep(BEAT).await;
-        let Some(mut state) = current(generation) else { return };
+        let Some(mut state) = current(generation) else {
+            return;
+        };
 
         if launched_at.is_some() || turn_at.is_some() {
             let on = on_server();
@@ -237,11 +263,11 @@ async fn run(app: AppHandle, token: String, key: String, generation: u64, mut pr
         if !claimed {
             if let Some((players, max)) = count {
                 if is_my_turn(players, max, place.ahead) {
-                    let mut outcome = take_turn(&app, &key);
+                    let mut outcome = take_turn(&app, &key, &categories, &bikes);
                     if matches!(outcome, Ok(LaunchOutcome::AlreadyRunning))
                         && close_open_game(&app).await
                     {
-                        outcome = take_turn(&app, &key);
+                        outcome = take_turn(&app, &key, &categories, &bikes);
                     }
                     match outcome {
                         Ok(LaunchOutcome::Launched) => {
@@ -271,8 +297,18 @@ async fn run(app: AppHandle, token: String, key: String, generation: u64, mut pr
 }
 
 /// Launch into the slot. Reports `AlreadyRunning` rather than touching an open game.
-fn take_turn(app: &AppHandle, key: &str) -> Result<LaunchOutcome, String> {
-    crate::join_server(app.clone(), key.to_string())
+fn take_turn(
+    app: &AppHandle,
+    key: &str,
+    categories: &[String],
+    bikes: &[String],
+) -> Result<LaunchOutcome, String> {
+    crate::join_listed_server(
+        app.clone(),
+        key.to_string(),
+        categories.to_vec(),
+        bikes.to_vec(),
+    )
 }
 
 /// Close an open game so the turn can launch into the slot, if the rider turned that on.
@@ -387,7 +423,9 @@ async fn remove(token: &str) -> anyhow::Result<()> {
 }
 
 fn client() -> anyhow::Result<reqwest::Client> {
-    Ok(reqwest::Client::builder().timeout(Duration::from_secs(10)).build()?)
+    Ok(reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()?)
 }
 
 #[cfg(test)]

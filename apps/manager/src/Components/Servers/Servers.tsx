@@ -43,8 +43,8 @@ import {
   listMasterServers,
   cachedMasterServers,
   onServersSwept,
-  joinServer,
-  closeAndJoin,
+  joinListedServer,
+  closeAndJoinListedServer,
   queueJoin,
   serversWithPaintSync,
   serverTrackPreviews,
@@ -504,27 +504,36 @@ const Servers = ({ link }: ServersProps) => {
   const { game } = useConfig();
 
   /** Close the open game and join with the copy that replaces it. */
-  const closeThenJoin = useCallback(
-    async (address: string) => {
-      setJoining(address);
-      try {
-        await closeAndJoin(address);
-        toast.success(t("join.launching", { address }));
-      } catch (e) {
-        toast.error(typeof e === "string" ? e : t("serverBrowser.joinFailed"));
-      } finally {
-        setJoining(null);
-      }
+  const joinError = useCallback(
+    (e: unknown) => {
+      if (e === "server_bike_no_profile") return t("serverBrowser.bikeNoProfile");
+      if (e === "server_bike_no_match") return t("serverBrowser.bikeNoMatch");
+      return typeof e === "string" ? e : t("serverBrowser.joinFailed");
     },
     [t],
   );
 
-  const join = useCallback(
-    async (address: string) => {
-      if (joining) return;
-      setJoining(address);
+  const closeThenJoin = useCallback(
+    async (server: MasterServer) => {
+      setJoining(server.address);
       try {
-        const outcome = await joinServer(address);
+        await closeAndJoinListedServer(server.address, server.categories, server.bikes);
+        toast.success(t("join.launching", { address: server.address }));
+      } catch (e) {
+        toast.error(joinError(e));
+      } finally {
+        setJoining(null);
+      }
+    },
+    [t, joinError],
+  );
+
+  const join = useCallback(
+    async (server: MasterServer) => {
+      if (joining) return;
+      setJoining(server.address);
+      try {
+        const outcome = await joinListedServer(server.address, server.categories, server.bikes);
         if (outcome === "already_running") {
           // The game reads the connect flag only at startup, so an open copy can't be sent
           // anywhere — which used to be the end of it. The way through is to replace the
@@ -533,26 +542,26 @@ const Servers = ({ link }: ServersProps) => {
             duration: 12_000,
             action: {
               label: t("join.closeAndJoin"),
-              onClick: () => void closeThenJoin(address),
+              onClick: () => void closeThenJoin(server),
             },
           });
         } else {
-          toast.success(t("join.launching", { address }));
+          toast.success(t("join.launching", { address: server.address }));
         }
       } catch (e) {
-        toast.error(typeof e === "string" ? e : t("serverBrowser.joinFailed"));
+        toast.error(joinError(e));
       } finally {
         setJoining(null);
       }
     },
-    [joining, t, game.display, closeThenJoin],
+    [joining, t, game.display, closeThenJoin, joinError],
   );
 
   // A full server turns you away, so the button gets you in line instead of failing.
   const wait = useCallback(
     async (s: MasterServer) => {
       try {
-        await queueJoin(s.address, s.name);
+        await queueJoin(s.address, s.name, s.categories, s.bikes);
       } catch (e) {
         toast.error(typeof e === "string" ? e : t("queue.joinFailed"));
       }
@@ -564,7 +573,7 @@ const Servers = ({ link }: ServersProps) => {
   // the player chose the explicit Install & join action.
   const { startPendingInstall, active } = useInstall();
   const [installing, setInstalling] = useState<
-    Record<string, { address: string; joinAfter: boolean }>
+    Record<string, { server: MasterServer; joinAfter: boolean }>
   >({});
   // Slugs whose install has been seen running. A finished card left over from an earlier
   // install of the same track must not join the server before this one has even started.
@@ -583,7 +592,7 @@ const Servers = ({ link }: ServersProps) => {
       const slug = product.slug;
       const tracks = modTypesFor(game.id).find((m) => m.id === "tracks");
       if (!slug || !tracks) return;
-      setInstalling((cur) => ({ ...cur, [slug]: { address: s.address, joinAfter } }));
+      setInstalling((cur) => ({ ...cur, [slug]: { server: s, joinAfter } }));
       startPendingInstall({
         slug,
         title: product.name,
@@ -639,7 +648,7 @@ const Servers = ({ link }: ServersProps) => {
       doneInstalling(slug);
       // A pack goes to review and an error has its own card; neither is ready to ride.
       if (job.stage !== "done") continue;
-      const s = servers?.find((x) => x.address === intent.address);
+      const s = servers?.find((x) => x.address === intent.server.address) ?? intent.server;
       if (s?.track) {
         delete ART[s.track];
         ASKED.delete(s.track);
@@ -647,12 +656,12 @@ const Servers = ({ link }: ServersProps) => {
       }
       if (!intent.joinAfter) continue;
       if (s && isFull(s)) void wait(s);
-      else void join(intent.address);
+      else void join(s);
     }
   }, [active, installing, servers, join, wait, doneInstalling]);
 
   const installingAt = useMemo(
-    () => new Set(Object.values(installing).map(({ address }) => address)),
+    () => new Set(Object.values(installing).map(({ server }) => server.address)),
     [installing],
   );
 

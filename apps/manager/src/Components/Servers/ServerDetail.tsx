@@ -293,7 +293,7 @@ export interface ServerDetailProps {
   /** Joining anything is blocked while another join is starting. */
   busy: boolean;
   queue: QueueState | null;
-  onJoin: (address: string) => void;
+  onJoin: (server: MasterServer) => void;
   onWait: (server: MasterServer) => void;
   onInstall: (s: MasterServer, product: CatalogTrack) => void;
   onInstallJoin: (s: MasterServer, product: CatalogTrack) => void;
@@ -609,7 +609,7 @@ const ServerDetail = ({
           ) : (
             <Button
               className="flex-1"
-              onClick={() => onJoin(s.address)}
+              onClick={() => onJoin(s)}
               disabled={!s.joinable || busy}
               title={s.joinable ? t("serverBrowser.join") : t("serverBrowser.notJoinable")}
             >
