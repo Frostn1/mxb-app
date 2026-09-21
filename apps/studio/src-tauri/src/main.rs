@@ -191,6 +191,8 @@ fn main() {
             scan_gear_repairs,
             repair_gear,
             generate_track,
+            edit_track,
+            edit_paint,
             get_track_model,
             set_track_model,
             clear_track_model,
@@ -498,6 +500,67 @@ async fn generate_with(
     .await
     .map_err(|e| anyhow::anyhow!("drawing the lap failed: {e}"))??;
     Ok(Generated { program, settings: Some(settings) })
+}
+
+/// Reach the same configured model as generation, but hand it the open document instead of
+/// asking for a replacement from scratch. The edit is measured before it returns, so the
+/// webview never has to trust a plausible-looking JSON mutation.
+#[tauri::command]
+async fn edit_track(
+    app: tauri::AppHandle,
+    instruction: String,
+    program: serde_json::Value,
+) -> Result<trackprog::TrackProgram, String> {
+    let current = track_program(program)?;
+    let instruction = instruction.trim();
+    if instruction.is_empty() {
+        return Err("say what to change".into());
+    }
+    let own = mxb_core::config::data_dir(&app).and_then(|d| trackmodel::load(&d));
+    let edited = match own {
+        Some(model) => trackllm::edit(instruction, &current, &trackmodel::Direct { model }, 3).await,
+        None => {
+            let ask = control_plane_for(&app)?;
+            trackllm::edit(instruction, &current, &ask, 3).await
+        }
+    }
+    .map_err(|e| format!("{e:#}"))?;
+    usage::track("track.edit");
+    Ok(edited)
+}
+
+/// Plan a paint edit from the model-aware context assembled by the Designer. Pixel buffers,
+/// paths and model geometry stay local; this returns declarative operations whose ids and
+/// ranges are checked again in the webview before anything is changed.
+#[tauri::command]
+async fn edit_paint(app: tauri::AppHandle, context: String) -> Result<serde_json::Value, String> {
+    if context.trim().is_empty() {
+        return Err("say what to change".into());
+    }
+    let own = mxb_core::config::data_dir(&app).and_then(|d| trackmodel::load(&d));
+    let plan = match own {
+        Some(model) => trackllm::paint_edit(&context, &trackmodel::Direct { model }).await,
+        None => {
+            let ask = control_plane_for(&app)?;
+            trackllm::paint_edit(&context, &ask).await
+        }
+    }
+    .map_err(|e| format!("{e:#}"))?;
+    usage::track("paint.edit");
+    Ok(plan)
+}
+
+fn control_plane_for(app: &tauri::AppHandle) -> Result<trackllm::ControlPlane, String> {
+    let cfg = config::load_or_detect(app).unwrap_or_default();
+    let base = mxb_core::names::control_plane();
+    let local = cfg!(debug_assertions) && !base.starts_with("https://");
+    if cfg.cp_token.trim().is_empty() && !local {
+        return Err(
+            "Studio AI needs a model. Add your own in Settings, or enroll your MXB account in the manager's Settings."
+                .into(),
+        );
+    }
+    Ok(trackllm::ControlPlane { base, token: cfg.cp_token })
 }
 
 fn model_dir(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {

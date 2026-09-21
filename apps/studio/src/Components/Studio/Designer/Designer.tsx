@@ -30,10 +30,12 @@ import {
   Plus,
   Save,
   Shirt,
+  Sparkles,
   Trash2,
   Ungroup,
 } from "lucide-react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { toast } from "sonner";
 import * as THREE from "three";
@@ -92,10 +94,12 @@ import {
   partAt,
   partBox,
   partPath,
+  paintRegions,
   triangleAt,
   uvParts,
   uvWireframe,
   type UvPart,
+  type PaintRegion,
 } from "./uv";
 import {
   blankSheet,
@@ -237,6 +241,64 @@ interface DesignerProps {
   onIncomingLoaded?: () => void;
 }
 
+type PaintAgentOp = "place" | "move" | "resize" | "rotate" | "opacity" | "visibility" | "clip";
+interface PaintAgentAction {
+  op: PaintAgentOp;
+  sheetId: string;
+  layerId: string;
+  regionId: string;
+  x: number;
+  y: number;
+  dx: number;
+  dy: number;
+  scale: number;
+  rotation: number;
+  opacity: number;
+  visible: boolean;
+  clip: boolean;
+}
+interface PaintAgentPlan {
+  message: string;
+  actions: PaintAgentAction[];
+}
+
+const PAINT_AGENT_OPS = new Set<PaintAgentOp>([
+  "place",
+  "move",
+  "resize",
+  "rotate",
+  "opacity",
+  "visibility",
+  "clip",
+]);
+
+function paintAgentPlan(value: unknown): PaintAgentPlan | null {
+  if (!value || typeof value !== "object") return null;
+  const plan = value as Record<string, unknown>;
+  if (typeof plan.message !== "string" || !Array.isArray(plan.actions)) return null;
+  const actions = plan.actions.slice(0, 12).filter((candidate): candidate is PaintAgentAction => {
+    if (!candidate || typeof candidate !== "object") return false;
+    const action = candidate as Record<string, unknown>;
+    return (
+      typeof action.op === "string" &&
+      PAINT_AGENT_OPS.has(action.op as PaintAgentOp) &&
+      typeof action.sheetId === "string" &&
+      typeof action.layerId === "string" &&
+      typeof action.regionId === "string" &&
+      typeof action.x === "number" &&
+      typeof action.y === "number" &&
+      typeof action.dx === "number" &&
+      typeof action.dy === "number" &&
+      typeof action.scale === "number" &&
+      typeof action.rotation === "number" &&
+      typeof action.opacity === "number" &&
+      typeof action.visible === "boolean" &&
+      typeof action.clip === "boolean"
+    );
+  });
+  return { message: plan.message, actions };
+}
+
 export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) {
   const t = useT();
   const [sheets, setSheets] = useState<Sheet[]>([]);
@@ -291,6 +353,8 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
   // Set when Save asked for the name, so Enter in the title finishes that save.
   const saveAfterName = useRef(false);
   const [busy, setBusy] = useState(false);
+  const [agentPrompt, setAgentPrompt] = useState("");
+  const [agentBusy, setAgentBusy] = useState(false);
   // The sheets/layers rail folds away, because once a paint is set up the thing worth the
   // width is the canvas and the model — not the list of what you already chose.
   // Remembered: someone who paints with it hidden wants it hidden next session too.
@@ -1520,6 +1584,11 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
     () => (geometry ? uvParts(geometry, activeName, { assembled: bike && assembled }) : []),
     [geometry, activeName, bike, assembled],
   );
+  const regions = useMemo<PaintRegion[]>(() => paintRegions(parts), [parts]);
+  // A detailed bike can contain thousands of tiny UV islands. The useful named panels are
+  // sorted first by paintRegions, so keep the prompt bounded without dropping fenders,
+  // shrouds and plates in favour of anonymous fasteners.
+  const agentRegions = useMemo(() => regions.slice(0, 160), [regions]);
 
   const startPaint = useCallback(
     (at: Point, whole: boolean) => {
@@ -1621,6 +1690,169 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
     },
     [active, bump, parts, patchLayer, selectedId],
   );
+
+  /**
+   * Give the model names and measurements, never pixels, then execute its small action plan
+   * against the still-current document. Every id is resolved again here; changing sheets or
+   * models while a request is in flight makes stale operations harmless rather than misplaced.
+   */
+  const askPaintAgent = useCallback(async () => {
+    const instruction = agentPrompt.trim();
+    if (!instruction || !active || agentBusy) return;
+    const context = JSON.stringify({
+      instruction,
+      activeSheetId: active.id,
+      selectedLayerIds: selection,
+      sheets: sheets.map((sheet) => ({
+        id: sheet.id,
+        name: sheet.name,
+        width: sheet.width,
+        height: sheet.height,
+        layers: sheet.layers.map((layer, index) => ({
+          id: layer.id,
+          index: index + 1,
+          name: layer.name,
+          kind: layer.kind,
+          selected: selection.includes(layer.id),
+          x: layer.x / sheet.width,
+          y: layer.y / sheet.height,
+          scale: layer.scale,
+          rotation: (layer.rotation * 180) / Math.PI,
+          opacity: layer.opacity,
+          visible: layer.visible,
+          clippedTo: layer.clip?.label ?? "",
+        })),
+      })),
+      regionCount: regions.length,
+      regionsTruncated: regions.length > agentRegions.length,
+      regions: agentRegions.map((region) => ({
+        id: region.id,
+        label: region.label,
+        owner: region.owner ?? "",
+        semantic: region.semantic,
+        side: region.side ?? "unknown",
+        face: region.face ?? "unknown",
+        centre: region.centre
+          ? {
+              x: Number(region.centre.x.toFixed(5)),
+              y: Number(region.centre.y.toFixed(5)),
+              z: Number(region.centre.z.toFixed(5)),
+            }
+          : null,
+        triangles: region.part.tris.length / 6,
+        bounds: {
+          x: region.part.minU,
+          y: region.part.minV,
+          width: region.part.maxU - region.part.minU,
+          height: region.part.maxV - region.part.minV,
+        },
+      })),
+    });
+    setAgentBusy(true);
+    try {
+      const plan = paintAgentPlan(await invoke<unknown>("edit_paint", { context }));
+      if (!plan) throw new Error("the model returned an invalid paint plan");
+      const currentSheet = sheetsRef.current.find((sheet) => sheet.id === active.id);
+      if (!currentSheet) throw new Error("the sheet changed while the edit was being planned");
+      const byRegion = new Map(regions.map((region) => [region.id, region]));
+      const valid = plan.actions.filter(
+        (action) =>
+          action.sheetId === currentSheet.id &&
+          currentSheet.layers.some(
+            (layer) => layer.id === action.layerId && layer.kind !== "paint",
+          ) &&
+          ((action.op !== "place" && !(action.op === "clip" && action.clip)) ||
+            byRegion.has(action.regionId)),
+      );
+      if (!valid.length) {
+        toast.info(plan.message || t("designer.aiNoChange"));
+        return;
+      }
+      const finite = (value: number, fallback: number) =>
+        Number.isFinite(value) ? value : fallback;
+      const touched = new Set(valid.map((action) => action.layerId));
+      patchSheet(currentSheet.id, (sheet) => {
+        let layers = sheet.layers;
+        for (const action of valid) {
+          const region = byRegion.get(action.regionId);
+          layers = layers.map((layer) => {
+            if (layer.id !== action.layerId || layer.kind === "paint") return layer;
+            if (action.op === "move") {
+              const dx = Math.min(1, Math.max(-1, finite(action.dx, 0)));
+              const dy = Math.min(1, Math.max(-1, finite(action.dy, 0)));
+              return {
+                ...layer,
+                x: Math.min(sheet.width * 2, Math.max(-sheet.width, layer.x + dx * sheet.width)),
+                y: Math.min(sheet.height * 2, Math.max(-sheet.height, layer.y + dy * sheet.height)),
+              };
+            }
+            if (action.op === "resize") {
+              return {
+                ...layer,
+                scale: Math.min(4, Math.max(0.05, layer.scale * finite(action.scale, 1))),
+              };
+            }
+            if (action.op === "rotate") {
+              const degrees = Math.min(360, Math.max(-360, finite(action.rotation, 0)));
+              return {
+                ...layer,
+                rotation: layer.rotation + (degrees * Math.PI) / 180,
+              };
+            }
+            if (action.op === "opacity") {
+              return { ...layer, opacity: Math.min(1, Math.max(0, finite(action.opacity, 1))) };
+            }
+            if (action.op === "visibility") return { ...layer, visible: !!action.visible };
+            if (action.op === "clip") {
+              return {
+                ...layer,
+                clip:
+                  action.clip && region
+                    ? { label: region.label, path: partPath(region.part, sheet.width, sheet.height) }
+                    : null,
+              };
+            }
+            if (action.op === "place" && region) {
+              const bw = (region.part.maxU - region.part.minU) * sheet.width;
+              const bh = (region.part.maxV - region.part.minV) * sheet.height;
+              const extent = layerExtent(layer);
+              const margin = Math.min(1.5, Math.max(0.1, finite(action.scale, 0.82)));
+              const scale = Math.min(
+                4,
+                Math.max(0.05, Math.min(bw / extent.w, bh / extent.h) * margin),
+              );
+              return {
+                ...layer,
+                x: (region.part.minU + region.part.maxU) * 0.5 * sheet.width,
+                y: (region.part.minV + region.part.maxV) * 0.5 * sheet.height,
+                scale,
+                clip: action.clip
+                  ? { label: region.label, path: partPath(region.part, sheet.width, sheet.height) }
+                  : layer.clip,
+              };
+            }
+            return layer;
+          });
+        }
+        return { ...sheet, layers };
+      });
+      if (touched.size) {
+        setSelection([...touched]);
+        setPaint((value) => ({ ...value, tool: "move" }));
+        bump();
+        setAgentPrompt("");
+        toast.success(plan.message || t("designer.aiChanged"));
+      } else {
+        toast.info(plan.message || t("designer.aiNoChange"));
+      }
+    } catch (error) {
+      toast.error(t("designer.aiFailed"), {
+        description: String(error).replace(/^Error:\s*/, ""),
+      });
+    } finally {
+      setAgentBusy(false);
+    }
+  }, [active, agentBusy, agentPrompt, agentRegions, bump, patchSheet, regions, selection, sheets, t]);
 
   /**
    * Hand the mirror the model it should answer from, and drop the index built from the last one.
@@ -2774,6 +3006,35 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
               meant the bike slid off the top the moment the tool panel grew — which it does
               every time you pick a brush. */}
           <div className="mt-10 flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto">
+          {active && (
+            <div className="rounded-md border border-border bg-card/95 p-2.5 shadow-sm">
+              <div className="mb-2 flex items-center gap-1.5 font-cond text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                <Sparkles className="size-3 text-primary" />
+                {t("designer.aiTitle")}
+              </div>
+              <div className="flex gap-1.5">
+                <Input
+                  value={agentPrompt}
+                  onChange={(event) => setAgentPrompt(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") void askPaintAgent();
+                  }}
+                  placeholder={t("designer.aiPlaceholder")}
+                  className="h-8 min-w-0 text-[11.5px]"
+                  disabled={agentBusy}
+                />
+                <Button
+                  size="sm"
+                  className="h-8 px-2.5"
+                  disabled={agentBusy || !agentPrompt.trim()}
+                  onClick={() => void askPaintAgent()}
+                  title={t("designer.aiApply")}
+                >
+                  {agentBusy ? <Loader2 className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />}
+                </Button>
+              </div>
+            </div>
+          )}
           {active && (
             <PaintTools
               settings={paint}

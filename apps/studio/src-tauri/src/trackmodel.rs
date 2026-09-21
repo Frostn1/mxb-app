@@ -25,14 +25,23 @@ pub const SETTINGS_SYSTEM: &str =
     include_str!("../../../../packages/track-protocol/settings.system.md");
 pub const SETTINGS_SCHEMA: &str =
     include_str!("../../../../packages/track-protocol/settings.schema.json");
+pub const EDIT_SYSTEM: &str = include_str!("../../../../packages/track-protocol/edit.system.md");
+pub const PAINT_EDIT_SYSTEM: &str =
+    include_str!("../../../../packages/track-protocol/paint-edit.system.md");
+pub const PAINT_EDIT_SCHEMA: &str =
+    include_str!("../../../../packages/track-protocol/paint-edit.schema.json");
 
-/// What the app asks a model for. See `control-plane/src/trackgen.ts` for the same two.
+/// What the app asks a model for. See `control-plane/src/trackgen.ts` for the same protocols.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Protocol {
     /// The whole lap, drawn by the model and measured here. Only a strong model manages it.
     Program,
     /// The character only; `tracklayout` draws the lap. Small enough for any model.
     Settings,
+    /// The complete open lap, changed in place from a rider's instruction.
+    TrackEdit,
+    /// A small plan of layer operations, resolved against the loaded model in the webview.
+    PaintEdit,
 }
 
 impl Protocol {
@@ -41,6 +50,8 @@ impl Protocol {
         match self {
             Protocol::Program => "program",
             Protocol::Settings => "settings",
+            Protocol::TrackEdit => "trackEdit",
+            Protocol::PaintEdit => "paintEdit",
         }
     }
 
@@ -48,6 +59,8 @@ impl Protocol {
         match self {
             Protocol::Program => PROGRAM_SYSTEM,
             Protocol::Settings => SETTINGS_SYSTEM,
+            Protocol::TrackEdit => EDIT_SYSTEM,
+            Protocol::PaintEdit => PAINT_EDIT_SYSTEM,
         }
     }
 
@@ -55,6 +68,8 @@ impl Protocol {
         match self {
             Protocol::Program => PROGRAM_SCHEMA,
             Protocol::Settings => SETTINGS_SCHEMA,
+            Protocol::TrackEdit => PROGRAM_SCHEMA,
+            Protocol::PaintEdit => PAINT_EDIT_SCHEMA,
         }
     }
 
@@ -66,6 +81,8 @@ impl Protocol {
         match self {
             Protocol::Program => "track_program",
             Protocol::Settings => "track_settings",
+            Protocol::TrackEdit => "track_edit",
+            Protocol::PaintEdit => "paint_edit",
         }
     }
 
@@ -77,6 +94,8 @@ impl Protocol {
         match self {
             Protocol::Program => 32000,
             Protocol::Settings => 3000,
+            Protocol::TrackEdit => 32000,
+            Protocol::PaintEdit => 3000,
         }
     }
 }
@@ -86,19 +105,32 @@ impl Protocol {
 fn turns(protocol: Protocol, brief: &str, attempt: &Attempt) -> Vec<Value> {
     let mut out = vec![json!({ "role": "user", "content": brief })];
     // Settings are always legal once clamped, so they are never sent back to be fixed.
-    if let (Protocol::Program, Some(previous)) = (protocol, attempt.previous.as_deref()) {
-        if !attempt.problems.is_empty() {
-            let list: Vec<String> =
-                attempt.problems.iter().take(40).map(|p| format!("- {p}")).collect();
-            out.push(json!({ "role": "assistant", "content": previous }));
-            out.push(json!({
-                "role": "user",
-                "content": format!(
-                    "The app built that and measured it. These are wrong:\n\n{}\n\nSend the whole program again with those fixed.",
-                    list.join("\n")
-                ),
-            }));
+    if matches!(protocol, Protocol::Program | Protocol::TrackEdit) {
+        if let Some(previous) = attempt.previous.as_deref() {
+            if !attempt.problems.is_empty() {
+                let list: Vec<String> =
+                    attempt.problems.iter().take(40).map(|p| format!("- {p}")).collect();
+                out.push(json!({ "role": "assistant", "content": previous }));
+                out.push(json!({
+                    "role": "user",
+                    "content": format!(
+                        "The app built that and measured it. These are wrong:\n\n{}\n\nSend the whole program again with those fixed.",
+                        list.join("\n")
+                    ),
+                }));
+            }
         }
+    } else if protocol == Protocol::PaintEdit && !attempt.problems.is_empty() {
+        if let Some(previous) = attempt.previous.as_deref() {
+            out.push(json!({ "role": "assistant", "content": previous }));
+        }
+        out.push(json!({
+            "role": "user",
+            "content": format!(
+                "That action plan was rejected: {}. Send a corrected plan for the original request.",
+                attempt.problems.join("; ")
+            ),
+        }));
     }
     out
 }
@@ -350,7 +382,7 @@ fn anthropic_body(model: &str, protocol: Protocol, messages: &[Value]) -> Value 
     });
     // The control plane's rule, see `ask` in trackgen.ts: Haiku 4.5 takes a fixed budget and
     // refuses `effort`; the rest think adaptively. Settings have no arithmetic to think about.
-    if protocol == Protocol::Program {
+    if matches!(protocol, Protocol::Program | Protocol::TrackEdit) {
         if model.starts_with("claude-haiku") {
             body["thinking"] = json!({ "type": "enabled", "budget_tokens": 4000 });
         } else {
@@ -408,12 +440,12 @@ fn mentions_format(body: &str) -> bool {
 
 fn cut_off(protocol: Protocol, host: &str) -> String {
     match protocol {
-        Protocol::Program => format!(
+        Protocol::Program | Protocol::TrackEdit => format!(
             "the answer from {host} ran past {} tokens and was cut off. A whole lap needs a model \
              with a long output; Settings only needs a few hundred tokens.",
             protocol.max_tokens()
         ),
-        Protocol::Settings => {
+        Protocol::Settings | Protocol::PaintEdit => {
             format!("the answer from {host} ran past {} tokens and was cut off", protocol.max_tokens())
         }
     }
@@ -436,12 +468,12 @@ fn refusal(model: &TrackModel, protocol: Protocol, status: u16, body: &str) -> R
             "{host} doesn't know the model \"{}\", or the address is wrong: {said}",
             model.model
         ),
-        413 if protocol == Protocol::Program => bail!(
+        413 if matches!(protocol, Protocol::Program | Protocol::TrackEdit) => bail!(
             "a whole lap is too large for this model's limit on {host}. Free tiers allow a few \
              thousand tokens a minute; Settings only fits in that. ({said})"
         ),
         413 => bail!("that's too large for this model's limit on {host}: {said}"),
-        429 if protocol == Protocol::Program => bail!(
+        429 if matches!(protocol, Protocol::Program | Protocol::TrackEdit) => bail!(
             "{host} is rate limiting this key: {said}. A whole lap is tens of thousands of \
              tokens; Settings only is far smaller."
         ),
@@ -505,13 +537,17 @@ mod tests {
     }
 
     #[test]
-    fn a_retry_carries_the_answer_and_the_problems_for_a_program_only() {
+    fn retries_carry_the_answer_and_the_problems_for_document_edits() {
         let attempt = Attempt { previous: Some("{\"name\":\"x\"}".into()), problems: vec!["too wide".into()] };
         let program = turns(Protocol::Program, "b", &attempt);
         assert_eq!(program.len(), 3);
         assert_eq!(program[1]["role"], "assistant");
         assert!(program[2]["content"].as_str().unwrap().contains("- too wide"));
         assert_eq!(turns(Protocol::Settings, "b", &attempt).len(), 1);
+        assert_eq!(turns(Protocol::TrackEdit, "b", &attempt).len(), 3);
+        let paint = turns(Protocol::PaintEdit, "b", &attempt);
+        assert_eq!(paint.len(), 3);
+        assert!(paint[2]["content"].as_str().unwrap().contains("too wide"));
     }
 
     #[test]
@@ -523,6 +559,7 @@ mod tests {
         assert_eq!(opus["thinking"]["type"], "adaptive");
         assert_eq!(opus["output_config"]["effort"], "low");
         assert!(anthropic_body("claude-opus-5", Protocol::Settings, &[]).get("thinking").is_none());
+        assert!(anthropic_body("claude-opus-5", Protocol::PaintEdit, &[]).get("thinking").is_none());
 
         // No enum reaches the grammar; the values survive as words.
         let schema = &haiku["output_config"]["format"]["schema"];

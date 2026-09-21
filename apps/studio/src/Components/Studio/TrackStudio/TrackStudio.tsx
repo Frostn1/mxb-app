@@ -60,6 +60,7 @@ import {
   saveTrackProject,
   TRACK_PROJECT_EXT,
   generateTrack,
+  editTrack,
   lapLength,
   FEATURE_COLOUR,
   elevationAt,
@@ -350,6 +351,14 @@ export default function TrackStudio() {
     setFatal([]);
     setProblems([]);
     try {
+      if (current.current) {
+        const next = await editTrack(brief.trim(), current.current);
+        await settle(next);
+        setBrief("");
+        setAsking(false);
+        toast.success(t("track.edited"));
+        return;
+      }
       // Whole lap or settings only is decided in `generate_track`, by what the configured
       // model can actually do — see the comment there. `settings` coming back is how the
       // studio learns which way it went, and the toast says so.
@@ -379,7 +388,9 @@ export default function TrackStudio() {
           : undefined,
       );
     } catch (e) {
-      toast.error(t("track.generateFailed"), { description: String(e) });
+      toast.error(t(current.current ? "track.editFailed" : "track.generateFailed"), {
+        description: String(e),
+      });
     } finally {
       setWorking(null);
     }
@@ -870,7 +881,11 @@ export default function TrackStudio() {
                 disabled={!brief.trim() || busy !== null}
                 className="h-10 flex-none"
               >
-                {busy === "generate" ? t("track.generating") : t("track.generate")}
+                {busy === "generate"
+                  ? t("track.generating")
+                  : program
+                    ? t("track.askAi")
+                    : t("track.generate")}
               </Button>
             </div>
             <p className="mt-3 text-[12.5px] leading-relaxed text-muted-foreground">
@@ -1167,7 +1182,7 @@ export default function TrackStudio() {
                   asking ? "text-foreground" : "text-muted-foreground hover:text-foreground",
                 )}
               >
-                {busy === "generate" ? t("track.generating") : t("track.generate")}
+                {busy === "generate" ? t("track.generating") : t("track.askAi")}
               </button>
             </div>
           </aside>

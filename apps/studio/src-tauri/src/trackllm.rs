@@ -856,6 +856,100 @@ pub async fn generate(brief: &str, ask: &impl Ask, tries: usize) -> Result<Track
     )
 }
 
+/// Apply one natural-language change to the open program, then put the result through the
+/// same repair-and-measure loop as a generated lap. The complete current program travels in
+/// the first user turn; on a retry the model receives its edited answer plus exact measured
+/// failures, so it fixes the edit rather than starting the track again.
+pub async fn edit(
+    instruction: &str,
+    current: &TrackProgram,
+    ask: &impl Ask,
+    tries: usize,
+) -> Result<TrackProgram> {
+    let brief = serde_json::json!({
+        "instruction": instruction,
+        "currentProgram": current,
+    })
+    .to_string();
+    let mut attempt = Attempt::default();
+    let mut last = String::new();
+    for round in 0..tries.max(1) {
+        let raw = ask
+            .ask(Protocol::TrackEdit, &brief, &attempt)
+            .await
+            .with_context(|| format!("asking for a track edit (attempt {})", round + 1))?;
+        if let Some(why) = raw.strip_prefix(REJECTED) {
+            last = why.to_string();
+            attempt.problems = vec![last.clone()];
+            continue;
+        }
+        match serde_json::from_str::<TrackProgram>(&raw) {
+            Ok(mut prog) => {
+                // The creation schema deliberately omits fields its MX-only author never
+                // chooses. An edit uses that compact schema too, so put those values back
+                // from the open document before measuring: editing turn 9 must not silently
+                // turn an SX round into MX or discard imported ground and texture sheets.
+                prog.discipline = current.discipline;
+                prog.border = current.border;
+                prog.venue = current.venue;
+                prog.terrain.texture = current.terrain.texture.clone();
+                prog.terrain.ground = current.terrain.ground.clone();
+                for fixed in repair(&mut prog) {
+                    log::info!("[trackllm] edited track: {fixed}");
+                }
+                let problems = validate(&prog);
+                if problems.is_empty() {
+                    return Ok(prog);
+                }
+                last = problems.join("; ");
+                attempt = Attempt { previous: Some(raw), problems };
+            }
+            Err(e) => {
+                last = format!("that didn't parse as a track program: {e}");
+                attempt = Attempt {
+                    previous: Some(raw),
+                    problems: vec![last.clone()],
+                };
+            }
+        }
+    }
+    bail!("couldn't make that edit after {} attempts — last time: {last}", tries.max(1))
+}
+
+/// Ask for a constrained paint action plan. Geometry stays in the webview, where the loaded
+/// model and decoded image layers already live; the model only chooses among the ids sent in
+/// `context`, and the caller validates every id before applying it.
+pub async fn paint_edit(context: &str, ask: &impl Ask) -> Result<serde_json::Value> {
+    let mut attempt = Attempt::default();
+    for round in 0..2 {
+        let raw = ask
+            .ask(Protocol::PaintEdit, context, &attempt)
+            .await
+            .with_context(|| format!("asking for a paint edit (attempt {})", round + 1))?;
+        if let Some(why) = raw.strip_prefix(REJECTED) {
+            attempt.problems = vec![why.to_string()];
+            continue;
+        }
+        match serde_json::from_str::<serde_json::Value>(&raw) {
+            Ok(value) if value.get("message").is_some_and(|v| v.is_string())
+                && value.get("actions").is_some_and(|v| v.is_array()) => return Ok(value),
+            Ok(_) => {
+                attempt = Attempt {
+                    previous: Some(raw),
+                    problems: vec!["message must be a string and actions must be an array".into()],
+                };
+            }
+            Err(e) => {
+                attempt = Attempt {
+                    previous: Some(raw),
+                    problems: vec![format!("the plan was not valid JSON: {e}")],
+                };
+            }
+        }
+    }
+    bail!("the model couldn't produce a valid paint action plan twice")
+}
+
 /// Ask for a track's settings rather than its lap.
 ///
 /// The model only picks the character, see [`TrackSettings`], so the answer is small enough
@@ -1369,6 +1463,10 @@ struct GenerateRequest<'a> {
 struct GenerateResponse {
     program: Option<serde_json::Value>,
     settings: Option<serde_json::Value>,
+    #[serde(rename = "trackEdit")]
+    track_edit: Option<serde_json::Value>,
+    #[serde(rename = "paintEdit")]
+    paint_edit: Option<serde_json::Value>,
     error: Option<String>,
 }
 
@@ -1423,6 +1521,8 @@ impl Ask for ControlPlane {
         let answer = match protocol {
             Protocol::Program => parsed.program,
             Protocol::Settings => parsed.settings,
+            Protocol::TrackEdit => parsed.track_edit,
+            Protocol::PaintEdit => parsed.paint_edit,
         };
         match (answer, parsed.error) {
             (Some(p), _) => Ok(serde_json::to_string(&p)?),
@@ -1497,6 +1597,19 @@ mod tests {
     fn the_worked_example_has_nothing_wrong_with_it() {
         let p: TrackProgram = serde_json::from_str(EXAMPLE).unwrap();
         assert_eq!(validate(&p), Vec::<String>::new());
+    }
+
+    #[test]
+    fn a_bad_paint_plan_is_retried_with_the_reason() {
+        let ask = Canned::new(&[
+            r#"{"message":"missing actions"}"#,
+            r#"{"message":"moved it","actions":[]}"#,
+        ]);
+        let plan = block_on(paint_edit("{}", &ask)).unwrap();
+        assert_eq!(plan["message"], "moved it");
+        let seen = ask.seen.borrow();
+        assert_eq!(seen.len(), 2);
+        assert!(seen[1].problems[0].contains("actions"));
     }
 
     /// Property names of an object in a schema.

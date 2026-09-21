@@ -76,6 +76,8 @@ describe("the prompts", () => {
     expect(SYSTEM.length).toBeGreaterThan(1000);
     expect(SYSTEM).toContain("THE LAP MUST CLOSE");
     expect(PROTOCOLS.settings.system).toContain("settings");
+    expect(PROTOCOLS.trackEdit.system).toContain("existing MX Bikes track program");
+    expect(PROTOCOLS.paintEdit.system).toContain("safe edits");
   });
 });
 
@@ -98,11 +100,13 @@ describe("the schemas", () => {
     const unions = (s: unknown) => JSON.stringify(s).split('"anyOf"').length - 1;
     expect(unions(PROTOCOLS.program.schema)).toBeLessThanOrEqual(1);
     expect(unions(PROTOCOLS.settings.schema)).toBe(0);
+    expect(unions(PROTOCOLS.trackEdit.schema)).toBeLessThanOrEqual(1);
+    expect(unions(PROTOCOLS.paintEdit.schema)).toBe(0);
   });
 
   it("are strict: every field required and nothing extra", () => {
     // What Groq, OpenAI and Anthropic all need for constrained decoding.
-    for (const mode of ["program", "settings"] as const) {
+    for (const mode of ["program", "settings", "trackEdit", "paintEdit"] as const) {
       for (const o of objects(PROTOCOLS[mode].schema)) {
         const keys = Object.keys(o.properties as object).sort();
         expect([...(o.required as string[])].sort(), `${mode}: ${keys}`).toEqual(keys);

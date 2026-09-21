@@ -17,11 +17,7 @@ import { cn } from "@frost/shared/lib/utils";
 import { ConfigContext, MXB_FALLBACK } from "@frost/shared/Context/Config";
 import { ThemeProvider, useTheme } from "@frost/shared/Context/Theme";
 import { I18nProvider, setAmbientVars, useT } from "@/i18n";
-import Rail, {
-  RailBrand,
-  RailButton,
-  type RailEntry,
-} from "@frost/shared/Components/Shell/Rail";
+import type { RailEntry } from "@frost/shared/Components/Shell/Rail";
 import TitleBar from "./Components/Shell/TitleBar";
 import {
   ContextSlots,
@@ -239,56 +235,39 @@ function Shell() {
         <ShellChrome.Provider value={chrome}>
         <UnsavedRegistry.Provider value={registry}>
           <div className="flex h-screen flex-col bg-background text-foreground">
-            <TitleBar />
-            <div className="flex min-h-0 flex-1">
-            <Rail
+            <TitleBar
               entries={entries}
               active={view}
               onPick={setView}
-              header={<RailBrand top="Frost's" name="Studio" />}
-              footer={
-                <RailButton
-                  label={t("nav.settings")}
-                  on={view === "settings"}
-                  onClick={() => setView("settings")}
-                />
-              }
+              settingsLabel={t("nav.settings")}
+              onSettings={() => setView("settings")}
             />
-
-            <div className="flex min-w-0 flex-1 flex-col">
-              {/* Above the strip, so a tool that hides the strip doesn't hide it too. */}
-              <UpdateBanner />
-              {/* One strip the mounted tool fills from both ends, rather than a second row of
-                  chrome. Draggable, since the rail is the only other place to grab. It is
-                  taller than the manager's context bar on purpose: this is the only chrome
-                  the Studio has, so it can afford to breathe. */}
-              <div
-                data-tauri-drag-region
-                className={cn(
-                  "relative flex h-[52px] shrink-0 items-center gap-3 border-b border-border px-4",
-                  bare && "hidden",
-                )}
-              >
-                <div ref={setLeft} className="flex min-w-0 flex-1 items-center gap-2" />
-                <div ref={setRight} className="flex shrink-0 items-center gap-2" />
-              </div>
-
-              <div className="min-h-0 flex-1 bg-canvas">
-                {view === "settings" ? (
-                  <Settings />
-                ) : pluginPanel ? (
-                  <pluginPanel.component />
-                ) : (
-                  <Studio
-                    tab={view as StudioTab}
-                    onTab={(tb) => setView(tb)}
-                    riderPreset={null}
-                    riderBike={null}
-                    onRiderPresetLoaded={() => {}}
-                  />
-                )}
-              </div>
+            <UpdateBanner />
+            <div
+              data-tauri-drag-region
+              className={cn(
+                "relative flex h-11 shrink-0 items-center gap-3 border-b border-border bg-window px-7",
+                bare && "hidden",
+              )}
+            >
+              <div ref={setLeft} className="flex min-w-0 flex-1 items-center gap-3" />
+              <div ref={setRight} className="flex shrink-0 items-center gap-3" />
             </div>
+
+            <div className="min-h-0 flex-1 bg-background">
+              {view === "settings" ? (
+                <Settings />
+              ) : pluginPanel ? (
+                <pluginPanel.component />
+              ) : (
+                <Studio
+                  tab={view as StudioTab}
+                  onTab={(tb) => setView(tb)}
+                  riderPreset={null}
+                  riderBike={null}
+                  onRiderPresetLoaded={() => {}}
+                />
+              )}
             </div>
           </div>
           <ThemedToaster />
@@ -329,9 +308,7 @@ function ThemedToaster() {
 
 export default function App() {
   return (
-    // Light unless the user picks otherwise — the reason is in `studio.css`. No interface
-    // scale here, so the provider leaves the webview's zoom alone.
-    <ThemeProvider defaultTheme="light" scalable={false}>
+    <ThemeProvider defaultTheme="dark">
       <I18nProvider>
         <UpdateProvider>
           <Shell />
