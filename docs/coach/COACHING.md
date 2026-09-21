@@ -21,7 +21,13 @@ the things it says are judgements of the lap on its own terms, which hold whatev
    under 10 m long), and straights between.
 5. **Name the sections** from the track's own frozen roster, so Turn 5 is the same corner next
    week (`trackmap.rs`, below).
-6. **Explain** each section that loses more than 0.05 s with the rules below. The three
+6. **Classify corners for display** from the reference lap. Peak lean says flat versus held;
+   mean vertical hit says smooth versus rough; rear-wheel material identifies sand; the height
+   line against the corner's grade separates a rut from a berm; and a strongly rising path
+   curvature identifies a hook. Clear combinations are shown as Lynds' six types: flat, smooth
+   rut, hooked rut, rough rut, whooped sand turn, or smooth SX berm. Marginal readings remain
+   unnamed, and these provisional display names do not change a coaching rule.
+7. **Explain** each section that loses more than 0.05 s with the rules below. The three
    sections losing most are shown first. Safety findings (⚠: front lock, crooked or hard
    landing, sliding front) show even where no time was lost, and so do judgements the lap earns
    on its own terms (◆: over-jumping, casing, coming in too fast, turning in too early). A
@@ -103,7 +109,7 @@ is a small sample and none of it is settled.
 | Corner | `throttle_room` | ≥ 20 points less exit throttle than the reference, rear slip never over 1.08, front down (on its own: a ≥ 25 m exit under 55% throttle) |
 | Jump | `jump_it` | reference jumps, lap rolls it |
 | Jump | `chop_face` | throttle drops > 0.3 on the last 15 m of the face |
-| Jump | `scrub` | > 10% + 0.1 s more airtime and > 0.5 m higher |
+| Jump | `scrub` | > 10% + 0.1 s more airtime and > 0.5 m higher; technique is read against a scrubbed reference |
 | Jump | `overjump` ◆ | the ground after touchdown runs flat past the downslope, and the bike dropped onto it and hit for it; said at the takeoff, the last place the rider can act |
 | Jump | `land_short` ◆ | the ground after touchdown is still climbing: cased |
 | Jump | `land_short` / `overjump` | where the ground can't settle it: lands > 2 m short of the reference / > 3 m past it |
@@ -112,6 +118,21 @@ is a small sample and none of it is settled.
 | Jump | `land_hard` ⚠ | the landing hits > 10 G and > 1.4× the reference (on its own: > 12 G); not said where the landing already reads flat |
 | Whoops | `whoops_speed` / `whoops_throttle` / `whoops_bucking` | slower, off the gas, pitching more |
 | Straight | `shift_earlier` / `full_gas` | more time on the limiter / less throttle |
+
+**A scrub is roll, not simply a bike that looks leaned in the air.** For each flight Coach
+waits 0.3 s, integrates the recorded body-axis angular rates, and applies MXBMRP3's useful
+classification boundary: yaw past 30° is a whip; otherwise takeoff lean or accumulated roll
+past 30° is a scrub. That one classifier places the live cue and explains the review. Against a
+scrubbed fast lap the review can now distinguish an upright attempt, a whip, and a roll started
+after takeoff. Where the recorder knows the controls, it also compares sitting through the face
+and forward rider input; unknown input stays unknown. A scrub that remains leaned after landing
+gets a specific counter-lean warning, except on an up-face, where Lynds' deliberate cranked
+landing is a recovery rather than a mistake.
+
+The session debrief normally walks the three sections with the largest time loss. A section
+with a `scrub` finding is appended when it is not already in those three, because the scrub is a
+taught technique rather than a one-off warning. It uses the same section panel and six-type
+corner label as the full review; no second analysis path is maintained for debrief.
 
 **Where a jump was landed** is read off the ground rather than off the reference lap. The bike's
 own height is the only terrain these rules have, so the landing zone is the ground the bike runs
@@ -339,7 +360,10 @@ will and the fast line stays smoother (`wear` notes).
 
 ## Sources
 
-Transmoto (braking, corner entry, jumps), Gary Semics (braking, clutch, scrubbing), Shane
-Watts (tight turns), MXA (momentum, shifting, ruts), MotoOnline / CRA (whoops), Cycle World
-(starts), MX Bikes on X (scrub method), MX Bikes Steam threads and forum (lean, aids, gearbox
-preload, deformation), PiBoSo's `mxb_example.c` (the API).
+Transmoto (braking, corner entry, jumps), Gary Semics (braking, clutch, scrubbing), Lynds
+([slow-to-pro scrub lesson](references/lynds-slow-to-pro.md)), Shane Watts (tight turns), MXA
+(momentum, shifting, ruts), MotoOnline / CRA (whoops), Cycle World (starts), MX Bikes on X
+(scrub method), MX Bikes Steam threads and forum (lean, aids, gearbox preload, deformation),
+PiBoSo's `mxb_example.c` (the API), and Thomas's MIT-licensed
+[MXBMRP3 air-trick classifier](https://github.com/thomas4f/mxbmrp3/tree/a6678de9fe86d683516449ffebc3fe80b1383767)
+(scrub/whip boundary and airtime gate).

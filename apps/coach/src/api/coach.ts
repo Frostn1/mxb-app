@@ -103,6 +103,7 @@ export interface SessionDetail {
 }
 
 export type SectionKind = "straight" | "corner" | "jump" | "rhythm" | "whoops";
+export type CornerKind = "unknown" | "flat" | "smoothRut" | "hookedRut" | "roughRut" | "whoopedSand" | "smoothBerm";
 
 export interface Finding {
   skill: string;
@@ -121,6 +122,14 @@ export interface SectionReview {
   end: number;
   core: [number, number];
   dir: number;
+  corner: {
+    hold: "unknown" | "flat" | "rutted";
+    bumps: "unknown" | "smooth" | "rough";
+    soil: Soil | null;
+    profile: "unknown" | "rut" | "berm";
+    shape: "unknown" | "constant" | "hooked";
+    kind: CornerKind;
+  };
   lapTime: number;
   refTime: number;
   /** Seconds lost to the reference; negative is a gain. */

@@ -109,8 +109,15 @@ export default function Debrief({
   }, [path]);
 
   const review = data?.review ?? null;
-  // The sections worth walking: the review's own focus list, in the order it ranked them.
-  const focus = useMemo(() => review?.focus ?? [], [review]);
+  // Start with the time-loss focus. Scrub instruction is a taught technique, so keep its
+  // section in the debrief even when three larger losses would otherwise push it out.
+  const focus = useMemo(() => {
+    if (!review) return [];
+    const scrub = review.sections
+      .map((s, i) => (s.findings.some((f) => f.skill === "scrub") ? i : -1))
+      .filter((i) => i >= 0 && !review.focus.includes(i));
+    return [...review.focus, ...scrub];
+  }, [review]);
   // One step for the verdict, one for the themes, one per focus section, one for the bike.
   const steps = useMemo(() => ["verdict", "themes", ...focus.map((i) => `section:${i}`), "bike"], [focus]);
   const here = steps[Math.min(step, steps.length - 1)] ?? "verdict";

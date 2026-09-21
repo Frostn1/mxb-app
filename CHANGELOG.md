@@ -15,6 +15,14 @@
 
 ## 2026-09-20
 
+### Added
+- Coach labels confidently measured corners with Lynds' six taught types: flat, smooth rut,
+  hooked rut, rough rut, whooped sand turn, and smooth SX berm.
+
+### Changed
+- Coach now teaches a scrub from takeoff to touchdown, distinguishes it from a whip using the
+  bike's recorded rotation, and keeps scrub coaching in the session debrief.
+
 ### Fixed
 - MediaFire folders containing several packaged mods now keep every file for pack review
   instead of silently installing only the first one.
