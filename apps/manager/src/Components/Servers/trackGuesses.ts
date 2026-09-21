@@ -65,12 +65,25 @@ export function useTrackGuesses(): number {
  */
 const LANES = 2;
 
+export interface TrackToIdentify {
+  id: string;
+  /** The server name often carries the pack title the internal track id omits. */
+  hint?: string;
+}
+
 export async function warmTracks(
-  tracks: string[],
-  identify: (track: string) => Promise<TrackGuess>,
+  tracks: TrackToIdentify[],
+  identify: (track: string, hint?: string) => Promise<TrackGuess>,
   keepGoing: () => boolean,
 ) {
-  const queue = [...new Set(tracks.filter((t) => t && !GUESSES.has(t) && !PENDING.has(t)))];
+  // One id can be on several servers. Keep its first useful title hint while still resolving
+  // it only once; a rotation's friendly server name is the only place some shop packs publish
+  // the product title.
+  const byId = new Map<string, string | undefined>();
+  for (const { id, hint } of tracks) {
+    if (id && !byId.has(id)) byId.set(id, hint);
+  }
+  const queue = [...byId.keys()].filter((t) => !GUESSES.has(t) && !PENDING.has(t));
   // Claimed up front: a second sweep starting mid-walk must not ask for the same track again.
   for (const t of queue) PENDING.add(t);
   const lane = async () => {
@@ -80,7 +93,7 @@ export async function warmTracks(
         continue;
       }
       try {
-        rememberGuess(t, await identify(t));
+        rememberGuess(t, await identify(t, byId.get(t)));
       } catch {
         // A track we couldn't identify is one without a picture, not a broken list.
       } finally {

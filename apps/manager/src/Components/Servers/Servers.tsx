@@ -278,7 +278,7 @@ const Servers = ({ link }: ServersProps) => {
     if (!servers?.length) return;
     let live = true;
     void warmTracks(
-      servers.map((s) => s.track),
+      servers.map((s) => ({ id: s.track, hint: s.name })),
       guessServerTrack,
       () => live,
     );

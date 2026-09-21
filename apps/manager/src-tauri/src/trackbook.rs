@@ -26,8 +26,9 @@ use std::path::{Path, PathBuf};
 /// version 2: version 1 searched, and its misses are not this version's misses. Version 3
 /// stopped a stock track being matched to a mod that merely shares its address, which retires
 /// every row that mistake wrote — `forest` among them. Version 4 supplements an mxb-mods hit
-/// with matching Shop artwork, so cached bare posts can gain the image the server list needs.
-pub const VERSION: u32 = 4;
+/// with matching Shop artwork, and version 5 uses a server's visible pack title for secured
+/// tracks whose internal folder name does not resemble the Shop product.
+pub const VERSION: u32 = 5;
 
 /// How long a found track is trusted. A page does not move, and if it ever does the worst
 /// case is a dead link on one panel until the row ages out.

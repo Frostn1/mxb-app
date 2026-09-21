@@ -3925,7 +3925,11 @@ pub struct TrackGuess {
 /// Three catalogues, and mxb-mods.com goes first because that is where tracks come from —
 /// it holds around 1,600 of them and asks nothing for them. The shop and the Hub follow.
 #[tauri::command]
-async fn guess_server_track(app: tauri::AppHandle, track: String) -> Result<TrackGuess, String> {
+async fn guess_server_track(
+    app: tauri::AppHandle,
+    track: String,
+    hint: Option<String>,
+) -> Result<TrackGuess, String> {
     let id = track.trim().to_string();
     let mut guess = TrackGuess { id: id.clone(), ..Default::default() };
     if id.is_empty() {
@@ -3993,6 +3997,17 @@ async fn guess_server_track(app: tauri::AppHandle, track: String) -> Result<Trac
         guess.product_image = known.product_image;
         guess.exact = guess.exact || known.exact;
         return Ok(guess);
+    }
+
+    // A server's internal id is often its extracted folder (`2026_ARLMX_RD05_BUCHANAN_Pro`),
+    // while its visible name carries the actual Shop product (`2026 ARL MX PRO Rotation 1`).
+    // Resolve that title first when it is an unambiguous product-name match; otherwise the
+    // regular id-based lookups below still decide. This is especially important for secured
+    // packs, whose folder names never need to resemble the product someone buys.
+    if let Some(hint) = hint.as_deref().filter(|hint| !hint.trim().is_empty()) {
+        if let Some(hit) = shop_track_from_server_name(&app, hint).await {
+            return Ok(learned(&app, shop_guess(guess, hit, true)));
+        }
     }
 
     // The id is snake_case and a product title is not, so the underscores become spaces
@@ -4394,6 +4409,55 @@ fn shop_guess(mut guess: TrackGuess, hit: mods::shop_catalog::ShopMod, exact: bo
     // Same rule as the other catalogues: a name fold cannot downgrade a track found on disk.
     guess.exact = guess.exact || exact;
     guess
+}
+
+/// Find the Shop product named plainly in a server title.
+///
+/// The name can have operator decoration around it (`12 | OPEN OEM | … | CBRSERVERS.COM`), so
+/// punctuation and spaces are ignored for the comparison. A product must still be a track and
+/// its complete compact title must occur in the server name — shared words alone never qualify.
+async fn shop_track_from_server_name(
+    app: &tauri::AppHandle,
+    server_name: &str,
+) -> Option<mods::shop_catalog::ShopMod> {
+    let compact = compact_track_name(server_name);
+    if compact.is_empty() {
+        return None;
+    }
+    // Operator names bracket their pack title with `|`, for example
+    // `12 | OPEN OEM | 2026 ARL MX PRO Rotation 1 | CBRSERVERS.COM`. The Shop search is an
+    // all-words search, so using the full title would require a product to contain the server
+    // number and host too. Each segment is a useful search phrase on its own.
+    for query in server_name.split('|').map(str::trim).filter(|part| !part.is_empty()) {
+        let Ok(page) = mods::shop_catalog::search(
+            app,
+            query,
+            None,
+            1,
+            mods::shop_catalog::ShopSort::default(),
+            false,
+        )
+        .await
+        else {
+            continue;
+        };
+        if let Some(hit) = page.items.into_iter().find(|item| {
+            sells_tracks(&item.category_names)
+                && !compact_track_name(&item.title).is_empty()
+                && compact.contains(&compact_track_name(&item.title))
+        }) {
+            return Some(hit);
+        }
+    }
+    None
+}
+
+fn compact_track_name(value: &str) -> String {
+    value
+        .chars()
+        .filter(|ch| ch.is_alphanumeric())
+        .flat_map(char::to_lowercase)
+        .collect()
 }
 
 /// Keep mxb-mods as the source and install route for a free track, but borrow the Shop's
