@@ -108,7 +108,16 @@ mod th {
 
     pub const FLOAT_AIR: f32 = 1.1;
     pub const FLOAT_HEIGHT_M: f32 = 0.5;
-    pub const SCRUB_ROLL_DEG: f32 = 20.0;
+    /// Thomas's MXBMRP3 waits this long before a bump can become an air trick.
+    pub const AIR_COMMIT_S: f32 = 0.3;
+    /// MXBMRP3's minimum integrated rotation for both a scrub and a whip. Yaw wins: turning
+    /// the bike sideways is a whip, while rolling it (or leaving the lip rolled) is a scrub.
+    pub const PARTIAL_ROTATION_DEG: f32 = 30.0;
+    /// Enough roll to say the scrub has begun; used only to compare when two riders start it.
+    pub const SCRUB_START_DEG: f32 = 10.0;
+    pub const SCRUB_START_GAP_S: f32 = 0.1;
+    pub const SCRUB_SEATED_SHARE: f32 = 0.6;
+    pub const SCRUB_FORWARD_GAP: f32 = 0.25;
     pub const SHORT_M: i64 = 2;
     pub const LONG_M: i64 = 3;
     pub const CHOP: f32 = 0.3;
@@ -190,6 +199,13 @@ mod th {
     /// flat corner on a stock track and a sand turn before anything leans on them.
     pub const RUT_LEAN_DEG: f32 = 60.0;
     pub const FLAT_LEAN_DEG: f32 = 45.0;
+    /// A rut or berm must depart this far from the straight grade between the core's ends before
+    /// its vertical profile gets a name. This is display-only until real laps tune it.
+    pub const CORNER_PROFILE_M: f32 = 0.35;
+    /// A hooked rut tightens decisively towards the exit. The ratio alone is unstable when both
+    /// thirds are nearly straight, so require a real curvature increase as well.
+    pub const HOOK_CURVATURE_RATIO: f32 = 1.8;
+    pub const HOOK_CURVATURE_DELTA: f32 = 0.01;
 
     /// Mean vertical hit through the core, G. PROVISIONAL, from the same two sessions, where
     /// corner means ran 1.1 to 2.3 G. Peak hit was tried first and thrown out: it is a single
@@ -293,6 +309,10 @@ pub struct Point {
     /// How fast the bike's heading turns, degrees a second. The game's yaw rate is about the
     /// bike's own axis, which leans over in a turn.
     pub turn: f32,
+    /// Raw body-axis angular rates, degrees a second. Kept separately from `turn`: scrub/whip
+    /// classification integrates the game's own axes, as MXBMRP3 does.
+    pub yaw_rate: f32,
+    pub roll_rate: f32,
     /// Bar angle, degrees, negative right, and the torque on the bars.
     pub steer: f32,
     pub torque: f32,
@@ -339,6 +359,8 @@ fn point(s: &Sample) -> Point {
         used: [0.0; 2],
         acc: s.acc,
         turn: s.yaw_rate / s.roll.to_radians().cos().max(0.3),
+        yaw_rate: s.yaw_rate,
+        roll_rate: s.roll_rate,
         steer: s.steer,
         torque: s.steer_torque,
         sv: s.susp_vel,
@@ -385,6 +407,8 @@ fn lerp(a: &Point, b: &Point, f: f32) -> Point {
         used: [0.0; 2],
         acc: [m(a.acc[0], b.acc[0]), m(a.acc[1], b.acc[1]), m(a.acc[2], b.acc[2])],
         turn: m(a.turn, b.turn),
+        yaw_rate: m(a.yaw_rate, b.yaw_rate),
+        roll_rate: m(a.roll_rate, b.roll_rate),
         steer: m(a.steer, b.steer),
         torque: m(a.torque, b.torque),
         sv: [m(a.sv[0], b.sv[0]), m(a.sv[1], b.sv[1])],
@@ -606,6 +630,72 @@ fn air_runs(tr: &Trace, within: Range<usize>) -> Vec<(usize, usize)> {
     raw.into_iter().filter(|&(s, e)| e - s >= th::JUMP_MIN_M && tr.span(s, e) >= th::JUMP_MIN_AIR_S).collect()
 }
 
+/// The two partial-rotation air tricks Coach needs to tell apart. A whip can carry plenty of
+/// world-space roll while the bike is sideways, so peak lean alone is not a scrub detector.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum AirMove {
+    #[default]
+    None,
+    Scrub,
+    Whip,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct AirMotion {
+    kind: AirMove,
+    roll_start_s: Option<f32>,
+    peak_roll: f32,
+    peak_yaw: f32,
+}
+
+/// Classifies one flight with the same useful boundary as Thomas's MXBMRP3: wait 0.3 s,
+/// integrate the bike's body-axis rates, give yaw/whip precedence, then accept roll or takeoff
+/// lean as a scrub at 30 degrees. Coach works on a one-metre trace rather than every 100 Hz
+/// plugin frame, so trapezoids preserve the rotation between its coarser samples.
+fn air_motion(tr: &Trace, take: usize, land: usize) -> AirMotion {
+    let Some(first) = tr.pts.get(take) else { return AirMotion::default() };
+    if land <= take || land >= tr.len() || tr.span(take, land) < th::AIR_COMMIT_S {
+        return AirMotion::default();
+    }
+    let mut roll = 0.0f32;
+    let mut yaw = 0.0f32;
+    let mut peak_roll = 0.0f32;
+    let mut peak_yaw = 0.0f32;
+    let mut elapsed = 0.0f32;
+    let mut roll_start_s = (first.roll.abs() >= th::SCRUB_START_DEG).then_some(0.0);
+    for i in take + 1..=land {
+        let a = &tr.pts[i - 1];
+        let b = &tr.pts[i];
+        let dt = (b.t - a.t).clamp(0.0, 0.2);
+        elapsed += dt;
+        roll += (a.roll_rate + b.roll_rate) * 0.5 * dt;
+        yaw += (a.yaw_rate + b.yaw_rate) * 0.5 * dt;
+        peak_roll = peak_roll.max(roll.abs());
+        peak_yaw = peak_yaw.max(yaw.abs());
+        if roll_start_s.is_none() && peak_roll >= th::SCRUB_START_DEG {
+            roll_start_s = Some(elapsed);
+        }
+    }
+    let start_roll = first.roll.abs();
+    let kind = if peak_yaw >= th::PARTIAL_ROTATION_DEG {
+        AirMove::Whip
+    } else if start_roll >= th::PARTIAL_ROTATION_DEG || peak_roll >= th::PARTIAL_ROTATION_DEG {
+        AirMove::Scrub
+    } else {
+        AirMove::None
+    };
+    AirMotion { kind, roll_start_s, peak_roll, peak_yaw }
+}
+
+/// A known rider-input mean. Unknown values do not become a centred rider.
+fn mean_lean(tr: &Trace, range: Range<usize>, axis: usize) -> Option<f32> {
+    let known: Vec<f32> = tr.pts.get(range)?.iter().map(|q| q.lean[axis]).filter(|&v| crate::telemetry::lean::known(v)).collect();
+    if known.len() < 3 {
+        return None;
+    }
+    Some(known.iter().sum::<f32>() / known.len() as f32)
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Kind {
@@ -641,13 +731,48 @@ pub enum Bumps {
     Rough,
 }
 
-/// What sort of corner this is, as properties rather than as one of a handful of named types.
+/// The vertical line the bike follows through a held corner. Kept separate from `Hold`: both a
+/// rut below the grade and a berm above it can hold the bike over.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Profile {
+    #[default]
+    Unknown,
+    Rut,
+    Berm,
+}
+
+/// Whether the corner tightens strongly towards its exit.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Shape {
+    #[default]
+    Unknown,
+    Constant,
+    Hooked,
+}
+
+/// Lynds' six rider-facing corner names. These are display classifications only: coaching rules
+/// continue to read the measured properties, and an incomplete or conflicting reading stays
+/// `Unknown` rather than forcing the nearest label.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum CornerKind {
+    #[default]
+    Unknown,
+    Flat,
+    SmoothRut,
+    HookedRut,
+    RoughRut,
+    WhoopedSand,
+    SmoothBerm,
+}
+
+/// What sort of corner this is, as measured properties plus a display-only Lynds name.
 ///
-/// The named types riders use - flat, smooth rut, hooked rut, rough rut, sand turn, berm - are
-/// combinations of these, so naming one forces a single winner where a corner is usually two
-/// things at once and leaves nothing to fall back on when the call is marginal. Each property
-/// carries its own `Unknown`, and every rule that reads one must treat `Unknown` as today's
-/// behaviour.
+/// The properties remain the source of truth because a corner is usually several things at
+/// once. `kind` is only filled when their combination clearly matches one of the six taught
+/// types; every marginal reading stays `Unknown`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CornerType {
@@ -656,6 +781,9 @@ pub struct CornerType {
     /// The ground under the corner, from the rear wheel's material. `None` off a corner or
     /// where the recorder gave nothing usable.
     pub soil: Option<crate::soil::Soil>,
+    pub profile: Profile,
+    pub shape: Shape,
+    pub kind: CornerKind,
 }
 
 /// A stretch of track with one job: a corner with its braking zone and exit, a jump with its
@@ -674,8 +802,8 @@ pub struct Section {
     pub core: (usize, usize),
     /// +1 right-hander, -1 left-hander, 0 otherwise.
     pub dir: i8,
-    /// What sort of corner it is. All `Unknown` off a corner. Nothing reads it yet: it lands
-    /// ahead of the rules so that no existing finding changes behaviour because it exists.
+    /// What sort of corner it is. All `Unknown` off a corner. The UI reads the display name;
+    /// coaching rules deliberately do not, so classification cannot change their behaviour.
     #[serde(default)]
     pub corner: CornerType,
     #[serde(skip)]
@@ -847,7 +975,67 @@ pub fn corner_type(tr: &Trace, core: (usize, usize)) -> CornerType {
         .max_by_key(|&(_, n)| n)
         .and_then(|(v, _)| crate::soil::Soil::from_wheel(v, false));
 
-    CornerType { hold, bumps, soil }
+    // Remove the straight grade between the ends before looking for a bowl or a bank. A corner
+    // climbing or descending a hill is not thereby a rut or berm.
+    let first = ground.first().expect("ground is not empty").y;
+    let last = ground.last().expect("ground is not empty").y;
+    let mut below = 0.0f32;
+    let mut above = 0.0f32;
+    for (i, q) in ground.iter().enumerate() {
+        let f = i as f32 / (ground.len() - 1).max(1) as f32;
+        let residual = q.y - (first + (last - first) * f);
+        below = below.min(residual);
+        above = above.max(residual);
+    }
+    let profile = if below <= -th::CORNER_PROFILE_M && -below > above {
+        Profile::Rut
+    } else if above >= th::CORNER_PROFILE_M && above > -below {
+        Profile::Berm
+    } else {
+        Profile::Unknown
+    };
+
+    // Curvature is distance-normalised, unlike yaw rate, so the same hook does not change label
+    // merely because one rider entered it faster. The strong gate deliberately leaves many
+    // corners unknown: earlier real-lap work showed weaker first/last ratios were noisy.
+    let curve = curvature(tr);
+    let third = ((b - a + 1) / 3).max(1);
+    let mean_curve = |from: usize, to: usize| {
+        curve[from..to].iter().map(|v| v.abs()).sum::<f32>() / (to - from).max(1) as f32
+    };
+    let first_curve = mean_curve(a, (a + third).min(b + 1));
+    let last_curve = mean_curve((b + 1).saturating_sub(third).max(a), b + 1);
+    let shape = if last_curve >= first_curve * th::HOOK_CURVATURE_RATIO
+        && last_curve - first_curve >= th::HOOK_CURVATURE_DELTA
+    {
+        Shape::Hooked
+    } else if first_curve > 0.0 && (0.67..=1.5).contains(&(last_curve / first_curve)) {
+        Shape::Constant
+    } else {
+        Shape::Unknown
+    };
+
+    let kind = named_corner(hold, bumps, soil, profile, shape);
+    CornerType { hold, bumps, soil, profile, shape, kind }
+}
+
+fn named_corner(hold: Hold, bumps: Bumps, soil: Option<crate::soil::Soil>, profile: Profile, shape: Shape) -> CornerKind {
+    use crate::soil::Soil;
+    if hold == Hold::Flat {
+        CornerKind::Flat
+    } else if bumps == Bumps::Rough && soil == Some(Soil::Sand) {
+        CornerKind::WhoopedSand
+    } else if hold == Hold::Rutted && bumps == Bumps::Rough {
+        CornerKind::RoughRut
+    } else if hold == Hold::Rutted && shape == Shape::Hooked {
+        CornerKind::HookedRut
+    } else if hold == Hold::Rutted && bumps == Bumps::Smooth && profile == Profile::Berm {
+        CornerKind::SmoothBerm
+    } else if hold == Hold::Rutted && bumps == Bumps::Smooth && profile == Profile::Rut {
+        CornerKind::SmoothRut
+    } else {
+        CornerKind::Unknown
+    }
 }
 
 /// Splits the track into sections, from the reference lap.
@@ -1683,16 +1871,57 @@ fn jumps(c: &mut Ctx) {
         let (air_p, air_r) = (p.span(pt, pl), r.span(rt, rl));
         let peak = |t: &Trace, x: usize, y: usize| t.max_by(x..y + 1, |q| q.y);
         let higher = peak(p, pt, pl) - peak(r, rt, rl);
+        let (motion_p, motion_r) = (air_motion(p, pt, pl), air_motion(r, rt, rl));
         // Landing short, the fix is speed; staying low would only make it shorter.
         let short = (pl as i64 - rl as i64) < -th::SHORT_M;
         if air_p > air_r * th::FLOAT_AIR + 0.1 && higher > th::FLOAT_HEIGHT_M && !short {
-            let scrubs = r.max_by(rt..rt + (rl - rt) / 3 + 1, |q| q.roll.abs()) > th::SCRUB_ROLL_DEG;
-            let hint = if scrubs { " The fast lap scrubs this one." } else { "" };
+            let mut how: Vec<String> = Vec::new();
+            if motion_r.kind == AirMove::Scrub {
+                match motion_p.kind {
+                    AirMove::Whip => how.push(
+                        "You yaw the bike sideways like a whip; for a scrub, roll it over at the lip instead.".into(),
+                    ),
+                    AirMove::Scrub
+                        if motion_p
+                            .roll_start_s
+                            .zip(motion_r.roll_start_s)
+                            .is_some_and(|(mine, reference)| mine - reference > th::SCRUB_START_GAP_S) =>
+                    {
+                        how.push("You make the roll once you are airborne; start it as the rear wheel leaves the lip.".into())
+                    }
+                    AirMove::Scrub if motion_p.peak_roll + 10.0 < motion_r.peak_roll => how.push(
+                        "The fast lap commits farther to the roll at takeoff.".into(),
+                    ),
+                    AirMove::None => how.push(
+                        "The fast lap rolls the bike into a scrub at the lip; your bike stays upright.".into(),
+                    ),
+                    _ => {}
+                }
+                let before_p = pt.saturating_sub(8)..(pt + 1).min(p.len());
+                let before_r = rt.saturating_sub(8)..(rt + 1).min(r.len());
+                if let (Some(sit_p), Some(sit_r)) = (seated(p, before_p.clone()), seated(r, before_r.clone())) {
+                    if sit_p < th::SCRUB_SEATED_SHARE && sit_r - sit_p > th::STANCE_GAP {
+                        how.push("Sit through the face so the bike can lean underneath you.".into());
+                    }
+                }
+                use crate::telemetry::lean;
+                if let (Some(fwd_p), Some(fwd_r)) =
+                    (mean_lean(p, before_p, lean::FB), mean_lean(r, before_r, lean::FB))
+                {
+                    if fwd_r > 0.1 && fwd_r - fwd_p > th::SCRUB_FORWARD_GAP {
+                        how.push("Move the rider forward over the face, as the fast lap does, to keep the flight low.".into());
+                    }
+                }
+            }
+            if how.is_empty() {
+                how.push("Stay seated, lean the bike over as you leave the lip, then counter it in the air.".into());
+            } else {
+                how.push("Counter the lean in the air so the bike is straight for touchdown.".into());
+            }
             c.add("scrub", 0.85, pt, "Stay low: scrub it", format!(
-                "You fly {higher:.1} m higher and {:.1} s longer than the fast lap over {name}. In MX Bikes, \
-                 stay seated, lean the bike over as you leave the lip, then lean the other way in the air \
-                 to straighten it before you land.{hint}",
-                air_p - air_r
+                "You fly {higher:.1} m higher and {:.1} s longer than the fast lap over {name}. {}",
+                air_p - air_r,
+                how.join(" ")
             ));
         }
         let landed = pl as i64 - rl as i64;
@@ -1752,11 +1981,20 @@ fn jumps(c: &mut Ctx) {
         // and only where the fast lap lands straighter.
         let settled = |t: &Trace, l: usize| t.pts[(l + 4).min(s.end)].roll.abs();
         let (lean_p, lean_r) = (settled(p, pl), settled(r, rl));
-        if lean_p > th::LAND_ROLL_DEG && lean_p - lean_r > th::LAND_ROLL_DEG / 2.0 {
-            c.warn("land_crooked", pl, "Straighten up before landing", format!(
-                "The bike is still leaned {lean_p:.0}° after you land at {name}. Bring it straight in the air, \
-                 a moment earlier."
-            ));
+        // Lynds deliberately lands leaned when a jump will come up short so the rear slides up
+        // the face instead of rebounding. Do not call that recovery move a crooked landing.
+        if verdict != Landing::Face && lean_p > th::LAND_ROLL_DEG && lean_p - lean_r > th::LAND_ROLL_DEG / 2.0 {
+            if motion_p.kind == AirMove::Scrub {
+                c.warn("land_crooked", pl, "Bring the scrub back sooner", format!(
+                    "You get the bike rolled over, but it is still leaned {lean_p:.0}° after you land at {name}. \
+                     Counter the lean earlier in the air so it is straight for touchdown."
+                ));
+            } else {
+                c.warn("land_crooked", pl, "Straighten up before landing", format!(
+                    "The bike is still leaned {lean_p:.0}° after you land at {name}. Bring it straight in the air, \
+                     a moment earlier."
+                ));
+            }
         }
         let hit = |t: &Trace, l: usize| t.max_by(l..(l + 8).min(s.end + 1).max(l + 1), |q| q.hit);
         let (hp, hr) = (hit(p, pl), hit(r, rl));
@@ -2408,6 +2646,7 @@ fn alone(c: &mut Ctx) {
             let runs = air_runs(p, start..end + 1);
             for (k, &(pt, pl)) in runs.iter().enumerate() {
                 let which = if runs.len() > 1 { format!("the {} jump of {name}", ordinal(k + 1)) } else { name.clone() };
+                let motion = air_motion(p, pt, pl);
                 let from = pt.saturating_sub(th::CHOP_M);
                 if p.max_by(from..pt + 1, |q| q.throttle) - p.pts[pt].throttle > th::SOLO_CHOP && p.pts[pt].throttle < 0.3 {
                     c.add("chop_face", 0.9, pt, "Stay on the gas up the face", format!(
@@ -2420,16 +2659,25 @@ fn alone(c: &mut Ctx) {
                          open it as you touch down."
                     ));
                 }
+                // Read the ground before judging the lean: landing cranked on an up-face can be
+                // an intentional recovery, not a scrub the rider failed to bring back.
+                let (verdict, hit_g) = landing(p, pt, pl, s.end, c.bike);
                 let lean = p.pts[(pl + 4).min(s.end)].roll.abs();
-                if lean > th::SOLO_LAND_ROLL_DEG {
-                    c.warn("land_crooked", pl, "Straighten up before landing", format!(
-                        "The bike is still leaned {lean:.0}° after you land {which}. Bring it straight in the air, a \
-                         moment earlier."
-                    ));
+                if verdict != Landing::Face && lean > th::SOLO_LAND_ROLL_DEG {
+                    if motion.kind == AirMove::Scrub {
+                        c.warn("land_crooked", pl, "Bring the scrub back sooner", format!(
+                            "You get the bike rolled over, but it is still leaned {lean:.0}° after you land {which}. \
+                             Counter the lean earlier in the air so it is straight for touchdown."
+                        ));
+                    } else {
+                        c.warn("land_crooked", pl, "Straighten up before landing", format!(
+                            "The bike is still leaned {lean:.0}° after you land {which}. Bring it straight in the air, a \
+                             moment earlier."
+                        ));
+                    }
                 }
                 // The ground says where this came down, with no lap to hold it against, which
                 // is the whole point of reading the landing rather than a pairing.
-                let (verdict, hit_g) = landing(p, pt, pl, s.end, c.bike);
                 match verdict {
                     Landing::Flat => c.judge("overjump", 0.9, pt, "You're over-jumping this", format!(
                         "Your {} m flight over {which} finishes out on the flat, past the downslope, and \
@@ -2692,8 +2940,7 @@ pub(crate) fn cue_points(r: &Trace, secs: &[Section]) -> Vec<CuePoint> {
                     add(start, cue::STAND);
                 }
                 if let Some(&(t, l)) = s.runs.first() {
-                    let third = (t + l.saturating_sub(t) / 3).max(t + 1).min(last);
-                    if r.max_by(t..third + 1, |q| q.roll.abs()) > th::SCRUB_ROLL_DEG {
+                    if air_motion(r, t, l).kind == AirMove::Scrub {
                         add(t, cue::SCRUB);
                     }
                 }
@@ -2957,7 +3204,8 @@ pub(crate) mod tests {
             let in_hop = hp > 0.0 && d >= h0 && d <= h1;
             let air = (d >= take && d <= land) || in_hop;
             let v = if air { v.min(st.air_v) } else { v };
-            let roll = if st.whip > 0.0 && d >= take && d <= land + 2.0 {
+            let in_roll = st.whip > 0.0 && d >= take && d <= land + 2.0;
+            let roll = if in_roll {
                 st.whip * (PI * (d - take) / (land + 2.0 - take)).sin()
             } else {
                 roll
@@ -2996,6 +3244,11 @@ pub(crate) mod tests {
             s.wheel_speed = [v, v];
             s.wheel_material = if air { [0, 0] } else { [1, 1] };
             s.roll = roll;
+            if in_roll {
+                s.roll_rate = st.whip * PI / (land + 2.0 - take)
+                    * (PI * (d - take) / (land + 2.0 - take)).cos()
+                    * v;
+            }
             s.susp = [0.30 - squash; 2];
             let landing = !air && d > land && d <= land + 3.0;
             s.acc = [0.0, if landing { st.hit } else { 1.0 }, 0.0];
@@ -3077,6 +3330,73 @@ pub(crate) mod tests {
         // Too short to say anything about.
         let few: Vec<Point> = (0..2).map(|_| point(80.0, 3.0, false)).collect();
         assert_eq!(corner_type(&Trace { pts: few }, (0, 1)), CornerType::default());
+    }
+
+    #[test]
+    fn lynds_six_corner_names_are_composed_without_forcing_a_guess() {
+        use crate::soil::Soil;
+        let named = |hold, bumps, soil, profile, shape| named_corner(hold, bumps, soil, profile, shape);
+
+        assert_eq!(named(Hold::Flat, Bumps::Smooth, Some(Soil::Hardpack), Profile::Unknown, Shape::Constant), CornerKind::Flat);
+        assert_eq!(named(Hold::Rutted, Bumps::Smooth, Some(Soil::Soft), Profile::Rut, Shape::Constant), CornerKind::SmoothRut);
+        assert_eq!(named(Hold::Rutted, Bumps::Smooth, Some(Soil::Soft), Profile::Rut, Shape::Hooked), CornerKind::HookedRut);
+        assert_eq!(named(Hold::Rutted, Bumps::Rough, Some(Soil::Soft), Profile::Rut, Shape::Constant), CornerKind::RoughRut);
+        assert_eq!(named(Hold::Rutted, Bumps::Rough, Some(Soil::Sand), Profile::Rut, Shape::Constant), CornerKind::WhoopedSand);
+        assert_eq!(named(Hold::Rutted, Bumps::Smooth, Some(Soil::Hardpack), Profile::Berm, Shape::Constant), CornerKind::SmoothBerm);
+
+        assert_eq!(named(Hold::Rutted, Bumps::Smooth, Some(Soil::Soft), Profile::Unknown, Shape::Constant), CornerKind::Unknown);
+        assert_eq!(named(Hold::Unknown, Bumps::Rough, Some(Soil::Soft), Profile::Rut, Shape::Hooked), CornerKind::Unknown);
+    }
+
+    #[test]
+    fn corner_vertical_profile_removes_the_grade_before_naming_rut_or_berm() {
+        let classify = |middle: f32, grade: f32| {
+            let pts: Vec<Point> = (0..41)
+                .map(|i| {
+                    let f = i as f32 / 40.0;
+                    let shape = middle * (PI * f).sin();
+                    Point { x: i as f32, y: grade * f + shape, roll: 70.0, hit: 0.8, ground: 12, ..Point::default() }
+                })
+                .collect();
+            corner_type(&Trace { pts }, (0, 40))
+        };
+
+        let rut = classify(-0.6, 2.0);
+        assert_eq!((rut.profile, rut.kind), (Profile::Rut, CornerKind::SmoothRut));
+        let berm = classify(0.6, -2.0);
+        assert_eq!((berm.profile, berm.kind), (Profile::Berm, CornerKind::SmoothBerm));
+        let grade_only = classify(0.0, 2.0);
+        assert_eq!((grade_only.profile, grade_only.kind), (Profile::Unknown, CornerKind::Unknown));
+    }
+
+    #[test]
+    fn a_hook_requires_path_curvature_to_rise_towards_the_exit() {
+        let trace = |hooked: bool| {
+            let mut pts = Vec::new();
+            let (mut x, mut z, mut heading) = (0.0f32, 0.0f32, 0.0f32);
+            for i in 0..60 {
+                let k = if hooked && i >= 40 { 0.05 } else { 0.015 };
+                heading += k;
+                x += heading.sin();
+                z += heading.cos();
+                let f = i as f32 / 59.0;
+                pts.push(Point {
+                    x,
+                    y: -0.6 * (PI * f).sin(),
+                    z,
+                    roll: 70.0,
+                    hit: 0.8,
+                    ground: 12,
+                    ..Point::default()
+                });
+            }
+            corner_type(&Trace { pts }, (0, 59))
+        };
+
+        let hooked = trace(true);
+        assert_eq!((hooked.shape, hooked.kind), (Shape::Hooked, CornerKind::HookedRut));
+        let constant = trace(false);
+        assert_eq!((constant.shape, constant.kind), (Shape::Constant, CornerKind::SmoothRut));
     }
 
     /// Prints what every corner in some real recordings looks like, so the corner-type
@@ -3602,6 +3922,113 @@ pub(crate) mod tests {
         assert!(found.contains(&"overjump"), "{found:?}");
     }
 
+    fn flight(seconds: f32, start_roll: f32, roll_rate: f32, yaw_rate: f32) -> Trace {
+        let steps = (seconds / 0.05).round() as usize;
+        let pts = (0..=steps)
+            .map(|i| Point {
+                t: i as f32 * 0.05,
+                air: true,
+                roll: start_roll,
+                roll_rate,
+                yaw_rate,
+                ..Point::default()
+            })
+            .collect();
+        Trace { pts }
+    }
+
+    #[test]
+    fn scrub_motion_uses_roll_after_real_airtime_and_yaw_is_a_whip() {
+        let rolled = flight(0.5, 0.0, 80.0, 0.0);
+        let m = air_motion(&rolled, 0, rolled.len() - 1);
+        assert_eq!(m.kind, AirMove::Scrub);
+        assert!(m.peak_roll >= 39.0, "{}", m.peak_roll);
+        assert!(m.roll_start_s.is_some_and(|s| s > 0.1), "{:?}", m.roll_start_s);
+
+        let leaned = flight(0.5, 35.0, 0.0, 0.0);
+        let m = air_motion(&leaned, 0, leaned.len() - 1);
+        assert_eq!(m.kind, AirMove::Scrub);
+        assert_eq!(m.roll_start_s, Some(0.0));
+
+        let whip = flight(0.5, 35.0, 80.0, 80.0);
+        let m = air_motion(&whip, 0, whip.len() - 1);
+        assert_eq!(m.kind, AirMove::Whip, "yaw takes precedence over a bike that is also rolled");
+        assert!(m.peak_yaw >= 39.0, "{}", m.peak_yaw);
+
+        let bump = flight(0.2, 40.0, 200.0, 0.0);
+        assert_eq!(air_motion(&bump, 0, bump.len() - 1).kind, AirMove::None, "a short lift is not a scrub");
+    }
+
+    #[test]
+    fn scrub_cue_comes_from_roll_motion_not_a_whip() {
+        let scrub = lap(&Style { whip: 40.0, ..FAST });
+        let secs = sections(&scrub);
+        assert!(cue_points(&scrub, &secs).iter().any(|p| p.kind == cue::SCRUB));
+
+        let mut whip = scrub.clone();
+        let jump = secs.iter().find(|s| s.kind == Kind::Jump).expect("jump");
+        let (take, land) = jump.runs[0];
+        for p in &mut whip.pts[take..=land] {
+            p.yaw_rate = 80.0;
+        }
+        assert!(!cue_points(&whip, &secs).iter().any(|p| p.kind == cue::SCRUB));
+    }
+
+    #[test]
+    fn scrub_finding_teaches_the_lynds_takeoff_position_when_the_reference_shows_it() {
+        use crate::telemetry::{lean, stance};
+        let mut floaty = lap(&Style { jump: (330.0, 356.0, 4.5), air_v: 17.0, ..FAST });
+        let mut scrub = lap(&Style { whip: 40.0, ..FAST });
+        for p in &mut floaty.pts {
+            p.stance = stance::STAND;
+            p.lean[lean::FB] = -0.25;
+        }
+        for p in &mut scrub.pts {
+            p.stance = stance::SIT;
+            p.lean[lean::FB] = 0.5;
+        }
+        let rv = review(&floaty, &scrub, BIKE);
+        let tip = section(&rv, "Jump 1").findings.iter().find(|f| f.skill == "scrub").expect("scrub tip");
+        assert!(tip.detail.contains("your bike stays upright"), "{}", tip.detail);
+        assert!(tip.detail.contains("Sit through the face"), "{}", tip.detail);
+        assert!(tip.detail.contains("Move the rider forward"), "{}", tip.detail);
+        assert!(tip.detail.contains("Counter the lean"), "{}", tip.detail);
+    }
+
+    #[test]
+    fn scrub_finding_calls_out_a_roll_started_after_takeoff() {
+        let mut late = lap(&Style { jump: (330.0, 356.0, 4.5), air_v: 17.0, ..FAST });
+        let mut reference = lap(&FAST);
+        let ref_jump = sections(&reference).into_iter().find(|s| s.kind == Kind::Jump).expect("jump");
+        let (rt, _) = ref_jump.runs[0];
+        reference.pts[rt].roll = 35.0;
+        let mine = air_runs(&late, ref_jump.start..ref_jump.end + 1)[0];
+        for p in &mut late.pts[mine.0..=mine.1] {
+            p.roll_rate = 80.0;
+        }
+        let rv = review(&late, &reference, BIKE);
+        let tip = section(&rv, "Jump 1").findings.iter().find(|f| f.skill == "scrub").expect("scrub tip");
+        assert!(tip.detail.contains("once you are airborne"), "{}", tip.detail);
+    }
+
+    #[test]
+    fn unknown_body_inputs_do_not_turn_into_scrub_advice() {
+        use crate::telemetry::stance;
+        let mut floaty = lap(&Style { jump: (330.0, 356.0, 4.5), air_v: 17.0, ..FAST });
+        let mut scrub = lap(&Style { whip: 40.0, ..FAST });
+        for p in &mut floaty.pts {
+            p.lean = [f32::NAN; 2];
+        }
+        for p in &mut scrub.pts {
+            p.stance = stance::SIT;
+            p.lean = [0.0, 0.5];
+        }
+        let rv = review(&floaty, &scrub, BIKE);
+        let tip = section(&rv, "Jump 1").findings.iter().find(|f| f.skill == "scrub").expect("scrub tip");
+        assert!(!tip.detail.contains("Sit through the face"), "{}", tip.detail);
+        assert!(!tip.detail.contains("Move the rider forward"), "{}", tip.detail);
+    }
+
     #[test]
     fn rolling_a_jump_the_fast_lap_clears_says_jump_it() {
         let rolled = lap(&Style { jump: (0.0, 0.0, 0.0), ..FAST });
@@ -3616,6 +4043,29 @@ pub(crate) mod tests {
         let whip = lap(&Style { whip: 35.0, ..FAST });
         let rv = review(&whip, &lap(&FAST), BIKE);
         let found = skills(section(&rv, "Jump 1"));
+        assert!(!found.contains(&"land_crooked"), "{found:?}");
+    }
+
+    #[test]
+    fn a_scrub_left_leaned_on_a_normal_landing_says_bring_it_back() {
+        let fast = lap(&FAST);
+        let mut scrub = lap(&Style { whip: 40.0, ..FAST });
+        let jump = sections(&fast).into_iter().find(|s| s.kind == Kind::Jump).expect("jump");
+        let (_, land) = jump.runs[0];
+        scrub.pts[(land + 4).min(jump.end)].roll = 25.0;
+        let rv = review(&scrub, &fast, BIKE);
+        assert!(titles(section(&rv, "Jump 1")).contains(&"Bring the scrub back sooner"));
+    }
+
+    #[test]
+    fn a_cranked_scrub_landing_on_an_up_face_is_not_called_crooked() {
+        let mut cased = lap(&Style { whip: 40.0, ..CASED });
+        let jump = sections(&cased).into_iter().find(|s| s.kind == Kind::Jump).expect("jump");
+        let (_, land) = jump.runs[0];
+        cased.pts[(land + 4).min(jump.end)].roll = 25.0;
+        let rv = solo(&cased, BIKE);
+        let found = skills(section(&rv, "Jump 1"));
+        assert!(found.contains(&"land_short"), "{found:?}");
         assert!(!found.contains(&"land_crooked"), "{found:?}");
     }
 

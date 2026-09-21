@@ -339,6 +339,12 @@ export const en = {
   "review.kind.rhythm": "Rhythm section",
   "review.kind.whoops": "Whoops",
   "review.kind.straight": "Straight",
+  "corner.flat": "Flat corner",
+  "corner.smoothRut": "Smooth rut",
+  "corner.hookedRut": "Hooked rut",
+  "corner.roughRut": "Rough rut",
+  "corner.whoopedSand": "Whooped sand turn",
+  "corner.smoothBerm": "Smooth SX berm",
 
   "recorder.title": "Recorder",
   "recorder.on": "The recorder is installed",
