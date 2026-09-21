@@ -2124,7 +2124,7 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
               </Select>
             </div>
 
-            {/* A Select, not a Segmented control — seven options don't fit the
+            {/* A Select, not a Segmented control — eight options don't fit the
                 segmented track, and each is named in its own language so someone
                 who lands in a script they can't read can still get back out. */}
             <div className="mt-3 flex items-center justify-between">

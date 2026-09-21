@@ -1,6 +1,6 @@
 /* Barlow, Barlow Condensed and Geist Mono (SIL Open Font License 1.1), vendored
    so the app renders correctly offline. latin + latin-ext only: those cover
-   all six shipped locales. Regenerate with scripts/fetch-fonts.py. */
+   all seven shipped locales. Regenerate with scripts/fetch-fonts.py. */
 
 @font-face {
   font-family: 'Barlow';

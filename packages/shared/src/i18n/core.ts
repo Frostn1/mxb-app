@@ -16,10 +16,11 @@ import { es as baseEs } from "./base/es";
 import { fr as baseFr } from "./base/fr";
 import { de as baseDe } from "./base/de";
 import { ptBR as basePtBR } from "./base/pt-BR";
+import { sv as baseSv } from "./base/sv";
 
 /** Every locale we ship. Also what `isLocale` tests against, so it no longer
  *  depends on which dictionaries happen to be registered. */
-export const LOCALES = ["en", "it", "es", "fr", "de", "pt-BR"] as const;
+export const LOCALES = ["en", "it", "es", "fr", "de", "pt-BR", "sv"] as const;
 export type Locale = (typeof LOCALES)[number];
 /** What the user picked — `system` follows the OS. */
 export type LocalePref = Locale | "system";
@@ -54,6 +55,7 @@ export const LOCALE_OPTIONS: { value: LocalePref; label: string }[] = [
   { value: "fr", label: "Français" },
   { value: "de", label: "Deutsch" },
   { value: "pt-BR", label: "Português (BR)" },
+  { value: "sv", label: "Svenska" },
 ];
 
 export const STORAGE_KEY = "frost-locale";
@@ -65,6 +67,7 @@ const BASE_DICTS: Record<Locale, Dict> = {
   fr: baseFr,
   de: baseDe,
   "pt-BR": basePtBR,
+  sv: baseSv,
 };
 
 let DICTS: Record<Locale, Dict> = BASE_DICTS;

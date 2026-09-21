@@ -2,7 +2,7 @@
  * English — the source of truth.
  *
  * Every other locale is typed as `Record<keyof typeof en, string>`, so adding a
- * key here makes `tsc` fail until all five translations supply it. Keys are
+ * key here makes `tsc` fail until all six translations supply it. Keys are
  * flat and namespaced by screen.
  *
  * Plural families are `<key>_one` / `<key>_other` and are looked up by passing

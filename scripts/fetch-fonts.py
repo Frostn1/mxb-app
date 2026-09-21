@@ -3,7 +3,7 @@
 
 The app must render offline, so the faces are bundled rather than pulled from
 Google at runtime. Only the latin and latin-ext subsets are kept — between them
-they cover all six locales the app ships.
+they cover all seven locales the app ships.
 """
 import hashlib, os, re, subprocess, sys
 
@@ -50,6 +50,6 @@ while i < len(parts) - 1:
 with open(os.path.join(ROOT, "packages/shared/src/fonts.css"), "w") as fh:
     fh.write("/* Barlow, Barlow Condensed and Geist Mono (SIL Open Font License 1.1), vendored\n"
              "   so the app renders correctly offline. latin + latin-ext only: those cover\n"
-             "   all six shipped locales. Regenerate with scripts/fetch-fonts.py. */\n\n"
+             "   all seven shipped locales. Regenerate with scripts/fetch-fonts.py. */\n\n"
              + "\n\n".join(out) + "\n")
 print("wrote packages/shared/src/fonts.css with %d faces" % len(out))

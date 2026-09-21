@@ -17,10 +17,11 @@ import { es } from "./locales/es";
 import { fr } from "./locales/fr";
 import { de } from "./locales/de";
 import { ptBR } from "./locales/pt-BR";
+import { sv } from "./locales/sv";
 
 // A side effect on import, deliberately: every module that needs a translated string
 // reaches this one first, so the dictionaries are in place before anything renders.
-registerDicts({ en, it, es, fr, de, "pt-BR": ptBR });
+registerDicts({ en, it, es, fr, de, "pt-BR": ptBR, sv });
 
 /** Every locale is typed against `en`, so a missing or invented key fails the build. */
 export type Translation = Record<keyof typeof en, string>;

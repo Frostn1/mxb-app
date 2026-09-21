@@ -11,7 +11,7 @@ import { registerDicts, type PluralBase, type TFunc } from "@frost/shared/i18n/c
 import { en } from "./locales/en";
 
 // A side effect on import, deliberately — see the manager's copy for why.
-registerDicts({ en, it: en, es: en, fr: en, de: en, "pt-BR": en });
+registerDicts({ en, it: en, es: en, fr: en, de: en, "pt-BR": en, sv: en });
 
 type Key = keyof typeof en;
 export type TKey = Key | PluralBase<Key>;
