@@ -13,6 +13,25 @@
 - Uninstall a mod straight from its page. Under Reinstall, on anything already in your
   Library, with the file going to the Recycle Bin like it does in the Library itself.
 
+## 2026-09-20 — Frost's Studio v0.5.0 — Build it by asking
+
+### Added
+- **The Track AI can edit the track in front of it.** Ask it to make a named turn wider,
+  reshape turn 9, or add another rut and it uses the track-edit protocol to make the change
+  without replacing details you did not ask it to touch.
+- **The Paint AI can place and adjust artwork on the bike.** Tell it to put a logo on the
+  right fender, move it up, resize it, rotate it, change its opacity, hide it or clip it, and
+  it applies that operation to the selected paint.
+- Paint placement understands the connected regions of the bike model, including left and
+  right sides and each part's position on the assembled bike. The same model-aware placement
+  works across bikes instead of relying on KTM-only coordinates.
+
+### Changed
+- AI edit plans are checked before they touch a project. Invalid values are clamped, stale
+  layer references are rejected, and failed track plans can be corrected and retried.
+- Frost's Studio now uses the same dark, compact shell and visual language as MXB App and
+  MXB Secure, with the Studio tools arranged across the top rail.
+
 ## 2026-09-19 — v0.17.6 — A sign-in link you can copy
 
 ### Fixed
