@@ -163,13 +163,14 @@ export function sortMerged(items: MergedMod[], sort: ModsSort): MergedMod[] {
 /* ── Type ↔ store category ─────────────────────────────────────────────────────────── */
 
 /**
- * Which of a store's own top-level categories a browse type means.
+ * Which of a store's own categories a browse type means.
  *
- * Matched on the category's *name*, because the three catalogues number their taxonomies
- * independently and nothing relates the ids. No match means the store is queried unnarrowed
- * rather than not at all: a hint that misses would otherwise hide a whole catalogue, and a
- * store showing more than the type asked for is a far smaller wrong than a store showing
- * nothing. The left list's count stays blank there, which is the tell.
+ * Matched on the category's slug or name, because the three catalogues number their taxonomies
+ * independently and nothing relates the ids. A top-level match wins, because it usually owns
+ * the whole subtree the player means. MXB Hub does not make every useful type a root, though:
+ * `Tracks` lives beneath `Free Mods`. Falling back to a nested match keeps that real category
+ * filterable instead of silently querying the entire store. No match still means the store is
+ * queried unnarrowed rather than hidden altogether.
  */
 const TYPE_HINTS: Record<string, RegExp> = {
   tracks: /track/i,
@@ -185,5 +186,10 @@ export function storeRootFor(
 ): ShopCategory | undefined {
   const hint = TYPE_HINTS[modType.id];
   if (!hint) return undefined;
-  return categories.find((c) => c.depth === 0 && hint.test(c.name));
+  const matches = (category: ShopCategory) =>
+    hint.test(category.slug) || hint.test(category.name);
+  return (
+    categories.find((category) => category.depth === 0 && matches(category)) ??
+    categories.find(matches)
+  );
 }
