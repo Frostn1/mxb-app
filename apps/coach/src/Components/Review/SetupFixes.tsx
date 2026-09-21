@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@frost/shared/Components/ui/button";
+import { cn } from "@frost/shared/lib/utils";
 import { useT, type TKey } from "@/i18n";
 import {
   coachSaveSetup,
@@ -73,13 +74,13 @@ function amount(c: SetupChange, t: ReturnType<typeof useT>): string {
 }
 
 /** One change on its own line: the setting and how far it goes, with the reason under it. */
-function Change({ c }: { c: SetupChange }) {
+function Change({ c, compact = false }: { c: SetupChange; compact?: boolean }) {
   const t = useT();
   return (
     <li className="grid grid-cols-[1fr_auto] items-baseline gap-x-3 gap-y-0.5">
       <span className="text-[12.5px] text-foreground">{t(`setupField.${c.field}` as TKey)}</span>
       <span className="whitespace-nowrap font-mono text-[12px] text-accent-foreground">{amount(c, t)}</span>
-      <span className="col-span-2 text-[12px] leading-snug text-muted-foreground">
+      <span className={cn("col-span-2 text-[12px] text-muted-foreground", compact ? "leading-tight" : "leading-snug")}>
         {c.why}
         {!c.writes && c.from !== c.to && (
           <span className="ml-1.5 text-[11px] text-faint">{c.conflict ? t("setup.conflict") : t("setup.byHand")}</span>
@@ -90,16 +91,16 @@ function Change({ c }: { c: SetupChange }) {
 }
 
 /** A list of changes by group, each setting named once. */
-function Plan({ groups }: { groups: { key: TKey; changes: SetupChange[] }[] }) {
+function Plan({ groups, compact = false }: { groups: { key: TKey; changes: SetupChange[] }[]; compact?: boolean }) {
   const t = useT();
   return (
-    <div className="space-y-3">
+    <div className={compact ? "space-y-2" : "space-y-3"}>
       {groups.map((g) => (
         <div key={g.key}>
           <div className="mb-1 text-[12px] font-semibold text-foreground">{t(g.key)}</div>
-          <ul className="space-y-2 border-l border-border pl-3">
+          <ul className={cn("border-l border-border pl-3", compact ? "space-y-1.5" : "space-y-2")}>
             {g.changes.map((c) => (
-              <Change key={c.field} c={c} />
+              <Change key={c.field} c={c} compact={compact} />
             ))}
           </ul>
         </div>
@@ -143,11 +144,14 @@ export default function SetupFixes({
   path,
   findings,
   bikeId,
+  compact = false,
 }: {
   path: string;
   findings: Finding[];
   /** The bike the lap was ridden on, so the feel panel can show the rider their own. */
   bikeId?: string;
+  /** Fit the one-screen Debrief step; the full Review keeps the roomier layout. */
+  compact?: boolean;
 }) {
   const t = useT();
   const [plan, setPlan] = useState<SetupPlan | null>(null);
@@ -257,11 +261,11 @@ export default function SetupFixes({
 
   return (
     <div>
-      <Label>{t("review.setup")}</Label>
-      <div className="border border-border bg-card px-4 py-4">
+      {!compact && <Label>{t("review.setup")}</Label>}
+      <div className={cn("border border-border bg-card px-4", compact ? "py-3" : "py-4")}>
         {/* The copy it would save, first: the button and what it changes, in one line. */}
         {plan && (writes || plan.why) && (
-          <div className="border-b border-border pb-4">
+          <div className={cn("border-b border-border", compact ? "pb-2.5" : "pb-4")}>
             {writes ? (
               <div className="space-y-2">
                 <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
@@ -290,15 +294,22 @@ export default function SetupFixes({
           </div>
         )}
 
-        <div className="mt-4 grid gap-x-8 gap-y-5 min-[1100px]:grid-cols-2 min-[1100px]:items-start">
+        <div
+          className={cn(
+            "grid items-start",
+            compact
+              ? "mt-3 grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)] gap-x-5 gap-y-3"
+              : "mt-4 gap-x-8 gap-y-5 min-[1100px]:grid-cols-2 min-[1100px]:items-start",
+          )}
+        >
           {/* Everything the coach would change, without the rider picking anything. */}
           <div className="min-w-0">
             <div className="mb-1.5 eyebrow">{t("setup.plan")}</div>
-            <p className="mb-3 text-[12.5px] text-muted-foreground">{t("setup.planBody")}</p>
+            <p className={cn("text-[12.5px] text-muted-foreground", compact ? "mb-2" : "mb-3")}>{t("setup.planBody")}</p>
             {foundGroups.groups.length === 0 ? (
               <p className="text-[12.5px] text-muted-foreground">{plan ? t("setup.planNone") : t("common.loading")}</p>
             ) : (
-              <Plan groups={foundGroups.groups} />
+              <Plan groups={foundGroups.groups} compact={compact} />
             )}
             {foundGroups.limited > 0 && (
               <p className="mt-3 text-[12px] text-faint">
@@ -308,14 +319,22 @@ export default function SetupFixes({
           </div>
 
           {/* How the bike feels, as a bike. */}
-          <div className="min-w-0 border-t border-border pt-5 min-[1100px]:border-l min-[1100px]:border-t-0 min-[1100px]:pl-8 min-[1100px]:pt-0">
+          <div
+            className={cn(
+              "min-w-0",
+              compact
+                ? "border-l border-border pl-5"
+                : "border-t border-border pt-5 min-[1100px]:border-l min-[1100px]:border-t-0 min-[1100px]:pl-8 min-[1100px]:pt-0",
+            )}
+          >
             <div className="mb-1.5 eyebrow">{t("feel.title")}</div>
-            <p className="mb-4 text-[12.5px] text-muted-foreground">{t("feel.body")}</p>
+            <p className={cn("text-[12.5px] text-muted-foreground", compact ? "mb-2.5" : "mb-4")}>{t("feel.body")}</p>
             {bikeId && (
               <BikeRender bikeId={bikeId} travel={plan?.travelUsed ?? null} maxTravel={stroke} poke={poke} />
             )}
             <BikeFeel
               felt={felt}
+              compact={compact}
               onToggle={(skill) => {
                 const dropping = felt.includes(skill);
                 setFelt((v) => (dropping ? v.filter((s) => s !== skill) : [...v, skill]));
@@ -364,14 +383,14 @@ export default function SetupFixes({
             {feltGroups.groups.length > 0 && (
               <div className="mt-4 space-y-3">
                 <div className="eyebrow">{t("setup.fromFeel")}</div>
-                <Plan groups={feltGroups.groups} />
+                <Plan groups={feltGroups.groups} compact={compact} />
               </div>
             )}
           </div>
         </div>
 
         {plan?.sag && (
-          <p className="mt-5 border-t border-border pt-4 text-[12px] text-muted-foreground">
+          <p className={cn("border-t border-border text-[12px] text-muted-foreground", compact ? "mt-3 pt-2.5" : "mt-5 pt-4")}>
             {plan.sag.still
               ? t("setup.sagStill", {
                   front: Math.round(plan.sag.metres[0] * 1000),

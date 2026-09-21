@@ -5,7 +5,7 @@ import Page, { Label } from "../Page";
 import SectionStrip from "../Review/SectionStrip";
 import TrackMap from "../Review/TrackMap";
 import SectionReplay from "../Review/SectionReplay";
-import SetupFixes from "../Review/SetupFixes";
+import SetupFixes, { Num } from "../Review/SetupFixes";
 import { preloadBike } from "../Review/BikeRender";
 import { Overall, SectionPanel } from "../Review/Review";
 import {
@@ -56,6 +56,7 @@ export default function Debrief({
   const [ground, setGround] = useState<Ground | null>(null);
   const [why, setWhy] = useState<string | null>(null);
   const [lines, setLines] = useState<Lines | null>(null);
+  const [scrubCalled, setScrubCalled] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [step, setStep] = useState(0);
   /** Which way the corner is being looked at. Kept across steps: a rider who asked to watch
@@ -69,6 +70,7 @@ export default function Debrief({
     setGround(null);
     setWhy(null);
     setLines(null);
+    setScrubCalled(false);
     setError(null);
     setStep(0);
     let live = true;
@@ -77,10 +79,16 @@ export default function Debrief({
         if (!live) return;
         setDetail(d);
         // The best whole lap of the session, wherever in the stints it sits.
-        const best = d.summary.laps.filter((l) => l.whole && !l.invalid).sort((a, b) => a.timeMs - b.timeMs)[0];
+        const laps = d.summary.laps.filter((l) => l.whole && !l.invalid);
+        const best = [...laps].sort((a, b) => a.timeMs - b.timeMs)[0];
         if (!best) return;
-        const out = await coachReview(best.path, best.num, {});
-        if (live) setData(out);
+        // A technique belongs to the session if any valid lap calls for it, not merely the
+        // fastest lap used for the rest of the debrief. Read all timed laps once, together.
+        const reviewed = await Promise.all(laps.map((lap) => coachReview(lap.path, lap.num, {})));
+        if (live) {
+          setData(reviewed.find((out) => out.lap.path === best.path && out.lap.lap === best.num) ?? reviewed[0]);
+          setScrubCalled(reviewed.some((out) => out.review.sections.some((section) => section.findings.some((f) => f.skill === "scrub"))));
+        }
       })
       .catch((e) => live && setError(String(e)));
     // The bike is the slowest thing on any step, so it starts loading with the debrief rather
@@ -118,8 +126,10 @@ export default function Debrief({
       .filter((i) => i >= 0 && !review.focus.includes(i));
     return [...review.focus, ...scrub];
   }, [review]);
-  // One step for the verdict, one for the themes, one per focus section, one for the bike.
-  const steps = useMemo(() => ["verdict", "themes", ...focus.map((i) => `section:${i}`), "bike"], [focus]);
+  const steps = useMemo(
+    () => ["verdict", "themes", ...(scrubCalled ? ["scrub"] : []), ...focus.map((i) => `section:${i}`), "bike"],
+    [focus, scrubCalled],
+  );
   const here = steps[Math.min(step, steps.length - 1)] ?? "verdict";
   const last = step >= steps.length - 1;
 
@@ -180,9 +190,11 @@ export default function Debrief({
                 <Label>{t("debrief.theLap")}</Label>
                 <SectionStrip review={review} selected={null} onPick={() => {}} />
               </div>
-              <Overall themes={review.overall} solo={solo} onPick={() => setStep(2)} />
+              <Overall themes={review.overall} solo={solo} onPick={() => setStep(scrubCalled ? 3 : 2)} />
             </div>
           )}
+
+          {here === "scrub" && <ScrubLesson />}
 
           {sel != null && review.sections[sel] && (
             <div className="space-y-4">
@@ -240,7 +252,7 @@ export default function Debrief({
             </div>
           )}
 
-          {here === "bike" && <SetupFixes path={data.lap.path} findings={review.setup} bikeId={data.lap.bikeId} />}
+          {here === "bike" && <SetupFixes path={data.lap.path} findings={review.setup} bikeId={data.lap.bikeId} compact />}
         </div>
 
         {/* One thing per screen, so the rider is never asked to choose before being told. */}
@@ -277,12 +289,60 @@ export default function Debrief({
 /** What the next screen is about, so Next is never a step into the dark. */
 function nextLabel(key: string, review: ReviewOut["review"], t: ReturnType<typeof useT>): string {
   if (key === "themes") return t("debrief.nextThemes");
+  if (key === "scrub") return t("debrief.nextScrub");
   if (key === "bike") return t("debrief.nextBike");
   if (key.startsWith("section:")) {
     const i = Number(key.slice(8));
     return review.sections[i]?.name ?? "";
   }
   return "";
+}
+
+function ScrubLesson() {
+  const t = useT();
+  const steps = ["face", "lip", "air", "land"] as const;
+  const [cue, setCue] = useState(0);
+  const key = steps[cue];
+  return (
+    <div className="mx-auto max-w-4xl">
+      <Label>{t("debrief.scrubLabel")}</Label>
+      <div className="border border-primary/40 bg-card px-5 py-4">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <div className="eyebrow">{t("debrief.scrubEyebrow")}</div>
+            <h2 className="mt-1 headline text-[28px]">{t("debrief.scrubTitle")}</h2>
+          </div>
+          <span className="font-mono text-[12px] text-faint">{cue + 1} / {steps.length}</span>
+        </div>
+        <div className="mt-5 flex min-h-28 items-start gap-3 border-y border-border py-5">
+          <Num n={cue + 1} />
+          <div>
+            <div className="text-[16px] font-semibold">{t(`debrief.scrub.${key}.title` as const)}</div>
+            <div className="mt-1 max-w-2xl text-[13px] leading-relaxed text-muted-foreground">{t(`debrief.scrub.${key}.body` as const)}</div>
+          </div>
+        </div>
+        <div className="mt-4 flex items-center gap-2">
+          <Button size="sm" variant="outline" disabled={cue === 0} onClick={() => setCue((v) => Math.max(0, v - 1))}>
+            {t("debrief.back")}
+          </Button>
+          <div className="flex gap-1.5">
+            {steps.map((step, i) => (
+              <button
+                key={step}
+                type="button"
+                aria-label={`${i + 1}`}
+                onClick={() => setCue(i)}
+                className={cn("h-1.5 rounded-full", i === cue ? "w-5 bg-primary" : "w-1.5 bg-secondary")}
+              />
+            ))}
+          </div>
+          <Button size="sm" className="ml-auto" disabled={cue === steps.length - 1} onClick={() => setCue((v) => Math.min(steps.length - 1, v + 1))}>
+            {t("debrief.nextButton")}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function Stat({ label, value, note }: { label: string; value: string; note?: string }) {

@@ -77,15 +77,15 @@ const ALIGN: Record<Part, string> = {
  * about — which is what the drawing was standing in for. In a narrow column the groups stack,
  * each still labelled.
  */
-export default function BikeFeel({ felt, onToggle }: { felt: string[]; onToggle: (skill: string) => void }) {
+export default function BikeFeel({ felt, onToggle, compact = false }: { felt: string[]; onToggle: (skill: string) => void; compact?: boolean }) {
   const t = useT();
   return (
     <div className="@container">
-      <div className="grid gap-x-4 gap-y-3 @[560px]:grid-cols-[minmax(0,0.85fr)_minmax(190px,1.4fr)_minmax(0,0.85fr)] @[560px]:items-center">
+      <div className={cn("grid gap-x-4 gap-y-3", compact ? "grid-cols-2 items-start" : "@[560px]:grid-cols-[minmax(0,0.85fr)_minmax(190px,1.4fr)_minmax(0,0.85fr)] @[560px]:items-center")}>
         {FEEL_GROUPS.map((g) => (
-          <div key={g.part} role="group" aria-label={t(g.key)} className={cn("min-w-0", PLACE[g.part])}>
-            <div className={cn("mb-1.5 eyebrow", g.part === "shock" && "@[560px]:text-right")}>{t(g.key)}</div>
-            <div className={cn("flex flex-wrap gap-1.5", ALIGN[g.part])}>
+          <div key={g.part} role="group" aria-label={t(g.key)} className={cn("min-w-0", !compact && PLACE[g.part])}>
+            <div className={cn("mb-1.5 eyebrow", !compact && g.part === "shock" && "@[560px]:text-right")}>{t(g.key)}</div>
+            <div className={cn("flex flex-wrap gap-1.5", !compact && ALIGN[g.part])}>
               {g.feels.map((f) => {
                 const on = felt.includes(f.skill);
                 return (
