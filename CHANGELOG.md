@@ -13,6 +13,15 @@
 - Uninstall a mod straight from its page. Under Reinstall, on anything already in your
   Library, with the file going to the Recycle Bin like it does in the Library itself.
 
+## 2026-09-20
+
+### Fixed
+- MediaFire folders containing several packaged mods now keep every file for pack review
+  instead of silently installing only the first one.
+- Rider kits using the standard `rider/<profile>/paints` package layout now install into the
+  game's required `rider/riders/<profile>/paints` folder.
+- Copy link on a failed install now copies the original download URL instead of the error text.
+
 ## 2026-09-20 — Frost's Studio v0.5.0 — Build it by asking
 
 ### Added
