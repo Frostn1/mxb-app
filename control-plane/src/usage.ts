@@ -209,6 +209,8 @@ export const KNOWN_EVENTS: Readonly<Record<string, readonly AppId[]>> = {
 
   "track.generate": STUDIO,
   "track.settings": STUDIO,
+  "track.edit": STUDIO,
+  "paint.edit": STUDIO,
   "track.build.install": STUDIO,
   "paint.save": STUDIO,
 

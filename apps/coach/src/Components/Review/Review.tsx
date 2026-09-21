@@ -636,6 +636,7 @@ export function SectionPanel({ s, solo, onPrev, onNext }: { s: SectionReview; so
         <div>
           <div className="eyebrow">
             {t(`review.kind.${s.kind}` as TKey)}
+            {s.corner.kind !== "unknown" && ` · ${t(`corner.${s.corner.kind}` as TKey)}`}
             {s.soil && ` · ${t(`soil.${s.soil.kind}` as TKey)}`}
           </div>
           <div className="mt-0.5 headline text-[24px]">{s.name}</div>

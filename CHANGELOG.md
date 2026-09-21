@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Changed
+- The live look refresh now runs only on the game build it was built for. On any other build
+  it stays out of the way, and everything else works as it always has.
+
 ### Added
 - Copy link on a server's page, and on a mod's page. Paste it in Discord and whoever clicks
   it lands in MXB App on that server's join dialog or on that mod. Anyone without the app
@@ -67,6 +71,42 @@
   stays put while you read, the screenshot is bigger with the figures along its foot, and a
   fact with nothing in it is left out instead of shown blank. An installed track lists its
   layouts, and a bike lists the model swaps, liveries and sounds that came with it.
+## 2026-09-20
+
+### Added
+- Coach labels confidently measured corners with Lynds' six taught types: flat, smooth rut,
+  hooked rut, rough rut, whooped sand turn, and smooth SX berm.
+
+### Changed
+- Coach now teaches a scrub from takeoff to touchdown, distinguishes it from a whip using the
+  bike's recorded rotation, and keeps scrub coaching in the session debrief.
+
+### Fixed
+- MediaFire folders containing several packaged mods now keep every file for pack review
+  instead of silently installing only the first one.
+- Rider kits using the standard `rider/<profile>/paints` package layout now install into the
+  game's required `rider/riders/<profile>/paints` folder.
+- Copy link on a failed install now copies the original download URL instead of the error text.
+
+## 2026-09-20 — Frost's Studio v0.5.0 — Build it by asking
+
+### Added
+- **The Track AI can edit the track in front of it.** Ask it to make a named turn wider,
+  reshape turn 9, or add another rut and it uses the track-edit protocol to make the change
+  without replacing details you did not ask it to touch.
+- **The Paint AI can place and adjust artwork on the bike.** Tell it to put a logo on the
+  right fender, move it up, resize it, rotate it, change its opacity, hide it or clip it, and
+  it applies that operation to the selected paint.
+- Paint placement understands the connected regions of the bike model, including left and
+  right sides and each part's position on the assembled bike. The same model-aware placement
+  works across bikes instead of relying on KTM-only coordinates.
+
+### Changed
+- AI edit plans are checked before they touch a project. Invalid values are clamped, stale
+  layer references are rejected, and failed track plans can be corrected and retried.
+- Frost's Studio now uses the same dark, compact shell and visual language as MXB App and
+  MXB Secure, with the Studio tools arranged across the top rail.
+
 ## 2026-09-19 — v0.17.6 — A sign-in link you can copy
 
 ### Fixed

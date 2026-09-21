@@ -5,6 +5,7 @@ import {
   loginUrl,
   returnToMatches,
   steamIdFromClaimedId,
+  steamIdFromGuid,
   verifyAssertion,
 } from "../src/steam";
 
@@ -239,5 +240,16 @@ describe("the GUID derived from a Steam identity", () => {
     expect(guidFromSteamId("123")).toBeNull();
     expect(guidFromSteamId("not a number")).toBeNull();
     expect(guidFromSteamId("7656119796026572")).toBeNull(); // 16 digits
+  });
+
+  it("reverses a Steam-derived MX Bikes GUID to its SteamID64", () => {
+    expect(steamIdFromGuid("FF011000010178A758")).toBe("76561197984950104");
+    expect(steamIdFromGuid(" ff011000010a22a002 ")).toBe("76561198130307074");
+  });
+
+  it("does not treat malformed or non-Steam GUIDs as Steam accounts", () => {
+    expect(steamIdFromGuid("ABCDEF0123456789AB")).toBeNull();
+    expect(steamIdFromGuid("FF011000010178A75Z")).toBeNull();
+    expect(steamIdFromGuid("FF0000000000000001")).toBeNull();
   });
 });

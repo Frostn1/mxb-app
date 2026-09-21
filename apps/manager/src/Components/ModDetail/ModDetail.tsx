@@ -328,11 +328,16 @@ export default function ModDetail({
       );
   };
 
-  const copyError = () => {
-    if (!myActive?.message) return;
-    navigator.clipboard.writeText(myActive.message);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
+  const copyFailedDownload = () => {
+    if (myActive?.source.kind !== "download") return;
+    void copyText(myActive.source.url).then((ok) => {
+      if (!ok) {
+        toast.error(t("modDetail.copyLinkFailed"));
+        return;
+      }
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
   };
 
   const crumb = (title: string) => (
@@ -497,10 +502,12 @@ export default function ModDetail({
                   >
                     {t("common.tryAgain")}
                   </Button>
-                  <Button size="sm" variant="outline" onClick={copyError}>
-                    <Copy className="size-3.5" />{" "}
-                    {copied ? t("modDetail.copied") : t("modDetail.copy")}
-                  </Button>
+                  {myActive.source.kind === "download" && (
+                    <Button size="sm" variant="outline" onClick={copyFailedDownload}>
+                      <Copy className="size-3.5" />{" "}
+                      {copied ? t("modDetail.copied") : t("modDetail.copyLink")}
+                    </Button>
+                  )}
                 </div>
               </div>
             ) : blocked ? (

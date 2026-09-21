@@ -12,25 +12,33 @@ One thing to hold on to while reading: a finding only becomes a spoken cue if it
 `cues::answers()` (`cues.rs:144-155`) or `cues::from_finding()` (`cues.rs:161-175`). Plenty of
 analysis exists that never reaches the rider in the bike.
 
-## 1. Table-topping jumps — covered in principle, not in placement
+## 1. Table-topping jumps — scrub technique is now measured
 
 COACHING.md already has the technique and has it right: scrubbing in MX Bikes is done seated,
-leaning the bike off the lip and back the other way in the air. `SCRUB` (kind 8) is placed at a
-takeoff when peak roll over the first third of the flight exceeds 20° on the fast lap
-(`analysis.rs:2212-2217`), and the `scrub` finding doubles its score.
+leaning the bike off the lip and back the other way in the air. Coach now uses Thomas's MXBMRP3
+boundary on its own recorded telemetry: after 0.3 s of real airtime, 30° of yaw is a whip;
+otherwise 30° of takeoff lean or integrated roll is a scrub. The same result places `SCRUB`
+(kind 8) at the takeoff and shapes the review finding, so a whip is no longer mistaken for the
+technique the cue asks for.
 
-What the video adds is the two *purposes*, neither of which we model:
+Against a fast lap that scrubs, the finding says which part is missing: roll the bike rather
+than yawing it, start as the rear wheel leaves the lip rather than once airborne, sit through
+the face, move the rider forward when that input is known, then counter the lean for touchdown.
+Unknown stance or rider input is omitted rather than guessed.
+
+The video also gives the technique two distinct *purposes*:
 
 - **Turning jumps, stay low** — crank it over off the lip to flatten the trajectory, land
   earlier and get on the brakes sooner. Our `scrub` tip observes the symptom (more airtime,
-  higher than the reference) but nothing connects it to the braking zone that follows.
+  higher than the reference), but nothing yet connects it to the braking zone that follows.
 - **Landing cranked on purpose** — when you know you're short, land still leaned so the rear
-  slides up the face instead of compressing and rebounding.
+  slides up the face instead of compressing and rebounding. Coach now recognises that ground
+  shape and leaves the intentional lean alone.
 
-I thought this second one might collide with `land_crooked` ⚠ (>15° of lean 4 m after touchdown).
-It doesn't, in practice: `land_crooked` has no arm in `answers()`, so it is a review-only safety
-note and never becomes a cue. Worth still putting real laps through it, because a rider who reads
-their review and sees a warning for the thing that just worked will not trust the next one.
+The second case no longer collides with `land_crooked` ⚠ (>15° of lean 4 m after touchdown).
+Coach suppresses that warning when the ground shows an up-face. On an ordinary landing an
+identified scrub gets the more useful wording, “Bring the scrub back sooner”; it remains a
+review-only safety note and never becomes a live cue.
 
 Confirmed in passing: "the less you do to the bike the better, the game straightens it out, and
 fighting it makes it worse" is precisely what `bar_fight` measures.

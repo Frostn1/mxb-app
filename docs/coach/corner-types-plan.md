@@ -1,6 +1,6 @@
 # Plan: telling corners apart
 
-A design for review, not a change. Written 2026-09-17.
+Implemented incrementally. Written 2026-09-17; display classification added 2026-09-20.
 
 ## Why
 
@@ -29,24 +29,26 @@ So the design is **additive and gated**, in this order:
 At no point does an existing rule change behaviour because the classifier exists. If step 2
 never happens, Coach behaves exactly as it does today.
 
-## Don't classify into six types. Classify four properties.
+## Measure properties first; compose the six types for display
 
 The six named types are not independent — they are combinations. A "rough rut" is rutted plus
 rough; a "whooped sand turn" is sand plus rough plus rutted. Naming six and picking one forces a
 single winner where a corner is often two things, and it gives us nothing to fall back on when
 the call is marginal.
 
-Four independent properties instead, each with an explicit `Unknown`:
+Independent properties instead, each with an explicit `Unknown`:
 
 | Property | Values | Read from |
 |---|---|---|
-| `rutted` | Flat / Rutted / Unknown | peak bike roll held through the core, and the ground height at the apex against the corner's entry and exit (a rut sits below, a berm rises) |
-| `rough` | Smooth / Rough / Unknown | suspension velocity and vertical hit through the core — `sv_hi` / `sv_lo` and `Point.hit`, which already carry the per-metre extremes |
+| `hold` | Flat / Rutted / Unknown | peak bike roll held through the core |
+| `rough` | Smooth / Rough / Unknown | mean vertical hit through the core from `Point.hit` |
 | `surface` | Sand / Soft / Hard / Unknown | `Point.ground`, the rear wheel's material, already summarised per section and already mapped by `soil.rs` |
+| `profile` | Rut / Berm / Unknown | bike height against the straight grade between the core's ends: a rut sits below and a berm rises |
 | `shape` | Constant / Hooked / Unknown | the curvature profile across the core: a hooked rut tightens towards the exit, which is a rising \|k\| in the last third against the first |
 
-The six names then fall out for display only — a corner shown as "Turn 4, rough rut" is just the
-two properties written out. Rules gate on the properties, not the names.
+The six names now fall out for display only — a corner shown as "Turn 4, rough rut" is just the
+properties written out. `CornerKind` includes every Lynds type plus `Unknown`; rules gate on the
+properties, not the name. Review and debrief share one section panel, so both show the same call.
 
 Every property defaults to `Unknown`, and **`Unknown` must mean "behave as today"** in every
 rule that gates on it. That is the property that keeps step 3 safe.
@@ -103,9 +105,10 @@ What it settled:
 - **Peak hit is useless, mean hit is usable.** The peak moved by more than 2 G between two
   sessions on the same corner — it is one sample. The mean moved by about 0.3.
 - **Mean lean is useless.** It moved by up to 20° on the same corner between sessions.
-- **The hook metric is noise.** First-third against last-third turn rate gave ratios from 0.17
-  to 4.7 with no agreement between sessions. `shape` is therefore not implemented, and should
-  not be until there is a better measurement than that.
+- **The original hook metric is noise.** First-third against last-third turn rate gave ratios
+  from 0.17 to 4.7 with no agreement between sessions. The display classifier therefore uses
+  distance-normalised path curvature instead of speed-dependent yaw rate, and requires both a
+  1.8× rise and a 0.01 rad/m absolute increase. This remains provisional and cannot gate advice.
 
 Cross-session agreement over the same eleven corners, which is the test that matters:
 
@@ -137,10 +140,10 @@ anything that compares a corner with itself over time.
 
 ## Steps
 
-1. `CornerType` (the four properties) on `Section`, classifier in `features()`, provisional
-   thresholds, tests against the synthetic laps for direction of response. Nothing reads it.
-2. Show the classification in the review UI so it can be eyeballed against real tracks. Cheap,
-   and it is how step 3 gets verified.
+1. **Done.** `CornerType` properties on `Section`, classifier in `features()`, provisional
+   thresholds, and synthetic tests.
+2. **Done.** Compose the six taught names only when the property combination is complete, and
+   show the classification in review and debrief so it can be eyeballed against real tracks.
 3. Recordings on known tracks; tune the thresholds.
 4. Gate rules one at a time, each with its own test, `Unknown` always meaning today's behaviour.
 

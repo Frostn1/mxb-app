@@ -50,7 +50,6 @@ import {
   setWatchModsReload,
   setBetaUpdates,
   setAutoUpdates,
-  setSecureContentInject,
   setWineRunner,
   wineHostInfo,
   type WineHostInfo,
@@ -498,8 +497,6 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
   const watchModsReload = config.watchModsReload ?? true;
   const betaUpdates = config.betaUpdates ?? false;
   const autoUpdates = config.autoUpdates ?? true;
-  const secureContentInject = config.secureContentInject ?? false;
-
   const overlayEnabled = config.overlayEnabled ?? true;
   const overlayHotkey = config.overlayHotkey || FALLBACK_HOTKEY;
   // Same shape as the overlay pair above: the config's fields are optional (an install
@@ -914,15 +911,6 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
   const toggleAutoUpdates = async (v: boolean) => {
     try {
       await setAutoUpdates(v);
-      await reloadConfig();
-    } catch (e) {
-      toast.error(t("settings.updateFailed"), { description: String(e) });
-    }
-  };
-
-  const toggleSecureContentInject = async (v: boolean) => {
-    try {
-      await setSecureContentInject(v);
       await reloadConfig();
     } catch (e) {
       toast.error(t("settings.updateFailed"), { description: String(e) });
@@ -2460,7 +2448,6 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
                 </div>
               </>
             )}
-
             {/* Only once FrostMod is on disk: without an install there is no config to
                 edit, and the keys would be an offer that quietly does nothing. */}
 

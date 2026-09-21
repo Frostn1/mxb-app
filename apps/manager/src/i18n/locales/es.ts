@@ -772,9 +772,6 @@ export const es: Translation = {
   "settings.watchModsReload": "Recarga automática al cambiar la carpeta",
   "settings.watchModsReloadDesc":
     "Recarga el juego automáticamente cuando se añaden pistas o motos a tu carpeta de mods — incluso descargadas manualmente fuera de {{app}}.",
-  "settings.secureContentInject": "Usar contenido bloqueado en el juego",
-  "settings.secureContentInjectDesc":
-    "Permite abrir circuitos bloqueados comprados añadiendo un pequeño asistente al juego en marcha. Desactivado por defecto. Funciona inicies el juego como lo inicies: desde {{app}} o desde Steam.",
   "settings.checking": "Comprobando…",
   "settings.runningConnected": "En ejecución · juego conectado",
   "settings.notRunning": "Inactivo",

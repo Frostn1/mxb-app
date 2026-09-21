@@ -1318,8 +1318,8 @@ fn parse_gdrive_folder(html: &str, folder_id: &str) -> Vec<GDriveFile> {
     out
 }
 
-/// Choose the one download out of a folder's top level: a packaged mod, or the sole entry
-/// when there is nothing to choose between. `None` means the folder is the mod.
+/// Choose the one download out of a folder's top level: its sole packaged mod, or the sole
+/// entry when there is nothing to choose between. `None` means the folder is the mod.
 ///
 /// `.pnt` is deliberately not in the list. A paint is content, not a package, and folders of
 /// them are how a designer ships a kit — six liveries for one bike, of which "pick the
@@ -1330,10 +1330,18 @@ fn pick_archive(names: &[&str]) -> Option<usize> {
         let n = n.to_lowercase();
         ARCHIVE_EXT.iter().any(|ext| n.ends_with(ext))
     };
-    names
+    let archives: Vec<usize> = names
         .iter()
-        .position(is_archive)
-        .or_else(|| (names.len() == 1).then_some(0))
+        .enumerate()
+        .filter_map(|(i, name)| is_archive(name).then_some(i))
+        .collect();
+    match archives.as_slice() {
+        [only] => Some(*only),
+        // Several packages are several mods or variants. Keep the folder intact so the
+        // pack review can show all of them; taking the first silently loses the rest.
+        [_, _, ..] => None,
+        [] => (names.len() == 1).then_some(0),
+    }
 }
 
 async fn get_with_retry(client: &Client, url: &str) -> anyhow::Result<reqwest::Response> {
@@ -2098,6 +2106,53 @@ pub(crate) fn plan_placement(
     } else {
         vec![extracted, unwrapped.as_path()]
     };
+
+    // MX Bikes kits use `[mods/]rider/<profile>/paints` inside their package. That is the
+    // standard package layout, not the final on-disk path: the game reads the selected
+    // profile's kit from `rider/riders/<profile>/paints`. The generic self-describing-tree
+    // rules below would trust the package wrapper and override the profile the user picked,
+    // placing the kit somewhere the game never reads. Apply the required `riders` segment
+    // only when the caller identified profile paints and the package contains exactly one
+    // kit folder. That keeps real gear trees (`rider/helmets`, `boots`, and so on) and
+    // multi-profile packs on the ordinary review path.
+    let dest_segs: Vec<&str> = dest_folder.split(['/', '\\']).filter(|s| !s.is_empty()).collect();
+    let profile_paints = type_folder.eq_ignore_ascii_case("rider")
+        && matches!(dest_segs.as_slice(), [riders, _, paints]
+            if riders.eq_ignore_ascii_case("riders") && paints.eq_ignore_ascii_case("paints"));
+    if profile_paints {
+        for base in &candidates {
+            let rider = child_dir(base, "rider").or_else(|| {
+                let mods = child_dir(base, "mods")?;
+                child_dir(&mods, "rider")
+            });
+            let Some(rider) = rider else {
+                continue;
+            };
+            if child_dir(&rider, "riders").is_some() {
+                continue;
+            }
+            let kits: Vec<PathBuf> = std::fs::read_dir(&rider)
+                .into_iter()
+                .flatten()
+                .filter_map(|entry| entry.ok())
+                .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_dir()))
+                .filter_map(|entry| child_dir(&entry.path(), "paints"))
+                .collect();
+            if let [paints] = kits.as_slice() {
+                let mut dst = mods_dir.join(type_folder);
+                for seg in &dest_segs {
+                    dst.push(sanitize(seg));
+                }
+                return route(
+                    RouteRule::Typed,
+                    Placement::Merge {
+                        src: paints.clone(),
+                        dst,
+                    },
+                );
+            }
+        }
+    }
 
     for base in &candidates {
         if let Some(m) = child_dir(base, "mods") {
@@ -2945,6 +3000,15 @@ mod tests {
         assert_eq!(pick_archive(&["readme.txt", "I40 MX.pkz"]), Some(1));
         // Nothing archive-shaped, but only one candidate — take it.
         assert_eq!(pick_archive(&["I40 MX.pnt.part"]), Some(0));
+        // One file per helmet variant is a pack, not permission to discard two of them.
+        assert_eq!(
+            pick_archive(&[
+                "2024 Astars SM10 Armega.pkz",
+                "2024 Astars SM10 EKS.pkz",
+                "2024 Astars SM10 Oakley.pkz",
+            ]),
+            None
+        );
         assert_eq!(pick_archive(&["a.txt", "b.txt"]), None);
         assert_eq!(pick_archive(&[]), None);
     }
@@ -3257,6 +3321,25 @@ mod tests {
         match fold_share("I40".into(), files) {
             Resolved::File(u) => assert_eq!(u, "https://example.invalid/pkz"),
             Resolved::Folder { .. } => panic!("the package is the download"),
+        }
+    }
+
+    #[test]
+    fn a_folder_holding_several_packages_keeps_every_package() {
+        let files: Vec<RemoteFile> = ["Armega.pkz", "EKS.pkz", "Oakley.pkz"]
+            .iter()
+            .map(|name| RemoteFile {
+                rel: (*name).into(),
+                url: format!("https://example.invalid/{name}"),
+                bytes: None,
+            })
+            .collect();
+        match fold_share("2024 Alpinestars SM10".into(), files) {
+            Resolved::Folder { name, files } => {
+                assert_eq!(name, "2024 Alpinestars SM10");
+                assert_eq!(files.len(), 3);
+            }
+            Resolved::File(_) => panic!("the three helmet variants are a pack"),
         }
     }
 
@@ -4031,6 +4114,54 @@ mod tests {
         let mods = root.join("mods");
         place_mod(&ex, &mods, "tracks", "Supercross/Round 1", "slug").unwrap();
         assert!(mods.join("tracks/Supercross/Round 1/track.pkz").exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn standard_rider_kit_tree_uses_the_selected_profile_paints_folder() {
+        for (case, prefix) in [("category", "rider"), ("mods-tree", "mods/rider")] {
+            let root = place_tmp(&format!("standard-rider-kit-{case}"));
+            let ex = root.join("ex");
+            touch(&ex.join(prefix).join("default_mx/paints/Factory.pnt"));
+            let mods = root.join("mods");
+
+            place_mod(
+                &ex,
+                &mods,
+                "rider",
+                "riders/default_sm/paints",
+                "factory-kit",
+            )
+            .unwrap();
+
+            assert!(mods
+                .join("rider/riders/default_sm/paints/Factory.pnt")
+                .exists());
+            assert!(!mods.join("rider/default_mx/paints/Factory.pnt").exists());
+            let _ = std::fs::remove_dir_all(&root);
+        }
+    }
+
+    #[test]
+    fn rider_kit_rule_does_not_reclassify_a_gear_install() {
+        let root = place_tmp("rider-kit-gear");
+        let ex = root.join("ex");
+        touch(&ex.join("rider/Fox/paints/Factory.pnt"));
+        let mods = root.join("mods");
+
+        place_mod(
+            &ex,
+            &mods,
+            "rider",
+            "helmets/Fox/paints",
+            "factory-helmet",
+        )
+        .unwrap();
+
+        assert!(mods.join("rider/Fox/paints/Factory.pnt").exists());
+        assert!(!mods
+            .join("rider/riders/Fox/paints/Factory.pnt")
+            .exists());
         let _ = std::fs::remove_dir_all(&root);
     }
 
