@@ -53,3 +53,21 @@ docs/guides/tools/uidrive
 
 # Cargo build output — the workspace target now lives at the repo root.
 /target/
+/target-win/
+
+# Process output and local logs
+*.out
+
+# Local AI agent workspaces & worktrees
+.worktrees/
+.claude/
+.codex/
+
+# Local agent instructions & RE guidelines (keep private / untracked)
+AGENTS.md
+CLAUDE.md
+
+# Local livery development tooling and dump harness
+tools/
+apps/manager/src-tauri/src/liverydump.rs
+
