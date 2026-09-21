@@ -12,6 +12,7 @@ import {
   completeSetup,
   detectGamePath,
   normalizeGameFolder,
+  setGamePath as saveGamePath,
   type GameFolderCorrection,
 } from "@frost/shared/api/mods";
 import { usePlatform } from "@frost/shared/lib/usePlatform";
@@ -210,21 +211,36 @@ export default function Setup({ onComplete, game, games, firstRun }: SetupProps)
     }
   };
 
-  const chooseGame = async () => {
+  const chooseGame = async (persist = false): Promise<string | null> => {
     const folder = await pickFolder({
       directory: true,
       multiple: false,
       title: t("setup.pickInstallFolder", { game: picked.display }),
     });
     if (typeof folder === "string") {
-      setGamePath(folder);
-      setGameAuto(false);
+      try {
+        if (persist) await saveGamePath(folder);
+        setGamePath(folder);
+        setGameAuto(false);
+        setError(null);
+        return folder;
+      } catch (e) {
+        setError(String(e));
+      }
     }
+    return null;
   };
 
   const progress = <Progress total={total} current={current} />;
 
   const finishIntegration = async (enabled: boolean) => {
+    // Integration attaches to the installed game, not its Documents/PiBoSo data folder.
+    // If Steam detection missed that install, keep the player inside setup: choosing it
+    // here saves it to the config we created on the previous step and then continues.
+    if (enabled && !gamePath) {
+      const selected = await chooseGame(true);
+      if (!selected) return;
+    }
     setIntegrationBusy(true);
     setError(null);
     try {
@@ -314,6 +330,17 @@ export default function Setup({ onComplete, game, games, firstRun }: SetupProps)
             </p>
           </div>
 
+          {!gamePath && (
+            <div className="border-l-2 border-primary py-1 pl-4">
+              <p className="text-[12px] font-semibold text-foreground">
+                {t("setup.integrationInstallRequired", { game: picked.display })}
+              </p>
+              <p className="mt-1 text-[12px] leading-relaxed text-muted-foreground">
+                {t("setup.integrationInstallRequiredDesc", { game: picked.display })}
+              </p>
+            </div>
+          )}
+
           <div className="flex items-center gap-5">
             <Button
               className="h-12 flex-1 text-[14px]"
@@ -321,7 +348,9 @@ export default function Setup({ onComplete, game, games, firstRun }: SetupProps)
               onClick={() => void finishIntegration(true)}
             >
               {integrationBusy && <Loader2 className="animate-spin" />}
-              {t("setup.integrationEnable")}
+              {gamePath
+                ? t("setup.integrationEnable")
+                : t("setup.integrationChooseInstall")}
             </Button>
             <button
               type="button"
@@ -468,7 +497,7 @@ export default function Setup({ onComplete, game, games, firstRun }: SetupProps)
                 )}
               </div>
               <button
-                onClick={chooseGame}
+                onClick={() => void chooseGame()}
                 className="cursor-default self-start text-[12px] font-semibold text-primary hover:brightness-110"
               >
                 {t("setup.chooseDifferent")}
@@ -480,7 +509,7 @@ export default function Setup({ onComplete, game, games, firstRun }: SetupProps)
                 {t("setup.installNotFound")}
               </p>
               <button
-                onClick={chooseGame}
+                onClick={() => void chooseGame()}
                 className="cursor-default self-start text-[12px] font-semibold text-primary hover:brightness-110"
               >
                 {t("setup.chooseInstallManually")}

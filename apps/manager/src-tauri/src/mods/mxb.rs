@@ -51,6 +51,7 @@ fn client() -> anyhow::Result<&'static Client> {
         .map_err(|e| anyhow::anyhow!("{e}"))
 }
 
+
 fn build_client() -> anyhow::Result<Client> {
     use reqwest::header::{HeaderMap, HeaderValue};
     // What Chrome actually sends on a same-origin `fetch`. reqwest sends almost none of
@@ -1126,10 +1127,13 @@ fn parse_downloads(html: &str) -> Vec<DownloadOption> {
 
     let mut out = Vec::new();
     for el in doc.select(&container) {
-        let is_default = el
-            .value()
-            .classes()
+        let classes: Vec<&str> = el.value().classes().collect();
+        let site_default = classes
+            .iter()
             .any(|c| c.eq_ignore_ascii_case("container-default"));
+        let is_recommended = classes
+            .iter()
+            .any(|c| c.eq_ignore_ascii_case("container-recommended"));
         let href = el.select(&a_sel).next().and_then(|a| a.value().attr("href"));
         let Some(url) = href else { continue };
 
@@ -1150,6 +1154,14 @@ fn parse_downloads(html: &str) -> Vec<DownloadOption> {
             .filter(|s| !s.is_empty());
         let host = friendly_host(url);
         let label = filename_text.unwrap_or_else(|| host.clone());
+        // The theme distinguishes "Recommended" mirrors from ordinary mirrors, but the
+        // old parser only understood "Default". Project OEM exposes an information page
+        // as its first Default and the actual full-pack mirrors as Recommended, so the app
+        // dutifully tried to unpack HTML. Treat both flags as recommendations while
+        // demoting OEM's known information-page handoff below the real file mirrors.
+        let oem_information_page = host_from_url(url).eq_ignore_ascii_case("oem.mxb-mods.com")
+            && label.to_lowercase().contains("information");
+        let is_default = (site_default || is_recommended) && !oem_information_page;
 
         out.push(DownloadOption {
             url: url.to_string(),
@@ -1371,6 +1383,36 @@ mod tests {
         assert_eq!(downloads[0].host, "Google Drive");
         assert_eq!(downloads[1].host, "MediaFire");
         assert!(downloads[0].url.contains("drive.google.com/file/d/ABC123"));
+    }
+
+    #[test]
+    fn oem_information_page_does_not_beat_recommended_pack_mirrors() {
+        // This is the significant shape of the live OEM listing. The first row is marked
+        // Default by the site, but it is only release notes; the installable full pack is
+        // marked Recommended. Selecting the first row used to feed HTML into the archive
+        // downloader and fail with "host returned a web page instead of a file".
+        let html = r#"
+            <div class="download-container container-default">
+              <div class="filename">Informations about the pack</div>
+              <a href="https://oem.mxb-mods.com/mx-oem-v0-19-1-update/">Direct download</a>
+            </div>
+            <div class="download-container container-recommended">
+              <div class="filename">FULL PACK v0.19.1 - MEDIAFIRE</div>
+              <a href="https://www.mediafire.com/file/abc/MX_OEM_v0.19.1.zip/file">Download</a>
+            </div>
+            <div class="download-container container-default">
+              <div class="filename">FULL PACK v0.19.1 - GOOGLE DRIVE</div>
+              <a href="https://drive.google.com/file/d/ABC123/view">Download</a>
+            </div>
+        "#;
+
+        let downloads = parse_downloads(html);
+        assert_eq!(downloads.len(), 3);
+        assert_eq!(downloads[0].host, "MediaFire");
+        assert!(downloads[0].is_default);
+        assert_eq!(downloads[1].host, "Google Drive");
+        assert_eq!(downloads[2].host, "oem.mxb-mods.com");
+        assert!(!downloads[2].is_default);
     }
 
     #[test]
@@ -1872,4 +1914,3 @@ mod client_tests {
         assert!(h["Sec-Fetch-Mode"].as_str().is_some());
     }
 }
-

@@ -2015,7 +2015,14 @@ export function buildRiderDestinations(
  * blocks. There is no direct link to resolve. Listing it here also sorts it *below* any
  * other mirror on the same mod, so a MediaFire alternative is preferred automatically.
  */
-const BLOCKED_HOST_PATTERNS: string[] = ["drive.proton.me", "proton.me"];
+const BLOCKED_HOST_PATTERNS: string[] = [
+  "drive.proton.me",
+  "proton.me",
+  // Project OEM publishes release notes here and sends players back to the mxb-mods
+  // listing for the actual MediaFire / MEGA / Drive files. It is a web page, not a file
+  // host; leave it available as the manual/info choice but never try to unpack its HTML.
+  "oem.mxb-mods.com",
+];
 
 export function isBlockedDownload(opt: { url: string; host: string }): boolean {
   const s = `${opt.url} ${opt.host}`.toLowerCase();
