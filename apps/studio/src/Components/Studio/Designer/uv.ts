@@ -85,6 +85,8 @@ export interface UvPart {
    * say "both" everywhere the precise answer is "here, both".
    */
   flanks: Uint8Array | null;
+  /** Model-space centroid per triangle, xyz, or null when the bike was not assembled. */
+  centres: Float32Array | null;
   /** The flanks the part covers as a whole, for a one-word summary. Null when unknown. */
   side: Side | null;
   /** Per-triangle facing codes, alongside `flanks` and null on the same terms. */
@@ -98,6 +100,212 @@ export interface UvPart {
   maxV: number;
   /** Stable hue, so a shroud and a fender never read as one shape. */
   hue: number;
+}
+
+/** A model-measured target an agent can name without ever seeing or inventing UV pixels. */
+export interface PaintRegion {
+  id: string;
+  label: string;
+  owner: string | null;
+  side: Side | null;
+  face: Face | null;
+  semantic: string;
+  centre: { x: number; y: number; z: number } | null;
+  part: UvPart;
+}
+
+function subset(part: UvPart, picked: number[]): UvPart {
+  const tris = new Float32Array(picked.length * 6);
+  const src = new Int32Array(picked.length * 2);
+  const flanks = part.flanks ? new Uint8Array(picked.length) : null;
+  const faces = part.faces ? new Uint8Array(picked.length) : null;
+  const centres = part.centres ? new Float32Array(picked.length * 3) : null;
+  let minU = Infinity;
+  let minV = Infinity;
+  let maxU = -Infinity;
+  let maxV = -Infinity;
+  picked.forEach((triangle, n) => {
+    for (let j = 0; j < 6; j += 1) {
+      const value = part.tris[triangle * 6 + j];
+      tris[n * 6 + j] = value;
+      if (j % 2 === 0) {
+        minU = Math.min(minU, value);
+        maxU = Math.max(maxU, value);
+      } else {
+        minV = Math.min(minV, value);
+        maxV = Math.max(maxV, value);
+      }
+    }
+    src[n * 2] = part.src[triangle * 2];
+    src[n * 2 + 1] = part.src[triangle * 2 + 1];
+    if (flanks && part.flanks) flanks[n] = part.flanks[triangle];
+    if (faces && part.faces) faces[n] = part.faces[triangle];
+    if (centres && part.centres) {
+      centres[n * 3] = part.centres[triangle * 3];
+      centres[n * 3 + 1] = part.centres[triangle * 3 + 1];
+      centres[n * 3 + 2] = part.centres[triangle * 3 + 2];
+    }
+  });
+  return {
+    ...part,
+    tris,
+    src,
+    flanks,
+    faces,
+    centres,
+    side: flanks ? summarise(Array.from(flanks)) : part.side,
+    face: faces ? summariseFaces(Array.from(faces)) : part.face,
+    minU,
+    minV,
+    maxU,
+    maxV,
+  };
+}
+
+function centreOf(part: UvPart): PaintRegion["centre"] {
+  if (!part.centres?.length) return null;
+  const axes: [number[], number[], number[]] = [[], [], []];
+  for (let i = 0; i < part.centres.length; i += 3) {
+    for (let axis = 0; axis < 3; axis += 1) {
+      const value = part.centres[i + axis];
+      if (Number.isFinite(value)) axes[axis].push(value);
+    }
+  }
+  if (axes.some((values) => !values.length)) return null;
+  // Median rather than mean: several shipped models contain a handful of f32::MAX vertices.
+  // They must not move an otherwise valid fender centre millions of bike lengths away.
+  const median = (values: number[]) => {
+    values.sort((a, b) => a - b);
+    const middle = Math.floor(values.length / 2);
+    return values.length % 2 ? values[middle] : (values[middle - 1] + values[middle]) / 2;
+  };
+  return { x: median(axes[0]), y: median(axes[1]), z: median(axes[2]) };
+}
+
+/** Connected UV islands inside a set of triangle indexes. */
+function connected(part: UvPart, picked: number[]): number[][] {
+  if (picked.length < 2) return [picked];
+  const key = (triangle: number, corner: number) => {
+    const at = triangle * 6 + corner * 2;
+    return `${Math.round(part.tris[at] * 1e5)},${Math.round(part.tris[at + 1] * 1e5)}`;
+  };
+  const byVertex = new Map<string, number[]>();
+  for (const triangle of picked) {
+    for (let corner = 0; corner < 3; corner += 1) {
+      const k = key(triangle, corner);
+      const run = byVertex.get(k);
+      if (run) run.push(triangle);
+      else byVertex.set(k, [triangle]);
+    }
+  }
+  const allowed = new Set(picked);
+  const seen = new Set<number>();
+  const islands: number[][] = [];
+  for (const seed of picked) {
+    if (seen.has(seed)) continue;
+    const island: number[] = [];
+    const queue = [seed];
+    seen.add(seed);
+    while (queue.length) {
+      const triangle = queue.pop() as number;
+      island.push(triangle);
+      for (let corner = 0; corner < 3; corner += 1) {
+        for (const next of byVertex.get(key(triangle, corner)) ?? []) {
+          if (allowed.has(next) && !seen.has(next)) {
+            seen.add(next);
+            queue.push(next);
+          }
+        }
+      }
+    }
+    islands.push(island.sort((a, b) => a - b));
+  }
+  return islands;
+}
+
+function semanticOf(part: UvPart): string {
+  const label = part.label.toLowerCase();
+  const owner = part.owner?.toLowerCase() ?? "";
+  if (/rear.?fender|rear.?mud|mudguard.?rear/.test(label)) return "rear fender";
+  if (/front.?fender|front.?mud|mudguard.?front/.test(label)) return "front fender";
+  if (/shroud|radiator.?cover/.test(label)) return "shroud";
+  if (/side.?plate|number.?plate/.test(label)) return "number plate";
+  if (/air.?box/.test(label)) return "airbox";
+  if (/seat/.test(label)) return "seat";
+  // The Python liveries find KTM panels from assembled positions. Owners carry the same
+  // information on every bike without baking KTM's millimetre bounds into the editor.
+  if (/fsusp|front.?susp|steer/.test(owner)) {
+    if (part.face === "top" || part.face === "under") return "front fender";
+    return "front suspension bodywork";
+  }
+  if (/rsusp|rear.?susp/.test(owner)) {
+    if (part.face === "top" || part.face === "under") return "rear fender";
+    return "rear suspension bodywork";
+  }
+  return "";
+}
+
+/**
+ * Split mesh groups into the flank/facing targets people actually name: right shroud, top of
+ * the rear fender, underside of the front fender. The full group is included as a fallback.
+ * IDs only live for this model context; an action is rejected when that context has changed.
+ */
+export function paintRegions(parts: UvPart[]): PaintRegion[] {
+  const out: PaintRegion[] = [];
+  parts.forEach((part, index) => {
+    out.push({
+      id: `p${index}:all`,
+      label: part.label,
+      owner: part.owner,
+      side: part.side,
+      face: part.face,
+      semantic: semanticOf(part),
+      centre: centreOf(part),
+      part,
+    });
+    if (!part.flanks && !part.faces) return;
+    const groups = new Map<string, number[]>();
+    const count = Math.floor(part.tris.length / 6);
+    for (let triangle = 0; triangle < count; triangle += 1) {
+      const side = part.flanks?.[triangle] ?? -1;
+      const face = part.faces?.[triangle] ?? -1;
+      const key = `${side}:${face}`;
+      const run = groups.get(key);
+      if (run) run.push(triangle);
+      else groups.set(key, [triangle]);
+    }
+    for (const [key, picked] of groups) {
+      connected(part, picked).forEach((island, islandIndex) => {
+        // A lone degenerate/detail triangle is not a useful placement target. The full part is
+        // still present above, so omitting it cannot make the underlying bodywork unreachable.
+        if (island.length < 2 && count > 1) return;
+        const region = subset(part, island);
+        out.push({
+          id: `p${index}:${key}:i${islandIndex}`,
+          label: part.label,
+          owner: part.owner,
+          side: region.side,
+          face: region.face,
+          semantic: semanticOf(region),
+          centre: centreOf(region),
+          part: region,
+        });
+      });
+    }
+  });
+  // Named panels first, then precise islands, then broad fallbacks. This also makes a bounded
+  // agent context retain the useful targets before anonymous hardware and whole-sheet groups.
+  out.sort((a, b) => {
+    if (!!a.semantic !== !!b.semantic) return a.semantic ? -1 : 1;
+    const aWhole = a.id.endsWith(":all");
+    const bWhole = b.id.endsWith(":all");
+    if (aWhole !== bWhole) return aWhole ? 1 : -1;
+    return (
+      (b.part.maxU - b.part.minU) * (b.part.maxV - b.part.minV) -
+      (a.part.maxU - a.part.minU) * (a.part.maxV - a.part.minV)
+    );
+  });
+  return out;
 }
 
 /**
@@ -304,6 +512,7 @@ export function uvParts(
   // they are judged against is a fraction of the widest of them, so none can be judged until
   // all of them are in.
   const lateralByLabel = new Map<string, number[]>();
+  const centresByLabel = new Map<string, number[]>();
   const facesByLabel = new Map<string, number[]>();
   const nodesByLabel = new Map<string, Set<string>>();
   // One triangle's corners, reused: a bike is a few hundred thousand of them and a fresh
@@ -343,6 +552,11 @@ export function uvParts(
         sides = [];
         lateralByLabel.set(label, sides);
       }
+      let centres = centresByLabel.get(label);
+      if (!centres && sided) {
+        centres = [];
+        centresByLabel.set(label, centres);
+      }
       let faces = facesByLabel.get(label);
       if (!faces && sided) {
         faces = [];
@@ -356,12 +570,20 @@ export function uvParts(
       for (let t = Math.max(0, start); t < end; t += 1) {
         src.push(nodeIndex, t);
         let x = 0;
+        let y = 0;
+        let z = 0;
         let ny = 0;
         for (let c = 0; c < 3; c += 1) {
           const v = node.indices[t * 3 + c];
           tri[c * 2] = node.uvs[v * 2];
           tri[c * 2 + 1] = node.uvs[v * 2 + 1];
-          if (sides) x += node.positions[v * 3];
+          if (sides || centres) {
+            x += node.positions[v * 3];
+            if (centres) {
+              y += node.positions[v * 3 + 1];
+              z += node.positions[v * 3 + 2];
+            }
+          }
           if (faces && hasNormals) ny += node.normals[v * 3 + 1];
         }
         untile(tri);
@@ -369,6 +591,7 @@ export function uvParts(
         // The centroid, not every corner: a triangle with one vertex over the line is still on
         // the side the rest of it is, and a panel's inner edge is full of them.
         if (sides) sides.push(x / 3);
+        if (centres) centres.push(x / 3, y / 3, z / 3);
         if (faces) {
           const up = hasNormals ? ny / 3 : 0;
           faces.push(up > FACE_TOLERANCE ? TOP : up < -FACE_TOLERANCE ? UNDER : EDGE);
@@ -423,6 +646,9 @@ export function uvParts(
       tris: new Float32Array(flat),
       src: new Int32Array(srcByLabel.get(label) ?? []),
       flanks: sides ? new Uint8Array(sides) : null,
+      centres: centresByLabel.has(label)
+        ? new Float32Array(centresByLabel.get(label) as number[])
+        : null,
       side: sides ? summarise(sides) : null,
       faces: faces ? new Uint8Array(faces) : null,
       face: faces ? summariseFaces(faces) : null,
@@ -530,6 +756,7 @@ export function triangleAt(part: UvPart, u: number, v: number): UvPart | null {
       tris: tris.slice(i, i + 6),
       src: part.src.slice(t * 2, t * 2 + 2),
       flanks,
+      centres: part.centres ? part.centres.slice(t * 3, t * 3 + 3) : null,
       faces,
       // One triangle sits on one side and faces one way, whatever the group as a whole does.
       side: flanks ? summarise([flanks[0]]) : part.side,
@@ -603,6 +830,7 @@ export function islandAt(part: UvPart, u: number, v: number): UvPart | null {
   const src = new Int32Array(picked.length * 2);
   const flanks = part.flanks ? new Uint8Array(picked.length) : null;
   const faces = part.faces ? new Uint8Array(picked.length) : null;
+  const centres = part.centres ? new Float32Array(picked.length * 3) : null;
   let minU = Infinity;
   let minV = Infinity;
   let maxU = -Infinity;
@@ -624,6 +852,11 @@ export function islandAt(part: UvPart, u: number, v: number): UvPart | null {
     src[n * 2 + 1] = part.src[t * 2 + 1];
     if (flanks && part.flanks) flanks[n] = part.flanks[t];
     if (faces && part.faces) faces[n] = part.faces[t];
+    if (centres && part.centres) {
+      centres[n * 3] = part.centres[t * 3];
+      centres[n * 3 + 1] = part.centres[t * 3 + 1];
+      centres[n * 3 + 2] = part.centres[t * 3 + 2];
+    }
   }
 
   return {
@@ -631,6 +864,7 @@ export function islandAt(part: UvPart, u: number, v: number): UvPart | null {
     tris: out,
     src,
     flanks,
+    centres,
     faces,
     // Summarised over the island, not inherited: half a shroud is one flank where the group
     // was "both", and what gets said should describe what was filled.

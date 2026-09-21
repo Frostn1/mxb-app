@@ -332,6 +332,8 @@ pub const KNOWN_EVENTS: &[&str] = &[
     "replay.ffmpeg.fetch",
     "track.generate",
     "track.settings",
+    "track.edit",
+    "paint.edit",
     "track.build.install",
     "paint.save",
     // MXB Coach. It shares `view.settings` above with the manager — it is the same page, and

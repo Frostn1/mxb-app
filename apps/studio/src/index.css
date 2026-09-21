@@ -4,5 +4,6 @@
 @import "tailwindcss" source(none);
 @import "@frost/shared/theme.css";
 @import "./studio.css";
+@import "./mxbsecure.css";
 @source "./**/*.{ts,tsx}";
 @source "../index.html";

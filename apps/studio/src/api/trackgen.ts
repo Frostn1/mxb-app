@@ -241,6 +241,11 @@ export function generateTrack(
   return invoke<Generated>("generate_track", { brief, mode, discipline });
 }
 
+/** Apply one constrained natural-language edit to the open program. */
+export function editTrack(instruction: string, program: TrackProgram): Promise<TrackProgram> {
+  return invoke<TrackProgram>("edit_track", { instruction, program });
+}
+
 /** Which API shape a model of the user's own speaks. */
 export type ModelKind = "openAi" | "anthropic";
 

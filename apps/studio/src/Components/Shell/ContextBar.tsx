@@ -94,7 +94,7 @@ export function ContextTab({
     <button
       onClick={onSelect}
       className={cn(
-        "relative flex cursor-default items-center font-cond text-[12.5px] font-semibold uppercase tracking-[0.16em] transition-colors",
+        "relative flex cursor-default items-center font-cond text-[12.5px] font-semibold tracking-[-0.02em] transition-colors",
         active ? "text-foreground" : "text-muted-foreground hover:text-foreground",
       )}
     >

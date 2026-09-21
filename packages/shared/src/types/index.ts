@@ -116,16 +116,6 @@ export interface Config {
   betaUpdates?: boolean;
   /** Install updates at launch or once the app sits unused, never mid-game. Default true. */
   autoUpdates?: boolean;
-  /**
-   * Inject `mxbsecure.dll` into the running game so locked content can be opened.
-   *
-   * **Off by default.** It reaches into a process the app usually didn't create, and the
-   * DLL hasn't been proven on a real Windows run — a build that armed it for everyone with
-   * locked content had the game dying on access violations seconds in, with quitting the
-   * app from the tray as the only way out. With it on, launch the game from Play: the app
-   * won't inject into a session it didn't start.
-   */
-  secureContentInject?: boolean;
   /** Intro slideshow already dismissed. Saved with the config (not in localStorage)
    *  so clearing the webview's storage doesn't replay the first-run flow. */
   welcomeSeen?: boolean;

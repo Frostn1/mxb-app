@@ -2,7 +2,7 @@
  * Writing a track with Claude.
  *
  * The model never sees a heightmap. It answers in one of two shapes, and the app turns either
- * into terrain:
+ * into terrain, or asks for a constrained edit to the open track/paint document:
  *
  * - a **program**: a start pose, a run of straights and arcs, and the jumps laid along them.
  *   The model draws the whole lap and the app measures it. Only a strong model manages this.
@@ -28,6 +28,9 @@ import PROGRAM_SCHEMA from "../../packages/track-protocol/program.schema.json";
 import PROGRAM_SYSTEM from "../../packages/track-protocol/program.system.md";
 import SETTINGS_SCHEMA from "../../packages/track-protocol/settings.schema.json";
 import SETTINGS_SYSTEM from "../../packages/track-protocol/settings.system.md";
+import EDIT_SYSTEM from "../../packages/track-protocol/edit.system.md";
+import PAINT_EDIT_SCHEMA from "../../packages/track-protocol/paint-edit.schema.json";
+import PAINT_EDIT_SYSTEM from "../../packages/track-protocol/paint-edit.system.md";
 
 /**
  * The whole-lap prompt: what published MX Bikes tracks measure, quoted rather than described.
@@ -62,6 +65,18 @@ export const PROTOCOLS = {
     // Twenty fields, one of which is which discipline the brief asks for. There is no
     // arithmetic in it for thinking to help with.
     maxTokens: 2000,
+    think: false,
+  },
+  trackEdit: {
+    system: EDIT_SYSTEM,
+    schema: PROGRAM_SCHEMA as unknown as Schema,
+    maxTokens: 32000,
+    think: true,
+  },
+  paintEdit: {
+    system: PAINT_EDIT_SYSTEM,
+    schema: PAINT_EDIT_SCHEMA as unknown as Schema,
+    maxTokens: 3000,
     think: false,
   },
 } as const;
@@ -111,6 +126,8 @@ function ask(model: string) {
 
 /** Briefs longer than this are not briefs. */
 const MAX_BRIEF = 2000;
+/** An edit carries the open document and measured UV regions with it. */
+const MAX_EDIT_CONTEXT = 100_000;
 
 /** How much of a rejected program to hand back. A lap is a few thousand tokens. */
 const MAX_PREVIOUS = 60_000;
@@ -135,17 +152,23 @@ export async function generateTrack(request: Request, env: Env): Promise<Respons
     return json(400, { error: "expected a JSON body" });
   }
 
-  const brief = typeof body.brief === "string" ? body.brief.trim() : "";
-  if (!brief) return json(400, { error: "say what kind of track you want" });
-  if (brief.length > MAX_BRIEF) {
-    return json(400, { error: `keep the brief under ${MAX_BRIEF} characters` });
-  }
-
-  if (body.mode !== undefined && body.mode !== "program" && body.mode !== "settings") {
-    return json(400, { error: "mode is program or settings" });
+  if (
+    body.mode !== undefined &&
+    body.mode !== "program" &&
+    body.mode !== "settings" &&
+    body.mode !== "trackEdit" &&
+    body.mode !== "paintEdit"
+  ) {
+    return json(400, { error: "mode is program, settings, trackEdit or paintEdit" });
   }
   const mode: Mode = body.mode ?? "program";
   const protocol = PROTOCOLS[mode];
+  const brief = typeof body.brief === "string" ? body.brief.trim() : "";
+  if (!brief) return json(400, { error: "say what you want" });
+  const inputLimit = mode === "program" || mode === "settings" ? MAX_BRIEF : MAX_EDIT_CONTEXT;
+  if (brief.length > inputLimit) {
+    return json(400, { error: `keep the request under ${inputLimit} characters` });
+  }
 
   const problems = Array.isArray(body.problems)
     ? body.problems.filter((p): p is string => typeof p === "string").slice(0, 40)
@@ -155,7 +178,7 @@ export async function generateTrack(request: Request, env: Env): Promise<Respons
 
   const messages: Anthropic.MessageParam[] = [{ role: "user", content: brief }];
   // Settings are always legal once clamped, so the app never sends them back to be fixed.
-  if (mode === "program" && previous && problems.length) {
+  if ((mode === "program" || mode === "trackEdit") && previous && problems.length) {
     // The model gets its own answer back and a list of measurements, which is a far easier
     // thing to act on than a fresh attempt at the same brief.
     messages.push({ role: "assistant", content: previous });
@@ -164,6 +187,14 @@ export async function generateTrack(request: Request, env: Env): Promise<Respons
       content: `The app built that and measured it. These are wrong:\n\n${problems
         .map((p) => `- ${p}`)
         .join("\n")}\n\nSend the whole program again with those fixed.`,
+    });
+  } else if (mode === "paintEdit" && problems.length) {
+    if (previous) messages.push({ role: "assistant", content: previous });
+    messages.push({
+      role: "user",
+      content: `That action plan was rejected: ${problems.join(
+        "; ",
+      )}. Send a corrected plan for the original request.`,
     });
   }
 

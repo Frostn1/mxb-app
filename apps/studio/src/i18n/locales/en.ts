@@ -326,6 +326,12 @@ export const en = {
   "designer.fillHint": "Click the sheet to flood the whole layer.",
   "designer.gradientHint":
     "Drag across the sheet to set where the transition happens. It fills this whole layer — add another paint layer to keep what's underneath.",
+  "designer.aiTitle": "AI edit",
+  "designer.aiPlaceholder": "Place the logo on the right fender…",
+  "designer.aiApply": "Apply AI edit",
+  "designer.aiChanged": "Applied the paint edit",
+  "designer.aiNoChange": "The AI did not return a safe edit",
+  "designer.aiFailed": "Couldn't apply that paint edit",
 
   // ── Track Studio ───────────────────────────────────────────────────────────
   "nav.track": "Track",
@@ -336,6 +342,9 @@ export const en = {
   "track.generatingHint": "Laying out a lap that closes, then building and measuring it. A minute or two, and longer if the first attempt needs fixing.",
   "track.generated": "Wrote “{{name}}”",
   "track.generateFailed": "Couldn't write a track",
+  "track.askAi": "Ask AI",
+  "track.edited": "Applied the track edit",
+  "track.editFailed": "Couldn't apply that track edit",
   "track.empty": "Describe the track you want. Claude writes the lap and every jump on it; the app builds it and checks it measures like a real one before you see it.",
   "track.lap": "Lap",
   "track.width": "Width",
@@ -580,9 +589,9 @@ export const en = {
   "studioSettings.themeLight": "Light",
   "studioSettings.themeDark": "Dark",
   "studioSettings.themeSystem": "System",
-  "studioSettings.model": "Track generation",
+  "studioSettings.model": "Studio AI",
   "studioSettings.modelHint":
-    "Tracks are written through your MXB account unless you pick a model of your own. A free Groq key works with Settings only; a whole lap needs a strong model like Claude Opus. Your key stays on this computer.",
+    "Track and paint edits use your MXB account unless you pick a model of your own. A free Groq key can handle small edits and track settings; a whole lap needs a strong model like Claude Opus. Your key stays on this computer.",
   "studioSettings.modelAccount": "MXB account",
   "studioSettings.modelCustom": "Other (OpenAI-compatible)",
   "studioSettings.modelAddress": "Address",

@@ -719,9 +719,6 @@ export const de: Translation = {
   "settings.watchModsReload": "Automatisch neu laden bei Ordneränderungen",
   "settings.watchModsReloadDesc":
     "Das Spiel automatisch neu laden, wenn Strecken oder Motorräder in deinen Mod-Ordner kommen — auch wenn sie außerhalb von {{app}} manuell heruntergeladen wurden.",
-  "settings.secureContentInject": "Gesperrte Inhalte im Spiel nutzen",
-  "settings.secureContentInjectDesc":
-    "Erlaubt gekaufte gesperrte Strecken, indem dem laufenden Spiel ein kleiner Helfer hinzugefügt wird. Standardmäßig aus. Funktioniert, egal wie du das Spiel startest — über {{app}} oder über Steam.",
   "settings.checking": "Wird geprüft…",
   "settings.runningConnected": "Läuft · Spiel verbunden",
   "settings.notRunning": "Läuft nicht",
