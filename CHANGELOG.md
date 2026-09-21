@@ -13,15 +13,21 @@
 - Uninstall a mod straight from its page. Under Reinstall, on anything already in your
   Library, with the file going to the Recycle Bin like it does in the Library itself.
 
-## 2026-09-20
+## 2026-09-21 — MXB Coach v0.1.19-beta.19 — Learn the scrub, know the corner
 
 ### Added
 - Coach labels confidently measured corners with Lynds' six taught types: flat, smooth rut,
   hooked rut, rough rut, whooped sand turn, and smooth SX berm.
+- When any valid lap calls for scrub coaching, its debrief now teaches the four-part technique
+  one cue at a time in a compact carousel.
 
 ### Changed
 - Coach now teaches a scrub from takeoff to touchdown, distinguishes it from a whip using the
   bike's recorded rotation, and keeps scrub coaching in the session debrief.
+- The final debrief step fits its setup changes, bike-feel controls, and sag in one screen
+  without the redundant Bike setup heading or an unnecessary scrollbar.
+
+## 2026-09-20
 
 ### Fixed
 - MediaFire folders containing several packaged mods now keep every file for pack review
