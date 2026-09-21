@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2026-09-21 — v0.18.0 — Everything in one place
 
 ### Changed
 - The live look refresh now runs only on the game build it was built for. On any other build
@@ -72,6 +72,17 @@
   fact with nothing in it is left out instead of shown blank. An installed track lists its
   layouts, and a bike lists the model swaps, liveries and sounds that came with it.
 
+### Fixed
+- Game Integration now asks for the game install folder during setup when it cannot be found,
+  then enables itself without sending you away to Settings.
+- The OEM bike pack now chooses an actual full-pack mirror instead of trying to install its
+  information webpage.
+- MediaFire folders containing several packaged mods now keep every file for pack review
+  instead of silently installing only the first one.
+- Rider kits using the standard `rider/<profile>/paints` package layout now install into the
+  game's required `rider/riders/<profile>/paints` folder.
+- Copy link on a failed install now copies the original download URL instead of the error text.
+
 ## 2026-09-21 — MXB Coach v0.1.19-beta.19 — Learn the scrub, know the corner
 
 ### Added
@@ -85,15 +96,6 @@
   bike's recorded rotation, and keeps scrub coaching in the session debrief.
 - The final debrief step fits its setup changes, bike-feel controls, and sag in one screen
   without the redundant Bike setup heading or an unnecessary scrollbar.
-
-## 2026-09-20
-
-### Fixed
-- MediaFire folders containing several packaged mods now keep every file for pack review
-  instead of silently installing only the first one.
-- Rider kits using the standard `rider/<profile>/paints` package layout now install into the
-  game's required `rider/riders/<profile>/paints` folder.
-- Copy link on a failed install now copies the original download URL instead of the error text.
 
 ## 2026-09-20 — Frost's Studio v0.5.0 — Build it by asking
 
