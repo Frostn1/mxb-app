@@ -18,6 +18,7 @@ import DropZone from "../Dropzone/DropZone";
 import RuntimeBanner from "../RuntimeBanner/RuntimeBanner";
 import UpdateBanner from "../UpdateBanner/UpdateBanner";
 import SecurePrompt from "./SecurePrompt";
+import GameIntegrationConsent from "../GameIntegration/GameIntegrationConsent";
 import Settings, { type SectionId } from "../Settings/Settings";
 import Tour, { TourContext, TOUR_DONE_KEY } from "../Tour/Tour";
 import GetStarted from "../GetStarted/GetStarted";
@@ -34,6 +35,7 @@ import { useModBrowsing } from "../../lib/useModBrowsing";
 import { displayName } from "@frost/shared/lib/mods";
 import { track } from "../../lib/analytics";
 import type { DownloadRecord } from "@frost/shared/types";
+import { useFrostmod } from "../../Context/FrostmodContext";
 
 interface DashboardProps {
   /** True while the Welcome slideshow is still up. The tour waits for it to close
@@ -43,6 +45,7 @@ interface DashboardProps {
 
 const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
   const { config, game, games } = useConfig();
+  const { integrationChoice } = useFrostmod();
   const t = useT();
   // Opens on Online. Riding with other people is what the app is opened for most often, and
   // the server list is the one screen that is worth nothing five minutes later — a mod list
@@ -64,9 +67,6 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
     openModTarget,
     closeMod,
   } = useModBrowsing(showBrowse, game.id);
-
-  // FrostMod installs itself silently on first run (see FrostmodProvider) —
-  // no prompt here.
 
   // Which Settings section to land on, when something sent us there on purpose.
   // Cleared on the way out so a later visit opens where Settings normally opens.
@@ -151,10 +151,10 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
   // Auto-start the first-run tour once — but only after the Welcome slideshow has
   // been dismissed, otherwise its spotlights sit behind the overlay and show nothing.
   useEffect(() => {
-    if (welcomeActive) return;
+    if (welcomeActive || integrationChoice === null) return;
     if (config.tourDone || localStorage.getItem(TOUR_DONE_KEY) === "1") return;
     startTour();
-  }, [welcomeActive, startTour, config.tourDone]);
+  }, [welcomeActive, integrationChoice, startTour, config.tourDone]);
 
   // The first-run bar, after the tour rather than before it: it hands someone to Browse,
   // which means nothing until the tour has said what Browse is. It shows itself only to an
@@ -262,6 +262,7 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
           whatever turns up as a new purchase. Here because it needs the install queue and has
           to outlive every view a store link can be clicked from. */}
       <PurchaseWatcher />
+      <GameIntegrationConsent paused={welcomeActive} />
       <SecurePrompt onOpenSettings={openSettingsSection} />
       <TopRail
         view={view}

@@ -79,7 +79,11 @@ const App = () => {
   // the product or a title — see `setAmbientVars`. Set as a layout effect so the first paint after a
   // switch already reads right.
   useLayoutEffect(() => {
-    setAmbientVars({ app: APP_NAME, game: activeGame.display, site: activeGame.catalogDomain });
+    setAmbientVars({
+      app: APP_NAME || "MXB App",
+      game: activeGame.display,
+      site: activeGame.catalogDomain,
+    });
   }, [activeGame]);
 
   // Carry the old webview-only flags into the config once, so an existing install

@@ -8,6 +8,16 @@ import type {
 } from "@frost/shared/types";
 
 export interface FrostmodContextValue {
+  /** The player's explicit choice about the optional in-game component. */
+  integrationChoice: "enabled" | "app-only" | null;
+  /** Whether the consent dialog should currently be shown. */
+  integrationConsentOpen: boolean;
+  /** Opt in, installing or updating only after this explicit action. */
+  enableIntegration: () => Promise<void>;
+  /** Keep using the mod manager without installing or updating the component. */
+  useAppOnly: () => Promise<void>;
+  /** Ask again when a protected mod or integration-only feature is first needed. */
+  requestIntegrationConsent: () => void;
   /** Whether FrostMod is currently running (polled). `null` until first probe. */
   running: boolean | null;
   /**

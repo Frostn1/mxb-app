@@ -53,7 +53,7 @@ export const en = {
   "nav.hub": "MXB Hub",
   "nav.library": "Library",
   "nav.garage": "Garage",
-  "nav.downloads": "Downloads",
+  "nav.downloads": "Activity",
   "nav.locker": "Locker",
   "nav.presets": "Presets",
   "nav.servers": "Online",
@@ -69,36 +69,35 @@ export const en = {
   "sidebar.hideGroup": "Hide what's under {{name}}",
 
   // ── FrostMod status + actions ──────────────────────────────────────────────
-  "frostmod.checking": "Checking FrostMod…",
-  "frostmod.running": "FrostMod running",
-  "frostmod.notRunning": "FrostMod not running",
-  "frostmod.notInGame": "FrostMod not in game",
+  "frostmod.checking": "Checking Game Integration…",
+  "frostmod.running": "Game Integration ready",
+  "frostmod.notRunning": "Game Integration off",
+  "frostmod.notInGame": "Game Integration waiting for the game",
   "frostmod.reloadGame": "Reload game",
-  "frostmod.start": "Start FrostMod",
-  "frostmod.reloadedGame": "FrostMod reloaded the game.",
-  "frostmod.notRunningToast": "FrostMod isn't running.",
-  "frostmod.started": "FrostMod started",
-  "frostmod.alreadyRunning": "FrostMod is already running",
-  "frostmod.startFailed": "Couldn't start FrostMod",
-  "frostmod.stop": "Stop FrostMod",
-  "frostmod.stopped": "FrostMod stopped",
-  "frostmod.stopFailed": "Couldn't stop FrostMod",
+  "frostmod.start": "Start Game Integration",
+  "frostmod.reloadedGame": "Game Integration reloaded the game.",
+  "frostmod.notRunningToast": "Game Integration is off.",
+  "frostmod.started": "Game Integration started",
+  "frostmod.alreadyRunning": "Game Integration is already running",
+  "frostmod.startFailed": "Couldn't start Game Integration",
+  "frostmod.stop": "Stop Game Integration",
+  "frostmod.stopped": "Game Integration stopped",
+  "frostmod.stopFailed": "Couldn't stop Game Integration",
   "frostmod.stopFailedDesc":
     "It's still running — it may have been started by another user or with administrator rights.",
-  "frostmod.installedToast": "FrostMod {{version}} installed",
+  "frostmod.installedToast": "Game Integration {{version}} installed",
   "frostmod.installedToastDesc":
     "It'll live-reload the game when you add mods.",
-  "frostmod.installedToastRestart":
-    "Restart MX Bikes to switch over — the running game is still on the old FrostMod.",
-  "frostmod.installFailed": "Couldn't install FrostMod",
+  "frostmod.installedToastRestart": "Restart MX Bikes to switch over — the running game is still using the previous integration.",
+  "frostmod.installFailed": "Couldn't install Game Integration",
   // Folder-watcher notifications.
   "frostmod.newModsAdded": "New mods added",
   "frostmod.modsAdded_one": "New mod added",
   "frostmod.modsAdded_other": "{{count}} mods added",
-  "frostmod.askedReload": "Asked FrostMod to reload the game.",
+  "frostmod.askedReload": "Asked Game Integration to reload the game.",
   "frostmod.andMore_one": "{{names}} and {{count}} more",
   "frostmod.andMore_other": "{{names}} and {{count}} more",
-  "frostmod.watchDesc": "{{names}} — asked FrostMod to reload the game.",
+  "frostmod.watchDesc": "{{names}} — asked Game Integration to reload the game.",
 
   // ── First-run setup ────────────────────────────────────────────────────────
   "setup.title": "Welcome to {{app}}",
@@ -231,14 +230,12 @@ export const en = {
   "tour.rider.title": "Rider studio",
   "tour.rider.body":
     "Preview your gear and paints on the 3D rider before you take them out on track.",
-  "tour.frostmod.title": "FrostMod, live",
-  "tour.frostmod.body":
-    "This shows FrostMod's status. It live-reloads MX Bikes after an install, so new content shows up without restarting the game.",
+  "tour.frostmod.title": "Game Integration",
+  "tour.frostmod.body": "This shows Game Integration's status. It live-reloads MX Bikes after an install, so new content appears without restarting the game.",
   "tour.servers.title": "Look right online",
   "tour.servers.body": "MX Bikes never sends paints between players, so everyone shows up in default gear unless you already hold their exact file. Enroll here and the app publishes your look and fetches everyone else's — and you can start a dedicated server from the same page.",
   "tour.settings.title": "Settings",
-  "tour.settings.body":
-    "Set your game folder, background behaviour and FrostMod options here. You can replay this tour from here too.",
+  "tour.settings.body": "Set your game folder, background behaviour and Game Integration options here. You can replay this tour from here too.",
   "tour.done.title": "You're all set",
   "tour.done.body": "That's the tour. Head to Browse and install your first mod.",
 
@@ -265,8 +262,8 @@ export const en = {
   "update.updateAndRestart": "Update & restart",
   "update.dismiss": "Dismiss update notification",
   "update.onLatest": "You're on the latest version",
-  "runtime.bannerGame": "MX Bikes needs {{what}} before FrostMod can load into it.",
-  "runtime.bannerFrostmod": "FrostMod needs {{what}} to run.",
+  "runtime.bannerGame": "MX Bikes needs {{what}} before Game Integration can connect to it.",
+  "runtime.bannerFrostmod": "Game Integration needs {{what}} to run.",
   "runtime.pitch":
     "Without it Windows shows a \"dll was not found\" error instead. Takes seconds to fix.",
   "runtime.fixIt": "Install it",
@@ -299,8 +296,7 @@ export const en = {
   "cloud.slowPitch":
     "Nothing is wrong with the app — the game just loads slowly reading through {{what}}. Moving the folder out fixes it.",
   "runtime.installed": "Component installed",
-  "runtime.installedDesc":
-    "FrostMod should reach the game now. Restart MX Bikes if it's already open.",
+  "runtime.installedDesc": "Game Integration should reach the game now. Restart MX Bikes if it's already open.",
   "runtime.cancelled": "Nothing was installed",
   "runtime.cancelledDesc":
     "Windows needs your permission to install it. Opening Microsoft's download instead.",
@@ -514,7 +510,7 @@ export const en = {
   "libraryDetail.lockedWord": "locked",
   "libraryDetail.lockedWithMeta":
     "This track is {{locked}} by its creator. Its name, details and preview are shown here, but the files stay sealed — it can't be unpacked or previewed in 3D.",
-  "libraryDetail.securedLockedNote": "mxbsecure-protected content. Unlock it to read its details and play — sign in with Steam if you haven't. It also unlocks on its own when you launch the game.",
+  "libraryDetail.securedLockedNote": "Creator-protected content requires Game Integration. Sign in with Steam to verify ownership; once unlocked, its offline key is stored on this PC and it opens automatically when you play.",
   "libraryDetail.lockedNoMeta":
     "This track is {{locked}}, so its name, length and preview can't be read from the file — only its filename and size.",
 
@@ -542,8 +538,7 @@ export const en = {
   "modDetail.noDownloadLink": "No download link was found on this page — open it on {{site}}.",
   "modDetail.serverOnlyNotice":
     "This page only offers dedicated-server files. They install fine, but there's nothing to ride in-game.",
-  "modDetail.frostmodHint":
-    "FrostMod will hot-reload the {{kind}} list when this finishes.",
+  "modDetail.frostmodHint": "Game Integration will reload the {{kind}} list when this finishes.",
   "modDetail.kindRider": "rider",
   "modDetail.kindBike": "bike",
   "modDetail.kindTrack": "track",
@@ -580,7 +575,7 @@ export const en = {
   "settings.gameFolder": "Game folder",
   "settings.general": "General",
   "settings.appearance": "Appearance",
-  "settings.frostmod": "FrostMod",
+  "settings.frostmod": "Game Integration",
   "settings.about": "About & updates",
   "settings.whatsNew": "What's new",
   "settings.modsFolderDesc":
@@ -615,25 +610,22 @@ export const en = {
   "settings.preferredHostDesc": "Where a mod is mirrored on several hosts, take this one first.",
   "settings.preferredHostNone": "No preference",
   "settings.runInBackground": "Keep running in the background",
-  "settings.runInBackgroundDesc":
-    "Closing the window hides {{app}} to the tray so FrostMod stays connected. Quit from the tray icon.",
+  "settings.runInBackgroundDesc": "Closing the window hides {{app}} to the tray so Game Integration stays connected. Quit from the tray icon.",
   "settings.launchAtStartup": "Launch at startup",
   "settings.launchAtStartupDesc":
     "Start {{app}} automatically when you log in.",
   "settings.instantRefresh": "Instant preset refresh",
   "settings.instantRefreshDesc":
     "When you apply a preset while {{game}} is running, refresh the look in-game instantly — no restart or profile reselect. If it can't, you'll be told to reselect your profile.",
-  "settings.mxbsecure": "mxbsecure",
-  "settings.mxbsecureDesc":
-    "Experimental. Adds a Secure tab that locks a file so owning it isn't enough to use it. Only creators packing paid content need this.",
+  "settings.mxbsecure": "Protected content",
+  "settings.mxbsecureDesc": "Standard mods work without Game Integration. Creator-protected mods require ownership verification and Game Integration while you play.",
   "settings.mxbsecureUnlock": "Unlock purchased content",
-  "settings.mxbsecureUnlockDesc":
-    "Pick a .mxbsecure file you own — a track, paint, gear or bike. It's unlocked for this account on this machine, then appears in the game offline.",
+  "settings.mxbsecureUnlockDesc": "Pick protected content you own — a track, paint, gear or bike. After Steam verifies ownership, an offline key is stored for this account on this PC.",
   "settings.mxbsecureUnlockBtn": "Unlock content…",
   "settings.mxbsecureUnlockOk": "Unlocked — it'll appear in the game offline.",
   "settings.mxbsecureUnlockFail": "Couldn't unlock this content",
   "settings.steamLink": "Sign in with Steam",
-  "settings.steamLinkDesc": "Required to unlock purchased content — links this account to your Steam ID.",
+  "settings.steamLinkDesc": "Required only for protected content. Sign-in happens on Steam; {{app}} never receives your Steam password.",
   "settings.steamLinkedAs": "Signed in as {{id}}.",
   "settings.steamLinkBtn": "Sign in with Steam",
   "settings.steamRelink": "Re-link",
@@ -704,8 +696,7 @@ export const en = {
   "secure.promptEnroll": "Enroll with your invite code first. It's in Settings under Paint sync.",
   "secure.promptEnrollBtn": "Open Settings",
   "settings.unlockNotOwned": "You don't own this content on this account yet.",
-  "secure.intro":
-    "Pick a file, lock it, then verify it unlocks. Verifying decrypts the blob right here and checks it matches the original, byte for byte — the proof it round-trips on this machine.",
+  "secure.intro": "Protected content is opened in memory only while the game uses it. No unpacked copy is written to disk, and your mod files are not uploaded.",
   "secure.protectTitle": "Protect a track",
   "secure.protectDesc":
     "Encrypts a track file in place — it keeps its name so the game still lists it, but only you can ride it, offline. Overwrites the file, so keep your own master copy. Then just start the game.",
@@ -757,12 +748,10 @@ export const en = {
     "Share the paints you're wearing with the other riders on your server, and install theirs, so the grid looks the way everyone meant it to. Runs by itself on any server — nothing for you or the host to set up.",
   "settings.instantRefreshWindowsOnly":
     "Refreshing the look in-game without a restart means reaching into the running game, which only the Windows build can do — you'll be told to reselect your profile instead.",
-  "settings.autoRunFrostmod": "Run FrostMod automatically",
-  "settings.autoRunFrostmodDesc":
-    "Start FrostMod in the background whenever {{app}} opens.",
-  "settings.frostmodArgs": "FrostMod flags",
-  "settings.frostmodArgsDesc":
-    "Extra command line for FrostMod, typed as you would in a terminal. Applies the next time FrostMod starts. Leave it empty unless you've been given a flag to try.",
+  "settings.autoRunFrostmod": "Start Game Integration automatically",
+  "settings.autoRunFrostmodDesc": "Start Game Integration in the background whenever {{app}} opens.",
+  "settings.frostmodArgs": "Game Integration flags",
+  "settings.frostmodArgsDesc": "Advanced command-line options for Game Integration. They apply the next time it starts; leave this empty unless support gave you a flag to try.",
   "settings.watchModsReload": "Auto-reload on folder changes",
   "settings.watchModsReloadDesc":
     "Reload the game automatically when tracks or bikes are added to your mods folder — even downloaded manually outside {{app}}.",
@@ -780,20 +769,18 @@ export const en = {
   "settings.latestVersion": "Latest: {{version}}",
   "settings.frostmodStrayMsvcr90":
     "A file in your game folder crashes MX Bikes with \"R6034\" — move it aside to fix it.",
-  "settings.frostmodRuntimeMissing":
-    "Windows is missing a Visual C++ component FrostMod needs — install it to stop the \"dll was not found\" error.",
+  "settings.frostmodRuntimeMissing": "Windows is missing a Microsoft Visual C++ component Game Integration needs — install it to stop the \"dll was not found\" error.",
   "settings.repairRuntimes": "Repair runtimes",
   "settings.repairRuntimesHint":
     "Installs every Visual C++ runtime this PC is short of, both 32- and 64-bit, and clears out anything an older version of this app left in the game folder. Worth running even if nothing above looks wrong.",
   "settings.frostmodNeedsRepair":
     "The installed files don't match this version — reinstalling fixes it.",
   "settings.frostmodRepair": "Repair install",
-  "settings.frostmodUnsupportedForGame":
-    "This FrostMod build isn't safe on {{game}} — update it to use FrostMod here.",
+  "settings.frostmodUnsupportedForGame": "This Game Integration build is not compatible with {{game}} — update it before enabling the integration here.",
   "settings.frostmodUpdateRequired": "Update required",
-  "settings.checkNewer": "Check for a newer FrostMod",
+  "settings.checkNewer": "Check for a newer Game Integration",
   "settings.working": "Working…",
-  "settings.installFrostmod": "Install FrostMod",
+  "settings.installFrostmod": "Install Game Integration",
   "settings.updateTo": "Update to {{version}}",
   "settings.reinstallLatest": "Reinstall latest",
   "settings.upToDate": "Up to date",
@@ -838,8 +825,7 @@ export const en = {
   "settings.setProfilesFailed": "Couldn't set profiles folder",
   "settings.profilesReverted": "Reverted to the default profiles folder",
   "settings.resetProfilesFailed": "Couldn't reset profiles folder",
-  "settings.frostmodNotRunningHint":
-    "FrostMod isn't running — start it to hot-reload mods.",
+  "settings.frostmodNotRunningHint": "Game Integration is off — start it to reload mods without restarting the game.",
   "settings.reloadUnavailable": "Reload isn't available on this platform.",
 
   // ── Launching the game ─────────────────────────────────────────────────────
@@ -1625,8 +1611,7 @@ export const en = {
   "downloads.stageReview": "Waiting for you",
 
   // ── Downloads (history) ────────────────────────────────────────────────────
-  "downloads.help":
-    "Everything you've downloaded, newest first — the ones that failed included. Filter by status, or search for a mod whose name you can't quite remember.",
+  "downloads.help": "A record of downloads, installs and other automated changes, newest first. Failed actions are included so you can see exactly what happened.",
   "downloads.filterAll": "All",
   "downloads.filterFailed": "Failed",
   "downloads.searchPlaceholder": "Search downloads…",
@@ -1634,7 +1619,7 @@ export const en = {
   "downloads.clearTitle": "Clear download history?",
   "downloads.clearBody":
     "This only forgets the list. Nothing you've installed is removed.",
-  "downloads.empty": "Nothing downloaded yet — head to Browse and add something.",
+  "downloads.empty": "No activity yet — installs and automated changes will appear here.",
   "downloads.noMatches": "No matches.",
   "downloads.sourceSite": "Download",
   "downloads.sourceShop": "Shop",
@@ -2405,4 +2390,56 @@ export const en = {
   "ranked.mxp": "MXP",
   "ranked.penalty": "Penalty",
   "ranked.finished": "Finished",
+
+  "setup.steamOptional": "Steam is optional. You only need it for protected purchases and Ranked.",
+  "setup.steamSkip": "Skip for now",
+  "setup.integrationTitle": "Enable Game Integration?",
+  "setup.integrationIntro": "{{app}} works without Game Integration. Enable it only if you want protected mods, instant reloads and in-game paint sync.",
+  "setup.integrationInstallDisclosure": "This installs frostmod.exe and frostmod.dll from the official FrostMod GitHub release into the app's own data folder. The download is staged and checked against its release metadata before anything changes.",
+  "setup.integrationUseAppOnly": "Use app only",
+  "setup.integrationEnable": "Enable Game Integration",
+  "setup.integrationLearnMore": "View technical details",
+  "integration.title": "Game Integration",
+  "integration.poweredBy": "Powered by FrostMod",
+  "settings.integrationIntro": "Optional game-side features for protected mods, instant reloads and paint sync. Standard mods do not need this.",
+  "integration.details": "Technical details",
+  "integration.detailsTitle": "What Game Integration installs",
+  "integration.optional": "Optional",
+  "integration.optionalDesc": "Standard mods work without Game Integration. Creator-protected mods require it.",
+  "integration.protectedContentTitle": "How protected content works",
+  "integration.protectedContentDesc": "After Steam ownership is verified, an offline key is stored on this PC. Protected files are opened in memory only while the game uses them; no unpacked copy is written to disk.",
+  "integration.privacyTitle": "Your data",
+  "integration.privacyDesc": "Your mod files are not uploaded. {{app}} never receives your Steam password; Steam handles sign-in and returns only the account identity needed to verify ownership.",
+  "integration.filesTitle": "Installed files",
+  "integration.publisher": "Publisher",
+  "integration.publisherValue": "MXB App · Powered by FrostMod",
+  "integration.source": "Download source",
+  "integration.sourceValue": "Official FrostMod releases on GitHub",
+  "integration.components": "Components",
+  "integration.componentsValue": "frostmod.exe and frostmod.dll",
+  "integration.installLocation": "Install location",
+  "integration.installLocationValue": "The app's private data folder / frostmod",
+  "integration.network": "Network services",
+  "integration.networkValue": "GitHub for integration updates; MXB App services for ownership verification and enabled online features.",
+  "integration.integrity": "Integrity checks",
+  "integration.integrityValue": "File size is always checked. SHA-256 is also checked when the release provides it.",
+  "integration.control": "Your control",
+  "integration.controlValue": "Game Integration is optional and can be stopped at any time.",
+  "integration.standardMods": "Standard mods keep working without Game Integration.",
+  "integration.protectedMods": "Creator-protected mods require Game Integration while you play.",
+  "activity.automaticTitle": "Automatic activity",
+  "activity.automaticDesc": "Actions the app performed or attempted. Saved only on this device.",
+  "activity.clear": "Clear",
+  "activity.clearAria": "Clear automatic activity",
+  "activity.empty": "No automatic actions recorded yet.",
+  "activity.noMatches": "No automatic activity matches your search.",
+  "activity.completed": "Completed",
+  "activity.failed": "Failed",
+  "activity.notice": "Notice",
+  "activity.integrationAppOnly": "App-only mode selected",
+  "activity.integrationAppOnlyDesc": "Game Integration will not start or update automatically.",
+  "activity.integrationEnabled": "Game Integration enabled",
+  "activity.integrationEnabledDesc": "Optional game-side features are allowed on this device.",
+  "activity.integrationInstalled": "Game Integration {{version}} installed",
+  "activity.integrationInstallFailed": "Game Integration install failed",
 } as const;

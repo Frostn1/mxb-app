@@ -49,14 +49,13 @@ function hintFor(platform: string | null, game: GameInfo): string {
  * First run, in the order the answers are needed:
  *
  *   1. which game — only when this build drives more than one, and only on a true first run;
- *   2. sign in with Steam — the identity every entitlement is keyed to;
+ *   2. optionally sign in with Steam — the identity protected purchases and Ranked use;
  *   3. where the folders are — and only when detection couldn't work them out.
  *
- * Steam comes before the folders on purpose. The library is scanned the moment setup
- * finishes, and what that scan can open depends on the account: sealed tracks and gear
- * unlock for the account that owns them, and a store purchase is delivered to it. Asked
- * afterwards, the first library the rider ever sees is the wrong one, and every locked
- * mod in it has to be re-checked later from Settings.
+ * Steam comes before the folders so somebody who wants protected purchases starts with the
+ * right account, but it is optional: standard mods, local Library management and ordinary
+ * servers work without identifying the rider. Protected content and Ranked ask again at the
+ * point of use if setup was skipped.
  *
  * The folders step is skipped rather than shown pre-answered: detection either finds the
  * folder, in which case there was never a question, or it doesn't, in which case the step
@@ -70,7 +69,7 @@ export default function Setup({ onComplete, game, games, firstRun }: SetupProps)
   // the release showcase). It reaches the backend once, with the folders.
   const [picked, setPicked] = useState<GameInfo>(game);
   const askGame = firstRun && games.length > 1;
-  // Steam is asked on a first run only. Arriving here by switching to a title whose folders
+  // Steam is offered on a first run only. Arriving here by switching to a title whose folders
   // weren't found is not a first run: that account was linked the first time round, and a
   // step with no way past it is the wrong thing to put between a rider and a game switch.
   const askSteam = firstRun;
@@ -240,6 +239,7 @@ export default function Setup({ onComplete, game, games, firstRun }: SetupProps)
           setSteamDone(true);
           goDetect();
         }}
+        onSkip={goDetect}
         progress={progress}
       />
     );

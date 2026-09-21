@@ -24,16 +24,30 @@ import {
   RUNTIME_DOWNLOAD_URL,
   RUNTIME_DOWNLOADS_PAGE,
   RUNTIME_NAME_KEY,
+  setAutoRunFrostmod,
 } from "@frost/shared/api/mods";
 import type { Attachment, FrostmodStatus, VcRuntime } from "@frost/shared/types";
 import { ATTACH_PROBLEM } from "@frost/shared/types";
 import { displayName } from "@frost/shared/lib/mods";
 import { autoInstallAction } from "../lib/frostmodAuto";
+import { recordActivity } from "../lib/activity";
 import { useGameRunning } from "../lib/useGameRunning";
 import { useT, type TFunc, type TKey } from "@/i18n";
 import { FrostmodContext } from "./FrostmodContext";
 
 const POLL_MS = 5000;
+const INTEGRATION_CHOICE_KEY = "mxb.integration-choice.v1";
+
+type IntegrationChoice = "enabled" | "app-only" | null;
+
+function savedIntegrationChoice(): IntegrationChoice {
+  try {
+    const value = localStorage.getItem(INTEGRATION_CHOICE_KEY);
+    return value === "enabled" || value === "app-only" ? value : null;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * How often to ask GitHub whether FrostMod has a newer release.
@@ -69,6 +83,11 @@ export function FrostmodProvider({ children }: { children: ReactNode }) {
   // process is `running` below, and the two are separate things to watch.
   const { running: gameRunning } = useGameRunning();
   const [running, setRunning] = useState<boolean | null>(null);
+  const [integrationChoice, setIntegrationChoice] =
+    useState<IntegrationChoice>(savedIntegrationChoice);
+  const [integrationConsentOpen, setIntegrationConsentOpen] = useState(
+    () => savedIntegrationChoice() === null,
+  );
   const [attachment, setAttachment] = useState<Attachment | null>(null);
   // What we last warned about, so a problem that persists across the 5s poll is reported
   // once rather than every tick. Cleared when the state stops being a problem, which is
@@ -84,6 +103,20 @@ export function FrostmodProvider({ children }: { children: ReactNode }) {
   const [runtimeDismissed, setRuntimeDismissed] = useState(false);
   const mounted = useRef(true);
 
+  const rememberIntegrationChoice = useCallback((choice: Exclude<IntegrationChoice, null>) => {
+    setIntegrationChoice(choice);
+    setIntegrationConsentOpen(false);
+    try {
+      localStorage.setItem(INTEGRATION_CHOICE_KEY, choice);
+    } catch {
+      /* A locked-down webview still gets the choice for this session. */
+    }
+  }, []);
+
+  const requestIntegrationConsent = useCallback(() => {
+    setIntegrationConsentOpen(true);
+  }, []);
+
   const probe = useCallback(async () => {
     try {
       const r = await isFrostmodRunning();
@@ -98,7 +131,7 @@ export function FrostmodProvider({ children }: { children: ReactNode }) {
       const a = await frostmodAttachment();
       if (!mounted.current) return;
       setAttachment(a);
-      if (!ATTACH_PROBLEM.includes(a.state)) {
+      if (integrationChoice !== "enabled" || !ATTACH_PROBLEM.includes(a.state)) {
         warnedFor.current = null;
         return;
       }
@@ -114,7 +147,7 @@ export function FrostmodProvider({ children }: { children: ReactNode }) {
     } catch {
       /* older backend or non-Tauri — leave the pill on `running` alone */
     }
-  }, [t]);
+  }, [integrationChoice, t]);
 
   const refreshStatus = useCallback(async () => {
     if (mounted.current) setChecking(true);
@@ -211,6 +244,9 @@ export function FrostmodProvider({ children }: { children: ReactNode }) {
   }, [probe, t]);
 
   const install = useCallback(async () => {
+    // Pressing an Install/Repair button is itself explicit consent. Remember it so a
+    // manually installed component can receive future unattended compatibility fixes.
+    rememberIntegrationChoice("enabled");
     setInstalling(true);
     try {
       // The backend stops a running FrostMod before replacing it and restarts it
@@ -218,6 +254,10 @@ export function FrostmodProvider({ children }: { children: ReactNode }) {
       // a second instance.
       const { version, needsGameRestart } = await frostmodInstall();
       await refreshStatus();
+      recordActivity({
+        title: t("activity.integrationInstalled", { version }),
+        status: "success",
+      });
       toast.success(t("frostmod.installedToast", { version }), {
         // The update landed either way; when the game had the old FrostMod loaded,
         // it keeps running that until restarted, and saying so beats leaving people
@@ -230,11 +270,58 @@ export function FrostmodProvider({ children }: { children: ReactNode }) {
       // Re-read the real state: a failed install leaves the previous one in place,
       // and the panel shouldn't keep showing whatever it had guessed before.
       await refreshStatus();
+      recordActivity({
+        title: t("activity.integrationInstallFailed"),
+        detail: String(e),
+        status: "error",
+      });
       toast.error(t("frostmod.installFailed"), { description: String(e) });
     } finally {
       setInstalling(false);
     }
-  }, [refreshStatus, t]);
+  }, [refreshStatus, rememberIntegrationChoice, t]);
+
+  const useAppOnly = useCallback(async () => {
+    // App-only is a durable choice, not just a hidden badge. Disable both launch paths
+    // used by the backend, then stop an already-running integration for this session.
+    try {
+      await setAutoRunFrostmod(false);
+      if (running) await stop();
+      rememberIntegrationChoice("app-only");
+      recordActivity({
+        title: t("activity.integrationAppOnly"),
+        detail: t("activity.integrationAppOnlyDesc"),
+        status: "success",
+      });
+    } catch (e) {
+      toast.error(t("frostmod.stopFailed"), { description: String(e) });
+    }
+  }, [rememberIntegrationChoice, running, stop, t]);
+
+  const enableIntegration = useCallback(async () => {
+    rememberIntegrationChoice("enabled");
+    try {
+      await setAutoRunFrostmod(true);
+    } catch (e) {
+      // The component can still be installed and started for this session; be honest that
+      // Windows may not start it automatically next time.
+      toast.warning(t("frostmod.startFailed"), { description: String(e) });
+    }
+    if (
+      !status?.installed ||
+      status.needsRepair ||
+      !status.supportedForGame ||
+      (status.latest !== null && status.version !== status.latest)
+    ) {
+      await install();
+    }
+    await start();
+    recordActivity({
+      title: t("activity.integrationEnabled"),
+      detail: t("activity.integrationEnabledDesc"),
+      status: "success",
+    });
+  }, [install, rememberIntegrationChoice, start, status, t]);
 
   const installRuntime = useCallback(
     async (runtime: VcRuntime) => {
@@ -366,15 +453,22 @@ export function FrostmodProvider({ children }: { children: ReactNode }) {
   const missingRuntime = status?.missingRuntimes?.[0] ?? null;
   // The banner respects a dismissal; the Settings panel deliberately doesn't. Dismissing
   // a bar you didn't understand shouldn't also erase the one place that explains it.
-  const runtimeWarning = runtimeDismissed ? null : missingRuntime;
+  const runtimeWarning =
+    integrationChoice === "enabled" && !runtimeDismissed ? missingRuntime : null;
 
   const dismissRuntimeWarning = useCallback(() => setRuntimeDismissed(true), []);
 
-  // FrostMod is core to the app, so it is installed, repaired and updated without anyone
-  // being asked — `autoInstallAction` holds the whole decision table. A build that is
-  // missing, half-applied or too old for the active title does nothing at all and gives the
-  // player no way to know why; one that is merely out of date used to sit behind a button
-  // in a panel most people never open, which is the half this now covers too.
+  // Existing installations predate the consent screen. Treat them as enabled unless the
+  // player explicitly chose app-only mode, preserving today's behavior without ever
+  // installing an executable onto a machine that did not already have it.
+  useEffect(() => {
+    if (integrationChoice === null && status?.installed) {
+      rememberIntegrationChoice("enabled");
+    }
+  }, [integrationChoice, rememberIntegrationChoice, status?.installed]);
+
+  // Once enabled, keep the component compatible as before. With no choice or app-only
+  // selected, status checks remain read-only and no download or replacement can begin.
   //
   // `missingRuntimes` is deliberately NOT in here. Reinstalling FrostMod cannot put a
   // Visual C++ runtime on the machine, so auto-installing on that flag would download
@@ -383,6 +477,7 @@ export function FrostmodProvider({ children }: { children: ReactNode }) {
   const triedRepair = useRef(false);
   const updatedTo = useRef<string | null>(null);
   useEffect(() => {
+    if (integrationChoice !== "enabled") return;
     const action = autoInstallAction(status, {
       statusError,
       installing,
@@ -396,10 +491,15 @@ export function FrostmodProvider({ children }: { children: ReactNode }) {
     if (action === "repair") triedRepair.current = true;
     else updatedTo.current = status?.latest ?? null;
     void install();
-  }, [status, statusError, installing, gameRunning, install]);
+  }, [status, statusError, installing, gameRunning, install, integrationChoice]);
 
   const value = useMemo(
     () => ({
+      integrationChoice,
+      integrationConsentOpen,
+      enableIntegration,
+      useAppOnly,
+      requestIntegrationConsent,
       running,
       attachment,
       status,
@@ -424,7 +524,7 @@ export function FrostmodProvider({ children }: { children: ReactNode }) {
       runtimeWarning,
       missingRuntime,
     }),
-    [running, attachment, status, installing, checking, statusError, reload, probe, refreshStatus, install, start, stop, installingRuntime, installRuntime, repairingRuntimes, repairRuntimes, strayMsvcr90, strayWarning, clearingStray, clearStrayMsvcr90, dismissRuntimeWarning, runtimeWarning, missingRuntime],
+    [integrationChoice, integrationConsentOpen, enableIntegration, useAppOnly, requestIntegrationConsent, running, attachment, status, installing, checking, statusError, reload, probe, refreshStatus, install, start, stop, installingRuntime, installRuntime, repairingRuntimes, repairRuntimes, strayMsvcr90, strayWarning, clearingStray, clearStrayMsvcr90, dismissRuntimeWarning, runtimeWarning, missingRuntime],
   );
 
   return (

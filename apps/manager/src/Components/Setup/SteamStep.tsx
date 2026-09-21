@@ -10,6 +10,8 @@ import { Plate } from "../Shell/Brand";
 interface SteamStepProps {
   /** The account is linked and the flow can move on to the folders. */
   onDone: () => void;
+  /** Continue without linking. Standard mods and the Library do not require an account. */
+  onSkip: () => void;
   /** The step counter, rendered by the parent so every step shows the same one. */
   progress: ReactNode;
 }
@@ -22,22 +24,21 @@ const REASONS: { icon: LucideIcon; body: TKey }[] = [
 ];
 
 /**
- * Sign in with Steam — the second step of first-run setup, and a required one.
+ * Sign in with Steam — the optional second step of first-run setup.
  *
  * The Steam account is the identity everything else hangs off: sealed content unlocks on
  * the account that owns it, a store purchase is delivered to it, and Ranked finds the rider
  * by it. Asked here, before the library is ever scanned, so all three are already true the
  * first time those tabs are opened instead of being repaired later from Settings.
  *
- * No skip. MX Bikes is bought on Steam, so there is no rider this step cannot serve, and an
- * install that walks past it spends its first session looking broken — locked tracks that
- * won't open, an empty Owned tab. Ranked still takes a typed GUID for the case this can't
- * fix (the wrong account), but that is a repair, not a way around.
+ * Standard mods, local Library management and ordinary servers do not require this account.
+ * Protected purchases and Ranked do, and each can ask at the point of use. Keeping a skip here
+ * means setup never implies that the app needs identity merely to organize local files.
  *
  * The link itself is `useSteamLink`: it opens the browser, polls the control plane, and runs
  * the unlock pass on success. Nothing about that is reimplemented here.
  */
-export default function SteamStep({ onDone, progress }: SteamStepProps) {
+export default function SteamStep({ onDone, onSkip, progress }: SteamStepProps) {
   const t = useT();
   const [linkedId, setLinkedId] = useState<string | null>(null);
   const { linking, linkSteam } = useSteamLink({ onLinked: setLinkedId });
@@ -70,6 +71,9 @@ export default function SteamStep({ onDone, progress }: SteamStepProps) {
             </h1>
             <p className="max-w-[400px] text-center text-[13.5px] leading-relaxed text-muted-foreground">
               {t("setup.steamLead")}
+            </p>
+            <p className="max-w-[400px] text-center text-[12px] leading-relaxed text-faint">
+              {t("setup.steamOptional")}
             </p>
           </div>
         </div>
@@ -113,6 +117,13 @@ export default function SteamStep({ onDone, progress }: SteamStepProps) {
             <p className="max-w-[400px] text-center text-[12px] leading-relaxed text-muted-foreground">
               {t("setup.steamNote")}
             </p>
+            <button
+              type="button"
+              onClick={onSkip}
+              className="cursor-default text-[12px] font-semibold text-muted-foreground transition-colors hover:text-foreground"
+            >
+              {t("setup.steamSkip")}
+            </button>
           </div>
         )}
       </div>

@@ -21,11 +21,11 @@ import { Popover, PopoverContent, PopoverTrigger } from "@frost/shared/Component
 export default function FrostmodBadge() {
   const t = useT();
   const { game } = useConfig();
-  const { running, attachment, reload, status, start, stop } = useFrostmod();
+  const { integrationChoice, running, attachment, reload, status, start, stop } = useFrostmod();
 
   // FrostMod is a compiled MX Bikes plugin — there is nothing to report, start or reload
   // for a title it wasn't built for.
-  if (!game.caps.frostmod) return null;
+  if (!game.caps.frostmod || integrationChoice !== "enabled") return null;
 
   // Up, but not reaching the game — see `frostmod::attachment`. Reported plainly rather than
   // as "Running", which is exactly as far as a player could get in working out why nothing
@@ -112,7 +112,7 @@ export default function FrostmodBadge() {
               </button>
             </>
           ) : (
-            // Nothing to start until it is installed — the provider puts it in on first run.
+            // Nothing to start until the player has explicitly installed it.
             status?.installed && (
               <button
                 onClick={start}
