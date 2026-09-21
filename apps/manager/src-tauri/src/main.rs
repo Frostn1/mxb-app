@@ -276,6 +276,7 @@ fn create_config(
             cfg.game().display
         ));
     }
+    cfg.setup_complete = true;
     // Setup only sends the folders, so carry over first-run state from any config
     // that's already there — rewriting it would replay the intro and the tour.
     match config::load(&app) {
@@ -297,6 +298,29 @@ fn create_config(
         modwatch::start(&app, &watcher, &cfg.mods_path);
     }
     Ok(true)
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct NormalizedGameFolder {
+    path: String,
+    correction: Option<&'static str>,
+}
+
+/// Preview how a folder-picker choice will be stored without writing configuration yet.
+/// Setup uses this to explain when `mods` or `profiles` was one level too deep.
+#[tauri::command]
+fn normalize_game_folder(path: String) -> NormalizedGameFolder {
+    match config::normalize_selected_game_folder(&path) {
+        Some((adopted, correction)) => NormalizedGameFolder {
+            path: adopted.to_string_lossy().into_owned(),
+            correction: Some(correction),
+        },
+        None => NormalizedGameFolder {
+            path,
+            correction: None,
+        },
+    }
 }
 
 /// Run an mxb-mods.com call; if Cloudflare refuses it, run it again from inside a real
@@ -7258,6 +7282,7 @@ fn main() {
             scan_library,
             is_configured,
             create_config,
+            normalize_game_folder,
             mxb_core::viewer::app_platform,
             search_mods,
             get_mod_detail,

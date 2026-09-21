@@ -279,6 +279,16 @@ export function createConfig(config: Config): Promise<boolean> {
   return invoke<boolean>("create_config", { config });
 }
 
+export type GameFolderCorrection = "mods-subfolder" | "profiles-subfolder";
+
+/** Preview the game-folder path setup will save, including a one-level correction. */
+export function normalizeGameFolder(path: string): Promise<{
+  path: string;
+  correction: GameFolderCorrection | null;
+}> {
+  return invoke("normalize_game_folder", { path });
+}
+
 /** Change only the MX Bikes folder — an empty string re-runs auto-detection. Unlike
  *  `createConfig`, the rest of the settings are preserved. Resolves to the folder actually
  *  adopted: picking the `mods` folder settles on the game folder above it. */

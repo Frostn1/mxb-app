@@ -7,15 +7,24 @@ import {
   ChevronRight,
 } from "lucide-react";
 import { open as pickFolder } from "@tauri-apps/plugin-dialog";
-import { createConfig, detectGamePath } from "@frost/shared/api/mods";
+import {
+  createConfig,
+  detectGamePath,
+  normalizeGameFolder,
+  type GameFolderCorrection,
+} from "@frost/shared/api/mods";
 import { usePlatform } from "@frost/shared/lib/usePlatform";
 import { Trans } from "@/i18n";
 import { useT } from "@/i18n";
 import { Button } from "@frost/shared/Components/ui/button";
 import type { GameInfo } from "@frost/shared/types";
-import { Plate } from "../Shell/Brand";
+import { useFrostmod } from "@/Context/FrostmodContext";
 import Progress from "./Progress";
-import SteamStep from "./SteamStep";
+
+const GAME_LOGOS: Record<string, string> = {
+  mxb: "https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/655500/logo.png",
+  gpb: "https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/848050/logo.png",
+};
 
 interface SetupProps {
   onComplete: () => void;
@@ -49,13 +58,11 @@ function hintFor(platform: string | null, game: GameInfo): string {
  * First run, in the order the answers are needed:
  *
  *   1. which game — only when this build drives more than one, and only on a true first run;
- *   2. optionally sign in with Steam — the identity protected purchases and Ranked use;
- *   3. where the folders are — and only when detection couldn't work them out.
+ *   2. where the folders are — and only when detection couldn't work them out;
+ *   3. whether to enable the optional in-game integration.
  *
- * Steam comes before the folders so somebody who wants protected purchases starts with the
- * right account, but it is optional: standard mods, local Library management and ordinary
- * servers work without identifying the rider. Protected content and Ranked ask again at the
- * point of use if setup was skipped.
+ * Steam is deliberately absent here. The app-level sign-in gate already settled identity
+ * before setup became usable; asking again would contradict that required first screen.
  *
  * The folders step is skipped rather than shown pre-answered: detection either finds the
  * folder, in which case there was never a question, or it doesn't, in which case the step
@@ -64,21 +71,25 @@ function hintFor(platform: string | null, game: GameInfo): string {
  */
 export default function Setup({ onComplete, game, games, firstRun }: SetupProps) {
   const t = useT();
+  const {
+    integrationChoice,
+    enableIntegration,
+    useAppOnly,
+  } = useFrostmod();
   // The pick is held here rather than saved as it's made: writing a config before setup
   // finishes would make `create_config` treat a fresh install as an upgrade (and replay
   // the release showcase). It reaches the backend once, with the folders.
   const [picked, setPicked] = useState<GameInfo>(game);
   const askGame = firstRun && games.length > 1;
-  // Steam is offered on a first run only. Arriving here by switching to a title whose folders
-  // weren't found is not a first run: that account was linked the first time round, and a
-  // step with no way past it is the wrong thing to put between a rider and a game switch.
-  const askSteam = firstRun;
-  const [phase, setPhase] = useState<"game" | "steam" | "detect" | "folders">(
-    askGame ? "game" : askSteam ? "steam" : "detect",
+  const needsIntegration = firstRun && integrationChoice === null;
+  const [phase, setPhase] = useState<
+    "game" | "detect" | "folders" | "integration"
+  >(
+    askGame ? "game" : "detect",
   );
-  // Asked once per run of setup. Someone who backs up to change the game they picked has
-  // already signed in, and the account doesn't change with the title.
-  const [steamDone, setSteamDone] = useState(false);
+  // Keep the fourth step in the counter while enabling it. The provider records the
+  // choice before its install finishes, but the screen is still step four until we leave.
+  const askIntegration = needsIntegration || phase === "integration";
   /** Whether the silent "can detection answer the folders question?" attempt has been made. */
   const attempted = useRef(false);
   const goDetect = useCallback(() => {
@@ -87,7 +98,9 @@ export default function Setup({ onComplete, game, games, firstRun }: SetupProps)
   }, []);
   const defaultHint = hintFor(usePlatform(), picked);
   const [chosen, setChosen] = useState<string | null>(null);
+  const [folderCorrection, setFolderCorrection] = useState<GameFolderCorrection | null>(null);
   const [busy, setBusy] = useState(false);
+  const [integrationBusy, setIntegrationBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // MX Bikes install (Steam) folder — auto-detected on mount so the 3D rider
@@ -96,14 +109,26 @@ export default function Setup({ onComplete, game, games, firstRun }: SetupProps)
   const [gamePath, setGamePath] = useState<string | null>(null);
   const [gameAuto, setGameAuto] = useState(false);
 
-  // Steps shown in the counter: the game question when it's asked, Steam when it's asked,
-  // and the folders, which are counted even though they're often skipped — the rider is
-  // told there are three, and finishing early is a pleasant surprise, not a missing step.
-  const total = (askGame ? 1 : 0) + (askSteam ? 1 : 0) + 1;
-  const current = phase === "game" ? 1 : phase === "steam" ? (askGame ? 2 : 1) : total;
+  // Steps shown in the counter: game selection when needed, the folder, and optional
+  // Game Integration consent. Steam was already handled by the entry gate.
+  const folderStep = (askGame ? 1 : 0) + 1;
+  const total = folderStep + (askIntegration ? 1 : 0);
+  const current =
+    phase === "game"
+      ? 1
+      : phase === "integration"
+          ? total
+          : folderStep;
 
   useEffect(() => {
     let cancelled = false;
+    // A path belongs to one game. Never carry a detected install or a manual mods
+    // destination across the game picker into the other title.
+    setGamePath(null);
+    setGameAuto(false);
+    setChosen(null);
+    setFolderCorrection(null);
+    setError(null);
     setDetecting(true);
     detectGamePath(picked.id)
       .then((found) => {
@@ -128,13 +153,14 @@ export default function Setup({ onComplete, game, games, firstRun }: SetupProps)
       setError(null);
       try {
         await createConfig({ modsPath, gamePath: gamePath ?? "", activeGame: picked.id });
-        onComplete();
+        if (askIntegration) setPhase("integration");
+        else onComplete();
       } catch (e) {
         setError(String(e));
         setBusy(false);
       }
     },
-    [gamePath, onComplete, picked.id],
+    [askIntegration, gamePath, onComplete, picked.id],
   );
 
   // The folders question, asked of the backend first. `create_config` runs the same
@@ -150,7 +176,10 @@ export default function Setup({ onComplete, game, games, firstRun }: SetupProps)
     let cancelled = false;
     createConfig({ modsPath: "", gamePath: gamePath ?? "", activeGame: picked.id })
       .then(() => {
-        if (!cancelled) onComplete();
+        if (!cancelled) {
+          if (askIntegration) setPhase("integration");
+          else onComplete();
+        }
       })
       .catch(() => {
         // Nothing to report: not finding the folder is exactly what the next step is for.
@@ -159,7 +188,7 @@ export default function Setup({ onComplete, game, games, firstRun }: SetupProps)
     return () => {
       cancelled = true;
     };
-  }, [phase, detecting, gamePath, picked.id, onComplete]);
+  }, [phase, detecting, gamePath, picked.id, askIntegration, onComplete]);
 
   const choose = async () => {
     const folder = await pickFolder({
@@ -167,7 +196,15 @@ export default function Setup({ onComplete, game, games, firstRun }: SetupProps)
       multiple: false,
       title: t("setup.pickModsFolder", { game: picked.display }),
     });
-    if (typeof folder === "string") setChosen(folder);
+    if (typeof folder === "string") {
+      const normalized = await normalizeGameFolder(folder).catch(() => ({
+        path: folder,
+        correction: null,
+      }));
+      setChosen(normalized.path);
+      setFolderCorrection(normalized.correction);
+      setError(null);
+    }
   };
 
   const chooseGame = async () => {
@@ -184,6 +221,17 @@ export default function Setup({ onComplete, game, games, firstRun }: SetupProps)
 
   const progress = <Progress total={total} current={current} />;
 
+  const finishIntegration = async (enabled: boolean) => {
+    setIntegrationBusy(true);
+    try {
+      if (enabled) await enableIntegration();
+      else await useAppOnly();
+      onComplete();
+    } finally {
+      setIntegrationBusy(false);
+    }
+  };
+
   // Step one on a first run: which game are we setting up? Everything after this — the
   // folder we suggest, the install we scan for, the catalog we browse — depends on it,
   // so it's asked before anything else rather than inferred.
@@ -194,7 +242,6 @@ export default function Setup({ onComplete, game, games, firstRun }: SetupProps)
           {progress}
 
           <div className="flex flex-col items-center gap-3.5">
-            <Plate className="size-14" />
             <div className="flex flex-col items-center gap-1.5">
               <h1 className="font-cond text-[26px] font-bold leading-[1.05] tracking-[-0.045em]">
                 {t("setup.title")}
@@ -205,20 +252,25 @@ export default function Setup({ onComplete, game, games, firstRun }: SetupProps)
             </div>
           </div>
 
-          <div className="flex w-full flex-col gap-2.5">
+          <div className="grid w-full grid-cols-2 border-y border-border">
             {games.map((g) => (
               <button
                 key={g.id}
                 onClick={() => {
                   setPicked(g);
-                  if (askSteam && !steamDone) setPhase("steam");
-                  else goDetect();
+                  goDetect();
                 }}
-                className="flex cursor-default items-center gap-3 rounded-xl border border-input bg-card px-4 py-4 text-left transition-colors hover:border-primary/50 hover:bg-foreground/[0.03]"
+                className="group flex min-h-32 cursor-default flex-col items-center justify-center gap-4 px-6 py-6 text-center transition-colors even:border-l even:border-border hover:bg-foreground/[0.03]"
               >
-                <Gamepad2 className="size-5 flex-none text-primary" />
-                <span className="flex-1 text-[14.5px] font-semibold">{g.display}</span>
-                <ChevronRight className="size-4 flex-none text-muted-foreground" />
+                <img
+                  src={GAME_LOGOS[g.id]}
+                  alt=""
+                  className="h-12 w-full max-w-36 object-contain"
+                />
+                <span className="flex items-center gap-1.5 text-[12px] font-semibold text-muted-foreground transition-colors group-hover:text-foreground">
+                  {g.display}
+                  <ChevronRight className="size-3.5" />
+                </span>
               </button>
             ))}
           </div>
@@ -231,17 +283,47 @@ export default function Setup({ onComplete, game, games, firstRun }: SetupProps)
     );
   }
 
-  // Step two: the Steam account. Required — there is no way past it here.
-  if (phase === "steam") {
+  if (phase === "integration") {
     return (
-      <SteamStep
-        onDone={() => {
-          setSteamDone(true);
-          goDetect();
-        }}
-        onSkip={goDetect}
-        progress={progress}
-      />
+      <div className="grid min-h-0 flex-1 place-items-center px-10">
+        <div className="flex w-full max-w-[480px] flex-col gap-8 pb-16">
+          <div className="self-center">{progress}</div>
+
+          <div className="flex flex-col gap-2.5">
+            <span className="font-cond text-[11px] font-bold uppercase tracking-[0.12em] text-primary">
+              {t("integration.optional")}
+            </span>
+            <h1 className="font-cond text-[30px] font-bold leading-[1.05] tracking-[-0.045em]">
+              {t("setup.integrationTitle")}
+            </h1>
+            <p className="max-w-[450px] text-[13.5px] leading-relaxed text-muted-foreground">
+              {t("setup.integrationIntro")}
+            </p>
+            <p className="max-w-[450px] text-[12px] leading-relaxed text-faint">
+              {t("setup.integrationInstallDisclosure")}
+            </p>
+          </div>
+
+          <div className="flex items-center gap-5">
+            <Button
+              className="h-12 flex-1 text-[14px]"
+              disabled={integrationBusy}
+              onClick={() => void finishIntegration(true)}
+            >
+              {integrationBusy && <Loader2 className="animate-spin" />}
+              {t("setup.integrationEnable")}
+            </Button>
+            <button
+              type="button"
+              disabled={integrationBusy}
+              onClick={() => void finishIntegration(false)}
+              className="flex-none cursor-default text-[12px] font-semibold text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50"
+            >
+              {t("setup.integrationUseAppOnly")}
+            </button>
+          </div>
+        </div>
+      </div>
     );
   }
 
@@ -252,7 +334,6 @@ export default function Setup({ onComplete, game, games, firstRun }: SetupProps)
       <div className="grid min-h-0 flex-1 place-items-center px-10">
         <div className="flex w-full max-w-[480px] flex-col items-center gap-7 pb-16">
           {progress}
-          <Plate className="size-14" />
           <div className="flex items-center gap-2.5 text-[13.5px] text-muted-foreground">
             <Loader2 className="size-4 flex-none animate-spin text-primary" />
             <span>{t("setup.finishing", { game: picked.display })}</span>
@@ -268,11 +349,13 @@ export default function Setup({ onComplete, game, games, firstRun }: SetupProps)
         {progress}
 
         <div className="flex flex-col items-center gap-3.5">
-          <Plate className="size-14" />
           <div className="flex flex-col items-center gap-1.5">
-            <h1 className="font-cond text-[26px] font-bold leading-[1.05] tracking-[-0.045em]">
-              {picked.display}
-            </h1>
+            <h1 className="sr-only">{picked.display}</h1>
+            <img
+              src={GAME_LOGOS[picked.id]}
+              alt=""
+              className="mb-1 h-11 w-full max-w-44 object-contain"
+            />
             <p className="max-w-[380px] text-center text-[13.5px] leading-relaxed text-muted-foreground">
               {t("setup.tagline")}
             </p>
@@ -288,21 +371,27 @@ export default function Setup({ onComplete, game, games, firstRun }: SetupProps)
         </div>
 
         <div className="flex w-full flex-col gap-2.5">
-          <span className="text-[11.5px] font-bold uppercase tracking-[1px] text-faint">
-            {t("setup.modsFolder", { game: picked.display })}
-          </span>
+          <div className="flex items-center justify-between gap-4">
+            <span className="text-[11.5px] font-bold uppercase tracking-[1px] text-foreground/70">
+              {t("setup.modsFolder", { game: picked.display })}
+            </span>
+            <span className="text-[10.5px] font-bold uppercase tracking-[0.08em] text-primary">
+              {t("setup.required")}
+            </span>
+          </div>
           {chosen ? (
-            <div className="flex items-center gap-2.5 rounded-xl bg-card px-3.5 py-3 font-mono text-[12.5px] text-muted-foreground">
+            <div className="flex items-center gap-2.5 border-l-2 border-primary py-1 pl-3 font-mono text-[12.5px] text-foreground/80">
               <FolderOpen className="size-4 flex-none text-primary" />
               <span className="flex-1 truncate" title={chosen}>
                 {chosen}
               </span>
             </div>
           ) : (
-            <p className="text-[12.5px] text-muted-foreground">
+            <p className="text-[13px] leading-relaxed text-foreground/85">
               <Trans
                 k="setup.autoDetect"
                 values={{
+                  game: picked.display,
                   hint: (
                     <span className="font-mono text-foreground/80">{defaultHint}</span>
                   ),
@@ -310,26 +399,45 @@ export default function Setup({ onComplete, game, games, firstRun }: SetupProps)
               />
             </p>
           )}
-          <button
-            onClick={choose}
-            className="cursor-default self-start text-[12px] font-semibold text-primary hover:brightness-110"
-          >
-            {chosen ? t("setup.chooseDifferent") : t("setup.chooseManually")}
-          </button>
+          {chosen && (
+            <>
+              {folderCorrection && (
+                <p className="border-l-2 border-warning/70 py-0.5 pl-3 text-[12px] leading-relaxed text-foreground/80">
+                  {t(
+                    folderCorrection === "mods-subfolder"
+                      ? "setup.correctedModsFolder"
+                      : "setup.correctedProfilesFolder",
+                    { game: picked.display },
+                  )}
+                </p>
+              )}
+              <button
+                onClick={choose}
+                className="cursor-default self-start text-[12px] font-semibold text-primary hover:brightness-110"
+              >
+                {t("setup.chooseDifferent")}
+              </button>
+            </>
+          )}
         </div>
 
-        <div className="flex w-full flex-col gap-2.5">
-          <span className="text-[11.5px] font-bold uppercase tracking-[1px] text-faint">
-            {t("setup.gameInstall", { game: picked.display })}
-          </span>
+        <div className="flex w-full flex-col gap-2.5 border-t border-border pt-6">
+          <div className="flex items-center justify-between gap-4">
+            <span className="text-[11.5px] font-bold uppercase tracking-[1px] text-foreground/70">
+              {t("setup.gameInstall", { game: picked.display })}
+            </span>
+            <span className="text-[10.5px] font-bold uppercase tracking-[0.08em] text-muted-foreground">
+              {t("integration.optional")}
+            </span>
+          </div>
           {detecting ? (
-            <div className="flex items-center gap-2.5 rounded-xl bg-card px-3.5 py-3 text-[12.5px] text-muted-foreground">
+            <div className="flex items-center gap-2.5 py-1 text-[12.5px] text-muted-foreground">
               <Loader2 className="size-4 flex-none animate-spin text-primary" />
               <span>{t("setup.detecting", { game: picked.display })}</span>
             </div>
           ) : gamePath ? (
             <>
-              <div className="flex items-center gap-2.5 rounded-xl bg-card px-3.5 py-3 font-mono text-[12.5px] text-muted-foreground">
+              <div className="flex items-center gap-2.5 border-l-2 border-primary py-1 pl-3 font-mono text-[12.5px] text-foreground/80">
                 <Gamepad2 className="size-4 flex-none text-primary" />
                 <span className="flex-1 truncate" title={gamePath}>
                   {gamePath}
@@ -353,7 +461,7 @@ export default function Setup({ onComplete, game, games, firstRun }: SetupProps)
             </>
           ) : (
             <>
-              <p className="text-[12.5px] text-muted-foreground">
+              <p className="text-[13px] leading-relaxed text-foreground/85">
                 {t("setup.installNotFound")}
               </p>
               <button
@@ -375,9 +483,10 @@ export default function Setup({ onComplete, game, games, firstRun }: SetupProps)
         <Button
           className="h-12 w-full text-[14.5px]"
           disabled={busy}
-          onClick={() => void finish(chosen ?? "")}
+          onClick={() => (chosen ? void finish(chosen) : void choose())}
         >
-          {chosen ? t("setup.startBrowsing") : t("setup.detectAndStart")}
+          {!chosen && <FolderOpen className="size-4" />}
+          {chosen ? t("setup.startBrowsing") : t("setup.chooseGameFolder")}
         </Button>
       </div>
     </div>

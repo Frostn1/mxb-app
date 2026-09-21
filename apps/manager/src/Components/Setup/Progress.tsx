@@ -2,17 +2,13 @@ import { cn } from "@frost/shared/lib/utils";
 import { useT } from "@/i18n";
 
 interface ProgressProps {
-  /** How many steps this run of setup has — two on a single-title build, three otherwise. */
+  /** How many questions this setup run actually needs to ask. */
   total: number;
   /** Which one is on screen, counting from one. */
   current: number;
 }
 
-/**
- * Where you are in setup. Worth the row of pixels because the flow now asks for a Steam
- * sign-in in the middle of it: without a count, a step that opens the browser and waits
- * reads as the app having stopped rather than as one of three things being asked.
- */
+/** Where the player is in the short game, folder and integration setup flow. */
 export default function Progress({ total, current }: ProgressProps) {
   const t = useT();
   return (

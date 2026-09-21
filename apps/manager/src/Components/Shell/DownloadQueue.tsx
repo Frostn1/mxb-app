@@ -9,7 +9,8 @@
  * The rows themselves live in `Components/Downloads/LiveQueue` because the Downloads screen
  * shows the same queue, and the two must not drift.
  */
-import { Download } from "lucide-react";
+import { useState } from "react";
+import { ArrowRight, Download } from "lucide-react";
 import { useInstall } from "../../Context/Install";
 import { useT } from "@/i18n";
 import { displayName } from "@frost/shared/lib/mods";
@@ -21,9 +22,10 @@ import {
   progressOf,
 } from "../Downloads/LiveQueue";
 
-export default function DownloadQueue() {
+export default function DownloadQueue({ onOpenDownloads }: { onOpenDownloads: () => void }) {
   const t = useT();
   const { active, queued, cancel, promote } = useInstall();
+  const [open, setOpen] = useState(false);
 
   const installing = active.filter((a) => IN_PROGRESS.has(a.stage));
 
@@ -39,7 +41,7 @@ export default function DownloadQueue() {
   const total = installing.length + queued.length;
 
   return (
-    <Popover>
+    <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <button
           title={t("downloads.open")}
@@ -88,6 +90,18 @@ export default function DownloadQueue() {
             />
           ))}
         </div>
+
+        <button
+          type="button"
+          onClick={() => {
+            setOpen(false);
+            onOpenDownloads();
+          }}
+          className="flex w-full cursor-default items-center justify-between border-t border-white/[0.07] px-3.5 py-3 font-cond text-[11.5px] font-semibold text-muted-foreground transition-colors hover:bg-foreground/[0.035] hover:text-foreground"
+        >
+          {t("downloads.viewAll")}
+          <ArrowRight className="size-3.5" />
+        </button>
       </PopoverContent>
     </Popover>
   );

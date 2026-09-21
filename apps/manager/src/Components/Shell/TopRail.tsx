@@ -123,7 +123,7 @@ export default function TopRail({ view, plugins, onNavigate, leftRef, rightRef }
         {/* The server line, visible on every tab: the turn can come while you're elsewhere. */}
         <QueueBanner />
         <FrostmodBadge />
-        <DownloadQueue />
+        <DownloadQueue onOpenDownloads={() => onNavigate("downloads")} />
         <button
           onClick={() => onNavigate("settings")}
           title={t("nav.settings")}

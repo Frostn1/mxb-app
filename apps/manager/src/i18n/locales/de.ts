@@ -109,8 +109,12 @@ export const de: Translation = {
   "setup.tagline": "Mods durchsuchen, mit einem Klick installieren und direkt wieder aufs Motorrad.",
   "setup.modsFolder": "Ordner von {{game}}",
   "setup.autoDetect":
-    "{{app}} erkennt deinen Ordner {{hint}} automatisch. Du kannst ihn auch selbst auswählen.",
+    "{{hint}} wurde nicht automatisch gefunden. Wähle den {{game}}-Ordner mit deinen Mods und Profilen aus.",
+  "setup.required": "Erforderlich",
   "setup.chooseManually": "Ordner manuell auswählen…",
+  "setup.chooseGameFolder": "Spielordner auswählen…",
+  "setup.correctedModsFolder": "Du hast den Unterordner „mods“ ausgewählt. Wir verwenden den darüberliegenden {{game}}-Ordner.",
+  "setup.correctedProfilesFolder": "Du hast den Unterordner „profiles“ ausgewählt. Wir verwenden den darüberliegenden {{game}}-Ordner.",
   "setup.chooseDifferent": "Anderen Ordner auswählen…",
   "setup.gameInstall": "Installation von {{game}}",
   "setup.detecting": "Deine Installation von {{game}} wird gesucht…",
@@ -120,8 +124,7 @@ export const de: Translation = {
     "Deine {{game}}-Installation konnte nicht automatisch gefunden werden — sie liefert die 3D-Fahrervorschau. Wähle sie manuell aus oder lege sie später in den Einstellungen fest.",
   "setup.chooseInstallManually":
     "Installationsordner manuell auswählen…",
-  "setup.startBrowsing": "Mods entdecken",
-  "setup.detectAndStart": "Erkennen und loslegen",
+  "setup.startBrowsing": "Jetzt stöbern",
   "setup.pickModsFolder": "Wähle deinen Ordner von {{game}}",
   "setup.pickInstallFolder": "Wähle den Installationsordner von {{game}}",
   "setup.step": "Schritt {{current}} von {{total}}",
@@ -1645,6 +1648,7 @@ export const de: Translation = {
 
   "downloads.title": "Downloads",
   "downloads.open": "Download-Warteschlange anzeigen",
+  "downloads.viewAll": "Alle Downloads anzeigen",
   "downloads.preparing": "Wird vorbereitet…",
   "downloads.waiting": "Wartet",
   "downloads.cancel": "Diesen Download abbrechen",

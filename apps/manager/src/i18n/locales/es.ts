@@ -104,8 +104,12 @@ export const es: Translation = {
   "setup.tagline": "Explora mods, instálalos con un clic y vuelve a la moto enseguida.",
   "setup.modsFolder": "Carpeta de {{game}}",
   "setup.autoDetect":
-    "{{app}} detectará automáticamente tu carpeta {{hint}}. También puedes elegirla tú.",
+    "No encontramos {{hint}} automáticamente. Elige la carpeta de {{game}} que contiene tus mods y perfiles.",
+  "setup.required": "Obligatorio",
   "setup.chooseManually": "Elegir la carpeta manualmente…",
+  "setup.chooseGameFolder": "Elegir la carpeta del juego…",
+  "setup.correctedModsFolder": "Parece que elegiste la subcarpeta «mods», así que usaremos la carpeta de {{game}} que está encima.",
+  "setup.correctedProfilesFolder": "Parece que elegiste la subcarpeta «profiles», así que usaremos la carpeta de {{game}} que está encima.",
   "setup.chooseDifferent": "Elegir otra carpeta…",
   "setup.gameInstall": "Instalación de {{game}}",
   "setup.detecting": "Buscando tu instalación de {{game}}…",
@@ -115,8 +119,7 @@ export const es: Translation = {
     "No se pudo encontrar automáticamente tu instalación de {{game}} — es lo que alimenta la vista previa 3D del piloto. Elígela manualmente, o configúrala más tarde en Ajustes.",
   "setup.chooseInstallManually":
     "Elegir la carpeta de instalación manualmente…",
-  "setup.startBrowsing": "Empezar a explorar mods",
-  "setup.detectAndStart": "Detectar y empezar",
+  "setup.startBrowsing": "Empezar a explorar",
   "setup.pickModsFolder": "Selecciona tu carpeta de {{game}}",
   "setup.pickInstallFolder": "Selecciona la carpeta de instalación de {{game}}",
   "setup.step": "Paso {{current}} de {{total}}",
@@ -1634,6 +1637,7 @@ export const es: Translation = {
 
   "downloads.title": "Descargas",
   "downloads.open": "Mostrar la cola de descargas",
+  "downloads.viewAll": "Ver todas las descargas",
   "downloads.preparing": "Preparando…",
   "downloads.waiting": "En espera",
   "downloads.cancel": "Cancelar esta descarga",

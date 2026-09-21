@@ -95,6 +95,9 @@ export function FrostmodProvider({ children }: { children: ReactNode }) {
   const warnedFor = useRef<string | null>(null);
   const [status, setStatus] = useState<FrostmodStatus | null>(null);
   const [installing, setInstalling] = useState(false);
+  // React state does not update synchronously. This closes the small window where the
+  // explicit Enable action and the compatibility effect could both start an install.
+  const installFlight = useRef(false);
   const [checking, setChecking] = useState(false);
   const [statusError, setStatusError] = useState(false);
   const [installingRuntime, setInstallingRuntime] = useState(false);
@@ -244,6 +247,8 @@ export function FrostmodProvider({ children }: { children: ReactNode }) {
   }, [probe, t]);
 
   const install = useCallback(async () => {
+    if (installFlight.current) return;
+    installFlight.current = true;
     // Pressing an Install/Repair button is itself explicit consent. Remember it so a
     // manually installed component can receive future unattended compatibility fixes.
     rememberIntegrationChoice("enabled");
@@ -277,6 +282,7 @@ export function FrostmodProvider({ children }: { children: ReactNode }) {
       });
       toast.error(t("frostmod.installFailed"), { description: String(e) });
     } finally {
+      installFlight.current = false;
       setInstalling(false);
     }
   }, [refreshStatus, rememberIntegrationChoice, t]);

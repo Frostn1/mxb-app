@@ -106,8 +106,12 @@ export const fr: Translation = {
   "setup.tagline": "Parcourez les mods, installez-les en un clic et remontez vite en selle.",
   "setup.modsFolder": "Dossier {{game}}",
   "setup.autoDetect":
-    "{{app}} détectera automatiquement votre dossier {{hint}}. Vous pouvez aussi le choisir vous-même.",
+    "{{hint}} n'a pas été trouvé automatiquement. Choisissez le dossier {{game}} qui contient vos mods et profils.",
+  "setup.required": "Obligatoire",
   "setup.chooseManually": "Choisir le dossier manuellement…",
+  "setup.chooseGameFolder": "Choisir le dossier du jeu…",
+  "setup.correctedModsFolder": "Vous avez choisi le sous-dossier « mods ». Nous utiliserons le dossier {{game}} situé au-dessus.",
+  "setup.correctedProfilesFolder": "Vous avez choisi le sous-dossier « profiles ». Nous utiliserons le dossier {{game}} situé au-dessus.",
   "setup.chooseDifferent": "Choisir un autre dossier…",
   "setup.gameInstall": "Installation de {{game}}",
   "setup.detecting": "Recherche de votre installation de {{game}}…",
@@ -117,8 +121,7 @@ export const fr: Translation = {
     "Impossible de trouver automatiquement votre installation de {{game}} — elle alimente l'aperçu 3D du pilote. Choisissez-la manuellement, ou définissez-la plus tard dans les Réglages.",
   "setup.chooseInstallManually":
     "Choisir le dossier d'installation manuellement…",
-  "setup.startBrowsing": "Commencer à parcourir les mods",
-  "setup.detectAndStart": "Détecter et commencer",
+  "setup.startBrowsing": "Commencer à parcourir",
   "setup.pickModsFolder": "Sélectionnez votre dossier {{game}}",
   "setup.pickInstallFolder": "Sélectionnez le dossier d'installation de {{game}}",
   "setup.step": "Étape {{current}} sur {{total}}",
@@ -1637,6 +1640,7 @@ export const fr: Translation = {
 
   "downloads.title": "Téléchargements",
   "downloads.open": "Afficher la file de téléchargement",
+  "downloads.viewAll": "Voir tous les téléchargements",
   "downloads.preparing": "Préparation…",
   "downloads.waiting": "En attente",
   "downloads.cancel": "Annuler ce téléchargement",

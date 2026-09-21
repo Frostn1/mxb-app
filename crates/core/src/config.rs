@@ -123,6 +123,12 @@ pub struct AppConfig {
     /// touches a Steam-started game. It stays opt-in until that run happens.
     #[serde(default)]
     pub secure_content_inject: bool,
+    /// The player has completed folder setup at least once.
+    ///
+    /// Separate from this file existing: the startup gate claims an anonymous device token
+    /// before setup and persists it here. Treating that token-only file as completed setup
+    /// skips the game and Steam steps on a genuinely new install.
+    pub setup_complete: bool,
     /// The intro slideshow has been dismissed. Kept here rather than in the webview's
     /// `localStorage` so it survives that storage being cleared (WebView2 resets it on
     /// an app-data wipe, and an OS shutdown can kill the tray-resident process before
@@ -427,6 +433,7 @@ impl Default for AppConfig {
             beta_updates: false,
             auto_updates: true,
             secure_content_inject: false,
+            setup_complete: false,
             welcome_seen: false,
             tour_done: false,
             get_started_done: false,
@@ -490,6 +497,16 @@ pub const LAUNCH_AT_STARTUP_REV: u32 = 1;
 /// in memory is decided — and logged — again on every read.
 pub fn migrate(cfg: &mut AppConfig) -> bool {
     let mut changed = false;
+    // Every released config predating `setupComplete` belongs to a player who completed setup
+    // when it has a saved mods folder for any game. A token-only config created by the startup
+    // gate has no such folder and must remain a first run.
+    if !cfg.setup_complete
+        && (!cfg.mods_path.trim().is_empty()
+            || cfg.games.values().any(|paths| !paths.mods_path.trim().is_empty()))
+    {
+        cfg.setup_complete = true;
+        changed = true;
+    }
     // The one-shot described on `paint_sync_rev`. A config that never had the field is at
     // rev 0 too, and forcing an already-off setting off is a no-op, so this needs no way to
     // tell those two apart.
@@ -824,7 +841,7 @@ fn is_user_dir(dir: &Path) -> bool {
 /// handing FrostMod a mods folder that doesn't exist. So the climb is gated on the parent
 /// actually being the user folder; anything else is adopted as the mods root it is, which
 /// [`crate::library::mods_root`] then resolves.
-fn climb_out_of_mods(path: &str) -> Option<PathBuf> {
+pub fn normalize_selected_game_folder(path: &str) -> Option<(PathBuf, &'static str)> {
     let dir = Path::new(path.trim());
     if path.trim().is_empty() || !dir.is_dir() {
         return None;
@@ -833,10 +850,22 @@ fn climb_out_of_mods(path: &str) -> Option<PathBuf> {
     if is_user_dir(dir) || crate::library::resolve_child(dir, "mods").is_dir() {
         return None;
     }
-    if !crate::library::is_mods_tree(dir) {
-        return None;
+    let parent = dir.parent().filter(|p| is_user_dir(p))?;
+    let leaf = dir
+        .file_name()
+        .map(|name| name.to_string_lossy().to_ascii_lowercase())
+        .unwrap_or_default();
+
+    // A relocated mods tree is allowed to be named `mods` (or even `profiles`). Only
+    // climb when its parent is demonstrably the game's user folder. A real mods tree
+    // under that folder may also have a custom name, which the existing behavior keeps.
+    if leaf == "profiles" && !crate::library::is_mods_tree(dir) {
+        return Some((parent.to_path_buf(), "profiles-subfolder"));
     }
-    dir.parent().filter(|p| is_user_dir(p)).map(Path::to_path_buf)
+    if leaf == "mods" || crate::library::is_mods_tree(dir) {
+        return Some((parent.to_path_buf(), "mods-subfolder"));
+    }
+    None
 }
 
 /// The saved config, or one built on the spot when the MX Bikes folder sits where it
@@ -922,11 +951,12 @@ pub fn finalize(mut cfg: AppConfig) -> AppConfig {
     // Picked one level too deep — take the folder above `mods`, which is the one every
     // other path in the app is built from. Done here so it covers both ways in: first-run
     // setup (`create_config`) and Change… in Settings (`set_mods_path`).
-    if let Some(up) = climb_out_of_mods(&cfg.mods_path) {
+    if let Some((up, correction)) = normalize_selected_game_folder(&cfg.mods_path) {
         log::info!(
-            "{} folder was set to the mods folder ({}) — using the folder above it: {}",
+            "{} folder was set to a subfolder ({}, {}) — using the folder above it: {}",
             game.display,
             cfg.mods_path,
+            correction,
             up.display()
         );
         cfg.mods_path = up.to_string_lossy().into_owned();
@@ -1594,6 +1624,24 @@ mod tests {
         cfg.mods_path = game.join("mods").to_string_lossy().into_owned();
         let out = finalize(cfg);
         assert_eq!(Path::new(&out.mods_path), game);
+
+        // The sibling `profiles` folder is just as easy to select by mistake.
+        let mut cfg = AppConfig::default();
+        cfg.mods_path = game.join("profiles").to_string_lossy().into_owned();
+        let (normalized, reason) = normalize_selected_game_folder(&cfg.mods_path).unwrap();
+        assert_eq!(normalized, game);
+        assert_eq!(reason, "profiles-subfolder");
+        assert_eq!(Path::new(&finalize(cfg).mods_path), game);
+
+        // Case must not matter under Proton or on a case-sensitive macOS volume.
+        let upper = root.join("MX Bikes Upper");
+        std::fs::create_dir_all(upper.join("Profiles")).unwrap();
+        let (normalized, reason) = normalize_selected_game_folder(
+            &upper.join("Profiles").to_string_lossy(),
+        )
+        .unwrap();
+        assert_eq!(normalized, upper);
+        assert_eq!(reason, "profiles-subfolder");
 
         // A tree under any other name climbs too, as long as the folder above it is
         // really the game's — `profiles/` is what says so.

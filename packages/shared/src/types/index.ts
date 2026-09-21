@@ -126,6 +126,9 @@ export interface Config {
    * won't inject into a session it didn't start.
    */
   secureContentInject?: boolean;
+  /** Folder setup has been completed at least once. A device-token-only config is still a
+   * genuine first run and must show the full setup flow. */
+  setupComplete?: boolean;
   /** Intro slideshow already dismissed. Saved with the config (not in localStorage)
    *  so clearing the webview's storage doesn't replay the first-run flow. */
   welcomeSeen?: boolean;

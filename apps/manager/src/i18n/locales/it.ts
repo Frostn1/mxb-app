@@ -104,8 +104,12 @@ export const it: Translation = {
   "setup.tagline": "Sfoglia le mod, installale con un clic e torna subito in sella.",
   "setup.modsFolder": "Cartella di {{game}}",
   "setup.autoDetect":
-    "{{app}} rileverà automaticamente la tua cartella {{hint}}. Puoi anche sceglierla tu.",
+    "{{hint}} non è stata trovata automaticamente. Scegli la cartella di {{game}} che contiene mod e profili.",
+  "setup.required": "Obbligatoria",
   "setup.chooseManually": "Scegli la cartella manualmente…",
+  "setup.chooseGameFolder": "Scegli la cartella del gioco…",
+  "setup.correctedModsFolder": "Sembra che tu abbia scelto la sottocartella «mods», quindi useremo la cartella {{game}} superiore.",
+  "setup.correctedProfilesFolder": "Sembra che tu abbia scelto la sottocartella «profiles», quindi useremo la cartella {{game}} superiore.",
   "setup.chooseDifferent": "Scegli un'altra cartella…",
   "setup.gameInstall": "Installazione di {{game}}",
   "setup.detecting": "Ricerca dell'installazione di {{game}}…",
@@ -115,8 +119,7 @@ export const it: Translation = {
     "Non ho trovato automaticamente la tua installazione di {{game}} — serve per l'anteprima 3D del pilota. Scegliela manualmente, oppure impostala più tardi nelle Impostazioni.",
   "setup.chooseInstallManually":
     "Scegli manualmente la cartella d'installazione…",
-  "setup.startBrowsing": "Inizia a sfogliare le mod",
-  "setup.detectAndStart": "Rileva e inizia",
+  "setup.startBrowsing": "Inizia a esplorare",
   "setup.pickModsFolder": "Seleziona la tua cartella di {{game}}",
   "setup.pickInstallFolder": "Seleziona la cartella d'installazione di {{game}}",
   "setup.step": "Passaggio {{current}} di {{total}}",
@@ -1629,6 +1632,7 @@ export const it: Translation = {
 
   "downloads.title": "Download",
   "downloads.open": "Mostra la coda dei download",
+  "downloads.viewAll": "Vedi tutti i download",
   "downloads.preparing": "Preparazione…",
   "downloads.waiting": "In attesa",
   "downloads.cancel": "Annulla questo download",

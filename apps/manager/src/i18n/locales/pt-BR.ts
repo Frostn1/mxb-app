@@ -107,8 +107,12 @@ export const ptBR: Translation = {
   "setup.tagline": "Explore mods, instale com um clique e volte logo para a moto.",
   "setup.modsFolder": "Pasta do {{game}}",
   "setup.autoDetect":
-    "O {{app}} vai detectar sua pasta {{hint}} automaticamente. Você também pode escolher você mesmo.",
+    "Não encontramos {{hint}} automaticamente. Escolha a pasta do {{game}} que contém seus mods e perfis.",
+  "setup.required": "Obrigatória",
   "setup.chooseManually": "Escolher a pasta manualmente…",
+  "setup.chooseGameFolder": "Escolher a pasta do jogo…",
+  "setup.correctedModsFolder": "Parece que você escolheu a subpasta “mods”, então usaremos a pasta do {{game}} acima dela.",
+  "setup.correctedProfilesFolder": "Parece que você escolheu a subpasta “profiles”, então usaremos a pasta do {{game}} acima dela.",
   "setup.chooseDifferent": "Escolher outra pasta…",
   "setup.gameInstall": "Instalação do {{game}}",
   "setup.detecting": "Procurando sua instalação do {{game}}…",
@@ -118,8 +122,7 @@ export const ptBR: Translation = {
     "Não deu pra encontrar sua instalação do {{game}} automaticamente — é ela que alimenta a prévia 3D do piloto. Escolha manualmente, ou defina depois nas Configurações.",
   "setup.chooseInstallManually":
     "Escolher a pasta de instalação manualmente…",
-  "setup.startBrowsing": "Começar a explorar mods",
-  "setup.detectAndStart": "Detectar e começar",
+  "setup.startBrowsing": "Começar a explorar",
   "setup.pickModsFolder": "Selecione sua pasta do {{game}}",
   "setup.pickInstallFolder": "Selecione a pasta de instalação do {{game}}",
   "setup.step": "Passo {{current}} de {{total}}",
@@ -1628,6 +1631,7 @@ export const ptBR: Translation = {
 
   "downloads.title": "Downloads",
   "downloads.open": "Mostrar a fila de downloads",
+  "downloads.viewAll": "Ver todos os downloads",
   "downloads.preparing": "Preparando…",
   "downloads.waiting": "Aguardando",
   "downloads.cancel": "Cancelar este download",
