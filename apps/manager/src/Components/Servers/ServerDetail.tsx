@@ -389,7 +389,7 @@ const ServerDetail = ({
     return () => {
       cancelled = true;
     };
-  }, [track]);
+  }, [track, live?.name, server?.name]);
 
   if (!server) return null;
   const s = live ?? server;

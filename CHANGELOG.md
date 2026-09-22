@@ -1,10 +1,20 @@
 # Changelog
 
+## 2026-09-21 — v0.18.1 — Shop pictures and a fresh cache
+
+### Added
+- Settings now shows MX Bikes' generated track-texture cache and can clear it after
+  confirmation, reclaiming space without removing installed tracks or mods.
+
+### Fixed
+- Server cards and details now resolve MX Bikes Shop artwork from decorated server titles and
+  canonical round ids; stale no-image answers expire so the corrected artwork can appear.
+- On Windows, MXB Hub's anti-robot check keeps WebView2's real browser identity, so the visible
+  fallback no longer turns into a delayed 403 page.
+
 ## 2026-09-21 — v0.18.0 — Everything in one place
 
 ### Changed
-- On Windows, MXB Hub's anti-robot check now uses WebView2's real browser identity, so the
-  visible fallback no longer turns into a delayed 403 page.
 - The live look refresh now runs only on the game build it was built for. On any other build
   it stays out of the way, and everything else works as it always has.
 
