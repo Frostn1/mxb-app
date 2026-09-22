@@ -25,8 +25,12 @@ use std::path::{Path, PathBuf};
 /// same id, which retires every row written by the old way. Slug lookup on mxb-mods made
 /// version 2: version 1 searched, and its misses are not this version's misses. Version 3
 /// stopped a stock track being matched to a mod that merely shares its address, which retires
-/// every row that mistake wrote — `forest` among them.
-pub const VERSION: u32 = 3;
+/// every row that mistake wrote — `forest` among them. Version 4 supplements an mxb-mods hit
+/// with Shop artwork, version 5 uses a server's visible pack title for secured tracks whose
+/// internal folder name does not resemble the Shop product, version 6 canonicalizes round ids
+/// such as `RD01` to match Shop titles that use `RD1`, and version 7 tries both zero-padded
+/// and unpadded round spellings because the Shop uses both forms.
+pub const VERSION: u32 = 7;
 
 /// How long a found track is trusted. A page does not move, and if it ever does the worst
 /// case is a dead link on one panel until the row ages out.

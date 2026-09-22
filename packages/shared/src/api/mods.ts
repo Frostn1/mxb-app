@@ -3744,8 +3744,8 @@ export interface TrackGuess {
  * Work out which track a server means. The server publishes an internal id and nothing else,
  * which is not a product title and not something anyone can search for.
  */
-export function guessServerTrack(track: string): Promise<TrackGuess> {
-  return invoke<TrackGuess>("guess_server_track", { track });
+export function guessServerTrack(track: string, hint?: string): Promise<TrackGuess> {
+  return invoke<TrackGuess>("guess_server_track", { track, hint });
 }
 
 /** Card art for the server browser: track id to its preview, for every id the player has
