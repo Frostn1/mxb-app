@@ -34,8 +34,9 @@ pub const HUB_SITE: Site = Site {
     base: HUB_BASE,
     domain: "shop.mxb-hub.com",
     file: "hub_session.json",
-    // The clearance window is opened wearing this exact string, so the browser and the HTTP
-    // client remain the same visitor when the cookies are handed across.
+    // WKWebView receives this matching identity before it earns a clearance. WebView2 keeps
+    // its own honest identity because replacing only its User-Agent leaves Edge client hints
+    // behind, which SiteGround rejects as a forged browser.
     ua: HUB_UA,
     // Purchased tracks run to hundreds of megabytes; `install::download` streams with this
     // client, so the ceiling has to cover a whole transfer rather than a page load.
