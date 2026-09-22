@@ -379,7 +379,7 @@ const ServerDetail = ({
     }
     let cancelled = false;
     setGuessing(true);
-    guessServerTrack(track)
+    guessServerTrack(track, live?.name ?? server?.name)
       .then((g) => {
         rememberGuess(track, g);
         if (!cancelled) setGuess(g);
@@ -389,7 +389,7 @@ const ServerDetail = ({
     return () => {
       cancelled = true;
     };
-  }, [track]);
+  }, [track, live?.name, server?.name]);
 
   if (!server) return null;
   const s = live ?? server;

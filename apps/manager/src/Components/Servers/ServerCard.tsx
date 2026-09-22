@@ -3,7 +3,6 @@ import {
   Mountain,
   Users,
   Lock,
-  Play,
   Loader2,
   Wifi,
   Copy,
@@ -296,7 +295,7 @@ const ServerCard = memo(function ServerCard({
               }}
               title={s.joinable ? t("serverBrowser.join") : t("serverBrowser.notJoinable")}
             >
-              {joining ? <Loader2 className="size-3.5 animate-spin" /> : <Play className="size-3.5" />}
+              {joining && <Loader2 className="size-3.5 animate-spin" />}
               {t("serverBrowser.join")}
             </CardButton>
           )}

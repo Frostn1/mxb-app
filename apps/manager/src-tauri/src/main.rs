@@ -26,6 +26,7 @@ mod frostmod_manage;
 pub(crate) use mxb_core::game;
 mod fileinfo;
 mod gameproc;
+mod gamecache;
 mod hub_clearance;
 mod hub_session;
 mod identity;
@@ -1606,6 +1607,23 @@ fn get_mods_root(app: tauri::AppHandle) -> ModsRootInfo {
             && root == std::path::Path::new(cfg.mods_path.trim()),
         path: root.to_string_lossy().into_owned(),
     }
+}
+
+/// The cache holds generated track textures. It can become very large, but deleting it is safe:
+/// MX Bikes re-creates only what the player rides next.
+#[tauri::command]
+fn game_cache_info(app: tauri::AppHandle) -> Result<gamecache::CacheInfo, String> {
+    let cfg = config::load(&app).unwrap_or_default();
+    gamecache::inspect(&library::mods_root(&cfg.mods_path))
+}
+
+#[tauri::command]
+fn clear_game_cache(app: tauri::AppHandle) -> Result<gamecache::CacheInfo, String> {
+    if gameproc::is_game_running() {
+        return Err("Close MX Bikes before clearing its cache.".into());
+    }
+    let cfg = config::load(&app).unwrap_or_default();
+    gamecache::clear(&library::mods_root(&cfg.mods_path))
 }
 
 /// Whether this build can lock content with mxbsecure — the packer is the gitignored
@@ -3925,7 +3943,11 @@ pub struct TrackGuess {
 /// Three catalogues, and mxb-mods.com goes first because that is where tracks come from —
 /// it holds around 1,600 of them and asks nothing for them. The shop and the Hub follow.
 #[tauri::command]
-async fn guess_server_track(app: tauri::AppHandle, track: String) -> Result<TrackGuess, String> {
+async fn guess_server_track(
+    app: tauri::AppHandle,
+    track: String,
+    hint: Option<String>,
+) -> Result<TrackGuess, String> {
     let id = track.trim().to_string();
     let mut guess = TrackGuess { id: id.clone(), ..Default::default() };
     if id.is_empty() {
@@ -3995,6 +4017,23 @@ async fn guess_server_track(app: tauri::AppHandle, track: String) -> Result<Trac
         return Ok(guess);
     }
 
+    // A server's internal id is often its extracted folder (`2026_ARLMX_RD05_BUCHANAN_Pro`),
+    // while its visible name carries the actual Shop product (`2026 ARL MX PRO Rotation 1`).
+    // Resolve that title first when it is an unambiguous product-name match; otherwise the
+    // regular id-based lookups below still decide.
+    if let Some(hint) = hint.as_deref().filter(|hint| !hint.trim().is_empty()) {
+        if let Some(hit) = shop_track_from_server_name(&app, hint).await {
+            return Ok(learned(&app, shop_guess(guess, hit, true)));
+        }
+    }
+
+    // The Shop titles its rounds without the server's folder suffix or zero padding:
+    // `2026 ARLMX RD1 – PALA` versus `2026_ARLMX_RD01_PALA_Pro`. This is stronger than a
+    // generic title hint because the course and round must both occur in the internal id.
+    if let Some(hit) = shop_track_from_server_id(&app, &id).await {
+        return Ok(learned(&app, shop_guess(guess, hit, true)));
+    }
+
     // The id is snake_case and a product title is not, so the underscores become spaces
     // before any catalogue sees it.
     let words = id.replace('_', " ");
@@ -4019,7 +4058,7 @@ async fn guess_server_track(app: tauri::AppHandle, track: String) -> Result<Trac
         guess.product_url = hit.link;
         guess.product_image = hit.image.unwrap_or_default();
         guess.exact = true;
-        return Ok(learned(&app, guess));
+        return Ok(learned(&app, with_shop_track_art(&app, &id, &words, guess).await));
     }
 
     // mxb-mods.com. Scoped to its Tracks category: an unscoped search for `forest` comes
@@ -4035,7 +4074,7 @@ async fn guess_server_track(app: tauri::AppHandle, track: String) -> Result<Trac
             // `exact` describes the name fold, and it is already true for something found on
             // disk — a catalogue's opinion must not downgrade that to "we think".
             guess.exact = guess.exact || exact;
-            return Ok(learned(&app, guess));
+            return Ok(learned(&app, with_shop_track_art(&app, &id, &words, guess).await));
         }
     }
 
@@ -4396,6 +4435,175 @@ fn shop_guess(mut guess: TrackGuess, hit: mods::shop_catalog::ShopMod, exact: bo
     guess
 }
 
+/// Keep mxb-mods as the source and install route for a free track, but borrow the Shop's
+/// artwork when it knows the same track. Some creators publish a bare mxb-mods post beside the
+/// paid or secured release, so returning as soon as the first catalogue matched left server rows
+/// with no picture even though the Shop had the one players recognise.
+async fn with_shop_track_art(
+    app: &tauri::AppHandle,
+    id: &str,
+    words: &str,
+    mut guess: TrackGuess,
+) -> TrackGuess {
+    let image = mods::shop_catalog::match_products(app, &[id.to_string()])
+        .await
+        .ok()
+        .and_then(|hits| hits.into_iter().flatten().next())
+        .filter(|hit| sells_tracks(&hit.category_names))
+        .and_then(|hit| hit.image);
+
+    let image = match image {
+        Some(image) => Some(image),
+        None => mods::shop_catalog::search(
+            app,
+            words,
+            None,
+            1,
+            mods::shop_catalog::ShopSort::default(),
+            false,
+        )
+        .await
+        .ok()
+        .and_then(|page| {
+            best_track_hit(&id, page.items, |m| m.title.clone(), |m| {
+                sells_tracks(&m.category_names)
+            })
+            .and_then(|(hit, _)| hit.image)
+        }),
+    };
+
+    if let Some(image) = image {
+        guess.product_image = image;
+    }
+    guess
+}
+
+/// Find the Shop product named plainly in a server title.
+///
+/// Operators usually bracket the actual pack title with decoration such as
+/// `12 | OPEN OEM | 2026 ARL MX PRO Rotation 1 | CBRSERVERS.COM`. The Shop search is an
+/// all-words search, so each `|`-delimited segment is queried on its own. A result is accepted
+/// only when its complete compact title occurs in the full server name.
+async fn shop_track_from_server_name(
+    app: &tauri::AppHandle,
+    server_name: &str,
+) -> Option<mods::shop_catalog::ShopMod> {
+    let compact = compact_track_name(server_name);
+    if compact.is_empty() {
+        return None;
+    }
+    for query in server_name.split('|').map(str::trim).filter(|part| !part.is_empty()) {
+        let Ok(page) = mods::shop_catalog::search(
+            app,
+            query,
+            None,
+            1,
+            mods::shop_catalog::ShopSort::default(),
+            false,
+        )
+        .await
+        else {
+            continue;
+        };
+        if let Some(hit) = page.items.into_iter().find(|item| {
+            sells_tracks(&item.category_names) && title_in_server_name(&compact, &item.title)
+        }) {
+            return Some(hit);
+        }
+    }
+    None
+}
+
+fn compact_track_name(value: &str) -> String {
+    value
+        .chars()
+        .filter(|ch| ch.is_alphanumeric())
+        .flat_map(char::to_lowercase)
+        .collect()
+}
+
+fn title_in_server_name(compact_server_name: &str, product_title: &str) -> bool {
+    let compact_title = compact_track_name(product_title);
+    !compact_title.is_empty() && compact_server_name.contains(&compact_title)
+}
+
+/// Find an exact Shop title expressed by a server's internal folder id.
+async fn shop_track_from_server_id(
+    app: &tauri::AppHandle,
+    id: &str,
+) -> Option<mods::shop_catalog::ShopMod> {
+    let queries = shop_queries_for_server_id(id);
+    if queries.is_empty() {
+        return None;
+    }
+    let canonical_id = canonical_server_track_name(id);
+    for query in queries {
+        let Ok(page) = mods::shop_catalog::search(
+            app,
+            &query,
+            None,
+            1,
+            mods::shop_catalog::ShopSort::default(),
+            false,
+        )
+        .await
+        else {
+            continue;
+        };
+        if let Some(hit) = page.items.into_iter().find(|item| {
+            sells_tracks(&item.category_names)
+                && !canonical_server_track_name(&item.title).is_empty()
+                && canonical_id.contains(&canonical_server_track_name(&item.title))
+        }) {
+            return Some(hit);
+        }
+    }
+    None
+}
+
+fn shop_queries_for_server_id(id: &str) -> Vec<String> {
+    let mut words: Vec<String> = fold_name(id)
+        .split_whitespace()
+        .map(str::to_string)
+        .collect();
+    // `Pro` describes the server's class, not the product name; keeping it makes the Shop's
+    // all-words search reject the actual course page.
+    if words.last().is_some_and(|word| word == "pro") {
+        words.pop();
+    }
+    if words.is_empty() {
+        return Vec::new();
+    }
+    let exact = words.join(" ");
+    let normalized = words
+        .iter()
+        .map(|word| canonical_track_token(word))
+        .collect::<Vec<_>>()
+        .join(" ");
+    if normalized == exact {
+        vec![exact]
+    } else {
+        vec![exact, normalized]
+    }
+}
+
+fn canonical_server_track_name(value: &str) -> String {
+    fold_name(value)
+        .split_whitespace()
+        .map(canonical_track_token)
+        .collect()
+}
+
+fn canonical_track_token(token: &str) -> String {
+    let Some(number) = token.strip_prefix("rd").filter(|number| !number.is_empty()) else {
+        return token.to_string();
+    };
+    let Ok(number) = number.parse::<u32>() else {
+        return token.to_string();
+    };
+    format!("rd{number}")
+}
+
 /// The best answer a catalogue page has to a track id, and whether it is a match rather than
 /// a resemblance.
 ///
@@ -4453,6 +4661,37 @@ fn name_answers(id: &str, title: &str) -> Option<bool> {
 fn sells_tracks(categories: &[String]) -> bool {
     categories.is_empty()
         || categories.iter().any(|c| c.to_ascii_lowercase().contains("track"))
+}
+
+#[cfg(test)]
+mod server_title_art_tests {
+    use super::{
+        canonical_server_track_name, compact_track_name, shop_queries_for_server_id,
+        title_in_server_name,
+    };
+
+    #[test]
+    fn finds_a_complete_shop_title_inside_a_decorated_server_name() {
+        let server_name =
+            compact_track_name("12 | OPEN OEM | 2026 ARL MX PRO Rotation 1 | CBRSERVERS.COM");
+        assert!(title_in_server_name(&server_name, "2026 ARL MX PRO"));
+        assert!(!title_in_server_name(&server_name, "2026 ARL MX PRO X"));
+    }
+
+    #[test]
+    fn matches_a_shop_round_to_its_server_folder_id() {
+        let id = "2026_ARLMX_RD01_PALA_Pro";
+        assert_eq!(
+            shop_queries_for_server_id(id),
+            ["2026 arlmx rd01 pala", "2026 arlmx rd1 pala"]
+        );
+        assert!(canonical_server_track_name(id).contains(&canonical_server_track_name(
+            "2026 ARLMX RD1 - PALA"
+        )));
+        assert!(!canonical_server_track_name(id).contains(&canonical_server_track_name(
+            "2026 ARLMX RD2 - RANCHO CORDOVA"
+        )));
+    }
 }
 
 // Lowercase and reduce everything that isn't alphanumeric to a single space, so an internal
@@ -7496,6 +7735,8 @@ fn main() {
             detect_game_path,
             count_profiles_in,
             get_mods_root,
+            game_cache_info,
+            clear_game_cache,
             set_run_in_background,
             set_analytics_enabled,
             track_event,
