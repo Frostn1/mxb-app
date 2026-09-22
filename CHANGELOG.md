@@ -73,6 +73,8 @@
   layouts, and a bike lists the model swaps, liveries and sounds that came with it.
 
 ### Fixed
+- Server cards now resolve MX Bikes Shop artwork from both decorated server titles and canonical
+  round ids; Join buttons no longer show a play-arrow icon.
 - Game Integration now asks for the game install folder during setup when it cannot be found,
   then enables itself without sending you away to Settings.
 - The OEM bike pack now chooses an actual full-pack mirror instead of trying to install its
