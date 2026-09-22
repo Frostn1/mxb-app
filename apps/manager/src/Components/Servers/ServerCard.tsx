@@ -1,4 +1,4 @@
-import { memo } from "react";
+import { memo, useState } from "react";
 import {
   Mountain,
   Users,
@@ -14,6 +14,8 @@ import {
 } from "lucide-react";
 import type { CatalogTrack, MasterServer } from "@frost/shared/api/mods";
 import { Badge } from "@frost/shared/Components/ui/badge";
+import CachedImg from "@frost/shared/Components/ui/cached-img";
+import { GRID_THUMB_WIDTH, isCacheableImage } from "@frost/shared/lib/imgcache";
 import { cn } from "@frost/shared/lib/utils";
 import { useI18n } from "@/i18n";
 import { formatPrice, openShopUrl } from "../../api/shop";
@@ -85,6 +87,8 @@ const ServerCard = memo(function ServerCard({
   // The player's own copy wins; a track they do NOT have shows what it looks like, from
   // the store. Never the other way round — that is a guess at a name match.
   const picture = art || (missing ? product?.image : null);
+  const [unavailablePicture, setUnavailablePicture] = useState<string | null>(null);
+  const shownPicture = picture === unavailablePicture ? null : picture;
   const free = missing && product?.source === "mods" && !!product.slug;
   const sold = missing && product?.source === "shop" ? product : null;
   const price = sold?.price;
@@ -105,14 +109,27 @@ const ServerCard = memo(function ServerCard({
       )}
     >
       <div className="relative aspect-video overflow-hidden bg-gradient-to-br from-[#3a3f45] to-[#20242a]">
-        {picture ? (
-          <img
-            src={picture}
-            alt={s.track}
-            decoding="async"
-            loading="lazy"
-            className="size-full object-cover"
-          />
+        {shownPicture ? (
+          isCacheableImage(shownPicture) ? (
+            <CachedImg
+              src={shownPicture}
+              width={GRID_THUMB_WIDTH}
+              alt={s.track}
+              decoding="async"
+              loading="lazy"
+              onUnavailable={() => setUnavailablePicture(shownPicture)}
+              className="size-full object-cover"
+            />
+          ) : (
+            <img
+              src={shownPicture}
+              alt={s.track}
+              decoding="async"
+              loading="lazy"
+              onError={() => setUnavailablePicture(shownPicture)}
+              className="size-full object-cover"
+            />
+          )
         ) : (
           <div className="grid size-full place-items-center text-foreground/20">
             <Mountain className="size-8" strokeWidth={1.5} />

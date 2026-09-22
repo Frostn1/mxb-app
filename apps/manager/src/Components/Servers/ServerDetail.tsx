@@ -21,7 +21,9 @@ import { open as openUrl } from "@tauri-apps/plugin-shell";
 import { toast } from "sonner";
 import { Button } from "@frost/shared/Components/ui/button";
 import { Badge } from "@frost/shared/Components/ui/badge";
+import CachedImg from "@frost/shared/Components/ui/cached-img";
 import { Dialog, DialogContent, DialogTitle } from "@frost/shared/Components/ui/dialog";
+import { DESCRIPTION_IMAGE_WIDTH, isCacheableImage } from "@frost/shared/lib/imgcache";
 import { cn } from "@frost/shared/lib/utils";
 import { useI18n, useT } from "@/i18n";
 import { copyText } from "@/lib/clipboard";
@@ -330,6 +332,7 @@ const ServerDetail = ({
   const [guess, setGuess] = useState<TrackGuess | null>(null);
   const [guessing, setGuessing] = useState(false);
   const [waiting, setWaiting] = useState(0);
+  const [unavailableHero, setUnavailableHero] = useState<string | null>(null);
 
   const address = server?.address ?? "";
   const name = server?.name ?? "";
@@ -408,6 +411,7 @@ const ServerDetail = ({
     (missing ? product?.image : null) ||
     guess?.preview ||
     (guess?.installed ? "" : guess?.productImage);
+  const shownHero = hero === unavailableHero ? null : hero;
 
   // The same four-way decision the tile makes, so a server offers the same thing whichever
   // way it is being looked at.
@@ -424,8 +428,25 @@ const ServerDetail = ({
   return (
     <div className={cn("flex min-h-0 flex-col", className)}>
       <div className="relative aspect-[16/6] min-h-[132px] w-full shrink-0 overflow-hidden bg-gradient-to-br from-[#3a3f45] to-[#20242a]">
-        {hero ? (
-          <img src={hero} alt="" decoding="async" className="size-full object-cover" />
+        {shownHero ? (
+          isCacheableImage(shownHero) ? (
+            <CachedImg
+              src={shownHero}
+              width={DESCRIPTION_IMAGE_WIDTH}
+              alt=""
+              decoding="async"
+              onUnavailable={() => setUnavailableHero(shownHero)}
+              className="size-full object-cover"
+            />
+          ) : (
+            <img
+              src={shownHero}
+              alt=""
+              decoding="async"
+              onError={() => setUnavailableHero(shownHero)}
+              className="size-full object-cover"
+            />
+          )
         ) : (
           <div className="grid size-full place-items-center text-foreground/20">
             <Mountain className="size-10" strokeWidth={1.5} />

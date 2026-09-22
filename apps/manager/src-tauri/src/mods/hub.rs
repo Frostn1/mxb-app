@@ -29,6 +29,8 @@ use std::time::{Duration, Instant};
 
 /// Matches `HUB_PAGE_SIZE` in `src/api/hub.ts`.
 pub const PER_PAGE: u32 = 24;
+const CATEGORY_TTL: Duration = Duration::from_secs(10 * 60);
+static CATEGORY_CACHE: Mutex<Option<(Instant, Vec<HubCategory>)>> = Mutex::new(None);
 
 // ───────────────────────────────── what we hand out ─────────────────────────────────
 
@@ -414,6 +416,74 @@ pub async fn search(
     })
 }
 
+pub async fn search_in_browser(
+    app: &tauri::AppHandle,
+    query: &str,
+    category_ids: &[u64],
+    page: u32,
+    sort: HubSort,
+    on_sale_only: bool,
+) -> anyhow::Result<HubPage> {
+    let page = page.max(1);
+    let (orderby, order) = sort.params();
+    let mut url = reqwest::Url::parse(&store_api("products"))?;
+    {
+        let mut params = url.query_pairs_mut();
+        params.append_pair("per_page", &PER_PAGE.to_string());
+        params.append_pair("page", &page.to_string());
+        params.append_pair("orderby", orderby);
+        params.append_pair("order", order);
+        if !query.trim().is_empty() {
+            params.append_pair("search", query.trim());
+        }
+        if let Some(categories) = category_filter(category_ids) {
+            params.append_pair("category", &categories);
+            params.append_pair("category_operator", "in");
+        }
+        if on_sale_only {
+            params.append_pair("on_sale", "true");
+        }
+    }
+    let response = crate::hub_clearance::get(app, url.as_str()).await?;
+    if response.status == 400 {
+        return Ok(HubPage {
+            items: vec![],
+            total: 0,
+            has_more: false,
+            currency: "USD".into(),
+        });
+    }
+    if !(200..300).contains(&response.status) {
+        anyhow::bail!("MXB Hub answered {} for the catalog", response.status);
+    }
+    let total = response
+        .headers
+        .get("x-wp-total")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0);
+    let total_pages = response
+        .headers
+        .get("x-wp-totalpages")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0);
+    let products: Vec<ApiProduct> = serde_json::from_str(&response.body)?;
+    let currency = products
+        .first()
+        .map(|p| p.prices.currency_code.clone())
+        .filter(|c| !c.is_empty())
+        .unwrap_or_else(|| "USD".into());
+    let mut items: Vec<HubMod> = products.iter().map(map_product).collect();
+    if let Ok(tree) = categories_in_browser(app).await {
+        apply_authors(&mut items, &tree);
+    }
+    Ok(HubPage {
+        items,
+        total,
+        has_more: page < total_pages,
+        currency,
+    })
+}
+
 fn category_filter(ids: &[u64]) -> Option<String> {
     (!ids.is_empty()).then(|| ids.iter().map(u64::to_string).collect::<Vec<_>>().join(","))
 }
@@ -447,6 +517,33 @@ pub async fn detail(id: u64) -> anyhow::Result<HubModDetail> {
         }
     }
 
+    Ok(HubModDetail {
+        item,
+        description_html: sanitize_html(&product.description),
+        images,
+        summary: sanitize_html(&product.short_description),
+    })
+}
+
+pub async fn detail_in_browser(app: &tauri::AppHandle, id: u64) -> anyhow::Result<HubModDetail> {
+    let response = crate::hub_clearance::get(app, &store_api(&format!("products/{id}"))).await?;
+    if !(200..300).contains(&response.status) {
+        anyhow::bail!("MXB Hub answered {} for product {id}", response.status);
+    }
+    let product: ApiProduct = serde_json::from_str(&response.body)?;
+    let mut item = map_product(&product);
+    if let Ok(tree) = categories_in_browser(app).await {
+        apply_authors(std::slice::from_mut(&mut item), &tree);
+    }
+    let mut images = Vec::new();
+    for img in &product.images {
+        let Some(url) = safe_image_url(&img.src).or_else(|| safe_image_url(&img.thumbnail)) else {
+            continue;
+        };
+        if !images.contains(&url) {
+            images.push(url);
+        }
+    }
     Ok(HubModDetail {
         item,
         description_html: sanitize_html(&product.description),
@@ -490,13 +587,8 @@ pub async fn by_slugs(slugs: &[String]) -> anyhow::Result<Vec<HubMod>> {
 /// Cached for the session with a short TTL: the list is 99 rows that change when a creator is
 /// added, and the filter row asks for it on every mount.
 pub async fn categories() -> anyhow::Result<Vec<HubCategory>> {
-    const TTL: Duration = Duration::from_secs(10 * 60);
-    static CACHE: Mutex<Option<(Instant, Vec<HubCategory>)>> = Mutex::new(None);
-
-    if let Some((at, cached)) = CACHE.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
-        if at.elapsed() < TTL {
-            return Ok(cached.clone());
-        }
+    if let Some(cached) = cached_categories() {
+        return Ok(cached);
     }
 
     let resp = client()?
@@ -513,8 +605,38 @@ pub async fn categories() -> anyhow::Result<Vec<HubCategory>> {
     let raw: Vec<ApiCategory> = resp.json().await?;
     let tree = flatten(&raw);
 
-    *CACHE.lock().unwrap_or_else(|e| e.into_inner()) = Some((Instant::now(), tree.clone()));
+    cache_categories(&tree);
     Ok(tree)
+}
+
+pub async fn categories_in_browser(app: &tauri::AppHandle) -> anyhow::Result<Vec<HubCategory>> {
+    if let Some(cached) = cached_categories() {
+        return Ok(cached);
+    }
+    let mut url = reqwest::Url::parse(&store_api("products/categories"))?;
+    url.query_pairs_mut().append_pair("per_page", "100");
+    let response = crate::hub_clearance::get(app, url.as_str()).await?;
+    if !(200..300).contains(&response.status) {
+        anyhow::bail!("MXB Hub answered {} for categories", response.status);
+    }
+    let raw: Vec<ApiCategory> = serde_json::from_str(&response.body)?;
+    let tree = flatten(&raw);
+    cache_categories(&tree);
+    Ok(tree)
+}
+
+fn cached_categories() -> Option<Vec<HubCategory>> {
+    CATEGORY_CACHE
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .as_ref()
+        .filter(|(at, _)| at.elapsed() < CATEGORY_TTL)
+        .map(|(_, cached)| cached.clone())
+}
+
+fn cache_categories(tree: &[HubCategory]) {
+    *CATEGORY_CACHE.lock().unwrap_or_else(|e| e.into_inner()) =
+        Some((Instant::now(), tree.to_vec()));
 }
 
 // ───────────────────────────────── mapping ─────────────────────────────────
@@ -653,6 +775,10 @@ async fn fill_authors(items: &mut [HubMod]) {
     let Ok(tree) = categories().await else {
         return;
     };
+    apply_authors(items, &tree);
+}
+
+fn apply_authors(items: &mut [HubMod], tree: &[HubCategory]) {
     let Some(root) = tree.iter().find(|c| c.slug == CREATORS_SLUG) else {
         return;
     };

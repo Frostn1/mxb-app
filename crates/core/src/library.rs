@@ -431,12 +431,23 @@ fn is_pkz_like(p: &Path) -> bool {
 
 pub fn strip_ext(name: &str) -> String {
     let lower = name.to_ascii_lowercase();
-    for ext in [".pkz", ".pnt", ".zip"] {
+    for ext in [".mxbsecure", ".pkz", ".pnt", ".zip"] {
         if lower.ends_with(ext) {
             return name[..name.len() - ext.len()].to_string();
         }
     }
     name.to_string()
+}
+
+#[cfg(test)]
+mod archive_name_tests {
+    use super::strip_ext;
+
+    #[test]
+    fn protected_archives_match_by_their_asset_name() {
+        assert_eq!(strip_ext("Walnut.mxbsecure"), "Walnut");
+        assert_eq!(strip_ext("Walnut.MXBSECURE"), "Walnut");
+    }
 }
 
 fn rel_folder(base: &Path, path: &Path) -> String {

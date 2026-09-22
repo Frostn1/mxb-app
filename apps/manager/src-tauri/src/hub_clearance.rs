@@ -31,6 +31,29 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
 
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BrowserResponse {
+    pub status: u16,
+    pub headers: std::collections::HashMap<String, String>,
+    pub body: String,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase", tag = "state")]
+enum BrowserResult {
+    #[serde(rename = "pending")]
+    Pending,
+    #[serde(rename = "done")]
+    Done {
+        status: u16,
+        headers: std::collections::HashMap<String, String>,
+        body: String,
+    },
+    #[serde(rename = "error")]
+    Error { message: String },
+}
+
 /// The window's label. Transient — it must be destroyed on close, never parked in the tray,
 /// or its label stays registered and the next handshake silently cannot build one.
 pub const WINDOW: &str = "hub-clearance";
@@ -58,6 +81,7 @@ const ASSIST_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 const PROBE_TIMEOUT: Duration = Duration::from_secs(10);
 
 const POLL: Duration = Duration::from_millis(500);
+const MAX_BROWSER_BODY: usize = 8 * 1024 * 1024;
 
 /// How long to let the page settle before asking the store anything. Probing instantly only
 /// spends a request confirming what we already know — we are here because we were refused.
@@ -177,6 +201,180 @@ pub async fn earn(app: &AppHandle) -> anyhow::Result<()> {
             Err(e)
         }
     }
+}
+
+/// Read a protected Hub URL in the browser identity that answered the challenge.
+///
+/// This is the Windows fallback. WebView2 must keep its native Edge identity (overriding only
+/// its UA leaves Edge client hints behind), and consequently its clearance must not be replayed
+/// by the Chrome-shaped reqwest client. The request stays in WebView2 and its result comes back
+/// through the native execute-script callback. The remote page receives no Tauri IPC capability.
+pub async fn get(app: &AppHandle, url: &str) -> anyhow::Result<BrowserResponse> {
+    if !browser_target_allowed(url) {
+        anyhow::bail!("refusing to read a non-Hub URL in the Hub browser");
+    }
+    static LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+    let _guard = LOCK.lock().await;
+    let _cleanup = WindowCleanup(app.clone());
+
+    let outcome = async {
+        close_and_settle(app).await;
+        if let Some(response) = browser_attempt(app, url, Mode::Hidden).await? {
+            return Ok(response);
+        }
+        close_and_settle(app).await;
+        browser_attempt(app, url, Mode::Visible)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!(STILL_REFUSED))
+    }
+    .await;
+    close_and_settle(app).await;
+    outcome
+}
+
+fn browser_target_allowed(url: &str) -> bool {
+    reqwest::Url::parse(url).is_ok_and(|url| {
+        url.scheme() == "https"
+            && url.host_str() == Some(HUB_SITE.domain)
+            && url.port_or_known_default() == Some(443)
+            && url.username().is_empty()
+            && url.password().is_none()
+    })
+}
+
+struct WindowCleanup(AppHandle);
+
+impl Drop for WindowCleanup {
+    fn drop(&mut self) {
+        close(&self.0);
+    }
+}
+
+async fn browser_attempt(
+    app: &AppHandle,
+    target: &str,
+    mode: Mode,
+) -> anyhow::Result<Option<BrowserResponse>> {
+    let url: tauri::Url = challenge_url().parse()?;
+    let mut builder = WebviewWindowBuilder::new(app, WINDOW, WebviewUrl::External(url))
+        .title(if mode.visible() {
+            "MXB Hub — please finish the robot check"
+        } else {
+            "MXB Hub"
+        })
+        .visible(mode.visible())
+        .decorations(mode.visible())
+        .focused(mode.visible())
+        .skip_taskbar(!mode.visible());
+    builder = if mode.visible() {
+        builder.inner_size(520.0, 760.0).center()
+    } else {
+        builder.inner_size(1024.0, 768.0).position(-32000.0, -32000.0)
+    };
+    let window = builder.build()?;
+
+    let target = serde_json::to_string(target)?;
+    let script = format!(
+        r#"(() => {{
+          const target = {target};
+          const key = "__mxbAppHubFetch";
+          if (!window[key] || window[key].target !== target) {{
+            window[key] = {{ state: "pending", target }};
+            (async () => {{
+              try {{
+                const response = await fetch(target, {{ credentials: "include", cache: "no-store" }});
+                const declared = Number(response.headers.get("content-length") || "0");
+                if (declared > {MAX_BROWSER_BODY}) throw new Error("response body is too large");
+                const reader = response.body && response.body.getReader();
+                const decoder = new TextDecoder();
+                let body = "";
+                let bytes = 0;
+                if (reader) {{
+                  for (;;) {{
+                    const part = await reader.read();
+                    if (part.done) break;
+                    bytes += part.value.byteLength;
+                    if (bytes > {MAX_BROWSER_BODY}) {{
+                      await reader.cancel();
+                      throw new Error("response body is too large");
+                    }}
+                    body += decoder.decode(part.value, {{ stream: true }});
+                  }}
+                  body += decoder.decode();
+                }} else {{
+                  body = await response.text();
+                  if (new TextEncoder().encode(body).byteLength > {MAX_BROWSER_BODY})
+                    throw new Error("response body is too large");
+                }}
+                const headers = {{}};
+                response.headers.forEach((value, name) => headers[name.toLowerCase()] = value);
+                window[key] = {{ state: "done", target, status: response.status, headers, body }};
+              }} catch (error) {{
+                window[key] = {{ state: "error", target, message: String(error) }};
+              }}
+            }})();
+          }}
+          return JSON.stringify(window[key]);
+        }})()"#
+    );
+
+    let deadline = std::time::Instant::now() + mode.budget();
+    tokio::time::sleep(FIRST_PROBE).await;
+    while std::time::Instant::now() < deadline {
+        if mode.visible() && app.get_webview_window(WINDOW).is_none() {
+            return Ok(None);
+        }
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let tx = std::sync::Arc::new(std::sync::Mutex::new(Some(tx)));
+        window.eval_with_callback(script.clone(), move |value| {
+            if let Some(tx) = tx.lock().unwrap_or_else(|e| e.into_inner()).take() {
+                let _ = tx.send(value);
+            }
+        })?;
+        let raw = match tokio::time::timeout(PROBE_TIMEOUT, rx).await {
+            Ok(Ok(value)) => value,
+            _ => {
+                tokio::time::sleep(POLL).await;
+                continue;
+            }
+        };
+        let inner = serde_json::from_str::<String>(&raw).unwrap_or(raw);
+        match serde_json::from_str::<BrowserResult>(&inner) {
+            Ok(BrowserResult::Done {
+                status,
+                headers,
+                body,
+            }) => {
+                if !browser_response_challenged(status, &headers) {
+                    return Ok(Some(BrowserResponse {
+                        status,
+                        headers,
+                        body,
+                    }));
+                }
+                let _ = window.eval("delete window.__mxbAppHubFetch");
+            }
+            Ok(BrowserResult::Error { message }) => {
+                log::debug!("MXB Hub browser request is not ready: {message}");
+                let _ = window.eval("delete window.__mxbAppHubFetch");
+            }
+            Ok(BrowserResult::Pending) | Err(_) => {}
+        }
+        tokio::time::sleep(POLL).await;
+    }
+    Ok(None)
+}
+
+fn browser_response_challenged(
+    status: u16,
+    headers: &std::collections::HashMap<String, String>,
+) -> bool {
+    headers.contains_key("sg-captcha")
+        || (status == 202
+            && headers
+                .get("content-type")
+                .is_some_and(|v| v.starts_with("text/html")))
+        || status == 403
 }
 
 /// Whose problem the challenge is on this pass.
@@ -425,5 +623,46 @@ mod tests {
 
         #[cfg(not(target_os = "macos"))]
         assert_eq!(browser_user_agent(), None);
+    }
+
+    #[test]
+    fn browser_transport_never_becomes_an_open_proxy() {
+        assert!(browser_target_allowed(
+            "https://shop.mxb-hub.com/wp-json/wc/store/v1/products?per_page=1"
+        ));
+        for refused in [
+            "http://shop.mxb-hub.com/wp-json",
+            "https://mxb-hub.com/wp-json",
+            "https://shop.mxb-hub.com.evil.example/wp-json",
+            "https://shop.mxb-hub.com:444/wp-json",
+            "https://user:pass@shop.mxb-hub.com/wp-json",
+            "https://example.com/",
+            "not a url",
+        ] {
+            assert!(!browser_target_allowed(refused), "accepted {refused}");
+        }
+    }
+
+    #[test]
+    fn browser_transport_recognises_every_hub_refusal_shape() {
+        let mut headers = std::collections::HashMap::new();
+        headers.insert("content-type".into(), "text/html; charset=UTF-8".into());
+        assert!(browser_response_challenged(202, &headers));
+        assert!(browser_response_challenged(
+            403,
+            &std::collections::HashMap::new()
+        ));
+        headers.insert("sg-captcha".into(), "1".into());
+        assert!(browser_response_challenged(200, &headers));
+        assert!(!browser_response_challenged(
+            200,
+            &std::collections::HashMap::new()
+        ));
+    }
+
+    #[test]
+    fn browser_response_cap_is_small_enough_for_control_plane_data() {
+        assert_eq!(MAX_BROWSER_BODY, 8 * 1024 * 1024);
+        assert!(MAX_BROWSER_BODY < 32 * 1024 * 1024);
     }
 }
