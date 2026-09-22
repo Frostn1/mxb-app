@@ -790,6 +790,15 @@ export const it: Translation = {
   "settings.frostmodNeedsRepair":
     "I file installati non corrispondono a questa versione — reinstallando si risolve.",
   "settings.frostmodRepair": "Ripara installazione",
+  "settings.cacheTitle": "Cache delle texture dei circuiti",
+  "settings.cacheDesc": "Texture dei circuiti generate durante le sessioni già fatte. Puoi eliminarle quando MX Bikes è chiuso; il gioco ricreerà solo quelle dei circuiti che userai di nuovo.",
+  "settings.cacheUsage": "{{size}} in {{count}} file di cache",
+  "settings.cacheClear": "Svuota cache",
+  "settings.cacheConfirmTitle": "Svuotare la cache delle texture dei circuiti?",
+  "settings.cacheConfirmDesc": "Questo rimuove {{size}} di texture generate. Circuiti e mod restano installati; MX Bikes ricreerà la cache mentre guidi.",
+  "settings.cacheCleared": "Cache delle texture dei circuiti svuotata",
+  "settings.cacheClearedDesc": "Liberati {{size}} da {{count}} file di cache.",
+  "settings.cacheClearFailed": "Impossibile svuotare la cache delle texture dei circuiti",
   "settings.frostmodUnsupportedForGame":
     "Questa versione di FrostMod non è sicura su {{game}} — aggiornala per usare FrostMod qui.",
   "settings.frostmodUpdateRequired": "Aggiornamento necessario",

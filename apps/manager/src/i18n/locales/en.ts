@@ -776,6 +776,17 @@ export const en = {
   "settings.frostmodNeedsRepair":
     "The installed files don't match this version — reinstalling fixes it.",
   "settings.frostmodRepair": "Repair install",
+  "settings.cacheTitle": "Track texture cache",
+  "settings.cacheDesc":
+    "Generated track textures from rides you have already done. Safe to clear while MX Bikes is closed; the game rebuilds only what you ride next.",
+  "settings.cacheUsage": "{{size}} used by {{count}} cached files",
+  "settings.cacheClear": "Clear cache",
+  "settings.cacheConfirmTitle": "Clear track texture cache?",
+  "settings.cacheConfirmDesc":
+    "This removes {{size}} of generated track textures. Your tracks and mods stay installed, and MX Bikes will rebuild the cache as you ride.",
+  "settings.cacheCleared": "Track texture cache cleared",
+  "settings.cacheClearedDesc": "Freed {{size}} from {{count}} cached files.",
+  "settings.cacheClearFailed": "Couldn't clear the track texture cache",
   "settings.frostmodUnsupportedForGame": "This Game Integration build is not compatible with {{game}} — update it before enabling the integration here.",
   "settings.frostmodUpdateRequired": "Update required",
   "settings.checkNewer": "Check for a newer Game Integration",

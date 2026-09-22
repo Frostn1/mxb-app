@@ -1467,6 +1467,23 @@ export function getModsRoot(): Promise<ModsRootInfo> {
   return invoke<ModsRootInfo>("get_mods_root");
 }
 
+/** MX Bikes' generated track-texture cache. It is safe to remove while the game is closed. */
+export type GameCacheInfo = {
+  path: string;
+  exists: boolean;
+  bytes: number;
+  files: number;
+};
+
+export function gameCacheInfo(): Promise<GameCacheInfo> {
+  return invoke<GameCacheInfo>("game_cache_info");
+}
+
+/** Remove only the configured game's generated cache. Refuses while MX Bikes is running. */
+export function clearGameCache(): Promise<GameCacheInfo> {
+  return invoke<GameCacheInfo>("clear_game_cache");
+}
+
 /** Launch-at-login toggle (also flips the OS autostart entry). */
 export function setLaunchAtStartup(enabled: boolean): Promise<void> {
   return invoke<void>("set_launch_at_startup", { enabled });

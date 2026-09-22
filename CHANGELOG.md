@@ -9,6 +9,8 @@
   it stays out of the way, and everything else works as it always has.
 
 ### Added
+- Settings can now show and clear MX Bikes' generated track-texture cache, reclaiming space
+  without removing installed tracks or mods.
 - Copy link on a server's page, and on a mod's page. Paste it in Discord and whoever clicks
   it lands in MXB App on that server's join dialog or on that mod. Anyone without the app
   gets a page telling them what the link was for and where to get it.

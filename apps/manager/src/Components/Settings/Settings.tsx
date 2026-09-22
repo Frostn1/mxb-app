@@ -16,6 +16,7 @@ import {
   Copy,
   Loader2,
   ChevronDown,
+  Trash2,
 } from "lucide-react";
 import { open as pickFolder, save as pickSavePath } from "@tauri-apps/plugin-dialog";
 import { open as openUrl } from "@tauri-apps/plugin-shell";
@@ -29,6 +30,8 @@ import {
   detectGamePath,
   exportLogs,
   getModsRoot,
+  gameCacheInfo,
+  clearGameCache,
   logsInfo,
   onLogsShareProgress,
   openLogsFolder,
@@ -84,6 +87,16 @@ import {
   type VoiceDevices,
   type VoiceStatus,
 } from "@frost/shared/api/mods";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@frost/shared/Components/ui/alert-dialog";
 import {
   getOverlayState,
   overlayToggle,
@@ -375,6 +388,40 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
       .then(setModsRoot)
       .catch(() => setModsRoot(null));
   }, [config.modsPath]);
+
+  const [gameCache, setGameCache] = useState<{
+    path: string;
+    exists: boolean;
+    bytes: number;
+    files: number;
+  } | null>(null);
+  const [cacheConfirmOpen, setCacheConfirmOpen] = useState(false);
+  const [clearingCache, setClearingCache] = useState(false);
+  const refreshGameCache = useCallback(() => {
+    gameCacheInfo().then(setGameCache).catch(() => setGameCache(null));
+  }, []);
+  useEffect(() => {
+    refreshGameCache();
+  }, [refreshGameCache, config.modsPath]);
+
+  const clearGameTextureCache = async () => {
+    setClearingCache(true);
+    try {
+      const cleared = await clearGameCache();
+      toast.success(t("settings.cacheCleared"), {
+        description: t("settings.cacheClearedDesc", {
+          size: formatBytes(cleared.bytes),
+          count: cleared.files,
+        }),
+      });
+      setGameCache({ ...cleared, exists: false, bytes: 0, files: 0 });
+      setCacheConfirmOpen(false);
+    } catch (e) {
+      toast.error(t("settings.cacheClearFailed"), { description: String(e) });
+    } finally {
+      setClearingCache(false);
+    }
+  };
 
   // Where the logs are and what's in them. Re-read whenever the Logs section is opened
   // (and after an export) rather than once on mount: the reason anyone comes here is that
@@ -1298,6 +1345,35 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
                 {!modsRoot.exists && " — nothing will show up until it's there."}
               </p>
             )}
+
+            <div className="mt-1 rounded-lg border border-border/70 p-3">
+              <div className="flex items-center justify-between gap-4">
+                <div className="min-w-0">
+                  <p className="text-[13px] font-medium">{t("settings.cacheTitle")}</p>
+                  <p className="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">
+                    {t("settings.cacheDesc")}
+                  </p>
+                  {gameCache?.exists && (
+                    <p className="mt-1 text-[11.5px] font-medium text-foreground/75">
+                      {t("settings.cacheUsage", {
+                        size: formatBytes(gameCache.bytes),
+                        count: gameCache.files,
+                      })}
+                    </p>
+                  )}
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="flex-none"
+                  disabled={!gameCache?.exists || clearingCache}
+                  onClick={() => setCacheConfirmOpen(true)}
+                >
+                  <Trash2 className="size-3.5" />
+                  {t("settings.cacheClear")}
+                </Button>
+              </div>
+            </div>
 
             {/* Profiles folder — a customization nested under the mods folder. It
                 normally lives at <mods>/profiles; override only for the split case. */}
@@ -2686,6 +2762,29 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
           )}
         </div>
       </div>
+
+      <AlertDialog open={cacheConfirmOpen} onOpenChange={setCacheConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("settings.cacheConfirmTitle")}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t("settings.cacheConfirmDesc", {
+                size: formatBytes(gameCache?.bytes ?? 0),
+              })}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={clearingCache}>{t("common.cancel")}</AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              disabled={clearingCache}
+              onClick={() => void clearGameTextureCache()}
+            >
+              {clearingCache ? t("settings.working") : t("settings.cacheClear")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

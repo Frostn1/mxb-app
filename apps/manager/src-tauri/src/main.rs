@@ -26,6 +26,7 @@ mod frostmod_manage;
 pub(crate) use mxb_core::game;
 mod fileinfo;
 mod gameproc;
+mod gamecache;
 mod hub_clearance;
 mod hub_session;
 mod identity;
@@ -1606,6 +1607,23 @@ fn get_mods_root(app: tauri::AppHandle) -> ModsRootInfo {
             && root == std::path::Path::new(cfg.mods_path.trim()),
         path: root.to_string_lossy().into_owned(),
     }
+}
+
+/// The cache holds generated track textures. It can become very large, but deleting it is safe:
+/// MX Bikes re-creates only what the player rides next.
+#[tauri::command]
+fn game_cache_info(app: tauri::AppHandle) -> Result<gamecache::CacheInfo, String> {
+    let cfg = config::load(&app).unwrap_or_default();
+    gamecache::inspect(&library::mods_root(&cfg.mods_path))
+}
+
+#[tauri::command]
+fn clear_game_cache(app: tauri::AppHandle) -> Result<gamecache::CacheInfo, String> {
+    if gameproc::is_game_running() {
+        return Err("Close MX Bikes before clearing its cache.".into());
+    }
+    let cfg = config::load(&app).unwrap_or_default();
+    gamecache::clear(&library::mods_root(&cfg.mods_path))
 }
 
 /// Whether this build can lock content with mxbsecure — the packer is the gitignored
@@ -7717,6 +7735,8 @@ fn main() {
             detect_game_path,
             count_profiles_in,
             get_mods_root,
+            game_cache_info,
+            clear_game_cache,
             set_run_in_background,
             set_analytics_enabled,
             track_event,

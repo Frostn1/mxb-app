@@ -75,7 +75,7 @@ export default function Setup({ onComplete, game, games, firstRun }: SetupProps)
   const t = useT();
   const {
     enableIntegration,
-    useAppOnly,
+    useAppOnly: chooseAppOnly,
   } = useFrostmod();
   // The pick is held here until the folder step. `create_config` then saves the paths as an
   // explicitly incomplete setup so the integration choice can update that same config;
@@ -245,7 +245,7 @@ export default function Setup({ onComplete, game, games, firstRun }: SetupProps)
     setError(null);
     try {
       if (enabled) await enableIntegration();
-      else await useAppOnly();
+      else await chooseAppOnly();
       await completeSetup();
       onComplete();
     } catch (e) {
