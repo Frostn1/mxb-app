@@ -103,6 +103,23 @@ const STILL_REFUSED: &str =
     "MXB Hub is still asking the app to prove it isn't a robot. It opens a window for you to \
      finish that check — complete it there, then try again.";
 
+/// A WebView's user agent is part of the challenge identity, but only macOS needs an override.
+///
+/// WKWebView's default string does not travel with the HTTP client, so it uses the matching
+/// macOS identity from [`HUB_SITE`]. WebView2 must remain untouched: overriding only its
+/// `User-Agent` to claim Chrome leaves its Edge client-hint headers intact, which SiteGround
+/// rejects as an inconsistent browser and returns 403 after the visible fallback opens.
+fn browser_user_agent() -> Option<&'static str> {
+    #[cfg(target_os = "macos")]
+    {
+        Some(HUB_SITE.ua)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        None
+    }
+}
+
 fn now() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -202,15 +219,15 @@ async fn attempt(app: &AppHandle, mode: Mode) -> anyhow::Result<bool> {
         } else {
             "MXB Hub"
         })
-        // SiteGround binds the challenge result to this identity. HUB_SITE uses a
-        // platform-appropriate value, so WKWebView is no longer made to claim it is Windows
-        // Chrome and the HTTP probe does not replay the result as a different browser.
-        .user_agent(HUB_SITE.ua)
         // Never given a way to talk to the app, shown or not — see the module comment.
         .visible(mode.visible())
         .decorations(mode.visible())
         .focused(mode.visible())
         .skip_taskbar(!mode.visible());
+    let builder = match browser_user_agent() {
+        Some(user_agent) => builder.user_agent(user_agent),
+        None => builder,
+    };
 
     let builder = if mode.visible() {
         // The sign-in window's shape, because it is the same kind of thing: a store page the
@@ -399,5 +416,14 @@ mod tests {
             RETRY_AFTER_FAILURE < Mode::Hidden.budget().as_secs(),
             "standing on a stale refusal for longer than an attempt takes is just a slower no"
         );
+    }
+
+    #[test]
+    fn clearance_window_uses_only_the_platform_safe_identity() {
+        #[cfg(target_os = "macos")]
+        assert_eq!(browser_user_agent(), Some(HUB_SITE.ua));
+
+        #[cfg(not(target_os = "macos"))]
+        assert_eq!(browser_user_agent(), None);
     }
 }
