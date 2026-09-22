@@ -793,6 +793,15 @@ export const ptBR: Translation = {
   "settings.frostmodNeedsRepair":
     "Os arquivos instalados não batem com esta versão — reinstalar resolve.",
   "settings.frostmodRepair": "Reparar instalação",
+  "settings.cacheTitle": "Cache de texturas das pistas",
+  "settings.cacheDesc": "Texturas de pistas geradas nas suas corridas. É seguro limpar com o MX Bikes fechado; o jogo recria apenas o que você voltar a usar.",
+  "settings.cacheUsage": "{{size}} em {{count}} arquivos de cache",
+  "settings.cacheClear": "Limpar cache",
+  "settings.cacheConfirmTitle": "Limpar o cache de texturas das pistas?",
+  "settings.cacheConfirmDesc": "Isso remove {{size}} de texturas de pistas geradas. Suas pistas e mods continuam instalados; o MX Bikes recria o cache quando você correr.",
+  "settings.cacheCleared": "Cache de texturas das pistas limpo",
+  "settings.cacheClearedDesc": "Liberados {{size}} de {{count}} arquivos de cache.",
+  "settings.cacheClearFailed": "Não foi possível limpar o cache de texturas das pistas",
   "settings.frostmodUnsupportedForGame":
     "Esta versão do FrostMod não é segura no {{game}} — atualize para usar o FrostMod aqui.",
   "settings.frostmodUpdateRequired": "Atualização necessária",
