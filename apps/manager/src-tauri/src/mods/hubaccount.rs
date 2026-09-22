@@ -91,7 +91,22 @@ pub async fn fetch_my_downloads(app: &AppHandle, client: &Client) -> anyhow::Res
     let status = resp.status();
     let html = resp.text().await?;
 
-    if !status.is_success() {
+    parse_downloads_page(app, status.as_u16(), html)
+}
+
+/// Windows cannot replay WebView2's SiteGround clearance through reqwest: the two clients have
+/// different browser identities. Keep the protected account read in WebView2 instead.
+pub async fn fetch_my_downloads_in_browser(app: &AppHandle) -> anyhow::Result<Vec<HubItem>> {
+    let response = crate::hub_clearance::get(app, &format!("{HUB_BASE}{DOWNLOADS_PATH}")).await?;
+    parse_downloads_page(app, response.status, response.body)
+}
+
+fn parse_downloads_page(
+    app: &AppHandle,
+    status: u16,
+    html: String,
+) -> anyhow::Result<Vec<HubItem>> {
+    if !(200..300).contains(&status) {
         anyhow::bail!("MXB Hub answered {status} for your downloads");
     }
     // WooCommerce serves the login form in place of the account page for a dead cookie — a 200,

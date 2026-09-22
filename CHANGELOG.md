@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026-09-22 — v0.18.2 — Lower memory, safer protected tracks
+
+### Fixed
+- Protected content is now opened exclusively by the in-game client; desktop archive readers reject
+  it, and CI prevents private modules or plaintext opener plumbing entering the public tree.
+- Server track matching no longer loads protected archives in parallel. Secured tracks match by
+  filename, legacy GUID-locked previews are read one at a time, and ordinary tracks retain their
+  bounded index/thumbnail path.
+- Server cards and details now use the bounded image cache for remote artwork instead of retaining
+  full-size store images in the WebView.
+- MXB Hub requests that hit SiteGround verification now stay in WebView2's browser identity on
+  Windows, with serialized checks and guaranteed window cleanup.
+
 ## 2026-09-21 — v0.18.1 — Shop pictures and a fresh cache
 
 ### Added

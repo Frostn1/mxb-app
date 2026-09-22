@@ -52,6 +52,9 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
 
+      - name: Enforce secure-content boundary before private sync
+        run: bun run check:secure-boundary
+
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:

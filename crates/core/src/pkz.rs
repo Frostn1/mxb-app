@@ -49,6 +49,7 @@ struct Gate {
 }
 
 static INSPECT_GATE: OnceLock<Gate> = OnceLock::new();
+static PROTECTED_READ_GATE: OnceLock<Gate> = OnceLock::new();
 
 fn gate() -> &'static Gate {
     INSPECT_GATE.get_or_init(|| Gate {
@@ -77,6 +78,22 @@ impl Drop for Permit {
 
 fn acquire() -> Permit {
     let gate = gate();
+    let mut free = gate.free.lock().unwrap_or_else(|e| e.into_inner());
+    while *free == 0 {
+        free = gate.ready.wait(free).unwrap_or_else(|e| e.into_inner());
+    }
+    *free -= 1;
+    Permit(gate)
+}
+
+/// Legacy creator/GUID-locked archives are not stream-readable: their local reader first holds
+/// the complete encrypted file. Keep those reads strictly serial while ordinary ZIP archives and
+/// unpacked folders retain the wider inspection gate above.
+fn acquire_protected_read() -> Permit {
+    let gate = PROTECTED_READ_GATE.get_or_init(|| Gate {
+        free: Mutex::new(1),
+        ready: Condvar::new(),
+    });
     let mut free = gate.free.lock().unwrap_or_else(|e| e.into_inner());
     while *free == 0 {
         free = gate.ready.wait(free).unwrap_or_else(|e| e.into_inner());
@@ -782,6 +799,7 @@ pub fn extract(path: &Path, out_dir: &Path) -> Result<Vec<String>> {
     if is_plain_zip(path) {
         return extract_plain(path, out_dir);
     }
+    let _protected = acquire_protected_read();
     #[cfg(sidecar)]
     {
         if let Some(written) = crate::sidecar::try_extract(path, out_dir)? {
@@ -795,6 +813,7 @@ pub fn read_sidecar_blob(bytes: &[u8]) -> Option<Vec<u8>> {
     #[cfg(sidecar)]
     {
         if crate::sidecar::handles(bytes) {
+            let _protected = acquire_protected_read();
             return crate::sidecar::read_blob(bytes).ok();
         }
     }
@@ -802,11 +821,11 @@ pub fn read_sidecar_blob(bytes: &[u8]) -> Option<Vec<u8>> {
     None
 }
 
+const SECURED_IN_GAME_ONLY: &str = "secured content is opened only inside the game process";
+
 pub fn read_all(path: &Path) -> Result<Vec<(String, Vec<u8>)>> {
     if crate::securesource::is_secured(path) {
-        let bytes = crate::securesource::open(path)
-            .with_context(|| format!("open secured {path:?}"))?;
-        return read_all_bytes(&bytes);
+        bail!(SECURED_IN_GAME_ONLY);
     }
     if is_plain_zip(path) {
         let file = std::fs::File::open(path).with_context(|| format!("open {path:?}"))?;
@@ -825,6 +844,7 @@ pub fn read_all(path: &Path) -> Result<Vec<(String, Vec<u8>)>> {
         }
         return Ok(out);
     }
+    let _protected = acquire_protected_read();
     #[cfg(sidecar)]
     {
         return crate::sidecar::read_all(path);
@@ -838,9 +858,7 @@ pub fn read_selected(
     keep: impl Fn(&str) -> bool + Copy,
 ) -> Result<Vec<(String, Vec<u8>)>> {
     if crate::securesource::is_secured(path) {
-        let bytes = crate::securesource::open(path)
-            .with_context(|| format!("open secured {path:?}"))?;
-        return read_selected_bytes(&bytes, keep);
+        bail!(SECURED_IN_GAME_ONLY);
     }
     if is_plain_zip(path) {
         let file = std::fs::File::open(path).with_context(|| format!("open {path:?}"))?;
@@ -859,6 +877,7 @@ pub fn read_selected(
         }
         return Ok(out);
     }
+    let _protected = acquire_protected_read();
     #[cfg(sidecar)]
     {
         return crate::sidecar::read_selected(path, keep);
@@ -875,9 +894,7 @@ pub fn read_selected(
 /// `keep` closure always returns `false`, so the archive is walked but nothing is read out.
 pub fn entry_names(path: &Path) -> Result<Vec<String>> {
     if crate::securesource::is_secured(path) {
-        let bytes = crate::securesource::open(path)
-            .with_context(|| format!("open secured {path:?}"))?;
-        return entry_names_bytes(&bytes);
+        bail!(SECURED_IN_GAME_ONLY);
     }
     if is_plain_zip(path) {
         let file = std::fs::File::open(path).with_context(|| format!("open {path:?}"))?;
@@ -898,6 +915,9 @@ pub fn entry_names(path: &Path) -> Result<Vec<String>> {
 // Kept beside the other archive readers; no caller today.
 #[allow(dead_code)]
 pub fn read_entry(path: &Path, file_name: &str) -> Result<Option<Vec<u8>>> {
+    if crate::securesource::is_secured(path) {
+        bail!(SECURED_IN_GAME_ONLY);
+    }
     if is_plain_zip(path) {
         let file = std::fs::File::open(path).with_context(|| format!("open {path:?}"))?;
         let mut archive =
@@ -914,6 +934,7 @@ pub fn read_entry(path: &Path, file_name: &str) -> Result<Option<Vec<u8>>> {
         }
         return Ok(None);
     }
+    let _protected = acquire_protected_read();
     #[cfg(sidecar)]
     {
         if let Some(bytes) = crate::sidecar::read_entry(path, file_name)? {
@@ -930,10 +951,10 @@ fn is_plain_zip_bytes(bytes: &[u8]) -> bool {
     bytes.starts_with(b"PK\x03\x04") || bytes.starts_with(b"PK\x05\x06")
 }
 
-/// [`read_selected`] over an archive already in memory — an inner `.pkz` decrypted from a
-/// `.mxbsecure` blob, say — so secured content can be read without its plaintext ever touching
-/// disk. Plain-zip and encrypted `KCOL` archives are both handled.
-pub fn read_selected_bytes(
+/// Parse a caller-owned in-memory archive. This has no `.mxbsecure` path: desktop apps never
+/// receive that format's plaintext.
+#[allow(dead_code)]
+pub(crate) fn read_selected_bytes(
     bytes: &[u8],
     keep: impl Fn(&str) -> bool + Copy,
 ) -> Result<Vec<(String, Vec<u8>)>> {
@@ -965,12 +986,14 @@ pub fn read_selected_bytes(
 }
 
 /// [`read_all`] over an in-memory archive.
-pub fn read_all_bytes(bytes: &[u8]) -> Result<Vec<(String, Vec<u8>)>> {
+#[allow(dead_code)]
+pub(crate) fn read_all_bytes(bytes: &[u8]) -> Result<Vec<(String, Vec<u8>)>> {
     read_selected_bytes(bytes, |_| true)
 }
 
 /// [`entry_names`] over an in-memory archive: walks the directory without inflating payloads.
-pub fn entry_names_bytes(bytes: &[u8]) -> Result<Vec<String>> {
+#[allow(dead_code)]
+pub(crate) fn entry_names_bytes(bytes: &[u8]) -> Result<Vec<String>> {
     let names = std::cell::RefCell::new(Vec::new());
     read_selected_bytes(bytes, |n| {
         names.borrow_mut().push(n.replace('\\', "/"));
@@ -1109,6 +1132,20 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         d
+    }
+
+    #[test]
+    fn desktop_archive_readers_never_open_mxbsecure_plaintext() {
+        let path = Path::new("must-stay-in-game.mxbsecure");
+        let errors = [
+            read_all(path).unwrap_err(),
+            read_selected(path, |_| true).unwrap_err(),
+            entry_names(path).unwrap_err(),
+            read_entry(path, "track.ini").unwrap_err(),
+        ];
+        for error in errors {
+            assert_eq!(error.to_string(), SECURED_IN_GAME_ONLY);
+        }
     }
 
     /// The archive has to be readable by the game's own reader, not merely by a zip library.
@@ -1262,6 +1299,28 @@ mod tests {
         let peak = peak.load(Ordering::SeqCst);
         assert!(peak >= 1, "the gate must let work through at all");
         assert!(peak <= 4, "at most 4 inspections at once, saw {peak}");
+    }
+
+    #[test]
+    fn protected_archive_gate_allows_only_one_full_file_read() {
+        let live = Arc::new(AtomicUsize::new(0));
+        let peak = Arc::new(AtomicUsize::new(0));
+        let threads: Vec<_> = (0..12)
+            .map(|_| {
+                let (live, peak) = (Arc::clone(&live), Arc::clone(&peak));
+                std::thread::spawn(move || {
+                    let _permit = acquire_protected_read();
+                    let now = live.fetch_add(1, Ordering::SeqCst) + 1;
+                    peak.fetch_max(now, Ordering::SeqCst);
+                    std::thread::sleep(std::time::Duration::from_millis(5));
+                    live.fetch_sub(1, Ordering::SeqCst);
+                })
+            })
+            .collect();
+        for thread in threads {
+            thread.join().unwrap();
+        }
+        assert_eq!(peak.load(Ordering::SeqCst), 1);
     }
 
     /// `MXB_DUMP_PKZ='…/rider.pkz' cargo test dump_pkz_layout -- --ignored --nocapture`

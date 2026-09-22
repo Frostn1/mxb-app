@@ -77,17 +77,11 @@ async fn check_coach_update(
         .map_err(|e| format!("{e:#}"))
 }
 
-/// Opens a secured (`.mxbsecure`) track the rider has unlocked, in memory, the way MXB App does:
-/// the key beside it is unsealed for the Steam account signed in now. Anyone else's stays locked.
+/// Register the cheap key-state check. Coach never opens secured track contents; only
+/// `mxbsecure.dll`, inside the game process, may decrypt a blob.
 #[cfg(mxbsecure)]
-fn register_secure_opener() {
+fn register_secure_key_check() {
     use mxb_core::{mxbsecure, securesource, steamid};
-    securesource::set_opener(Box::new(|blob_path: &std::path::Path| {
-        let steam_id = steamid::current_steam_id64()?;
-        let sealed = std::fs::read(securesource::existing_key_path(blob_path.to_str()?)?).ok()?;
-        let key = mxbsecure::unseal_key(&sealed, &steam_id, "")?;
-        mxbsecure::open(&std::fs::read(blob_path).ok()?, &key).ok()
-    }));
     securesource::set_unlocked_check(Box::new(|blob_path: &std::path::Path| {
         (|| {
             let steam_id = steamid::current_steam_id64()?;
@@ -130,7 +124,7 @@ fn main() {
     // hardening, shared by the whole lineup from `mxb_core`.
     mxb_core::antidebug::guard();
     #[cfg(mxbsecure)]
-    register_secure_opener();
+    register_secure_key_check();
     let builder = tauri::Builder::default();
     // A second launch shows the window already running rather than starting another Coach
     // (and another overlay key). Release only, so a dev run starts beside the installed one.

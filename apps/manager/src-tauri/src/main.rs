@@ -90,69 +90,6 @@ use mxb_core::steamid;
 mod secure_launch;
 mod server_admin;
 
-#[cfg(all(test, mxbsecure))]
-mod offline_flow_test {
-    // The whole offline story on a real file: lock, provision (seal to a Steam ID), then
-    // open offline with that identity — and prove a different Steam account gets nothing.
-    #[test]
-    fn provision_then_open_offline_binds_to_the_steam_id() {
-        let dir = std::env::temp_dir().join(format!("mxb-offline-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-
-        // A fake Steam loginusers.vdf, pointed at by the env override the reader honours.
-        let vdf = dir.join("loginusers.vdf");
-        let write_vdf = |id: &str| {
-            std::fs::write(
-                &vdf,
-                format!("\"users\"\n{{\n\t\"{id}\"\n\t{{\n\t\t\"MostRecent\" \"1\"\n\t}}\n}}\n"),
-            )
-            .unwrap();
-        };
-        std::env::set_var("MXB_STEAM_LOGINUSERS", &vdf);
-
-        // Lock a real file.
-        let plaintext = vec![9u8; 130_000];
-        let src = dir.join("track.pkz");
-        std::fs::write(&src, &plaintext).unwrap();
-        let locked = crate::mxbsecure::lock(&plaintext, "trk_x", "k1", "track.pkz");
-        let blob_path = dir.join("track.pkz.mxbsecure");
-        std::fs::write(&blob_path, &locked.blob).unwrap();
-
-        // Provision: seal the key to the (fake) live Steam ID and the per-provision secret,
-        // store the .mxbkey.
-        write_vdf("76561198000000001");
-        let steam = crate::steamid::current_steam_id64().expect("steam id");
-        assert_eq!(steam, "76561198000000001");
-        let secret = b"a-server-minted-provision-secret";
-        let sealed =
-            crate::mxbsecure::seal_key_to_identity(&locked.content_key, &steam, "", secret, true)
-                .expect("a debug build seals identity-only when DPAPI is unavailable");
-        std::fs::write(dir.join("track.pkz.mxbsecure.mxbkey"), &sealed).unwrap();
-
-        // Open offline as the same account: unseal (the secret rides inside the envelope),
-        // decrypt, compare.
-        let key = crate::mxbsecure::unseal_key(
-            &sealed,
-            &crate::steamid::current_steam_id64().unwrap(),
-            "",
-        )
-        .expect("unseals for the same account");
-        let opened = crate::mxbsecure::open(&locked.blob, &key).unwrap();
-        assert_eq!(opened, plaintext, "offline open matches the original");
-
-        // A different Steam account (a copy on a friend's machine) gets nothing.
-        write_vdf("76561198000000999");
-        let other = crate::steamid::current_steam_id64().unwrap();
-        assert_eq!(other, "76561198000000999");
-        assert!(
-            crate::mxbsecure::unseal_key(&sealed, &other, "").is_none(),
-            "another account must not unseal it"
-        );
-
-        std::env::remove_var("MXB_STEAM_LOGINUSERS");
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-}
 pub(crate) use mxb_core::presets;
 mod paintsync;
 mod ranked;
@@ -1779,7 +1716,7 @@ async fn blob_header_and_hash(
 /// key to this machine via [`provision_and_record`].
 ///
 /// Prechecks first, so a bad file or an already-unlocked one never touches the server: the header
-/// must parse as a `.mxbsecure`, and if a `.mxbkey` beside it already opens for the live Steam ID
+/// must parse as a `.mxbsecure`, and if a `.mxbkey` beside it already validates for the live Steam ID
 /// that is returned — no grant.
 #[cfg(mxbsecure)]
 async fn unlock_one(
@@ -1919,21 +1856,10 @@ fn vault_backfill(app: &tauri::AppHandle, blob_path: &str, steam_id: &str) {
     secure_launch::vault_store(app, steam_id, &asset_id, &sealed);
 }
 
-/// Teach the core viewer to open a `.mxbsecure` file to its inner `.pkz` bytes **in memory**, so
-/// the app can render your unlocked secured content (a bike, a paint, a track's terrain) without
-/// ever writing the source files to disk. The key is unsealed for the live Steam account; a file
-/// you haven't unlocked (or aren't signed in for) simply returns `None` and won't render.
+/// Register the cheap key-state check used by the Library. The manager never opens secured
+/// content; only `mxbsecure.dll`, inside the game process, may decrypt a blob.
 #[cfg(mxbsecure)]
-fn register_secure_opener() {
-    mxb_core::securesource::set_opener(Box::new(|blob_path: &std::path::Path| {
-        let steam_id = steamid::current_steam_id64()?;
-        let key_path = secure_launch::existing_key_path(blob_path.to_str()?)?;
-        let sealed = std::fs::read(&key_path).ok()?;
-        let key = mxbsecure::unseal_key(&sealed, &steam_id, "")?;
-        let blob = std::fs::read(blob_path).ok()?;
-        mxbsecure::open(&blob, &key).ok()
-    }));
-    // The cheap flag for the library scan: only the key is unsealed, never the content.
+fn register_secure_key_check() {
     mxb_core::securesource::set_unlocked_check(Box::new(|blob_path: &std::path::Path| {
         match (steamid::current_steam_id64(), blob_path.to_str()) {
             (Some(id), Some(p)) => has_valid_key(p, &id),
@@ -4227,6 +4153,19 @@ enum ArtSource {
     Stock(String),
 }
 
+/// Whether inspecting this source can hold a complete protected archive in memory.
+///
+/// `.mxbsecure` must never be opened by this process. Legacy GUID-locked PKZs are not marked
+/// `LibraryEntry::secured`, but their optional reader loads the complete archive before it can
+/// decrypt the directory. Both must stay out of parallel discovery and preview work.
+fn protected_track_read_must_be_serial(entry: &library::LibraryEntry) -> bool {
+    if entry.secured {
+        return true;
+    }
+    let path = std::path::Path::new(&entry.path);
+    !path.is_dir() && !pkz::is_plain_zip(path)
+}
+
 fn track_previews(
     entries: &[library::LibraryEntry],
     install: &str,
@@ -4256,15 +4195,24 @@ fn track_previews(
         }
     }
     if found.len() < want.len() {
-        let folders: Vec<Option<String>> = entries
+        // Protected archives do not participate in folder discovery: `.mxbsecure` is a hard
+        // process boundary, while a legacy GUID-locked PKZ's reader loads the whole encrypted
+        // archive before decrypting its directory. Doing the latter for every protected track in
+        // parallel can still fan out memory even though a server-card lookup only needs a name.
+        // Protected filenames are their identity here; only ordinary ZIP PKZs and folders use
+        // this fallback.
+        let folders: Vec<(usize, Option<String>)> = entries
             .par_iter()
-            .map(|e| {
-                cached(&TRACK_FOLDERS, stamp(e), || {
+            .enumerate()
+            .filter(|(_, e)| !protected_track_read_must_be_serial(e))
+            .map(|(i, e)| {
+                let folder = cached(&TRACK_FOLDERS, stamp(e), || {
                     mxb_core::track::folder_name(std::path::Path::new(&e.path))
-                })
+                });
+                (i, folder)
             })
             .collect();
-        for (i, folder) in folders.iter().enumerate() {
+        for (i, folder) in folders {
             if let Some(folded) = folder.as_deref().map(key) {
                 if want.contains_key(&folded) {
                     found.entry(folded).or_insert(ArtSource::Installed(i));
@@ -4278,20 +4226,32 @@ fn track_previews(
             .or_insert_with(|| ArtSource::Stock(ids[0].clone()));
     }
 
-    found
-        .into_par_iter()
-        .filter_map(|(folded, source)| {
+    // Preview extraction has the same distinction as folder discovery. Ordinary ZIPs and stock
+    // tracks remain parallel; protected sources are deliberately read one at a time so several
+    // large server tracks can never coexist as complete in-memory archives.
+    let (protected, ordinary): (Vec<_>, Vec<_>) =
+        found.into_iter().partition(|(_, source)| match source {
+            ArtSource::Installed(i) => protected_track_read_must_be_serial(&entries[*i]),
+            ArtSource::Stock(_) => false,
+        });
+    let render = |(folded, source)| {
             // Empty when the player has the track but it carries no picture: still installed,
             // so the tile mustn't offer to fetch it.
             let art = match source {
                 ArtSource::Installed(i) => {
                     let e = &entries[i];
-                    cached(&CARD_ART, stamp(e), || {
-                        pkz::read_preview_at(std::path::Path::new(&e.path), CARD_ART_MAX)
-                            .ok()
-                            .flatten()
-                    })
-                    .unwrap_or_default()
+                    if e.secured {
+                        // Server decoration is never a reason for the desktop process to open
+                        // protected content. The DLL is the only plaintext boundary.
+                        String::new()
+                    } else {
+                        cached(&CARD_ART, stamp(e), || {
+                            pkz::read_preview_at(std::path::Path::new(&e.path), CARD_ART_MAX)
+                                .ok()
+                                .flatten()
+                        })
+                        .unwrap_or_default()
+                    }
                 }
                 ArtSource::Stock(id) => {
                     cached(&CARD_ART, (format!("stock:{folded}"), 0, 0), || {
@@ -4301,8 +4261,10 @@ fn track_previews(
                 }
             };
             Some((folded, art))
-        })
-        .collect::<Vec<_>>()
+        };
+    let mut rendered: Vec<_> = ordinary.into_par_iter().filter_map(&render).collect();
+    rendered.extend(protected.into_iter().filter_map(render));
+    rendered
         .into_iter()
         .flat_map(|(folded, art)| {
             want[&folded].iter().map(move |id| (id.clone(), art.clone())).collect::<Vec<_>>()
@@ -4362,6 +4324,59 @@ mod card_art_tests {
         assert_eq!(art["walnut"], art["WALNUT"]);
         assert_eq!(art["Farm14"], "");
         assert!(!art.contains_key("not_installed"));
+    }
+
+    #[test]
+    fn protected_tracks_match_their_filename_without_inner_folder_discovery() {
+        let root = std::env::temp_dir().join(format!("card-art-secure-{}", std::process::id()));
+        let protected = root.join("Secret Folder");
+        let guid_locked = root.join("Guid Locked.pkz");
+        let ordinary = root.join("Ordinary Folder");
+        std::fs::create_dir_all(&protected).unwrap();
+        std::fs::create_dir_all(&ordinary).unwrap();
+        std::fs::write(&guid_locked, b"not a plain ZIP").unwrap();
+
+        let entry = |name: &str, path: &std::path::Path, secured: bool| library::LibraryEntry {
+            name: name.into(),
+            path: path.to_string_lossy().into_owned(),
+            folder: String::new(),
+            size: 1,
+            modified: 1,
+            kind: if secured { "mxbsecure" } else { "folder" }.into(),
+            category: "tracks".into(),
+            parent: None,
+            secured,
+            locked: false,
+            prefix: None,
+            stock: false,
+        };
+
+        let secured_entry = entry("Protected Track.mxbsecure", &protected, true);
+        let guid_entry = entry("Guid Locked.pkz", &guid_locked, false);
+        let ordinary_entry = entry("bundle.pkz", &ordinary, false);
+        assert!(protected_track_read_must_be_serial(&secured_entry));
+        assert!(protected_track_read_must_be_serial(&guid_entry));
+        assert!(!protected_track_read_must_be_serial(&ordinary_entry));
+
+        let art = track_previews(
+            &[secured_entry, guid_entry, ordinary_entry],
+            "",
+            vec![
+                "ProtectedTrack".into(),
+                "GuidLocked".into(),
+                "SecretFolder".into(),
+                "OrdinaryFolder".into(),
+            ],
+        );
+        std::fs::remove_dir_all(&root).ok();
+
+        assert_eq!(art["ProtectedTrack"], "", "the protected basename is enough to match");
+        assert_eq!(art["GuidLocked"], "", "the GUID-locked basename is enough to match");
+        assert!(
+            !art.contains_key("SecretFolder"),
+            "a protected entry must not expose its inner folder during the parallel scan"
+        );
+        assert_eq!(art["OrdinaryFolder"], "", "ordinary folder discovery still works");
     }
 }
 
@@ -5655,14 +5670,17 @@ async fn shop_install(
 /// session, because Cloudflare judges the client. SiteGround judges the request rate and hands
 /// out a cookie once its script has run — so the browser is needed exactly once, and every
 /// request after it is an ordinary one again.
-async fn with_hub_clearance<T, F, Fut>(
-    app: &tauri::AppHandle,
+async fn with_hub_clearance<T, F, Fut, B, BFut>(
+    _app: &tauri::AppHandle,
     what: &str,
     op: F,
+    browser_op: B,
 ) -> Result<T, String>
 where
     F: Fn() -> Fut,
     Fut: std::future::Future<Output = anyhow::Result<T>>,
+    B: Fn() -> BFut,
+    BFut: std::future::Future<Output = anyhow::Result<T>>,
 {
     let err = match op().await {
         Ok(value) => return Ok(value),
@@ -5673,9 +5691,17 @@ where
         return Err(format!("{err:#}"));
     }
     log::info!("{what} hit the MXB Hub robot challenge — answering it in a browser");
-    if let Err(e) = hub_clearance::earn(app).await {
+    #[cfg(target_os = "windows")]
+    {
+        return browser_op().await.map_err(|e| format!("{e:#}"));
+    }
+    #[cfg(not(target_os = "windows"))]
+    let _ = browser_op;
+    #[cfg(not(target_os = "windows"))]
+    if let Err(e) = hub_clearance::earn(_app).await {
         return Err(format!("{e:#}"));
     }
+    #[cfg(not(target_os = "windows"))]
     op().await.map_err(|e| format!("{e:#}"))
 }
 
@@ -5688,9 +5714,12 @@ async fn hub_search(
     sort: mods::hub::HubSort,
     on_sale_only: bool,
 ) -> Result<mods::hub::HubPage, String> {
-    with_hub_clearance(&app, "hub search", || {
-        mods::hub::search(&query, &category_ids, page, sort, on_sale_only)
-    })
+    with_hub_clearance(
+        &app,
+        "hub search",
+        || mods::hub::search(&query, &category_ids, page, sort, on_sale_only),
+        || mods::hub::search_in_browser(&app, &query, &category_ids, page, sort, on_sale_only),
+    )
     .await
 }
 
@@ -5698,7 +5727,13 @@ async fn hub_search(
 async fn hub_categories(
     app: tauri::AppHandle,
 ) -> Result<Vec<mods::hub::HubCategory>, String> {
-    with_hub_clearance(&app, "hub categories", mods::hub::categories).await
+    with_hub_clearance(
+        &app,
+        "hub categories",
+        mods::hub::categories,
+        || mods::hub::categories_in_browser(&app),
+    )
+    .await
 }
 
 #[tauri::command]
@@ -5706,7 +5741,13 @@ async fn hub_detail(
     app: tauri::AppHandle,
     id: u64,
 ) -> Result<mods::hub::HubModDetail, String> {
-    with_hub_clearance(&app, "hub detail", || mods::hub::detail(id)).await
+    with_hub_clearance(
+        &app,
+        "hub detail",
+        || mods::hub::detail(id),
+        || mods::hub::detail_in_browser(&app, id),
+    )
+    .await
 }
 
 #[tauri::command]
@@ -5816,15 +5857,22 @@ async fn hub_my_downloads(
     if !state.logged_in() {
         return Err("Not signed in to MXB Hub.".to_string());
     }
-    let mut items = with_hub_clearance(&app, "hub purchases", || {
-        // Re-read the client each attempt: answering the challenge rebuilds the signed-in one
-        // with the clearance folded in, and the stale handle would just be challenged again.
-        let client = state.client();
-        async {
-            let client = client.ok_or_else(|| anyhow::anyhow!("Not signed in to MXB Hub."))?;
-            mods::hubaccount::fetch_my_downloads(&app, &client).await
-        }
-    })
+    let mut items = with_hub_clearance(
+        &app,
+        "hub purchases",
+        || {
+            // Re-read the client each attempt: answering the challenge rebuilds the signed-in
+            // one with the clearance folded in, and the stale handle would just be challenged
+            // again.
+            let client = state.client();
+            async {
+                let client =
+                    client.ok_or_else(|| anyhow::anyhow!("Not signed in to MXB Hub."))?;
+                mods::hubaccount::fetch_my_downloads(&app, &client).await
+            }
+        },
+        || mods::hubaccount::fetch_my_downloads_in_browser(&app),
+    )
     .await?;
 
     let listings = match mods::hubaccount::match_products(&items).await {
@@ -7536,7 +7584,7 @@ fn main() {
             overlay::start_link(handle);
             secure_launch::watch(handle);
             #[cfg(mxbsecure)]
-            register_secure_opener();
+            register_secure_key_check();
             // Voice follows the rider onto whatever server they join, and off it again.
             // There is nothing to press: the supervisor is the whole of "joining a room".
             voice::session::start(handle);

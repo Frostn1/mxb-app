@@ -35,6 +35,9 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
 
+      - name: Enforce secure-content boundary
+        run: bun run check:secure-boundary
+
       - name: Install dependencies
         run: bun install --frozen-lockfile
 

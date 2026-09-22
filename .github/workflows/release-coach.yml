@@ -56,6 +56,9 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
 
+      - name: Enforce secure-content boundary before private sync
+        run: bun run check:secure-boundary
+
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -100,7 +103,8 @@ jobs:
         shell: bash
         run: bash .sidecar-src/sync.sh "$GITHUB_WORKSPACE"
 
-      # Fail loudly rather than ship a coach that can't open locked tracks.
+      # Fail loudly rather than ship a coach without the private key-state/header support. Coach
+      # never decrypts secured track contents; that boundary belongs to the in-game DLL.
       - name: Check the sidecar module is in place
         if: ${{ github.repository == 'Frostn1/mxb-app' }}
         shell: bash
