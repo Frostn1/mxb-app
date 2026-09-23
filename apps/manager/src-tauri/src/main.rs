@@ -4975,16 +4975,10 @@ fn shop_queries_for_server_id(id: &str) -> Vec<String> {
     // Folder ids compact a series and its round (`ARLSX_RD09`), whereas the Shop spells the
     // same product `ARL SX ROUND 09`. Ask both forms: catalog search deliberately requires
     // every term, so either spelling by itself otherwise filters the product out.
-    let split_series = words
-        .iter()
-        .flat_map(|word| match word.as_str() {
-            "arlmx" => vec!["arl".to_string(), "mx".to_string()],
-            "arlsx" => vec!["arl".to_string(), "sx".to_string()],
-            _ => vec![word.clone()],
-        })
-        .collect::<Vec<_>>();
+    let split_series = split_shop_series_words(&words);
     let round_words = shop_round_words(&words);
     let split_series_round = shop_round_words(&split_series);
+    let split_series_spaced_round = shop_spaced_round_words(&split_series);
 
     let mut queries = Vec::new();
     for candidate in [
@@ -4993,6 +4987,7 @@ fn shop_queries_for_server_id(id: &str) -> Vec<String> {
         split_series,
         round_words,
         split_series_round,
+        split_series_spaced_round,
     ] {
         let query = candidate.join(" ");
         if !queries.contains(&query) {
@@ -5005,6 +5000,9 @@ fn shop_queries_for_server_id(id: &str) -> Vec<String> {
 fn canonical_server_track_name(value: &str) -> String {
     let words = fold_name(value)
         .split_whitespace()
+        // Shop publishes the 2026 SX rounds under its SPX collection, while dedicated servers
+        // use the same ARL SX folder ids without that store-only marker.
+        .filter(|word| !matches!(*word, "pro" | "spx"))
         .map(str::to_string)
         .collect::<Vec<_>>();
     shop_round_words(&words).concat()
@@ -5027,6 +5025,18 @@ fn normalized_track_words(words: &[String]) -> Vec<String> {
         .collect()
 }
 
+fn split_shop_series_words(words: &[String]) -> Vec<String> {
+    words
+        .iter()
+        .flat_map(|word| match word.as_str() {
+            "arlmx" => vec!["arl".to_string(), "mx".to_string()],
+            "arlsx" => vec!["arl".to_string(), "sx".to_string()],
+            "arlfinals" => vec!["arl".to_string(), "finals".to_string()],
+            _ => vec![word.clone()],
+        })
+        .collect()
+}
+
 /// Rewrite both the short server form (`RD09`) and Shop's prose form (`ROUND 09`) to a
 /// shared pair of tokens. Keeping the number separate retains a useful Shop search query while
 /// `canonical_server_track_name` joins it for an exact id/title comparison.
@@ -5042,7 +5052,7 @@ fn shop_round_words(words: &[String]) -> Vec<String> {
             normalized.push("round".to_string());
             normalized.push(number.to_string());
             index += 1;
-        } else if word == "round" {
+        } else if matches!(word.as_str(), "rd" | "round") {
             if let Some(number) = words
                 .get(index + 1)
                 .and_then(|number| number.parse::<u32>().ok())
@@ -5060,6 +5070,21 @@ fn shop_round_words(words: &[String]) -> Vec<String> {
         }
     }
     normalized
+}
+
+/// The Shop has used both `RD2` and `RD 02` in product titles. This spelling covers the
+/// latter while preserving the same normalized number as the other round aliases.
+fn shop_spaced_round_words(words: &[String]) -> Vec<String> {
+    words
+        .iter()
+        .flat_map(|word| {
+            word.strip_prefix("rd")
+                .filter(|number| !number.is_empty())
+                .and_then(|number| number.parse::<u32>().ok())
+                .map(|number| vec!["rd".to_string(), number.to_string()])
+                .unwrap_or_else(|| vec![word.clone()])
+        })
+        .collect()
 }
 
 /// The best answer a catalogue page has to a track id, and whether it is a match rather than
@@ -5147,6 +5172,7 @@ mod server_title_art_tests {
                 "2026 arl mx rd01 pala",
                 "2026 arlmx round 1 pala",
                 "2026 arl mx round 1 pala",
+                "2026 arl mx rd 1 pala",
             ]
         );
         assert!(canonical_server_track_name(id).contains(&canonical_server_track_name(
@@ -5168,19 +5194,43 @@ mod server_title_art_tests {
                 "2026 arl sx rd09",
                 "2026 arlsx round 9",
                 "2026 arl sx round 9",
+                "2026 arl sx rd 9",
             ]
         );
         assert!(shop_title_matches_server_id(
             &canonical_server_track_name(id),
-            "2026 ARL SX ROUND 09 - INDIANAPOLIS"
+            "2026 SPX ARL SX ROUND 09"
         ));
         assert!(shop_title_matches_server_id(
             &canonical_server_track_name("2026_ARLSX_RD13"),
-            "2026 ARL SX ROUND 13 - ST LOUIS"
+            "2026 SPX ARL SX ROUND 13"
         ));
         assert!(!shop_title_matches_server_id(
             &canonical_server_track_name(id),
             "2026 ARL SX ROUND 10 - DETROIT"
+        ));
+    }
+
+    #[test]
+    fn matches_the_shop_sx_and_finals_catalog_spellings() {
+        assert!(shop_title_matches_server_id(
+            &canonical_server_track_name("2026_ARLSX_RD14"),
+            "2026 SPX ARL SX ROUND 14"
+        ));
+        assert_eq!(
+            shop_queries_for_server_id("2026_ARLFINALS_RD02_PRO"),
+            [
+                "2026 arlfinals rd02",
+                "2026 arlfinals rd2",
+                "2026 arl finals rd02",
+                "2026 arlfinals round 2",
+                "2026 arl finals round 2",
+                "2026 arl finals rd 2",
+            ]
+        );
+        assert!(shop_title_matches_server_id(
+            &canonical_server_track_name("2026_ARLFINALS_RD02_PRO"),
+            "2026 ARL FINALS RD 02"
         ));
     }
 }

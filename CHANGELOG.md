@@ -3,6 +3,8 @@
 ## 2026-09-22 — v0.18.2 — Lower memory, safer protected tracks
 
 ### Fixed
+- Shop matching now recognizes the `SPX ARL SX` and spaced `ARL FINALS RD 02` product names
+  used by the current catalog, including compact server ids that omit the venue.
 - Server ids such as `2026_ARLSX_RD09` and `2026_ARLSX_RD13` now resolve to their Shop
   products when the catalog spells the round as `2026 ARL SX ROUND 09` or `ROUND 13`.
 - Image and legacy locked-archive work now has strict memory/concurrency budgets, preventing a

@@ -31,7 +31,8 @@ use std::path::{Path, PathBuf};
 /// such as `RD01` to match Shop titles that use `RD1`, and version 7 tries both zero-padded
 /// and unpadded round spellings because the Shop uses both forms. Version 8 also understands
 /// compact series/round ids such as `ARLSX_RD09` when the Shop spells them `ARL SX ROUND 09`.
-pub const VERSION: u32 = 8;
+/// Version 9 recognizes the Shop's `SPX ARL SX` and spaced `ARL FINALS RD 02` identities.
+pub const VERSION: u32 = 9;
 
 /// How long a found track is trusted. A page does not move, and if it ever does the worst
 /// case is a dead link on one panel until the row ages out.
