@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- When mxb-mods.com's Cloudflare check needs a click, the app now shows it in a small
+  "Verifying access to mxb-mods.com" window instead of waiting on a hidden one that could never
+  clear. Once it's done, mod pages load through that browser for the rest of the session, and
+  after a restart for as long as the clearance lasts.
+- Closing that window stops the app asking until you hit Retry, instead of quietly reopening a
+  hidden window every minute.
+- A mod page that can't load now offers "Open on mxb-mods.com" next to Retry.
+- The mxb-mods.com browser window no longer pretends to be a year-old Chrome, which contradicted
+  the Edge version WebView2 reports in its client hints. The app logs the real user agent at startup.
+
 ## 2026-09-23 — v0.18.4 — Lighter navigation and background work
 
 ### Changed

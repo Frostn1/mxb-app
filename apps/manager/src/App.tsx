@@ -15,6 +15,7 @@ import {
   getConfig,
   isConfigured,
   listGames,
+  onModsVerify,
   setActiveGame,
   setIntroSeen,
 } from "@frost/shared/api/mods";
@@ -113,6 +114,28 @@ const App = () => {
         description: t("overlay.fullscreenBlockedDesc"),
       }),
     );
+    return () => {
+      void unlisten.then((off) => off()).catch(() => {});
+    };
+  }, [t]);
+
+  // mxb-mods.com's check, when it needs the user. Its window shows Cloudflare's page and
+  // nothing of ours, so the instruction lives here — one toast, kept up while the window is
+  // and replaced by how it ended.
+  useEffect(() => {
+    const id = "mods-verify";
+    const unlisten = onModsVerify(({ state, site }) => {
+      if (state === "shown") {
+        toast.info(t("modsVerify.shown", { site }), { id, duration: Infinity });
+      } else if (state === "cleared") {
+        toast.success(t("modsVerify.cleared", { site }), { id, duration: 3000 });
+      } else {
+        toast.warning(
+          t(state === "dismissed" ? "modsVerify.dismissed" : "modsVerify.timedOut", { site }),
+          { id },
+        );
+      }
+    });
     return () => {
       void unlisten.then((off) => off()).catch(() => {});
     };

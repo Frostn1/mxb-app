@@ -552,6 +552,23 @@ export function getModDetail(slug: string): Promise<ModDetail> {
   return invoke<ModDetail>("get_mod_detail", { slug });
 }
 
+/** Retry after a refused mod page: if the session stopped showing mxb-mods.com's check (the
+ *  user closed it, or left it unanswered), show it again on the next request. */
+export function resetModsVerification(): Promise<void> {
+  return invoke<void>("mods_verify_reset");
+}
+
+/** What mxb-mods.com's check window is doing. `shown` means it is waiting on the user. */
+export interface ModsVerify {
+  state: "shown" | "cleared" | "dismissed" | "timedOut";
+  site: string;
+}
+
+/** The backend can't put a line of our own text above Cloudflare's page, so it says here. */
+export function onModsVerify(cb: (e: ModsVerify) => void): Promise<UnlistenFn> {
+  return listen<ModsVerify>("mods-verify", (e) => cb(e.payload));
+}
+
 /** Community scores for the given post ids, keyed by id. Ids the site didn't answer for
  *  are absent — ratings decorate a card, so a miss shows no stars rather than an error. */
 export function getModRatings(ids: number[]): Promise<Record<string, ModRating>> {

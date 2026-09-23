@@ -328,49 +328,64 @@ fn normalize_game_folder(path: String) -> NormalizedGameFolder {
 /// anyway — a clearance is bound to the TLS fingerprint that earned it. So instead of moving
 /// the cookie to the request, we move the request to the browser. See [`mxb_fetch`].
 ///
-/// Once, not a loop: the second attempt is on a different transport, so if that is refused
-/// too, trying a third time changes nothing. Only refusals a browser could plausibly satisfy
-/// get this treatment — a 429 wants patience, not another request.
+/// Once, not a loop, and only from the HTTP client. A refusal the WebView itself got has
+/// already been through everything the WebView can do — including showing the check to the
+/// user — so running it through the WebView again would only repeat that. Only refusals a
+/// browser could plausibly satisfy get the fallback; a 429 wants patience, not a browser.
 async fn with_clearance<T, F, Fut>(_app: &tauri::AppHandle, what: &str, op: F) -> Result<T, String>
 where
     F: Fn() -> Fut,
     Fut: std::future::Future<Output = anyhow::Result<T>>,
 {
+    let via_webview = mods::mxb::on_webview();
     let err = match op().await {
         Ok(value) => return Ok(value),
         Err(err) => err,
     };
+    if via_webview {
+        // `mxb_fetch` has already logged whether the check was shown, cleared, dismissed or
+        // timed out; this is the request's own outcome.
+        log::warn!("{what} failed through the WebView: {err:#}");
+        return Err(format!("{err:#}"));
+    }
     match err.downcast_ref::<mods::mxb::Blocked>() {
         Some(blocked) if blocked.clearable() => {
             log::info!(
-                "{what} blocked ({}) — retrying it from inside the WebView",
+                "{what} blocked by Cloudflare ({}) — retrying it from inside the WebView",
                 blocked
                     .status
                     .map_or_else(|| "interstitial".to_string(), |s| s.to_string())
             );
         }
-        // Not clearable, or not a block at all — a parse failure, a timeout, a 429.
+        // Not a Cloudflare challenge — a parse failure, a timeout, a 429.
         _ => {
-            log::warn!("{what} failed and a browser wouldn't help: {err:#}");
+            log::warn!("{what} failed (not a Cloudflare challenge, no WebView fallback): {err:#}");
             return Err(format!("{err:#}"));
         }
     }
     // Latches for the session: once this client's fingerprint has been refused on this
     // network, every later request would be refused the same way, so there is nothing to
     // gain from trying the HTTP client again first.
-    mods::mxb::use_webview();
+    mods::mxb::use_webview("the HTTP client was refused");
     match op().await {
         Ok(value) => {
             log::info!("{what} succeeded through the WebView");
             Ok(value)
         }
-        // Report the browser's failure, not the original 403 — if the site is refusing a
-        // real browser too, "open mxb-mods.com and hit Retry" is the wrong advice.
+        // Report the browser's failure, not the original 403 — it is the one that says whether
+        // the user dismissed the check, let it time out, or has no WebView at all.
         Err(e) => {
             log::warn!("{what} failed through the WebView too: {e:#}");
             Err(format!("{e:#}"))
         }
     }
+}
+
+/// Retry on a refused mod page: if this session stopped asking — the user closed the check,
+/// or left it — ask again on the next request.
+#[tauri::command]
+fn mods_verify_reset() {
+    mxb_fetch::reset();
 }
 
 #[tauri::command]
@@ -7895,9 +7910,6 @@ fn main() {
             // The window is built hidden and revealed by `window_painted`; this is what
             // rescues it when that never arrives.
             firstpaint::arm(app.handle());
-            // Cloudflare scores the User-Agent alongside the IP, and a cf_clearance is bound
-            // to the UA that earned it — a log about a block should say which one was used.
-            log::info!("{} user-agent: {}", mxb_session::site().domain, mxb_session::UA);
             // A blank webview leaves nothing else behind to diagnose from, so record the
             // session this run started under and every knob `prepare_webview_env` settled on.
             if cfg!(target_os = "linux") {
@@ -8154,6 +8166,9 @@ fn main() {
             // Only registers the result listener and stashes the handle — the hidden window
             // isn't built until something is actually refused.
             mxb_fetch::init(handle);
+            // The WebView's real user-agent (logged, and borrowed by the mods client), and
+            // whether an earlier session left a live cf_clearance to start on.
+            mxb_fetch::inspect_on_startup(handle);
             // Same again for the shop's signed-in half. Nothing opens until the purchases tab
             // is actually used, so a user who never signs in never pays for the window.
             shop_fetch::init(handle);
@@ -8229,6 +8244,7 @@ fn main() {
             search_mods,
             get_mod_detail,
             get_mod_ratings,
+            mods_verify_reset,
             get_installed_mods,
             mxb_core::trackview::get_pkz_meta_cached,
             mxb_core::trackview::get_pkz_meta,

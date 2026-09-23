@@ -12,7 +12,7 @@ pub const SHOP_BASE: &str = "https://mxbikes-shop.com";
 /// uses it for the mod hosts (MediaFire, Drive) that have nothing to do with this store.
 ///
 /// It is **no longer forced on the login WebView**, which is the one thing it used to be for.
-/// Real Chrome never sends a two-part version — [`crate::mxb_session::UA`] documents that shape
+/// Real Chrome never sends a two-part version — [`crate::mxb_session::FALLBACK_UA`] documents that shape
 /// as a bot-filter signal in its own right — and on macOS the window wearing it is WKWebView,
 /// so the claim contradicts every other thing a Cloudflare challenge measures. The window
 /// introduces itself honestly now.

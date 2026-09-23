@@ -67,8 +67,9 @@ fn build_client() -> anyhow::Result<Client> {
     ] {
         headers.insert(k, HeaderValue::from_static(v));
     }
-    // UA, jar and timeouts come from `mxb_session` so the client and the handshake WebView
-    // cannot drift apart — a `cf_clearance` is bound to the UA that earned it.
+    // Jar and timeouts come from `mxb_session`. The User-Agent is set again on every request
+    // (see `get`), because this client can be built before the WebView has said what its real
+    // one is.
     Ok(mxb_session::client_builder().default_headers(headers).build()?)
 }
 
@@ -123,10 +124,13 @@ impl Fetched {
 /// reintroduce the failure on every request.
 static WEBVIEW_TRANSPORT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-/// Route every mxb-mods.com request through the WebView from here on.
-pub fn use_webview() {
+/// Route every mxb-mods.com request through the WebView from here on. `why` goes in the log.
+pub fn use_webview(why: &str) {
     if !WEBVIEW_TRANSPORT.swap(true, std::sync::atomic::Ordering::Relaxed) {
-        log::info!("switching mxb-mods.com traffic to the WebView for the rest of this session");
+        log::info!(
+            "switching {} traffic to the WebView for the rest of this session ({why})",
+            mxb_session::site().domain
+        );
     }
 }
 
@@ -147,7 +151,10 @@ fn forced_to_webview() -> bool {
     })
 }
 
-fn on_webview() -> bool {
+/// Whether requests are going through the WebView right now. [`crate::with_clearance`] asks
+/// before each attempt: a refusal the WebView itself got is not one another WebView attempt
+/// can fix.
+pub fn on_webview() -> bool {
     forced_to_webview() || WEBVIEW_TRANSPORT.load(std::sync::atomic::Ordering::Relaxed)
 }
 
@@ -219,7 +226,10 @@ async fn get(url: &str, params: &[(&str, String)], want: Want) -> anyhow::Result
     let mut last_err: Option<anyhow::Error> = None;
     for attempt in 1..=ATTEMPTS {
         let started = Instant::now();
-        let req = client.get(url).query(params);
+        let req = client
+            .get(url)
+            .query(params)
+            .header(reqwest::header::USER_AGENT, mxb_session::ua());
         let req = match want {
             Want::Api => req,
             Want::Page => req.headers(page_headers()),
@@ -310,9 +320,8 @@ pub use super::Blocked;
 /// carrying it can be diagnosed without asking anyone to find their log file.
 fn blocked_error(status: u16, ray: Option<&str>) -> anyhow::Error {
     let message = match status {
-        403 => "mxb-mods.com refused the request (403), and its check window didn't clear \
-                it either. Open mxb-mods.com in your normal browser to confirm the site \
-                loads for you, then hit Retry."
+        403 => "mxb-mods.com refused the request (403). Hit Retry to be shown its check, or \
+                open the mod on mxb-mods.com in your browser."
             .to_string(),
         429 => "mxb-mods.com is rate-limiting us (429). Give it a minute, then hit Retry."
             .to_string(),
@@ -409,9 +418,8 @@ fn challenge_error(marker: &str, html_len: usize) -> anyhow::Error {
     );
     anyhow::Error::new(Blocked {
         status: None,
-        message: "mxb-mods.com served a Cloudflare check instead of the mod page, and its \
-                  check window didn't clear it. Open mxb-mods.com in your normal browser, \
-                  then hit Retry."
+        message: "mxb-mods.com served a Cloudflare check instead of the mod page. Hit Retry \
+                  to be shown the check, or open the mod on mxb-mods.com in your browser."
             .to_string(),
     })
 }
@@ -805,7 +813,11 @@ async fn rating(id: u64) -> anyhow::Result<ModRating> {
     let resp = if on_webview() {
         crate::mxb_fetch::post(&url, &form).await?
     } else {
-        into_fetched(client()?.post(&url).form(&form).send().await?).await
+        let req = client()?
+            .post(&url)
+            .header(reqwest::header::USER_AGENT, mxb_session::ua())
+            .form(&form);
+        into_fetched(req.send().await?).await
     };
     if !resp.is_success() {
         anyhow::bail!("{}", resp.status);
@@ -1900,6 +1912,7 @@ mod client_tests {
         let body: serde_json::Value = client()
             .unwrap()
             .get("https://httpbin.org/headers")
+            .header(reqwest::header::USER_AGENT, mxb_session::ua())
             .send()
             .await
             .expect("reachable")
@@ -1908,7 +1921,7 @@ mod client_tests {
             .expect("json");
         let h = &body["headers"];
         eprintln!("{}", serde_json::to_string_pretty(h).unwrap());
-        assert!(h["User-Agent"].as_str().unwrap().contains("Chrome/131.0.6778.140"));
+        assert!(h["User-Agent"].as_str().unwrap().contains("Chrome/"));
         assert!(h["Accept-Encoding"].as_str().unwrap().contains("gzip"));
         assert!(h["Accept-Language"].as_str().is_some());
         assert!(h["Sec-Fetch-Mode"].as_str().is_some());

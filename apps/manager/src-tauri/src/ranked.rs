@@ -135,7 +135,7 @@ fn client() -> Result<&'static reqwest::Client, String> {
     CLIENT
         .get_or_init(|| {
             reqwest::Client::builder()
-                .user_agent(crate::mxb_session::UA)
+                .user_agent(crate::mxb_session::ua())
                 .connect_timeout(Duration::from_secs(15))
                 .timeout(REQUEST_TIMEOUT)
                 .build()
