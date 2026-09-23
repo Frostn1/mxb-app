@@ -20,6 +20,7 @@ import { Share2 } from "lucide-react";
 import { cn } from "@frost/shared/lib/utils";
 import { Button } from "@frost/shared/Components/ui/button";
 import { ContextBarRight } from "../Shell/ContextBar";
+import { useRefreshWhileActive } from "../Shell/RetainedView";
 import HelpHint from "@frost/shared/Components/ui/help-hint";
 import {
   scanModelSwaps,
@@ -237,14 +238,9 @@ export default function Locker() {
     void load();
   }, [load]);
 
-  // Installing a mod or editing the folder changes what's swappable — pick it up without
-  // making the user hit Rescan (same watcher `Context/Frostmod` listens to).
-  useEffect(() => {
-    const un = onModsChanged(() => void load());
-    return () => {
-      void un.then((f) => f());
-    };
-  }, [load]);
+  // Installing a mod or editing the folder changes what's swappable. Hidden retained tabs
+  // coalesce those signals and scan once when reopened instead of doing invisible disk work.
+  useRefreshWhileActive(load, onModsChanged);
 
   const looseCount = loose.reduce((n, b) => n + b.candidates.length, 0);
 

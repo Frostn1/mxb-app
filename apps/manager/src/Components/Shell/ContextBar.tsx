@@ -11,7 +11,12 @@ import type { DashboardView, RailItem } from "./nav";
  * is what made the old shell feel like a dashboard. Screens fill the ends by portalling
  * into them, so nothing has to be lifted into `Dashboard` state and re-rendered from there.
  */
-export const ContextSlots = createContext<{ left: HTMLElement | null; right: HTMLElement | null }>({
+export interface ContextSlotTargets {
+  left: HTMLElement | null;
+  right: HTMLElement | null;
+}
+
+export const ContextSlots = createContext<ContextSlotTargets>({
   left: null,
   right: null,
 });

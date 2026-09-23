@@ -111,6 +111,7 @@ import { useConfig } from "@frost/shared/Context/Config";
 import { useSteamLink } from "@/lib/useSteamLink";
 import GameSwitcher from "../Shell/GameSwitcher";
 import { ContextBarLeft, ContextBarRight } from "../Shell/ContextBar";
+import { useViewActive } from "../Shell/RetainedView";
 import ReshadeCard from "./ReshadeCard";
 import SupportersCard from "./SupportersCard";
 import {
@@ -276,6 +277,7 @@ interface SettingsProps {
 }
 
 export default function Settings({ initialSection, onShowWhatsNew }: SettingsProps) {
+  const viewActive = useViewActive();
   const { t, locale, setLocale } = useI18n();
   const { config, reloadConfig, game, games } = useConfig();
   const caps = game.caps;
@@ -613,6 +615,7 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
   // player can find out why "nothing happens".
   const [overlayLive, setOverlayLive] = useState<OverlayState | null>(null);
   useEffect(() => {
+    if (!viewActive) return;
     let alive = true;
     const poll = () =>
       getOverlayState()
@@ -626,7 +629,7 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
       alive = false;
       clearInterval(id);
     };
-  }, [config.overlayEnabled, config.overlayHotkey]);
+  }, [viewActive, config.overlayEnabled, config.overlayHotkey]);
 
   const showOverlayNow = async () => {
     try {
@@ -741,10 +744,11 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
 
   // Navigating to another section closes the meter with it. The state that drives it lives
   // up here rather than in the section, so without this a mic left testing would keep
-  // recording behind a pane that isn't even on screen.
+  // recording behind a pane that isn't even on screen. Retained navigation also means the
+  // whole Settings screen can be hidden without unmounting, so leaving Settings closes it too.
   useEffect(() => {
-    if (active !== "voice") setMicTesting(false);
-  }, [active]);
+    if (!viewActive || active !== "voice") setMicTesting(false);
+  }, [viewActive, active]);
 
   const toggleVoice = async (v: boolean) => {
     try {

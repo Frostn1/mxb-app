@@ -13,6 +13,7 @@ import { SearchBox } from "@frost/shared/Components/ui/search-box";
 import { cn } from "@frost/shared/lib/utils";
 import { Button } from "@frost/shared/Components/ui/button";
 import { ContextBarLeft, ContextBarRight, ContextTab } from "../Shell/ContextBar";
+import { RetainedPane, useRefreshWhileActive } from "../Shell/RetainedView";
 import HelpHint from "@frost/shared/Components/ui/help-hint";
 import { Switch } from "@frost/shared/Components/ui/switch";
 import {
@@ -124,13 +125,9 @@ export default function Manage() {
     void load();
   }, [load]);
 
-  // A mod installed from Browse (in either window) belongs in this list right away.
-  useEffect(() => {
-    const un = onModsChanged(() => void load());
-    return () => {
-      void un.then((f) => f());
-    };
-  }, [load]);
+  // A hidden retained tab records the change and scans once when reopened, rather than making
+  // one install fan out into several invisible full-tree scans.
+  useRefreshWhileActive(load, onModsChanged);
 
   useEffect(() => {
     presetsListProfiles()
@@ -280,36 +277,41 @@ export default function Manage() {
         <p className="px-7 py-16 text-center text-[13px] text-muted-foreground">
           {t("library.scanning")}
         </p>
-      ) : tab === "race" ? (
-        <RacePanel
-          presets={presets}
-          mods={mods}
-          busy={busy}
-          profiles={profiles}
-          profile={profile}
-          onProfile={setProfile}
-          bikes={bikes}
-          bike={bike}
-          onBike={setBike}
-          onEdit={setEditing}
-          onRace={openRace}
-        />
       ) : (
-        <ModsPanel
-          mods={mods}
-          busy={busy}
-          onToggle={toggleMod}
-          onDelete={setDeleting}
-          onBulk={(rels, enabled) =>
-            run(
-              () => modsStateSet(rels, enabled),
-              (o) =>
-                enabled
-                  ? t("manage.enabledMany", { count: o.enabled })
-                  : t("manage.disabledMany", { count: o.disabled }),
-            )
-          }
-        />
+        <>
+          <RetainedPane active={tab === "race"}>
+            <RacePanel
+              presets={presets}
+              mods={mods}
+              busy={busy}
+              profiles={profiles}
+              profile={profile}
+              onProfile={setProfile}
+              bikes={bikes}
+              bike={bike}
+              onBike={setBike}
+              onEdit={setEditing}
+              onRace={openRace}
+            />
+          </RetainedPane>
+          <RetainedPane active={tab === "mods"}>
+            <ModsPanel
+              mods={mods}
+              busy={busy}
+              onToggle={toggleMod}
+              onDelete={setDeleting}
+              onBulk={(rels, enabled) =>
+                run(
+                  () => modsStateSet(rels, enabled),
+                  (o) =>
+                    enabled
+                      ? t("manage.enabledMany", { count: o.enabled })
+                      : t("manage.disabledMany", { count: o.disabled }),
+                )
+              }
+            />
+          </RetainedPane>
+        </>
       )}
 
       <ContentDialog

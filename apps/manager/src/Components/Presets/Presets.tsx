@@ -21,6 +21,7 @@ import { toast } from "sonner";
 import { cn } from "@frost/shared/lib/utils";
 import { Button } from "@frost/shared/Components/ui/button";
 import { ContextBarLeft, ContextBarRight, ContextTab } from "../Shell/ContextBar";
+import { RetainedPane, useRefreshWhileActive } from "../Shell/RetainedView";
 import HelpHint from "@frost/shared/Components/ui/help-hint";
 import { Input } from "@frost/shared/Components/ui/input";
 import { Switch } from "@frost/shared/Components/ui/switch";
@@ -221,13 +222,8 @@ export default function Presets({
   }, [load]);
 
   // Registering a swap in the Locker (or installing a mod) changes what these slots can
-  // offer — re-scan on the same signal instead of waiting for a manual Refresh.
-  useEffect(() => {
-    const un = onModsChanged(() => void load());
-    return () => {
-      void un.then((f) => f());
-    };
-  }, [load]);
+  // offer. Hidden retained tabs defer and coalesce that scan until they are visible again.
+  useRefreshWhileActive(load, onModsChanged);
 
   useEffect(() => {
     if (!profile) {
@@ -517,10 +513,13 @@ export default function Presets({
             </Button>
           </div>
         </div>
-      ) : mode === "feel" ? (
-        <FeelPresets profiles={profiles} profile={profile} onProfile={setProfile} />
       ) : (
-        <div className="flex min-h-0 flex-1 gap-5 overflow-hidden px-7 pb-6">
+        <>
+          <RetainedPane active={mode === "feel"}>
+            <FeelPresets profiles={profiles} profile={profile} onProfile={setProfile} />
+          </RetainedPane>
+          <RetainedPane active={mode === "look"}>
+            <div className="flex min-h-0 flex-1 gap-5 overflow-hidden px-7 pb-6">
           {/* Builder */}
           <section className="flex min-w-0 flex-1 flex-col gap-4 overflow-y-auto pr-1">
             {/* Target row */}
@@ -763,7 +762,9 @@ export default function Presets({
               ))
             )}
           </aside>
-        </div>
+            </div>
+          </RetainedPane>
+        </>
       )}
 
       <ConfirmSaveDialog

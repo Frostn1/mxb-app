@@ -18,6 +18,7 @@ import { useT, type TFunc, type TKey } from "@/i18n";
 import type { InstallStage } from "@frost/shared/types";
 import { displayName, formatBytes } from "@frost/shared/lib/mods";
 import { cn } from "@frost/shared/lib/utils";
+import { useViewActive } from "../Shell/RetainedView";
 
 /** Stages that mean an install is still moving — anything else is done, failed, or idle.
  *  `review` counts: the bytes are down but nothing is installed, and dropping the card would
@@ -138,7 +139,8 @@ export function RunningRow({
   boxed?: boolean;
 }) {
   const t = useT();
-  useLiveTick(item.stage === "downloading");
+  const viewActive = useViewActive();
+  useLiveTick(viewActive && item.stage === "downloading");
   const pct = pctOf(item);
   const rate = rateLine(item, t);
   const size = sizeLine(item);
