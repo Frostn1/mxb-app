@@ -1,6 +1,6 @@
 # Changelog
 
-## 2026-09-22 — v0.18.2 — Lower memory, safer protected tracks
+## 2026-09-22 — v0.18.3 — Shop resolution and stability patch
 
 ### Fixed
 - Cached ARL Finals misses from the interim matcher are now retired immediately, so Round 01
