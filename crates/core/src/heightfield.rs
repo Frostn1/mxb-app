@@ -87,12 +87,6 @@ pub struct Layout {
     pub metres_per_sample: Option<f32>,
 }
 
-/// The magic that opens a real `.trh`.
-const TRH_MAGIC: &[u8; 4] = b"TRH\0";
-
-/// Half the 16-bit range, added back to a `.trh`'s signed samples. See [`Layout::bias`].
-const TRH_BIAS: f32 = 32768.0;
-
 /// Read MX Bikes' own heightfield layout, confirmed against a published track:
 ///
 /// ```text
@@ -111,24 +105,12 @@ const TRH_BIAS: f32 = 32768.0;
 /// sample below the datum a full half-range too high, which draws the ground below a track
 /// as an eleven-metre wall around it.
 fn parse_trh(bytes: &[u8]) -> Option<Layout> {
-    if bytes.len() < 12 || &bytes[..4] != TRH_MAGIC {
-        return None;
-    }
-    let width = u32::from_le_bytes(bytes[4..8].try_into().ok()?);
-    let height = u32::from_le_bytes(bytes[8..12].try_into().ok()?);
-    if !(MIN_DIM..=MAX_DIM).contains(&width) || !(MIN_DIM..=MAX_DIM).contains(&height) {
-        return None;
-    }
-    let need = (width as usize).checked_mul(height as usize)?.checked_mul(2)?;
-    let end = need.checked_add(12)?;
-    if end > bytes.len() {
-        return None;
-    }
+    let descriptor = mxb_content::trh_descriptor(bytes)?;
 
     let c = Candidate {
-        offset: 12,
-        width,
-        height,
+        offset: descriptor.sample_offset,
+        width: descriptor.width,
+        height: descriptor.height,
         sample: Sample::I16,
         source: "trh",
     };
@@ -138,39 +120,17 @@ fn parse_trh(bytes: &[u8]) -> Option<Layout> {
         return None;
     };
 
-    let scale = trh_scale(bytes, end, width);
     Some(Layout {
-        offset: 12,
-        width,
-        height,
+        offset: descriptor.sample_offset,
+        width: descriptor.width,
+        height: descriptor.height,
         sample: Sample::I16,
         confidence,
         source: "trh",
-        bias: TRH_BIAS,
-        height_scale: scale.map(|(_, h)| h),
-        metres_per_sample: scale.map(|(s, _)| s),
+        bias: descriptor.bias,
+        height_scale: descriptor.height_scale,
+        metres_per_sample: descriptor.metres_per_sample,
     })
-}
-
-/// `(metres per sample, metres per raw unit)` from the block that follows the grid.
-///
-/// Taken from one published track rather than from a specification, so every figure has to
-/// be plausible before any of it is believed — and it's all or nothing, because a footprint
-/// without a height scale would draw relief in raw units across real ground.
-fn trh_scale(bytes: &[u8], at: usize, width: u32) -> Option<(f32, f32)> {
-    let f32_at = |i: usize| -> Option<f32> {
-        let o = at + i * 4;
-        Some(f32::from_le_bytes(bytes.get(o..o + 4)?.try_into().ok()?))
-    };
-    let size_x = f32_at(0)?;
-    let relief = f32_at(1)?;
-    let size_z = f32_at(2)?;
-
-    let sane = |v: f32, max: f32| v.is_finite() && v > 0.0 && v < max;
-    if !(sane(size_x, 100_000.0) && sane(size_z, 100_000.0) && sane(relief, 10_000.0)) {
-        return None;
-    }
-    Some((size_x / (width.max(2) - 1) as f32, relief / u16::MAX as f32))
 }
 
 /// Integer square root, for testing whether a sample count is a square grid.
@@ -656,9 +616,9 @@ pub fn probe(bytes: &[u8], hint: Option<(u32, u32)>) -> Option<Layout> {
         let better = match &best {
             None => true,
             Some(b) => (
-                confidence,
-                rank(layout.source),
-                layout.width as u64 * layout.height as u64,
+                    confidence,
+                    rank(layout.source),
+                    layout.width as u64 * layout.height as u64,
             ) > (b.confidence, rank(b.source), b.width as u64 * b.height as u64),
         };
         if better {

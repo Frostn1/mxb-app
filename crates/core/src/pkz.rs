@@ -860,11 +860,7 @@ fn make_thumbnail(name: &str, bytes: &[u8], max: u32) -> Option<String> {
 }
 
 pub fn is_plain_zip(path: &Path) -> bool {
-    let mut magic = [0u8; 4];
-    std::fs::File::open(path)
-        .and_then(|mut f| f.read(&mut magic).map(|n| n))
-        .map(|n| n >= 4 && magic == ZIP_MAGIC)
-        .unwrap_or(false)
+    mxb_content::is_plain_zip(path)
 }
 
 pub fn extract(path: &Path, out_dir: &Path) -> Result<Vec<String>> {
@@ -900,21 +896,7 @@ pub fn read_all(path: &Path) -> Result<Vec<(String, Vec<u8>)>> {
         bail!(SECURED_IN_GAME_ONLY);
     }
     if is_plain_zip(path) {
-        let file = std::fs::File::open(path).with_context(|| format!("open {path:?}"))?;
-        let mut archive =
-            zip::ZipArchive::new(file).with_context(|| format!("open zip {path:?}"))?;
-        let mut out = Vec::new();
-        for idx in 0..archive.len() {
-            let mut e = archive.by_index(idx)?;
-            if !e.is_file() {
-                continue;
-            }
-            let name = e.name().replace('\\', "/");
-            let mut buf = Vec::with_capacity(e.size() as usize);
-            e.read_to_end(&mut buf)?;
-            out.push((name, buf));
-        }
-        return Ok(out);
+        return mxb_content::read_selected(path, u64::MAX, |_| true);
     }
     let _protected = acquire_protected_read();
     #[cfg(sidecar)]
@@ -933,21 +915,7 @@ pub fn read_selected(
         bail!(SECURED_IN_GAME_ONLY);
     }
     if is_plain_zip(path) {
-        let file = std::fs::File::open(path).with_context(|| format!("open {path:?}"))?;
-        let mut archive =
-            zip::ZipArchive::new(file).with_context(|| format!("open zip {path:?}"))?;
-        let mut out = Vec::new();
-        for idx in 0..archive.len() {
-            let mut e = archive.by_index(idx)?;
-            if !e.is_file() || !keep(e.name()) {
-                continue;
-            }
-            let name = e.name().replace('\\', "/");
-            let mut buf = Vec::with_capacity(e.size() as usize);
-            e.read_to_end(&mut buf)?;
-            out.push((name, buf));
-        }
-        return Ok(out);
+        return mxb_content::read_selected(path, u64::MAX, keep);
     }
     let _protected = acquire_protected_read();
     #[cfg(sidecar)]
@@ -969,12 +937,7 @@ pub fn entry_names(path: &Path) -> Result<Vec<String>> {
         bail!(SECURED_IN_GAME_ONLY);
     }
     if is_plain_zip(path) {
-        let file = std::fs::File::open(path).with_context(|| format!("open {path:?}"))?;
-        let mut archive =
-            zip::ZipArchive::new(file).with_context(|| format!("open zip {path:?}"))?;
-        return Ok((0..archive.len())
-            .filter_map(|i| archive.by_index(i).ok().map(|f| f.name().replace('\\', "/")))
-            .collect());
+        return mxb_content::entry_names(path);
     }
     let names = std::cell::RefCell::new(Vec::new());
     read_selected(path, |n| {
@@ -991,20 +954,14 @@ pub fn read_entry(path: &Path, file_name: &str) -> Result<Option<Vec<u8>>> {
         bail!(SECURED_IN_GAME_ONLY);
     }
     if is_plain_zip(path) {
-        let file = std::fs::File::open(path).with_context(|| format!("open {path:?}"))?;
-        let mut archive =
-            zip::ZipArchive::new(file).with_context(|| format!("open zip {path:?}"))?;
-        for idx in 0..archive.len() {
-            let mut e = archive.by_index(idx)?;
-            let base = e.name().replace('\\', "/");
-            let base = base.rsplit('/').next().unwrap_or(&base);
-            if base.eq_ignore_ascii_case(file_name) {
-                let mut buf = Vec::with_capacity(e.size() as usize);
-                e.read_to_end(&mut buf)?;
-                return Ok(Some(buf));
-            }
-        }
-        return Ok(None);
+        return Ok(mxb_content::read_selected(path, u64::MAX, |name| {
+            name.rsplit('/')
+                .next()
+                .is_some_and(|base| base.eq_ignore_ascii_case(file_name))
+        })?
+        .into_iter()
+        .next()
+        .map(|(_, bytes)| bytes));
     }
     let _protected = acquire_protected_read();
     #[cfg(sidecar)]
@@ -1031,20 +988,7 @@ pub(crate) fn read_selected_bytes(
     keep: impl Fn(&str) -> bool + Copy,
 ) -> Result<Vec<(String, Vec<u8>)>> {
     if is_plain_zip_bytes(bytes) {
-        let mut archive =
-            zip::ZipArchive::new(std::io::Cursor::new(bytes)).context("open in-memory zip")?;
-        let mut out = Vec::new();
-        for idx in 0..archive.len() {
-            let mut e = archive.by_index(idx)?;
-            if !e.is_file() || !keep(e.name()) {
-                continue;
-            }
-            let name = e.name().replace('\\', "/");
-            let mut buf = Vec::with_capacity(e.size() as usize);
-            e.read_to_end(&mut buf)?;
-            out.push((name, buf));
-        }
-        return Ok(out);
+        return mxb_content::read_selected_bytes(bytes, u64::MAX, keep);
     }
     #[cfg(sidecar)]
     {
@@ -1464,8 +1408,8 @@ mod tests {
         let is_text = |n: &str| {
             let l = n.to_ascii_lowercase();
             [".cfg", ".ini", ".skl", ".txt", ".xml", ".bones", ".rig", ".hrc", ".prm"]
-                .iter()
-                .any(|e| l.ends_with(e))
+            .iter()
+            .any(|e| l.ends_with(e))
         };
         for (name, data) in &entries {
             if is_text(name) && data.len() < 200_000 {
@@ -1642,8 +1586,8 @@ mod tests {
 
         let mut png = Vec::new();
         image::DynamicImage::ImageRgba8(source)
-        .write_to(&mut Cursor::new(&mut png), image::ImageFormat::Png)
-        .unwrap();
+            .write_to(&mut Cursor::new(&mut png), image::ImageFormat::Png)
+            .unwrap();
 
         let badge = make_badge("logo.png", &png, LOGO_MAX).expect("badge");
         assert!(badge.starts_with("data:image/png;base64,"));

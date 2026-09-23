@@ -11,6 +11,7 @@
 [workspace]
 resolver = "2"
 members = [
+    "crates/content",
     "crates/core",
     "apps/manager/src-tauri",
     "apps/studio/src-tauri",
