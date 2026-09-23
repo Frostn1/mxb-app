@@ -23,6 +23,7 @@ import type { ModTarget } from "../Context/Install";
 export function useModBrowsing(
   onOpenedFromElsewhere?: () => void,
   game: GameId = "mxb",
+  enabled = true,
 ) {
   const modTypes = modTypesFor(game);
   const [modType, setModType] = useState<ModType>(modTypes[0]);
@@ -36,7 +37,7 @@ export function useModBrowsing(
   const [installed, setInstalled] = useState<InstalledIndex>(EMPTY_INSTALLED_INDEX);
   // The grid's own state — filters, fetched pages, scroll offset. Held here, above the
   // Browse/ModDetail swap, so opening a mod and coming back lands on the same screen.
-  const listing = useModListing(modType);
+  const listing = useModListing(modType, enabled);
 
   // Follow a game switch. The two catalogs don't share category ids, so carrying the old
   // `modType` over would query the new site with the old site's numbers and come back
@@ -52,6 +53,7 @@ export function useModBrowsing(
   // The full library scan, not `getInstalledMods` — that one sees `.pkz` files only, so
   // extracted track folders and every `.pnt` paint/livery counted as "not installed".
   useEffect(() => {
+    if (!enabled) return;
     let cancelled = false;
     scanLibrary(modType.installSubpath)
       .then((entries) => {
@@ -62,7 +64,7 @@ export function useModBrowsing(
     return () => {
       cancelled = true;
     };
-  }, [modType, libraryVersion]);
+  }, [enabled, modType, libraryVersion]);
 
   const onInstalled = useCallback(() => setLibraryVersion((v) => v + 1), []);
 

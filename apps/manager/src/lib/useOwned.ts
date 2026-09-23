@@ -13,7 +13,6 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   modTypesFor,
-  scanLibrary,
   shopInstalledMap,
   shopMyDownloads,
   shopStatus,
@@ -24,6 +23,7 @@ import { useConfig } from "@frost/shared/Context/Config";
 import { shopMatchCatalog, type StoreId } from "@/api/shop";
 import { hubMyDownloads, hubStatus, type HubItem } from "@/api/hub";
 import { groupPurchases } from "./purchases";
+import { scanLibrariesSequentially } from "./scanLibraries";
 
 /** One owned product, flattened to what a list of them needs to show. */
 export interface OwnedRow {
@@ -84,7 +84,7 @@ export function useOwned(enabled: boolean, refreshKey: number): OwnedState {
       // bikes and gear, so every mod folder is scanned, not just one.
       const subpaths = modTypesFor(game.id).map((m) => m.installSubpath);
       const [scans, record] = await Promise.all([
-        Promise.all(subpaths.map((s) => scanLibrary(s).catch(() => []))),
+        scanLibrariesSequentially(subpaths),
         shopInstalledMap().catch(() => ({}) as Record<string, string[]>),
       ]);
       const installedNames = scans.flat().map((e) => e.name);

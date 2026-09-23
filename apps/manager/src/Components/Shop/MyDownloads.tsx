@@ -26,11 +26,11 @@ import {
   shopLogout,
   shopMyDownloads,
   shopStatus,
-  scanLibrary,
   modTypesFor,
   buildDestinations,
   destStorageKey,
   resolveInitialFolder,
+  scanLibrary,
   type DestOption,
   type ModType,
   type ShopItem,
@@ -72,6 +72,7 @@ import {
 } from "@frost/shared/Components/ui/select";
 import { SearchBox } from "@frost/shared/Components/ui/search-box";
 import { cn } from "@frost/shared/lib/utils";
+import { scanLibrariesSequentially } from "../../lib/scanLibraries";
 
 /** The pill for purchases the catalog doesn't list. */
 const OTHER_CATEGORY = -1;
@@ -194,7 +195,7 @@ export default function MyDownloads({ refreshKey }: MyDownloadsProps) {
   useEffect(() => {
     let cancelled = false;
     const subpaths = modTypesFor(game.id).map((m) => m.installSubpath);
-    Promise.all(subpaths.map((s) => scanLibrary(s).catch(() => [])))
+    scanLibrariesSequentially(subpaths)
       .then((scans) => {
         if (cancelled) return;
         setInstalledNames(scans.flat().map((e) => e.name));

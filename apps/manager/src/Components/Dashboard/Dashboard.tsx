@@ -1,25 +1,27 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { toast } from "sonner";
 import TopRail from "../Shell/TopRail";
 import { ContextSlots } from "../Shell/ContextBar";
 import PurchaseWatcher from "../Shell/PurchaseWatcher";
-import { isModsView, type DashboardView } from "../Shell/nav";
+import { isModsView, type DashboardView, type ModsView } from "../Shell/nav";
+import RetainedView from "../Shell/RetainedView";
 import { parsePluginView, usePlugins } from "@frost/shared/lib/usePlugins";
-import Library from "../Library/Library";
-import Downloads from "../Downloads/Downloads";
-import Locker from "../Locker/Locker";
-import Presets from "../Presets/Presets";
-import Manage from "../Manage/Manage";
-import Mods from "../Mods/Mods";
 import Servers from "../Servers/Servers";
-import Ranked from "../Ranked/Ranked";
-import ModDetail from "../ModDetail/ModDetail";
 import DropZone from "../Dropzone/DropZone";
 import RuntimeBanner from "../RuntimeBanner/RuntimeBanner";
 import UpdateBanner from "../UpdateBanner/UpdateBanner";
 import SecurePrompt from "./SecurePrompt";
 import GameIntegrationConsent from "../GameIntegration/GameIntegrationConsent";
-import Settings, { type SectionId } from "../Settings/Settings";
+import type { SectionId } from "../Settings/Settings";
+import { LoadingMark } from "../Shell/LoadingMark";
 import Tour, { TourContext, TOUR_DONE_KEY } from "../Tour/Tour";
 import GetStarted from "../GetStarted/GetStarted";
 import ReleaseShowcase from "../Showcase/ReleaseShowcase";
@@ -36,6 +38,17 @@ import { displayName } from "@frost/shared/lib/mods";
 import { track } from "../../lib/analytics";
 import type { DownloadRecord } from "@frost/shared/types";
 import { useFrostmod } from "../../Context/FrostmodContext";
+import { invoke } from "@tauri-apps/api/core";
+
+const Mods = lazy(() => import("../Mods/Mods"));
+const ModDetail = lazy(() => import("../ModDetail/ModDetail"));
+const Ranked = lazy(() => import("../Ranked/Ranked"));
+const Library = lazy(() => import("../Library/Library"));
+const Downloads = lazy(() => import("../Downloads/Downloads"));
+const Locker = lazy(() => import("../Locker/Locker"));
+const Presets = lazy(() => import("../Presets/Presets"));
+const Manage = lazy(() => import("../Manage/Manage"));
+const Settings = lazy(() => import("../Settings/Settings"));
 
 interface DashboardProps {
   /** True while the Welcome slideshow is still up. The tour waits for it to close
@@ -66,7 +79,7 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
     openMod,
     openModTarget,
     closeMod,
-  } = useModBrowsing(showBrowse, game.id);
+  } = useModBrowsing(showBrowse, game.id, isModsView(view));
 
   // Which Settings section to land on, when something sent us there on purpose.
   // Cleared on the way out so a later visit opens where Settings normally opens.
@@ -240,6 +253,24 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
   const [ctxRight, setCtxRight] = useState<HTMLDivElement | null>(null);
   const ctxSlots = useMemo(() => ({ left: ctxLeft, right: ctxRight }), [ctxLeft, ctxRight]);
 
+  // A retained Mods screen needs its last valid source view while another rail item is open;
+  // handing it `servers` just because it is hidden would reset the source it is preserving.
+  const lastModsView = useRef<ModsView>("browse");
+  if (isModsView(view)) lastModsView.current = view;
+  // Same for detail: closing it hides the retained subtree, but its required slug remains the
+  // last real one until another mod is opened.
+  const lastDetailSlug = useRef("");
+  if (selectedSlug) lastDetailSlug.current = selectedSlug;
+
+  const builtInsActive = pluginPanel === null;
+  const modsActive = builtInsActive && isModsView(view) && !selectedSlug;
+  const detailActive = builtInsActive && isModsView(view) && Boolean(selectedSlug);
+
+  useEffect(() => {
+    void invoke("set_server_browser_active", {
+      active: builtInsActive && view === "servers",
+    }).catch(() => {});
+  }, [builtInsActive, view]);
 
   return (
     <TourContext.Provider value={{ startTour }}>
@@ -286,21 +317,31 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
       )}
       <div className="flex min-h-0 flex-1">
         <div className="min-h-0 min-w-0 flex-1 overflow-hidden pt-3">
-          <ContextSlots.Provider value={ctxSlots}>
-          {pluginPanel ? (
-            <pluginPanel.component />
-          ) : isModsView(view) && selectedSlug ? (
+          {pluginPanel && (
+            <ContextSlots.Provider value={ctxSlots}>
+              <pluginPanel.component />
+            </ContextSlots.Provider>
+          )}
+          <Suspense
+            fallback={
+              <div className="flex h-full items-center justify-center">
+                <LoadingMark />
+              </div>
+            }
+          >
+          <RetainedView active={detailActive} slots={ctxSlots}>
             <ModDetail
-              slug={selectedSlug}
+              slug={selectedSlug ?? lastDetailSlug.current}
               modType={modType}
               categoryId={selectedCategoryId ?? modType.categoryId}
               installed={installed}
               onChanged={onInstalled}
               onBack={closeMod}
             />
-          ) : isModsView(view) ? (
+          </RetainedView>
+          <RetainedView active={modsActive} slots={ctxSlots}>
             <Mods
-              view={view}
+              view={lastModsView.current}
               modType={modType}
               modTypes={modTypes}
               listing={listing}
@@ -309,11 +350,14 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
               onOpenMod={openMod}
               onChangeType={changeType}
             />
-          ) : view === "servers" ? (
+          </RetainedView>
+          <RetainedView active={builtInsActive && view === "servers"} slots={ctxSlots}>
             <Servers link={serverLink} />
-          ) : view === "ranked" ? (
+          </RetainedView>
+          <RetainedView active={builtInsActive && view === "ranked"} slots={ctxSlots}>
             <Ranked onFindServers={() => setView("servers")} />
-          ) : view === "library" ? (
+          </RetainedView>
+          <RetainedView active={builtInsActive && view === "library"} slots={ctxSlots}>
             <Library
               modType={modType}
               onChangeType={changeType}
@@ -324,29 +368,40 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
               onOpenMod={openFoundMod}
               onOpenStore={navigate}
             />
-          ) : view === "downloads" ? (
+          </RetainedView>
+          <RetainedView active={builtInsActive && view === "downloads"} slots={ctxSlots}>
             <Downloads
               onOpenMod={openModTarget}
               onShowInLibrary={showInLibrary}
               onOpenShop={() => navigate("shop")}
               onOpenHub={() => navigate("hub")}
             />
-          ) : view === "locker" ? (
+          </RetainedView>
+          <RetainedView active={builtInsActive && view === "locker"} slots={ctxSlots}>
             <Locker />
-          ) : view === "presets" ? (
+          </RetainedView>
+          <RetainedView active={builtInsActive && view === "presets"} slots={ctxSlots}>
             <Presets
               onOpenLocker={() => setView("locker")}
               onOpenSettings={() => openSettingsSection("folder")}
             />
-          ) : view === "manage" ? (
+          </RetainedView>
+          <RetainedView active={builtInsActive && view === "manage"} slots={ctxSlots}>
             <Manage />
-          ) : (
+          </RetainedView>
+          <RetainedView
+            active={
+              builtInsActive &&
+              (view === "settings" || (view.startsWith("plugin:") && pluginPanel === null))
+            }
+            slots={ctxSlots}
+          >
             <Settings
               initialSection={settingsSection}
               onShowWhatsNew={replayShowcase}
             />
-          )}
-          </ContextSlots.Provider>
+          </RetainedView>
+          </Suspense>
         </div>
       </div>
       {tourRun && <Tour navigate={navigate} onDone={endTour} />}

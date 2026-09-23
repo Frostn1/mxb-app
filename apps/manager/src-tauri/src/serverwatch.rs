@@ -7,7 +7,7 @@
 //! that makes a fresh install's browser work, to the snapshot it paints while its own sweep
 //! runs, or to the count that answers "is the master down or is it me".
 //!
-//! So the app sweeps on a beat for as long as it is open, feeds what it finds to the control
+//! So the app sweeps on a beat while Online is visible, feeds what it finds to the control
 //! plane, and the tab takes whatever the last one found. That pooled list is also the answer for
 //! an app that cannot sweep at all — a machine with no MX Bikes on it, or a build without the
 //! browser in it — which used to be an error message where the list should be and is now
@@ -19,20 +19,21 @@
 //!   already rebuilds the list by asking each remembered server about itself, because the
 //!   Steam account the master login spends is the one the game is holding. A beat during a
 //!   session is a handful of `GETINFO` datagrams and no account.
-//! - **Nothing sweeps hard while nobody is there.** The main window parks in the tray rather
-//!   than ending the app, and a tray-parked app drops to [`IDLE_BEAT`] — enough to keep feeding
-//!   the shared book and the outage count, without reading the master every couple of minutes
-//!   for a list nobody is looking at.
+//! - **Nothing sweeps while nobody is there.** Leaving Online, minimising, or parking the main
+//!   window pauses discovery. Returning to Online wakes it immediately instead of inheriting an
+//!   idle sleep.
 //! - **What a sweep *tells* the control plane is floored here, not on the beat.** The list is
 //!   refreshed every couple of minutes; the addresses, the snapshot and the status report go at
 //!   their own much slower rates, so running this everywhere costs the control plane about what
 //!   the tab already cost it. See [`Told`].
 
 use std::collections::BTreeSet;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use tauri::{AppHandle, Emitter};
+use tokio::sync::Notify;
 
 use crate::masterstatus::{self, MasterOutcome};
 use crate::{roster, serverbook, WorldServer};
@@ -46,14 +47,14 @@ const BEAT: Duration = Duration::from_secs(120);
 /// opened it than a list they haven't asked for yet.
 const SETTLE: Duration = Duration::from_secs(20);
 
-/// The beat while the app is parked in the tray with no window on screen.
-///
-/// Nobody is reading a list then, so the only thing a sweep is still good for is the shared
-/// book, the snapshot and the outage count — and all three have floors of their own measured in
-/// minutes. Reading the master also spends a moment of the player's Steam account, which is
-/// worth doing six times an hour for somebody looking at the app and not for somebody who left
-/// it in the tray this morning.
+/// A bounded sleep while discovery is paused. Navigation notifications normally wake it first;
+/// the timeout is only a safety net if a frontend disappears without sending another update.
 const IDLE_BEAT: Duration = Duration::from_secs(10 * 60);
+
+/// The frontend starts on Online and reports every later navigation. The native watcher uses
+/// this instead of treating any visible app window as a reason to sweep the network.
+static SERVER_BROWSER_ACTIVE: AtomicBool = AtomicBool::new(true);
+static ACTIVITY_CHANGED: Notify = Notify::const_new();
 
 /// The widest the beat gets while sweeps keep failing. An outage is the one time every install
 /// is failing at once, and it is the worst time for all of them to be retrying on the fast beat.
@@ -404,10 +405,22 @@ fn watching(app: &AppHandle) -> bool {
     visible && !minimised
 }
 
-/// Start sweeping, for as long as the app is open.
+fn should_sweep(window_visible: bool, server_browser_active: bool) -> bool {
+    window_visible && server_browser_active
+}
+
+/// Change whether the Online screen is visible and wake the watcher so returning to it does
+/// not inherit the ten-minute idle sleep used by every other tab.
+pub fn set_active(active: bool) {
+    if SERVER_BROWSER_ACTIVE.swap(active, Ordering::Relaxed) != active {
+        ACTIVITY_CHANGED.notify_one();
+    }
+}
+
+/// Start sweeping whenever Online is the visible screen.
 ///
-/// The beat widens to [`IDLE_BEAT`] whenever the app is parked in the tray: nobody is reading a
-/// list then, and a sweep of the master spends a moment of the player's Steam account.
+/// Other tabs and a parked/minimised window wait without touching the master. A return to Online
+/// wakes that wait immediately.
 ///
 /// Failures widen it further rather than stopping it. The common failure is the master being down,
 /// which is exactly when every install is failing at once, and thousands of apps retrying on the
@@ -418,7 +431,14 @@ pub fn start(app: &AppHandle) {
         tokio::time::sleep(SETTLE).await;
         let mut backoff = BEAT;
         loop {
-            let beat = if watching(&app) { BEAT } else { IDLE_BEAT };
+            let active = should_sweep(
+                watching(&app),
+                SERVER_BROWSER_ACTIVE.load(Ordering::Relaxed),
+            );
+            if !active {
+                let _ = tokio::time::timeout(IDLE_BEAT, ACTIVITY_CHANGED.notified()).await;
+                continue;
+            }
             // The backoff follows our own sweep, not what ended up on screen: a beat that
             // finished on the pooled list is still a beat whose master didn't answer.
             match got(app.clone()).await {
@@ -438,7 +458,7 @@ pub fn start(app: &AppHandle) {
                     backoff = widened(backoff, &why);
                 }
             }
-            tokio::time::sleep(beat.max(backoff)).await;
+            let _ = tokio::time::timeout(BEAT.max(backoff), ACTIVITY_CHANGED.notified()).await;
         }
     });
 }
@@ -446,6 +466,13 @@ pub fn start(app: &AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sweeps_only_for_a_visible_online_tab() {
+        assert!(should_sweep(true, true));
+        assert!(!should_sweep(true, false));
+        assert!(!should_sweep(false, true));
+    }
 
     fn one_server() -> CachedServers {
         CachedServers {

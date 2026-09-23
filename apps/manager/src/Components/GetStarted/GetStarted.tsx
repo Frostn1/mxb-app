@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
 import { X } from "lucide-react";
-import { scanLibrary } from "@frost/shared/api/mods";
 import { Button } from "@frost/shared/Components/ui/button";
 import { useConfig } from "@frost/shared/Context/Config";
 import { cn } from "@frost/shared/lib/utils";
 import { useT, type TKey } from "@/i18n";
 import { useInstall } from "../../Context/Install";
+import { scanLibrariesSequentially } from "../../lib/scanLibraries";
 
 /**
  * The first run, for an install that has nothing.
@@ -95,9 +95,7 @@ export default function GetStarted({
   const [collapsed, setCollapsed] = useState(false);
 
   const rescan = useCallback(async () => {
-    const found = await Promise.all(
-      STEPS.map((s) => scanLibrary(s.subpath).catch(() => [])),
-    );
+    const found = await scanLibrariesSequentially(STEPS.map((s) => s.subpath));
     const next = Object.fromEntries(
       STEPS.map((s, i) => [s.id, found[i].length]),
     ) as Record<Step["id"], number>;

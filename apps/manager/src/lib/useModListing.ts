@@ -28,7 +28,7 @@ interface CachedPage {
  * calls *above* that swap, nothing unmounts: coming back re-renders the grid that is
  * already in memory, with no refetch at all.
  */
-export function useModListing(modType: ModType) {
+export function useModListing(modType: ModType, enabled = true) {
   const [query, setQuery] = useState("");
   const [debounced, setDebounced] = useState("");
   const [categoryId, setCategoryId] = useState(modType.categoryId);
@@ -102,6 +102,7 @@ export function useModListing(modType: ModType) {
   // answer first, where there is one, so the grid is never replaced by skeletons for a
   // listing we already have.
   useEffect(() => {
+    if (!enabled) return;
     let cancelled = false;
     const cached = skipCache.current ? undefined : readListing<CachedPage>(key);
     skipCache.current = false;
@@ -137,12 +138,13 @@ export function useModListing(modType: ModType) {
     return () => {
       cancelled = true;
     };
-  }, [key, debounced, categoryId, activeSort, reloadKey]);
+  }, [enabled, key, debounced, categoryId, activeSort, reloadKey]);
 
   // Scores aren't part of the search response — they come in a second pass keyed by post
   // id, for whatever is on screen. Never awaited by the grid: cards paint immediately and
   // stars appear a moment later, and a failure just leaves them off.
   useEffect(() => {
+    if (!enabled) return;
     const wanted = mods.map((m) => m.id).filter((id) => !askedForRatings.current.has(id));
     if (wanted.length === 0) return;
     for (const id of wanted) askedForRatings.current.add(id);
@@ -160,7 +162,7 @@ export function useModListing(modType: ModType) {
     return () => {
       cancelled = true;
     };
-  }, [mods]);
+  }, [enabled, mods]);
 
   const loadMore = useCallback(async () => {
     const next = page + 1;

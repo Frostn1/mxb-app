@@ -1,5 +1,22 @@
 # Changelog
 
+## 2026-09-23 — v0.18.4 — Lighter navigation and background work
+
+### Changed
+- Built-in screens and their inner tabs stay warm during quick navigation, then release their
+  hidden DOM after five idle minutes so repeated switches avoid image reloads without retaining
+  every visited grid for the whole session.
+- Heavy non-startup screens are loaded as separate frontend chunks, and Mods waits until it is
+  opened before fetching its catalog or scanning the active library folder.
+- Server discovery now runs its two-minute sweep only while Online is visible and wakes as soon
+  as the player returns to it.
+- Owned, Shop Purchases, Hub Purchases, and first-run library checks scan mod folders one at a
+  time instead of competing for the disk.
+
+### Fixed
+- Switching between Online, Mods, Library, Garage, Settings, and their inner tabs no longer
+  destroys and rebuilds already-loaded grids, preventing repeated Windows CPU and disk bursts.
+
 ## 2026-09-22 — v0.18.3 — Shop resolution and stability patch
 
 ### Added

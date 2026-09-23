@@ -5421,6 +5421,11 @@ async fn list_master_servers(app: tauri::AppHandle) -> Result<CachedServers, Str
     serverwatch::list(app).await
 }
 
+#[tauri::command]
+fn set_server_browser_active(active: bool) {
+    serverwatch::set_active(active);
+}
+
 /// What every other app is seeing of the master server, right now.
 ///
 /// The Servers tab asks after a failed fetch, and only then. One machine failing knows nothing
@@ -8376,6 +8381,7 @@ fn main() {
             queue_status,
             queue_counts,
             list_master_servers,
+            set_server_browser_active,
             cached_master_servers,
             master_status,
             connection_selftest,

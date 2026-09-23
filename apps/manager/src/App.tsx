@@ -27,6 +27,7 @@ import SigninGate from "@frost/shared/Components/SigninGate/SigninGate";
 import SurveyPrompt from "@frost/shared/Components/Survey/SurveyPrompt";
 import UpdateBanner from "./Components/UpdateBanner/UpdateBanner";
 import type { Config, GameId, GameInfo } from "@frost/shared/types";
+import { invoke } from "@tauri-apps/api/core";
 
 const App = () => {
   const { t } = useI18n();
@@ -39,6 +40,21 @@ const App = () => {
   const [games, setGames] = useState<GameInfo[]>([MXB_FALLBACK]);
   const reloadConfig = useCallback(async () => {
     setConfig(await getConfig());
+  }, []);
+
+  // This component itself is a lazy chunk so the overlay window never downloads the main app.
+  // Announce the first real App paint here, after that chunk has loaded, rather than from the
+  // entrypoint while its Suspense fallback is still an intentionally blank frame.
+  useEffect(() => {
+    let cancelled = false;
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() => {
+        if (!cancelled) void invoke("window_painted").catch(() => {});
+      }),
+    );
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const switchGame = useCallback(async (id: GameId) => {

@@ -113,6 +113,7 @@ const SWAPS_KEY = "\u0000model-swaps";
 import { useInstall } from "../../Context/Install";
 import { Button } from "@frost/shared/Components/ui/button";
 import { ContextBarRight } from "../Shell/ContextBar";
+import { useViewActive } from "../Shell/RetainedView";
 import HelpHint from "@frost/shared/Components/ui/help-hint";
 import {
   DropdownMenu,
@@ -697,6 +698,7 @@ export default function Library({
   onOpenMod,
   onOpenStore,
 }: LibraryProps) {
+  const viewActive = useViewActive();
   const t = useT();
   const { pickAndImport, staging } = useImport();
   const { shareFiles, importShare, liveShares } = useShare();
@@ -762,6 +764,7 @@ export default function Library({
   // yet answers with an empty list, which is the right answer: a card nothing can open is
   // worse than no card.
   useEffect(() => {
+    if (!viewActive) return;
     if (modType.id !== "tracks") {
       setStock([]);
       return;
@@ -773,12 +776,12 @@ export default function Library({
     return () => {
       alive = false;
     };
-  }, [modType, refreshKey]);
+  }, [viewActive, modType, refreshKey]);
 
   // The ledger is only fetched once the player asks to see it: it inflates a thumbnail per
   // missing mod, which is real work for a panel most visits never open.
   useEffect(() => {
-    if (!showRemoved) return;
+    if (!viewActive || !showRemoved) return;
     let alive = true;
     void Promise.all([libraryLedger(modType.installSubpath), downloadHistory()])
       .then(([rows, records]) => {
@@ -790,7 +793,7 @@ export default function Library({
     return () => {
       alive = false;
     };
-  }, [showRemoved, modType, refreshKey]);
+  }, [viewActive, showRemoved, modType, refreshKey]);
 
   // What `refreshKey` and the open tab were last time. A `refreshKey` bump means something
   // installed, moved or was removed, so every remembered scan is stale — including the other
@@ -799,6 +802,7 @@ export default function Library({
   const seenModType = useRef(modType.id);
 
   useEffect(() => {
+    if (!viewActive) return;
     const refreshBumped = seenRefresh.current !== refreshKey;
     const tabChanged = seenModType.current !== modType.id;
     seenRefresh.current = refreshKey;
@@ -814,7 +818,7 @@ export default function Library({
     setEntries(hit.value);
     setLoading(false);
     if (!hit.fresh) void load({ quiet: true });
-  }, [load, refreshKey, modType]);
+  }, [viewActive, load, refreshKey, modType]);
 
   // A mod dropped into the folder by hand, caught by the watcher: every remembered scan is
   // stale, and the list on screen refreshes behind itself. In-app changes bump `refreshKey`.
@@ -822,25 +826,27 @@ export default function Library({
     const un = onFrostmodReload((p) => {
       if (p.slug !== MODS_WATCH_SLUG) return;
       dropScans();
-      void load({ quiet: true });
+      if (viewActive) void load({ quiet: true });
     });
     return () => {
       void un.then((f) => f());
     };
-  }, [load]);
+  }, [viewActive, load]);
 
   // Opening the Library (and switching tabs) is a natural moment to pull down keys for any
   // secured content you own but haven't unlocked yet — so it can appear here and in-game without
   // digging into Settings. Throttled server-side, so re-entering the Library is cheap.
   useEffect(() => {
+    if (!viewActive) return;
     void mxbsecureAutoUnlock().catch(() => {});
-  }, [modType]);
+  }, [viewActive, modType]);
 
   // Model swaps, for the bikes tab only — one scan of the whole tree, indexed by bike
   // folder. Installing a mod or editing the folder changes what's swappable, so it rides
   // the same `refreshKey` the library scan does. A failure leaves the map empty and the
   // cards simply carry no badge; it must never take the library down with it.
   useEffect(() => {
+    if (!viewActive) return;
     if (modType.id !== "bikes") {
       setSwaps(new Map());
       return;
@@ -858,7 +864,7 @@ export default function Library({
     return () => {
       alive = false;
     };
-  }, [modType, refreshKey]);
+  }, [viewActive, modType, refreshKey]);
 
   // A card that has scrolled away, or a tab change, must not leave a row expanded.
   useEffect(() => setOpenSwaps(new Set()), [modType]);
@@ -894,7 +900,7 @@ export default function Library({
 
   const favs = useFavorites(FAVORITES_KEY);
   // Both stores, read only once the player asks for them — see `useOwned`.
-  const owned = useOwned(pick.kind === "owned", refreshKey);
+  const owned = useOwned(viewActive && pick.kind === "owned", refreshKey);
   const wishlist = useWishlist();
   const isStarred = useCallback(
     (e: LibraryEntry) => favs.has(starId(modType, e)),
