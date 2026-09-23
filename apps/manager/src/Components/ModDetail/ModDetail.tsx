@@ -24,6 +24,7 @@ import {
   isServerOnly,
   isSoundContext,
   modLink,
+  resetModsVerification,
   riderTarget,
   resolveInitialFolder,
   uninstallMod,
@@ -368,9 +369,28 @@ export default function ModDetail({
           <p className="select-text text-[12.5px] leading-relaxed text-muted-foreground">
             {loadError.replace(/^Error:\s*/, "")}
           </p>
-          <Button variant="outline" size="sm" onClick={() => setReloadKey((n) => n + 1)}>
-            {t("common.retry")}
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            {/* Retry also re-arms the site's check, if this session stopped showing it. */}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() =>
+                void resetModsVerification()
+                  .catch(() => {})
+                  .finally(() => setReloadKey((n) => n + 1))
+              }
+            >
+              {t("common.retry")}
+            </Button>
+            {/* The way out that always works: the same page in the user's own browser. */}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => void open(`https://${game.catalogDomain}/${slug}/`)}
+            >
+              {t("modDetail.openOnSite", { site: game.catalogDomain })}
+            </Button>
+          </div>
         </div>
       </div>
     );

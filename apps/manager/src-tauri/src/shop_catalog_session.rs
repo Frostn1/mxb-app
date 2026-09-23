@@ -30,9 +30,9 @@ use tauri::AppHandle;
 
 pub const BASE: &str = "https://mxbikes-shop.com";
 
-/// The same four-part version [`crate::mxb_session::UA`] uses, and for the same reason: a
+/// The same shape [`crate::mxb_session::FALLBACK_UA`] uses, and for the same reason: a
 /// User-Agent no real browser would send is itself a signal to a bot filter.
-pub const UA: &str = crate::mxb_session::UA;
+pub const UA: &str = crate::mxb_session::FALLBACK_UA;
 
 pub const SITE: Site = Site {
     base: BASE,

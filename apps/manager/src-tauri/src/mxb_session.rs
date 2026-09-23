@@ -48,17 +48,49 @@ pub fn site() -> &'static Site {
     }
 }
 
-/// A full four-part version, unlike the `Chrome/126.0` form [`crate::shop_session::UA`]
-/// uses — real Chrome never sends a two-part version, and a UA no browser would emit is
-/// itself a signal to a bot filter. [`crate::mxb_fetch`]'s WebView is built with this same
-/// constant, so the HTTP client and the browser present as the same visitor.
-pub const UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.6778.140 Safari/537.36";
+/// What the HTTP client calls itself until the WebView has said what it really is — see
+/// [`ua`]. Only ever a stand-in for the first second or so of a session.
+///
+/// In the reduced form real Chrome sends (`major.0.0.0`). This used to pin
+/// `Chrome/131.0.6778.140`, which no Chrome has sent since UA reduction and which was a year
+/// stale besides — and the fetch WebView was built claiming it too, which on WebView2 is worse
+/// than stale: the `Sec-CH-UA` client hints still announce the real Edge build, so the browser
+/// contradicted itself on every request Cloudflare scored.
+pub const FALLBACK_UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36";
+
+/// The WebView's own `navigator.userAgent`, once [`crate::mxb_fetch::inspect_on_startup`] has
+/// read it.
+static WEBVIEW_UA: OnceLock<&'static str> = OnceLock::new();
+
+/// Record the WebView's user agent. Only a Chromium one is adopted for the HTTP client:
+/// WebView2's string is the Edge that is really installed, and borrowing it makes the client
+/// and the fetch window the same browser by name. WKWebView and WebKitGTK report a bare
+/// `AppleWebKit (KHTML, like Gecko)` with no browser in it at all, which is a stranger thing
+/// for a client to send than the fallback. Returns whether it was adopted.
+pub fn set_webview_ua(ua: &str) -> bool {
+    let ua = ua.trim();
+    if !adoptable(ua) {
+        return false;
+    }
+    WEBVIEW_UA.set(Box::leak(ua.to_string().into_boxed_str())).is_ok()
+}
+
+fn adoptable(ua: &str) -> bool {
+    ua.starts_with("Mozilla/5.0") && ua.contains("Chrome/")
+}
+
+/// The User-Agent every mxb-mods.com / gpb-mods.com request goes out with. Asked per request
+/// rather than baked into a client, because the clients are built lazily and may well be built
+/// before the WebView has answered.
+pub fn ua() -> &'static str {
+    WEBVIEW_UA.get().copied().unwrap_or(FALLBACK_UA)
+}
 
 pub const MXB_SITE: Site = Site {
     base: "https://mxb-mods.com",
     domain: "mxb-mods.com",
     file: "mxb_session.json",
-    ua: UA,
+    ua: FALLBACK_UA,
     timeout: Duration::from_secs(30),
 };
 
@@ -66,7 +98,7 @@ pub const GPB_SITE: Site = Site {
     base: "https://gpb-mods.com",
     domain: "gpb-mods.com",
     file: "gpb_session.json",
-    ua: UA,
+    ua: FALLBACK_UA,
     timeout: Duration::from_secs(30),
 };
 
@@ -84,8 +116,8 @@ fn jar_for(site: &Site) -> Arc<Jar> {
     slot.get_or_init(|| Arc::new(Jar::default())).clone()
 }
 
-/// The mods client is built from this so its User-Agent, jar and timeouts cannot drift from
-/// the fetch WebView's. Callers add their own default headers.
+/// The mods client is built from this so its jar and timeouts are shared. Callers add their
+/// own default headers, and set [`ua`] per request.
 pub fn client_builder() -> reqwest::ClientBuilder {
     client_builder_for(site())
 }
@@ -96,7 +128,7 @@ pub fn client_builder() -> reqwest::ClientBuilder {
 /// not always the game currently selected — a description can embed an image from either, and
 /// a fetch already in flight outlives a game switch.
 pub fn client_builder_for(site: &'static Site) -> reqwest::ClientBuilder {
-    cookie_session::client_builder(site, jar_for(site))
+    cookie_session::client_builder(site, jar_for(site)).user_agent(ua())
 }
 
 /// Which cookies the client would actually send to the active catalog, by name.
@@ -208,6 +240,22 @@ mod tests {
 
         cookie_session::fill(&jar, &MXB_SITE, &[("cf_clearance".into(), "y".into())]).unwrap();
         assert!(!summarize(&jar, &url()).contains("no cf_clearance"));
+    }
+
+    /// WebView2's own string is adopted; a WebKit one with no browser named in it is not, and
+    /// nor is anything that isn't a UA at all.
+    #[test]
+    fn only_a_chromium_user_agent_is_adopted() {
+        assert!(adoptable(
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) \
+             Chrome/140.0.0.0 Safari/537.36 Edg/140.0.0.0"
+        ));
+        assert!(!adoptable(
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko)"
+        ));
+        assert!(!adoptable(""));
+        assert!(!adoptable("null"));
+        assert!(!FALLBACK_UA.contains("131.0.6778"));
     }
 
     #[test]

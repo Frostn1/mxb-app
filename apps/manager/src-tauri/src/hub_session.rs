@@ -25,7 +25,7 @@ pub const HUB_BASE: &str = "https://shop.mxb-hub.com";
 #[cfg(target_os = "macos")]
 pub const HUB_UA: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko)";
 #[cfg(not(target_os = "macos"))]
-pub const HUB_UA: &str = crate::mxb_session::UA;
+pub const HUB_UA: &str = crate::mxb_session::FALLBACK_UA;
 
 /// The store is one host — `mxbhub.com` and `mxb-hub.com` both redirect here — so the cookie
 /// domain is the full subdomain rather than the registrable one. Scoping it wider would put
