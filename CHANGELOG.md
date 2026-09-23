@@ -3,6 +3,8 @@
 ## 2026-09-22 — v0.18.2 — Lower memory, safer protected tracks
 
 ### Fixed
+- Server ids such as `2026_ARLSX_RD09` and `2026_ARLSX_RD13` now resolve to their Shop
+  products when the catalog spells the round as `2026 ARL SX ROUND 09` or `ROUND 13`.
 - Image and legacy locked-archive work now has strict memory/concurrency budgets, preventing a
   large library or fast artwork scroll from accumulating unbounded downloads and decodes.
 - Server browsing reuses a single indexed track-library snapshot and bounded artwork caches,

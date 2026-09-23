@@ -29,8 +29,9 @@ use std::path::{Path, PathBuf};
 /// with Shop artwork, version 5 uses a server's visible pack title for secured tracks whose
 /// internal folder name does not resemble the Shop product, version 6 canonicalizes round ids
 /// such as `RD01` to match Shop titles that use `RD1`, and version 7 tries both zero-padded
-/// and unpadded round spellings because the Shop uses both forms.
-pub const VERSION: u32 = 7;
+/// and unpadded round spellings because the Shop uses both forms. Version 8 also understands
+/// compact series/round ids such as `ARLSX_RD09` when the Shop spells them `ARL SX ROUND 09`.
+pub const VERSION: u32 = 8;
 
 /// How long a found track is trusted. A page does not move, and if it ever does the worst
 /// case is a dead link on one panel until the row ages out.

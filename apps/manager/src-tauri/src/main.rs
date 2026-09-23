@@ -4937,13 +4937,25 @@ async fn shop_track_from_server_id(
         };
         if let Some(hit) = page.items.into_iter().find(|item| {
             sells_tracks(&item.category_names)
-                && !canonical_server_track_name(&item.title).is_empty()
-                && canonical_id.contains(&canonical_server_track_name(&item.title))
+                && shop_title_matches_server_id(&canonical_id, &item.title)
         }) {
             return Some(hit);
         }
     }
     None
+}
+
+fn shop_title_matches_server_id(canonical_id: &str, title: &str) -> bool {
+    let canonical_title = canonical_server_track_name(title);
+    if canonical_id.is_empty() || canonical_title.is_empty() {
+        return false;
+    }
+    // Most folder ids include the venue, so the product title must appear in the id. ARL SX
+    // rotation ids are the exception: `2026_ARLSX_RD09` names a unique season/series/round
+    // but omits Indianapolis. A title beginning with that complete round identity is equally
+    // exact, while the round marker prevents a broad prefix such as `2026 ARL SX` matching.
+    canonical_id.contains(&canonical_title)
+        || (canonical_id.contains("round") && canonical_title.starts_with(canonical_id))
 }
 
 fn shop_queries_for_server_id(id: &str) -> Vec<String> {
@@ -4959,24 +4971,43 @@ fn shop_queries_for_server_id(id: &str) -> Vec<String> {
     if words.is_empty() {
         return Vec::new();
     }
-    let exact = words.join(" ");
-    let normalized = words
+
+    // Folder ids compact a series and its round (`ARLSX_RD09`), whereas the Shop spells the
+    // same product `ARL SX ROUND 09`. Ask both forms: catalog search deliberately requires
+    // every term, so either spelling by itself otherwise filters the product out.
+    let split_series = words
         .iter()
-        .map(|word| canonical_track_token(word))
-        .collect::<Vec<_>>()
-        .join(" ");
-    if normalized == exact {
-        vec![exact]
-    } else {
-        vec![exact, normalized]
+        .flat_map(|word| match word.as_str() {
+            "arlmx" => vec!["arl".to_string(), "mx".to_string()],
+            "arlsx" => vec!["arl".to_string(), "sx".to_string()],
+            _ => vec![word.clone()],
+        })
+        .collect::<Vec<_>>();
+    let round_words = shop_round_words(&words);
+    let split_series_round = shop_round_words(&split_series);
+
+    let mut queries = Vec::new();
+    for candidate in [
+        words.clone(),
+        normalized_track_words(&words),
+        split_series,
+        round_words,
+        split_series_round,
+    ] {
+        let query = candidate.join(" ");
+        if !queries.contains(&query) {
+            queries.push(query);
+        }
     }
+    queries
 }
 
 fn canonical_server_track_name(value: &str) -> String {
-    fold_name(value)
+    let words = fold_name(value)
         .split_whitespace()
-        .map(canonical_track_token)
-        .collect()
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    shop_round_words(&words).concat()
 }
 
 fn canonical_track_token(token: &str) -> String {
@@ -4987,6 +5018,48 @@ fn canonical_track_token(token: &str) -> String {
         return token.to_string();
     };
     format!("rd{number}")
+}
+
+fn normalized_track_words(words: &[String]) -> Vec<String> {
+    words
+        .iter()
+        .map(|word| canonical_track_token(word))
+        .collect()
+}
+
+/// Rewrite both the short server form (`RD09`) and Shop's prose form (`ROUND 09`) to a
+/// shared pair of tokens. Keeping the number separate retains a useful Shop search query while
+/// `canonical_server_track_name` joins it for an exact id/title comparison.
+fn shop_round_words(words: &[String]) -> Vec<String> {
+    let mut normalized = Vec::with_capacity(words.len());
+    let mut index = 0;
+    while let Some(word) = words.get(index) {
+        let number = word
+            .strip_prefix("rd")
+            .filter(|number| !number.is_empty())
+            .and_then(|number| number.parse::<u32>().ok());
+        if let Some(number) = number {
+            normalized.push("round".to_string());
+            normalized.push(number.to_string());
+            index += 1;
+        } else if word == "round" {
+            if let Some(number) = words
+                .get(index + 1)
+                .and_then(|number| number.parse::<u32>().ok())
+            {
+                normalized.push("round".to_string());
+                normalized.push(number.to_string());
+                index += 2;
+            } else {
+                normalized.push(word.clone());
+                index += 1;
+            }
+        } else {
+            normalized.push(word.clone());
+            index += 1;
+        }
+    }
+    normalized
 }
 
 /// The best answer a catalogue page has to a track id, and whether it is a match rather than
@@ -5052,7 +5125,7 @@ fn sells_tracks(categories: &[String]) -> bool {
 mod server_title_art_tests {
     use super::{
         canonical_server_track_name, compact_track_name, shop_queries_for_server_id,
-        title_in_server_name,
+        shop_title_matches_server_id, title_in_server_name,
     };
 
     #[test]
@@ -5068,7 +5141,13 @@ mod server_title_art_tests {
         let id = "2026_ARLMX_RD01_PALA_Pro";
         assert_eq!(
             shop_queries_for_server_id(id),
-            ["2026 arlmx rd01 pala", "2026 arlmx rd1 pala"]
+            [
+                "2026 arlmx rd01 pala",
+                "2026 arlmx rd1 pala",
+                "2026 arl mx rd01 pala",
+                "2026 arlmx round 1 pala",
+                "2026 arl mx round 1 pala",
+            ]
         );
         assert!(canonical_server_track_name(id).contains(&canonical_server_track_name(
             "2026 ARLMX RD1 - PALA"
@@ -5076,6 +5155,33 @@ mod server_title_art_tests {
         assert!(!canonical_server_track_name(id).contains(&canonical_server_track_name(
             "2026 ARLMX RD2 - RANCHO CORDOVA"
         )));
+    }
+
+    #[test]
+    fn matches_an_sx_shop_round_to_its_compact_server_id() {
+        let id = "2026_ARLSX_RD09";
+        assert_eq!(
+            shop_queries_for_server_id(id),
+            [
+                "2026 arlsx rd09",
+                "2026 arlsx rd9",
+                "2026 arl sx rd09",
+                "2026 arlsx round 9",
+                "2026 arl sx round 9",
+            ]
+        );
+        assert!(shop_title_matches_server_id(
+            &canonical_server_track_name(id),
+            "2026 ARL SX ROUND 09 - INDIANAPOLIS"
+        ));
+        assert!(shop_title_matches_server_id(
+            &canonical_server_track_name("2026_ARLSX_RD13"),
+            "2026 ARL SX ROUND 13 - ST LOUIS"
+        ));
+        assert!(!shop_title_matches_server_id(
+            &canonical_server_track_name(id),
+            "2026 ARL SX ROUND 10 - DETROIT"
+        ));
     }
 }
 
