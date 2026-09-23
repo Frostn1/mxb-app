@@ -3,6 +3,13 @@
 ## 2026-09-22 — v0.18.2 — Lower memory, safer protected tracks
 
 ### Fixed
+- Image and legacy locked-archive work now has strict memory/concurrency budgets, preventing a
+  large library or fast artwork scroll from accumulating unbounded downloads and decodes.
+- Server browsing reuses a single indexed track-library snapshot and bounded artwork caches,
+  avoiding repeated archive scans and preview work on each server refresh.
+- Idle Shop and MXB Mods WebViews are destroyed after their request burst, Hub retries back off,
+  and slow diagnostics/status polls can no longer overlap.
+- Full-page loading states now use the reduced-motion-safe flashing mxbsecure `m` mark.
 - Protected content is now opened exclusively by the in-game client; desktop archive readers reject
   it, and CI prevents private modules or plaintext opener plumbing entering the public tree.
 - Server track matching no longer loads protected archives in parallel. Secured tracks match by

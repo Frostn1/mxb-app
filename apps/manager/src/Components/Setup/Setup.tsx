@@ -21,6 +21,7 @@ import { useT } from "@/i18n";
 import { Button } from "@frost/shared/Components/ui/button";
 import type { GameInfo } from "@frost/shared/types";
 import { useFrostmod } from "@/Context/FrostmodContext";
+import { LoadingMark } from "../Shell/LoadingMark";
 import Progress from "./Progress";
 
 const GAME_LOGOS: Record<string, string> = {
@@ -379,7 +380,10 @@ export default function Setup({ onComplete, game, games, firstRun }: SetupProps)
         <div className="flex w-full max-w-[480px] flex-col items-center gap-7 pb-16">
           {progress}
           <div className="flex items-center gap-2.5 text-[13.5px] text-muted-foreground">
-            <Loader2 className="size-4 flex-none animate-spin text-primary" />
+            <LoadingMark
+              className="flex-none text-primary"
+              label={t("setup.finishing", { game: picked.display })}
+            />
             <span>{t("setup.finishing", { game: picked.display })}</span>
           </div>
         </div>

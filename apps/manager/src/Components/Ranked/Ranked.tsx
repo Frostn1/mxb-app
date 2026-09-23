@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ExternalLink, Loader2, RefreshCw, Trophy, ArrowUp, ArrowDown, Pencil } from "lucide-react";
+import { ExternalLink, RefreshCw, Trophy, ArrowUp, ArrowDown, Pencil } from "lucide-react";
 import { toast } from "sonner";
 import { open as openUrl } from "@tauri-apps/plugin-shell";
 import { cn } from "@frost/shared/lib/utils";
@@ -15,6 +15,7 @@ import {
 } from "../../api/ranked";
 import { useConfig } from "@frost/shared/Context/Config";
 import { useT } from "@/i18n";
+import { LoadingMark } from "../Shell/LoadingMark";
 import GuidDialog from "./GuidDialog";
 
 /**
@@ -169,7 +170,7 @@ const Ranked = ({ onFindServers }: { onFindServers?: () => void }) => {
           </Centered>
         ) : !profile && loading ? (
           <Centered>
-            <Loader2 className="size-5 animate-spin text-faint" />
+            <LoadingMark label={t("ranked.loading")} />
             <p className="text-[13px] text-faint">{t("ranked.loading")}</p>
           </Centered>
         ) : error && !profile ? (
@@ -190,7 +191,7 @@ const Ranked = ({ onFindServers }: { onFindServers?: () => void }) => {
           />
         ) : (
           <Centered>
-            <Loader2 className="size-5 animate-spin text-faint" />
+            <LoadingMark label={t("common.loading")} />
           </Centered>
         )}
       </div>

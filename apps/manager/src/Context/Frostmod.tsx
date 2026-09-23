@@ -173,17 +173,28 @@ export function FrostmodProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     mounted.current = true;
-    probe();
+    let stopped = false;
+    let probeTimer: ReturnType<typeof setTimeout> | undefined;
+    const watchIntegration = integrationChoice === "enabled";
+    const probeAfterCompletion = async () => {
+      await probe();
+      // App-only users still get the initial status for the settings screen, but there is no
+      // integration process/attachment state to watch every five seconds until they enable it.
+      if (!stopped && watchIntegration) {
+        probeTimer = setTimeout(probeAfterCompletion, POLL_MS);
+      }
+    };
+    void probeAfterCompletion();
     void refreshStatus();
-    const id = setInterval(probe, POLL_MS);
     // Its own, much slower interval: this one hits the network, the one above doesn't.
     const versionId = setInterval(() => void refreshStatus(), VERSION_CHECK_MS);
     return () => {
+      stopped = true;
       mounted.current = false;
-      clearInterval(id);
+      if (probeTimer !== undefined) clearTimeout(probeTimer);
       clearInterval(versionId);
     };
-  }, [probe, refreshStatus]);
+  }, [integrationChoice, probe, refreshStatus]);
 
   // Surface reloads the mods-folder watcher triggers (a manual download dropped into
   // the folder). In-app installs carry their own slug and toast, so we only react to

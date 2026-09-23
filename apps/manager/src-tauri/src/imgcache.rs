@@ -62,9 +62,12 @@ const MAX_CACHE_BYTES: u64 = 256 * 1024 * 1024;
 /// How far below the cap a prune goes, so pruning is occasional rather than constant.
 const PRUNE_TO: f64 = 0.8;
 
-/// Concurrent origin fetches. A fast scroll through the grid must not open a hundred
-/// sockets — the same reasoning as `mods::mxb`'s rating concurrency.
-const MAX_CONCURRENT_FETCHES: usize = 8;
+/// Concurrent image jobs, from starting the download until its body has either been rejected,
+/// cached, or decoded and downscaled. The permit deliberately spans both network and CPU work:
+/// releasing it as soon as a download finished let eight 32 MB bodies queue behind blocking
+/// decodes while another eight downloads began, so a fast scroll could still grow without a
+/// useful bound.
+const MAX_CONCURRENT_IMAGE_JOBS: usize = 4;
 
 /// …and how many of those may be MXB Hub's at once. See the gate in [`handle`] for why this
 /// store gets its own, far smaller, number.
@@ -75,7 +78,7 @@ const MAX_CONCURRENT_HUB_FETCHES: usize = 2;
 /// The whole body is held in memory to be sniffed and downscaled, and being on the allowlist
 /// says only where a URL points, never how big what it points at is: an `<img>` on a mod page
 /// can name whatever its author uploaded. Uncapped, one such link costs however large that
-/// file happens to be — and [`MAX_CONCURRENT_FETCHES`] of them can be in flight at once, so
+/// file happens to be — and [`MAX_CONCURRENT_IMAGE_JOBS`] of them can be in flight at once, so
 /// the grid decides how many times over. Generous for a card rendered around 300px wide: the
 /// store's own product images, the largest thing normally seen here, are ~0.5 MB.
 const MAX_FETCH_BYTES: usize = 32 * 1024 * 1024;
@@ -256,10 +259,13 @@ async fn load(app: &AppHandle, url: &str, width: Option<u32>) -> Option<(Vec<u8>
         return Some(hit);
     }
 
+    // This permit stays alive through sniffing and (when requested) the blocking decode. A
+    // completed download is still a large resident body, so it must not stop counting merely
+    // because it is waiting for the CPU rather than the network.
+    let _image_job = image_job_semaphore().acquire().await.ok()?;
     let bytes = {
-        let _permit = fetch_semaphore().acquire().await.ok()?;
         // A second, much tighter gate for the store that counts requests. Everything else here
-        // is fetched eight at a time, which is what a grid of twenty-four thumbnails wants;
+        // is fetched four at a time, which is enough to keep a grid's first paint moving;
         // MXB Hub answers that burst by deciding we are a robot and refusing the whole site,
         // images and API alike, for everyone on this address. Two at a time costs a moment on
         // the first paint of a page and nothing at all afterwards, because the entry is then
@@ -533,9 +539,9 @@ fn push_capped(body: &mut Vec<u8>, chunk: &[u8]) -> bool {
     true
 }
 
-fn fetch_semaphore() -> &'static tokio::sync::Semaphore {
+fn image_job_semaphore() -> &'static tokio::sync::Semaphore {
     static SEM: OnceLock<tokio::sync::Semaphore> = OnceLock::new();
-    SEM.get_or_init(|| tokio::sync::Semaphore::new(MAX_CONCURRENT_FETCHES))
+    SEM.get_or_init(|| tokio::sync::Semaphore::new(MAX_CONCURRENT_IMAGE_JOBS))
 }
 
 fn inflight_gate(url: &str, width: Option<u32>) -> Arc<tokio::sync::Mutex<()>> {
@@ -803,6 +809,27 @@ mod tests {
         let mut body = Vec::new();
         assert!(!push_capped(&mut body, &vec![0u8; MAX_FETCH_BYTES + 1]));
         assert!(body.is_empty());
+    }
+
+    #[tokio::test]
+    async fn image_jobs_are_bounded_until_their_permits_are_released() {
+        let gate = image_job_semaphore();
+        let mut held = Vec::new();
+        for _ in 0..MAX_CONCURRENT_IMAGE_JOBS {
+            held.push(gate.acquire().await.expect("image-job permit"));
+        }
+
+        assert!(
+            gate.try_acquire().is_err(),
+            "a completed body waiting to decode must still block another download"
+        );
+        drop(held.pop());
+        assert!(
+            gate.try_acquire().is_ok(),
+            "dropping the whole-job permit admits one more image"
+        );
+
+        assert_eq!(MAX_CONCURRENT_IMAGE_JOBS * MAX_FETCH_BYTES, 128 * 1024 * 1024);
     }
 
     #[test]

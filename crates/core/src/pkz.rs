@@ -30,6 +30,14 @@ const MAX_DECODE_BYTES: u64 = 64 * 1024 * 1024;
 /// something a card needs.
 const MAX_DECODE_EDGE: u32 = 8192;
 
+/// Largest legacy creator/GUID-locked archive the desktop app will materialize in memory.
+/// These archives cannot be streamed by the optional reader, so accepting an arbitrarily large
+/// backing file means one library card can allocate the entire file before preview decoding even
+/// starts. Real locked tracks can be several hundred megabytes; this leaves room for those while
+/// refusing multi-gigabyte archives that would push an ordinary PC into swap.
+#[cfg(sidecar)]
+const MAX_LOCKED_ARCHIVE_BYTES: u64 = 512 * 1024 * 1024;
+
 // ===========================================================================
 // Inspection gate
 //
@@ -494,6 +502,7 @@ fn locked() -> PkzMeta {
 
 /// Build a `PkzMeta` (+ preview image) from already-decoded `(name, bytes)` entries,
 /// reusing the same `.ini`/image selection as the plain-zip path.
+#[cfg(sidecar)]
 fn meta_from_entries(entries: &[(String, Vec<u8>)]) -> (PkzMeta, Option<(String, Vec<u8>)>) {
     let names: Vec<String> = entries.iter().map(|(n, _)| n.replace('\\', "/")).collect();
     let mut meta = PkzMeta::default();
@@ -535,6 +544,7 @@ fn locked_art_indices(names: &[String], ini_dir: &str, pic: Option<&str>) -> Vec
     out
 }
 
+#[cfg(sidecar)]
 fn same_entry(a: &str, b: &str) -> bool {
     a.replace('\\', "/")
         .eq_ignore_ascii_case(&b.replace('\\', "/"))
@@ -548,13 +558,40 @@ fn same_entry(a: &str, b: &str) -> bool {
 /// ZIP path: choose one image by name first, then read only that image instead of every texture
 /// the track happens to carry.
 fn inspect_locked(path: &Path) -> Result<(PkzMeta, Option<(String, Vec<u8>)>)> {
-    let Ok(names) = entry_names(path) else {
+    if crate::securesource::is_secured(path) {
+        bail!(SECURED_IN_GAME_ONLY);
+    }
+    #[cfg(not(sidecar))]
+    {
+        let _ = path;
+        Ok((locked(), None))
+    }
+    #[cfg(sidecar)]
+    {
+        inspect_locked_with_reader(path)
+    }
+}
+
+#[cfg(sidecar)]
+fn inspect_locked_with_reader(path: &Path) -> Result<(PkzMeta, Option<(String, Vec<u8>)>)> {
+    // The optional legacy reader needs the complete encrypted file. Read that backing allocation
+    // once, under the serial protected-read gate, then reuse it for the directory and selected
+    // payload passes below. Calling the path-based readers here used to read the same large file
+    // once for names, once for the descriptor, and once more for card art.
+    // Keep the serial permit for the lifetime of the backing bytes, not just the disk call. If it
+    // were dropped after `read`, four queued inspections could each retain a 512 MB allocation
+    // while decrypting and decoding their previews.
+    let _protected = acquire_protected_read();
+    let bytes = read_locked_backing_once(path)?;
+    let Ok(names) = entry_names_bytes(&bytes) else {
         return Ok((locked(), None));
     };
 
     let ini_name = top_ini_index(&names).map(|i| names[i].clone());
     let mut entries = match ini_name.as_deref() {
-        Some(want) => read_selected(path, |name| same_entry(name, want)).unwrap_or_default(),
+        Some(want) => {
+            read_selected_bytes(&bytes, |name| same_entry(name, want)).unwrap_or_default()
+        }
         None => Vec::new(),
     };
 
@@ -574,7 +611,7 @@ fn inspect_locked(path: &Path) -> Result<(PkzMeta, Option<(String, Vec<u8>)>)> {
         .map(|i| names[i].clone())
         .collect();
     if !art_names.is_empty() {
-        match read_selected(path, |name| {
+        match read_selected_bytes(&bytes, |name| {
             art_names.iter().any(|want| same_entry(name, want))
         }) {
             Ok(mut art) => entries.append(&mut art),
@@ -590,6 +627,41 @@ fn inspect_locked(path: &Path) -> Result<(PkzMeta, Option<(String, Vec<u8>)>)> {
     // It's still creator-locked — keep the badge; we only surfaced its preview.
     meta.locked = true;
     Ok((meta, image))
+}
+
+/// Read one non-plain archive into its single caller-owned backing allocation.
+///
+/// The metadata check is intentionally before `std::fs::read`: that function sizes its initial
+/// allocation from the file, so checking only the returned vector would already be too late for
+/// the resource spike this guard exists to prevent.
+#[cfg(sidecar)]
+fn read_locked_backing_once(path: &Path) -> Result<Vec<u8>> {
+    if crate::securesource::is_secured(path) {
+        bail!(SECURED_IN_GAME_ONLY);
+    }
+    read_file_capped_with(path, MAX_LOCKED_ARCHIVE_BYTES, |path| std::fs::read(path))
+}
+
+fn read_file_capped_with(
+    path: &Path,
+    max_bytes: u64,
+    read: impl FnOnce(&Path) -> std::io::Result<Vec<u8>>,
+) -> Result<Vec<u8>> {
+    let size = std::fs::metadata(path)
+        .with_context(|| format!("stat {path:?}"))?
+        .len();
+    if size > max_bytes {
+        bail!(
+            "archive is {} MiB, past the {} MiB in-memory legacy archive limit",
+            size / (1024 * 1024),
+            max_bytes / (1024 * 1024),
+        );
+    }
+    let bytes = read(path).with_context(|| format!("read {path:?}"))?;
+    if bytes.len() as u64 > max_bytes {
+        bail!("archive grew past the in-memory legacy archive limit while being read");
+    }
+    Ok(bytes)
 }
 
 fn parse_ini(text: &str, meta: &mut PkzMeta, pic: &mut Option<String>) {
@@ -1146,6 +1218,15 @@ mod tests {
         for error in errors {
             assert_eq!(error.to_string(), SECURED_IN_GAME_ONLY);
         }
+
+        // Metadata inspection reaches the format dispatch only after opening the file, so give
+        // it a real non-ZIP body and prove that dispatch still refuses the secure format rather
+        // than treating it as a legacy creator lock.
+        let dir = tmp_dir("secure-metadata-refusal");
+        let secure = dir.join("must-stay-in-game.mxbsecure");
+        std::fs::write(&secure, b"not a desktop-readable archive").unwrap();
+        assert_eq!(read_meta(&secure).unwrap_err().to_string(), SECURED_IN_GAME_ONLY);
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     /// The archive has to be readable by the game's own reader, not merely by a zip library.
@@ -1321,6 +1402,45 @@ mod tests {
             thread.join().unwrap();
         }
         assert_eq!(peak.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn capped_backing_reader_reads_an_accepted_file_exactly_once() {
+        let dir = tmp_dir("single-backing-read");
+        let path = dir.join("legacy.pkz");
+        std::fs::write(&path, b"one backing allocation").unwrap();
+        let calls = AtomicUsize::new(0);
+
+        let bytes = read_file_capped_with(&path, 1024, |path| {
+            calls.fetch_add(1, Ordering::SeqCst);
+            std::fs::read(path)
+        })
+        .unwrap();
+
+        assert_eq!(bytes, b"one backing allocation");
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn oversized_backing_is_refused_before_the_reader_runs() {
+        let dir = tmp_dir("oversized-backing");
+        let path = dir.join("legacy.pkz");
+        std::fs::write(&path, b"nine-byte").unwrap();
+        let calls = AtomicUsize::new(0);
+
+        let error = read_file_capped_with(&path, 8, |_| {
+            calls.fetch_add(1, Ordering::SeqCst);
+            Ok(Vec::new())
+        })
+        .unwrap_err();
+
+        assert!(
+            error.to_string().contains("in-memory legacy archive limit"),
+            "{error:#}"
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 0, "the oversized file must never be read");
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     /// `MXB_DUMP_PKZ='…/rider.pkz' cargo test dump_pkz_layout -- --ignored --nocapture`

@@ -1,5 +1,6 @@
 import { getPkzMeta, getPkzMetaCached } from "@frost/shared/api/mods";
 import type { LibraryEntry, PkzMeta } from "@frost/shared/types";
+import { BoundedCache } from "./boundedCache";
 
 /**
  * Shared store for mod metadata (name, author, thumbnail) read out of `.pkz` archives.
@@ -17,8 +18,29 @@ import type { LibraryEntry, PkzMeta } from "@frost/shared/types";
  * 3. {@link requestMeta} lets a few of those run at a time and shares in-flight work.
  */
 
-const cache = new Map<string, PkzMeta>();
+// The values carry base64 preview and logo images. Keep enough for several large library tabs,
+// but never let a long session retain every archive revision it has ever seen.
+const cache = new BoundedCache<PkzMeta>(256, 96 * 1024 * 1024);
 const inflight = new Map<string, Promise<PkzMeta | null>>();
+
+const lineageKey = (entry: Pick<LibraryEntry, "path" | "prefix">): string =>
+  entry.prefix ? `${entry.path}#${entry.prefix}` : entry.path;
+
+const retainedBytes = (meta: PkzMeta): number =>
+  // JS strings are UTF-16. The image fields dominate, but count the text too so the ceiling
+  // remains honest if metadata grows later.
+  2 *
+  [meta.name, meta.author, meta.location, meta.thumbnail, meta.logo]
+    .filter((value): value is string => value !== null)
+    .reduce((sum, value) => sum + value.length, 0);
+
+function rememberMeta(
+  entry: Pick<LibraryEntry, "path" | "prefix">,
+  key: string,
+  meta: PkzMeta,
+): void {
+  cache.set(key, lineageKey(entry), meta, retainedBytes(meta));
+}
 
 /** Size is part of the key so replacing a mod in place invalidates its entry.
  *
@@ -51,7 +73,7 @@ export async function primeMetaCache(entries: LibraryEntry[]): Promise<void> {
   try {
     const metas = await getPkzMetaCached(wanted.map((e) => e.path));
     metas.forEach((meta, i) => {
-      if (meta) cache.set(metaKey(wanted[i]), meta);
+      if (meta) rememberMeta(wanted[i], metaKey(wanted[i]), meta);
     });
   } catch {
     /* fall back to per-card requests */
@@ -99,7 +121,7 @@ export function requestMeta(
   const run = acquire()
     .then(() => getPkzMeta(entry.path, entry.prefix))
     .then((meta) => {
-      cache.set(key, meta);
+      rememberMeta(entry, key, meta);
       return meta;
     })
     .catch(() => null)

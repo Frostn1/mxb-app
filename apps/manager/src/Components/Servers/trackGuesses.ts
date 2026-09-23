@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from "react";
 import type { TrackGuess } from "@frost/shared/api/mods";
+import { BoundedCache } from "@/lib/boundedCache";
 
 /**
  * What each track id turned out to be, for the life of the app.
@@ -12,14 +13,24 @@ import type { TrackGuess } from "@frost/shared/api/mods";
  * empty while the hero above it was fine. Anything that learns an answer puts it here, and
  * everything that draws a track reads from here.
  */
-const GUESSES = new Map<string, TrackGuess>();
+const GUESSES = new BoundedCache<TrackGuess>(512, 32 * 1024 * 1024);
 const listeners = new Set<() => void>();
 let version = 0;
 
 export const guessFor = (track: string): TrackGuess | undefined => GUESSES.get(track);
 
 export function rememberGuess(track: string, guess: TrackGuess) {
-  GUESSES.set(track, guess);
+  const bytes =
+    2 *
+    (track.length +
+      guess.id.length +
+      guess.installed.length +
+      guess.source.length +
+      guess.productName.length +
+      guess.productUrl.length +
+      guess.preview.length +
+      guess.productImage.length);
+  GUESSES.set(track, track, guess, bytes);
   version += 1;
   for (const l of listeners) l();
 }

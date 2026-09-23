@@ -12,6 +12,7 @@
 //! the Play button or from Steam.
 
 use crate::gameproc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 use tauri::AppHandle;
 
@@ -22,6 +23,32 @@ const POLL: Duration = Duration::from_secs(15);
 /// answer barely moves within a session, and the report is only sent when it does. Matched
 /// to the live paint sync, which is the other thing running through a race.
 const REPORT_EVERY: Duration = Duration::from_secs(45);
+
+/// A slow module/signature pass must never pile up behind the next heartbeat.
+struct Exclusive(AtomicBool);
+
+impl Exclusive {
+    const fn new() -> Self {
+        Self(AtomicBool::new(false))
+    }
+
+    fn try_enter(&self) -> Option<ExclusiveGuard<'_>> {
+        self.0
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .ok()
+            .map(|_| ExclusiveGuard(self))
+    }
+}
+
+struct ExclusiveGuard<'a>(&'a Exclusive);
+
+impl Drop for ExclusiveGuard<'_> {
+    fn drop(&mut self) {
+        self.0.0.store(false, Ordering::Release);
+    }
+}
+
+static PROCMODS_PASS: Exclusive = Exclusive::new();
 
 /// Start the standing watcher. Call once, from `setup`.
 pub fn start(app: &AppHandle) {
@@ -107,8 +134,15 @@ pub fn start(app: &AppHandle) {
                     // resource — and that is disk I/O and a trust check per file, seconds of
                     // it on a cold cache. Held here it would stall every other async task in
                     // the app, the updater and paint sync among them, for the length of it.
-                    let handle = app.clone();
-                    tauri::async_runtime::spawn_blocking(move || crate::procmods::tick(&handle));
+                    if let Some(pass) = PROCMODS_PASS.try_enter() {
+                        let handle = app.clone();
+                        tauri::async_runtime::spawn_blocking(move || {
+                            let _pass = pass;
+                            crate::procmods::tick(&handle)
+                        });
+                    } else {
+                        log::debug!("[diag] previous module inspection is still running; skipping this beat");
+                    }
                 }
             } else if reported.take().is_some() {
                 // The session is over, so nothing that was true of it is true now.
@@ -125,6 +159,20 @@ pub fn start(app: &AppHandle) {
             tokio::time::sleep(POLL).await;
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_slow_diagnostic_pass_cannot_overlap_the_next_beat() {
+        let pass = Exclusive::new();
+        let first = pass.try_enter().expect("first pass starts");
+        assert!(pass.try_enter().is_none(), "a second pass must be skipped");
+        drop(first);
+        assert!(pass.try_enter().is_some(), "the next beat starts after completion");
+    }
 }
 
 /// Hand anything FrostMod left after a crash to [`crate::crashreports`].

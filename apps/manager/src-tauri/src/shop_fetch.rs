@@ -49,7 +49,85 @@ const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(60 * 30);
 /// the same whichever path a file came down.
 const PROGRESS_EVERY: Duration = Duration::from_millis(400);
 
+/// Keep the signed-in browser through a request burst, not for the process lifetime.
+const IDLE_TIMEOUT: Duration = Duration::from_secs(30);
+
 static APP: OnceLock<AppHandle> = OnceLock::new();
+
+static ACTIVE: AtomicU64 = AtomicU64::new(0);
+static IDLE_GENERATION: AtomicU64 = AtomicU64::new(0);
+static LIFECYCLE: Mutex<()> = Mutex::new(());
+
+struct WindowLease {
+    app: AppHandle,
+}
+
+impl WindowLease {
+    fn acquire(app: &AppHandle) -> Self {
+        let _guard = lock(&LIFECYCLE);
+        ACTIVE.fetch_add(1, Ordering::AcqRel);
+        IDLE_GENERATION.fetch_add(1, Ordering::AcqRel);
+        Self { app: app.clone() }
+    }
+}
+
+impl Drop for WindowLease {
+    fn drop(&mut self) {
+        let _guard = lock(&LIFECYCLE);
+        if ACTIVE.fetch_sub(1, Ordering::AcqRel) != 1 {
+            return;
+        }
+        let generation = IDLE_GENERATION.fetch_add(1, Ordering::AcqRel) + 1;
+        let app = self.app.clone();
+        tauri::async_runtime::spawn(async move {
+            tokio::time::sleep(IDLE_TIMEOUT).await;
+            let _guard = lock(&LIFECYCLE);
+            if idle_expired(
+                ACTIVE.load(Ordering::Acquire),
+                IDLE_GENERATION.load(Ordering::Acquire),
+                generation,
+            ) {
+                destroy_window(&app);
+            }
+        });
+    }
+}
+
+struct WindowFailureCleanup {
+    app: AppHandle,
+    armed: bool,
+}
+
+impl WindowFailureCleanup {
+    fn new(app: &AppHandle) -> Self {
+        Self { app: app.clone(), armed: true }
+    }
+
+    fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for WindowFailureCleanup {
+    fn drop(&mut self) {
+        if self.armed {
+            let _guard = lock(&LIFECYCLE);
+            // Do not destroy the shared signed-in browser underneath another request that is
+            // still succeeding. The last failed lease performs the cleanup.
+            if failure_cleanup_allowed(ACTIVE.load(Ordering::Acquire)) {
+                destroy_window(&self.app);
+            }
+        }
+    }
+}
+
+fn idle_expired(active: u64, current_generation: u64, scheduled_generation: u64) -> bool {
+    active == 0 && current_generation == scheduled_generation
+}
+
+fn failure_cleanup_allowed(active: u64) -> bool {
+    active == 1
+}
 
 pub fn init(app: &AppHandle) {
     let _ = APP.set(app.clone());
@@ -117,6 +195,8 @@ fn listen_for_results(app: &AppHandle) {
 /// EDD serves a signed-out visitor. That is the reload's real job, not just the button's.
 pub async fn downloads_html(reload: bool) -> anyhow::Result<String> {
     let app = app()?;
+    let _lease = WindowLease::acquire(app);
+    let mut cleanup = WindowFailureCleanup::new(app);
     // A window that was *just built* has already loaded the purchases page, freshly, as itself:
     // there is no stale DOM for a reload to replace, and re-navigating would only make the user
     // wait through a second load and a second challenge. This is the common case after a
@@ -152,6 +232,7 @@ pub async fn downloads_html(reload: bool) -> anyhow::Result<String> {
             return Err(anyhow::anyhow!("the shop page did not answer in time"));
         }
     };
+    cleanup.disarm();
     Ok(reply.html)
 }
 
@@ -230,6 +311,8 @@ fn download_lock() -> &'static tokio::sync::Mutex<()> {
 /// `commit_drop` — moves at all.
 pub async fn download(app: &AppHandle, slug: &str, url: &str, dir: &Path) -> anyhow::Result<PathBuf> {
     let _guard = download_lock().lock().await;
+    let _lease = WindowLease::acquire(app);
+    let mut cleanup = WindowFailureCleanup::new(app);
     let (window, _) = ensure_window(app).await?;
 
     *lock(download_dir()) = Some(dir.to_path_buf());
@@ -255,6 +338,9 @@ pub async fn download(app: &AppHandle, slug: &str, url: &str, dir: &Path) -> any
         let _ = window.navigate(url);
     }
 
+    if outcome.is_ok() {
+        cleanup.disarm();
+    }
     outcome
 }
 
@@ -409,7 +495,10 @@ async fn ensure_window(app: &AppHandle) -> anyhow::Result<(tauri::WebviewWindow,
         .focused(false)
         .build()?;
 
-    wait_until_ready(&window).await?;
+    if let Err(error) = wait_until_ready(&window).await {
+        close(app);
+        return Err(error);
+    }
     READY.store(true, Ordering::Relaxed);
     Ok((window, true))
 }
@@ -501,17 +590,33 @@ fn probe_script() -> String {
 /// answers the very next read with that same stale DOM, so a sign-in that genuinely succeeded
 /// is reported back as "your session expired" and the app drops straight to signed-out again.
 pub fn close(app: &AppHandle) {
+    let _guard = lock(&LIFECYCLE);
+    IDLE_GENERATION.fetch_add(1, Ordering::AcqRel);
+    destroy_window(app);
+}
+
+fn destroy_window(app: &AppHandle) {
     // Cleared before the close, not after: `READY` describes the window that is going away, and
     // a `true` left behind would let the next one be handed out before its challenge cleared.
     READY.store(false, Ordering::Relaxed);
     if let Some(win) = app.get_webview_window(WINDOW) {
-        let _ = win.close();
+        let _ = win.destroy();
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn idle_cleanup_only_owns_the_generation_it_scheduled() {
+        assert!(idle_expired(0, 11, 11));
+        assert!(!idle_expired(1, 11, 11), "an overlapping request keeps the browser alive");
+        assert!(!idle_expired(0, 12, 11), "new activity cancels the older timer");
+        assert!(IDLE_TIMEOUT <= Duration::from_secs(60));
+        assert!(failure_cleanup_allowed(1));
+        assert!(!failure_cleanup_allowed(2));
+    }
 
     /// The name comes from a remote `Content-Disposition`. The property that matters is not
     /// what it gets rewritten *to* — that is cosmetic — but that whatever comes out is a single

@@ -19,6 +19,7 @@ import {
   Clock,
 } from "lucide-react";
 import { toast } from "sonner";
+import { invoke } from "@tauri-apps/api/core";
 import { SearchBox } from "@frost/shared/Components/ui/search-box";
 import { cn } from "@frost/shared/lib/utils";
 import { Button } from "@frost/shared/Components/ui/button";
@@ -62,8 +63,10 @@ import { useT, type TFunc, type TKey } from "@/i18n";
 import { useFavorites } from "@/lib/useFavorites";
 import { useGameRunning } from "@/lib/useGameRunning";
 import { isFull, useServerQueue } from "@/lib/useServerQueue";
+import { BoundedCache } from "@/lib/boundedCache";
 import { REGION_LABEL_KEY, REGION_ORDER, canonicalRegion, type RegionKey } from "@/lib/serverRegion";
 import JoinServerDialog from "../Shell/JoinServerDialog";
+import { LoadingMark } from "../Shell/LoadingMark";
 import { guessPicture, useTrackGuesses, warmTracks } from "./trackGuesses";
 import ServerDetail, { ServerDetailDialog, ServerDetailEmpty } from "./ServerDetail";
 import ServerCard from "./ServerCard";
@@ -74,16 +77,14 @@ import RegisterServerDialog from "./RegisterServerDialog";
 type ViewMode = "tiles" | "list";
 const VIEW_KEY = "mxb:serversView:v1";
 
-/** Track art by track id, kept for the app's life so coming back to the tab paints at once.
- *  `""` for a track the player has that carries no picture. */
-const ART: Record<string, string> = {};
-/** Tracks the library has been asked about. One of these missing from ART isn't installed. */
-const ASKED = new Set<string>();
-/** What our server knows about tracks the player lacks, kept for the app's life. */
-const CATALOG: Record<string, CatalogTrack> = {};
+/** Installed artwork (`""` means no picture) or `null` for a confirmed missing track. */
+const LIBRARY = new BoundedCache<string | null>(256, 32 * 1024 * 1024);
+const LIBRARY_PENDING = new Set<string>();
+/** What our server knows about tracks the player lacks, bounded with its retained images. */
+const CATALOG = new BoundedCache<CatalogTrack>(256, 32 * 1024 * 1024);
 /** When each track was last asked of our server. One it didn't know yet is asked again after
  *  `REASK_MS`, since asking is what gets it looked up. */
-const CATALOG_ASKED = new Map<string, number>();
+const CATALOG_ASKED = new BoundedCache<number>(512, 512 * 8);
 const REASK_MS = 5 * 60 * 1000;
 
 type SortMode = "players" | "ping" | "name" | "region" | "track";
@@ -251,24 +252,40 @@ const Servers = ({ link }: ServersProps) => {
 
   // One request for every track in the list, not one per tile. Tracks already drawn aren't
   // asked again; the ones the player lacks are, in case they installed one since.
-  const [art, setArt] = useState<Record<string, string>>(() => ({ ...ART }));
+  const [library, setLibrary] = useState<Record<string, string | null>>(() =>
+    Object.fromEntries(LIBRARY.entries()),
+  );
   // Bumped when a track is installed from a tile, so its own art replaces the catalogue's.
   const [installed, setInstalled] = useState(0);
   // Asked for either view now: the list's rows carry the art small, and the pane beside them
   // shows it as the hero. It was tiles-only while the list was a table of text.
   useEffect(() => {
     if (!servers?.length) return;
-    const tracks = [...new Set(servers.map((s) => s.track).filter((tr) => tr && !(tr in ART)))];
+    const tracks = [
+      ...new Set(
+        servers
+          .map((s) => s.track)
+          .filter((tr) => tr && !LIBRARY.has(tr) && !LIBRARY_PENDING.has(tr)),
+      ),
+    ];
     if (tracks.length === 0) return;
-    // Never dropped on a re-run: the next run skips whatever is in ART, so art that landed
-    // there without reaching the tiles would stay off them until the app restarted.
+    // Claim before invoking: a second sweep can land while the first decode is still running.
+    // Missing ids stay claimed too, since "not installed" is a useful negative cache entry.
+    for (const tr of tracks) LIBRARY_PENDING.add(tr);
     serverTrackPreviews(tracks)
       .then((found) => {
-        Object.assign(ART, found);
-        for (const tr of tracks) ASKED.add(tr);
-        setArt({ ...ART });
+        for (const tr of tracks) {
+          const value = Object.prototype.hasOwnProperty.call(found, tr) ? found[tr] : null;
+          LIBRARY.set(tr, tr, value, value === null ? 1 : 2 * value.length);
+        }
+        setLibrary(Object.fromEntries(LIBRARY.entries()));
       })
-      .catch(() => {});
+      .catch(() => {
+        // A failed batch learned nothing and is safe to retry on the next sweep.
+      })
+      .finally(() => {
+        for (const tr of tracks) LIBRARY_PENDING.delete(tr);
+      });
   }, [servers, installed]);
 
   // Identify every track in the list without waiting to be asked. Opening a server to find
@@ -288,31 +305,30 @@ const Servers = ({ link }: ServersProps) => {
   }, [servers]);
 
   // The tracks the player lacks, from our server: what they are, their picture, the price.
-  const [catalog, setCatalog] = useState<Record<string, CatalogTrack>>(() => ({ ...CATALOG }));
+  const [catalog, setCatalog] = useState<Record<string, CatalogTrack>>(() =>
+    Object.fromEntries(CATALOG.entries()),
+  );
   useEffect(() => {
     if (!servers?.length) return;
     const now = Date.now();
     const tracks = [...new Set(servers.map((s) => s.track))].filter(
       (tr) =>
         tr &&
-        ASKED.has(tr) &&
-        // `!(tr in art)`, not `!art[tr]`: an empty string means "installed, carries no
-        // picture", and asking the store about a track the player already has buys a wrong
-        // answer — the name is all it can match on, and a stock track called "forest" came
-        // back as somebody else's product. A grey tile is better than the wrong track.
-        !(tr in art) &&
-        !(tr in CATALOG) &&
+        library[tr] === null &&
+        !CATALOG.has(tr) &&
         now - (CATALOG_ASKED.get(tr) ?? 0) > REASK_MS,
     );
     if (tracks.length === 0) return;
-    for (const tr of tracks) CATALOG_ASKED.set(tr, now);
+    for (const tr of tracks) CATALOG_ASKED.set(tr, tr, now, 8);
     serverTrackCatalog(tracks)
       .then((found) => {
-        Object.assign(CATALOG, found);
-        setCatalog({ ...CATALOG });
+        for (const [tr, product] of Object.entries(found)) {
+          CATALOG.set(tr, tr, product, 2 * JSON.stringify(product).length);
+        }
+        setCatalog(Object.fromEntries(CATALOG.entries()));
       })
       .catch(() => {});
-  }, [servers, art]);
+  }, [servers, library]);
 
   // One fetch at a time. Two overlapping ones each sign in to Steam, and the loser's
   // failure used to replace the winner's list with an error.
@@ -650,9 +666,14 @@ const Servers = ({ link }: ServersProps) => {
       if (job.stage !== "done") continue;
       const s = servers?.find((x) => x.address === intent.server.address) ?? intent.server;
       if (s?.track) {
-        delete ART[s.track];
-        ASKED.delete(s.track);
-        setInstalled((n) => n + 1);
+        // Preview and identification share a backend library snapshot. The completed install
+        // is the boundary at which both positive and negative answers become stale.
+        LIBRARY.delete(s.track);
+        LIBRARY_PENDING.delete(s.track);
+        CATALOG.delete(s.track);
+        // Refresh only after Rust has dropped its snapshot; otherwise this render can race
+        // the invalidation IPC and faithfully re-cache the pre-install directory listing.
+        void invoke("invalidate_server_track_cache").finally(() => setInstalled((n) => n + 1));
       }
       if (!intent.joinAfter) continue;
       if (s && isFull(s)) void wait(s);
@@ -682,12 +703,12 @@ const Servers = ({ link }: ServersProps) => {
   // catalogue, so a track that is neither — Fort Red, found on mxb-mods — drew a full hero
   // and an empty row beside it. Reading the same store fixes that the moment it is known.
   useTrackGuesses();
-  const pictureFor = (track: string) => art[track] || guessPicture(track) || undefined;
+  const pictureFor = (track: string) => library[track] || guessPicture(track) || undefined;
 
   const detailProps = {
     server: detail,
     art: detail ? pictureFor(detail.track) : undefined,
-    missing: !!detail?.track && ASKED.has(detail.track) && !(detail.track in art),
+    missing: !!detail?.track && library[detail.track] === null,
     product: detail ? catalog[detail.track] : undefined,
     installing: !!detail && installingAt.has(detail.address),
     favourite: !!detail && favs.has(detail.address),
@@ -931,7 +952,7 @@ const Servers = ({ link }: ServersProps) => {
       >
         {servers === null ? (
           <Centered>
-            <Loader2 className="size-5 animate-spin text-faint" />
+            <LoadingMark label={t("serverBrowser.loading")} />
             <p className="text-[13px] text-faint">{t("serverBrowser.loading")}</p>
           </Centered>
         ) : error && servers.length === 0 ? (
@@ -956,7 +977,7 @@ const Servers = ({ link }: ServersProps) => {
                 key={`${s.address}-${i}`}
                 server={s}
                 art={pictureFor(s.track)}
-                missing={!!s.track && ASKED.has(s.track) && !(s.track in art)}
+                missing={!!s.track && library[s.track] === null}
                 product={catalog[s.track]}
                 installing={installingAt.has(s.address)}
                 onInstall={installOnly}
@@ -994,7 +1015,7 @@ const Servers = ({ link }: ServersProps) => {
                     key={`${s.address}-${i}`}
                     server={s}
                     art={pictureFor(s.track)}
-                    missing={!!s.track && ASKED.has(s.track) && !(s.track in art)}
+                    missing={!!s.track && library[s.track] === null}
                     product={catalog[s.track]}
                     selected={s.address === selected}
                     favourite={favs.has(s.address)}

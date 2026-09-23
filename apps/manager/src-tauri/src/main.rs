@@ -3885,21 +3885,25 @@ async fn guess_server_track(
     // "mods/tracks": `mods_path` is the user folder, so "tracks" scanned a folder that isn't
     // there and every installed track read as missing — which on this screen means offering to
     // sell the player a track they already have.
-    if let Ok(entries) = scan_library(app.clone(), "mods/tracks".into()).await {
+    if let Ok(entries) = server_track_entries(app.clone()).await {
         let want = id.clone();
-        let hit = tauri::async_runtime::spawn_blocking(move || {
-            mxb_core::tracksource::find_installed(entries, &want)
-        })
+        let hit = tauri::async_runtime::spawn_blocking(move || entries.find(&want))
         .await
         .ok()
         .flatten();
         if let Some(hit) = hit {
             guess.installed = mxb_core::library::strip_ext(&hit.name);
             guess.exact = true;
-            guess.preview = pkz::read_preview(std::path::Path::new(&hit.path))
-                .ok()
-                .flatten()
-                .unwrap_or_default();
+            guess.preview = if hit.secured {
+                String::new()
+            } else {
+                cached(&CARD_ART, (hit.path.clone(), hit.size, hit.modified), || {
+                    pkz::read_preview_at(std::path::Path::new(&hit.path), CARD_ART_MAX)
+                        .ok()
+                        .flatten()
+                })
+                .unwrap_or_default()
+            };
             // Deliberately does NOT return. Finding the file answers "do I have it" and
             // supplies the picture; it says nothing about where the track came from, and the
             // panel links its title to that page. Gating the search on a missing preview —
@@ -4095,7 +4099,11 @@ async fn stock_track(app: &tauri::AppHandle, id: &str) -> Option<StockGuess> {
     let id = id.to_string();
     tauri::async_runtime::spawn_blocking(move || {
         let hit = trackstock::find(&install, &id)?;
-        let preview = trackstock::preview(&install, &hit).unwrap_or_default();
+        let folded = mxb_core::tracksource::key(&id);
+        let preview = cached(&CARD_ART, (format!("stock:{folded}"), 0, 0), || {
+            Some(trackstock::preview(&install, &hit).unwrap_or_default())
+        })
+        .unwrap_or_default();
         Some(StockGuess { name: hit.name, preview })
     })
     .await
@@ -4111,22 +4119,237 @@ struct StockGuess {
 /// The longest edge of a server card's track art. The cards are about 260 px wide.
 const CARD_ART_MAX: u32 = 560;
 
+/// Server sweeps reuse one view of the installed track tree. The preview batch and the
+/// per-track catalogue warmup start beside one another, so caching only their final answers
+/// still let both walks rescan the same (sometimes very large) library. This cache coalesces
+/// that first scan and keeps negative answers stable until an install explicitly invalidates it.
+#[derive(Default)]
+struct TrackLibraryState {
+    key: String,
+    entries: Option<std::sync::Arc<TrackLibrarySnapshot>>,
+    loading: bool,
+    generation: u64,
+}
+
+#[derive(Default)]
+struct TrackLibraryCache {
+    state: std::sync::Mutex<TrackLibraryState>,
+    ready: std::sync::Condvar,
+}
+
+struct TrackLibrarySnapshot {
+    entries: Vec<library::LibraryEntry>,
+    installed: std::collections::HashMap<String, usize>,
+}
+
+impl TrackLibrarySnapshot {
+    fn new(entries: Vec<library::LibraryEntry>) -> Self {
+        let installed = track_index(&entries, |entry| {
+            cached(&TRACK_FOLDERS, (entry.path.clone(), entry.size, entry.modified), || {
+                mxb_core::track::folder_name(std::path::Path::new(&entry.path))
+            })
+        });
+        Self { entries, installed }
+    }
+
+    fn find(&self, id: &str) -> Option<library::LibraryEntry> {
+        self.installed
+            .get(&mxb_core::tracksource::key(id))
+            .and_then(|index| self.entries.get(*index))
+            .cloned()
+    }
+}
+
+fn track_index(
+    entries: &[library::LibraryEntry],
+    mut folder: impl FnMut(&library::LibraryEntry) -> Option<String>,
+) -> std::collections::HashMap<String, usize> {
+    let key = mxb_core::tracksource::key;
+    let mut installed = std::collections::HashMap::new();
+    // Filename matches outrank every inner-folder match, even one appearing earlier in the
+    // directory listing. Populate the two tiers separately to preserve that precedence.
+    for (index, entry) in entries.iter().enumerate() {
+        let folded = key(&library::strip_ext(&entry.name));
+        if !folded.is_empty() {
+            installed.entry(folded).or_insert(index);
+        }
+    }
+    for (index, entry) in entries.iter().enumerate() {
+        if protected_track_read_must_be_serial(entry) {
+            continue;
+        }
+        if let Some(folded) = folder(entry).as_deref().map(key).filter(|key| !key.is_empty()) {
+            installed.entry(folded).or_insert(index);
+        }
+    }
+    installed
+}
+
+impl TrackLibraryCache {
+    fn get_or_scan(
+        &self,
+        key: String,
+        scan: impl FnOnce() -> Result<Vec<library::LibraryEntry>, String>,
+    ) -> Result<std::sync::Arc<TrackLibrarySnapshot>, String> {
+        loop {
+            let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+            if state.key == key {
+                if let Some(entries) = &state.entries {
+                    return Ok(entries.clone());
+                }
+            }
+            if state.loading {
+                state = self.ready.wait(state).unwrap_or_else(|e| e.into_inner());
+                drop(state);
+                continue;
+            }
+            state.loading = true;
+            let generation = state.generation;
+            drop(state);
+
+            let result = scan().map(TrackLibrarySnapshot::new).map(std::sync::Arc::new);
+            let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+            state.loading = false;
+            if state.generation == generation {
+                if let Ok(entries) = &result {
+                    state.key = key;
+                    state.entries = Some(entries.clone());
+                }
+            }
+            self.ready.notify_all();
+            return result;
+        }
+    }
+
+    fn invalidate(&self) {
+        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        state.entries = None;
+        state.key.clear();
+        state.generation = state.generation.wrapping_add(1);
+        self.ready.notify_all();
+    }
+}
+
+static SERVER_TRACK_LIBRARY: std::sync::LazyLock<TrackLibraryCache> =
+    std::sync::LazyLock::new(Default::default);
+
+async fn server_track_entries(
+    app: tauri::AppHandle,
+) -> Result<std::sync::Arc<TrackLibrarySnapshot>, String> {
+    let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+    let tracks_dir = library::mods_subdir(&cfg.mods_path, "mods/tracks");
+    let directory_stamp = std::fs::metadata(&tracks_dir)
+        .map(|metadata| library::mtime_ms(&metadata))
+        .unwrap_or(0);
+    let key = format!("{}\0{}\0{directory_stamp}", cfg.mods_path, cfg.game().id);
+    tauri::async_runtime::spawn_blocking(move || {
+        SERVER_TRACK_LIBRARY.get_or_scan(key, || {
+            scan_library_blocking(app, "mods/tracks".into())
+        })
+    })
+    .await
+    .map_err(|e| format!("server track library task failed: {e}"))?
+}
+
+#[tauri::command]
+fn invalidate_server_track_cache() {
+    SERVER_TRACK_LIBRARY.invalidate();
+}
+
 /// A file by path, size and mtime, so a cache entry dies with the file it came from.
 type Stamped = (String, u64, u64);
-type StampCache = std::sync::Mutex<std::collections::HashMap<Stamped, Option<String>>>;
+struct CacheEntry {
+    value: Option<String>,
+    used: u64,
+    bytes: usize,
+}
+
+struct StampCacheState {
+    entries: std::collections::HashMap<Stamped, CacheEntry>,
+    used: u64,
+    bytes: usize,
+}
+
+struct StampCache {
+    state: std::sync::Mutex<StampCacheState>,
+    max_entries: usize,
+    max_bytes: usize,
+}
+
+impl StampCache {
+    fn new(max_entries: usize, max_bytes: usize) -> Self {
+        Self {
+            state: std::sync::Mutex::new(StampCacheState {
+                entries: Default::default(),
+                used: 0,
+                bytes: 0,
+            }),
+            max_entries,
+            max_bytes,
+        }
+    }
+
+    fn get_or_insert_with(
+        &self,
+        key: Stamped,
+        make: impl FnOnce() -> Option<String>,
+    ) -> Option<String> {
+        // Intentionally held through `make`: concurrent server refreshes requesting the same
+        // archive must share one decode, not briefly hold two large source images at once.
+        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        state.used = state.used.wrapping_add(1);
+        let used = state.used;
+        if let Some(hit) = state.entries.get_mut(&key) {
+            hit.used = used;
+            return hit.value.clone();
+        }
+
+        // A changed stamp replaces the old version of this path instead of consuming another
+        // slot forever. Stock keys use zero stamps and naturally have only one version.
+        let stale: Vec<_> = state
+            .entries
+            .keys()
+            .filter(|cached| cached.0 == key.0 && **cached != key)
+            .cloned()
+            .collect();
+        for stale_key in stale {
+            if let Some(old) = state.entries.remove(&stale_key) {
+                state.bytes = state.bytes.saturating_sub(old.bytes);
+            }
+        }
+
+        let value = make();
+        let bytes = value.as_ref().map_or(0, String::len);
+        if bytes <= self.max_bytes {
+            state.bytes += bytes;
+            state.entries.insert(key, CacheEntry { value: value.clone(), used, bytes });
+            while state.entries.len() > self.max_entries || state.bytes > self.max_bytes {
+                let Some(oldest) = state
+                    .entries
+                    .iter()
+                    .min_by_key(|(_, entry)| entry.used)
+                    .map(|(key, _)| key.clone())
+                else {
+                    break;
+                };
+                if let Some(old) = state.entries.remove(&oldest) {
+                    state.bytes = state.bytes.saturating_sub(old.bytes);
+                }
+            }
+        }
+        value
+    }
+}
 
 /// The folder inside each track archive, which costs opening the archive to learn.
-static TRACK_FOLDERS: std::sync::LazyLock<StampCache> = std::sync::LazyLock::new(Default::default);
+static TRACK_FOLDERS: std::sync::LazyLock<StampCache> =
+    std::sync::LazyLock::new(|| StampCache::new(1024, 512 * 1024));
 /// Card art already made, which costs an image decode.
-static CARD_ART: std::sync::LazyLock<StampCache> = std::sync::LazyLock::new(Default::default);
+static CARD_ART: std::sync::LazyLock<StampCache> =
+    std::sync::LazyLock::new(|| StampCache::new(128, 32 * 1024 * 1024));
 
 fn cached(map: &StampCache, key: Stamped, make: impl FnOnce() -> Option<String>) -> Option<String> {
-    if let Some(hit) = map.lock().unwrap_or_else(|e| e.into_inner()).get(&key) {
-        return hit.clone();
-    }
-    let value = make();
-    map.lock().unwrap_or_else(|e| e.into_inner()).insert(key, value.clone());
-    value
+    map.get_or_insert_with(key, make)
 }
 
 /// Card art for the server browser: each track id the player has, mapped to its preview, or
@@ -4140,9 +4363,17 @@ async fn server_track_previews(
     app: tauri::AppHandle,
     tracks: Vec<String>,
 ) -> Result<std::collections::HashMap<String, String>, String> {
-    let entries = scan_library(app.clone(), "mods/tracks".into()).await.unwrap_or_default();
+    let snapshot = server_track_entries(app.clone()).await.ok();
     let install = config::load(&app).map(|c| c.install_dir()).unwrap_or_default();
-    tauri::async_runtime::spawn_blocking(move || track_previews(&entries, &install, tracks))
+    tauri::async_runtime::spawn_blocking(move || match snapshot {
+        Some(snapshot) => track_previews_indexed(
+            &snapshot.entries,
+            &snapshot.installed,
+            &install,
+            tracks,
+        ),
+        None => Default::default(),
+    })
         .await
         .map_err(|e| format!("server_track_previews task failed: {e}"))
 }
@@ -4171,6 +4402,21 @@ fn track_previews(
     install: &str,
     tracks: Vec<String>,
 ) -> std::collections::HashMap<String, String> {
+    let stamp = |e: &library::LibraryEntry| (e.path.clone(), e.size, e.modified);
+    let installed = track_index(entries, |entry| {
+        cached(&TRACK_FOLDERS, stamp(entry), || {
+            mxb_core::track::folder_name(std::path::Path::new(&entry.path))
+        })
+    });
+    track_previews_indexed(entries, &installed, install, tracks)
+}
+
+fn track_previews_indexed(
+    entries: &[library::LibraryEntry],
+    installed: &std::collections::HashMap<String, usize>,
+    install: &str,
+    tracks: Vec<String>,
+) -> std::collections::HashMap<String, String> {
     use rayon::prelude::*;
     use std::collections::HashMap;
     let stamp = |e: &library::LibraryEntry| (e.path.clone(), e.size, e.modified);
@@ -4186,38 +4432,12 @@ fn track_previews(
         }
     }
 
-    // The order `guess_server_track` uses: file name, then the folder inside, then stock.
+    // The shared index has already applied the order `guess_server_track` uses: every file
+    // name first, then folders inside ordinary archives, then stock below.
     let mut found: HashMap<String, ArtSource> = HashMap::new();
-    for (i, e) in entries.iter().enumerate() {
-        let folded = key(&library::strip_ext(&e.name));
-        if want.contains_key(&folded) {
-            found.entry(folded).or_insert(ArtSource::Installed(i));
-        }
-    }
-    if found.len() < want.len() {
-        // Protected archives do not participate in folder discovery: `.mxbsecure` is a hard
-        // process boundary, while a legacy GUID-locked PKZ's reader loads the whole encrypted
-        // archive before decrypting its directory. Doing the latter for every protected track in
-        // parallel can still fan out memory even though a server-card lookup only needs a name.
-        // Protected filenames are their identity here; only ordinary ZIP PKZs and folders use
-        // this fallback.
-        let folders: Vec<(usize, Option<String>)> = entries
-            .par_iter()
-            .enumerate()
-            .filter(|(_, e)| !protected_track_read_must_be_serial(e))
-            .map(|(i, e)| {
-                let folder = cached(&TRACK_FOLDERS, stamp(e), || {
-                    mxb_core::track::folder_name(std::path::Path::new(&e.path))
-                });
-                (i, folder)
-            })
-            .collect();
-        for (i, folder) in folders {
-            if let Some(folded) = folder.as_deref().map(key) {
-                if want.contains_key(&folded) {
-                    found.entry(folded).or_insert(ArtSource::Installed(i));
-                }
-            }
+    for folded in want.keys() {
+        if let Some(index) = installed.get(folded) {
+            found.insert(folded.clone(), ArtSource::Installed(*index));
         }
     }
     for (folded, ids) in &want {
@@ -4275,6 +4495,156 @@ fn track_previews(
 #[cfg(test)]
 mod card_art_tests {
     use super::*;
+
+    fn entry(name: &str) -> library::LibraryEntry {
+        library::LibraryEntry {
+            name: name.into(),
+            path: name.into(),
+            folder: String::new(),
+            size: 1,
+            modified: 1,
+            kind: "folder".into(),
+            category: "tracks".into(),
+            parent: None,
+            secured: false,
+            locked: false,
+            prefix: None,
+            stock: false,
+        }
+    }
+
+    #[test]
+    fn server_track_library_is_single_flight_and_reused_until_invalidated() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::{Arc, Barrier};
+
+        let cache = Arc::new(TrackLibraryCache::default());
+        let scans = Arc::new(AtomicUsize::new(0));
+        let start = Arc::new(Barrier::new(3));
+        let mut threads = Vec::new();
+        for _ in 0..2 {
+            let cache = Arc::clone(&cache);
+            let scans = Arc::clone(&scans);
+            let start = Arc::clone(&start);
+            threads.push(std::thread::spawn(move || {
+                start.wait();
+                cache
+                    .get_or_scan("mods\0mxb".into(), || {
+                        scans.fetch_add(1, Ordering::SeqCst);
+                        std::thread::sleep(std::time::Duration::from_millis(20));
+                        Ok(vec![entry("Walnut")])
+                    })
+                    .unwrap()
+            }));
+        }
+        start.wait();
+        for thread in threads {
+            assert_eq!(thread.join().unwrap().entries[0].name, "Walnut");
+        }
+        assert_eq!(scans.load(Ordering::SeqCst), 1, "concurrent consumers share one scan");
+
+        cache
+            .get_or_scan("mods\0mxb".into(), || {
+                scans.fetch_add(1, Ordering::SeqCst);
+                Ok(vec![])
+            })
+            .unwrap();
+        assert_eq!(scans.load(Ordering::SeqCst), 1, "an unchanged sweep does no scan");
+
+        cache.invalidate();
+        cache
+            .get_or_scan("mods\0mxb".into(), || {
+                scans.fetch_add(1, Ordering::SeqCst);
+                Ok(vec![entry("New Track")])
+            })
+            .unwrap();
+        assert_eq!(scans.load(Ordering::SeqCst), 2, "install invalidation permits one rescan");
+    }
+
+    #[test]
+    fn distinct_track_ids_share_one_folder_discovery_pass() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let mut entries = vec![entry("bundle-a.pkz"), entry("bundle-b.pkz"), entry("bundle-c.pkz")];
+        for entry in &mut entries {
+            // A directory is an ordinary readable source; nonexistent `.pkz` fixture paths
+            // correctly look protected to the production guard and would skip discovery.
+            entry.path = ".".into();
+        }
+        let folders = ["Track One", "Track Two", "Track Three"];
+        let discoveries = AtomicUsize::new(0);
+        let index = track_index(&entries, |_| {
+            let n = discoveries.fetch_add(1, Ordering::SeqCst);
+            Some(folders[n].into())
+        });
+        let snapshot = TrackLibrarySnapshot { entries, installed: index };
+
+        for id in ["track_one", "TRACKTWO", "Track Three"] {
+            assert!(snapshot.find(id).is_some(), "{id} should use the prebuilt index");
+        }
+        assert_eq!(
+            discoveries.load(Ordering::SeqCst),
+            3,
+            "N lookups must not repeat the one discovery pass over three entries",
+        );
+    }
+
+    #[test]
+    fn stamp_cache_bounds_entries_bytes_and_replaces_stale_stamps() {
+        let cache = StampCache::new(2, 7);
+        assert_eq!(cached(&cache, ("a".into(), 1, 1), || Some("aaa".into())), Some("aaa".into()));
+        assert_eq!(cached(&cache, ("b".into(), 1, 1), || Some("bbb".into())), Some("bbb".into()));
+        assert_eq!(cached(&cache, ("c".into(), 1, 1), || Some("ccc".into())), Some("ccc".into()));
+        {
+            let state = cache.state.lock().unwrap();
+            assert!(state.entries.len() <= 2);
+            assert!(state.bytes <= 7);
+            assert!(!state.entries.contains_key(&("a".into(), 1, 1)), "oldest entry evicted");
+        }
+
+        cached(&cache, ("b".into(), 2, 2), || Some("bb".into()));
+        let state = cache.state.lock().unwrap();
+        assert!(!state.entries.contains_key(&("b".into(), 1, 1)), "old stamp removed");
+        assert!(state.entries.contains_key(&("b".into(), 2, 2)));
+    }
+
+    #[test]
+    fn stamp_cache_coalesces_concurrent_preview_work_and_keeps_misses() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::{Arc, Barrier};
+
+        let cache = Arc::new(StampCache::new(4, 1024));
+        let decodes = Arc::new(AtomicUsize::new(0));
+        let start = Arc::new(Barrier::new(3));
+        let mut threads = Vec::new();
+        for _ in 0..2 {
+            let cache = Arc::clone(&cache);
+            let decodes = Arc::clone(&decodes);
+            let start = Arc::clone(&start);
+            threads.push(std::thread::spawn(move || {
+                start.wait();
+                cached(&cache, ("preview".into(), 1, 1), || {
+                    decodes.fetch_add(1, Ordering::SeqCst);
+                    std::thread::sleep(std::time::Duration::from_millis(20));
+                    None
+                })
+            }));
+        }
+        start.wait();
+        for thread in threads {
+            assert_eq!(thread.join().unwrap(), None);
+        }
+        assert_eq!(decodes.load(Ordering::SeqCst), 1, "one decode serves concurrent callers");
+        assert_eq!(
+            cached(&cache, ("preview".into(), 1, 1), || {
+                decodes.fetch_add(1, Ordering::SeqCst);
+                Some("unexpected".into())
+            }),
+            None,
+            "a negative preview is cached",
+        );
+        assert_eq!(decodes.load(Ordering::SeqCst), 1);
+    }
 
     #[test]
     fn every_spelling_of_an_installed_track_gets_its_art() {
@@ -7860,6 +8230,7 @@ fn main() {
             servers_with_paint_sync,
             guess_server_track,
             server_track_previews,
+            invalidate_server_track_cache,
             server_track_catalog,
             ranked_identity,
             ranked_profile,

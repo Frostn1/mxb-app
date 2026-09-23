@@ -83,6 +83,11 @@ const PROBE_TIMEOUT: Duration = Duration::from_secs(10);
 const POLL: Duration = Duration::from_millis(500);
 const MAX_BROWSER_BODY: usize = 8 * 1024 * 1024;
 
+/// A refused browser fetch is not permission to start the same request on every poll. Give the
+/// challenge page time to make progress, and cap the entire pass even when it never does.
+const BROWSER_RETRY_BACKOFF: Duration = Duration::from_secs(10);
+const MAX_BROWSER_ATTEMPTS: u32 = 32;
+
 /// How long to let the page settle before asking the store anything. Probing instantly only
 /// spends a request confirming what we already know — we are here because we were refused.
 const FIRST_PROBE: Duration = Duration::from_secs(3);
@@ -162,6 +167,7 @@ fn now() -> u64 {
 pub async fn earn(app: &AppHandle) -> anyhow::Result<()> {
     static LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
     let _guard = LOCK.lock().await;
+    let _cleanup = WindowCleanup(app.clone());
 
     if now().saturating_sub(LAST.load(Ordering::Relaxed)) < REUSE_WITHIN {
         log::info!("an MXB Hub clearance was just earned; reusing it");
@@ -272,51 +278,10 @@ async fn browser_attempt(
         builder.inner_size(1024.0, 768.0).position(-32000.0, -32000.0)
     };
     let window = builder.build()?;
+    let _cleanup = WindowCleanup(app.clone());
 
     let target = serde_json::to_string(target)?;
-    let script = format!(
-        r#"(() => {{
-          const target = {target};
-          const key = "__mxbAppHubFetch";
-          if (!window[key] || window[key].target !== target) {{
-            window[key] = {{ state: "pending", target }};
-            (async () => {{
-              try {{
-                const response = await fetch(target, {{ credentials: "include", cache: "no-store" }});
-                const declared = Number(response.headers.get("content-length") || "0");
-                if (declared > {MAX_BROWSER_BODY}) throw new Error("response body is too large");
-                const reader = response.body && response.body.getReader();
-                const decoder = new TextDecoder();
-                let body = "";
-                let bytes = 0;
-                if (reader) {{
-                  for (;;) {{
-                    const part = await reader.read();
-                    if (part.done) break;
-                    bytes += part.value.byteLength;
-                    if (bytes > {MAX_BROWSER_BODY}) {{
-                      await reader.cancel();
-                      throw new Error("response body is too large");
-                    }}
-                    body += decoder.decode(part.value, {{ stream: true }});
-                  }}
-                  body += decoder.decode();
-                }} else {{
-                  body = await response.text();
-                  if (new TextEncoder().encode(body).byteLength > {MAX_BROWSER_BODY})
-                    throw new Error("response body is too large");
-                }}
-                const headers = {{}};
-                response.headers.forEach((value, name) => headers[name.toLowerCase()] = value);
-                window[key] = {{ state: "done", target, status: response.status, headers, body }};
-              }} catch (error) {{
-                window[key] = {{ state: "error", target, message: String(error) }};
-              }}
-            }})();
-          }}
-          return JSON.stringify(window[key]);
-        }})()"#
-    );
+    let script = browser_request_script(&target);
 
     let deadline = std::time::Instant::now() + mode.budget();
     tokio::time::sleep(FIRST_PROBE).await;
@@ -352,17 +317,77 @@ async fn browser_attempt(
                         body,
                     }));
                 }
-                let _ = window.eval("delete window.__mxbAppHubFetch");
+                // The answer is terminal for this pass. Replace it with a tiny pending marker
+                // so the 500 ms readiness poll does not keep serializing and parsing the same
+                // (potentially multi-megabyte) challenge body for five minutes.
+                let _ = window.eval(&format!(
+                    "if (window.__mxbAppHubFetch) window.__mxbAppHubFetch = {{ state: 'error', target: window.__mxbAppHubFetch.target, attempts: window.__mxbAppHubFetch.attempts, message: 'challenge not finished', retryAt: Date.now() + {} }};",
+                    browser_retry_backoff_ms()
+                ));
             }
             Ok(BrowserResult::Error { message }) => {
                 log::debug!("MXB Hub browser request is not ready: {message}");
-                let _ = window.eval("delete window.__mxbAppHubFetch");
             }
             Ok(BrowserResult::Pending) | Err(_) => {}
         }
         tokio::time::sleep(POLL).await;
     }
     Ok(None)
+}
+
+fn browser_request_script(target: &str) -> String {
+    format!(
+        r#"(() => {{
+          const target = {target};
+          const key = "__mxbAppHubFetch";
+          const attempts = Number(window[key]?.attempts || 0);
+          if (!window[key] || window[key].target !== target ||
+              ((window[key].state === "done" || window[key].state === "error") &&
+               Number(window[key].retryAt || 0) <= Date.now() &&
+               attempts < {MAX_BROWSER_ATTEMPTS})) {{
+            window[key] = {{ state: "pending", target, attempts: attempts + 1 }};
+            (async () => {{
+              try {{
+                const response = await fetch(target, {{ credentials: "include", cache: "no-store" }});
+                const declared = Number(response.headers.get("content-length") || "0");
+                if (declared > {MAX_BROWSER_BODY}) throw new Error("response body is too large");
+                const reader = response.body && response.body.getReader();
+                const decoder = new TextDecoder();
+                let body = "";
+                let bytes = 0;
+                if (reader) {{
+                  for (;;) {{
+                    const part = await reader.read();
+                    if (part.done) break;
+                    bytes += part.value.byteLength;
+                    if (bytes > {MAX_BROWSER_BODY}) {{
+                      await reader.cancel();
+                      throw new Error("response body is too large");
+                    }}
+                    body += decoder.decode(part.value, {{ stream: true }});
+                  }}
+                  body += decoder.decode();
+                }} else {{
+                  body = await response.text();
+                  if (new TextEncoder().encode(body).byteLength > {MAX_BROWSER_BODY})
+                    throw new Error("response body is too large");
+                }}
+                const headers = {{}};
+                response.headers.forEach((value, name) => headers[name.toLowerCase()] = value);
+                window[key] = {{ state: "done", target, attempts: window[key].attempts,
+                                 status: response.status, headers, body,
+                                 retryAt: Date.now() + {retry_ms} }};
+              }} catch (error) {{
+                window[key] = {{ state: "error", target, attempts: window[key].attempts,
+                                 message: String(error),
+                                 retryAt: Date.now() + {retry_ms} }};
+              }}
+            }})();
+          }}
+          return JSON.stringify(window[key]);
+        }})()"#,
+        retry_ms = browser_retry_backoff_ms()
+    )
 }
 
 fn browser_response_challenged(
@@ -375,6 +400,15 @@ fn browser_response_challenged(
                 .get("content-type")
                 .is_some_and(|v| v.starts_with("text/html")))
         || status == 403
+}
+
+#[cfg(test)]
+fn browser_restart_allowed(elapsed: Duration) -> bool {
+    elapsed.as_millis() >= browser_retry_backoff_ms()
+}
+
+fn browser_retry_backoff_ms() -> u128 {
+    BROWSER_RETRY_BACKOFF.as_millis()
 }
 
 /// Whose problem the challenge is on this pass.
@@ -664,5 +698,25 @@ mod tests {
     fn browser_response_cap_is_small_enough_for_control_plane_data() {
         assert_eq!(MAX_BROWSER_BODY, 8 * 1024 * 1024);
         assert!(MAX_BROWSER_BODY < 32 * 1024 * 1024);
+    }
+    #[test]
+    fn failed_browser_fetches_do_not_restart_on_the_poll_cadence() {
+        assert!(!browser_restart_allowed(POLL));
+        assert!(!browser_restart_allowed(BROWSER_RETRY_BACKOFF - Duration::from_millis(1)));
+        assert!(browser_restart_allowed(BROWSER_RETRY_BACKOFF));
+        assert!(BROWSER_RETRY_BACKOFF >= Duration::from_secs(5));
+        assert!(
+            BROWSER_RETRY_BACKOFF * MAX_BROWSER_ATTEMPTS >= ASSIST_TIMEOUT,
+            "the visible challenge must remain retryable for its whole budget"
+        );
+        let script = browser_request_script("\"https://shop.mxb-hub.com/test\"");
+        assert!(script.contains("attempts < 32"));
+        let script = browser_request_script(r#""https://shop.mxb-hub.com/test""#);
+        assert!(script.contains("retryAt"), "{script}");
+        assert!(
+            script.contains(&browser_retry_backoff_ms().to_string()),
+            "{script}"
+        );
+        assert!(!script.contains("delete window"), "{script}");
     }
 }

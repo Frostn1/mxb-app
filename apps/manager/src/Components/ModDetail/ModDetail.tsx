@@ -3,7 +3,6 @@ import {
   AlertTriangle,
   Check,
   Copy,
-  Snowflake,
   FileDown,
   ExternalLink,
   Link2,
@@ -41,6 +40,7 @@ import type {
   ModDetail as Detail,
 } from "@frost/shared/types";
 import { ContextBarLeft } from "../Shell/ContextBar";
+import { LoadingMark } from "../Shell/LoadingMark";
 import RichDescription from "./RichDescription";
 import InstallDialog, { type InstallChoice } from "./InstallDialog";
 import { useInstall } from "../../Context/Install";
@@ -381,7 +381,7 @@ export default function ModDetail({
       <div className="flex h-full flex-col px-7 py-5">
         {crumb("…")}
         <div className="grid flex-1 place-items-center text-muted-foreground">
-          <Snowflake className="size-7 animate-spin [animation-duration:2.5s]" />
+          <LoadingMark label={t("common.loading")} />
         </div>
       </div>
     );

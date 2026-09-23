@@ -42,10 +42,91 @@ const TIMEOUT: Duration = Duration::from_secs(45);
 /// How long to wait for the page to be ready to run script after the window is built.
 const READY_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// The browser is expensive even when hidden. Keep it through a short burst of catalog
+/// requests, then release WebView2/WKWebView and recreate it lazily on the next request.
+const IDLE_TIMEOUT: Duration = Duration::from_secs(30);
+
 /// Set once from `setup`. The mods code is a set of free functions with no handle to thread
 /// through — `search`, `detail` and `ratings` would all have to grow an `AppHandle`
 /// parameter, along with everything between them and the command layer, to avoid this.
 static APP: OnceLock<AppHandle> = OnceLock::new();
+
+static READY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static ACTIVE: AtomicU64 = AtomicU64::new(0);
+static IDLE_GENERATION: AtomicU64 = AtomicU64::new(0);
+static LIFECYCLE: Mutex<()> = Mutex::new(());
+
+struct WindowLease {
+    app: AppHandle,
+}
+
+impl WindowLease {
+    fn acquire(app: &AppHandle) -> Self {
+        let _guard = lock(&LIFECYCLE);
+        ACTIVE.fetch_add(1, Ordering::AcqRel);
+        IDLE_GENERATION.fetch_add(1, Ordering::AcqRel);
+        Self { app: app.clone() }
+    }
+}
+
+impl Drop for WindowLease {
+    fn drop(&mut self) {
+        let _guard = lock(&LIFECYCLE);
+        if ACTIVE.fetch_sub(1, Ordering::AcqRel) != 1 {
+            return;
+        }
+        let generation = IDLE_GENERATION.fetch_add(1, Ordering::AcqRel) + 1;
+        let app = self.app.clone();
+        tauri::async_runtime::spawn(async move {
+            tokio::time::sleep(IDLE_TIMEOUT).await;
+            let _guard = lock(&LIFECYCLE);
+            if idle_expired(
+                ACTIVE.load(Ordering::Acquire),
+                IDLE_GENERATION.load(Ordering::Acquire),
+                generation,
+            ) {
+                destroy_window(&app);
+            }
+        });
+    }
+}
+
+struct WindowFailureCleanup {
+    app: AppHandle,
+    armed: bool,
+}
+
+impl WindowFailureCleanup {
+    fn new(app: &AppHandle) -> Self {
+        Self { app: app.clone(), armed: true }
+    }
+
+    fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for WindowFailureCleanup {
+    fn drop(&mut self) {
+        if self.armed {
+            let _guard = lock(&LIFECYCLE);
+            // A concurrent request may still be using the shared browser successfully. Let the
+            // last failing lease tear it down; every failed request reaches this check before
+            // its lease decrements ACTIVE.
+            if failure_cleanup_allowed(ACTIVE.load(Ordering::Acquire)) {
+                destroy_window(&self.app);
+            }
+        }
+    }
+}
+
+fn idle_expired(active: u64, current_generation: u64, scheduled_generation: u64) -> bool {
+    active == 0 && current_generation == scheduled_generation
+}
+
+fn failure_cleanup_allowed(active: u64) -> bool {
+    active == 1
+}
 
 pub fn init(app: &AppHandle) {
     let _ = APP.set(app.clone());
@@ -140,6 +221,8 @@ pub async fn post(url: &str, form: &[(&str, String)]) -> anyhow::Result<Fetched>
 /// what keeps a refusal reported as one rather than as a page that parsed to nothing.
 pub async fn read_page(url: &str) -> anyhow::Result<Fetched> {
     let app = app()?;
+    let _lease = WindowLease::acquire(app);
+    let mut cleanup = WindowFailureCleanup::new(app);
     let window = ensure_window(app).await?;
 
     // Which document is being replaced. `navigate` returns immediately and the old page stays
@@ -178,7 +261,7 @@ pub async fn read_page(url: &str) -> anyhow::Result<Fetched> {
         started.elapsed()
     );
 
-    Ok(Fetched {
+    let fetched = Fetched {
         status: reply.status,
         // A navigation's response headers are not visible to script, so the refusal log will
         // say `cf-ray=-` for this transport. The body carries the block reason regardless.
@@ -189,7 +272,9 @@ pub async fn read_page(url: &str) -> anyhow::Result<Fetched> {
         } else {
             reply.url
         },
-    })
+    };
+    cleanup.disarm();
+    Ok(fetched)
 }
 
 /// `application/x-www-form-urlencoded`, matching what `reqwest`'s `.form()` sends, so the
@@ -232,6 +317,8 @@ fn urlencode(s: &str) -> String {
 
 async fn run(url: &str, body: Option<&str>) -> anyhow::Result<Fetched> {
     let app = app()?;
+    let _lease = WindowLease::acquire(app);
+    let mut cleanup = WindowFailureCleanup::new(app);
     let window = ensure_window(app).await?;
 
     let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
@@ -269,7 +356,7 @@ async fn run(url: &str, body: Option<&str>) -> anyhow::Result<Fetched> {
         started.elapsed()
     );
 
-    Ok(Fetched {
+    let fetched = Fetched {
         status: reply.status,
         headers: reply.headers,
         body: reply.body,
@@ -278,7 +365,9 @@ async fn run(url: &str, body: Option<&str>) -> anyhow::Result<Fetched> {
         } else {
             reply.url
         },
-    })
+    };
+    cleanup.disarm();
+    Ok(fetched)
 }
 
 /// The script run inside the page.
@@ -367,11 +456,6 @@ async fn ensure_window(app: &AppHandle) -> anyhow::Result<tauri::WebviewWindow> 
     static LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
     let _guard = LOCK.lock().await;
 
-    // Readiness is tracked separately from existence: a window that was built but never
-    // came good must not be handed out as if it were working, or every fetch through it
-    // times out 45 seconds at a time.
-    static READY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-
     if let Some(existing) = app.get_webview_window(WINDOW) {
         if READY.load(Ordering::Relaxed) {
             return Ok(existing);
@@ -405,9 +489,19 @@ async fn ensure_window(app: &AppHandle) -> anyhow::Result<tauri::WebviewWindow> 
         .focused(false)
         .build()?;
 
-    wait_until_ready(&window).await?;
+    if let Err(error) = wait_until_ready(&window).await {
+        destroy_window(app);
+        return Err(error);
+    }
     READY.store(true, Ordering::Relaxed);
     Ok(window)
+}
+
+fn destroy_window(app: &AppHandle) {
+    READY.store(false, Ordering::Release);
+    if let Some(window) = app.get_webview_window(WINDOW) {
+        let _ = window.destroy();
+    }
 }
 
 /// Wait for the page to be able to run our script, and to be past Cloudflare's check.
@@ -492,6 +586,16 @@ fn probe_script() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn idle_cleanup_only_owns_the_generation_it_scheduled() {
+        assert!(idle_expired(0, 7, 7));
+        assert!(!idle_expired(1, 7, 7), "an overlapping request keeps the browser alive");
+        assert!(!idle_expired(0, 8, 7), "new activity cancels the older timer");
+        assert!(IDLE_TIMEOUT <= Duration::from_secs(60));
+        assert!(failure_cleanup_allowed(1));
+        assert!(!failure_cleanup_allowed(2));
+    }
 
     /// A search term with a quote in it reaches `eval` — it must not be able to close the
     /// string literal it sits in.
