@@ -2,6 +2,12 @@
 
 ## 2026-09-22 — v0.18.3 — Shop resolution and stability patch
 
+### Added
+- A strict plain-PKZ content reader for capture-free dedicated-server manifests, including RDF and TRH metadata validation.
+
+### Changed
+- Shared terrain helpers now consume the plain archive boundary and continue to reject protected content.
+
 ### Fixed
 - Cached ARL Finals misses from the interim matcher are now retired immediately, so Round 01
   rechecks against the corrected Shop identity after updating.

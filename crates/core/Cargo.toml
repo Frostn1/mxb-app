@@ -14,6 +14,7 @@ links = "mxbcore"
 [build-dependencies]
 
 [dependencies]
+mxb-content = { path = "../content" }
 anyhow = "1"
 flate2 = "1"
 serde = { version = "1", features = ["derive"] }
@@ -82,4 +83,3 @@ mint-install-id = ["dep:uuid"]
 # Tauri's mock runtime, so paintwatch's watcher lifecycle can be exercised without a display
 # or a real webview. Dev-only, so the shipped binaries never get the `test` feature.
 tauri = { version = "2", features = ["test"] }
-
