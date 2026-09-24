@@ -6,6 +6,7 @@
 - Expose bounded beta21e TRH main-centreline projection for native server timing gates.
 
 ### Fixed
+- Match beta21e's track-manifest checks by excluding TRH C/D records from the first logical-count and byte-sum values while still validating them.
 - When mxb-mods.com's Cloudflare check needs a click, the app now shows it in a small
   "Verifying access to mxb-mods.com" window instead of waiting on a hidden one that could never
   clear. Once it's done, mod pages load through that browser for the rest of the session, and

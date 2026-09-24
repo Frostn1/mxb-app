@@ -66,9 +66,10 @@ pub fn descriptor(bytes: &[u8]) -> Option<TrhDescriptor> {
 
 /// Parse beta21e's structural TRH manifest inputs.
 ///
-/// All three values are derived from the file structure and beta21e's exact
-/// instruction-ordered D/EX3 canonicalization. A trusted sum can additionally
-/// pin the result to independently captured metadata.
+/// All three values are derived from the file structure. D records are
+/// validated and contribute to the third structural value, but beta21e excludes
+/// C and D from the first logical-count and byte-sum values. A trusted sum can
+/// additionally pin the result to independently captured metadata.
 pub fn beta21e_manifest_checks(
     bytes: &[u8],
     trusted_canonical_byte_sum: Option<u32>,
@@ -131,13 +132,10 @@ pub fn beta21e_manifest_checks(
 
     let c_count = cursor.u32("C count")?;
     let c_bytes = cursor.records(c_count, 52, "C records")?;
-    canonical_sum = canonical_sum.wrapping_add(unsigned_byte_sum(c_bytes));
-    canonical_count = checked_records(canonical_count, c_count, 52, "C records")?;
 
     let d_count = cursor.u32("D count")?;
     let d_bytes = cursor.records(d_count, 60, "D records")?;
-    canonical_count = checked_records(canonical_count, d_count, 56, "D records")?;
-    canonical_sum = canonical_sum.wrapping_add(beta21e_d_sum(&main_profile_headers, d_bytes)?);
+    beta21e_d_sum(&main_profile_headers, d_bytes)?;
     let mut auxiliary_sum = profile_sum(&main_profile_headers, d_bytes);
 
     (canonical_count, canonical_sum) =
@@ -901,8 +899,8 @@ mod tests {
     fn derives_all_beta21e_checks_and_validates_a_trusted_second_sum() {
         let bytes = manifest_trh();
         let checks = beta21e_manifest_checks(&bytes, None).unwrap();
-        assert_eq!(checks.canonical_byte_count, 2_348);
-        assert_eq!(checks.canonical_byte_sum, Some(1_428));
+        assert_eq!(checks.canonical_byte_count, 2_184);
+        assert_eq!(checks.canonical_byte_sum, Some(33));
         assert_eq!(checks.auxiliary_byte_sum, 957);
 
         let trusted = beta21e_manifest_checks(&bytes, checks.canonical_byte_sum).unwrap();
