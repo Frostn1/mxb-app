@@ -231,7 +231,7 @@ fn row_context(a: &ElementRef) -> (String, Option<String>) {
             .select(&img_sel)
             .next()
             .and_then(|i| i.value().attr("src").or_else(|| i.value().attr("data-src")))
-            .map(absolute);
+            .map(|src| super::shop_catalog::shop_image_on_the_cdn(&absolute(src)));
         let heading = el
             .select(&heading_sel)
             .next()
@@ -408,7 +408,8 @@ mod tests {
         assert_eq!(items[0].file_label, "");
         assert_eq!(
             items[0].image.as_deref(),
-            Some("https://mxbikes-shop.com/wp-content/uploads/track-a.jpg")
+            // On the CDN: the origin can answer uploads with a Cloudflare challenge.
+            Some("https://cdn.mxbikes-shop.com/wp-content/uploads/track-a.jpg")
         );
         assert!(items[0].download_url.contains("edd_action=download"));
         assert_eq!(items[1].title, "Riverside National");

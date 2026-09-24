@@ -85,7 +85,10 @@ const MAX_FETCH_BYTES: usize = 32 * 1024 * 1024;
 
 /// How a refusal was arrived at. Bumped when the reasoning below changes in a way that
 /// could give a different answer for the same URL, which retires every row the old way wrote.
-const MISS_VERSION: u32 = 1;
+///
+/// 2: a `403` stopped counting as dead. Version 1 wrote Cloudflare challenges on the store's
+/// photos down for a week, which is what kept the Shop blank after the challenge had cleared.
+const MISS_VERSION: u32 = 2;
 
 /// How long a URL that answered with nothing an image could be made of is left alone. Long,
 /// because that is the answer least likely to change: a thumbnail a catalog 404s today, or an
@@ -196,7 +199,9 @@ fn source_url(uri: &str) -> Option<String> {
         return None;
     }
     let host = url.host_str()?.to_ascii_lowercase();
-    is_allowed(&host).then(|| url.to_string())
+    // Here as well as where the catalog is parsed, because a store description's own `<img>`
+    // markup reaches the cache without passing through the catalog's mapping.
+    is_allowed(&host).then(|| crate::mods::shop_catalog::on_the_cdn(url).to_string())
 }
 
 /// The `?w=` the caller asked for, if any.
@@ -490,6 +495,11 @@ async fn fetch(url: &str) -> Result<Vec<u8>, Refusal> {
         return Err(Refusal::Busy);
     }
     if !resp.status().is_success() {
+        log_refusal(url, resp.status().as_u16(), resp.headers());
+        if resp.headers().contains_key("cf-mitigated") {
+            // Cloudflare deciding about this connection, not about the file.
+            return Err(Refusal::Busy);
+        }
         return Err(refusal_for(resp.status()));
     }
 
@@ -516,13 +526,46 @@ async fn fetch(url: &str) -> Result<Vec<u8>, Refusal> {
     Ok(body)
 }
 
+/// How many refused images a session logs at `warn`. A whole catalog can be refused at once
+/// (1,373 photos, in the report that added this), and the first few lines say everything.
+const WARN_REFUSALS: u64 = 20;
+
+/// Log a refused image with what it takes to tell a missing file from a robot check.
+///
+/// Before this a refusal was silent: a user's Shop had no pictures and their log had no line
+/// saying why, when the answer was a `403` with `cf-mitigated: challenge` on every one.
+fn log_refusal(url: &str, status: u16, headers: &http::HeaderMap) {
+    static SEEN: AtomicU64 = AtomicU64::new(0);
+    let line = refusal_line(url, status, headers);
+    if SEEN.fetch_add(1, Ordering::Relaxed) < WARN_REFUSALS {
+        log::warn!("{line}");
+    } else {
+        log::debug!("{line}");
+    }
+}
+
+/// The line itself, separate from the logging so a test can pin it. The query string is
+/// dropped: it's noise, and the path is what identifies the picture.
+fn refusal_line(url: &str, status: u16, headers: &http::HeaderMap) -> String {
+    let h = |name: &str| headers.get(name).and_then(|v| v.to_str().ok()).unwrap_or("-");
+    let place = url.split('?').next().unwrap_or(url);
+    format!(
+        "imgcache: {place} refused ({status}) — cf-mitigated={} cf-ray={} server={}",
+        h("cf-mitigated"),
+        h("cf-ray"),
+        h("server"),
+    )
+}
+
 /// What a status code says about the URL rather than the moment.
 ///
-/// A 404 or a 410 is the file; a 403 is the app, and neither changes on the next scroll. A
-/// 429 or a 5xx is the server having a minute, so that one is worth another look soon.
+/// A 404 or a 410 is the file and doesn't change on the next scroll. A 403 is not: it is how
+/// Cloudflare turns away a connection it wants to check, and the store's origin did exactly
+/// that to every product photo on some connections. Written down as dead, one bad minute
+/// left the Shop blank for a week. A 429 or a 5xx is the server having a minute too.
 fn refusal_for(status: http::StatusCode) -> Refusal {
     match status.as_u16() {
-        404 | 410 | 403 | 401 | 400 => Refusal::Dead,
+        404 | 410 | 401 | 400 => Refusal::Dead,
         _ => Refusal::Busy,
     }
 }
@@ -652,6 +695,24 @@ fn remember_failure(app: &AppHandle, url: &str, width: Option<u32>, why: Refusal
         let mut book = lock(miss_book(app));
         book.insert(miss_key(url, width), Miss::new(why, now));
         prune_misses(&mut book, now);
+        book.clone()
+    };
+    write_misses(app, &snapshot);
+}
+
+/// Forget every refusal, in memory and on disk.
+///
+/// Called when the shop catalog changes or is refreshed by hand: a new catalog can name new
+/// photos, and a user pressing Refresh because the pictures are blank should get them asked
+/// for again rather than an answer written down earlier.
+pub fn forget_misses(app: &AppHandle) {
+    let snapshot = {
+        let mut book = lock(miss_book(app));
+        if book.is_empty() {
+            return;
+        }
+        log::info!("imgcache: forgetting {} remembered image failures", book.len());
+        book.clear();
         book.clone()
     };
     write_misses(app, &snapshot);
@@ -849,6 +910,58 @@ mod tests {
         }
     }
 
+    /// The store's photos are fetched from its CDN whatever host the markup names: the origin
+    /// can answer them with a Cloudflare challenge while the CDN serves them. This is the one
+    /// place a description's own `<img>` is caught.
+    #[test]
+    fn the_stores_uploads_are_fetched_from_its_cdn() {
+        for (asked, fetched) in [
+            (
+                "https://mxbikes-shop.com/wp-content/uploads/2025/03/a.jpg",
+                "https://cdn.mxbikes-shop.com/wp-content/uploads/2025/03/a.jpg",
+            ),
+            (
+                "https://www.mxbikes-shop.com/wp-content/uploads/a.png",
+                "https://cdn.mxbikes-shop.com/wp-content/uploads/a.png",
+            ),
+            // Already there, or not an upload: left alone.
+            (
+                "https://cdn.mxbikes-shop.com/wp-content/uploads/a.jpg",
+                "https://cdn.mxbikes-shop.com/wp-content/uploads/a.jpg",
+            ),
+            ("https://mxbikes-shop.com/img/1.png", "https://mxbikes-shop.com/img/1.png"),
+            (
+                "https://mxb-mods.com/wp-content/uploads/a.jpg",
+                "https://mxb-mods.com/wp-content/uploads/a.jpg",
+            ),
+        ] {
+            assert_eq!(source_url(&encoded(asked)).as_deref(), Some(fetched), "{asked}");
+        }
+    }
+
+    /// The line a user pastes when the pictures are blank has to say how Cloudflare decided.
+    #[test]
+    fn a_refused_image_is_logged_with_cloudflares_verdict() {
+        let mut headers = http::HeaderMap::new();
+        headers.insert("cf-mitigated", "challenge".parse().unwrap());
+        headers.insert("cf-ray", "8c1f2a3b4c5d6e7f-AMS".parse().unwrap());
+        headers.insert("server", "cloudflare".parse().unwrap());
+        let line = refusal_line(
+            "https://mxbikes-shop.com/wp-content/uploads/a.jpg?ver=2",
+            403,
+            &headers,
+        );
+        assert_eq!(
+            line,
+            "imgcache: https://mxbikes-shop.com/wp-content/uploads/a.jpg refused (403) — \
+             cf-mitigated=challenge cf-ray=8c1f2a3b4c5d6e7f-AMS server=cloudflare"
+        );
+        assert!(
+            refusal_line("https://x/a.jpg", 404, &http::HeaderMap::new())
+                .ends_with("cf-mitigated=- cf-ray=- server=-")
+        );
+    }
+
     /// A lookalike host must not ride in on a store's name — the handler fetches whatever it
     /// is handed, and product descriptions are markup written by other people.
     #[test]
@@ -1016,7 +1129,11 @@ mod tests {
         use http::StatusCode;
         assert_eq!(refusal_for(StatusCode::NOT_FOUND), Refusal::Dead);
         assert_eq!(refusal_for(StatusCode::GONE), Refusal::Dead);
-        assert_eq!(refusal_for(StatusCode::FORBIDDEN), Refusal::Dead);
+        assert_eq!(
+            refusal_for(StatusCode::FORBIDDEN),
+            Refusal::Busy,
+            "a 403 is Cloudflare's way of asking later, not a missing file"
+        );
         assert_eq!(refusal_for(StatusCode::TOO_MANY_REQUESTS), Refusal::Busy);
         assert_eq!(refusal_for(StatusCode::BAD_GATEWAY), Refusal::Busy);
         assert_eq!(refusal_for(StatusCode::SERVICE_UNAVAILABLE), Refusal::Busy);

@@ -17,6 +17,14 @@
 - Closing that window stops the app asking until you hit Retry, instead of quietly reopening a
   hidden window every minute.
 - A mod page that can't load now offers "Open on mxb-mods.com" next to Retry.
+- Fixed MXB Shop product photos staying blank (all 0.18.x). The Shop now loads them from
+  cdn.mxbikes-shop.com, since mxbikes-shop.com can answer them with a Cloudflare check. That
+  includes a catalogue cached by an older version and the photos inside product descriptions.
+- A photo refused with a 403 or a Cloudflare check is retried after five minutes instead of
+  a week. After updating, all failures remembered by older versions are forgotten, and
+  refreshing the Shop, or a new catalogue arriving, forgets them again.
+- Refused images are now logged with their status and Cloudflare's `cf-mitigated`/`cf-ray`
+  headers.
 - The mxb-mods.com browser window no longer pretends to be a year-old Chrome, which contradicted
   the Edge version WebView2 reports in its client hints. The app logs the real user agent at startup.
 

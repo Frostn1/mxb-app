@@ -56,6 +56,55 @@ fn keeps_an_item_that_has_only_an_id_and_a_title() {
     assert!(hotel.image.is_none());
 }
 
+/// The store names its photos on `mxbikes-shop.com`, which can answer them with a Cloudflare
+/// challenge; the same files load from the CDN. The rewrite happens while parsing, so a
+/// catalog cached on disk by an older version is corrected the next time it's read, with no
+/// refetch needed.
+#[test]
+fn store_photos_are_pointed_at_the_cdn() {
+    let dump = r#"{"mods":[
+        {"id":1,"name":"Origin","image":"https://mxbikes-shop.com/wp-content/uploads/edd/2024/01/a.jpg",
+         "images":["https://mxbikes-shop.com/wp-content/uploads/b.png","https://cdn.mxbikes-shop.com/wp-content/uploads/c.png"]},
+        {"id":2,"name":"Elsewhere","image":"https://mxbikes-shop.b-cdn.net/wp-content/uploads/d.jpg"},
+        {"id":3,"name":"Plain http","image":"http://mxbikes-shop.com/wp-content/uploads/e.jpg"}
+    ]}"#;
+    let (catalog, _) = build(parse_dump(dump, NOW).unwrap());
+    let origin = item(&catalog, 1);
+    assert_eq!(
+        origin.image.as_deref(),
+        Some("https://cdn.mxbikes-shop.com/wp-content/uploads/edd/2024/01/a.jpg")
+    );
+    assert_eq!(
+        origin.images,
+        [
+            "https://cdn.mxbikes-shop.com/wp-content/uploads/b.png",
+            "https://cdn.mxbikes-shop.com/wp-content/uploads/c.png",
+        ]
+    );
+    assert_eq!(
+        item(&catalog, 2).image.as_deref(),
+        Some("https://mxbikes-shop.b-cdn.net/wp-content/uploads/d.jpg"),
+        "another host is left alone"
+    );
+    assert!(item(&catalog, 3).image.is_none(), "still https-only");
+}
+
+#[test]
+fn only_the_stores_uploads_move_to_the_cdn() {
+    assert_eq!(
+        shop_image_on_the_cdn("https://mxbikes-shop.com/wp-content/uploads/a.jpg"),
+        "https://cdn.mxbikes-shop.com/wp-content/uploads/a.jpg"
+    );
+    for untouched in [
+        "https://mxbikes-shop.com/product/some-track/",
+        "https://mxbikes-shop.com/wp-content/themes/x/logo.png",
+        "https://notmxbikes-shop.com/wp-content/uploads/a.jpg",
+        "not a url",
+    ] {
+        assert_eq!(shop_image_on_the_cdn(untouched), untouched);
+    }
+}
+
 #[test]
 fn skips_an_item_with_no_id() {
     let (catalog, _) = sample();

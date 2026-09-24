@@ -14,6 +14,14 @@ interface CachedImgProps extends Omit<ImgHTMLAttributes<HTMLImageElement>, "src"
   onUnavailable?: () => void;
 }
 
+function refusesOurReferer(url: string): boolean {
+  try {
+    return new URL(url).hostname.toLowerCase() === "cdn.mxbikes-shop.com";
+  } catch {
+    return false;
+  }
+}
+
 /**
  * A thumbnail, through the on-disk cache, falling back to the origin URL.
  *
@@ -42,6 +50,10 @@ export default function CachedImg({
 
   return (
     <img
+      // `cdn.mxbikes-shop.com`, where the Shop's photos now come from, refuses any referer but
+      // the store's own, and a direct load would otherwise send the app's origin. The cache
+      // sends none, so the fallback does the same.
+      referrerPolicy={direct && refusesOurReferer(src) ? "no-referrer" : undefined}
       {...rest}
       // Keyed so React swaps the element rather than reusing one the browser has already
       // marked as errored, which can leave the new `src` unrequested.

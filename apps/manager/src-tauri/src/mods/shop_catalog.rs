@@ -545,7 +545,36 @@ fn safe_shop_url(raw: &str) -> Option<String> {
 /// Same rule, relaxed to any https host, for images — thumbnails legitimately live on a CDN.
 pub(crate) fn safe_image_url(raw: &str) -> Option<String> {
     let url = reqwest::Url::parse(raw.trim()).ok()?;
-    (url.scheme() == "https").then(|| url.to_string())
+    (url.scheme() == "https").then(|| on_the_cdn(url).to_string())
+}
+
+/// The store's own CDN, which serves the same `/wp-content/uploads/` tree as the origin.
+pub(crate) const SHOP_CDN_HOST: &str = "cdn.mxbikes-shop.com";
+
+/// Move a store upload from the origin to [`SHOP_CDN_HOST`]; anything else is returned as-is.
+///
+/// The catalog names its photos on `mxbikes-shop.com`, and on some connections that origin
+/// answers every one of them with a Cloudflare challenge (`403`, `cf-mitigated: challenge`)
+/// while the same path on the CDN is a plain `200`. The result was a Shop whose product
+/// details loaded and whose pictures never did. Only the uploads tree moves: the CDN serves
+/// files, not pages.
+pub(crate) fn on_the_cdn(mut url: reqwest::Url) -> reqwest::Url {
+    let origin = url.host_str().is_some_and(|h| {
+        h.eq_ignore_ascii_case("mxbikes-shop.com") || h.eq_ignore_ascii_case("www.mxbikes-shop.com")
+    });
+    if origin && url.scheme() == "https" && url.path().starts_with("/wp-content/uploads/") {
+        // Can't fail: the host is a valid domain name and the URL already has one.
+        let _ = url.set_host(Some(SHOP_CDN_HOST));
+    }
+    url
+}
+
+/// [`on_the_cdn`] for a URL still in string form. Unparseable input comes back unchanged.
+pub(crate) fn shop_image_on_the_cdn(raw: &str) -> String {
+    match reqwest::Url::parse(raw) {
+        Ok(url) => on_the_cdn(url).to_string(),
+        Err(_) => raw.to_string(),
+    }
 }
 
 /// Strip everything that can execute out of a description before it reaches the webview.
@@ -1523,6 +1552,11 @@ async fn refresh(
         .as_ref()
         .map(|c| c.0.generated_ts != catalog.generated_ts)
         .unwrap_or(true);
+    // A new catalog can name new photos, and a hand-pressed Refresh is usually about blank
+    // ones: either way, pictures refused earlier get asked for again.
+    if changed || force {
+        crate::imgcache::forget_misses(app);
+    }
     *lock(last_error()) = None;
     Ok((install(catalog), changed))
 }
