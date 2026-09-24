@@ -19,6 +19,6 @@ pub use rdf::{
 };
 pub use track::{TrackPackage, WORLD_BLOCK_SIDE};
 pub use trh::{
-    beta21e_manifest_checks as beta21e_trh_manifest_checks, descriptor as trh_descriptor,
-    Beta21eTrhManifestChecks, TrhDescriptor,
+    beta21e_main_centreline_pose, beta21e_manifest_checks as beta21e_trh_manifest_checks,
+    descriptor as trh_descriptor, Beta21eTrhManifestChecks, CentrelinePose, TrhDescriptor,
 };
