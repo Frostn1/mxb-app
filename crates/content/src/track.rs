@@ -101,16 +101,29 @@ impl TrackPackage {
             bail!("server package must contain exactly one top-level track folder");
         }
         let id = roots.into_iter().next().expect("one root");
+        // Community packages can carry helper files (generator settings, alternate layouts)
+        // beside the track's own `<folder>/<folder>.<ext>` entry, which is the one to use.
         let unique = |extension: &str| -> Result<String> {
             let matches: Vec<_> = names
                 .iter()
                 .filter(|name| extension_of(name).eq_ignore_ascii_case(extension))
                 .cloned()
                 .collect();
-            if matches.len() != 1 {
-                bail!("server package must contain exactly one .{extension} entry");
+            if matches.len() == 1 {
+                return Ok(matches[0].clone());
             }
-            Ok(matches[0].clone())
+            let canonical = format!("{id}/{id}.{extension}");
+            let named: Vec<_> = matches
+                .iter()
+                .filter(|name| name.eq_ignore_ascii_case(&canonical))
+                .collect();
+            if named.len() != 1 {
+                bail!(
+                    "server package has {} .{extension} entries and none is exactly {canonical:?}",
+                    matches.len()
+                );
+            }
+            Ok(named[0].clone())
         };
         let ini_entry = unique("ini")?;
         let rdf_entry = unique("rdf")?;
@@ -201,6 +214,42 @@ mod tests {
         let nested = TrackPackage::open(outer.path()).unwrap();
         assert_eq!(nested.id, direct.id);
         assert_eq!(nested.world_block_grid(), direct.world_block_grid());
+    }
+
+    #[test]
+    fn prefers_the_folder_named_entry_when_helpers_share_an_extension() {
+        let file = write_temp(&package(&[
+            ("Track/generator.ini", b"ini"),
+            ("Track/track.INI", b"ini"),
+            ("Track/Alternate.rdf", b"rdf"),
+            ("Track/Track.rdf", b"rdf"),
+            ("Track/Track.trh", &trh(32, 32)),
+        ]));
+        let track = TrackPackage::open(file.path()).unwrap();
+        assert_eq!(track.ini_entry, "Track/track.INI");
+        assert_eq!(track.rdf_entry, "Track/Track.rdf");
+        assert_eq!(track.trh_entry, "Track/Track.trh");
+    }
+
+    #[test]
+    fn ties_need_one_exact_folder_named_entry() {
+        let file = write_temp(&package(&[
+            ("Track/generator.ini", b"ini"),
+            ("Track/Other.ini", b"ini"),
+            ("Track/Track.rdf", b"rdf"),
+            ("Track/Track.trh", &trh(32, 32)),
+        ]));
+        let error = TrackPackage::open(file.path()).unwrap_err();
+        assert!(format!("{error:#}").contains("2 .ini entries"));
+
+        let nested = write_temp(&package(&[
+            ("Track/Track.ini", b"ini"),
+            ("Track/Track.rdf", b"rdf"),
+            ("Track/Track.trh", &trh(32, 32)),
+            ("Track/sub/Track.trh", &trh(32, 32)),
+        ]));
+        let track = TrackPackage::open(nested.path()).unwrap();
+        assert_eq!(track.trh_entry, "Track/Track.trh");
     }
 
     #[test]

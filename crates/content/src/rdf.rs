@@ -51,7 +51,8 @@ pub struct RdfBootstrap {
     pub finish: TimingLine,
     pub split1: TimingLine,
     pub split2: TimingLine,
-    pub holeshot: TimingLine,
+    /// Absent from some community tracks that beta21e still loads.
+    pub holeshot: Option<TimingLine>,
     pub pit_lane: PitLane,
     pub pit_board: PitBoard,
     pub starting_grid: StartingGrid,
@@ -59,13 +60,17 @@ pub struct RdfBootstrap {
 }
 
 impl RdfBootstrap {
-    /// Parse a text RDF, requiring every bootstrap field exactly once.
+    /// Parse a text RDF, requiring every bootstrap field exactly once. `holeshot` alone may be
+    /// absent, but it is never accepted duplicated or malformed.
     pub fn parse(text: &str) -> Result<Self> {
         let document = Document::parse(text)?;
         let finish = timing_line(document.one_block("finish_line")?, "finish_line")?;
         let split1 = timing_line(document.one_block("split1")?, "split1")?;
         let split2 = timing_line(document.one_block("split2")?, "split2")?;
-        let holeshot = timing_line(document.one_block("holeshot")?, "holeshot")?;
+        let holeshot = document
+            .optional_block("holeshot")?
+            .map(|block| timing_line(block, "holeshot"))
+            .transpose()?;
 
         let pit_lane_block = document.one_block("pit_lane")?;
         let pit_lane_count = stall_count(pit_lane_block, "pit_lane")?;
@@ -229,6 +234,14 @@ impl Document {
 
     fn one_block(&self, name: &str) -> Result<&Scope> {
         self.0.one_block(name)
+    }
+
+    fn optional_block(&self, name: &str) -> Result<Option<&Scope>> {
+        if self.0.entries.iter().any(|entry| entry.name() == name) {
+            self.0.one_block(name).map(Some)
+        } else {
+            Ok(None)
+        }
     }
 }
 
@@ -425,6 +438,7 @@ starting_grid
     fn parses_the_complete_bootstrap_subset() {
         let rdf = RdfBootstrap::parse(VALID).unwrap();
         assert_eq!(rdf.finish.long, 100.5);
+        assert_eq!(rdf.holeshot.map(|line| line.long), Some(12.0));
         assert_eq!(rdf.pit_lane.start_stalls[1].angle, 6.0);
         assert_eq!(rdf.pit_board.height, 1.5);
         assert_eq!(rdf.pit_board.stalls.len(), 2);
@@ -442,6 +456,24 @@ starting_grid
         assert!(RdfBootstrap::parse(&duplicate).is_err());
 
         assert!(RdfBootstrap::parse(&VALID.replace("angle = 323.1", "angle = NaN")).is_err());
+    }
+
+    #[test]
+    fn holeshot_is_optional_but_strict_when_present() {
+        let start = VALID.find("holeshot\n").unwrap();
+        let end = VALID.find("split1\n").unwrap();
+        let without = format!("{}{}", &VALID[..start], &VALID[end..]);
+        let rdf = RdfBootstrap::parse(&without).unwrap();
+        assert_eq!(rdf.holeshot, None);
+        assert_eq!(rdf.split1.long, 30.0);
+
+        let duplicate = VALID.replace("holeshot\n{", "holeshot\n{\n}\nholeshot\n{");
+        assert!(RdfBootstrap::parse(&duplicate).is_err());
+        assert!(RdfBootstrap::parse(&VALID.replace("long = 12", "long = NaN")).is_err());
+        assert!(RdfBootstrap::parse(&VALID.replace("left = -5", "unused = -5")).is_err());
+        assert!(
+            RdfBootstrap::parse(&VALID.replace("holeshot\n{", "holeshot = 1\nunused\n{")).is_err()
+        );
     }
 
     #[test]

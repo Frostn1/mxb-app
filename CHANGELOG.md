@@ -6,6 +6,9 @@
 - Expose bounded beta21e TRH main-centreline projection for native server timing gates.
 
 ### Fixed
+- Open track packages that carry helper files beside the track (generator or algorithm `.ini`, alternate
+  layout `.rdf`) by selecting the folder-named `<track>/<track>.<ext>` entry.
+- Accept track RDFs with no `holeshot` block; a present holeshot is still strictly validated.
 - Match beta21e's track-manifest checks by excluding TRH C/D records from the first logical-count and byte-sum values while still validating them.
 - When mxb-mods.com's Cloudflare check needs a click, the app now shows it in a small
   "Verifying access to mxb-mods.com" window instead of waiting on a hidden one that could never
