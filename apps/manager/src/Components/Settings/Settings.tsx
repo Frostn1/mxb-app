@@ -151,6 +151,7 @@ import {
 import { Switch } from "@frost/shared/Components/ui/switch";
 import SurveySetting from "@frost/shared/Components/Survey/SurveySetting";
 import { cn } from "@frost/shared/lib/utils";
+import { Mxbmrp3SettingsRow } from "../Mxbmrp3/Mxbmrp3Suggestion";
 
 const REPO_URL = "https://github.com/Frostn1/mxb-app";
 // Where the app comes from, as far as anyone using it is concerned. GitHub is still where the
@@ -1471,6 +1472,9 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
             >
               Detect automatically
             </button>
+
+            <div className="mt-1 h-px bg-border" />
+            <Mxbmrp3SettingsRow />
 
             {/* macOS only: the Wine wrapper Play launches through. */}
             {isMac && (

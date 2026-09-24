@@ -5,6 +5,7 @@ pub(crate) use mxb_core::bikefiles;
 mod bikeswap;
 mod bundle;
 mod cancel;
+mod mxbmrp3;
 pub(crate) use mxb_core::cfg;
 mod trackbook;
 mod trainerfix;
@@ -8326,6 +8327,8 @@ fn main() {
             set_mods_path,
             set_intro_seen,
             set_seen_version,
+            mxbmrp3::mxbmrp3_status,
+            mxbmrp3::set_mxbmrp3_dismissed,
             set_profiles_path,
             detect_game_path,
             count_profiles_in,

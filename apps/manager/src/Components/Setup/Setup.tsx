@@ -23,6 +23,7 @@ import type { GameInfo } from "@frost/shared/types";
 import { useFrostmod } from "@/Context/FrostmodContext";
 import { LoadingMark } from "../Shell/LoadingMark";
 import Progress from "./Progress";
+import { Mxbmrp3Prompt } from "../Mxbmrp3/Mxbmrp3Suggestion";
 
 const GAME_LOGOS: Record<string, string> = {
   mxb: "https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/655500/logo.png",
@@ -362,6 +363,8 @@ export default function Setup({ onComplete, game, games, firstRun }: SetupProps)
               {t("setup.integrationUseAppOnly")}
             </button>
           </div>
+          {/* Beside the choice, not part of it: nothing here waits on it. */}
+          <Mxbmrp3Prompt />
           {error && (
             <p className="select-text text-center text-[12px] text-destructive">
               {error}

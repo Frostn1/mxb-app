@@ -39,6 +39,7 @@ import { track } from "../../lib/analytics";
 import type { DownloadRecord } from "@frost/shared/types";
 import { useFrostmod } from "../../Context/FrostmodContext";
 import { invoke } from "@tauri-apps/api/core";
+import { Mxbmrp3Prompt } from "../Mxbmrp3/Mxbmrp3Suggestion";
 
 const Mods = lazy(() => import("../Mods/Mods"));
 const ModDetail = lazy(() => import("../ModDetail/ModDetail"));
@@ -304,6 +305,8 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
       />
       <RuntimeBanner />
       <UpdateBanner />
+      {/* An offer, not a problem, so it waits for the intro and the tour and sits below both bars. */}
+      <Mxbmrp3Prompt paused={welcomeActive || tourRun} className="border-b border-border px-3 py-2" />
       {/* Waits for the intro and the tour so it isn't competing with them for attention,
           then stays put: its steps open Browse, and a panel that closed on the first click
           would strand a new player on a search page. */}

@@ -136,6 +136,8 @@ export interface Config {
   tourDone?: boolean;
   /** First-run checklist already finished or skipped. */
   getStartedDone?: boolean;
+  /** "Don't ask again" on the MXBMRP3 suggestion. Saved with the config, like `welcomeSeen`. */
+  mxbmrp3Dismissed?: boolean;
   /** Register the global hotkey that summons the in-game overlay (default true). */
   overlayEnabled?: boolean;
   /** Overlay toggle combo in Tauri accelerator syntax, e.g. `"CommandOrControl+Shift+X"`. */

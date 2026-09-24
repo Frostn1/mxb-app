@@ -4,6 +4,13 @@
 
 ### Added
 - Expose bounded beta21e TRH main-centreline projection for native server timing gates.
+- If MXBMRP3 (thomas4f's free HUD plugin: standings, timing, gap to your best, track map, radar)
+  isn't in your game's `plugins` folder, the app suggests it. The suggestion appears on the last
+  setup step and at the top of the app, and links to its official GitHub releases. "Not now"
+  hides it for the session and "Don't ask again" for good. Settings shows whether it's installed
+  and can turn the suggestion back on. The app only checks for the file. It never downloads
+  MXBMRP3 or changes the game folder, and it checks again when you change the game folder or
+  switch games.
 
 ### Fixed
 - Open track packages that carry helper files beside the track (generator or algorithm `.ini`, alternate
