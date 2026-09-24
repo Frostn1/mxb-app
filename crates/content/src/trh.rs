@@ -23,6 +23,13 @@ pub struct Beta21eTrhManifestChecks {
     pub auxiliary_byte_sum: u32,
 }
 
+/// One finite pose on the TRH main centreline, expressed in world X/Z metres.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CentrelinePose {
+    pub position: [f32; 2],
+    pub forward: [f32; 2],
+}
+
 const MAGIC: &[u8; 4] = b"TRH\0";
 const MIN_DIM: u32 = 32;
 const MAX_DIM: u32 = 8193;
@@ -197,6 +204,144 @@ pub fn beta21e_manifest_checks(
         canonical_byte_sum: Some(canonical_sum),
         auxiliary_byte_sum: auxiliary_sum,
     })
+}
+
+/// Project a longitudinal distance onto beta21e's main TRH centreline profile.
+///
+/// RDF timing lines name a profile and a distance along it. The capture-free server currently
+/// supports the main profile (`line = 0`); this exposes only the bounded world-space pose needed
+/// to construct timing gates without exposing or copying the package payload.
+pub fn beta21e_main_centreline_pose(bytes: &[u8], distance: f32) -> Result<CentrelinePose> {
+    ensure!(
+        distance.is_finite() && distance >= 0.0,
+        "centreline distance is invalid"
+    );
+    let terrain = descriptor(bytes).context("invalid TRH descriptor")?;
+    let tails = TailChunks::discover(bytes)?;
+    ensure!(
+        terrain.sample_end <= tails.main_end,
+        "TRH sample grid overlaps trailing chunks"
+    );
+
+    let mut cursor = Cursor::new(bytes, terrain.sample_end, tails.main_end)?;
+    cursor.take(24, "initial metadata")?;
+
+    let a_count = cursor.u32("A count")?;
+    for _ in 0..a_count {
+        cursor.take(8, "A fixed fields")?;
+        let rows = cursor.u32("A rows")?;
+        let columns = cursor.u32("A columns")?;
+        cursor.take(checked_product(rows, columns, "A payload")?, "A payload")?;
+    }
+
+    let b_count = cursor.u32("B count")?;
+    for _ in 0..b_count {
+        cursor.take(4, "B field0")?;
+        let rows = cursor.u32("B rows")?;
+        let columns = cursor.u32("B columns")?;
+        cursor.take(checked_product(rows, columns, "B payload")?, "B payload")?;
+    }
+
+    let root = cursor.take(16, "root header 0")?;
+    let headers: [f32; 3] = std::array::from_fn(|index| {
+        let offset = index * 4;
+        f32::from_le_bytes(
+            root[offset..offset + 4]
+                .try_into()
+                .expect("four-byte slice"),
+        )
+    });
+    ensure!(
+        headers.iter().all(|value| value.is_finite()),
+        "main profile header is non-finite"
+    );
+    cursor.take(24, "root header 1")?;
+    let c_count = cursor.u32("C count")?;
+    cursor.records(c_count, 52, "C records")?;
+    let d_count = cursor.u32("D count")?;
+    let records = cursor.records(d_count, 60, "D records")?;
+    centreline_pose_in_profile(records, distance)
+}
+
+fn centreline_pose_in_profile(records: &[u8], distance: f32) -> Result<CentrelinePose> {
+    ensure!(
+        !records.is_empty() && records.len().is_multiple_of(60),
+        "main profile has no complete records"
+    );
+    let mut last_end = 0.0f32;
+    for (index, record) in records.chunks_exact(60).enumerate() {
+        let scalar = |offset: usize| -> f32 {
+            f32::from_le_bytes(
+                record[offset..offset + 4]
+                    .try_into()
+                    .expect("four-byte slice"),
+            )
+        };
+        let flag = u32::from_le_bytes(record[0..4].try_into().expect("four-byte slice"));
+        let length = scalar(4);
+        let radius = scalar(8);
+        let running = scalar(20);
+        ensure!(flag <= 1, "D record {index} has invalid curve flag {flag}");
+        ensure!(
+            length.is_finite() && length > 0.0,
+            "D record {index} has invalid length"
+        );
+        ensure!(
+            running.is_finite() && running >= 0.0,
+            "D record {index} has invalid running distance"
+        );
+        ensure!(
+            (running - last_end).abs() <= 0.02,
+            "D record {index} has discontinuous running distance"
+        );
+        let end = running + length;
+        ensure!(end.is_finite(), "D record {index} has invalid endpoint");
+        last_end = end;
+        if distance > end && index + 1 < records.len() / 60 {
+            continue;
+        }
+        ensure!(
+            distance <= end + 0.02,
+            "centreline distance exceeds profile length"
+        );
+
+        let matrix = read_matrix(&record[24..60]);
+        ensure_finite_matrix(&matrix, &format!("D record {index} matrix"))?;
+        let along = (distance - running).clamp(0.0, length);
+        let (local_x, local_z, tangent_x, tangent_z) = if flag == 1 {
+            ensure!(
+                radius.is_finite() && radius != 0.0,
+                "D record {index} has invalid radius"
+            );
+            let angle = f64::from(along / radius);
+            let sine = angle.sin() as f32;
+            let cosine = angle.cos() as f32;
+            (radius - cosine * radius, sine * radius, sine, cosine)
+        } else {
+            (0.0, along, 0.0, 1.0)
+        };
+        let position = [
+            affine_x(&matrix, local_x, local_z),
+            affine_z(&matrix, local_x, local_z),
+        ];
+        let mut forward = [
+            tangent_x * matrix[0] + tangent_z * matrix[1],
+            tangent_x * matrix[3] + tangent_z * matrix[4],
+        ];
+        let magnitude = (forward[0] * forward[0] + forward[1] * forward[1]).sqrt();
+        ensure!(
+            magnitude.is_finite() && magnitude > 0.0,
+            "D record {index} has invalid tangent"
+        );
+        forward[0] /= magnitude;
+        forward[1] /= magnitude;
+        ensure!(
+            position.iter().all(|value| value.is_finite()),
+            "D record {index} has invalid position"
+        );
+        return Ok(CentrelinePose { position, forward });
+    }
+    bail!("main profile has no centreline records")
 }
 
 fn parse_flat_records(
@@ -575,6 +720,40 @@ fn scale(bytes: &[u8], at: usize, width: u32) -> Option<(f32, f32)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn profile_record(flag: u32, length: f32, radius: f32, running: f32) -> Vec<u8> {
+        let mut record = vec![0; 60];
+        record[0..4].copy_from_slice(&flag.to_le_bytes());
+        record[4..8].copy_from_slice(&length.to_le_bytes());
+        record[8..12].copy_from_slice(&radius.to_le_bytes());
+        record[20..24].copy_from_slice(&running.to_le_bytes());
+        for (index, value) in [1.0f32, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
+            .into_iter()
+            .enumerate()
+        {
+            let offset = 24 + index * 4;
+            record[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
+        }
+        record
+    }
+
+    #[test]
+    fn centreline_projection_handles_straights_curves_and_bounds() {
+        let straight = profile_record(0, 10.0, 0.0, 0.0);
+        let pose = centreline_pose_in_profile(&straight, 4.0).unwrap();
+        assert_eq!(pose.position, [0.0, 4.0]);
+        assert_eq!(pose.forward, [0.0, 1.0]);
+
+        let quarter_length = std::f32::consts::FRAC_PI_2 * 10.0;
+        let curve = profile_record(1, quarter_length, 10.0, 0.0);
+        let pose = centreline_pose_in_profile(&curve, quarter_length).unwrap();
+        assert!((pose.position[0] - 10.0).abs() < 0.001);
+        assert!((pose.position[1] - 10.0).abs() < 0.001);
+        assert!((pose.forward[0] - 1.0).abs() < 0.001);
+        assert!(pose.forward[1].abs() < 0.001);
+
+        assert!(centreline_pose_in_profile(&straight, 11.0).is_err());
+    }
 
     fn trh(width: u32, height: u32, samples: usize) -> Vec<u8> {
         let mut bytes = Vec::new();
