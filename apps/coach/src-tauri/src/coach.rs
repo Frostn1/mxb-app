@@ -1180,13 +1180,21 @@ fn write_history(app: &AppHandle, track: &str, bike: &str, h: &crate::cues::Hist
 /// The newest lap of this track and bike worth coaching from, so a sheet written mid-session
 /// is about the laps the rider is riding now rather than the one they opened the page on.
 fn newest_lap(app: &AppHandle, track: &str, bike: &str) -> Option<(String, i32)> {
-    let sessions = all_sessions(app);
+    newest_lap_in(&all_sessions(app), track, bike)
+}
+
+/// [`newest_lap`] over `sessions`, which [`all_sessions`] lists newest first.
+///
+/// The newest session with a lap worth coaching from, and its last such lap. It used to take
+/// the last lap of the whole list, which, newest first, is the oldest session's: on a track
+/// ridden before, the live sheet was about a lap from the first time the rider went there.
+/// A session still being ridden counts. Its first whole, valid lap is usable the moment it is
+/// on disk, which is what lets coaching start on the lap after it.
+fn newest_lap_in(sessions: &[SessionSummary], track: &str, bike: &str) -> Option<(String, i32)> {
     sessions
         .iter()
         .filter(|s| s.track_id == track && s.bike_id == bike)
-        .flat_map(|s| s.laps.iter())
-        .filter(|l| l.comparable())
-        .next_back()
+        .find_map(|s| s.laps.iter().filter(|l| l.comparable()).next_back())
         .map(|l| (l.path.clone(), l.num))
 }
 
@@ -1670,6 +1678,43 @@ mod tests {
         let r = best_reference(&all, "indiana", "crf250", None).unwrap();
         assert_eq!(r.path, "b", "no lap on this bike: the fastest on any");
         assert!(best_reference(&all, "nowhere", "kx450", None).is_none());
+    }
+
+    /// Live coaching follows the session being ridden. Sessions come newest first, and taking
+    /// the last lap of that list coached from the oldest session on the track instead.
+    #[test]
+    fn live_cues_follow_the_newest_session() {
+        let newest_first = [
+            session("today", "indiana", "kx450", &[(1, 61_000, true), (2, 60_000, true), (3, 0, false)]),
+            session("last-week", "indiana", "kx450", &[(1, 55_000, true), (2, 54_000, true)]),
+        ];
+        assert_eq!(
+            newest_lap_in(&newest_first, "indiana", "kx450"),
+            Some(("today".into(), 2)),
+            "today's last whole lap, not last week's and not the one still being ridden"
+        );
+    }
+
+    /// The usable-reference rule the in-game coaching starts from. On a new track the first
+    /// whole, valid lap of the session still being ridden is enough, so the next lap is
+    /// coached without a restart. Nothing else is: an out lap, a lap cut short or an invalid
+    /// one, another bike, another track.
+    #[test]
+    fn the_first_good_lap_of_a_new_track_is_enough_to_coach_from() {
+        let mut riding = session("now", "indiana", "kx450", &[(0, 0, false)]);
+        riding.complete = false;
+        assert_eq!(newest_lap_in(&[riding.clone()], "indiana", "kx450"), None, "only an out lap so far");
+
+        riding.laps.push(session("now", "indiana", "kx450", &[(1, 62_000, true)]).laps.remove(0));
+        assert_eq!(newest_lap_in(&[riding.clone()], "indiana", "kx450"), Some(("now".into(), 1)));
+        let r = best_reference(&[riding.clone()], "indiana", "kx450", None).expect("a reference to race");
+        assert_eq!((r.path.as_str(), r.lap), ("now", 1), "the same lap is the HUD's ghost");
+
+        let mut invalid = session("cut", "indiana", "kx450", &[(1, 50_000, true)]);
+        invalid.laps[0].invalid = true;
+        assert_eq!(newest_lap_in(&[invalid], "indiana", "kx450"), None, "an invalid lap");
+        assert_eq!(newest_lap_in(&[riding.clone()], "indiana", "yz250"), None, "another bike");
+        assert_eq!(newest_lap_in(&[riding], "erzberg", "kx450"), None, "another track");
     }
 
     /// The `.cue` and `.hud` sheets and `hud.ini` must land under one `mxbcoach` folder. They
