@@ -1555,7 +1555,7 @@ async fn refresh(
     // A new catalog can name new photos, and a hand-pressed Refresh is usually about blank
     // ones: either way, pictures refused earlier get asked for again.
     if changed || force {
-        crate::imgcache::forget_misses(app);
+        crate::imgcache::forget_shop_misses(app);
     }
     *lock(last_error()) = None;
     Ok((install(catalog), changed))

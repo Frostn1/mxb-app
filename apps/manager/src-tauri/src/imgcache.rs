@@ -500,7 +500,7 @@ async fn fetch(url: &str) -> Result<Vec<u8>, Refusal> {
             // Cloudflare deciding about this connection, not about the file.
             return Err(Refusal::Busy);
         }
-        return Err(refusal_for(resp.status()));
+        return Err(refusal_for(resp.status(), is_shop(url)));
     }
 
     // Refuse an oversized body before a byte of it is read, when the origin says how big it
@@ -559,15 +559,29 @@ fn refusal_line(url: &str, status: u16, headers: &http::HeaderMap) -> String {
 
 /// What a status code says about the URL rather than the moment.
 ///
-/// A 404 or a 410 is the file and doesn't change on the next scroll. A 403 is not: it is how
-/// Cloudflare turns away a connection it wants to check, and the store's origin did exactly
-/// that to every product photo on some connections. Written down as dead, one bad minute
-/// left the Shop blank for a week. A 429 or a 5xx is the server having a minute too.
-fn refusal_for(status: http::StatusCode) -> Refusal {
+/// A 404 or a 410 is the file and doesn't change on the next scroll; a 429 or a 5xx is the
+/// server having a minute. A 403 is usually the app, and stays dead — except from the store,
+/// whose origin turned every product photo away with one on some connections. Written down
+/// as dead there, one bad minute left the Shop blank for a week. (A 403 carrying
+/// `cf-mitigated` is Cloudflare's check and never reaches here; see [`fetch`].)
+fn refusal_for(status: http::StatusCode, shop: bool) -> Refusal {
     match status.as_u16() {
-        404 | 410 | 401 | 400 => Refusal::Dead,
+        403 if shop => Refusal::Busy,
+        404 | 410 | 403 | 401 | 400 => Refusal::Dead,
         _ => Refusal::Busy,
     }
+}
+
+/// Is `url` one of mxbikes-shop.com's — origin, CDN or Bunny pull zone?
+fn is_shop(url: &str) -> bool {
+    reqwest::Url::parse(url)
+        .ok()
+        .and_then(|u| u.host_str().map(|h| h.to_ascii_lowercase()))
+        .is_some_and(|h| {
+            h == "mxbikes-shop.com"
+                || h.ends_with(".mxbikes-shop.com")
+                || h == "mxbikes-shop.b-cdn.net"
+        })
 }
 
 /// Append `chunk`, unless doing so would take `body` past [`MAX_FETCH_BYTES`].
@@ -634,11 +648,13 @@ struct Miss {
     checked: u64,
     /// The [`MISS_VERSION`] that wrote this row.
     version: u32,
+    /// Whether the URL was the store's, so a shop catalog refresh can forget just these.
+    shop: bool,
 }
 
 impl Miss {
     fn new(why: Refusal, now: u64) -> Self {
-        Self { reason: why.tag().into(), checked: now, version: MISS_VERSION }
+        Self { reason: why.tag().into(), checked: now, version: MISS_VERSION, shop: false }
     }
 
     /// Still worth believing at `now`.
@@ -693,29 +709,37 @@ fn remember_failure(app: &AppHandle, url: &str, width: Option<u32>, why: Refusal
     let now = crate::trackbook::now_ms();
     let snapshot = {
         let mut book = lock(miss_book(app));
-        book.insert(miss_key(url, width), Miss::new(why, now));
+        book.insert(miss_key(url, width), Miss { shop: is_shop(url), ..Miss::new(why, now) });
         prune_misses(&mut book, now);
         book.clone()
     };
     write_misses(app, &snapshot);
 }
 
-/// Forget every refusal, in memory and on disk.
+/// Forget every refusal of a store image, in memory and on disk.
 ///
 /// Called when the shop catalog changes or is refreshed by hand: a new catalog can name new
 /// photos, and a user pressing Refresh because the pictures are blank should get them asked
-/// for again rather than an answer written down earlier.
-pub fn forget_misses(app: &AppHandle) {
+/// for again rather than an answer written down earlier. The other catalogs' refusals are
+/// none of the store's business and are kept.
+pub fn forget_shop_misses(app: &AppHandle) {
     let snapshot = {
         let mut book = lock(miss_book(app));
-        if book.is_empty() {
+        let forgotten = drop_shop_misses(&mut book);
+        if forgotten == 0 {
             return;
         }
-        log::info!("imgcache: forgetting {} remembered image failures", book.len());
-        book.clear();
+        log::info!("imgcache: forgetting {forgotten} remembered shop image failures");
         book.clone()
     };
     write_misses(app, &snapshot);
+}
+
+/// Remove the store's rows from `book`, returning how many went.
+fn drop_shop_misses(book: &mut MissBook) -> usize {
+    let before = book.len();
+    book.retain(|_, m| !m.shop);
+    before - book.len()
 }
 
 /// Drop what has aged out, then the oldest rows until the book fits.
@@ -1127,16 +1151,55 @@ mod tests {
     #[test]
     fn a_status_code_says_whether_the_url_or_the_moment_refused() {
         use http::StatusCode;
-        assert_eq!(refusal_for(StatusCode::NOT_FOUND), Refusal::Dead);
-        assert_eq!(refusal_for(StatusCode::GONE), Refusal::Dead);
-        assert_eq!(
-            refusal_for(StatusCode::FORBIDDEN),
-            Refusal::Busy,
-            "a 403 is Cloudflare's way of asking later, not a missing file"
-        );
-        assert_eq!(refusal_for(StatusCode::TOO_MANY_REQUESTS), Refusal::Busy);
-        assert_eq!(refusal_for(StatusCode::BAD_GATEWAY), Refusal::Busy);
-        assert_eq!(refusal_for(StatusCode::SERVICE_UNAVAILABLE), Refusal::Busy);
+        for shop in [false, true] {
+            assert_eq!(refusal_for(StatusCode::NOT_FOUND, shop), Refusal::Dead);
+            assert_eq!(refusal_for(StatusCode::GONE, shop), Refusal::Dead);
+            assert_eq!(refusal_for(StatusCode::TOO_MANY_REQUESTS, shop), Refusal::Busy);
+            assert_eq!(refusal_for(StatusCode::BAD_GATEWAY, shop), Refusal::Busy);
+            assert_eq!(refusal_for(StatusCode::SERVICE_UNAVAILABLE, shop), Refusal::Busy);
+        }
+    }
+
+    /// A 403 from anywhere else is still the app being turned away, and stays dead. From the
+    /// store it is how Cloudflare turned away every product photo, and must not last a week.
+    #[test]
+    fn only_the_stores_403_is_worth_another_look_soon() {
+        use http::StatusCode;
+        assert_eq!(refusal_for(StatusCode::FORBIDDEN, false), Refusal::Dead);
+        assert_eq!(refusal_for(StatusCode::FORBIDDEN, true), Refusal::Busy);
+    }
+
+    #[test]
+    fn the_stores_hosts_are_recognised_and_no_others() {
+        for url in [
+            "https://mxbikes-shop.com/wp-content/uploads/a.jpg",
+            "https://cdn.mxbikes-shop.com/wp-content/uploads/a.jpg",
+            "https://mxbikes-shop.b-cdn.net/wp-content/uploads/a.jpg",
+        ] {
+            assert!(is_shop(url), "{url}");
+        }
+        for url in [
+            "https://mxb-mods.com/wp-content/uploads/a.jpg",
+            "https://gpb-mods.com/wp-content/uploads/a.jpg",
+            "https://shop.mxb-hub.com/wp-content/uploads/a.png",
+            "https://notmxbikes-shop.com/a.jpg",
+        ] {
+            assert!(!is_shop(url), "{url}");
+        }
+    }
+
+    /// Refreshing the Shop is no reason to re-ask mxb-mods.com or MXB Hub for thumbnails
+    /// they already refused.
+    #[test]
+    fn a_shop_refresh_forgets_only_the_stores_refusals() {
+        let now = 10 * KEEP_DEAD;
+        let mut book = MissBook::new();
+        book.insert("shop".into(), Miss { shop: true, ..Miss::new(Refusal::Busy, now) });
+        book.insert("mods".into(), Miss::new(Refusal::Dead, now));
+        book.insert("hub".into(), Miss::new(Refusal::Busy, now));
+        assert_eq!(drop_shop_misses(&mut book), 1);
+        assert!(!book.contains_key("shop"));
+        assert!(book.contains_key("mods") && book.contains_key("hub"));
     }
 
     #[test]

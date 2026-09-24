@@ -20,9 +20,10 @@
 - Fixed MXB Shop product photos staying blank (all 0.18.x). The Shop now loads them from
   cdn.mxbikes-shop.com, since mxbikes-shop.com can answer them with a Cloudflare check. That
   includes a catalogue cached by an older version and the photos inside product descriptions.
-- A photo refused with a 403 or a Cloudflare check is retried after five minutes instead of
-  a week. After updating, all failures remembered by older versions are forgotten, and
-  refreshing the Shop, or a new catalogue arriving, forgets them again.
+- An image turned away by a Cloudflare check, or a store photo refused with a 403, is
+  retried after five minutes instead of a week. After updating, all failures remembered by
+  older versions are forgotten, and refreshing the Shop, or a new catalogue arriving,
+  forgets the store's again.
 - Refused images are now logged with their status and Cloudflare's `cf-mitigated`/`cf-ray`
   headers.
 - The mxb-mods.com browser window no longer pretends to be a year-old Chrome, which contradicted
