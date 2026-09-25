@@ -189,7 +189,7 @@ function Panel() {
 
   return (
     <OverlayFrame
-      appName="MXB Coach"
+      appName="Coach"
       tabs={TABS.map(({ id, icon }) => ({ id, icon, label: t(`overlay.tab.${id}` as TKey) }))}
       active={tab}
       onTab={(id) => {

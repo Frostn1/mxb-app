@@ -20,7 +20,7 @@ pub use mxb_core::overlay::{on_focus_lost, LABEL};
 pub static SPEC: Spec = Spec {
     app: App::Coach,
     url: "index.html?overlay=1",
-    title: "MXB Coach overlay",
+    title: "Coach overlay",
     size: (560.0, 680.0),
     min_size: (420.0, 480.0),
     tabs: &["tips", "setup", "cues", "hud"],
@@ -169,7 +169,7 @@ fn rebind(app: &AppHandle) -> Result<(), String> {
 /// MXB App think it had been set up. It writes into one that exists or can be detected.
 fn patch(app: &AppHandle, key: &str, value: serde_json::Value) -> Result<(), String> {
     if !config::exists(app) && config::load_or_detect(app).is_none() {
-        return Err("MXB Coach couldn't find the game's folder, so it has nowhere to keep this setting.".into());
+        return Err("Coach couldn't find the game's folder, so it has nowhere to keep this setting.".into());
     }
     let mut keys = serde_json::Map::new();
     keys.insert(key.to_string(), value);

@@ -23,6 +23,11 @@
   MXBMRP3 or changes the game folder, and it checks again when you change the game folder or
   switch games.
 
+### Changed
+- MXB Coach is now just "Coach" in the app: the sidebar reads "Coach" with a smaller "by
+  mxbsecure" under it, and the window, the overlay and the app's own messages say "Coach".
+  It still installs and updates as "MXB Coach", so shortcuts, updates and Uninstall keep working.
+
 ### Fixed
 - MXB Coach keeps one name for the setup it makes you. Every save used to create another copy:
   "Fast (coach)", then "Fast (coach 2)", "Fast (coach 3)". Coach now saves back onto the copy
