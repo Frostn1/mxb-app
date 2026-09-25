@@ -731,7 +731,7 @@ export const fr: Translation = {
   "secure.testHeading": "Tester le format (facultatif)",
   "secure.step3": "Lier à votre compte Steam & jouer hors ligne",
   "secure.step3Desc":
-    "Scelle la clé à votre compte Steam et la stocke localement. Ensuite elle s'ouvre sans serveur — hors ligne, en LAN, partout — mais seulement sur votre compte. Une copie sur un autre compte n'obtient rien.",
+    "Scelle la clé à votre compte Steam et la stocke localement. Ensuite elle fonctionne hors ligne jusqu'à 30 jours entre deux vérifications — l'app la renouvelle en silence dès qu'elle est en ligne — mais seulement sur votre compte. Une copie sur un autre compte n'obtient rien.",
   "secure.steamAccount": "Votre compte Steam :",
   "secure.noSteam": "Impossible de lire votre compte Steam. Steam est-il installé et connecté ?",
   "secure.provision": "Lier à mon compte",

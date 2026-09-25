@@ -17,6 +17,7 @@ import { tokenMatches } from "./auth";
 import { BANNED, banFor, isBanned } from "./bans";
 import { converterFile, CONVERTER_PREFIX, mayConvert } from "./converter";
 import { creatorSignupOpen, makeCreator, SIGNUP_CLOSED } from "./creators";
+import { lockPermit } from "./lockpermit";
 import { repairBySteamId } from "./steamlink";
 import { steamResult } from "./page";
 import { isWebAdmin, isWebAdminPath, webAdminRoutes } from "./webadmin";
@@ -68,7 +69,9 @@ export async function webRoutes(
 
   if (
     method === "OPTIONS" &&
-    (path === "/v1/web/me" || path === "/v1/web/logout" || path === "/v1/web/creator" || isWebAdminPath(path))
+    (path === "/v1/web/me" || path === "/v1/web/logout" || path === "/v1/web/creator" ||
+      path === "/v1/web/lock/permit" ||
+      isWebAdminPath(path))
   ) {
     if (request.headers.get("Origin") && !origin) return cors(json(403, { error: "origin not allowed" }), null);
     return cors(new Response(null, { status: 204 }), origin, true, "GET, POST, OPTIONS");
@@ -240,6 +243,12 @@ export async function webRoutes(
     headers.append("Set-Cookie", clearedCookie(SESSION_COOKIE));
     headers.append("Set-Cookie", clearedCookie(LEGACY_SESSION_COOKIE));
     return cors(new Response(null, { status: 204, headers }), origin);
+  }
+
+  // Asked by the GUID lock before it runs; `lockpermit.ts` says what it refuses and why every
+  // refusal reads the same.
+  if (method === "POST" && path === "/v1/web/lock/permit") {
+    return cors(await lockPermit(request, env), origin);
   }
 
   if (method === "GET" && path.startsWith("/v1/web/lockweb/")) {
