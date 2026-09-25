@@ -110,6 +110,17 @@ pub fn needs_renewal(kept: Option<&LeaseClaims>, live_steam_id: Option<&str>, no
     kept.expires_at.saturating_sub(now_ms) < RENEW_BELOW.as_millis() as i64
 }
 
+/// Whether a fresh lease should replace the kept one. It always does, unless the kept one is for
+/// the Steam login running now and the fresh one is not — the app signed in as one Steam account
+/// while Steam runs as another. The DLL checks against the running login, so overwriting would
+/// lock content that still had days to run.
+pub fn replaces(kept: Option<&LeaseClaims>, fresh: Option<&LeaseClaims>, live_steam_id: Option<&str>) -> bool {
+    let Some(live) = live_steam_id.map(str::trim) else { return true };
+    let kept_is_live = kept.is_some_and(|k| k.steam_id == live);
+    let fresh_is_live = fresh.is_some_and(|f| f.steam_id == live);
+    fresh_is_live || !kept_is_live
+}
+
 /// Write a lease where the DLL reads it: a temporary name moved into place, so the DLL never sees
 /// half a file.
 pub fn store(path: &Path, lease: &SignedLease) -> Result<(), String> {
@@ -195,6 +206,10 @@ pub async fn renew(token: &str, dir: &Path, live_steam_id: Option<&str>, force: 
             log::warn!("[lease] refused; lease {}", if had { "removed" } else { "was already gone" });
             Renewal::Blocked
         }
+        Answer::Store(lease) if !replaces(kept.as_ref(), claims(&lease).as_ref(), live_steam_id) => {
+            log::info!("[lease] the account's lease is for another Steam login than the one running; keeping this one's");
+            Renewal::Kept
+        }
         Answer::Store(lease) => match store(&path, &lease) {
             Ok(()) => {
                 let until = claims(&lease).map(|c| c.expires_at).unwrap_or_default();
@@ -243,6 +258,20 @@ mod tests {
         assert!(!needs_renewal(Some(&fresh), Some(STEAM), now + 4 * DAY));
         assert!(needs_renewal(Some(&fresh), Some(STEAM), now + 6 * DAY));
         assert!(needs_renewal(Some(&fresh), Some(STEAM), now + 31 * DAY));
+    }
+
+    #[test]
+    fn never_trades_the_running_logins_lease_for_another_accounts() {
+        let mine = claims(&lease(STEAM, 0)).unwrap();
+        let theirs = claims(&lease("76561198000000042", 5)).unwrap();
+        // Signed in as another account than Steam runs: keep the running login's lease.
+        assert!(!replaces(Some(&mine), Some(&theirs), Some(STEAM)));
+        // Nothing useful kept, so the fresh one may as well be there.
+        assert!(replaces(None, Some(&theirs), Some(STEAM)));
+        assert!(replaces(Some(&theirs), Some(&theirs), Some(STEAM)));
+        // The ordinary renewal, and no running login to compare against.
+        assert!(replaces(Some(&mine), Some(&mine), Some(STEAM)));
+        assert!(replaces(Some(&mine), Some(&theirs), None));
     }
 
     #[test]
