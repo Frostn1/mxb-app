@@ -114,16 +114,22 @@ fn write_atomically(path: &Path, text: &str) -> anyhow::Result<()> {
     use std::io::Write as _;
     let dir = path.parent().context("no parent folder")?;
     fs::create_dir_all(dir)?;
-    // Named per write, and created only if absent, so two saves can't share a temp file and
-    // nothing already there is ever truncated.
+    // Named per write (process, counter), and created only if absent, so two saves can't share
+    // a temp file and nothing already there is ever truncated.
+    static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let name = path.file_name().context("no file name")?.to_string_lossy();
-    let tmp = dir.join(format!(".{name}.{}-{}.tmp", std::process::id(), now_ms()));
-    let written = (|| {
-        let mut f = fs::OpenOptions::new().write(true).create_new(true).open(&tmp)?;
-        f.write_all(text.as_bytes())?;
-        f.sync_all()?;
-        fs::rename(&tmp, path)
-    })();
+    let n = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let tmp = dir.join(format!(".{name}.{}-{n}.tmp", std::process::id()));
+    // Only a file this call created is ever removed: if `create_new` fails, the name belongs
+    // to someone else.
+    let mut f = fs::OpenOptions::new().write(true).create_new(true).open(&tmp)?;
+    let written = f
+        .write_all(text.as_bytes())
+        .and_then(|()| f.sync_all())
+        .and_then(|()| {
+            drop(f);
+            fs::rename(&tmp, path)
+        });
     if written.is_err() {
         let _ = fs::remove_file(&tmp);
     }
@@ -380,6 +386,37 @@ mod tests {
         let err = write_atomically(&blocked.join("download-history.json").join("child.json"), "new");
         assert!(err.is_err(), "writing under a file can't work");
         assert_eq!(fs::read(store_path(&dir)).unwrap(), before, "the real history untouched");
+
+        // A rename that fails (the target is a folder) cleans up the temp it created.
+        let target = dir.join("is-a-folder.json");
+        fs::create_dir_all(target.join("inner")).unwrap();
+        assert!(write_atomically(&target, "new").is_err());
+        let leftovers = fs::read_dir(&dir)
+            .unwrap()
+            .filter(|e| e.as_ref().unwrap().file_name().to_string_lossy().ends_with(".tmp"))
+            .count();
+        assert_eq!(leftovers, 0, "no temp file left after a failed rename");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Saves in the same instant each get their own temp file.
+    #[test]
+    fn saves_in_a_burst_do_not_share_a_temp_file() {
+        let dir = tmp("atomic-burst");
+        let handles: Vec<_> = (0..8)
+            .map(|i| {
+                let d = dir.clone();
+                std::thread::spawn(move || write_atomically(&d.join("burst.json"), &format!("{i}")))
+            })
+            .collect();
+        for h in handles {
+            h.join().unwrap().expect("every save lands");
+        }
+        let names: Vec<String> = fs::read_dir(&dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(names, ["burst.json"]);
         let _ = fs::remove_dir_all(&dir);
     }
 }
