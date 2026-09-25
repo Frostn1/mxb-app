@@ -338,6 +338,8 @@ pub async fn publish_all(
         // publish is an investigation rather than a sentence.
         let status = resp.status();
         let detail = resp.text().await.unwrap_or_default();
+        // A block refusal re-asks the startup gate now, rather than at its next half hour.
+        crate::gate::note_refusal(status.as_u16(), Some(&detail));
         let reason = serde_json::from_str::<serde_json::Value>(&detail)
             .ok()
             .and_then(|v| v.get("error").and_then(|e| e.as_str()).map(str::to_string))
@@ -391,7 +393,8 @@ pub async fn report_presence(token: &str, server_id: &str) -> anyhow::Result<()>
         .json(&serde_json::json!({ "serverId": server_id }))
         .send()
         .await?
-        .error_for_status()?;
+        .error_for_status()
+        .inspect_err(crate::gate::note_error)?;
     Ok(())
 }
 
@@ -423,7 +426,7 @@ pub async fn who_is_on(token: Option<&str>, keys: &[String]) -> anyhow::Result<V
     if let Some(t) = token {
         req = req.bearer_auth(t);
     }
-    let resp: Resp = req.send().await?.error_for_status()?.json().await?;
+    let resp: Resp = req.send().await?.error_for_status().inspect_err(crate::gate::note_error)?.json().await?;
     Ok(resp.riders.into_iter().map(|r| r.rider_name).collect())
 }
 
@@ -448,7 +451,7 @@ pub async fn presence_counts(
     if let Some(t) = token {
         req = req.bearer_auth(t);
     }
-    let resp: Resp = req.send().await?.error_for_status()?.json().await?;
+    let resp: Resp = req.send().await?.error_for_status().inspect_err(crate::gate::note_error)?.json().await?;
     Ok(resp.servers)
 }
 
@@ -478,7 +481,7 @@ pub async fn registry(token: Option<&str>) -> anyhow::Result<Vec<RegisteredServe
     if let Some(token) = token.map(str::trim).filter(|t| !t.is_empty()) {
         req = req.bearer_auth(token);
     }
-    let resp: Resp = req.send().await?.error_for_status()?.json().await?;
+    let resp: Resp = req.send().await?.error_for_status().inspect_err(crate::gate::note_error)?.json().await?;
     Ok(resp.servers)
 }
 
@@ -576,6 +579,7 @@ pub async fn pull(
             // One unreachable roster shouldn't sink the others — the player still wants the
             // paints for the servers that did answer.
             Err(e) => {
+                crate::gate::note_error(&e);
                 log::warn!("[sync] roster for {server_id} failed: {e}");
                 continue;
             }
@@ -642,7 +646,8 @@ pub async fn pull(
             .bearer_auth(token)
             .send()
             .await?
-            .error_for_status()?
+            .error_for_status()
+            .inspect_err(crate::gate::note_error)?
             .bytes()
             .await?;
 

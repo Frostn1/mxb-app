@@ -834,7 +834,10 @@ fn token(app: &tauri::AppHandle) -> Result<String> {
 
 /// Pull the error message out of a control-plane failure, which always answers `{error}`.
 async fn plane_error(resp: reqwest::Response) -> String {
+    let status = resp.status();
     let detail = resp.text().await.unwrap_or_default();
+    // A block refusal re-asks the startup gate now, rather than at its next half hour.
+    crate::appgate::note_refusal(status.as_u16(), Some(&detail));
     serde_json::from_str::<serde_json::Value>(&detail)
         .ok()
         .and_then(|v| v.get("error").and_then(|e| e.as_str()).map(str::to_string))
@@ -930,6 +933,9 @@ pub async fn plugin_list(app: tauri::AppHandle) -> Result<Vec<PluginView>, Strin
                     }
                     let _ = save_state(&app, &state);
                 }
+            } else {
+                let status = resp.status();
+                crate::appgate::note_refusal(status.as_u16(), Some(&resp.text().await.unwrap_or_default()));
             }
         }
     }

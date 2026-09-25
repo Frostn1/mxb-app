@@ -294,6 +294,8 @@ fn main() {
             // server afresh in the background — the same lock as MXB App, from one shared core.
             mxb_core::appgate::enforce_marker(app.handle());
             tauri::async_runtime::spawn(mxb_core::appgate::check(app.handle().clone()));
+            // And again every half hour while it runs, so a ban reaches an app left open.
+            mxb_core::appgate::watch(app.handle());
             // The window is frameless with a custom title bar (see `TitleBar.tsx`), so the app
             // draws its own File menu. macOS keeps its global menu bar at the top of the screen —
             // that's the native home there — so the native menu is set on macOS only; elsewhere

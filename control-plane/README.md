@@ -29,7 +29,7 @@ consequences fall out of that, and they're baked into the schema:
 | GET | `/v1/servers` | — | Server registry. Public: it is the app's join picker, and the people who most need it are the ones with no account yet. `agent_url` is not returned. |
 | POST | `/v1/servers/:id/hello` | agent token | A provisioned box announcing that it is up. Its address is taken from `cf-connecting-ip`, never from the body, so a box cannot register somebody else's. |
 | GET | `/v1/me` | bearer | Account, and a per-bike summary of what is stored for it. Looks ordinary to a banned install on purpose — see below. |
-| GET | `/v1/app/gate` | bearer | The desktop apps' startup gate. `{status:"ok"}` to run; `{status:"signin"}` when `MXB_REQUIRE_STEAM` is on and the account has no confirmed Steam link (the app shows a sign-in wall); `{status:"unsupported"}` for a banned install (a mundane untruth, never the word "ban"). |
+| GET | `/v1/app/gate` | bearer | The desktop apps' startup gate. `{status:"ok"}` to run; `{status:"signin"}` when `MXB_REQUIRE_STEAM` is on and the account has no confirmed Steam link (the app shows a sign-in wall); `{status:"unsupported"}` for a banned install (a mundane untruth, never the word "ban"). With `MXB_VERDICT_SIGNING_KEY` set, each answer also carries `signed: {payload, sig}` — see **Signed verdicts, and the offline policy**. |
 | PUT | `/v1/me/guid` | bearer | Claim a GUID. Derived from the linked Steam identity and pinned (the client's value is ignored) for a Steam account; first-come for a non-Steam one; refused if banned. |
 | PUT | `/v1/loadout` | bearer | Replace **one bike's** loadout. Kept for clients older than per-bike storage. |
 | PUT | `/v1/loadouts` | bearer | Replace the whole look, every bike at once. Returns `missing` — the blobs still to upload. |
@@ -447,8 +447,61 @@ to make another account, the honest message is the exact next-step coaching they
 and the reinstall the disguise names cannot help them, because a ban follows the GUID, the Steam
 login and the install, never the files. We always know it is a ban — the ledger, the admin page
 and the internal `reason` all say so. The machine in front of the person does not. The app side
-of the gate — the marker that keeps a blocked install blocked even offline — lives in
-`mxb-app`'s `gate.rs`.
+of the gate — the signed verdict that keeps a blocked install blocked even offline — lives in
+`crates/core/src/appgate.rs`.
+
+#### Signed verdicts, and the offline policy
+
+The gate's plain answer is enough to act on in the moment and worth nothing afterwards: a block
+written to disk on the strength of an unsigned reply is a file anybody can delete, and a stored
+"ok" is a file anybody can write. So `GET /v1/app/gate` also returns the verdict as a signed
+statement (`src/verdict.ts`):
+
+```json
+"signed": {
+  "payload": "{\"v\":1,\"status\":\"unsupported\",\"account\":\"acc_…\",\"token\":\"<sha-256 of the bearer token>\",\"steamId\":null,\"guid\":null,\"issuedAt\":1800000000000}",
+  "sig": "<Ed25519 over the payload's UTF-8 bytes, base64url>"
+}
+```
+
+`payload` is the exact string signed. It names the status, the account it is about, a SHA-256 of
+the token it was fetched with (`hashToken` — how a launch, which knows its token but not its
+account id, tells that a kept verdict is about itself), the Steam ID and GUID the server tied to
+that account, and when it was issued — never a reason. The binding is inside the signature, so a
+kept block cannot be moved onto another account or off its own by editing the file. The apps
+hold only the public half of the pair (`VERDICT_PUBLIC_KEY` in `crates/core/src/appgate.rs`) and
+keep the last verdict they could verify in the folder all three share, so one app's block holds
+in the others. The policy:
+
+- **An install never told it is banned keeps working offline.** No network, a timeout or an
+  unreadable answer is never a reason to refuse anybody — exactly as before.
+- **An install given a signed block stays blocked offline.** A kept `unsupported` for the account
+  the install is signed in as refuses the launch without the network. Only a *newer* signed `ok`
+  or `signin` for the same account lifts it, so a replayed old "ok" cannot, and a block cannot be
+  carried to another account. A blocked launch asks the gate once, briefly, before refusing —
+  that is how a lifted ban gets back in.
+
+A signed block is kept only in that shared file; the older per-app `gate.lock` is still read, and
+still written for a block that arrives unsigned. The apps also re-ask every half hour while open,
+and at once when any call comes back 403 with `code: "blocked"`. Every app-facing refusal for a
+ban carries that code beside the unchanged disguised message (and `POST /v1/entitlements/check`
+beside its plain `"unavailable"`): the message is for the person, the code is for the app, so it can tell a
+block from "not entitled" without matching on prose.
+
+Signing is optional. Without `MXB_VERDICT_SIGNING_KEY` the gate answers exactly as it did, with
+no `signed` field, and a signing failure is logged and answered unsigned — never an error. To
+turn it on:
+
+```sh
+bun scripts/verdict-keypair.ts                   # prints both halves; stores neither
+bunx wrangler secret put MXB_VERDICT_SIGNING_KEY  # paste the private half (PKCS#8, base64url)
+```
+
+and put the printed public half in `VERDICT_PUBLIC_KEY` in `crates/core/src/appgate.rs` for the
+next app release. Never commit the private half. It is a pair of its own, not the plugin one.
+Rotating it is a release: a build treats a verdict signed by any other key as unsigned — it still
+acts on it, it just cannot keep it — and a block kept under the old key stays until a build with
+the old key sees a newer lift, or the app is updated.
 
 What a ban cannot reach is what carries no identity: the anonymous usage counters, the
 master-server probe, the shared server book, a live share code, and track generation (capped by
