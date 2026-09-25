@@ -9,6 +9,11 @@
   kinds of mod, each download opens the install review, which sorts every item into Bikes
   or Rider by what it is. A helmet or jersey paint on its own is now recognised as rider
   gear there, and when you drop it in, instead of being mistaken for a bike paint.
+- Ban migrations `0038` and `0040` no longer carry any GUIDs: their seed data was removed and bans
+  go through the admin API only. The rows they inserted stay in the database (D1 never re-runs an
+  applied migration), and the tests use synthetic GUIDs.
+- CI refuses any MX Bikes GUID not on `scripts/guid-allowlist.txt` (`bun run check:no-ban-guids`), so a
+  real install's GUID, and above all a banned one, never lands in this public repository.
 - Expose bounded beta21e TRH main-centreline projection for native server timing gates.
 - MXB App, MXB Coach and Frost Studio can each be uninstalled from their own Settings. Type the
   app's name to confirm, and the app closes and removes itself:
@@ -35,6 +40,9 @@
   It still installs and updates as "MXB Coach", so shortcuts, updates and Uninstall keep working.
 
 ### Fixed
+- The Downloads history can no longer be wiped by a save that's cut short (a crash, a full
+  disk, antivirus holding the file). It's written whole to a temp file and swapped in, and a
+  save that fails is noted in the log.
 - MXB Coach keeps one name for the setup it makes you. Every save used to create another copy:
   "Fast (coach)", then "Fast (coach 2)", "Fast (coach 3)". Coach now saves back onto the copy
   it wrote, provided you haven't changed that copy in the garage since and MX Bikes is closed.

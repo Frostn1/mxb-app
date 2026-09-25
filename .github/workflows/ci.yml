@@ -38,6 +38,9 @@ jobs:
       - name: Enforce secure-content boundary
         run: bun run check:secure-boundary
 
+      - name: No ban GUIDs in the public repo
+        run: bun run check:no-ban-guids
+
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
