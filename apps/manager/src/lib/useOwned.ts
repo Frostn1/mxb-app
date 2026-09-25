@@ -12,7 +12,7 @@
  */
 import { useCallback, useEffect, useState } from "react";
 import {
-  modTypesFor,
+  librarySubpaths,
   shopInstalledMap,
   shopMyDownloads,
   shopStatus,
@@ -82,7 +82,7 @@ export function useOwned(enabled: boolean, refreshKey: number): OwnedState {
 
       // The library, once, for both stores' "installed" joins — the stores sell tracks,
       // bikes and gear, so every mod folder is scanned, not just one.
-      const subpaths = modTypesFor(game.id).map((m) => m.installSubpath);
+      const subpaths = librarySubpaths(game.id);
       const [scans, record] = await Promise.all([
         scanLibrariesSequentially(subpaths),
         shopInstalledMap().catch(() => ({}) as Record<string, string[]>),

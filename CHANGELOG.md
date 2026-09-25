@@ -18,6 +18,12 @@
   that again with its own secret key before storing it. Deleting your account deletes it, banned
   or not, and the privacy policy says so. Off until the control plane's `MXB_DEVICE_SALT` is set
   (migration `0043_device_links.sql`).
+- Bikelife in Browse: mxb-mods.com's street and wheelie category (supermoto liveries and
+  builds, streetwear, packs) gets its own tab. It's listed from mxb-mods like every other
+  category, and each download comes from the post's own links. Because the category mixes
+  kinds of mod, each download opens the install review, which sorts every item into Bikes
+  or Rider by what it is. A helmet or jersey paint on its own is now recognised as rider
+  gear there, and when you drop it in, instead of being mistaken for a bike paint.
 - Ban migrations `0038` and `0040` no longer carry any GUIDs: their seed data was removed and bans
   go through the admin API only. The rows they inserted stay in the database (D1 never re-runs an
   applied migration), and the tests use synthetic GUIDs.

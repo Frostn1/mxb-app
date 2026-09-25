@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { modTypesFor, scanLibrary, type ModType } from "@frost/shared/api/mods";
+import { modTypesFor, scanLibrary, scanSubpaths, type ModType } from "@frost/shared/api/mods";
 import type { GameId } from "@frost/shared/types";
 import {
   EMPTY_INSTALLED_INDEX,
@@ -55,10 +55,12 @@ export function useModBrowsing(
   useEffect(() => {
     if (!enabled) return;
     let cancelled = false;
-    scanLibrary(modType.installSubpath)
-      .then((entries) => {
+    // A type that sorts downloads by content (Bikelife) has no folder of its own: look in
+    // every one it sorts into.
+    Promise.all(scanSubpaths(modType).map((s) => scanLibrary(s)))
+      .then((lists) => {
         if (cancelled) return;
-        setInstalled(buildInstalledIndex(entries));
+        setInstalled(buildInstalledIndex(lists.flat()));
       })
       .catch(() => !cancelled && setInstalled(EMPTY_INSTALLED_INDEX));
     return () => {
