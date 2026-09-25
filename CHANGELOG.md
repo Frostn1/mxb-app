@@ -24,6 +24,13 @@
   switch games.
 
 ### Changed
+- The startup check that MXB App, Studio and Coach share now keeps a signed copy of the
+  service's answer, in the folder all three share. An install that was never refused keeps
+  working offline exactly as before; one the service refused stays refused offline, in every
+  app, until the service says otherwise. The apps also ask again every half hour while open,
+  and straight away when the service turns a request down for that reason. The control plane
+  signs the answer only once `MXB_VERDICT_SIGNING_KEY` is set, and its refusals now carry
+  `code: "blocked"` beside the unchanged message.
 - MXB Coach is now just "Coach" in the app: the sidebar reads "Coach" with a smaller "by
   mxbsecure" under it, and the window, the overlay and the app's own messages say "Coach".
   It still installs and updates as "MXB Coach", so shortcuts, updates and Uninstall keep working.
