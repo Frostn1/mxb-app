@@ -161,6 +161,9 @@ export const ptBR: Record<keyof typeof en, string> = {
 
   "modType.reshade": "ReShade",
   "modType.reshadeInline": "presets do ReShade",
+  "modType.bikelife": "Bikelife",
+  "modType.bikelifeInline": "mods de bikelife",
+  "modType.autoDest": "Motos ou Piloto, conforme o conteúdo",
   "trackViewer.title": "Prévia da pista",
   "trackViewer.loading": "Lendo o terreno…",
   "trackViewer.refining": "Refinando…",

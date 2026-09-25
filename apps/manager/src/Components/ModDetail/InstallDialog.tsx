@@ -21,6 +21,7 @@ import {
   defaultMirrorIndex,
   destForVariant,
   installsOutsideMods,
+  routesByContent,
   isBlockedDownload,
   isServerOnly,
   pickDownloadForBike,
@@ -95,6 +96,9 @@ export default function InstallDialog({
   const t = useT();
   const mirrors = useMirrors(detail);
   const outsideMods = installsOutsideMods(modType);
+  // Where it lands when there's no folder to choose: ReShade's one home, or a category that
+  // sorts each download by what it holds.
+  const fixedDest = outsideMods ? RESHADE_DEST : routesByContent(modType) ? t("modType.autoDest") : null;
   const [folder, setFolder] = useState(initialFolder);
   const [folderOpen, setFolderOpen] = useState(false);
   const [folderSearch, setFolderSearch] = useState("");
@@ -366,13 +370,14 @@ export default function InstallDialog({
             <span className="text-[11px] font-bold uppercase tracking-[1.2px] text-faint">
               {t("installDialog.installTo")}
             </span>
-            {/* A ReShade preset doesn't live in the mods tree and has exactly one home, so
-                it shows where it lands and offers no folder to change. */}
-            {outsideMods ? (
+            {/* A ReShade preset doesn't live in the mods tree and has exactly one home, and a
+                category that sorts by content (Bikelife) decides per item in the review
+                sheet, so neither offers a folder to change. */}
+            {fixedDest !== null ? (
               <div className="flex items-center gap-2.5 bg-background px-3 py-2.5">
                 <ChevronRight className="size-3.5 flex-none text-primary" />
                 <span className="flex-1 truncate text-left font-mono text-[12px] text-muted-foreground">
-                  <b className="text-foreground">{RESHADE_DEST}</b>
+                  <b className="text-foreground">{fixedDest}</b>
                 </span>
               </div>
             ) : (
@@ -391,7 +396,7 @@ export default function InstallDialog({
               </button>
             )}
 
-            {folderOpen && !outsideMods && (
+            {folderOpen && fixedDest === null && (
               <div className="flex flex-col overflow-hidden bg-popover shadow-[0_12px_32px_rgba(0,0,0,0.5)]">
                 {/* command-style search */}
                 <div className="flex items-center gap-2 border-b border-border px-3 py-2">

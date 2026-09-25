@@ -916,6 +916,32 @@ fn units_in(
         }];
     }
 
+    // Gear says what it is by its folders (`helmets/<model>/paints/…`), and unwrapping a
+    // single-child chain strips exactly those: a lone helmet paint came out as a bike paint.
+    // So gear is looked for at every step of the chain before the wrapper is taken off,
+    // `Pack v2/helmets/…` included.
+    let mut step = dir.to_path_buf();
+    loop {
+        if let Some(mut verdict) = classify_typed(&step, ctx).filter(|v| v.kind == ContentKind::RiderGear) {
+            // Placement unwraps the same chain again on the way in, so the folders it strips
+            // have to be handed back as the destination, or `helmets/Airoh/paints/Red.pnt`
+            // lands as `mods/rider/Red.pnt`. The tree already said where it goes.
+            if verdict.reason == DetectReason::GearFolders {
+                let inner = install::unwrap_wrapper(&step);
+                let rel = inner
+                    .strip_prefix(&step)
+                    .map(|r| r.to_string_lossy().replace('\\', "/"))
+                    .unwrap_or_default();
+                verdict = verdict.keep(rel).in_pack("mods/rider");
+            }
+            return vec![Unit { path: step, verdict }];
+        }
+        match install::unwrap_one(&step) {
+            Some(next) => step = next,
+            None => break,
+        }
+    }
+
     // `plan_placement` unwraps single-child wrapper folders; classify what it settled on,
     // not the wrapper, or a `Mod v2/` folder would hide the bike inside it.
     let base = install::unwrap_wrapper(dir);
@@ -1766,6 +1792,51 @@ mod tests {
         assert_eq!(units.len(), 2, "one row each, nothing extra");
     }
 
+    /// What an auto-routed Browse category (Bikelife) relies on: each download is read for
+    /// what it holds and goes to that folder. A bike to bikes, gear to rider, and a pack of
+    /// one folder per mod split between them, with nothing put in a made-up folder.
+    #[test]
+    fn bikelife_downloads_are_sorted_by_what_they_hold() {
+        let game = tmp("bikelife-game");
+        let plan_of = |root: &Path, name: &str| {
+            let plan = plan_folder(game.to_str().unwrap(), root, tmp(&format!("bikelife-work-{name}")), name).expect("a plan");
+            // Nothing goes anywhere but a real mods folder, or waits for the rider to pick one.
+            assert!(plan.items.iter().all(|i| i.subpath.is_empty() || i.subpath.starts_with("mods/")));
+            let kinds: Vec<ContentKind> = plan.items.iter().map(|i| i.kind).collect();
+            cancel(&plan.id);
+            kinds
+        };
+
+        let bike = tmp("bikelife-bike");
+        write(&bike.join("MX1OEM_2023/MX1OEM_2023.ini"), "[info]\nname = Test 450\n");
+        write(&bike.join("MX1OEM_2023/MX1OEM_2023.cfg"), "ID = X\n");
+        assert_eq!(plan_of(&bike, "bike.zip"), [ContentKind::Bike]);
+
+        let gear = tmp("bikelife-gear");
+        write(&gear.join("helmets/Airoh/paints/Red.pnt"), "PNT\0");
+        // Gear says where it goes by its own folders: rider gear, installed under them.
+        assert_eq!(plan_of(&gear, "hoodie.zip"), [ContentKind::RiderGear]);
+
+        // The same gear inside a wrapper folder, the way most archives ship it.
+        let wrapped = tmp("bikelife-wrapped");
+        write(&wrapped.join("Airoh red v2/helmets/Airoh/paints/Red.pnt"), "PNT\0");
+        assert_eq!(plan_of(&wrapped, "wrapped.zip"), [ContentKind::RiderGear]);
+        let _ = fs::remove_dir_all(&wrapped);
+
+        // A pack laid out one folder per mod.
+        let pack = tmp("bikelife-pack");
+        write(&pack.join("Test 450/MX1OEM_2023/MX1OEM_2023.ini"), "[info]\nname = Test 450\n");
+        write(&pack.join("Test 450/MX1OEM_2023/MX1OEM_2023.cfg"), "ID = X\n");
+        write(&pack.join("Airoh red/helmets/Airoh/paints/Red.pnt"), "PNT\0");
+        let split = plan_of(&pack, "pack.zip");
+        assert!(split.contains(&ContentKind::Bike) && split.contains(&ContentKind::RiderGear), "{split:?}");
+        assert_eq!(split.len(), 2, "one row each");
+
+        for d in [&game, &bike, &gear, &pack] {
+            let _ = fs::remove_dir_all(d);
+        }
+    }
+
     #[test]
     fn a_wrapper_folder_does_not_hide_the_mod() {
         let root = tmp("wrapper");
@@ -2347,6 +2418,46 @@ mod tests {
 
         cancel(&again.id);
         let _ = fs::remove_dir_all(&root);
+    }
+
+    /// A helmet paint on its own names its model by its folders, and it has to land under
+    /// them: `mods/rider/Red.pnt` reports success and loads nowhere. Bare and wrapped alike.
+    #[test]
+    fn a_lone_helmet_paint_installs_under_its_model() {
+        for (label, rel) in [
+            ("bare", "helmets/Airoh/paints/Red.pnt"),
+            ("wrapped", "Airoh red v2/helmets/Airoh/paints/Red.pnt"),
+        ] {
+            let root = tmp(&format!("gear-commit-{label}"));
+            let game = root.join("MX Bikes");
+            let mods_path = game.to_string_lossy().into_owned();
+            let src = root.join("drop");
+            write(&src.join(rel), "PNT\0");
+
+            let staged = plan(&mods_path, &[src.to_string_lossy().into_owned()]).expect("planned");
+            assert_eq!(staged.items.len(), 1, "{label}");
+            let row = &staged.items[0];
+            assert_eq!(row.kind, ContentKind::RiderGear, "{label}");
+            assert!(!row.subpath.is_empty(), "{label}: the tree says where it goes");
+
+            let outcome = commit(
+                &mods_path,
+                &staged.id,
+                &[CommitItem {
+                    id: row.id.clone(),
+                    subpath: row.subpath.clone(),
+                    dest_folder: row.dest_folder.clone(),
+                }],
+            )
+            .expect("committed");
+            assert!(outcome.failed.is_empty(), "{label}: {:?}", outcome.failed);
+            assert!(
+                game.join("mods/rider/helmets/Airoh/paints/Red.pnt").is_file(),
+                "{label}: landed at {:?}",
+                walkdir::WalkDir::new(game.join("mods")).into_iter().flatten().map(|e| e.into_path()).collect::<Vec<_>>()
+            );
+            let _ = fs::remove_dir_all(&root);
+        }
     }
 
     /// A folder dropped straight from the file manager is staged by reference — we must not

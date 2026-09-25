@@ -42,6 +42,7 @@ import {
 import { toast } from "sonner";
 import {
   installsOutsideMods,
+  routesByContent,
   modTypesFor,
   scanLibrary,
   listStockTracks,
@@ -1050,7 +1051,9 @@ export default function Library({
   // The Library is a view of the mods tree, so the one type that installs outside it —
   // ReShade presets, which live in the game's install folder — has no row in the list.
   // They're managed in Settings, where their install status can be shown alongside them.
-  const modTypes = modTypesFor(game.id).filter((mt) => !installsOutsideMods(mt));
+  // A type that sorts downloads by content (Bikelife) owns no folder either: what it
+  // installs shows under Bikes or Rider, where it landed.
+  const modTypes = modTypesFor(game.id).filter((mt) => !installsOutsideMods(mt) && !routesByContent(mt));
 
   /**
    * How many mods each library holds, for the left list.
