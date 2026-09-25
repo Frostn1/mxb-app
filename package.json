@@ -16,6 +16,7 @@
     "tauri": "cd apps/manager && bun run tauri",
     "build": "bun run --filter '*' build",
     "check:secure-boundary": "bun scripts/check-secure-boundary.mjs",
+    "check:no-ban-guids": "bun scripts/check-no-ban-guids.mjs",
     "typecheck": "bun run --filter '*' typecheck",
     "lint": "eslint .",
     "dev:studio": "cd apps/studio && bun run dev",
