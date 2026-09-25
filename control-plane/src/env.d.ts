@@ -42,6 +42,11 @@ declare global {
      *  `/v1/app/gate` answers exactly as before, unsigned — never an error. Generate with
      *  `bun scripts/verdict-keypair.ts`. */
     MXB_VERDICT_SIGNING_KEY?: string;
+    /** Keys the device hash the apps report (`X-MXB-Device`) before it is stored, so a row in
+     *  `device_links` is useless without it (`devices.ts`). Any long random string. Without it
+     *  device linking is off: nothing is recorded and bans do not follow the machine — never an
+     *  error. Rotating it orphans every stored link, which is safe but forgets them. */
+    MXB_DEVICE_SALT?: string;
     /** Reads the usage dashboard and the stats JSON. Without it both answer 503, which is
      *  the right default: a deployment that was never given a key has no admin surface
      *  rather than an open one. */

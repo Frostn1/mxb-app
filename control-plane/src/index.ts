@@ -36,6 +36,7 @@ import {
 import { adminAssets, isAssetsPath } from "./assets";
 import { APP_BLOCK_CODE, APP_SIGNIN_MESSAGE, appBlocked, appGate, banFor, rememberGuid } from "./bans";
 import { signVerdict } from "./verdict";
+import { deviceFromRequest, rememberDevice } from "./devices";
 import { isWebPath, landingSite, webRoutes } from "./web";
 import { steamResult, redirectPage } from "./page";
 import { pinGuidFromSteam, rememberLink, steamIdFor } from "./steamlink";
@@ -384,7 +385,18 @@ async function route(request: Request, env: Env): Promise<Response> {
     const auth = bearer(request.headers.get("Authorization"));
     const token = auth ? await hashToken(auth) : null;
     const who = { account: account.id, token, steamId: account.steam_id, guid: account.guid };
-    const banned = await appGate(env, { accountId: account.id, steamId: account.steam_id, guid: account.guid });
+    // The machine this install runs on, as a keyed one-way hash (`devices.ts`), remembered before
+    // the verdict so the account is tied to it whatever the verdict is — which is how a banned
+    // PC's next fresh account resolves banned. Null, and nothing written, when the deployment
+    // has no `MXB_DEVICE_SALT` or the app sent no report.
+    const device = await deviceFromRequest(env, request);
+    await rememberDevice(env, account.id, device);
+    const banned = await appGate(env, {
+      accountId: account.id,
+      steamId: account.steam_id,
+      guid: account.guid,
+      device,
+    });
     if (banned.status !== "ok") return json(200, await withSignature(env, banned, who));
     const steamId = await steamIdFor(env, account);
     const steam = Boolean(steamId);

@@ -3,6 +3,13 @@
 ## Unreleased
 
 ### Added
+- A ban now follows the PC as well as the account. MXB App, Studio and Coach report a one-way
+  hash of the computer's machine id when they start and when they first create an account, and
+  a new account or a new Steam account on a banned PC is refused like the banned one. The
+  machine id never leaves the PC: the app sends only a hash of it, and the service scrambles
+  that again with its own secret key before storing it. Deleting your account deletes it, banned
+  or not, and the privacy policy says so. Off until the control plane's `MXB_DEVICE_SALT` is set
+  (migration `0043_device_links.sql`).
 - Expose bounded beta21e TRH main-centreline projection for native server timing gates.
 - MXB App, MXB Coach and Frost Studio can each be uninstalled from their own Settings. Type the
   app's name to confirm, and the app closes and removes itself:

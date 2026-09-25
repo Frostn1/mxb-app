@@ -27,6 +27,7 @@ pub mod winehost;
 pub mod account;
 pub mod antidebug;
 pub mod appgate;
+pub mod device;
 pub mod cfg;
 pub mod edf;
 pub mod gate;

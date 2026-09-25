@@ -22,12 +22,17 @@
  * - every account that shares the caller's Steam identity, now or in the link log, and every
  *   GUID *those* accounts hold or have ever claimed.
  *
+ * - when the deployment links devices (`MXB_DEVICE_SALT`, `devices.ts`), every account that has
+ *   been used on the same machine as the caller, through `device_links` — a keyed one-way hash of
+ *   the machine identifier, never the identifier itself.
+ *
  * So: a second account on the same Steam login resolves through the Steam side. A new GUID
  * claimed by a banned account resolves through the claim log, which the rename cannot erase. A
- * new Steam account on the banned install resolves through the GUID it reports. What is left
- * is a genuinely fresh install on a fresh Steam account, which is a new identity by every
- * measure we have, and is the point at which detection is the anti-cheat's job rather than
- * this table's.
+ * new Steam account on the banned install resolves through the GUID it reports. A fresh token,
+ * or a fresh Steam account, on the banned PC resolves through the device link. What is left is a
+ * genuinely fresh install on a fresh Steam account on a different machine, which is a new
+ * identity by every measure we have, and is the point at which detection is the anti-cheat's
+ * job rather than this table's.
  *
  * ## Where this is asked
  *
@@ -54,6 +59,7 @@
  * something to match would mean identifying everybody else too.
  */
 
+import { deviceLinking } from "./devices";
 import { guidFromSteamId } from "./steam";
 import { isGuid } from "./validate";
 
@@ -81,6 +87,9 @@ export interface Who {
   accountId?: string | null;
   steamId?: string | null;
   guid?: string | null;
+  /** The device this request came from, already keyed with the deployment's secret
+   *  (`devices.ts`'s `deviceHash`) — never a raw or client-side hash. */
+  device?: string | null;
 }
 
 /**
@@ -197,6 +206,11 @@ export async function rememberGuid(env: Env, accountId: string, raw: unknown): P
  * the database — and for a Steam copy their GUID is a pure function of the SteamID Valve just
  * confirmed, so it is known without being stored. The final select is a primary-key hit per
  * candidate against a table with a handful of rows in it.
+ *
+ * The device side is the same one hop, beside the Steam one: `devices` is `?5`, the keyed device
+ * the request reported, plus every device the seed accounts have been seen on, and `ids` takes in
+ * every account seen on any of them. `?6` is 1 only when the deployment links devices; otherwise
+ * `devices` is empty and the statement reads exactly as it did before the table existed.
  */
 const RESOLVE =
   "WITH seed AS (" +
@@ -206,10 +220,14 @@ const RESOLVE =
   "  SELECT ?2 AS steam_id WHERE ?2 IS NOT NULL" +
   "  UNION SELECT steam_id FROM accounts WHERE steam_id IS NOT NULL AND id IN (SELECT account_id FROM seed)" +
   "  UNION SELECT steam_id FROM steam_links WHERE account_id IN (SELECT account_id FROM seed)" +
+  "), devices AS (" +
+  "  SELECT ?5 AS device_hash WHERE ?6 = 1 AND ?5 IS NOT NULL" +
+  "  UNION SELECT device_hash FROM device_links WHERE ?6 = 1 AND account_id IN (SELECT account_id FROM seed)" +
   "), ids AS (" +
   "  SELECT account_id FROM seed" +
   "  UNION SELECT id FROM accounts WHERE steam_id IN (SELECT steam_id FROM steams)" +
   "  UNION SELECT account_id FROM steam_links WHERE steam_id IN (SELECT steam_id FROM steams)" +
+  "  UNION SELECT account_id FROM device_links WHERE device_hash IN (SELECT device_hash FROM devices)" +
   "), guids AS (" +
   "  SELECT ?3 AS guid WHERE ?3 IS NOT NULL" +
   "  UNION SELECT ?4 WHERE ?4 IS NOT NULL" +
@@ -231,15 +249,19 @@ export async function banFor(env: Env, who: Who): Promise<Ban | null> {
   const accountId = who.accountId?.trim() || null;
   const steamId = who.steamId?.trim() || null;
   const guid = normalizeGuid(who.guid);
-  // Nothing to go on is not a ban. Said here so the statement below never runs with three
+  // Only a deployment that links devices reads them: without the secret nothing was keyed, and
+  // the table is not consulted at all.
+  const linking = deviceLinking(env);
+  const device = linking ? who.device?.trim() || null : null;
+  // Nothing to go on is not a ban. Said here so the statement below never runs with only
   // nulls, which would scan for a GUID that is nobody's.
-  if (!accountId && !steamId && !guid) return null;
+  if (!accountId && !steamId && !guid && !device) return null;
 
   // For a Steam copy the GUID is the SteamID written in hex (`0039_derive_guids.sql`), so a
   // banned Steam login is a banned GUID with or without a row to join through.
   const derived = steamId ? guidFromSteamId(steamId) : null;
   const row = await env.DB.prepare(RESOLVE)
-    .bind(accountId, steamId, guid, derived)
+    .bind(accountId, steamId, guid, derived, device, linking ? 1 : 0)
     .first<{
       guid: string;
       reason: string;

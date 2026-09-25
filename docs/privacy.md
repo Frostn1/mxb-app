@@ -29,6 +29,15 @@ of the database holds nothing anyone could present as your credential. The GUID 
 id are what make a purchase open on your machine and what make a ban stick to a person rather
 than to a reinstall.
 
+**Which PC it is, as a one-way hash.** When the app starts, and when it first creates an
+account, it sends a fingerprint of your computer's machine identifier (the id Windows, macOS or
+Linux already gives every installation). Never the identifier itself: the app sends a one-way
+SHA-256 hash of it, and the server scrambles that again with a secret key of its own before
+storing it, so what we hold cannot be turned back into your machine id or matched against
+anything outside our database. It is kept next to your account for one reason, ban enforcement:
+so that a ban on a PC still applies when someone makes a new account or a new Steam account on
+that same PC. It is not used for anything else, and it is deleted when your account is deleted.
+
 **Paint sync**, if you switch it on. The paint files you publish, their names, their sizes and
 their checksums, so the riders beside you see your bike the way you built it. Image data is
 stored by its checksum, so two riders with the same paint share one copy.
@@ -88,7 +97,8 @@ included. The upload expires on its own after a few days.
 - Your account, paint sync, presence, voice and purchases: because you asked for the feature
   and it cannot work without them. In GDPR terms, performing the contract you are in when you
   use the app.
-- Crash reports, module reports, bans and the diagnostics behind them: legitimate interests.
+- Crash reports, module reports, bans, the machine fingerprint that makes a ban hold across
+  accounts, and the diagnostics behind them: legitimate interests.
   Specifically, keeping the game from crashing for everyone it crashes on, keeping cheats out
   of the lobbies people ride in, and keeping bought content from being stripped and handed
   around. We have weighed that against what it costs you, which is why the reports carry file
@@ -101,6 +111,7 @@ included. The upload expires on its own after a few days.
 | What | How long |
 | --- | --- |
 | Account, GUID, Steam link | Until you delete it |
+| Machine fingerprint (the salted one-way hash of your machine id) | Until you delete your account, banned or not |
 | Published paints, presence, queue | Until you delete it, or until you unpublish |
 | Module reports | 90 days |
 | Crash reports | Rider name and GUID wiped after 30 days, the row deleted after a year |
@@ -149,8 +160,9 @@ Two things survive a deletion, and they are named in the answer it gives you:
    working, and what keeps a creator's buyer list honest. Deleting them would take something
    off you, not give something back.
 
-Everything else goes, including the crash reports, the module reports, the paints and the
-presence, banned or not.
+Everything else goes, including the crash reports, the module reports, the paints, the
+presence and the machine fingerprint, banned or not. A ban survives through the GUID claims
+above; the fingerprint of your PC is not kept for it.
 
 ## Where it is held
 
@@ -172,4 +184,4 @@ above does it, and asking on Discord or by email works as well.
 Material changes are noted in the release notes of the version that carries them. The date at
 the bottom is when this text last changed.
 
-Last updated: 2026-09-17.
+Last updated: 2026-09-25.

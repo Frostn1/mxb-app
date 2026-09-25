@@ -3819,6 +3819,7 @@ dependencies = [
  "tokio",
  "uuid",
  "walkdir",
+ "windows-registry 0.6.1",
  "zip 2.4.2",
 ]
 

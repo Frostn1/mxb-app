@@ -29,7 +29,7 @@ consequences fall out of that, and they're baked into the schema:
 | GET | `/v1/servers` | — | Server registry. Public: it is the app's join picker, and the people who most need it are the ones with no account yet. `agent_url` is not returned. |
 | POST | `/v1/servers/:id/hello` | agent token | A provisioned box announcing that it is up. Its address is taken from `cf-connecting-ip`, never from the body, so a box cannot register somebody else's. |
 | GET | `/v1/me` | bearer | Account, and a per-bike summary of what is stored for it. Looks ordinary to a banned install on purpose — see below. |
-| GET | `/v1/app/gate` | bearer | The desktop apps' startup gate. `{status:"ok"}` to run; `{status:"signin"}` when `MXB_REQUIRE_STEAM` is on and the account has no confirmed Steam link (the app shows a sign-in wall); `{status:"unsupported"}` for a banned install (a mundane untruth, never the word "ban"). With `MXB_VERDICT_SIGNING_KEY` set, each answer also carries `signed: {payload, sig}` — see **Signed verdicts, and the offline policy**. |
+| GET | `/v1/app/gate` | bearer | The desktop apps' startup gate. `{status:"ok"}` to run; `{status:"signin"}` when `MXB_REQUIRE_STEAM` is on and the account has no confirmed Steam link (the app shows a sign-in wall); `{status:"unsupported"}` for a banned install (a mundane untruth, never the word "ban"). With `MXB_VERDICT_SIGNING_KEY` set, each answer also carries `signed: {payload, sig}` — see **Signed verdicts, and the offline policy**. Reads the optional `X-MXB-Device` header — see **Device links** under **Banning a rider**. |
 | PUT | `/v1/me/guid` | bearer | Claim a GUID. Derived from the linked Steam identity and pinned (the client's value is ignored) for a Steam account; first-come for a non-Steam one; refused if banned. |
 | PUT | `/v1/loadout` | bearer | Replace **one bike's** loadout. Kept for clients older than per-bike storage. |
 | PUT | `/v1/loadouts` | bearer | Replace the whole look, every bike at once. Returns `missing` — the blobs still to upload. |
@@ -399,10 +399,11 @@ the GUID in front of it, the GUID a Steam identity *derives to* (`guidFromSteamI
 copy the two are one value, so a banned Steam login needs no row in the database to be refused,
 which is the website's caller: signed in with Steam and possibly with no MXB App account at
 all), every GUID the calling account holds *or has ever claimed* (`guid_claims`), every account
-on the same Steam identity now or in the link log (`steam_links`), and every GUID those accounts
-have used. So a second account on the same Steam
-login, a fresh GUID claimed by a banned account, and a fresh Steam account on a banned install
-all resolve back to the ban. `guid_claims` exists for exactly the reason `steam_links` does:
+on the same Steam identity now or in the link log (`steam_links`), every account seen on the same
+machine (`device_links`, when device linking is on — see **Device links** below), and every GUID those
+accounts have used. So a second account on the same Steam
+login, a fresh GUID claimed by a banned account, a fresh Steam account on a banned install, and a
+fresh token on a banned PC all resolve back to the ban. `guid_claims` exists for exactly the reason `steam_links` does:
 `accounts.guid` is a single mutable cell, and a ban that only read it would end at a rename.
 
 **Asked at three doors, never per feature**, so a product added later inherits it:
@@ -502,6 +503,32 @@ next app release. Never commit the private half. It is a pair of its own, not th
 Rotating it is a release: a build treats a verdict signed by any other key as unsigned — it still
 acts on it, it just cannot keep it — and a block kept under the old key stays until a build with
 the old key sees a newer lift, or the app is updated.
+
+#### Device links
+
+A fresh token, or a fresh Steam account, on the same banned PC used to be a new identity. With
+`MXB_DEVICE_SALT` set it is not: the apps report the machine they run on in an `X-MXB-Device`
+header on `GET /v1/app/gate` and on `POST /v1/account`, and the worker ties the account to it in
+`device_links` (`src/devices.ts`, `0043_device_links.sql`). `banFor` then widens through it one
+hop, beside the Steam hop: every account seen on a device the caller has been seen on.
+
+The machine identifier itself never leaves the PC. The app sends SHA-256 of a domain tag and the
+OS's machine id (`crates/core/src/device.rs`: `MachineGuid` on Windows, `IOPlatformUUID` on
+macOS, `/etc/machine-id` on Linux); the worker keys that again with `HMAC-SHA256(MXB_DEVICE_SALT,
+…)` and stores only the result, so a copy of the table is useless without the secret. A report
+that is not 64 hex characters is ignored. Erasure (`DELETE /v1/me`) deletes an account's device
+links outright, a banned account's included — `docs/privacy.md` says so to the people it is about.
+
+Off unless configured: without the secret nothing is recorded, the resolution does not read the
+table, and no request fails either way. To turn it on:
+
+```sh
+bunx wrangler d1 migrations apply mxb-control-plane --remote   # 0043_device_links.sql first
+bunx wrangler secret put MXB_DEVICE_SALT                        # any long random string
+```
+
+Rotating the secret orphans every stored link — safe, but the links are forgotten until each
+install next opens.
 
 What a ban cannot reach is what carries no identity: the anonymous usage counters, the
 master-server probe, the shared server book, a live share code, and track generation (capped by

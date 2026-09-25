@@ -74,6 +74,11 @@ getrandom = "0.2"
 # The painting proxy's cut: seam-aware simplification that keeps every UV the source's own.
 meshopt = "0.6.2"
 
+[target.'cfg(windows)'.dependencies]
+# The machine id the ban device link hashes (`device.rs`): MachineGuid, read straight from the
+# registry rather than by spawning `reg.exe`.
+windows-registry = "0.6"
+
 [features]
 # Only the binary that owns the anonymous-stats reporting mints an install id, so only it
 # pulls `uuid` in. Everything else reads the id the manager already wrote.

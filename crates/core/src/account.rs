@@ -49,12 +49,16 @@ pub async fn ensure_token(app: &AppHandle) -> Result<String, String> {
         .timeout(HTTP_TIMEOUT)
         .build()
         .map_err(|e| format!("couldn't reach the service: {e}"))?;
-    let resp = client
-        .post(format!("{}/v1/account", control_plane()))
-        .json(&serde_json::json!({ "riderName": rider_name }))
-        .send()
-        .await
-        .map_err(|e| format!("couldn't reach the service: {e}"))?;
+    // The machine's one-way hash (`device.rs`), so the new account is tied to this PC from its
+    // first request — a fresh account on a banned machine is still that machine.
+    let resp = crate::device::with_device(
+        client
+            .post(format!("{}/v1/account", control_plane()))
+            .json(&serde_json::json!({ "riderName": rider_name })),
+    )
+    .send()
+    .await
+    .map_err(|e| format!("couldn't reach the service: {e}"))?;
     if !resp.status().is_success() {
         return Err(format!("the service turned down the sign-up ({})", resp.status()));
     }
