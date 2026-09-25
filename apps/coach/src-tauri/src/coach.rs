@@ -1180,14 +1180,41 @@ fn write_history(app: &AppHandle, track: &str, bike: &str, h: &crate::cues::Hist
 /// The newest lap of this track and bike worth coaching from, so a sheet written mid-session
 /// is about the laps the rider is riding now rather than the one they opened the page on.
 fn newest_lap(app: &AppHandle, track: &str, bike: &str) -> Option<(String, i32)> {
-    let sessions = all_sessions(app);
+    newest_lap_in(&all_sessions(app), track, bike)
+}
+
+/// [`newest_lap`] over `sessions`, which [`all_sessions`] lists newest first.
+///
+/// The newest session with a lap worth coaching from, and its last such lap. It used to take
+/// the last lap of the whole list, which, newest first, is the oldest session's: on a track
+/// ridden before, the live sheet was about a lap from the first time the rider went there.
+/// A session still being ridden counts. Its first whole, valid lap is usable the moment it is
+/// on disk, which is what lets coaching start on the lap after it.
+fn newest_lap_in(sessions: &[SessionSummary], track: &str, bike: &str) -> Option<(String, i32)> {
     sessions
         .iter()
         .filter(|s| s.track_id == track && s.bike_id == bike)
-        .flat_map(|s| s.laps.iter())
-        .filter(|l| l.comparable())
-        .next_back()
+        .find_map(|s| s.laps.iter().filter(|l| l.comparable()).next_back())
         .map(|l| (l.path.clone(), l.num))
+}
+
+/// Windows refusing to replace a file another process has open: `ERROR_SHARING_VIOLATION`, or
+/// `ERROR_ACCESS_DENIED`, which is how `MoveFileEx` usually reports the same thing.
+fn held_open(e: &std::io::Error) -> bool {
+    matches!(e.raw_os_error(), Some(32) | Some(5))
+}
+
+/// Move a sheet written aside into place, trying once more after a moment if the file is held
+/// open. Now that the recorder looks for a sheet while the rider rides, it can be reading the
+/// old one at the instant the new one lands, and that read is over in milliseconds.
+fn move_into_place(tmp: &Path, file: &Path) -> std::io::Result<()> {
+    match fs::rename(tmp, file) {
+        Err(e) if held_open(&e) => {
+            std::thread::sleep(Duration::from_millis(100));
+            fs::rename(tmp, file)
+        }
+        r => r,
+    }
 }
 
 /// Writes the live cues for this lap's track and bike: the few calls the recorder shows in
@@ -1245,7 +1272,7 @@ pub fn coach_write_cues(
     // Written aside and moved in, so the recorder never reads half a file.
     let tmp = dir.join(format!("{}.tmp", crate::cues::file_name(&rec.event.track_id, &rec.event.bike_id)));
     fs::write(&tmp, crate::cues::write(rec.event.track_length, &cues, amount)).map_err(err)?;
-    fs::rename(&tmp, &file).map_err(err)?;
+    move_into_place(&tmp, &file).map_err(err)?;
     // The HUD sheet beside it: the fast lap for the gap and the ghost, and each section's tip.
     // The sag prompt asks for a stop when this session has no standing-still sag yet.
     let hud_name = crate::hudsheet::file_name(&rec.event.track_id, &rec.event.bike_id);
@@ -1253,7 +1280,7 @@ pub fn coach_write_cues(
     let flags = if crate::sag::measure(&rec).is_some_and(|s| s.still) { 0 } else { crate::hudsheet::SAG_PROMPT };
     let hud_tmp = dir.join(format!("{hud_name}.tmp"));
     fs::write(&hud_tmp, crate::hudsheet::write(rec.event.track_length, &fast, &parts, flags)).map_err(err)?;
-    fs::rename(&hud_tmp, dir.join(&hud_name)).map_err(err)?;
+    move_into_place(&hud_tmp, &dir.join(&hud_name)).map_err(err)?;
     // Only once the sheet is really on disk: a write that failed is a sheet the rider never
     // heard, and it would be wrong to count it against them.
     write_history(&app, &rec.event.track_id, &rec.event.bike_id, &next);
@@ -1670,6 +1697,67 @@ mod tests {
         let r = best_reference(&all, "indiana", "crf250", None).unwrap();
         assert_eq!(r.path, "b", "no lap on this bike: the fastest on any");
         assert!(best_reference(&all, "nowhere", "kx450", None).is_none());
+    }
+
+    /// Only a file being held open is worth a second try; anything else fails at once.
+    #[test]
+    fn only_a_file_held_open_is_retried() {
+        use std::io::Error;
+        assert!(held_open(&Error::from_raw_os_error(32)), "sharing violation");
+        assert!(held_open(&Error::from_raw_os_error(5)), "access denied");
+        assert!(!held_open(&Error::from_raw_os_error(2)), "not found");
+        assert!(!held_open(&Error::new(std::io::ErrorKind::Other, "no code")));
+    }
+
+    #[test]
+    fn a_sheet_is_moved_into_place_over_the_old_one() {
+        let dir = std::env::temp_dir().join(format!("coach-move-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let (tmp, file) = (dir.join("a.cue.tmp"), dir.join("a.cue"));
+        fs::write(&file, b"old").unwrap();
+        fs::write(&tmp, b"new").unwrap();
+        move_into_place(&tmp, &file).unwrap();
+        assert_eq!(fs::read(&file).unwrap(), b"new");
+        assert!(!tmp.exists());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Live coaching follows the session being ridden. Sessions come newest first, and taking
+    /// the last lap of that list coached from the oldest session on the track instead.
+    #[test]
+    fn live_cues_follow_the_newest_session() {
+        let newest_first = [
+            session("today", "indiana", "kx450", &[(1, 61_000, true), (2, 60_000, true), (3, 0, false)]),
+            session("last-week", "indiana", "kx450", &[(1, 55_000, true), (2, 54_000, true)]),
+        ];
+        assert_eq!(
+            newest_lap_in(&newest_first, "indiana", "kx450"),
+            Some(("today".into(), 2)),
+            "today's last whole lap, not last week's and not the one still being ridden"
+        );
+    }
+
+    /// The usable-reference rule the in-game coaching starts from. On a new track the first
+    /// whole, valid lap of the session still being ridden is enough, so the next lap is
+    /// coached without a restart. Nothing else is: an out lap, a lap cut short or an invalid
+    /// one, another bike, another track.
+    #[test]
+    fn the_first_good_lap_of_a_new_track_is_enough_to_coach_from() {
+        let mut riding = session("now", "indiana", "kx450", &[(0, 0, false)]);
+        riding.complete = false;
+        assert_eq!(newest_lap_in(&[riding.clone()], "indiana", "kx450"), None, "only an out lap so far");
+
+        riding.laps.push(session("now", "indiana", "kx450", &[(1, 62_000, true)]).laps.remove(0));
+        assert_eq!(newest_lap_in(&[riding.clone()], "indiana", "kx450"), Some(("now".into(), 1)));
+        let r = best_reference(&[riding.clone()], "indiana", "kx450", None).expect("a reference to race");
+        assert_eq!((r.path.as_str(), r.lap), ("now", 1), "the same lap is the HUD's ghost");
+
+        let mut invalid = session("cut", "indiana", "kx450", &[(1, 50_000, true)]);
+        invalid.laps[0].invalid = true;
+        assert_eq!(newest_lap_in(&[invalid], "indiana", "kx450"), None, "an invalid lap");
+        assert_eq!(newest_lap_in(&[riding.clone()], "indiana", "yz250"), None, "another bike");
+        assert_eq!(newest_lap_in(&[riding], "erzberg", "kx450"), None, "another track");
     }
 
     /// The `.cue` and `.hud` sheets and `hud.ini` must land under one `mxbcoach` folder. They

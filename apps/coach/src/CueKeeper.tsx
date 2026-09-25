@@ -23,9 +23,22 @@ export default function CueKeeper() {
   useEffect(() => {
     let alive = true;
     let off: (() => void) | undefined;
+    // A change inside the gap is put off until the gap ends rather than dropped. Dropped, a lap
+    // finished within 45 s of the last pick waited for whatever the recorder wrote next, and
+    // the first sheet of a new track (the one that starts the in-game coaching) landed a lap late.
+    let later: ReturnType<typeof setTimeout> | undefined;
     const run = async () => {
       const now = Date.now();
-      if (busy.current || now - last.current < GAP_MS) return;
+      const wait = GAP_MS - (now - last.current);
+      if (busy.current || wait > 0) {
+        if (later === undefined && alive) {
+          later = setTimeout(() => {
+            later = undefined;
+            void run();
+          }, Math.max(wait, 1_000));
+        }
+        return;
+      }
       last.current = now;
       busy.current = true;
       try {
@@ -50,6 +63,7 @@ export default function CueKeeper() {
     });
     return () => {
       alive = false;
+      if (later !== undefined) clearTimeout(later);
       off?.();
     };
   }, []);

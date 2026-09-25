@@ -13,6 +13,12 @@
   switch games.
 
 ### Fixed
+- MXB Coach's live cues now follow the session you're riding. On a track you'd ridden before,
+  they were picked from a lap in your oldest session there.
+- MXB Coach no longer skips rewriting the cue sheet when a lap finishes less than 45 seconds after
+  the last rewrite. It does the rewrite as soon as the 45 seconds are up, so the first sheet on a
+  new track isn't a lap late. Coaching starting without a game restart also needs the recorder
+  fix in frostmod (Frostn1/frostmod `fix/coach-live-reference`).
 - Open track packages that carry helper files beside the track (generator or algorithm `.ini`, alternate
   layout `.rdf`) by selecting the folder-named `<track>/<track>.<ext>` entry.
 - Accept track RDFs with no `holeshot` block; a present holeshot is still strictly validated.
