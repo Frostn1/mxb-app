@@ -3,6 +3,11 @@
 ## Unreleased
 
 ### Added
+- The control plane can hand mxbsecure.com's FBX to EDF converter to invited accounts. It serves
+  the converter only to signed-in Steam accounts listed in `MXB_CONVERTER_STEAM_IDS`, plus
+  admins, and never to banned accounts. The files come from a new `mxb-fbx2edf` R2 bucket at
+  `/v1/web/fbx2edf/*`, and `/v1/web/me` reports `converter` so the site knows whether to
+  show it. The converter's own code is private and isn't in this repository.
 - Expose bounded beta21e TRH main-centreline projection for native server timing gates.
 - MXB App, MXB Coach and Frost Studio can each be uninstalled from their own Settings. Type the
   app's name to confirm, and the app closes and removes itself:
