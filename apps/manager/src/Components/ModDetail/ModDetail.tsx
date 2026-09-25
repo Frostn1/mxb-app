@@ -16,6 +16,7 @@ import {
   buildDestinations,
   buildRiderDestinations,
   defaultMirrorIndex,
+  entrySubpath,
   destStorageKey,
   getInstalledMods,
   getModDetail,
@@ -26,6 +27,8 @@ import {
   modLink,
   resetModsVerification,
   riderTarget,
+  routesByContent,
+  scanSubpaths,
   resolveInitialFolder,
   uninstallMod,
   scanBikeTargets,
@@ -173,7 +176,7 @@ export default function ModDetail({
         if (cancelled) return;
         setDetail(d);
         try {
-          const inst = await getInstalledMods(modType.installSubpath);
+          const inst = (await Promise.all(scanSubpaths(modType).map((s) => getInstalledMods(s)))).flat();
           if (cancelled) return;
           setInstalledFiles(inst);
           // OEM bikes own no file until they're painted, so the scan of `mods/bikes` can't
@@ -258,7 +261,7 @@ export default function ModDetail({
     setConfirmUninstall(false);
     setRemoving(true);
     try {
-      await uninstallMod(installedEntry.path, modType.installSubpath);
+      await uninstallMod(installedEntry.path, entrySubpath(installedEntry.path, modType));
       toast.success(
         t("library.uninstalledOne", { name: displayName(installedEntry.name) }),
         { description: t("library.movedToBin") },
@@ -554,9 +557,13 @@ export default function ModDetail({
                   {t("modDetail.fromHost", { host: primary.host })}
                   {mirrorNames.includes(",") ? ` (${mirrorNames})` : ""}
                   {" · "}
-                  <span className="font-mono">
-                    {`${modType.installSubpath.replace(/\//g, "\\")}\\`}
-                  </span>
+                  {routesByContent(modType) ? (
+                    <span>{t("modType.autoDest")}</span>
+                  ) : (
+                    <span className="font-mono">
+                      {`${modType.installSubpath.replace(/\//g, "\\")}\\`}
+                    </span>
+                  )}
                 </p>
                 {/* Only once it's actually on disk. Riders asked for it here because a track
                     they just downloaded and didn't like meant a trip to the Library. */}

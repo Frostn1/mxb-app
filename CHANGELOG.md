@@ -3,6 +3,12 @@
 ## Unreleased
 
 ### Added
+- Bikelife in Browse: mxb-mods.com's street and wheelie category (supermoto liveries and
+  builds, streetwear, packs) gets its own tab. It's listed from mxb-mods like every other
+  category, and each download comes from the post's own links. Because the category mixes
+  kinds of mod, each download opens the install review, which sorts every item into Bikes
+  or Rider by what it is. A helmet or jersey paint on its own is now recognised as rider
+  gear there, and when you drop it in, instead of being mistaken for a bike paint.
 - Expose bounded beta21e TRH main-centreline projection for native server timing gates.
 - MXB App, MXB Coach and Frost Studio can each be uninstalled from their own Settings. Type the
   app's name to confirm, and the app closes and removes itself:

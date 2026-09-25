@@ -32,7 +32,7 @@ import { DropReviewProvider } from "../../Context/DropReview";
 import { ShareProvider } from "../../Context/Share";
 import { useConfig } from "@frost/shared/Context/Config";
 import { useT } from "@/i18n";
-import { modTypesFor, onDeepLink, setIntroSeen } from "@frost/shared/api/mods";
+import { modTypesFor, onDeepLink, routesByContent, setIntroSeen } from "@frost/shared/api/mods";
 import { useModBrowsing } from "../../lib/useModBrowsing";
 import { displayName } from "@frost/shared/lib/mods";
 import { track } from "../../lib/analytics";
@@ -81,6 +81,9 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
     openModTarget,
     closeMod,
   } = useModBrowsing(showBrowse, game.id, isModsView(view));
+  // The Library shares Browse's type, but a type that sorts downloads by content (Bikelife)
+  // has no folder of its own to list. Show Bikes there instead, where most of it lands.
+  const libraryType = routesByContent(modType) ? (modTypes.find((t) => t.id === "bikes") ?? modTypes[0]) : modType;
 
   // Which Settings section to land on, when something sent us there on purpose.
   // Cleared on the way out so a later visit opens where Settings normally opens.
@@ -362,7 +365,7 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
           </RetainedView>
           <RetainedView active={builtInsActive && view === "library"} slots={ctxSlots}>
             <Library
-              modType={modType}
+              modType={libraryType}
               onChangeType={changeType}
               refreshKey={libraryVersion}
               onChanged={onInstalled}

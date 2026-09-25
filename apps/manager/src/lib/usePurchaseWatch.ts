@@ -28,7 +28,7 @@ import { useCallback, useEffect, useRef } from "react";
 import { toast } from "sonner";
 import {
   buildDestinations,
-  modTypesFor,
+  purchaseModTypes,
   resolveInitialFolder,
   scanLibrary,
   shopMyDownloads,
@@ -120,7 +120,7 @@ export function usePurchaseWatch() {
   /** Queue one file, worked out exactly as the Install dialog would have defaulted it. */
   const enqueue = useCallback(async (store: StoreId, owned: Owned) => {
     const { game: g, startShopInstall: shop, startHubInstall: hub } = env.current;
-    const modType = typeFor(owned.categories, modTypesFor(g.id));
+    const modType = typeFor(owned.categories, purchaseModTypes(g.id));
     const installedThere = await scanLibrary(modType.installSubpath).catch(() => []);
     const dest = buildDestinations(modType, owned.product, installedThere);
     // `resolveInitialFolder` honours the folder this mod type was last installed to, so an

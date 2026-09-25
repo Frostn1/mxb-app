@@ -161,6 +161,9 @@ export const it: Record<keyof typeof en, string> = {
 
   "modType.reshade": "ReShade",
   "modType.reshadeInline": "preset ReShade",
+  "modType.bikelife": "Bikelife",
+  "modType.bikelifeInline": "mod bikelife",
+  "modType.autoDest": "Moto o Pilota, in base al contenuto",
   "trackViewer.title": "Anteprima tracciato",
   "trackViewer.loading": "Lettura del terreno…",
   "trackViewer.refining": "Definizione…",
