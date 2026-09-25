@@ -454,10 +454,17 @@ pub fn enforce_marker(app: &AppHandle) {
                 }
                 deny(app, &message);
             }
-            // The server says this install may run. The per-app marker was only ever as good as
-            // the unsigned answer that wrote it, so any fresh answer lifts it, as `check` always
-            // did; a signed block needs a newer signed lift, which `ask` has kept if one came.
-            _ => unmark(app),
+            // The server says this install may run, live, now: this launch goes ahead. The per-app
+            // marker was only ever as good as the unsigned answer that wrote it, so any fresh
+            // answer lifts it, as `check` always did. A stored signed block is cleared only by a
+            // newer signed lift, which `ask` has kept if one came; without one (the signing key
+            // unset, broken, or rotated before the apps carry the new public key) the block stays
+            // for offline launches, but a user the server has let back in is never refused while
+            // the server is saying so. The server refuses a banned account's every call anyway.
+            _ => {
+                unmark(app);
+                return;
+            }
         }
     }
     if let Some(message) = blocked(app) {
