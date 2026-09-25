@@ -13,6 +13,10 @@
   switch games.
 
 ### Fixed
+- The MXBMRP3 suggestion stays in step everywhere it shows. "Suggest it again" in Settings
+  brings the banner back, and "Not now" on the setup card also hides it on the dashboard. Its
+  check no longer runs on the window's thread, so a slow or sleeping game drive can't freeze
+  the app.
 - MXB Coach's live cues now follow the session you're riding. On a track you'd ridden before,
   they were picked from a lap in your oldest session there.
 - MXB Coach no longer skips rewriting the cue sheet when a lap finishes less than 45 seconds after
