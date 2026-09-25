@@ -251,6 +251,8 @@ fn main() {
             mxb_core::survey::survey_answer,
             mxb_core::survey::survey_dismiss,
             mxb_core::survey::set_survey_enabled,
+            mxb_core::uninstall::uninstall_info,
+            mxb_core::uninstall::uninstall_app,
         ])
         .build(tauri::generate_context!())
         .expect("error while running MXB Coach")

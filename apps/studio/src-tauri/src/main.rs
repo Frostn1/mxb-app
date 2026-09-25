@@ -155,6 +155,8 @@ fn main() {
             mxb_core::survey::survey_answer,
             mxb_core::survey::survey_dismiss,
             mxb_core::survey::set_survey_enabled,
+            mxb_core::uninstall::uninstall_info,
+            mxb_core::uninstall::uninstall_app,
             steam_link_start,
             steam_link_status,
             recheck_gate,

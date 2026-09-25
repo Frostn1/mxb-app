@@ -150,6 +150,7 @@ import {
 } from "@frost/shared/Components/ui/select";
 import { Switch } from "@frost/shared/Components/ui/switch";
 import SurveySetting from "@frost/shared/Components/Survey/SurveySetting";
+import UninstallSetting from "@frost/shared/Components/Uninstall/UninstallSetting";
 import { cn } from "@frost/shared/lib/utils";
 import { Mxbmrp3SettingsRow } from "../Mxbmrp3/Mxbmrp3Suggestion";
 
@@ -2765,6 +2766,10 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
                   Frost
                 </button>
               </div>
+            </div>
+            {/* The same row Coach and the Studio show. */}
+            <div className="mt-2 border-t border-border pt-4">
+              <UninstallSetting />
             </div>
           </Section>
           )}

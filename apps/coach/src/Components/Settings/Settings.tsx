@@ -5,6 +5,7 @@ import { getVersion } from "@tauri-apps/api/app";
 import { open } from "@tauri-apps/plugin-dialog";
 import { revealInExplorer } from "@frost/shared/api/mods";
 import SurveySetting from "@frost/shared/Components/Survey/SurveySetting";
+import UninstallSetting from "@frost/shared/Components/Uninstall/UninstallSetting";
 import { Button } from "@frost/shared/Components/ui/button";
 import { Switch } from "@frost/shared/Components/ui/switch";
 import HotkeyField from "@frost/shared/Components/HotkeyField";
@@ -291,6 +292,11 @@ export default function Settings() {
         {(status?.sessionDirs.length ? status.sessionDirs : [""]).map((dir, k) => (
           <Row key={dir || k} label={t("coachSettings.sessions")} value={dir} onOpen={() => void show(openFolder(dir))} />
         ))}
+      </div>
+
+      {/* Last on the page, the same row MXB App and the Studio show. */}
+      <div className="mt-8 border border-border bg-card px-4 py-4">
+        <UninstallSetting />
       </div>
     </Page>
   );

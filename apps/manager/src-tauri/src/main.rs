@@ -8343,6 +8343,8 @@ fn main() {
             mxb_core::survey::survey_answer,
             mxb_core::survey::survey_dismiss,
             mxb_core::survey::set_survey_enabled,
+            mxb_core::uninstall::uninstall_info,
+            mxb_core::uninstall::uninstall_app,
             set_launch_at_startup,
             set_auto_run_frostmod,
             set_queue_restart_game,

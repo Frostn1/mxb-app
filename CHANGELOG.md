@@ -4,6 +4,17 @@
 
 ### Added
 - Expose bounded beta21e TRH main-centreline projection for native server timing gates.
+- MXB App, MXB Coach and Frost Studio can each be uninstalled from their own Settings. Type the
+  app's name to confirm, and the app closes and removes itself:
+  - Windows: its own uninstaller opens.
+  - macOS: the app goes to the Trash.
+  - AppImage: the file is deleted.
+  - .deb/.rpm: you get the command to run.
+
+  "Also delete my data" is off by default and removes only that app's settings, caches and logs.
+  It's never the game folder, mods, recordings or another app's data. MXB App's data folder is
+  also where Coach and Studio keep their settings, so that option is unavailable while either
+  of them is installed.
 - If MXBMRP3 (thomas4f's free HUD plugin: standings, timing, gap to your best, track map, radar)
   isn't in your game's `plugins` folder, the app suggests it. The suggestion appears on the last
   setup step and at the top of the app, and links to its official GitHub releases. "Not now"

@@ -45,6 +45,7 @@ pub mod scenery;
 pub mod securesource;
 pub mod steamid;
 pub mod survey;
+pub mod uninstall;
 pub mod texstore;
 pub mod track;
 pub mod tracksource;
