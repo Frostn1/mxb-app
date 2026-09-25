@@ -32,10 +32,13 @@ pub enum Role {
     WheelR,
     Levers,
     Pedals,
+    /// Accessories that hang off the steer: made in the Part Maker, or brought like any part.
+    Handguards,
+    Plate,
 }
 
 impl Role {
-    pub const ALL: [Role; 8] = [
+    pub const ALL: [Role; 10] = [
         Role::Chassis,
         Role::Steer,
         Role::Fsusp,
@@ -44,6 +47,8 @@ impl Role {
         Role::WheelR,
         Role::Levers,
         Role::Pedals,
+        Role::Handguards,
+        Role::Plate,
     ];
 }
 
@@ -65,6 +70,10 @@ const HINTS: &[(&str, Role)] = &[
     ("fsusp", Role::Fsusp),
     ("frontsusp", Role::Fsusp),
     ("fork", Role::Fsusp),
+    ("handguard", Role::Handguards),
+    ("brushguard", Role::Handguards),
+    ("numberplate", Role::Plate),
+    ("frontplate", Role::Plate),
     ("triple", Role::Steer),
     ("handlebar", Role::Steer),
     ("steer", Role::Steer),
@@ -202,6 +211,10 @@ impl Library {
         Self { root: root.into() }
     }
 
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
+
     pub fn part_dir(&self, id: &str) -> PathBuf {
         self.root.join(id)
     }
@@ -243,6 +256,18 @@ impl Library {
     /// while the job ran still shows as changed. Re-adding a part keeps a role the rider
     /// chose and its place in the list.
     pub fn add(&self, source: &Path, answer: &serde_json::Value, stamp: String) -> anyhow::Result<Part> {
+        self.add_as(source, answer, stamp, None)
+    }
+
+    /// [`Library::add`], with the role said rather than guessed: Studio's own parts (the
+    /// placeholder bike, the Part Maker's) know what they are.
+    pub fn add_as(
+        &self,
+        source: &Path,
+        answer: &serde_json::Value,
+        stamp: String,
+        known: Option<Role>,
+    ) -> anyhow::Result<Part> {
         let id = part_id(source);
         let dir = self.part_dir(&id);
         std::fs::create_dir_all(&dir)?;
@@ -252,6 +277,7 @@ impl Library {
         let names: Vec<&str> = objects.iter().filter_map(|o| o["name"].as_str()).collect();
         let stem = source.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
         let (role, role_guessed) = match &before {
+            _ if known.is_some() => (known, false),
             Some(p) if !p.role_guessed => (p.role, false),
             _ => (guess_role(&stem, names.iter().copied()), true),
         };
@@ -441,6 +467,8 @@ mod tests {
         assert_eq!(guess_role("clutch lever", []), Some(Role::Levers));
         assert_eq!(guess_role("footpegs", []), Some(Role::Pedals));
         assert_eq!(guess_role("frame_450", []), Some(Role::Chassis));
+        assert_eq!(guess_role("KTM handguards", []), Some(Role::Handguards));
+        assert_eq!(guess_role("front number plate", []), Some(Role::Plate));
         // The file says nothing: the objects vote.
         assert_eq!(guess_role("part01", ["fork_l", "fork_r", "axle"]), Some(Role::Fsusp));
         assert_eq!(guess_role("part01", ["Cube", "Cube.001"]), None);

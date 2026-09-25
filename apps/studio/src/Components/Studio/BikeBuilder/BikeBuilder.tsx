@@ -5,20 +5,27 @@ import { toast } from "sonner";
 import { Button } from "@frost/shared/Components/ui/button";
 import { useT } from "@/i18n";
 import { blenderStatus, setBlenderPath, type BlenderStatus } from "../../../api/bikebuild";
+import Assembly from "./Assembly";
 import PartLibrary from "./PartLibrary";
+import PartMaker from "./PartMaker";
 
 /**
  * Bike builder: put a bike together from parts, without having to be good at Blender.
  *
  * Studio chooses the parts and where they go; the rider's own Blender, run in the
  * background, does the importing, placing and exporting (see `src-tauri/src/blender.rs`).
- * Here: find Blender, then the part library — parts added once, each given a role, and one
- * slot per role for the bike being built.
+ * Two modes. Assemble: the part library (parts added once, each given a role, one slot per
+ * role), the bike put together on its template in 3D, and the build. Part Maker: parts made
+ * from templates and briefs, which join the same library.
  */
 export default function BikeBuilder() {
   const t = useT();
   const [status, setStatus] = useState<BlenderStatus | null>(null);
   const [checking, setChecking] = useState(false);
+  const [mode, setMode] = useState<"assemble" | "maker">("assemble");
+  /** Bumped whenever one panel changes the library, so the others read it again. */
+  const [version, setVersion] = useState(0);
+  const changed = useCallback(() => setVersion((v) => v + 1), []);
 
   const check = useCallback(() => {
     setChecking(true);
@@ -101,7 +108,21 @@ export default function BikeBuilder() {
         </div>
       </section>
 
-      <PartLibrary ready={ready} />
+      <div className="flex gap-1">
+        {(["assemble", "maker"] as const).map((m) => (
+          <Button key={m} size="sm" variant={mode === m ? "default" : "outline"} onClick={() => setMode(m)}>
+            {t(m === "assemble" ? "bike.modeAssemble" : "bike.modeMaker")}
+          </Button>
+        ))}
+      </div>
+      {mode === "assemble" ? (
+        <>
+          <PartLibrary ready={ready} version={version} onChanged={changed} />
+          <Assembly ready={ready} version={version} onChanged={changed} />
+        </>
+      ) : (
+        <PartMaker ready={ready} onChanged={changed} />
+      )}
     </div>
   );
 }

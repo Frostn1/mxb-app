@@ -15,6 +15,14 @@ use mxb_core::antidebug;
 // The studio's own modules: making a track, packing a paint, sealing content for a buyer.
 /// The bike builder's parts, catalogued once and kept.
 mod bikeparts;
+/// Where the bike builder's parts go, and the frames the game places them from.
+mod bikeassemble;
+/// The bike builder past the library: assembling it, and the preview's data.
+mod bikecmd;
+/// The bike builder's output: a bike folder from the slotted parts.
+mod bikebuild;
+/// The bike builder's Part Maker: parts made from templates and briefs.
+mod partmaker;
 mod blender;
 mod edfwrite;
 mod gearrepair;
@@ -201,6 +209,17 @@ fn main() {
             bike_part_set_role,
             bike_part_remove,
             bike_slot_set,
+            bikecmd::bike_placeholder_add,
+            bikecmd::bike_assembly,
+            bikecmd::bike_nudge,
+            bikecmd::bike_template_set,
+            bikecmd::bike_build_name_set,
+            bikecmd::bike_part_glb,
+            bikebuild::bike_build,
+            partmaker::bike_make_templates,
+            partmaker::bike_make_preview,
+            partmaker::bike_make_keep,
+            partmaker::bike_make_ask,
             scan_gear_repairs,
             repair_gear,
             generate_track,

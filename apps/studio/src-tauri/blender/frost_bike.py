@@ -25,7 +25,11 @@ import sys
 import traceback
 
 import bpy
-from mathutils import Vector
+from mathutils import Matrix, Vector
+
+# frost_make.py (placeholder parts, Part Maker templates) is written beside this file.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import frost_make  # noqa: E402
 
 MESH_EXTS = {".blend", ".fbx", ".obj"}
 
@@ -192,14 +196,10 @@ def render_thumb(path, meshes, size):
     return os.path.isfile(path)
 
 
-def op_catalog(job):
-    """Phase B: what the part library keeps of a part. Its objects, its attach empties, a
-    thumbnail, and a GLB for the preview. A thumbnail that won't render is a part without
-    a picture, never a part that can't be added."""
-    empty_scene()
-    objs = import_part(job["part"])
-    if not objs:
-        raise ValueError("nothing to import in %s" % os.path.basename(job["part"]))
+def catalog(objs, job):
+    """What the part library keeps of the objects now in the scene: their descriptions, attach
+    empties, a thumbnail, and a GLB for the preview. A thumbnail that won't render is a part
+    without a picture, never a part that can't be added."""
     meshes = [o for o in objs if o.type == "MESH"]
     out = {
         "objects": [describe(o) for o in objs],
@@ -219,7 +219,234 @@ def op_catalog(job):
     return out
 
 
-OPS = {"inspect": op_inspect, "catalog": op_catalog}
+def op_catalog(job):
+    """Phase B: one part file, catalogued for the library."""
+    empty_scene()
+    objs = import_part(job["part"])
+    if not objs:
+        raise ValueError("nothing to import in %s" % os.path.basename(job["part"]))
+    return catalog(objs, job)
+
+
+def save_part(path):
+    """The scene as a part file of its own, which the library then treats like any other."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    bpy.ops.wm.save_as_mainfile(filepath=path, copy=True, check_existing=False)
+
+
+def op_placeholder(job):
+    """Studio's placeholder bike, one .blend per role, each catalogued as it's made: so the
+    whole builder can be tried before anyone brings parts. One Blender run for all eight."""
+    parts = []
+    for role in frost_make.PLACEHOLDER_ROLES:
+        empty_scene()
+        frost_make.placeholder(role)
+        bpy.context.view_layer.update()
+        path = os.path.join(job["dir"], "placeholder_%s.blend" % role)
+        save_part(path)
+        work = os.path.join(job["work"], role)
+        os.makedirs(work, exist_ok=True)
+        answer = catalog(list(bpy.context.scene.objects), {
+            "thumb": os.path.join(work, "thumb.png"),
+            "thumbSize": job.get("thumbSize"),
+            "glb": os.path.join(work, "part.glb"),
+        })
+        answer["role"] = role
+        answer["part"] = path
+        parts.append(answer)
+    return {"parts": parts}
+
+
+def op_templates(job):
+    return {"templates": frost_make.describe_templates()}
+
+
+# What model-written code may use. Checked before it runs, as well as run with only these
+# names: a part is geometry, so nothing here reaches the file system, the network or Blender's
+# own settings.
+SAFE_MODULES = {"bpy", "bmesh", "math", "mathutils", "random"}
+SAFE_BUILTINS = {
+    "abs", "all", "any", "bool", "dict", "enumerate", "float", "int", "isinstance", "len",
+    "list", "max", "min", "print", "range", "reversed", "round", "set", "sorted", "str",
+    "sum", "tuple", "zip", "ValueError", "Exception", "True", "False", "None",
+}
+BANNED_NAMES = {
+    "eval", "exec", "compile", "open", "input", "globals", "locals", "vars", "getattr",
+    "setattr", "delattr", "breakpoint", "help", "memoryview", "type", "object", "super",
+}
+# Attribute chains no part needs: files, scripts, preferences, add-ons, handlers, drivers.
+BANNED_ATTRS = {
+    "wm", "script", "preferences", "utils", "app", "libraries", "texts", "filepath",
+    "export_scene", "import_scene", "import_mesh", "export_mesh", "file", "image", "images",
+    "driver_add", "driver_namespace", "drivers", "handlers", "addon_utils", "render",
+    "sequencer", "console", "text", "screen", "window", "window_manager", "context_pointer_set",
+    "gi_frame", "f_globals", "f_builtins", "cr_frame", "tb_frame",
+}
+
+
+def check_code(src):
+    """Refuse code that steps outside making geometry, before any of it runs."""
+    import ast
+
+    tree = ast.parse(src, mode="exec")
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            mods = [a.name for a in node.names] if isinstance(node, ast.Import) else [node.module or ""]
+            for m in mods:
+                if m.split(".")[0] not in SAFE_MODULES:
+                    raise ValueError("the code imports %s, which a part doesn't need" % m)
+            # `from random import __builtins__ as b` names no banned Name or Attribute node at
+            # all: it is the import itself that hands out a live, unrestricted namespace. Every
+            # name an import binds, on either side of `as`, is checked the same as a bare name.
+            for a in node.names:
+                for bound in (a.name, a.asname):
+                    if bound and (bound in BANNED_NAMES or bound.startswith("_") or "__" in bound):
+                        raise ValueError("the code imports %s, which a part doesn't need" % bound)
+        elif isinstance(node, ast.Name) and (node.id in BANNED_NAMES or node.id.startswith("__")):
+            raise ValueError("the code uses %s, which a part doesn't need" % node.id)
+        elif isinstance(node, ast.Attribute) and (node.attr in BANNED_ATTRS or node.attr.startswith("_")):
+            raise ValueError("the code reaches for .%s, which a part doesn't need" % node.attr)
+        elif isinstance(node, (ast.Global, ast.Nonlocal, ast.AsyncFunctionDef, ast.Await, ast.Lambda)):
+            raise ValueError("the code uses %s, which a part doesn't need" % type(node).__name__)
+        elif isinstance(node, ast.Constant) and isinstance(node.value, str) and "__" in node.value:
+            raise ValueError("the code carries a dunder string")
+    return tree
+
+
+def run_code(src, role, mount):
+    """Run checked code that builds a part. It gets the template helpers, not the file system."""
+    check_code(src)
+    import builtins
+    import importlib
+    import bmesh
+    import random
+
+    def safe_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if level != 0 or name.split(".")[0] not in SAFE_MODULES:
+            raise ImportError(name)
+        return importlib.__import__(name, globals, locals, fromlist, level)
+
+    safe = {n: getattr(builtins, n) for n in SAFE_BUILTINS if hasattr(builtins, n)}
+    safe["__import__"] = safe_import
+    env = {
+        "__builtins__": safe,
+        "bpy": bpy, "bmesh": bmesh, "math": math, "random": random, "Vector": Vector, "Matrix": Matrix,
+        "material": frost_make.material, "hex_rgba": frost_make.hex_rgba, "empty": frost_make.empty,
+        "tube": frost_make.tube, "box": frost_make.box, "curve_object": frost_make.curve_object,
+        "to_mesh": frost_make.to_mesh,
+    }
+    exec(compile(src, "<part maker>", "exec"), env)
+    # Whatever it made hangs from one root with the mount empty the builder snaps by.
+    objs = list(bpy.context.scene.objects)
+    if not any(o.type == "MESH" for o in objs):
+        raise ValueError("the code made no geometry")
+    names = {o.name.split(".")[0].lower() for o in objs if o.type == "EMPTY"}
+    root = frost_make.empty(role, (0, 0, 0))
+    if mount and mount not in names:
+        frost_make.empty(mount, (0, 0, 0), root)
+    for o in objs:
+        if o.parent is None:
+            mw = o.matrix_world.copy()
+            o.parent = root
+            o.matrix_world = mw
+    return root
+
+
+def op_make(job):
+    """The Part Maker: build a part from a template and its sliders, or from checked code, save
+    it as a .blend, and catalog it for the preview."""
+    empty_scene()
+    if job.get("code"):
+        role = job.get("role") or "handguards"
+        run_code(job["code"], role, frost_make.ROLE_MOUNT.get(role))
+    else:
+        t = frost_make.TEMPLATES.get(job.get("template"))
+        if t is None:
+            raise ValueError("no template %r" % job.get("template"))
+        t["make"](job.get("params") or {})
+        role = t["role"]
+    bpy.context.view_layer.update()
+    save_part(job["blend"])
+    out = catalog(list(bpy.context.scene.objects), job)
+    out["role"] = role
+    out["blend"] = job["blend"]
+    return out
+
+
+def op_assemble(job):
+    """Phase E: the slotted parts, each moved onto its anchor and carried into the frame of
+    the game part it's built into, under roots named for those parts. Exported as the model's
+    FBX, then again as a low, plain white shadow.
+
+    The roots sit at the origin, unturned: the converter keeps a root's rotation and drops
+    its position, and the template's .geom places each part, so all the placing is in the
+    meshes. Empties are dropped; the lever and peg objects keep their names, which the
+    game's gfx.cfg animates them by.
+    """
+    empty_scene()
+    roots = {}
+    for group in job["groups"]:
+        root = bpy.data.objects.new(group, None)
+        bpy.context.scene.collection.objects.link(root)
+        roots[group] = root
+    for p in job["parts"]:
+        objs = import_part(p["source"])
+        into = Matrix(job["groups"][p["group"]]) @ Matrix.Translation(Vector(p["offset"]))
+        worlds = {o: into @ o.matrix_world for o in objs if o.type == "MESH"}
+        for o, w in worlds.items():
+            o.parent = roots[p["group"]]
+            o.matrix_parent_inverse = Matrix.Identity(4)
+            o.matrix_world = w
+        for o in objs:
+            if o.type != "MESH":
+                bpy.data.objects.remove(o)
+    bpy.context.view_layer.update()
+    for group in [g for g, r in roots.items() if not r.children]:
+        bpy.data.objects.remove(roots.pop(group))
+    tris = {}
+    for group, root in roots.items():
+        tris[group] = 0
+        for o in root.children:
+            o.data.calc_loop_triangles()
+            tris[group] += len(o.data.loop_triangles)
+    export_fbx(job["fbx"])
+
+    # The shadow: each part's meshes joined and cut down, one white material.
+    white = frost_make.material("shadow", (1, 1, 1, 1), roughness=1.0)
+    target = int(job.get("shadowTris") or 600)
+    shadow_tris = {}
+    for group, root in roots.items():
+        kids = [o for o in root.children if o.type == "MESH"]
+        bpy.ops.object.select_all(action="DESELECT")
+        for o in kids:
+            o.select_set(True)
+        bpy.context.view_layer.objects.active = kids[0]
+        if len(kids) > 1:
+            bpy.ops.object.join()
+        joined = bpy.context.view_layer.objects.active
+        joined.name = group + "_shadow"
+        joined.data.materials.clear()
+        joined.data.materials.append(white)
+        joined.data.calc_loop_triangles()
+        have = len(joined.data.loop_triangles)
+        if have > target:
+            mod = joined.modifiers.new("decimate", "DECIMATE")
+            mod.ratio = max(0.01, target / have)
+            bpy.ops.object.modifier_apply(modifier=mod.name)
+        joined.data.calc_loop_triangles()
+        shadow_tris[group] = len(joined.data.loop_triangles)
+    export_fbx(job["shadowFbx"])
+    return {"fbx": job["fbx"], "shadowFbx": job["shadowFbx"], "tris": tris, "shadowTris": shadow_tris}
+
+
+OPS = {
+    "inspect": op_inspect,
+    "catalog": op_catalog,
+    "placeholder": op_placeholder,
+    "templates": op_templates,
+    "make": op_make,
+    "assemble": op_assemble,
+}
 
 
 def main():
