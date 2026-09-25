@@ -28,7 +28,8 @@ import {
 import {
   buildDestinations,
   destStorageKey,
-  modTypesFor,
+  librarySubpaths,
+  purchaseModTypes,
   resolveInitialFolder,
   scanLibrary,
   shopInstalledMap,
@@ -186,7 +187,7 @@ export default function HubPurchases({ refreshKey }: HubPurchasesProps) {
   // so scanning one subfolder would leave most of it unbadged.
   useEffect(() => {
     let cancelled = false;
-    const subpaths = modTypesFor(game.id).map((m) => m.installSubpath);
+    const subpaths = librarySubpaths(game.id);
     scanLibrariesSequentially(subpaths)
       .then((scans) => {
         if (cancelled) return;
@@ -286,7 +287,7 @@ export default function HubPurchases({ refreshKey }: HubPurchasesProps) {
   const typeFor = useCallback(
     (p: HubPurchase): ModType => {
       const names = (p.listing?.categoryNames ?? []).join(" ").toLowerCase();
-      const types = modTypesFor(game.id);
+      const types = purchaseModTypes(game.id);
       return (
         types.find((mt) => names.includes(mt.id)) ??
         types.find((mt) => mt.id === "track" && names.includes("track")) ??

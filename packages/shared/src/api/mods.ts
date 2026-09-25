@@ -96,6 +96,14 @@ export interface ModType {
  *  uses it because that one is a `const` array evaluated at module load. */
 export const RESHADE_SUBPATH = "reshade";
 
+/** Routes an install by what the download holds, each item to its own folder, through the
+ *  review sheet. For a category that mixes kinds of mod, like Bikelife's liveries and
+ *  streetwear. Must match `install::AUTO_SUBPATH` in the backend. */
+export const AUTO_SUBPATH = "auto";
+
+/** Where an auto-routed type's mods can end up, for "is it installed" checks. */
+export const AUTO_SCAN_SUBPATHS = ["mods/bikes", "mods/rider"];
+
 /**
  * Browse categories per game.
  *
@@ -222,11 +230,55 @@ export const MOD_TYPES: ModType[] = [
     installSubpath: RESHADE_SUBPATH,
     categories: [{ id: 174, label: "browseCat.all" }],
   },
+  {
+    id: "bikelife",
+    label: "modType.bikelife",
+    labelInline: "modType.bikelifeInline",
+    // mxb-mods' "Bikelife" category, the street and wheelie scene. It sits under Misc (40)
+    // and mixes supermoto liveries and builds with streetwear, so a download is sorted by
+    // what it holds (each item into bikes or rider) instead of into one folder.
+    categoryId: 175,
+    installSubpath: AUTO_SUBPATH,
+    categories: [{ id: 175, label: "browseCat.all" }],
+  },
 ];
 
 /** Does this mod type install outside the mods tree? Only ReShade presets do. */
 export function installsOutsideMods(modType: ModType): boolean {
   return modType.installSubpath === RESHADE_SUBPATH;
+}
+
+/** Does this type sort each download by content, rather than own one folder? It then has no
+ *  Library tab of its own, and "installed" is looked up across [`AUTO_SCAN_SUBPATHS`]. */
+export function routesByContent(modType: ModType): boolean {
+  return modType.installSubpath === AUTO_SUBPATH;
+}
+
+/** The folders a type's installed mods are found in. */
+export function scanSubpaths(modType: ModType): string[] {
+  return routesByContent(modType) ? AUTO_SCAN_SUBPATHS : [modType.installSubpath];
+}
+
+/** The folder an installed mod of `modType` is in, from its path: the type's own, or for an
+ *  auto-routed type whichever of [`AUTO_SCAN_SUBPATHS`] holds it. What Uninstall is given. */
+export function entrySubpath(path: string, modType: ModType): string {
+  if (!routesByContent(modType)) return modType.installSubpath;
+  const norm = path.replace(/\\/g, "/").toLowerCase();
+  return AUTO_SCAN_SUBPATHS.find((s) => norm.includes(`/${s}/`)) ?? AUTO_SCAN_SUBPATHS[0];
+}
+
+/** The types a store purchase can be filed under. Never an auto-routed one: the shop places a
+ *  purchase whole and frees its download straight after, so there's nothing left for a review
+ *  to sort. The store's "Freeride / FMX / BikeLife" category would otherwise match Bikelife
+ *  by name. */
+export function purchaseModTypes(game: GameId | undefined): ModType[] {
+  return modTypesFor(game).filter((mt) => !routesByContent(mt));
+}
+
+/** Every folder the Library and the purchase checks scan for `game`: each type's own, with
+ *  an auto-routed type standing for the folders it sorts into. */
+export function librarySubpaths(game: GameId | undefined): string[] {
+  return [...new Set(modTypesFor(game).flatMap(scanSubpaths))];
 }
 
 MOD_TYPES_BY_GAME.mxb = MOD_TYPES;
@@ -2398,7 +2450,7 @@ export async function resolveQuickInstall(
   let installed: InstalledMod[] = [];
   let bikeTargets: string[] = [];
   try {
-    installed = await getInstalledMods(modType.installSubpath);
+    installed = (await Promise.all(scanSubpaths(modType).map((s) => getInstalledMods(s)))).flat();
   } catch {
     installed = [];
   }
