@@ -3,6 +3,14 @@
 ## Unreleased
 
 ### Added
+- mxbsecure.com's GUID lock asks the control plane before it locks (`POST /v1/web/lock/permit`), and
+  a file can no longer be locked to a banned GUID. The creator is told only that the file couldn't
+  be locked, the same words as any other failed lock; the reason goes to the Worker's log
+  (`lock permit refused`, with the creator's account, Steam id and the GUIDs asked for). Each
+  creator may ask for 100 GUIDs an hour, so the refusal can't be used to scan the ban list, and
+  running out reads the same way (migration `0044_lock_attempts.sql`). The locker still runs in the
+  browser, so this stops the site as it is used, not somebody who edits the page; files already
+  locked are unaffected.
 - A ban now follows the PC as well as the account. MXB App, Studio and Coach report a one-way
   hash of the computer's machine id when they start and when they first create an account, and
   a new account or a new Steam account on a banned PC is refused like the banned one. The
