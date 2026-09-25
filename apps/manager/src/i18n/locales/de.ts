@@ -734,7 +734,7 @@ export const de: Translation = {
   "secure.testHeading": "Format testen (optional)",
   "secure.step3": "An dein Steam-Konto binden & offline spielen",
   "secure.step3Desc":
-    "Versiegelt den Schlüssel an dein Steam-Konto und speichert ihn lokal. Danach öffnet er ohne Server — offline, im LAN, überall — aber nur auf deinem Konto. Eine Kopie auf einem anderen Konto bekommt nichts.",
+    "Versiegelt den Schlüssel an dein Steam-Konto und speichert ihn lokal. Danach läuft er bis zu 30 Tage offline zwischen zwei Prüfungen — die App verlängert still, sobald sie online ist — aber nur auf deinem Konto. Eine Kopie auf einem anderen Konto bekommt nichts.",
   "secure.steamAccount": "Dein Steam-Konto:",
   "secure.noSteam": "Steam-Konto konnte nicht gelesen werden. Ist Steam installiert und angemeldet?",
   "secure.provision": "An mein Konto binden",

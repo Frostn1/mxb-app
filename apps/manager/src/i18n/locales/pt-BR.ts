@@ -729,7 +729,7 @@ export const ptBR: Translation = {
   "secure.testHeading": "Testar o formato (opcional)",
   "secure.step3": "Vincular à sua conta Steam e jogar offline",
   "secure.step3Desc":
-    "Sela a chave à sua conta Steam e guarda localmente. A partir daí abre sem servidor — offline, em LAN, em qualquer lugar — mas só na sua conta. Uma cópia em outra conta não abre nada.",
+    "Sela a chave à sua conta Steam e guarda localmente. A partir daí funciona offline por até 30 dias entre verificações — o app renova sozinho sempre que está online — mas só na sua conta. Uma cópia em outra conta não abre nada.",
   "secure.steamAccount": "Sua conta Steam:",
   "secure.noSteam": "Não foi possível ler sua conta Steam. O Steam está instalado e logado?",
   "secure.provision": "Vincular à minha conta",

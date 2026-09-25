@@ -8,6 +8,26 @@
   Microsoft Store, or you choose `blender.exe`. It then runs Blender in the background to
   open one part (`.blend`, `.fbx` or `.obj`) and shows what's in it: objects, their parents,
   triangle counts and size. Blender 4.2 or newer is needed. Studio doesn't ship or bundle it.
+- The control plane can hand mxbsecure.com's FBX to EDF converter to invited accounts. It serves
+  the converter only to signed-in Steam accounts listed in `MXB_CONVERTER_STEAM_IDS`, plus
+  admins, and never to banned accounts. The files come from a new `mxb-fbx2edf` R2 bucket at
+  `/v1/web/fbx2edf/*`, and `/v1/web/me` reports `converter` so the site knows whether to
+  show it. The converter's own code is private and isn't in this repository.
+- mxbsecure.com's GUID lock asks the control plane before it locks (`POST /v1/web/lock/permit`), and
+  a file can no longer be locked to a banned GUID. The creator is told only that the file couldn't
+  be locked, the same words as any other failed lock; the reason goes to the Worker's log
+  (`lock permit refused`, with the creator's account, Steam id and the GUIDs asked for). Each
+  creator may ask for 100 GUIDs an hour, so the refusal can't be used to scan the ban list, and
+  running out reads the same way (migration `0044_lock_attempts.sql`). The locker still runs in the
+  browser, so this stops the site as it is used, not somebody who edits the page; files already
+  locked are unaffected.
+- A ban now follows the PC as well as the account. MXB App, Studio and Coach report a one-way
+  hash of the computer's machine id when they start and when they first create an account, and
+  a new account or a new Steam account on a banned PC is refused like the banned one. The
+  machine id never leaves the PC: the app sends only a hash of it, and the service scrambles
+  that again with its own secret key before storing it. Deleting your account deletes it, banned
+  or not, and the privacy policy says so. Off until the control plane's `MXB_DEVICE_SALT` is set
+  (migration `0043_device_links.sql`).
 - Bikelife in Browse: mxb-mods.com's street and wheelie category (supermoto liveries and
   builds, streetwear, packs) gets its own tab. It's listed from mxb-mods like every other
   category, and each download comes from the post's own links. Because the category mixes
@@ -40,6 +60,20 @@
   switch games.
 
 ### Changed
+- Protected content you bought now plays offline for up to 30 days between check-ins, rather
+  than forever. The app renews a signed key lease silently whenever it is online (at startup,
+  after a Steam sign-in, when the game starts and every few hours while it is open), so a buyer
+  who is online now and then never notices. A ban stops the renewal, and the app deletes the
+  lease when it is told. New control-plane route `POST /v1/keys/lease`, signed with
+  `MXB_VERDICT_SIGNING_KEY`; without the secret it answers 503 and nothing changes, because only
+  a secure-content DLL built with the public key asks for a lease.
+- The startup check that MXB App, Studio and Coach share now keeps a signed copy of the
+  service's answer, in the folder all three share. An install that was never refused keeps
+  working offline exactly as before; one the service refused stays refused offline, in every
+  app, until the service says otherwise. The apps also ask again every half hour while open,
+  and straight away when the service turns a request down for that reason. The control plane
+  signs the answer only once `MXB_VERDICT_SIGNING_KEY` is set, and its refusals now carry
+  `code: "blocked"` beside the unchanged message.
 - MXB Coach is now just "Coach" in the app: the sidebar reads "Coach" with a smaller "by
   mxbsecure" under it, and the window, the overlay and the app's own messages say "Coach".
   It still installs and updates as "MXB Coach", so shortcuts, updates and Uninstall keep working.

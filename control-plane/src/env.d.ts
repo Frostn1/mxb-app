@@ -36,6 +36,20 @@ declare global {
      *  unsigned license is not a degraded one, it is a forgery with our name on it.
      *  Generate with `bun scripts/plugin-keypair.ts`. */
     PLUGIN_SIGNING_KEY?: string;
+    /** Ed25519 private key (PKCS#8 DER, base64url) that signs the startup gate's verdicts, so
+     *  an app can keep a block it was given and enforce it offline. A different pair from the
+     *  plugin one: the apps hold its public half in `crates/core/src/appgate.rs`. Without it
+     *  `/v1/app/gate` answers exactly as before, unsigned — never an error. Generate with
+     *  `bun scripts/verdict-keypair.ts`. Also signs the key leases `POST /v1/keys/lease` hands
+     *  out (`lease.ts`); without it that route answers 503 and the DLL, built without the public
+     *  half, does not ask for one. */
+    MXB_VERDICT_SIGNING_KEY?: string;
+    /** Keys the device hash the apps report (`X-MXB-Device`) before it is stored, so a row in
+     *  `device_links` is useless without it (`devices.ts`). Any long random string. Without it
+     *  device linking is off: nothing is recorded and bans do not follow the machine — never an
+     *  error. Rotating it stops new reports matching stored links; accounts already linked to each
+     *  other stay linked until their rows are deleted (`DELETE FROM device_links` forgets all). */
+    MXB_DEVICE_SALT?: string;
     /** Reads the usage dashboard and the stats JSON. Without it both answer 503, which is
      *  the right default: a deployment that was never given a key has no admin surface
      *  rather than an open one. */

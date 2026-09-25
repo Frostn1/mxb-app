@@ -24,6 +24,7 @@
  */
 
 import { hashToken, newToken } from "./auth";
+import { deviceFromRequest, rememberDevice } from "./devices";
 import { isRiderName, isServerKey, PRESENCE_TTL_MS } from "./validate";
 
 /** A full grid is around forty. The cap is a backstop against a room being used as a chat. */
@@ -194,6 +195,11 @@ export async function claimDeviceAccount(request: Request, env: Env): Promise<Re
         " ON CONFLICT(ip_digest, day, kind) DO UPDATE SET claims = claims + 1, updated_at = excluded.updated_at",
     ).bind(digest, day, now),
   ]);
+
+  // The machine the account was minted on, keyed one way (`devices.ts`), so a fresh account on a
+  // banned PC is tied to it from its first request. Nothing is written without `MXB_DEVICE_SALT`,
+  // and a failed write never fails the sign-up.
+  await rememberDevice(env, id, await deviceFromRequest(env, request));
 
   return json(201, { accountId: id, token, riderName: (riderName as string).trim(), kind: "device" });
 }

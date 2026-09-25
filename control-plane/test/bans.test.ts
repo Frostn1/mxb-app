@@ -7,11 +7,12 @@
  */
 
 import { describe, expect, it, vi } from "vitest";
-import { APP_BLOCK_MESSAGE, APP_SIGNIN_MESSAGE, addBan, appGate, banFor, liftBan, listBans, normalizeGuid, rememberGuid } from "../src/bans";
+import { APP_BLOCK_CODE, APP_BLOCK_MESSAGE, APP_SIGNIN_MESSAGE, addBan, appGate, banFor, liftBan, listBans, normalizeGuid, rememberGuid } from "../src/bans";
 import { guidFromSteamId } from "../src/steam";
 import { hashToken } from "../src/auth";
 import { mintKeys } from "../src/plugins";
 import { sealToken, SESSION_COOKIE } from "../src/websession";
+import { signVerdict, verifyVerdict, type SignedVerdict } from "../src/verdict";
 import { addAccount, d1, publishBundle } from "./d1sqlite";
 
 // The entry module exports the voice Durable Object, whose base class only exists in workerd.
@@ -283,7 +284,7 @@ describe("what a ban actually refuses", () => {
     const refused = await grant();
     expect(refused.status).toBe(403);
     // Disguised: the app is never told it is a ban.
-    expect(await refused.json()).toEqual({ error: APP_BLOCK_MESSAGE });
+    expect(await refused.json()).toEqual({ error: APP_BLOCK_MESSAGE, code: "blocked" });
 
     // The ledger's own word, so a banned install sweeping the catalogue is visible in it.
     const log = await env.DB.prepare(
@@ -311,7 +312,7 @@ describe("what a ban actually refuses", () => {
       req("POST", "/v1/entitlements/check", { key: "buyer-token", body: { assetId, sessionId: "s2" }, origin: null }),
     );
     expect(check.status).toBe(403);
-    expect(await check.json()).toEqual({ allowed: false, reason: "unavailable" });
+    expect(await check.json()).toEqual({ allowed: false, reason: "unavailable", code: APP_BLOCK_CODE });
 
     // Lifting it puts the buyer back where they were: the entitlement was never touched.
     await liftBan(env, GUID, BOSS);
@@ -668,5 +669,117 @@ describe("writing the list down", () => {
     expect(normalizeGuid("has a space")).toBeNull();
     expect(normalizeGuid("")).toBeNull();
     expect(normalizeGuid(42)).toBeNull();
+  });
+});
+
+describe("signed verdicts, and the code that says a refusal is a block", () => {
+  /** A fresh pair per test, the private half in the shape `MXB_VERDICT_SIGNING_KEY` holds. */
+  async function verdictPair(): Promise<{ secret: string; publicKey: CryptoKey }> {
+    const pair = (await crypto.subtle.generateKey({ name: "Ed25519" }, true, ["sign", "verify"])) as CryptoKeyPair;
+    const pkcs8 = new Uint8Array((await crypto.subtle.exportKey("pkcs8", pair.privateKey)) as ArrayBuffer);
+    let binary = "";
+    for (const b of pkcs8) binary += String.fromCharCode(b);
+    const secret = btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+    return { secret, publicKey: pair.publicKey };
+  }
+  const gate = (env: Env, token: string) => call(env, req("GET", "/v1/app/gate", { key: token, origin: null }));
+
+  it("signs and verifies round trip, and refuses a tampered payload or a foreign key", async () => {
+    const { secret, publicKey } = await verdictPair();
+    const env = { MXB_VERDICT_SIGNING_KEY: secret } as unknown as Env;
+    const signed = (await signVerdict(
+      env,
+      { status: "unsupported", account: "acc_x", token: await hashToken("t"), steamId: BUYER, guid: "aa0110000100000001" },
+      1_700_000_000_000,
+    ))!;
+    expect(signed).not.toBeNull();
+    // The payload is the exact string signed, fields in wire order, GUID normalised.
+    expect(signed.payload).toBe(
+      `{"v":1,"status":"unsupported","account":"acc_x","token":"${await hashToken("t")}","steamId":"${BUYER}","guid":"AA0110000100000001","issuedAt":1700000000000}`,
+    );
+    expect(await verifyVerdict(signed, publicKey)).toEqual({
+      v: 1,
+      status: "unsupported",
+      account: "acc_x",
+      token: await hashToken("t"),
+      steamId: BUYER,
+      guid: "AA0110000100000001",
+      issuedAt: 1_700_000_000_000,
+    });
+
+    const tampered: SignedVerdict = { ...signed, payload: signed.payload.replace("unsupported", "ok") };
+    expect(await verifyVerdict(tampered, publicKey)).toBeNull();
+    const other = await verdictPair();
+    expect(await verifyVerdict(signed, other.publicKey)).toBeNull();
+  });
+
+  it("leaves the signature out, and still answers, when the deployment has no key", async () => {
+    expect(await signVerdict({} as Env, { status: "ok", account: "acc_x" })).toBeNull();
+    // An unreadable key is the same as none: the gate must never fail on it.
+    expect(await signVerdict({ MXB_VERDICT_SIGNING_KEY: "not-a-key" } as unknown as Env, { status: "ok", account: "acc_x" })).toBeNull();
+
+    const env = await deployment();
+    await account(env, "acc_clean", "clean-token", CLEAN, OTHER_GUID);
+    const res = await gate(env, "clean-token");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body).toEqual({ status: "ok", steam: true });
+    expect("signed" in body).toBe(false);
+  });
+
+  it("signs every gate verdict for the account that asked, and a ban reads as unsupported", async () => {
+    const { secret, publicKey } = await verdictPair();
+    const env = await deployment({ MXB_VERDICT_SIGNING_KEY: secret });
+    await account(env, "acc_clean", "clean-token", CLEAN, OTHER_GUID);
+    await account(env, "acc_banned", "banned-token", BUYER, GUID);
+    await ban(env, GUID);
+
+    const clean = (await (await gate(env, "clean-token")).json()) as { status: string; signed: SignedVerdict };
+    expect(clean.status).toBe("ok");
+    const ok = await verifyVerdict(clean.signed, publicKey);
+    expect(ok).toMatchObject({ v: 1, status: "ok", account: "acc_clean", token: await hashToken("clean-token"), steamId: CLEAN, guid: OTHER_GUID });
+    expect(Math.abs(ok!.issuedAt - Date.now())).toBeLessThan(60_000);
+
+    const blocked = (await (await gate(env, "banned-token")).json()) as { status: string; message: string; signed: SignedVerdict };
+    expect(blocked.status).toBe("unsupported");
+    expect(blocked.message).toBe(APP_BLOCK_MESSAGE);
+    expect(await verifyVerdict(blocked.signed, publicKey)).toMatchObject({ status: "unsupported", account: "acc_banned" });
+    // Still disguised: the signed statement carries the status and the identities it is about,
+    // never a reason.
+    expect(Object.keys(JSON.parse(blocked.signed.payload))).toEqual(["v", "status", "account", "token", "steamId", "guid", "issuedAt"]);
+  });
+
+  it("signs the sign-in wall too", async () => {
+    const { secret, publicKey } = await verdictPair();
+    const env = await deployment({ MXB_VERDICT_SIGNING_KEY: secret, MXB_REQUIRE_STEAM: "1" });
+    await account(env, "acc_new", "t", null, null);
+    const body = (await (await gate(env, "t")).json()) as { status: string; signed: SignedVerdict };
+    expect(body.status).toBe("signin");
+    expect(await verifyVerdict(body.signed, publicKey)).toMatchObject({ status: "signin", account: "acc_new", steamId: null, guid: null });
+  });
+
+  it("marks every app-facing refusal for a ban with code \"blocked\", message unchanged", async () => {
+    const env = await deployment();
+    await account(env, "acc_banned", "banned-token", BUYER, GUID);
+    await account(env, "acc_clean", "clean-token", CLEAN, null);
+    await ban(env, GUID);
+    const expected = { error: APP_BLOCK_MESSAGE, code: APP_BLOCK_CODE };
+    expect(APP_BLOCK_CODE).toBe("blocked");
+
+    // The bearer gate.
+    const presence = await call(env, req("PUT", "/v1/presence", { key: "banned-token", body: { server: "s" }, origin: null }));
+    expect(presence.status).toBe(403);
+    expect(await presence.json()).toEqual(expected);
+
+    // A clean account claiming a banned GUID.
+    const claim = await call(env, req("PUT", "/v1/me/guid", { key: "clean-token", body: { guid: GUID }, origin: null }));
+    expect(claim.status).toBe(403);
+    expect(await claim.json()).toEqual(expected);
+
+    // A refusal that is not a ban carries no code, so the app does not mistake it for one.
+    await env.DB.prepare("UPDATE accounts SET kind = 'device' WHERE id = 'acc_clean'").run();
+    const invite = await call(env, req("GET", "/v1/servers/mine", { key: "clean-token", origin: null }));
+    expect(invite.status).toBe(403);
+    expect(await invite.json()).not.toHaveProperty("code");
   });
 });
