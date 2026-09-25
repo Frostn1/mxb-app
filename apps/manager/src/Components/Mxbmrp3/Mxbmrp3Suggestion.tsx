@@ -1,45 +1,30 @@
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useSyncExternalStore } from "react";
 import { open as openUrl } from "@tauri-apps/plugin-shell";
 import { Check, ExternalLink, Gauge, X } from "lucide-react";
 import { useConfig } from "@frost/shared/Context/Config";
 import { Button } from "@frost/shared/Components/ui/button";
 import { useT } from "@/i18n";
-import {
-  mxbmrp3Snoozed,
-  mxbmrp3Status,
-  setMxbmrp3Dismissed,
-  shouldSuggest,
-  snoozeMxbmrp3,
-  type Mxbmrp3Status,
-} from "@/lib/mxbmrp3";
+import { mxbmrp3Store, setMxbmrp3Dismissed, shouldSuggest } from "@/lib/mxbmrp3";
 
 /**
- * The status, asked of Rust again whenever the game folder or the game changes: a rider who
- * points the app at another install, or switches title, may have it on one and not the other.
- * Rust answers rather than the config's `gamePath`, which is blank when the install is found
- * through Steam.
+ * The shared status (see `mxbmrp3Store`), asked of Rust again whenever the game folder or the
+ * game changes: a rider who points the app at another install, or switches title, may have it
+ * on one and not the other. Rust answers rather than the config's `gamePath`, which is blank
+ * when the install is found through Steam.
  */
 export function useMxbmrp3() {
   const { config } = useConfig();
-  const [status, setStatus] = useState<Mxbmrp3Status | null>(null);
-  const [snoozed, setSnoozed] = useState(mxbmrp3Snoozed);
+  const { status, snoozed } = useSyncExternalStore(mxbmrp3Store.subscribe, mxbmrp3Store.get);
+  useEffect(() => {
+    void mxbmrp3Store.refresh();
+  }, [config?.gamePath, config?.activeGame]);
 
-  const refresh = useCallback(() => {
-    mxbmrp3Status()
-      .then(setStatus)
-      .catch(() => setStatus(null));
-  }, []);
-  useEffect(refresh, [refresh, config?.gamePath, config?.activeGame]);
-
-  const notNow = () => {
-    snoozeMxbmrp3();
-    setSnoozed(true);
-  };
   const setDismissed = async (dismissed: boolean) => {
     await setMxbmrp3Dismissed(dismissed).catch(() => {});
-    refresh();
+    if (!dismissed) mxbmrp3Store.unsnooze();
+    await mxbmrp3Store.refresh();
   };
-  return { status, suggest: shouldSuggest(status, snoozed), notNow, setDismissed };
+  return { status, suggest: shouldSuggest(status, snoozed), notNow: mxbmrp3Store.snooze, setDismissed };
 }
 
 interface SuggestionProps {

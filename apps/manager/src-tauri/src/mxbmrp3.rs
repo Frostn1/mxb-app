@@ -54,20 +54,29 @@ pub fn status_of(cfg: &AppConfig) -> Status {
     }
 }
 
+/// Off the main thread, like the command below: the check touches the game's drive, and
+/// `install_dir()` may fall back to Steam detection. A sleeping disk or a network share would
+/// otherwise freeze the window while the dashboard opens.
 #[tauri::command]
-pub fn mxbmrp3_status(app: tauri::AppHandle) -> Status {
-    status_of(&config::load(&app).unwrap_or_default())
+pub async fn mxbmrp3_status(app: tauri::AppHandle) -> Result<Status, String> {
+    tauri::async_runtime::spawn_blocking(move || status_of(&config::load(&app).unwrap_or_default()))
+        .await
+        .map_err(|e| e.to_string())
 }
 
 /// Set or clear "don't ask again". No-op before the config exists, like `set_intro_seen`.
 #[tauri::command]
-pub fn set_mxbmrp3_dismissed(app: tauri::AppHandle, dismissed: bool) -> Result<(), String> {
-    if !config::exists(&app) {
-        return Ok(());
-    }
-    let mut cfg = config::load(&app).unwrap_or_default();
-    cfg.mxbmrp3_dismissed = dismissed;
-    config::save(&app, &cfg).map_err(|e| format!("{e:#}"))
+pub async fn set_mxbmrp3_dismissed(app: tauri::AppHandle, dismissed: bool) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        if !config::exists(&app) {
+            return Ok(());
+        }
+        let mut cfg = config::load(&app).unwrap_or_default();
+        cfg.mxbmrp3_dismissed = dismissed;
+        config::save(&app, &cfg).map_err(|e| format!("{e:#}"))
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[cfg(test)]
