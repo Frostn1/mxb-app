@@ -311,6 +311,14 @@ async fn place_staged_named(
     .map_err(|e| anyhow::anyhow!("install task failed: {e}"))?
 }
 
+/// The install path of a Browse category that routes each download by what it holds. Must
+/// match `AUTO_SUBPATH` in `packages/shared/src/api/mods.ts`.
+pub(crate) const AUTO_SUBPATH: &str = "auto";
+
+pub(crate) fn is_auto_subpath(subpath: &str) -> bool {
+    subpath.trim_matches(['/', '\\']).eq_ignore_ascii_case(AUTO_SUBPATH)
+}
+
 /// Whether a download that turns out to hold several mods should be offered for review.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Packs {
@@ -407,6 +415,18 @@ fn place_staged_as(
 ) -> anyhow::Result<Placed> {
     let extracted = work.join(STAGED_DIR);
 
+    // A category that mixes kinds of mod (Bikelife: liveries and streetwear) has no one folder
+    // to put a download in, so every one is read like a folder share: each item is classified
+    // and goes to its own folder, through the review sheet.
+    let auto = is_auto_subpath(subpath);
+    if auto && packs == Packs::PlaceWhole {
+        // The shop and the hub place whole and free the download as soon as this returns,
+        // so there'd be nothing left for a review to sort. The frontend never files a
+        // purchase this way; this is the backstop.
+        anyhow::bail!("a purchase can't be sorted by content; install it from its own category");
+    }
+    let packs = if auto { Packs::OfferFolder } else { packs };
+
     // A pack is several mods in one download, and only now — with the archive open — can it
     // be seen to be one. Hand it to the review sheet rather than placing 3.8 GB of bikes the
     // user was never shown. An ordinary single-mod download answers `None` and carries on.
@@ -424,9 +444,19 @@ fn place_staged_as(
                 return Ok(Placed::Review { plan });
             }
             Ok(None) => {}
+            // An auto-routed download has nowhere to go whole: `mods/auto` is no folder the
+            // game reads. Say so rather than invent one.
+            Err(e) if auto => {
+                let _ = std::fs::remove_dir_all(work);
+                anyhow::bail!("couldn't tell what's in this download: {e:#}");
+            }
             // Never fail an install over the offer to split it — place it whole instead.
             Err(e) => log::warn!("could not offer {slug} as a pack: {e:#}"),
         }
+    }
+    if auto {
+        let _ = std::fs::remove_dir_all(work);
+        anyhow::bail!("couldn't tell what's in this download");
     }
 
     emit(app, slug, "placing", None, None);
@@ -608,6 +638,11 @@ pub fn import_file(
     let src = Path::new(file_path);
     if !src.is_file() {
         anyhow::bail!("file not found: {file_path}");
+    }
+    // `mods/auto` is no folder the game reads. The frontend sends a content-sorted import
+    // through the review sheet instead; this is the backstop.
+    if is_auto_subpath(subpath) {
+        anyhow::bail!("this download is sorted by what it holds; drop it on the app to review it");
     }
 
     let work = staging_dir("import");
@@ -2692,25 +2727,25 @@ fn walk_plain(
 
 pub(crate) fn unwrap_wrapper(dir: &Path) -> PathBuf {
     let mut cur = dir.to_path_buf();
-    loop {
-        let entries: Vec<_> = match std::fs::read_dir(&cur) {
-            Ok(rd) => rd.filter_map(|e| e.ok()).collect(),
-            Err(_) => return cur,
-        };
-        let dirs: Vec<_> = entries
-            .iter()
-            .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
-            .collect();
-        let only_junk_files = entries
-            .iter()
-            .filter(|e| e.file_type().map(|t| t.is_file()).unwrap_or(false))
-            .all(|f| is_junk(&f.file_name().to_string_lossy()));
-        if dirs.len() == 1 && only_junk_files {
-            cur = dirs[0].path();
-        } else {
-            return cur;
-        }
+    while let Some(next) = unwrap_one(&cur) {
+        cur = next;
     }
+    cur
+}
+
+/// One step of [`unwrap_wrapper`]: the only folder inside `dir`, when it holds nothing else
+/// but junk files.
+pub(crate) fn unwrap_one(dir: &Path) -> Option<PathBuf> {
+    let entries: Vec<_> = std::fs::read_dir(dir).ok()?.filter_map(|e| e.ok()).collect();
+    let dirs: Vec<_> = entries
+        .iter()
+        .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
+        .collect();
+    let only_junk_files = entries
+        .iter()
+        .filter(|e| e.file_type().map(|t| t.is_file()).unwrap_or(false))
+        .all(|f| is_junk(&f.file_name().to_string_lossy()));
+    (dirs.len() == 1 && only_junk_files).then(|| dirs[0].path())
 }
 
 pub(crate) fn child_dir(parent: &Path, name: &str) -> Option<PathBuf> {
@@ -2840,6 +2875,16 @@ fn has_root_pkz(dir: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The frontend's `AUTO_SUBPATH`, however it's written, and nothing else.
+    #[test]
+    fn only_the_auto_path_routes_by_content() {
+        assert!(is_auto_subpath("auto"));
+        assert!(is_auto_subpath("/Auto/"));
+        assert!(!is_auto_subpath("mods/bikes"));
+        assert!(!is_auto_subpath("mods/auto"), "a real-looking folder isn't the marker");
+        assert!(!is_auto_subpath("reshade"));
+    }
 
     /// The shape that broke installs: the button's `href` is a placeholder and the real
     /// link is only there base64-scrambled, so reading `href` alone finds nothing.

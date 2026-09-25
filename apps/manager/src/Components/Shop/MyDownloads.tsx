@@ -26,7 +26,8 @@ import {
   shopLogout,
   shopMyDownloads,
   shopStatus,
-  modTypesFor,
+  librarySubpaths,
+  purchaseModTypes,
   buildDestinations,
   destStorageKey,
   resolveInitialFolder,
@@ -194,7 +195,7 @@ export default function MyDownloads({ refreshKey }: MyDownloadsProps) {
   // scanning only `mods/tracks` (as this view used to) leaves two thirds of it unbadged.
   useEffect(() => {
     let cancelled = false;
-    const subpaths = modTypesFor(game.id).map((m) => m.installSubpath);
+    const subpaths = librarySubpaths(game.id);
     scanLibrariesSequentially(subpaths)
       .then((scans) => {
         if (cancelled) return;
@@ -302,7 +303,7 @@ export default function MyDownloads({ refreshKey }: MyDownloadsProps) {
   const typeFor = useCallback(
     (p: Purchase): ModType => {
       const names = (p.listing?.categoryNames ?? []).join(" ").toLowerCase();
-      const types = modTypesFor(game.id);
+      const types = purchaseModTypes(game.id);
       return (
         types.find((mt) => names.includes(mt.id)) ??
         types.find((mt) => mt.id === "track" && names.includes("track")) ??
