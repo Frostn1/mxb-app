@@ -20,16 +20,6 @@ export const setMxbmrp3Dismissed = (dismissed: boolean) =>
   invoke<void>("set_mxbmrp3_dismissed", { dismissed });
 
 /**
- * "Not now", for the rest of this session. Module-level so that saying it on the last setup
- * step also holds for the bar the dashboard would show a moment later.
- */
-let snoozed = false;
-export const snoozeMxbmrp3 = () => {
-  snoozed = true;
-};
-export const mxbmrp3Snoozed = () => snoozed;
-
-/**
  * Whether to put the suggestion in front of the rider: only when the plugin is known to be
  * missing, they haven't said never, and they haven't said not now this session. A game folder
  * that can't be found suggests nothing.
@@ -37,3 +27,44 @@ export const mxbmrp3Snoozed = () => snoozed;
 export function shouldSuggest(status: Mxbmrp3Status | null, snoozedNow: boolean): boolean {
   return status !== null && status.installed === false && !status.dismissed && !snoozedNow;
 }
+
+export interface Mxbmrp3State {
+  status: Mxbmrp3Status | null;
+  /** "Not now", for the rest of this session. */
+  snoozed: boolean;
+}
+
+/**
+ * One copy of the status and the session's "not now", shared by every place the suggestion
+ * shows. With a copy each, "Suggest it again" in Settings left the Dashboard bar hidden, and
+ * "Not now" on the setup card didn't reach the bar mounted a moment later.
+ */
+export function createMxbmrp3Store(load: () => Promise<Mxbmrp3Status> = mxbmrp3Status) {
+  let state: Mxbmrp3State = { status: null, snoozed: false };
+  const listeners = new Set<() => void>();
+  const set = (next: Partial<Mxbmrp3State>) => {
+    state = { ...state, ...next };
+    listeners.forEach((l) => l());
+  };
+  return {
+    get: () => state,
+    subscribe(listener: () => void) {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+    async refresh() {
+      try {
+        set({ status: await load() });
+      } catch {
+        set({ status: null });
+      }
+    },
+    snooze: () => set({ snoozed: true }),
+    /** "Suggest it again" also undoes this session's "not now": the rider just asked for it. */
+    unsnooze: () => set({ snoozed: false }),
+  };
+}
+
+export const mxbmrp3Store = createMxbmrp3Store();
