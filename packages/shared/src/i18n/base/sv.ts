@@ -162,6 +162,9 @@ export const sv: Record<keyof typeof en, string> = {
 
   "modType.reshade": "ReShade",
   "modType.reshadeInline": "ReShade-förinställningar",
+  "modType.bikelife": "Bikelife",
+  "modType.bikelifeInline": "bikelife-moddar",
+  "modType.autoDest": "Motorcyklar eller Förare, efter innehållet",
   "trackViewer.title": "Förhandsgranskning av bana",
   "trackViewer.loading": "Läser terräng...",
   "trackViewer.refining": "Skärpning...",

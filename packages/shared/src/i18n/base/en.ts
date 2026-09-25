@@ -167,6 +167,9 @@ export const en = {
 
   "modType.reshade": "ReShade",
   "modType.reshadeInline": "ReShade presets",
+  "modType.bikelife": "Bikelife",
+  "modType.bikelifeInline": "bikelife mods",
+  "modType.autoDest": "Bikes or Rider, by what's in it",
   "trackViewer.title": "Track preview",
   "trackViewer.loading": "Reading terrain…",
   "trackViewer.refining": "Sharpening…",

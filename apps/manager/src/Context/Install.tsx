@@ -12,11 +12,13 @@ import { AlertTriangle, X } from "lucide-react";
 import { toast } from "sonner";
 import {
   addToLibrary,
+  AUTO_SUBPATH,
   cancelInstall,
   importFile,
   mxbsecureAutoUnlock,
   onFrostmodReload,
   onInstallProgress,
+  planDrop,
   shopInstall,
   type ShopItem,
 } from "@frost/shared/api/mods";
@@ -400,6 +402,13 @@ export function InstallProvider({
         await shopInstall(source.item, subpath, destFolder);
       } else if (source.kind === "hub") {
         await hubInstall(source.item, subpath, destFolder);
+      } else if (subpath === AUTO_SUBPATH) {
+        // A category that sorts by content (Bikelife) has no folder to import into: the file
+        // the browser saved is read like any other drop, and the review sheet sorts it.
+        const plan = await planDrop([source.path]);
+        patch(key, (cur) => ({ ...cur, stage: "review" }));
+        reviewRef.current(plan);
+        return;
       } else {
         await importFile(source.path, subpath, destFolder);
       }
