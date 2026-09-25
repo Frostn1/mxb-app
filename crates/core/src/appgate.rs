@@ -471,8 +471,9 @@ pub fn enforce_marker(app: &AppHandle) {
 /// A verdict worth acting on, and whether it came signed and verified.
 struct Answer {
     verdict: Verdict,
-    /// The signed form verified: the kept verdict speaks for this block, so the per-app marker —
-    /// which knows no account and cannot be lifted from another app — is not written.
+    /// The signed form verified and is now the kept verdict: it speaks for this block, so the
+    /// per-app marker — which knows no account and cannot be lifted from another app — is not
+    /// written.
     signed: bool,
 }
 
@@ -535,12 +536,14 @@ async fn ask(app: &AppHandle) -> Option<Answer> {
     if let Some(sv) = body.get("signed").and_then(|v| SignedVerdict::deserialize(v).ok()) {
         match verify_verdict(&sv) {
             Ok(p) if p.status == verdict.status() && p.for_token(&token_digest(&token)) => {
-                signed = true;
                 let kept = verdict_path(app).map(|path| keep_if_newer(&path, &sv, &p, VERDICT_PUBLIC_KEY));
                 if kept == Some(Kept::Overtaken) {
                     log::info!("[gate] a newer verdict is already kept; answer set aside");
                     return None;
                 }
+                // Only a verdict that is actually on disk speaks for a block. One that could not
+                // be written falls back to the per-app marker, so it still holds next launch.
+                signed = kept == Some(Kept::Stored);
             }
             Ok(_) => log::warn!("[gate] the signed verdict disagrees with the plain one; not kept"),
             Err(e) => log::debug!("[gate] signed verdict not kept ({e})"),
@@ -644,6 +647,12 @@ async fn background_check(app: AppHandle) {
     loop {
         let Ok(one) = in_flight().try_lock() else {
             PENDING.store(true, Ordering::Release);
+            // The running check may have finished, and read the flag, between the failed lock and
+            // the store. If the lock is free now, nobody is left to drain the flag: take the turn.
+            // Otherwise the holder reads it after it lets go, so the re-run is not lost.
+            if in_flight().try_lock().is_ok() {
+                continue;
+            }
             return;
         };
         PENDING.store(false, Ordering::Release);
