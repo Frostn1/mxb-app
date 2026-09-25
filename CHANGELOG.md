@@ -3,6 +3,11 @@
 ## Unreleased
 
 ### Added
+- The control plane can hand mxbsecure.com's FBX to EDF converter to invited accounts. It serves
+  the converter only to signed-in Steam accounts listed in `MXB_CONVERTER_STEAM_IDS`, plus
+  admins, and never to banned accounts. The files come from a new `mxb-fbx2edf` R2 bucket at
+  `/v1/web/fbx2edf/*`, and `/v1/web/me` reports `converter` so the site knows whether to
+  show it. The converter's own code is private and isn't in this repository.
 - mxbsecure.com's GUID lock asks the control plane before it locks (`POST /v1/web/lock/permit`), and
   a file can no longer be locked to a banned GUID. The creator is told only that the file couldn't
   be locked, the same words as any other failed lock; the reason goes to the Worker's log

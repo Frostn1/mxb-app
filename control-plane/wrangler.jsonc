@@ -62,7 +62,11 @@
     // follows an install and a Steam login, and while this stood open the way past one was a
     // new Steam account and one click. Anything but "open" is closed; flip it to "open" to
     // take signups again.
-    "MXB_CREATOR_SIGNUP": "closed"
+    "MXB_CREATOR_SIGNUP": "closed",
+    // Who may use the FBX -> EDF converter on mxbsecure.com, besides the admins, who always
+    // may: SteamID64s, comma or space separated. Empty means the admins alone. A list here
+    // rather than a table so that granting it is a reviewable diff, like the admin list above.
+    "MXB_CONVERTER_STEAM_IDS": ""
   },
 
   // The idle reaper. Every five minutes it asks each running server who is connected and
@@ -108,6 +112,13 @@
     {
       "binding": "LOCKWEB",
       "bucket_name": "mxb-lockweb"
+    },
+    // The FBX -> EDF converter's WebAssembly build. Not on the site for the same reason as the
+    // locker: `/v1/web/fbx2edf/*` hands it to granted accounts only (`src/converter.ts`). Its
+    // code is private; only the built files are uploaded here, by the private repo's deploy.
+    {
+      "binding": "FBX2EDF",
+      "bucket_name": "mxb-fbx2edf"
     }
   ],
 
