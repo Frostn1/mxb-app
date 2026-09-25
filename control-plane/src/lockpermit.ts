@@ -50,8 +50,9 @@ const DAY_MS = 24 * HOUR_MS;
 type Reason = "caller_banned" | "not_creator" | "bad_request" | "rate_limited" | "banned_target";
 
 export async function lockPermit(request: Request, env: Env): Promise<Response> {
-  const offSite = refuseCrossSiteWrite(request, env);
-  if (offSite) return offSite;
+  // Refused as everything else here is, in the same words. Not logged: nothing from another
+  // site carries an identity worth writing down.
+  if (refuseCrossSiteWrite(request, env)) return refused(403);
 
   const session = await webSession(request, env);
   if (!session) return refused(401);

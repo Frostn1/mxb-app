@@ -976,8 +976,11 @@ describe("the GUID lock's permit", () => {
     expect(await anon.json()).toEqual(refusedBody);
 
     // Another origin, or a body a page could send without a preflight.
-    expect((await permit(env, [CLEAN], { origin: "https://evil.example" })).status).toBe(403);
-    expect((await permit(env, [CLEAN], { contentType: "text/plain" })).status).toBe(403);
+    for (const offSite of [{ origin: "https://evil.example" }, { contentType: "text/plain" }]) {
+      const res = await permit(env, [CLEAN], offSite);
+      expect(res.status).toBe(403);
+      expect(await res.json()).toEqual(refusedBody);
+    }
     // The preflight is answered for the site and nobody else.
     const pre = await web(env, req("OPTIONS", "/v1/web/lock/permit"));
     expect(pre.status).toBe(204);
