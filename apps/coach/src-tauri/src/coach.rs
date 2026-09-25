@@ -1198,6 +1198,25 @@ fn newest_lap_in(sessions: &[SessionSummary], track: &str, bike: &str) -> Option
         .map(|l| (l.path.clone(), l.num))
 }
 
+/// Windows refusing to replace a file another process has open: `ERROR_SHARING_VIOLATION`, or
+/// `ERROR_ACCESS_DENIED`, which is how `MoveFileEx` usually reports the same thing.
+fn held_open(e: &std::io::Error) -> bool {
+    matches!(e.raw_os_error(), Some(32) | Some(5))
+}
+
+/// Move a sheet written aside into place, trying once more after a moment if the file is held
+/// open. Now that the recorder looks for a sheet while the rider rides, it can be reading the
+/// old one at the instant the new one lands, and that read is over in milliseconds.
+fn move_into_place(tmp: &Path, file: &Path) -> std::io::Result<()> {
+    match fs::rename(tmp, file) {
+        Err(e) if held_open(&e) => {
+            std::thread::sleep(Duration::from_millis(100));
+            fs::rename(tmp, file)
+        }
+        r => r,
+    }
+}
+
 /// Writes the live cues for this lap's track and bike: the few calls the recorder shows in
 /// practice, from where this lap loses time to the lap it is held against. The reference is the
 /// one the rider picked in the review, so the cue sheet and the HUD sheet beside it are both
@@ -1253,7 +1272,7 @@ pub fn coach_write_cues(
     // Written aside and moved in, so the recorder never reads half a file.
     let tmp = dir.join(format!("{}.tmp", crate::cues::file_name(&rec.event.track_id, &rec.event.bike_id)));
     fs::write(&tmp, crate::cues::write(rec.event.track_length, &cues, amount)).map_err(err)?;
-    fs::rename(&tmp, &file).map_err(err)?;
+    move_into_place(&tmp, &file).map_err(err)?;
     // The HUD sheet beside it: the fast lap for the gap and the ghost, and each section's tip.
     // The sag prompt asks for a stop when this session has no standing-still sag yet.
     let hud_name = crate::hudsheet::file_name(&rec.event.track_id, &rec.event.bike_id);
@@ -1261,7 +1280,7 @@ pub fn coach_write_cues(
     let flags = if crate::sag::measure(&rec).is_some_and(|s| s.still) { 0 } else { crate::hudsheet::SAG_PROMPT };
     let hud_tmp = dir.join(format!("{hud_name}.tmp"));
     fs::write(&hud_tmp, crate::hudsheet::write(rec.event.track_length, &fast, &parts, flags)).map_err(err)?;
-    fs::rename(&hud_tmp, dir.join(&hud_name)).map_err(err)?;
+    move_into_place(&hud_tmp, &dir.join(&hud_name)).map_err(err)?;
     // Only once the sheet is really on disk: a write that failed is a sheet the rider never
     // heard, and it would be wrong to count it against them.
     write_history(&app, &rec.event.track_id, &rec.event.bike_id, &next);
@@ -1678,6 +1697,30 @@ mod tests {
         let r = best_reference(&all, "indiana", "crf250", None).unwrap();
         assert_eq!(r.path, "b", "no lap on this bike: the fastest on any");
         assert!(best_reference(&all, "nowhere", "kx450", None).is_none());
+    }
+
+    /// Only a file being held open is worth a second try; anything else fails at once.
+    #[test]
+    fn only_a_file_held_open_is_retried() {
+        use std::io::Error;
+        assert!(held_open(&Error::from_raw_os_error(32)), "sharing violation");
+        assert!(held_open(&Error::from_raw_os_error(5)), "access denied");
+        assert!(!held_open(&Error::from_raw_os_error(2)), "not found");
+        assert!(!held_open(&Error::new(std::io::ErrorKind::Other, "no code")));
+    }
+
+    #[test]
+    fn a_sheet_is_moved_into_place_over_the_old_one() {
+        let dir = std::env::temp_dir().join(format!("coach-move-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let (tmp, file) = (dir.join("a.cue.tmp"), dir.join("a.cue"));
+        fs::write(&file, b"old").unwrap();
+        fs::write(&tmp, b"new").unwrap();
+        move_into_place(&tmp, &file).unwrap();
+        assert_eq!(fs::read(&file).unwrap(), b"new");
+        assert!(!tmp.exists());
+        let _ = fs::remove_dir_all(&dir);
     }
 
     /// Live coaching follows the session being ridden. Sessions come newest first, and taking
