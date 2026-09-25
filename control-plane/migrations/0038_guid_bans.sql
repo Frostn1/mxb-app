@@ -78,33 +78,8 @@ SELECT id, UPPER(TRIM(guid)), created_at, created_at
 FROM accounts
 WHERE guid IS NOT NULL AND TRIM(guid) <> '';
 
--- The first bans: six installs reported with proof of unlocking protected content and
--- sharing it unlocked.
---
--- Seeded in a migration rather than typed into the admin page for the same reason
--- `MXB_ADMIN_STEAM_IDS` is config: this is the switch that refuses a paying-looking customer,
--- so turning it on should leave a diff somebody can read, review and revert. Bans added later
--- go through `/v1/web/admin/bans`, which records the admin who added them.
---
--- `FF011000016EAE6204` was reported as a second install of `FF0110000162638666`; the other
--- four arrived in the same list without a stated relationship, so none is claimed for them.
--- Each is banned on its own evidence in any case — the link is a note, never the reason.
---
--- Written as a VALUES list rather than a chain of `SELECT ... UNION ALL`, which is what
--- this was and why the deploy failed: D1 refuses a compound SELECT of more than five
--- terms (`too many terms in compound SELECT`, SQLITE_ERROR 7500), and six riders is six
--- terms. Plain SQLite allows five hundred, so it applies locally and in every test, and
--- fails only against the real database. A VALUES list has no such limit.
-WITH seed(guid, alt_of) AS (VALUES
-  ('FF011000016EAE6204', 'FF0110000162638666'),
-  ('FF0110000162638666', NULL),
-  ('FF011000012D2FBD46', NULL),
-  ('FF01100001308ED7FA', NULL),
-  ('FF0110000164B7DCE8', NULL),
-  ('FF011000012B467ED8', NULL)
-)
-INSERT INTO guid_bans (guid, reason, evidence, alt_of, banned_at, banned_by)
-SELECT guid, 'unlocked protected content and shared it unlocked',
-       'reported 2026-09-16 with proof of unlocking or sharing unlocked content', alt_of,
-       CAST(strftime('%s', 'now') AS INTEGER) * 1000, 'seed:0038'
-FROM seed;
+-- This migration used to seed the first bans here. Ban records no longer live in this public
+-- repository (2026-09-25): a GUID beside a ban reason is an accusation against a person that no
+-- later commit can take back. Bans go through `/v1/web/admin/bans`, and their records are kept
+-- privately. The rows this file once inserted were applied long ago and stay in the database;
+-- D1 never re-runs an applied migration, so removing them here changes nothing there.
