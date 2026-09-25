@@ -459,13 +459,16 @@ statement (`src/verdict.ts`):
 
 ```json
 "signed": {
-  "payload": "{\"v\":1,\"status\":\"unsupported\",\"account\":\"acc_…\",\"steamId\":null,\"guid\":null,\"issuedAt\":1800000000000}",
+  "payload": "{\"v\":1,\"status\":\"unsupported\",\"account\":\"acc_…\",\"token\":\"<sha-256 of the bearer token>\",\"steamId\":null,\"guid\":null,\"issuedAt\":1800000000000}",
   "sig": "<Ed25519 over the payload's UTF-8 bytes, base64url>"
 }
 ```
 
-`payload` is the exact string signed. It names the status, the account it is about, the Steam
-ID and GUID the server tied to that account, and when it was issued — never a reason. The apps
+`payload` is the exact string signed. It names the status, the account it is about, a SHA-256 of
+the token it was fetched with (`hashToken` — how a launch, which knows its token but not its
+account id, tells that a kept verdict is about itself), the Steam ID and GUID the server tied to
+that account, and when it was issued — never a reason. The binding is inside the signature, so a
+kept block cannot be moved onto another account or off its own by editing the file. The apps
 hold only the public half of the pair (`VERDICT_PUBLIC_KEY` in `crates/core/src/appgate.rs`) and
 keep the last verdict they could verify in the folder all three share, so one app's block holds
 in the others. The policy:
@@ -478,9 +481,11 @@ in the others. The policy:
   carried to another account. A blocked launch asks the gate once, briefly, before refusing —
   that is how a lifted ban gets back in.
 
-The apps also re-ask every half hour while open, and at once when any call comes back 403 with
-`code: "blocked"`. Every app-facing refusal for a ban carries that code beside the unchanged
-disguised message: the message is for the person, the code is for the app, so it can tell a
+A signed block is kept only in that shared file; the older per-app `gate.lock` is still read, and
+still written for a block that arrives unsigned. The apps also re-ask every half hour while open,
+and at once when any call comes back 403 with `code: "blocked"`. Every app-facing refusal for a
+ban carries that code beside the unchanged disguised message (and `POST /v1/entitlements/check`
+beside its plain `"unavailable"`): the message is for the person, the code is for the app, so it can tell a
 block from "not entitled" without matching on prose.
 
 Signing is optional. Without `MXB_VERDICT_SIGNING_KEY` the gate answers exactly as it did, with

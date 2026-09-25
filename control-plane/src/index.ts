@@ -34,7 +34,7 @@ import {
   terminateInstance,
 } from "./aws";
 import { adminAssets, isAssetsPath } from "./assets";
-import { APP_SIGNIN_MESSAGE, appBlocked, appGate, banFor, rememberGuid } from "./bans";
+import { APP_BLOCK_CODE, APP_SIGNIN_MESSAGE, appBlocked, appGate, banFor, rememberGuid } from "./bans";
 import { signVerdict } from "./verdict";
 import { isWebPath, landingSite, webRoutes } from "./web";
 import { steamResult, redirectPage } from "./page";
@@ -381,7 +381,9 @@ async function route(request: Request, env: Env): Promise<Response> {
   // an Ed25519-signed statement the app keeps, so a block it was given holds offline and a clean
   // install that never was keeps working offline (`verdict.ts`). Absent the key, it is left out.
   if (method === "GET" && path === "/v1/app/gate") {
-    const who = { account: account.id, steamId: account.steam_id, guid: account.guid };
+    const auth = bearer(request.headers.get("Authorization"));
+    const token = auth ? await hashToken(auth) : null;
+    const who = { account: account.id, token, steamId: account.steam_id, guid: account.guid };
     const banned = await appGate(env, { accountId: account.id, steamId: account.steam_id, guid: account.guid });
     if (banned.status !== "ok") return json(200, await withSignature(env, banned, who));
     const steamId = await steamIdFor(env, account);
@@ -1018,7 +1020,9 @@ async function checkEntitlement(request: Request, account: Account, env: Env): P
   );
   // Same disguise as the grant: the app never sees the word. A ban reads to it as the asset
   // being unavailable, which is what a withdrawn or removed one reads as too.
-  return json(allowed ? 200 : 403, { allowed, reason: reason === "banned" ? "unavailable" : reason });
+  // A ban keeps its plain "unavailable", plus the same `code` every app-facing ban refusal carries.
+  if (reason === "banned") return json(403, { allowed, reason: "unavailable", code: APP_BLOCK_CODE });
+  return json(allowed ? 200 : 403, { allowed, reason });
 }
 
 /**
@@ -1154,7 +1158,7 @@ function requireSteam(env: Env): boolean {
 async function withSignature<T extends { status: "ok" | "signin" | "unsupported" }>(
   env: Env,
   verdict: T,
-  who: { account: string; steamId: string | null; guid: string | null },
+  who: { account: string; token: string | null; steamId: string | null; guid: string | null },
 ): Promise<T & { signed?: { payload: string; sig: string } }> {
   const signed = await signVerdict(env, { status: verdict.status, ...who });
   return signed ? { ...verdict, signed } : verdict;

@@ -30,6 +30,13 @@ export interface VerdictPayload {
   status: "ok" | "signin" | "unsupported";
   /** The account the verdict is about, so a verdict cannot be carried to another install. */
   account: string;
+  /**
+   * SHA-256 of the bearer token it was fetched with (`hashToken`), lowercase hex. The app never
+   * learns its account id except from a verdict, so this — signed — is how a launch knows a kept
+   * verdict is about the account it is signed in as: it hashes the token in its config and
+   * compares. Harmless to hand back: the caller holds the token itself.
+   */
+  token: string | null;
   steamId: string | null;
   guid: string | null;
   /** Milliseconds since epoch. A newer verdict for the same account replaces an older one. */
@@ -78,6 +85,7 @@ export async function signPayload(payload: VerdictPayload, key: CryptoKey): Prom
     v: payload.v,
     status: payload.status,
     account: payload.account,
+    token: payload.token,
     steamId: payload.steamId,
     guid: payload.guid,
     issuedAt: payload.issuedAt,
@@ -95,7 +103,13 @@ export async function signPayload(payload: VerdictPayload, key: CryptoKey): Prom
  */
 export async function signVerdict(
   env: Env,
-  fields: { status: VerdictPayload["status"]; account: string; steamId?: string | null; guid?: string | null },
+  fields: {
+    status: VerdictPayload["status"];
+    account: string;
+    token?: string | null;
+    steamId?: string | null;
+    guid?: string | null;
+  },
   now: number = Date.now(),
 ): Promise<SignedVerdict | null> {
   const key = await signingKey(env);
@@ -106,6 +120,7 @@ export async function signVerdict(
         v: VERDICT_VERSION,
         status: fields.status,
         account: fields.account,
+        token: fields.token?.trim().toLowerCase() || null,
         steamId: fields.steamId?.trim() || null,
         guid: fields.guid?.trim().toUpperCase() || null,
         issuedAt: now,

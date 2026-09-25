@@ -349,7 +349,7 @@ describe("what a ban actually refuses", () => {
       req("POST", "/v1/entitlements/check", { key: "buyer-token", body: { assetId, sessionId: "s2" }, origin: null }),
     );
     expect(check.status).toBe(403);
-    expect(await check.json()).toEqual({ allowed: false, reason: "unavailable" });
+    expect(await check.json()).toEqual({ allowed: false, reason: "unavailable", code: APP_BLOCK_CODE });
 
     // Lifting it puts the buyer back where they were: the entitlement was never touched.
     await liftBan(env, GUID, BOSS);
@@ -724,16 +724,21 @@ describe("signed verdicts, and the code that says a refusal is a block", () => {
   it("signs and verifies round trip, and refuses a tampered payload or a foreign key", async () => {
     const { secret, publicKey } = await verdictPair();
     const env = { MXB_VERDICT_SIGNING_KEY: secret } as unknown as Env;
-    const signed = (await signVerdict(env, { status: "unsupported", account: "acc_x", steamId: BUYER, guid: "aa0110000100000001" }, 1_700_000_000_000))!;
+    const signed = (await signVerdict(
+      env,
+      { status: "unsupported", account: "acc_x", token: await hashToken("t"), steamId: BUYER, guid: "aa0110000100000001" },
+      1_700_000_000_000,
+    ))!;
     expect(signed).not.toBeNull();
     // The payload is the exact string signed, fields in wire order, GUID normalised.
     expect(signed.payload).toBe(
-      `{"v":1,"status":"unsupported","account":"acc_x","steamId":"${BUYER}","guid":"AA0110000100000001","issuedAt":1700000000000}`,
+      `{"v":1,"status":"unsupported","account":"acc_x","token":"${await hashToken("t")}","steamId":"${BUYER}","guid":"AA0110000100000001","issuedAt":1700000000000}`,
     );
     expect(await verifyVerdict(signed, publicKey)).toEqual({
       v: 1,
       status: "unsupported",
       account: "acc_x",
+      token: await hashToken("t"),
       steamId: BUYER,
       guid: "AA0110000100000001",
       issuedAt: 1_700_000_000_000,
@@ -769,7 +774,7 @@ describe("signed verdicts, and the code that says a refusal is a block", () => {
     const clean = (await (await gate(env, "clean-token")).json()) as { status: string; signed: SignedVerdict };
     expect(clean.status).toBe("ok");
     const ok = await verifyVerdict(clean.signed, publicKey);
-    expect(ok).toMatchObject({ v: 1, status: "ok", account: "acc_clean", steamId: CLEAN, guid: OTHER_GUID });
+    expect(ok).toMatchObject({ v: 1, status: "ok", account: "acc_clean", token: await hashToken("clean-token"), steamId: CLEAN, guid: OTHER_GUID });
     expect(Math.abs(ok!.issuedAt - Date.now())).toBeLessThan(60_000);
 
     const blocked = (await (await gate(env, "banned-token")).json()) as { status: string; message: string; signed: SignedVerdict };
@@ -778,7 +783,7 @@ describe("signed verdicts, and the code that says a refusal is a block", () => {
     expect(await verifyVerdict(blocked.signed, publicKey)).toMatchObject({ status: "unsupported", account: "acc_banned" });
     // Still disguised: the signed statement carries the status and the identities it is about,
     // never a reason.
-    expect(Object.keys(JSON.parse(blocked.signed.payload))).toEqual(["v", "status", "account", "steamId", "guid", "issuedAt"]);
+    expect(Object.keys(JSON.parse(blocked.signed.payload))).toEqual(["v", "status", "account", "token", "steamId", "guid", "issuedAt"]);
   });
 
   it("signs the sign-in wall too", async () => {

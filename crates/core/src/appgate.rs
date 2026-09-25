@@ -235,7 +235,7 @@ fn unmark(app: &AppHandle) {
 // ---------------------------------------------------------------------------------------
 
 /// The `signed` field of a gate answer: the payload as the exact string that was signed, and an
-/// Ed25519 signature over its UTF-8 bytes, base64url without padding.
+/// Ed25519 signature over its UTF-8 bytes, base64url without padding. Kept on disk as it came.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SignedVerdict {
     pub payload: String,
@@ -250,6 +250,11 @@ pub struct VerdictPayload {
     pub status: String,
     /// The account it is about. A verdict for one account never decides anything for another.
     pub account: String,
+    /// SHA-256 of the bearer token the verdict was fetched with, lowercase hex — see
+    /// [`token_digest`]. Signed, so a kept verdict cannot be re-pointed at another account by
+    /// editing the file. The app never learns its account id except from a verdict, so this is
+    /// how a launch knows a kept verdict is about the account it is signed in as.
+    pub token: Option<String>,
     #[serde(rename = "steamId")]
     pub steam_id: Option<String>,
     pub guid: Option<String>,
@@ -261,6 +266,11 @@ pub struct VerdictPayload {
 impl VerdictPayload {
     fn blocks(&self) -> bool {
         self.status == "unsupported"
+    }
+
+    /// Whether this verdict was fetched with the token whose digest is given.
+    fn for_token(&self, token_digest: &str) -> bool {
+        self.token.as_deref() == Some(token_digest)
     }
 }
 
@@ -295,29 +305,16 @@ pub fn verify_verdict(signed: &SignedVerdict) -> Result<VerdictPayload, String> 
     verify_verdict_with(signed, VERDICT_PUBLIC_KEY)
 }
 
-/// The verdict as kept on disk, beside a digest of the token it was fetched with.
-///
-/// The app never learns its own account id except from a verdict, so "the current account" is
-/// the token in the shared config: a kept verdict applies to a start only when it was fetched with
-/// the token that start holds. The digest rather than the token, because this file has no reason
-/// to be a second copy of a credential.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct StoredVerdict {
-    pub token: String,
-    #[serde(flatten)]
-    pub signed: SignedVerdict,
-}
-
-/// SHA-256 of a token, lowercase hex — how a kept verdict names the token it belongs to.
+/// SHA-256 of a token, lowercase hex — the control plane's own `hashToken`, so the digest the
+/// server signs and the one a launch computes from its config are the same string.
 pub fn token_digest(token: &str) -> String {
     Sha256::digest(token.trim().as_bytes()).iter().map(|b| format!("{b:02x}")).collect()
 }
 
-/// Whether a kept verdict refuses a start holding `token_digest`: it verifies, it is a block, and
-/// it was fetched with this token. A kept verdict for another account is ignored, never obeyed.
-pub fn stored_blocks(stored: &StoredVerdict, token_digest: &str, public_key_b64: &str) -> bool {
-    stored.token == token_digest
-        && verify_verdict_with(&stored.signed, public_key_b64).is_ok_and(|p| p.blocks())
+/// Whether a kept verdict refuses a launch holding the token with this digest: it verifies, it is
+/// a block, and it is about this token's account. Another account's block is ignored, never obeyed.
+pub fn stored_blocks(stored: &SignedVerdict, token_digest: &str, public_key_b64: &str) -> bool {
+    verify_verdict_with(stored, public_key_b64).is_ok_and(|p| p.blocks() && p.for_token(token_digest))
 }
 
 /// Whether a freshly verified verdict should replace the one kept.
@@ -335,6 +332,19 @@ pub fn supersedes(kept: Option<&VerdictPayload>, incoming: &VerdictPayload) -> b
     }
 }
 
+/// What [`keep_if_newer`] did with a verdict.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Kept {
+    /// It superseded what was there and is now the kept verdict.
+    Stored,
+    /// The kept verdict is a newer one for the same account: this answer was overtaken in flight
+    /// and must not be acted on either.
+    Overtaken,
+    /// It was not kept — another account's block stands, or the write failed — but it is not
+    /// stale, so the running app may still act on it.
+    NotKept,
+}
+
 /// Where the kept verdict lives: the folder every app in the lineup shares, beside the config
 /// that holds the token it was fetched with. Not `app_local_data_dir`, which is per app.
 fn verdict_path(app: &AppHandle) -> Option<PathBuf> {
@@ -343,31 +353,40 @@ fn verdict_path(app: &AppHandle) -> Option<PathBuf> {
 
 /// The kept verdict, or `None` when there is none or it cannot be read. Unreadable is "none": a
 /// damaged file is not evidence of anything.
-pub fn read_stored(path: &Path) -> Option<StoredVerdict> {
+pub fn read_stored(path: &Path) -> Option<SignedVerdict> {
     let text = std::fs::read_to_string(path).ok()?;
     serde_json::from_str(&text).ok()
 }
 
-/// Keep `incoming` if it supersedes what is there, and say whether it did. Written aside and
-/// moved in, like the config, so a crash mid-write never leaves half a verdict.
-pub fn keep_if_newer(
-    path: &Path,
-    token_digest: &str,
-    incoming_signed: &SignedVerdict,
-    incoming: &VerdictPayload,
-    public_key_b64: &str,
-) -> bool {
-    let kept = read_stored(path).and_then(|s| verify_verdict_with(&s.signed, public_key_b64).ok());
-    if !supersedes(kept.as_ref(), incoming) {
-        return false;
-    }
-    let record = StoredVerdict { token: token_digest.to_string(), signed: incoming_signed.clone() };
-    let Ok(text) = serde_json::to_string(&record) else { return false };
+/// Keep `incoming` if it supersedes what is there.
+///
+/// Three apps share the file, so the read, the comparison and the write happen under an exclusive
+/// lock on a sibling file: without it two apps could both pass the comparison against the same
+/// old verdict and the older answer could land last, undoing a lift or a block. The write goes to
+/// a temporary name of this process's own and is moved in, so a crash never leaves half a verdict.
+pub fn keep_if_newer(path: &Path, incoming_signed: &SignedVerdict, incoming: &VerdictPayload, public_key_b64: &str) -> Kept {
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
-    let tmp = path.with_extension("json.tmp");
-    std::fs::write(&tmp, text).and_then(|_| std::fs::rename(&tmp, path)).is_ok()
+    // Held until the end of this function. If the lock cannot be had at all (a filesystem without
+    // locks), carry on unlocked: a rare race is better than never keeping a verdict.
+    let lock = std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(path.with_extension("lock"));
+    let _guard = lock.as_ref().ok().filter(|f| f.lock().is_ok());
+
+    let kept = read_stored(path).and_then(|s| verify_verdict_with(&s, public_key_b64).ok());
+    if !supersedes(kept.as_ref(), incoming) {
+        let overtaken = kept.is_some_and(|k| k.account == incoming.account && k.issued_at > incoming.issued_at);
+        return if overtaken { Kept::Overtaken } else { Kept::NotKept };
+    }
+    let Ok(text) = serde_json::to_string(incoming_signed) else { return Kept::NotKept };
+    let tmp = path.with_extension(format!("{}.tmp", std::process::id()));
+    match std::fs::write(&tmp, text).and_then(|_| std::fs::rename(&tmp, path)) {
+        Ok(()) => Kept::Stored,
+        Err(_) => {
+            let _ = std::fs::remove_file(&tmp);
+            Kept::NotKept
+        }
+    }
 }
 
 /// The token this install holds in the shared config, read straight from the file.
@@ -381,7 +400,7 @@ fn current_token(app: &AppHandle) -> Option<String> {
     (!token.is_empty()).then_some(token)
 }
 
-/// Whether the kept, signed verdict refuses this start.
+/// Whether the kept, signed verdict refuses this launch.
 fn stored_block(app: &AppHandle) -> bool {
     let (Some(path), Some(token)) = (verdict_path(app), current_token(app)) else { return false };
     read_stored(&path).is_some_and(|s| stored_blocks(&s, &token_digest(&token), VERDICT_PUBLIC_KEY))
@@ -426,17 +445,20 @@ pub fn enforce_marker(app: &AppHandle) {
     let answer = tauri::async_runtime::block_on(async move {
         tokio::time::timeout(LIFT_WAIT, ask(&handle)).await.ok().flatten()
     });
-    match answer {
-        Some(Verdict::Unsupported { message }) => {
-            let message = if message.trim().is_empty() { FALLBACK_BLOCK.to_string() } else { message };
-            mark(app, &message);
-            deny(app, &message);
+    if let Some(answer) = answer {
+        match answer.verdict {
+            Verdict::Unsupported { message } => {
+                let message = if message.trim().is_empty() { FALLBACK_BLOCK.to_string() } else { message };
+                if !answer.signed {
+                    mark(app, &message);
+                }
+                deny(app, &message);
+            }
+            // The server says this install may run. The per-app marker was only ever as good as
+            // the unsigned answer that wrote it, so any fresh answer lifts it, as `check` always
+            // did; a signed block needs a newer signed lift, which `ask` has kept if one came.
+            _ => unmark(app),
         }
-        // The server says this install may run. The per-app marker was only ever as good as the
-        // unsigned answer that wrote it, so an unsigned answer lifts it, as `check` always did; a
-        // signed block needs a newer signed lift, which `ask` has already kept if one came.
-        Some(_) => unmark(app),
-        None => {}
     }
     if let Some(message) = blocked(app) {
         deny(app, &message);
@@ -446,9 +468,19 @@ pub fn enforce_marker(app: &AppHandle) {
     }
 }
 
+/// A verdict worth acting on, and whether it came signed and verified.
+struct Answer {
+    verdict: Verdict,
+    /// The signed form verified: the kept verdict speaks for this block, so the per-app marker —
+    /// which knows no account and cannot be lifted from another app — is not written.
+    signed: bool,
+}
+
 /// One round trip to the gate: the verdict, with its signed form kept when it verifies and
-/// supersedes what is kept. `None` for any network, auth or parse failure — "don't know".
-async fn ask(app: &AppHandle) -> Option<Verdict> {
+/// supersedes what is kept. `None` for any network, auth or parse failure — "don't know" — and
+/// for an answer that was overtaken before it arrived: one older than the verdict already kept
+/// for this account, or fetched for a token the config no longer holds.
+async fn ask(app: &AppHandle) -> Option<Answer> {
     remember(app);
     let token = match account::ensure_token(app).await {
         Ok(t) => t,
@@ -481,7 +513,7 @@ async fn ask(app: &AppHandle) -> Option<Verdict> {
             return None;
         }
     };
-    let verdict: Verdict = match Verdict::deserialize(&body) {
+    let verdict = match Verdict::deserialize(&body) {
         Ok(v) => v,
         Err(e) => {
             log::info!("[gate] unreadable verdict ({e})");
@@ -489,21 +521,32 @@ async fn ask(app: &AppHandle) -> Option<Verdict> {
         }
     };
 
-    // The signed form, kept when it verifies and says the same as the plain answer. One that does
-    // not verify — no key built in, a key rotated since this build — is simply not kept: the plain
-    // verdict is still acted on, as it always was.
-    if let Some(signed) = body.get("signed").and_then(|v| SignedVerdict::deserialize(v).ok()) {
-        match verify_verdict(&signed) {
-            Ok(payload) if payload.status == verdict.status() => {
-                if let Some(path) = verdict_path(app) {
-                    keep_if_newer(&path, &token_digest(&token), &signed, &payload, VERDICT_PUBLIC_KEY);
+    // Signed in as somebody else since the request left — another app claimed or replaced the
+    // token. This answer is about an account that is no longer this install's.
+    if current_token(app).is_some_and(|now| now != token.trim()) {
+        log::info!("[gate] the account changed while asking; answer set aside");
+        return None;
+    }
+
+    // The signed form, kept when it verifies, is about this token, and says the same as the plain
+    // answer. One that does not verify — no key built in, a key rotated since this build — is
+    // simply not kept: the plain verdict is still acted on, as it always was.
+    let mut signed = false;
+    if let Some(sv) = body.get("signed").and_then(|v| SignedVerdict::deserialize(v).ok()) {
+        match verify_verdict(&sv) {
+            Ok(p) if p.status == verdict.status() && p.for_token(&token_digest(&token)) => {
+                signed = true;
+                let kept = verdict_path(app).map(|path| keep_if_newer(&path, &sv, &p, VERDICT_PUBLIC_KEY));
+                if kept == Some(Kept::Overtaken) {
+                    log::info!("[gate] a newer verdict is already kept; answer set aside");
+                    return None;
                 }
             }
             Ok(_) => log::warn!("[gate] the signed verdict disagrees with the plain one; not kept"),
             Err(e) => log::debug!("[gate] signed verdict not kept ({e})"),
         }
     }
-    Some(verdict)
+    Some(Answer { verdict, signed })
 }
 
 impl Verdict {
@@ -521,17 +564,31 @@ impl Verdict {
 ///
 /// Spawned in the background from `setup` so it never delays a legitimate launch. `ok` clears any
 /// stale per-app marker and lowers the sign-in wall; `signin` raises the wall (never fatal);
-/// `unsupported` marks and tears the app down. Any network or auth error does nothing — a block
-/// already kept stands, and an install that was never blocked keeps running.
+/// `unsupported` tears the app down. Any network or auth error does nothing — a block already
+/// kept stands, and an install that was never blocked keeps running.
+///
+/// One at a time: a second call waits for the first rather than racing it, so an older answer can
+/// never land after a newer one in the same process.
 pub async fn check(app: AppHandle) {
-    let _running = Running::claim();
-    let Some(verdict) = ask(&app).await else { return };
+    {
+        let _one = in_flight().lock().await;
+        PENDING.store(false, Ordering::Release);
+        run(&app).await;
+    }
+    if PENDING.swap(false, Ordering::AcqRel) {
+        background_check(app).await;
+    }
+}
 
-    match verdict {
+/// The body of [`check`], for a caller already holding [`in_flight`].
+async fn run(app: &AppHandle) {
+    let Some(answer) = ask(app).await else { return };
+
+    match answer.verdict {
         Verdict::Ok { steam } => {
             STEAM.store(if steam { STEAM_YES } else { STEAM_NO }, Ordering::Relaxed);
-            unmark(&app);
-            announce(&app, SigninRequired { required: false, message: String::new() });
+            unmark(app);
+            announce(app, SigninRequired { required: false, message: String::new() });
         }
         Verdict::Signin { message } => {
             // A sign-in wall is only raised for an account Valve has not confirmed, so this
@@ -540,11 +597,15 @@ pub async fn check(app: AppHandle) {
             STEAM.store(STEAM_NO, Ordering::Relaxed);
             let message = if message.trim().is_empty() { FALLBACK_SIGNIN.to_string() } else { message };
             log::info!("[gate] a Steam sign-in is required before this install may run");
-            announce(&app, SigninRequired { required: true, message });
+            announce(app, SigninRequired { required: true, message });
         }
         Verdict::Unsupported { message } => {
             let message = if message.trim().is_empty() { FALLBACK_BLOCK.to_string() } else { message };
-            mark(&app, &message);
+            // An unsigned block is remembered the old way, per app; a signed one is already kept,
+            // for this account, where every app reads it.
+            if !answer.signed {
+                mark(app, &message);
+            }
             let handle = app.clone();
             let _ = app.run_on_main_thread(move || deny(&handle, &message));
         }
@@ -566,36 +627,32 @@ fn remember(app: &AppHandle) {
     let _ = app_handle().set(app.clone());
 }
 
-/// Whether a [`check`] is running now. A background re-check that finds one running skips its
-/// turn — the answer is already on its way, and two at once on an install with no token yet
-/// would both claim a device account.
-static CHECKING: AtomicBool = AtomicBool::new(false);
-
-/// Marks a check as running for as long as it is held. [`check`] itself always runs — the sign-in
-/// wall's "I've signed in" must be answered, not skipped because a half-hourly check was in
-/// flight — so this only records, and only the claim that set the flag clears it.
-struct Running(bool);
-
-impl Running {
-    fn claim() -> Self {
-        Running(CHECKING.compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire).is_ok())
-    }
+/// Held for the length of a check. Two at once on an install with no token yet would both claim
+/// a device account, and two answers could land in either order.
+fn in_flight() -> &'static tokio::sync::Mutex<()> {
+    static LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
 }
 
-impl Drop for Running {
-    fn drop(&mut self) {
-        if self.0 {
-            CHECKING.store(false, Ordering::Release);
+/// A re-check was asked for while one was running. The running one may have left before the
+/// reason to ask again arrived — a refusal seen mid-check — so it runs once more when it ends.
+static PENDING: AtomicBool = AtomicBool::new(false);
+
+/// A re-check nobody is waiting on. When one is already running it is not skipped but queued:
+/// the running check runs once more when it finishes.
+async fn background_check(app: AppHandle) {
+    loop {
+        let Ok(one) = in_flight().try_lock() else {
+            PENDING.store(true, Ordering::Release);
+            return;
+        };
+        PENDING.store(false, Ordering::Release);
+        run(&app).await;
+        drop(one);
+        if !PENDING.swap(false, Ordering::AcqRel) {
+            return;
         }
     }
-}
-
-/// A re-check nobody is waiting on: skipped when one is already running.
-async fn background_check(app: AppHandle) {
-    if CHECKING.load(Ordering::Acquire) {
-        return;
-    }
-    check(app).await;
 }
 
 /// Re-ask the gate every [`RECHECK_EVERY`] for as long as the app runs. Call once from `setup`,
@@ -634,6 +691,7 @@ pub fn note_refusal(status: u16, body: Option<&str>) {
     if !worth_asking {
         return;
     }
+    let Some(app) = app_handle().get() else { return };
     static LAST: AtomicU64 = AtomicU64::new(0);
     let now = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
     let last = LAST.load(Ordering::Relaxed);
@@ -642,10 +700,8 @@ pub fn note_refusal(status: u16, body: Option<&str>) {
     {
         return;
     }
-    if let Some(app) = app_handle().get() {
-        log::info!("[gate] a call was refused; asking the gate again now");
-        tauri::async_runtime::spawn(background_check(app.clone()));
-    }
+    log::info!("[gate] a call was refused; asking the gate again now");
+    tauri::async_runtime::spawn(background_check(app.clone()));
 }
 
 /// [`note_refusal`] for a `reqwest` error from `error_for_status`, which carries the status and
@@ -725,12 +781,19 @@ mod tests {
         (key, public)
     }
 
-    fn sign(key: &SigningKey, status: &str, account: &str, issued_at: i64) -> SignedVerdict {
+    /// A verdict for `account`, fetched with `token`, the way the control plane words one.
+    fn sign(key: &SigningKey, status: &str, account: &str, token: &str, issued_at: i64) -> SignedVerdict {
         let payload = format!(
-            r#"{{"v":1,"status":"{status}","account":"{account}","steamId":null,"guid":"FF0110000111111111","issuedAt":{issued_at}}}"#
+            r#"{{"v":1,"status":"{status}","account":"{account}","token":"{}","steamId":null,"guid":"FF0110000111111111","issuedAt":{issued_at}}}"#,
+            token_digest(token)
         );
         let sig = URL_SAFE_NO_PAD.encode(key.sign(payload.as_bytes()).to_bytes());
         SignedVerdict { payload, sig }
+    }
+
+    fn keep(path: &Path, signed: &SignedVerdict, public: &str) -> Kept {
+        let p = verify_verdict_with(signed, public).unwrap();
+        keep_if_newer(path, signed, &p, public)
     }
 
     fn scratch(name: &str) -> PathBuf {
@@ -742,10 +805,10 @@ mod tests {
 
     /// A verdict the control plane's own `signPayload` produced, in TypeScript, under a throwaway
     /// pair — pasted verbatim. The one seam neither side can check alone: the exact bytes signed,
-    /// base64url without padding, field names in camelCase.
-    const TS_PUBLIC_KEY: &str = "-CFSs1uk9joAyTUjTyF8Tf705d0N2Y3nV_I-gH9N4Vo";
-    const TS_PAYLOAD: &str = r#"{"v":1,"status":"unsupported","account":"acc_test","steamId":"76561198000000042","guid":"FF0110000111111111","issuedAt":1800000000000}"#;
-    const TS_SIG: &str = "eH2uicU77qF7WunwnaqK8HpCZZhDPcD6DfxZRzvDewkBMZfh6N5AlDnPfRmhCgrfXZGHZzAKTsqrdOct5cJJCQ";
+    /// base64url without padding, field names in camelCase, the token digest as `hashToken` makes it.
+    const TS_PUBLIC_KEY: &str = "6UPKDEVIrh4oaY0czLmDznbPNuH_8KtzkuT_GJaLQ-c";
+    const TS_PAYLOAD: &str = r#"{"v":1,"status":"unsupported","account":"acc_test","token":"4c5dc9b7708905f77f5e5d16316b5dfb425e68cb326dcd55a860e90a7707031e","steamId":"76561198000000042","guid":"FF0110000111111111","issuedAt":1800000000000}"#;
+    const TS_SIG: &str = "N43S6cB0pacXpcJiy_sX5P5T7UTp_mmjeKHXr1wUx46-wfMRP8Bju5ioTmkSNIeIVktLfQomLtKsOgq5eTKqAA";
 
     #[test]
     fn verifies_a_verdict_the_typescript_worker_actually_signed() {
@@ -754,6 +817,8 @@ mod tests {
         assert_eq!(p.v, 1);
         assert_eq!(p.status, "unsupported");
         assert_eq!(p.account, "acc_test");
+        // The worker's `hashToken` and this crate's `token_digest` must agree on the same token.
+        assert!(p.for_token(&token_digest("test-token")));
         assert_eq!(p.steam_id.as_deref(), Some("76561198000000042"));
         assert_eq!(p.guid.as_deref(), Some("FF0110000111111111"));
         assert_eq!(p.issued_at, 1_800_000_000_000);
@@ -762,7 +827,7 @@ mod tests {
     #[test]
     fn a_good_signature_verifies_and_a_bad_or_tampered_one_does_not() {
         let (key, public) = pair(1);
-        let signed = sign(&key, "ok", "acc_a", 10);
+        let signed = sign(&key, "ok", "acc_a", "token-a", 10);
         assert_eq!(verify_verdict_with(&signed, &public).unwrap().status, "ok");
 
         // Tampered: the payload says something it was not signed saying.
@@ -784,7 +849,7 @@ mod tests {
     #[test]
     fn a_verdict_of_an_unknown_version_is_not_read() {
         let (key, public) = pair(3);
-        let payload = r#"{"v":2,"status":"ok","account":"acc_a","steamId":null,"guid":null,"issuedAt":1}"#.to_string();
+        let payload = r#"{"v":2,"status":"ok","account":"acc_a","token":null,"steamId":null,"guid":null,"issuedAt":1}"#.to_string();
         let sig = URL_SAFE_NO_PAD.encode(key.sign(payload.as_bytes()).to_bytes());
         assert!(verify_verdict_with(&SignedVerdict { payload, sig }, &public).is_err());
     }
@@ -795,26 +860,20 @@ mod tests {
         let path = scratch("precedence");
         let tok = token_digest("token-a");
 
-        let block = sign(&key, "unsupported", "acc_a", 1_000);
-        let p = verify_verdict_with(&block, &public).unwrap();
-        assert!(keep_if_newer(&path, &tok, &block, &p, &public));
+        assert_eq!(keep(&path, &sign(&key, "unsupported", "acc_a", "token-a", 1_000), &public), Kept::Stored);
         assert!(stored_blocks(&read_stored(&path).unwrap(), &tok, &public));
 
-        // An older ok — a replayed one, say — changes nothing.
-        let old_ok = sign(&key, "ok", "acc_a", 999);
-        let p = verify_verdict_with(&old_ok, &public).unwrap();
-        assert!(!keep_if_newer(&path, &tok, &old_ok, &p, &public));
+        // An older ok — a replayed one, or one overtaken in flight — changes nothing, and is
+        // reported as overtaken so the running app does not act on it either.
+        assert_eq!(keep(&path, &sign(&key, "ok", "acc_a", "token-a", 999), &public), Kept::Overtaken);
         assert!(stored_blocks(&read_stored(&path).unwrap(), &tok, &public));
 
         // So does one issued at the same instant: strictly newer only.
-        let same = sign(&key, "ok", "acc_a", 1_000);
-        let p = verify_verdict_with(&same, &public).unwrap();
-        assert!(!keep_if_newer(&path, &tok, &same, &p, &public));
+        assert_eq!(keep(&path, &sign(&key, "ok", "acc_a", "token-a", 1_000), &public), Kept::NotKept);
+        assert!(stored_blocks(&read_stored(&path).unwrap(), &tok, &public));
 
         // A newer signin lifts it just as an ok does — neither is a block.
-        let lift = sign(&key, "signin", "acc_a", 1_001);
-        let p = verify_verdict_with(&lift, &public).unwrap();
-        assert!(keep_if_newer(&path, &tok, &lift, &p, &public));
+        assert_eq!(keep(&path, &sign(&key, "signin", "acc_a", "token-a", 1_001), &public), Kept::Stored);
         assert!(!stored_blocks(&read_stored(&path).unwrap(), &tok, &public));
     }
 
@@ -825,37 +884,46 @@ mod tests {
         let tok_a = token_digest("token-a");
         let tok_b = token_digest("token-b");
 
-        let block = sign(&key, "unsupported", "acc_a", 1_000);
-        let p = verify_verdict_with(&block, &public).unwrap();
-        assert!(keep_if_newer(&path, &tok_a, &block, &p, &public));
+        assert_eq!(keep(&path, &sign(&key, "unsupported", "acc_a", "token-a", 1_000), &public), Kept::Stored);
 
-        // A start holding another account's token is not refused by account A's block.
+        // A launch holding another account's token is not refused by account A's block.
         assert!(!stored_blocks(&read_stored(&path).unwrap(), &tok_b, &public));
 
-        // Nor does account B's ok, however new, lift account A's block.
-        let ok_b = sign(&key, "ok", "acc_b", 5_000);
-        let p = verify_verdict_with(&ok_b, &public).unwrap();
-        assert!(!keep_if_newer(&path, &tok_b, &ok_b, &p, &public));
+        // Nor does account B's ok, however new, lift account A's block — and it is not stale, so
+        // B's running app may still act on it.
+        assert_eq!(keep(&path, &sign(&key, "ok", "acc_b", "token-b", 5_000), &public), Kept::NotKept);
         assert!(stored_blocks(&read_stored(&path).unwrap(), &tok_a, &public));
 
-        // A block for the new account does replace it: that is the one the current start is about.
-        let block_b = sign(&key, "unsupported", "acc_b", 5_001);
-        let p = verify_verdict_with(&block_b, &public).unwrap();
-        assert!(keep_if_newer(&path, &tok_b, &block_b, &p, &public));
+        // A block for the new account does replace it: that is the one the current launch is about.
+        assert_eq!(keep(&path, &sign(&key, "unsupported", "acc_b", "token-b", 5_001), &public), Kept::Stored);
         assert!(stored_blocks(&read_stored(&path).unwrap(), &tok_b, &public));
+        assert!(!stored_blocks(&read_stored(&path).unwrap(), &tok_a, &public));
     }
 
     #[test]
     fn a_kept_ok_never_blocks_and_a_forged_block_is_ignored() {
         let (key, public) = pair(6);
         let tok = token_digest("token-a");
-        let ok = StoredVerdict { token: tok.clone(), signed: sign(&key, "ok", "acc_a", 1) };
-        assert!(!stored_blocks(&ok, &tok, &public));
+        assert!(!stored_blocks(&sign(&key, "ok", "acc_a", "token-a", 1), &tok, &public));
 
-        // A block written to disk by hand, or signed by anybody else, is not a block.
+        // A block written by hand, or signed by anybody else, is not a block.
         let (forger, _) = pair(7);
-        let forged = StoredVerdict { token: tok.clone(), signed: sign(&forger, "unsupported", "acc_a", 1) };
-        assert!(!stored_blocks(&forged, &tok, &public));
+        assert!(!stored_blocks(&sign(&forger, "unsupported", "acc_a", "token-a", 1), &tok, &public));
+    }
+
+    #[test]
+    fn the_account_binding_is_inside_the_signature() {
+        // Re-pointing a kept block at another token means editing the signed payload, which
+        // breaks the signature — so a block cannot be moved onto an account, nor moved off one.
+        let (key, public) = pair(8);
+        let block = sign(&key, "unsupported", "acc_a", "token-a", 1);
+        let moved = SignedVerdict {
+            payload: block.payload.replace(&token_digest("token-a"), &token_digest("token-b")),
+            ..block.clone()
+        };
+        assert!(!stored_blocks(&moved, &token_digest("token-b"), &public));
+        assert!(!stored_blocks(&moved, &token_digest("token-a"), &public));
+        assert!(stored_blocks(&block, &token_digest("token-a"), &public));
     }
 
     #[test]
@@ -864,6 +932,7 @@ mod tests {
             v: 1,
             status: status.into(),
             account: account.into(),
+            token: None,
             steam_id: None,
             guid: None,
             issued_at: at,
