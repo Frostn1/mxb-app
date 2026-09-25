@@ -34,7 +34,8 @@ import {
   terminateInstance,
 } from "./aws";
 import { adminAssets, isAssetsPath } from "./assets";
-import { APP_BLOCK_MESSAGE, APP_SIGNIN_MESSAGE, appGate, banFor, rememberGuid } from "./bans";
+import { APP_SIGNIN_MESSAGE, appBlocked, appGate, banFor, rememberGuid } from "./bans";
+import { signVerdict } from "./verdict";
 import { isWebPath, landingSite, webRoutes } from "./web";
 import { steamResult, redirectPage } from "./page";
 import { pinGuidFromSteam, rememberLink, steamIdFor } from "./steamlink";
@@ -360,8 +361,9 @@ async function route(request: Request, env: Env): Promise<Response> {
     // Disguised, because this is the app path: a bearer token is a desktop app, never the
     // website. It is handed the same mundane verification failure the startup gate returns,
     // so a pirate poking at any endpoint learns nothing the gate wouldn't already have hidden.
-    // The website keeps the honest `BANNED` on its own surfaces (`web.ts`, `assets.ts`).
-    if (ban) return json(403, { error: APP_BLOCK_MESSAGE });
+    // The website keeps the honest `BANNED` on its own surfaces (`web.ts`, `assets.ts`). The
+    // `code` beside the message is what tells the app to re-ask the startup gate now.
+    if (ban) return json(403, appBlocked());
   }
 
   // The desktop apps' startup gate. In `bannedMayUse`, so a banned install can reach it and be
@@ -374,18 +376,24 @@ async function route(request: Request, env: Env): Promise<Response> {
   //     one, `signin`: the app prompts for Steam and retries, and every install becomes a proven
   //     identity — which is what makes the GUID and the ban unspoofable for the whole estate;
   //  3. otherwise `ok`.
+  //
+  // Each answer also carries `signed` when `MXB_VERDICT_SIGNING_KEY` is set: the same verdict as
+  // an Ed25519-signed statement the app keeps, so a block it was given holds offline and a clean
+  // install that never was keeps working offline (`verdict.ts`). Absent the key, it is left out.
   if (method === "GET" && path === "/v1/app/gate") {
+    const who = { account: account.id, steamId: account.steam_id, guid: account.guid };
     const banned = await appGate(env, { accountId: account.id, steamId: account.steam_id, guid: account.guid });
-    if (banned.status !== "ok") return json(200, banned);
-    const steam = Boolean(await steamIdFor(env, account));
+    if (banned.status !== "ok") return json(200, await withSignature(env, banned, who));
+    const steamId = await steamIdFor(env, account);
+    const steam = Boolean(steamId);
     if (requireSteam(env) && !steam) {
-      return json(200, { status: "signin", message: APP_SIGNIN_MESSAGE });
+      return json(200, await withSignature(env, { status: "signin", message: APP_SIGNIN_MESSAGE }, who));
     }
     // `ok` carries whether Valve has confirmed this account, which is not the same question as
     // whether it may run: with `MXB_REQUIRE_STEAM` off an unlinked account is also `ok`. The app
     // reports it with its anonymous usage counters, as one bit and nothing else, so adoption can
     // be read against every install rather than only the ones whose game we saw running.
-    return json(200, { status: "ok", steam });
+    return json(200, await withSignature(env, { status: "ok", steam }, { ...who, steamId }));
   }
 
   // Open to every account, self-serve ones included: who you are, where you are, and the
@@ -1034,7 +1042,7 @@ async function grantKey(request: Request, account: Account, env: Env): Promise<R
   const { allowed, reason } = await decideEntitlement(account, assetId, session, blobSha256, env);
   // The ledger keeps the honest `banned`; the app is handed the same disguised failure as
   // everywhere else, so an unlock that a ban refused reads as a broken install, not a verdict.
-  if (!allowed) return json(403, { error: reason === "banned" ? APP_BLOCK_MESSAGE : reason });
+  if (!allowed) return json(403, reason === "banned" ? appBlocked() : { error: reason });
 
   const asset = await env.DB.prepare(
     "SELECT wrapped_key, key_id, blob_sha256 FROM assets WHERE id = ?",
@@ -1135,6 +1143,21 @@ function b64(bytes: Uint8Array): string {
  */
 function requireSteam(env: Env): boolean {
   return (env.MXB_REQUIRE_STEAM ?? "").trim() === "1";
+}
+
+/**
+ * A gate verdict with its signed form attached, when this deployment signs them.
+ *
+ * The signed payload repeats the status rather than the whole answer: the message is prose for
+ * the person, and `steam` is a counter's bit — the app acts on neither offline.
+ */
+async function withSignature<T extends { status: "ok" | "signin" | "unsupported" }>(
+  env: Env,
+  verdict: T,
+  who: { account: string; steamId: string | null; guid: string | null },
+): Promise<T & { signed?: { payload: string; sig: string } }> {
+  const signed = await signVerdict(env, { status: verdict.status, ...who });
+  return signed ? { ...verdict, signed } : verdict;
 }
 
 function bannedMayUse(method: string, path: string): boolean {
@@ -1269,7 +1292,7 @@ async function putGuid(request: Request, account: Account, env: Env): Promise<Re
   // only knows the identities already tied to the caller: this is the claim that would make
   // the tie, and letting it through would put a banned install's identity on a fresh account
   // for one request before anything noticed. Disguised, like every other app-facing refusal.
-  if (await banFor(env, { guid })) return json(403, { error: APP_BLOCK_MESSAGE });
+  if (await banFor(env, { guid })) return json(403, appBlocked());
 
   // If Valve has confirmed a Steam identity for this account, the GUID is not the client's to
   // choose: it is derived from that identity and pinned. Whatever the app sent is ignored — a

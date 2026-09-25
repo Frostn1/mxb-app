@@ -110,6 +110,23 @@ export const APP_BLOCK_MESSAGE =
   "This copy couldn't be verified. It may be out of date or damaged — reinstall the latest version from mxbsecure.com.";
 
 /**
+ * The machine-readable half of the same refusal: every app-facing 403 for a ban carries
+ * `code: "blocked"` beside the message.
+ *
+ * The message is for the person and has to read as an ordinary failure; the code is for the app,
+ * which needs to tell "refused because this install is blocked" from every other 403 (not
+ * entitled, needs an invite) without matching on prose. On seeing it the app re-asks the startup
+ * gate at once rather than at its next half-hourly check. It says no more than the gate already
+ * would — a banned install is told `unsupported` there anyway.
+ */
+export const APP_BLOCK_CODE = "blocked";
+
+/** The body of an app-facing refusal for a ban. One place, so the two fields never drift apart. */
+export function appBlocked(): { error: string; code: string } {
+  return { error: APP_BLOCK_MESSAGE, code: APP_BLOCK_CODE };
+}
+
+/**
  * What the app is told when a deployment requires a Steam sign-in and this install has none.
  *
  * Honest, unlike the ban message: this is a requirement to meet, not a refusal to hide. The app

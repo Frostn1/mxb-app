@@ -36,6 +36,12 @@ declare global {
      *  unsigned license is not a degraded one, it is a forgery with our name on it.
      *  Generate with `bun scripts/plugin-keypair.ts`. */
     PLUGIN_SIGNING_KEY?: string;
+    /** Ed25519 private key (PKCS#8 DER, base64url) that signs the startup gate's verdicts, so
+     *  an app can keep a block it was given and enforce it offline. A different pair from the
+     *  plugin one: the apps hold its public half in `crates/core/src/appgate.rs`. Without it
+     *  `/v1/app/gate` answers exactly as before, unsigned — never an error. Generate with
+     *  `bun scripts/verdict-keypair.ts`. */
+    MXB_VERDICT_SIGNING_KEY?: string;
     /** Reads the usage dashboard and the stats JSON. Without it both answer 503, which is
      *  the right default: a deployment that was never given a key has no admin surface
      *  rather than an open one. */
