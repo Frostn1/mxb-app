@@ -18,15 +18,15 @@ import SurveyPrompt from "@frost/shared/Components/Survey/SurveyPrompt";
 
 type View = "sessions" | "settings";
 
-/** The mxbsecure wordmark over the product name, as the site sets them. Grabs the window. */
+/** The product name, with a smaller "by mxbsecure" under it. Grabs the window. */
 function Brand() {
   return (
     <div data-tauri-drag-region className="select-none px-2.5 pt-0.5">
-      <div data-tauri-drag-region className="headline text-[12px] text-muted-foreground">
-        mxbsecure
-      </div>
-      <div data-tauri-drag-region className="headline mt-0.5 text-[22px]">
+      <div data-tauri-drag-region className="headline text-[22px]">
         Coach
+      </div>
+      <div data-tauri-drag-region className="mt-0.5 text-[11px] text-muted-foreground">
+        by mxbsecure
       </div>
     </div>
   );
