@@ -3,6 +3,11 @@
 ## Unreleased
 
 ### Added
+- Ban migrations `0038` and `0040` no longer carry any GUIDs: their seed data was removed and bans
+  go through the admin API only. The rows they inserted stay in the database (D1 never re-runs an
+  applied migration), and the tests use synthetic GUIDs.
+- CI refuses any MX Bikes GUID not on `scripts/guid-allowlist.txt` (`bun run check:no-ban-guids`), so a
+  real install's GUID, and above all a banned one, never lands in this public repository.
 - Expose bounded beta21e TRH main-centreline projection for native server timing gates.
 - MXB App, MXB Coach and Frost Studio can each be uninstalled from their own Settings. Type the
   app's name to confirm, and the app closes and removes itself:
