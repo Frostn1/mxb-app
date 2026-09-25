@@ -715,7 +715,7 @@ export const en = {
   "secure.testHeading": "Test the format (optional)",
   "secure.step3": "Bind to your Steam account & play offline",
   "secure.step3Desc":
-    "Seal the key to your Steam account and store it locally. From then on it opens with no server — offline, on a LAN, anywhere — but only on your account. A copy on someone else's account gets nothing.",
+    "Seal the key to your Steam account and store it locally. From then on it plays offline for up to 30 days between check-ins — the app renews silently whenever it is online — but only on your account. A copy on someone else's account gets nothing.",
   "secure.steamAccount": "Your Steam account:",
   "secure.noSteam": "Couldn't read your Steam account. Is Steam installed and signed in?",
   "secure.provision": "Bind to my account",

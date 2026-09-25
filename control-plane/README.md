@@ -29,7 +29,8 @@ consequences fall out of that, and they're baked into the schema:
 | GET | `/v1/servers` | — | Server registry. Public: it is the app's join picker, and the people who most need it are the ones with no account yet. `agent_url` is not returned. |
 | POST | `/v1/servers/:id/hello` | agent token | A provisioned box announcing that it is up. Its address is taken from `cf-connecting-ip`, never from the body, so a box cannot register somebody else's. |
 | GET | `/v1/me` | bearer | Account, and a per-bike summary of what is stored for it. Looks ordinary to a banned install on purpose — see below. |
-| GET | `/v1/app/gate` | bearer | The desktop apps' startup gate. `{status:"ok"}` to run; `{status:"signin"}` when `MXB_REQUIRE_STEAM` is on and the account has no confirmed Steam link (the app shows a sign-in wall); `{status:"unsupported"}` for a banned install (a mundane untruth, never the word "ban"). |
+| GET | `/v1/app/gate` | bearer | The desktop apps' startup gate. `{status:"ok"}` to run; `{status:"signin"}` when `MXB_REQUIRE_STEAM` is on and the account has no confirmed Steam link (the app shows a sign-in wall); `{status:"unsupported"}` for a banned install (a mundane untruth, never the word "ban"). With `MXB_VERDICT_SIGNING_KEY` set, each answer also carries `signed: {payload, sig}` — see **Signed verdicts, and the offline policy**. Reads the optional `X-MXB-Device` header — see **Device links** under **Banning a rider**. |
+| POST | `/v1/keys/lease` | bearer | A signed 30-day lease for the caller's Valve-confirmed Steam account, which the DLL needs beside a `.mxbkey` before it unseals it. 403 `code: "blocked"` for a banned account, 409 with no Steam link, 503 without `MXB_VERDICT_SIGNING_KEY` — see **Key leases, and the 30-day offline window** under **Banning a rider**. |
 | PUT | `/v1/me/guid` | bearer | Claim a GUID. Derived from the linked Steam identity and pinned (the client's value is ignored) for a Steam account; first-come for a non-Steam one; refused if banned. |
 | PUT | `/v1/loadout` | bearer | Replace **one bike's** loadout. Kept for clients older than per-bike storage. |
 | PUT | `/v1/loadouts` | bearer | Replace the whole look, every bike at once. Returns `missing` — the blobs still to upload. |
@@ -399,10 +400,11 @@ the GUID in front of it, the GUID a Steam identity *derives to* (`guidFromSteamI
 copy the two are one value, so a banned Steam login needs no row in the database to be refused,
 which is the website's caller: signed in with Steam and possibly with no MXB App account at
 all), every GUID the calling account holds *or has ever claimed* (`guid_claims`), every account
-on the same Steam identity now or in the link log (`steam_links`), and every GUID those accounts
-have used. So a second account on the same Steam
-login, a fresh GUID claimed by a banned account, and a fresh Steam account on a banned install
-all resolve back to the ban. `guid_claims` exists for exactly the reason `steam_links` does:
+on the same Steam identity now or in the link log (`steam_links`), every account seen on the same
+machine (`device_links`, when device linking is on — see **Device links** below), and every GUID those
+accounts have used. So a second account on the same Steam
+login, a fresh GUID claimed by a banned account, a fresh Steam account on a banned install, and a
+fresh token on a banned PC all resolve back to the ban. `guid_claims` exists for exactly the reason `steam_links` does:
 `accounts.guid` is a single mutable cell, and a ban that only read it would end at a rename.
 
 **Asked at three doors, never per feature**, so a product added later inherits it:
@@ -430,8 +432,8 @@ each is there because refusing it outright would work against the ban:
   machine — this is what makes the app delete the keys it already holds, and a blanket 403 there
   would read as "we don't know", which keeps them. It carries no ban flag: the per-asset
   `revoked` reads exactly like the creator having removed the buyer, which is the disguise. And
-  `.mxbkey` opens offline forever, so without this a ban would leave the banned install playing
-  everything it had already unlocked.
+  a `.mxbkey` opens offline, so without this a ban would leave the banned install playing
+  everything it had already unlocked until its key lease ran out (below).
 - `POST /v1/keys/grant` and `POST /v1/entitlements/check` still answer, and still write the
   denial to `entitlement_grants` as `banned` — a banned install walking the catalogue is only
   visible if the "no"s are recorded. What the app *sees* is the disguised failure (the grant) or
@@ -447,8 +449,130 @@ to make another account, the honest message is the exact next-step coaching they
 and the reinstall the disguise names cannot help them, because a ban follows the GUID, the Steam
 login and the install, never the files. We always know it is a ban — the ledger, the admin page
 and the internal `reason` all say so. The machine in front of the person does not. The app side
-of the gate — the marker that keeps a blocked install blocked even offline — lives in
-`mxb-app`'s `gate.rs`.
+of the gate — the signed verdict that keeps a blocked install blocked even offline — lives in
+`crates/core/src/appgate.rs`.
+
+#### Signed verdicts, and the offline policy
+
+The gate's plain answer is enough to act on in the moment and worth nothing afterwards: a block
+written to disk on the strength of an unsigned reply is a file anybody can delete, and a stored
+"ok" is a file anybody can write. So `GET /v1/app/gate` also returns the verdict as a signed
+statement (`src/verdict.ts`):
+
+```json
+"signed": {
+  "payload": "{\"v\":1,\"status\":\"unsupported\",\"account\":\"acc_…\",\"token\":\"<sha-256 of the bearer token>\",\"steamId\":null,\"guid\":null,\"issuedAt\":1800000000000}",
+  "sig": "<Ed25519 over the payload's UTF-8 bytes, base64url>"
+}
+```
+
+`payload` is the exact string signed. It names the status, the account it is about, a SHA-256 of
+the token it was fetched with (`hashToken` — how a launch, which knows its token but not its
+account id, tells that a kept verdict is about itself), the Steam ID and GUID the server tied to
+that account, and when it was issued — never a reason. The binding is inside the signature, so a
+kept block cannot be moved onto another account or off its own by editing the file. The apps
+hold only the public half of the pair (`VERDICT_PUBLIC_KEY` in `crates/core/src/appgate.rs`) and
+keep the last verdict they could verify in the folder all three share, so one app's block holds
+in the others. The policy:
+
+- **An install never told it is banned keeps working offline.** No network, a timeout or an
+  unreadable answer is never a reason to refuse anybody — exactly as before.
+- **An install given a signed block stays blocked offline.** A kept `unsupported` for the account
+  the install is signed in as refuses the launch without the network. Only a *newer* signed `ok`
+  or `signin` for the same account lifts it, so a replayed old "ok" cannot, and a block cannot be
+  carried to another account. A blocked launch asks the gate once, briefly, before refusing —
+  that is how a lifted ban gets back in.
+
+A signed block is kept only in that shared file; the older per-app `gate.lock` is still read, and
+still written for a block that arrives unsigned. The apps also re-ask every half hour while open,
+and at once when any call comes back 403 with `code: "blocked"`. Every app-facing refusal for a
+ban carries that code beside the unchanged disguised message (and `POST /v1/entitlements/check`
+beside its plain `"unavailable"`): the message is for the person, the code is for the app, so it can tell a
+block from "not entitled" without matching on prose.
+
+Signing is optional. Without `MXB_VERDICT_SIGNING_KEY` the gate answers exactly as it did, with
+no `signed` field, and a signing failure is logged and answered unsigned — never an error. To
+turn it on:
+
+```sh
+bun scripts/verdict-keypair.ts                   # prints both halves; stores neither
+bunx wrangler secret put MXB_VERDICT_SIGNING_KEY  # paste the private half (PKCS#8, base64url)
+```
+
+and put the printed public half in `VERDICT_PUBLIC_KEY` in `crates/core/src/appgate.rs` for the
+next app release. Never commit the private half. It is a pair of its own, not the plugin one.
+Rotating it is a release: a build treats a verdict signed by any other key as unsigned — it still
+acts on it, it just cannot keep it — and a block kept under the old key stays until a build with
+the old key sees a newer lift, or the app is updated.
+
+#### Key leases, and the 30-day offline window
+
+A `.mxbkey` is sealed to the buyer's Steam ID and PC and opens with no server, so the status poll
+above only reaches it while the app is online and left alone. An install kept offline used to keep
+everything it had unlocked, forever. So the DLL now unseals a key only beside a **lease**: a small
+statement signed with the verdict key (`src/lease.ts`), from `POST /v1/keys/lease`:
+
+```json
+{
+  "lease": {
+    "payload": "{\"v\":1,\"purpose\":\"mxbsecure-lease\",\"steamId\":\"7656…\",\"issuedAt\":1800000000000,\"expiresAt\":1802592000000}",
+    "sig": "<Ed25519 over the payload's UTF-8 bytes, base64url>"
+  },
+  "expiresAt": 1802592000000
+}
+```
+
+It names the caller's Valve-confirmed Steam ID and runs 30 days. One lease covers every key that
+Steam account holds on the install. The app keeps it beside the DLL's manifest and renews it
+silently whenever it is online and fewer than 25 days are left; the DLL checks the signature, the
+purpose, that the Steam ID is the one it reads live, and that it has not run out. What that means
+for a buyer: **play offline for up to 30 days between check-ins; the app renews silently whenever
+it is online.**
+
+The route is behind the ban gate and not in `bannedMayUse`, so a banned account is refused with
+`code: "blocked"` — and the app deletes its lease (and runs the revocation sweep) when it hears
+that. A ban therefore reaches keys already on disk within 30 days even on a PC that never comes
+back online, and at once on one that does. Without a Steam link the answer is 409
+`no Steam account linked`, the grant's own words.
+
+Signed with the same key as the gate verdicts, so there is one secret and one public half. The two
+cannot be swapped: a lease carries `purpose: "mxbsecure-lease"` and no `status` or `account`, and
+each verifier refuses the other's shape.
+
+Without `MXB_VERDICT_SIGNING_KEY` the route answers 503 `leases not configured`. That is safe
+because the DLL only asks for a lease when it was built with the public half
+(`LEASE_PUBLIC_KEY` in the private repo's `secure/src/lease.rs`); a DLL built without it unseals
+exactly as before. Roll it out in that order: set the secret, ship an app that fetches leases, and
+only then ship a DLL with the public key in it.
+
+#### Device links
+
+A fresh token, or a fresh Steam account, on the same banned PC used to be a new identity. With
+`MXB_DEVICE_SALT` set it is not: the apps report the machine they run on in an `X-MXB-Device`
+header on `GET /v1/app/gate` and on `POST /v1/account`, and the worker ties the account to it in
+`device_links` (`src/devices.ts`, `0043_device_links.sql`). `banFor` then widens through it one
+hop, beside the Steam hop: every account seen on a device the caller has been seen on.
+
+The machine identifier itself never leaves the PC. The app sends SHA-256 of a domain tag and the
+OS's machine id (`crates/core/src/device.rs`: `MachineGuid` on Windows, `IOPlatformUUID` on
+macOS, `/etc/machine-id` on Linux); the worker keys that again with `HMAC-SHA256(MXB_DEVICE_SALT,
+…)` and stores only the result, so a copy of the table is useless without the secret. A report
+that is not 64 hex characters is ignored. Erasure (`DELETE /v1/me`) deletes an account's device
+links outright, a banned account's included — `docs/privacy.md` says so to the people it is about.
+
+Off unless configured: without the secret nothing is recorded, the resolution does not read the
+table, and no request fails either way. To turn it on:
+
+```sh
+bunx wrangler d1 migrations apply mxb-control-plane --remote   # 0043_device_links.sql first
+bunx wrangler secret put MXB_DEVICE_SALT                        # any long random string
+```
+
+Rotating the secret stops new reports matching the stored hashes, so a machine is linked afresh
+the next time each install opens. It does not unlink accounts already linked to each other: those
+rows still share a hash. To forget every link, delete them (`DELETE FROM device_links`) with the
+rotation. Apply `0043` before deploying this worker at all — erasure deletes from the table
+whether or not the secret is set, so that a link written while it was on is never left behind.
 
 What a ban cannot reach is what carries no identity: the anonymous usage counters, the
 master-server probe, the shared server book, a live share code, and track generation (capped by

@@ -4,6 +4,8 @@ import { landingSite, safeNext, webRoutes } from "../src/web";
 import { adminSteamIds } from "../src/webadmin";
 import { SIGNUP_CLOSED } from "../src/creators";
 import { addBan, BANNED } from "../src/bans";
+import { CONVERTER_NOT_GRANTED } from "../src/converter";
+import { LOCK_GUIDS_PER_HOUR, LOCK_REFUSED, MAX_PERMIT_GUIDS, pruneLockAttempts } from "../src/lockpermit";
 import { guidFromSteamId } from "../src/steam";
 import {
   LEGACY_SESSION_COOKIE,
@@ -39,6 +41,14 @@ async function deployment(overrides: Record<string, string> = {}): Promise<Env> 
     DB,
     // Enough R2 for the locker route: `get` returns something with a body, or null.
     LOCKWEB: {
+      objects: new Map<string, string>(),
+      async get(name: string) {
+        const body = (this as { objects: Map<string, string> }).objects.get(name);
+        return body === undefined ? null : { body };
+      },
+    },
+    // The converter's bucket, the same fake as the locker's.
+    FBX2EDF: {
       objects: new Map<string, string>(),
       async get(name: string) {
         const body = (this as { objects: Map<string, string> }).objects.get(name);
@@ -199,6 +209,8 @@ describe("Steam sign-in", () => {
       linked: true,
       locks: { usedToday: 0, perDay: 10, remaining: 10 },
       admin: false,
+      // Not an admin and not on the converter list, which `deployment()` leaves empty.
+      converter: false,
       // Closed unless the deployment opens it, which `deployment()` does not.
       creatorSignup: "closed",
     });
@@ -563,6 +575,56 @@ describe("creators on /admin/assets", () => {
     expect((await web(env, req("GET", "/v1/web/lockweb/mxb_lockweb.js", { cookie: stale }))).status).toBe(401);
   });
 
+  it("hands the converter to granted accounts and admins, and to nobody else", async () => {
+    const GRANTED = "76561198000000077";
+    const env = await deployment({ MXB_CONVERTER_STEAM_IDS: `${GRANTED}, not-a-steam-id`, MXB_ADMIN_STEAM_IDS: CREATOR });
+    const file = "/v1/web/fbx2edf/fbx2edf.js";
+    // Not signed in.
+    expect((await web(env, req("GET", file))).status).toBe(401);
+    // Signed in without the permission — a creator is not thereby a converter.
+    const other = await cookieFor(OTHER);
+    const refused = await web(env, req("GET", file, { cookie: other }));
+    expect(refused.status).toBe(403);
+    expect(await refused.json()).toEqual({ error: CONVERTER_NOT_GRANTED });
+    // Granted, nothing uploaded yet: a configuration problem, not a missing page.
+    const granted = await cookieFor(GRANTED);
+    expect((await web(env, req("GET", file, { cookie: granted }))).status).toBe(503);
+    // Names outside the closed list, whoever asks.
+    expect((await web(env, req("GET", "/v1/web/fbx2edf/../secrets", { cookie: granted }))).status).toBe(404);
+    expect((await web(env, req("GET", "/v1/web/fbx2edf/fbx2edf.txt", { cookie: granted }))).status).toBe(404);
+
+    (env as unknown as { FBX2EDF: { objects: Map<string, string> } }).FBX2EDF.objects.set("fbx2edf.js", "export default 1");
+    const got = await web(env, req("GET", file, { cookie: granted }));
+    expect(got.status).toBe(200);
+    expect(got.headers.get("content-type")).toBe("text/javascript; charset=utf-8");
+    expect(got.headers.get("cache-control")).toBe("no-store");
+    expect(await got.text()).toBe("export default 1");
+    // Names that are only inherited properties of the allowlist are not files.
+    for (const bogus of ["constructor", "__proto__", "toString"]) {
+      expect((await web(env, req("GET", `/v1/web/fbx2edf/${bogus}`, { cookie: granted }))).status).toBe(404);
+    }
+    // An admin always may.
+    expect((await web(env, req("GET", file, { cookie: await cookieFor(CREATOR) }))).status).toBe(200);
+
+    // What /me tells the page, so it can draw the tool or the invite-only note.
+    const me = async (cookie: string) => ((await (await web(env, req("GET", "/v1/web/me", { cookie }))).json()) as { converter: boolean }).converter;
+    expect(await me(granted)).toBe(true);
+    expect(await me(other)).toBe(false);
+
+    // A ban takes it away, list or no list.
+    await addBan(env, { guid: guidFromSteamId(GRANTED), reason: "unlocked and shared protected content" }, CREATOR);
+    const banned = await web(env, req("GET", file, { cookie: granted }));
+    expect(banned.status).toBe(403);
+    expect(await banned.json()).toEqual({ error: BANNED });
+    expect(await me(granted)).toBe(false);
+  });
+
+  it("gives the converter to nobody when no bucket is bound", async () => {
+    const env = await deployment({ MXB_ADMIN_STEAM_IDS: CREATOR });
+    delete (env as unknown as { FBX2EDF?: unknown }).FBX2EDF;
+    expect((await web(env, req("GET", "/v1/web/fbx2edf/fbx2edf_bg.wasm", { cookie: await cookieFor(CREATOR) }))).status).toBe(503);
+  });
+
   it("refuses an expired session", async () => {
     const env = await deployment();
     const expired = await cookieFor(CREATOR, Date.now() - 1);
@@ -867,5 +929,151 @@ describe("the dashboards on the site", () => {
     expect(await me(admin, CREATOR)).toMatchObject({ admin: true, creator: true });
     expect(await me(admin, OTHER)).toMatchObject({ admin: false, creator: true });
     expect(await me(await deployment(), CREATOR)).toMatchObject({ admin: false });
+  });
+});
+
+describe("the GUID lock's permit", () => {
+  // Synthetic GUIDs only (`scripts/guid-allowlist.txt`): this repository is public.
+  const CLEAN = "FF0110000111111111";
+  const BANNED_TARGET = "FF0110000122222222";
+  const refusedBody = { error: LOCK_REFUSED };
+  const permit = async (
+    env: Env,
+    guids: unknown,
+    opts: { cookie?: string; origin?: string | null; contentType?: string } = {},
+  ) => web(env, req("POST", "/v1/web/lock/permit", { cookie: await cookieFor(CREATOR), body: { guids }, ...opts }));
+  /** `n` distinct GUIDs of the right shape, all under the allowlisted synthetic prefix. */
+  const many = (n: number) => Array.from({ length: n }, (_, i) => `FF0110000${String(i).padStart(9, "0")}`);
+
+  /** Every "lock permit refused" line logged while `run` ran, parsed. */
+  async function logged(run: () => Promise<unknown>): Promise<Record<string, unknown>[]> {
+    const spy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    try {
+      await run();
+      return spy.mock.calls
+        .map((c) => String(c[0]))
+        .filter((line) => line.includes("lock permit refused"))
+        .map((line) => JSON.parse(line) as Record<string, unknown>);
+    } finally {
+      spy.mockRestore();
+    }
+  }
+
+  it("lets a creator lock to a clean GUID, normalised", async () => {
+    const env = await deployment();
+    const ok = await permit(env, [` ${CLEAN.toLowerCase()} `]);
+    expect(ok.status).toBe(200);
+    expect(await ok.json()).toEqual({ ok: true });
+    expect(ok.headers.get("cache-control")).toBe("no-store");
+    expect(ok.headers.get("access-control-allow-origin")).toBe(SITE);
+  });
+
+  it("refuses a banned GUID with the lock page's own words, and logs why", async () => {
+    const env = await deployment();
+    await addBan(env, { guid: BANNED_TARGET, reason: "test" }, "admin");
+    let res!: Response;
+    const lines = await logged(async () => {
+      res = await permit(env, [CLEAN, BANNED_TARGET]);
+    });
+    expect(res.status).toBe(403);
+    const text = await res.text();
+    expect(JSON.parse(text)).toEqual(refusedBody);
+    expect(text.toLowerCase()).not.toContain("ban");
+    expect(lines).toEqual([
+      {
+        msg: "lock permit refused",
+        reason: "banned_target",
+        account: "acc_frost",
+        steamId: CREATOR,
+        guids: [CLEAN, BANNED_TARGET],
+        banned: [BANNED_TARGET],
+      },
+    ]);
+    // Lifted is not banned.
+    await env.DB.prepare("UPDATE guid_bans SET lifted_at = 1 WHERE guid = ?").bind(BANNED_TARGET).run();
+    expect((await permit(env, [BANNED_TARGET])).status).toBe(200);
+  });
+
+  it("trips after the hour's allowance with the identical refusal", async () => {
+    const env = await deployment();
+    await addBan(env, { guid: BANNED_TARGET, reason: "test" }, "admin");
+    const banned = await (await permit(env, [BANNED_TARGET])).text();
+    // The banned probe above spent one of the hour, like any other ask.
+    let left = LOCK_GUIDS_PER_HOUR - 1;
+    while (left > 0) {
+      const n = Math.min(left, MAX_PERMIT_GUIDS);
+      expect((await permit(env, many(n))).status).toBe(200);
+      left -= n;
+    }
+    let res!: Response;
+    const lines = await logged(async () => {
+      res = await permit(env, [CLEAN]);
+    });
+    expect(res.status).toBe(403);
+    // Byte for byte what a banned GUID is told, so the two cannot be told apart.
+    expect(await res.text()).toBe(banned);
+    expect(lines).toEqual([expect.objectContaining({ reason: "rate_limited", account: "acc_frost", guids: [CLEAN] })]);
+    // A refused ask spends nothing: the count stands at the ceiling, not over it.
+    const used = await env.DB.prepare("SELECT SUM(guids) AS n FROM lock_attempts WHERE account_id = 'acc_frost'").first<{
+      n: number;
+    }>();
+    expect(used?.n).toBe(LOCK_GUIDS_PER_HOUR);
+
+    // It was only ever this creator's hour; and an hour on, it is open again.
+    expect((await permit(env, [CLEAN], { cookie: await cookieFor(OTHER) })).status).toBe(200);
+    await env.DB.prepare("UPDATE lock_attempts SET attempted_at = attempted_at - ?").bind(60 * 60 * 1000 + 1).run();
+    expect((await permit(env, [CLEAN])).status).toBe(200);
+  });
+
+  it("has no ceiling for the owner account", async () => {
+    const env = await deployment({ MXB_OWNER_ACCOUNT_ID: "acc_frost" });
+    for (let i = 0; i < 3; i++) expect((await permit(env, many(MAX_PERMIT_GUIDS))).status).toBe(200);
+  });
+
+  it("refuses without a session, off the site, to a non-creator, a bad list and a banned caller", async () => {
+    const env = await deployment();
+    const anon = await web(env, req("POST", "/v1/web/lock/permit", { body: { guids: [CLEAN] } }));
+    expect(anon.status).toBe(401);
+    expect(await anon.json()).toEqual(refusedBody);
+
+    // Another origin, or a body a page could send without a preflight.
+    for (const offSite of [{ origin: "https://evil.example" }, { contentType: "text/plain" }]) {
+      const res = await permit(env, [CLEAN], offSite);
+      expect(res.status).toBe(403);
+      expect(await res.json()).toEqual(refusedBody);
+    }
+    // The preflight is answered for the site and nobody else.
+    const pre = await web(env, req("OPTIONS", "/v1/web/lock/permit"));
+    expect(pre.status).toBe(204);
+    expect(pre.headers.get("access-control-allow-origin")).toBe(SITE);
+    expect((await web(env, req("OPTIONS", "/v1/web/lock/permit", { origin: "https://evil.example" }))).status).toBe(403);
+
+    const rider = await permit(env, [CLEAN], { cookie: await cookieFor("76561198000000077") });
+    expect(rider.status).toBe(403);
+    expect(await rider.json()).toEqual(refusedBody);
+
+    for (const bad of [[], CLEAN, ["not-a-guid"], ["FF01100001111111"], many(MAX_PERMIT_GUIDS + 1)]) {
+      const res = await permit(env, bad);
+      expect(res.status).toBe(400);
+      expect(await res.json()).toEqual(refusedBody);
+    }
+
+    // A banned creator is refused the same way, whatever they ask to lock to.
+    await addBan(env, { guid: guidFromSteamId(CREATOR), reason: "test" }, "admin");
+    let res!: Response;
+    const lines = await logged(async () => {
+      res = await permit(env, [CLEAN]);
+    });
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual(refusedBody);
+    expect(lines).toEqual([expect.objectContaining({ reason: "caller_banned", steamId: CREATOR })]);
+  });
+
+  it("forgets attempts after a day", async () => {
+    const env = await deployment();
+    expect((await permit(env, [CLEAN])).status).toBe(200);
+    await pruneLockAttempts(env, Date.now() + 24 * 60 * 60 * 1000 + 1);
+    const left = await env.DB.prepare("SELECT COUNT(*) AS n FROM lock_attempts").first<{ n: number }>();
+    expect(left?.n).toBe(0);
   });
 });

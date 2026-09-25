@@ -15,7 +15,9 @@
 import { allowedOrigin, assetOrigins, cors, CREATOR_SIGNUP_NEEDED, lockAllowance, refuseCrossSiteWrite } from "./assets";
 import { tokenMatches } from "./auth";
 import { BANNED, banFor, isBanned } from "./bans";
+import { converterFile, CONVERTER_PREFIX, mayConvert } from "./converter";
 import { creatorSignupOpen, makeCreator, SIGNUP_CLOSED } from "./creators";
+import { lockPermit } from "./lockpermit";
 import { repairBySteamId } from "./steamlink";
 import { steamResult } from "./page";
 import { isWebAdmin, isWebAdminPath, webAdminRoutes } from "./webadmin";
@@ -67,7 +69,9 @@ export async function webRoutes(
 
   if (
     method === "OPTIONS" &&
-    (path === "/v1/web/me" || path === "/v1/web/logout" || path === "/v1/web/creator" || isWebAdminPath(path))
+    (path === "/v1/web/me" || path === "/v1/web/logout" || path === "/v1/web/creator" ||
+      path === "/v1/web/lock/permit" ||
+      isWebAdminPath(path))
   ) {
     if (request.headers.get("Origin") && !origin) return cors(json(403, { error: "origin not allowed" }), null);
     return cors(new Response(null, { status: 204 }), origin, true, "GET, POST, OPTIONS");
@@ -169,6 +173,9 @@ export async function webRoutes(
         // So the site knows whether to offer the dashboards at all. Never the gate itself —
         // every admin route checks the session again, and a client flag decides nothing.
         admin: isWebAdmin(session.steamId, env),
+        // Whether to draw the FBX converter or its invite-only note. The files themselves are
+        // gated again at `/v1/web/fbx2edf/*`; a ban takes this away like everything else.
+        converter: mayConvert(session.steamId, env) && !ban,
         // Whether to draw the sign-up button or the closed door. Same rule: the client flag
         // decides nothing, `POST /v1/web/creator` checks it again. It is here so somebody who
         // cannot join is told so by the page rather than by a failed click.
@@ -238,8 +245,19 @@ export async function webRoutes(
     return cors(new Response(null, { status: 204, headers }), origin);
   }
 
+  // Asked by the GUID lock before it runs; `lockpermit.ts` says what it refuses and why every
+  // refusal reads the same.
+  if (method === "POST" && path === "/v1/web/lock/permit") {
+    return cors(await lockPermit(request, env), origin);
+  }
+
   if (method === "GET" && path.startsWith("/v1/web/lockweb/")) {
     return lockweb(request, url, env, origin);
+  }
+
+  // The FBX → EDF converter, which runs in the browser: see `converter.ts`.
+  if (method === "GET" && path.startsWith(CONVERTER_PREFIX)) {
+    return converterFile(request, url, env, origin);
   }
 
   // The dashboards the site draws. Gated on the Steam account rather than a key — see
