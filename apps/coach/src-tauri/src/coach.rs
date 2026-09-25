@@ -741,25 +741,62 @@ struct Save {
     dir: PathBuf,
     /// The names to try, in order.
     names: Vec<String>,
+    /// Which setup these are copies of (see [`crate::setupbook`]): `coach:<base>`, or
+    /// `fresh:<track>` for one built from the game's default.
+    lineage: String,
 }
 
 impl Save {
     /// A copy of a setup of the rider's own, numbered off its name and kept in their profile.
-    fn beside(file: &Path, track: &str) -> Option<Save> {
-        let names = crate::stp::coach_names(&setup_base(file)).collect();
-        Some(Save { dir: crate::stp::track_dir(file, track)?, names })
+    ///
+    /// Riding a copy Coach wrote keeps that copy's lineage. So does one of the "Coach <track>"
+    /// setups Coach builds from the default, which used to become "Coach <track> (coach)" on
+    /// the next save: a second way of naming the same setup.
+    fn beside(file: &Path, track: &str, book: &crate::setupbook::Book) -> Option<Save> {
+        let dir = crate::stp::track_dir(file, track)?;
+        let hash = fs::read(file).ok().map(|b| crate::setupbook::fingerprint(&b));
+        let lineage = match book.ours(file, hash.as_deref()) {
+            Some(e) => e.lineage.clone(),
+            None if is_fresh_name(file, track) => format!("fresh:{track}"),
+            None => format!("coach:{}", setup_base(file)),
+        };
+        Some(Save { names: names_for(&lineage), dir, lineage })
     }
 
     /// One the coach built for a rider who rode the game's default: there is no name of theirs
     /// to build on, so it is named after the track.
     fn fresh(dir: PathBuf, track: &str) -> Save {
-        Save { names: crate::stp::fresh_names(track).collect(), dir }
+        let lineage = format!("fresh:{track}");
+        Save { names: names_for(&lineage), dir, lineage }
     }
 
-    /// The first name nothing has taken.
-    fn free(&self) -> Option<String> {
-        self.names.iter().find(|n| !self.dir.join(format!("{n}.stp")).exists()).cloned()
+    /// Where a save goes now: back onto Coach's own untouched copy with the game closed, else
+    /// the first free name. The plan's preview and the save both ask this, so they agree.
+    fn target(&self, book: &crate::setupbook::Book, game_open: bool) -> Option<crate::setupbook::Target> {
+        let on_disk = |p: &Path| fs::read(p).ok().map(|b| (p.to_path_buf(), crate::setupbook::fingerprint(&b)));
+        let taken = |n: &str| self.dir.join(format!("{n}.stp")).exists();
+        book.target(&self.lineage, &self.dir, &self.names, game_open, &on_disk, &taken)
     }
+}
+
+/// The names a lineage's copies go under, in order.
+fn names_for(lineage: &str) -> Vec<String> {
+    match lineage.split_once(':') {
+        Some(("fresh", track)) => crate::stp::fresh_names(track).collect(),
+        Some((_, base)) => crate::stp::coach_names(base).collect(),
+        None => crate::stp::coach_names(lineage).collect(),
+    }
+}
+
+/// Whether `file` is named like a setup Coach built from the default for `track`.
+fn is_fresh_name(file: &Path, track: &str) -> bool {
+    let Some(stem) = file.file_stem().and_then(|s| s.to_str()) else { return false };
+    crate::stp::fresh_names(track).any(|n| n.eq_ignore_ascii_case(stem))
+}
+
+/// Where the book of setups Coach wrote is kept.
+fn setup_book_path(app: &AppHandle) -> Option<PathBuf> {
+    Some(config::data_dir(app)?.join("coach").join("setup-book.json"))
 }
 
 /// The setup the rider had on for a recording, as far as the coach could find and read it.
@@ -798,12 +835,13 @@ fn rider_setup(app: &AppHandle, rec: &Recording) -> RiderSetup {
             .filter(|s| s.bike_id() == e.bike_id)
     };
     let file = crate::stp::locate(&profiles, &raw, &e.track_id, &e.bike_id);
+    let book = setup_book_path(app).map(|p| crate::setupbook::Book::load(&p)).unwrap_or_default();
     // Riding the game's default used to be the end of it: the coach asked the rider to go and
     // save a setup in the garage first. Now it writes them one. Best is another setup of their
     // own for this bike, which keeps every slot the coach doesn't model at a value the game
     // itself wrote; failing that, the bike's own defaults out of its cfg.
     let (setup, save) = match file.as_deref().and_then(read) {
-        Some(s) => (Some(s), file.as_deref().and_then(|f| Save::beside(f, &e.track_id))),
+        Some(s) => (Some(s), file.as_deref().and_then(|f| Save::beside(f, &e.track_id, &book))),
         None => {
             let donor = crate::stp::setups_for_bike(&profiles, &e.track_id, &e.bike_id).into_iter().find_map(|p| read(&p));
             let built = || {
@@ -903,7 +941,9 @@ pub fn coach_setup_plan(app: AppHandle, path: String, skills: Vec<String>) -> Re
     let rec = load(&path)?;
     let r = rider_setup(&app, &rec);
     let fixes = all_fixes(&r, &skills, rec.event.susp_max_travel);
-    let save_as = r.save.as_ref().and_then(Save::free);
+    let book = setup_book_path(&app).map(|p| crate::setupbook::Book::load(&p)).unwrap_or_default();
+    let game_open = mxb_core::gamewindow::is_game_running();
+    let save_as = r.save.as_ref().and_then(|s| s.target(&book, game_open)).map(|t| t.name());
     let (sag, travel_used) = (r.sag, crate::sag::travel_used(&rec));
     Ok(SetupPlan { name: r.name, file: r.file.map(|p| p.display().to_string()), save_as, why: r.why, fixes, sag, travel_used })
 }
@@ -959,9 +999,13 @@ fn point_at(file: &Path, track: &str, wet: bool) -> Result<Picked, String> {
     Ok(if got.as_deref() == Some(want.as_str()) { Picked::Done } else { Picked::Missed })
 }
 
-/// Saves a lap's setup fixes as a new setup under this track — named after the rider's own, or
-/// after the track when they rode the game's default — and points the game at it. Never
-/// overwrites a file, and only the practice keys of `default.ini` are touched.
+/// Saves a lap's setup fixes under this track (named after the rider's own setup, or after the
+/// track when they rode the game's default) and points the game at it. Only the practice keys
+/// of `default.ini` are touched.
+///
+/// The fixes go back onto Coach's own copy of this setup when the book says Coach wrote it,
+/// it's unchanged since, and the game is closed (see [`crate::setupbook`]). So one setup keeps
+/// one name instead of gaining a number every session. Any other file is never overwritten.
 #[tauri::command]
 pub fn coach_save_setup(app: AppHandle, path: String, skills: Vec<String>) -> Result<SavedSetup, String> {
     let rec = load(&path)?;
@@ -975,17 +1019,88 @@ pub fn coach_save_setup(app: AppHandle, path: String, skills: Vec<String>) -> Re
         return Err("There's nothing in this setup the coach can change.".into());
     }
     fs::create_dir_all(&save.dir).map_err(err)?;
+    let book_path = setup_book_path(&app);
+    let mut book = book_path.as_deref().map(crate::setupbook::Book::load).unwrap_or_default();
+    let game_open = mxb_core::gamewindow::is_game_running();
+    let written = match save.target(&book, game_open) {
+        Some(crate::setupbook::Target::Over(path)) => replace_own(&path, &book, out.bytes()).then_some(path),
+        _ => None,
+    };
+    let path = match written {
+        Some(p) => p,
+        None => write_new(&save, out.bytes())?,
+    };
+    let name = path.file_stem().and_then(|s| s.to_str()).unwrap_or_default().to_string();
+    let now = std::time::SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64);
+    book.record(&path, out.bytes(), &save.lineage, now, &|p| p.exists());
+    if let Some(p) = &book_path {
+        book.store(p);
+    }
+    // A setup the rider has to go and find in the garage is a setup they ride without.
+    // Failing to select it is not failing to save it, so it is reported rather than raised.
+    let picked = select(&path, &rec.event.track_id, rec.session.conditions == 2).unwrap_or(Picked::Missed);
+    let (selected, game_open) = (picked == Picked::Done, picked == Picked::GameOpen);
+    Ok(SavedSetup { name, changed, selected, game_open })
+}
+
+/// A file in `dir` nothing else has, reserved by creating it: `.<stem>.<tag>-<pid>-<nanos>`.
+fn reserve(dir: &Path, stem: &str, tag: &str) -> Option<PathBuf> {
+    let nanos = std::time::SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_nanos());
+    for n in 0..16u32 {
+        let p = dir.join(format!(".{stem}.{tag}-{}-{nanos}-{n}", std::process::id()));
+        if fs::OpenOptions::new().write(true).create_new(true).open(&p).is_ok() {
+            return Some(p);
+        }
+    }
+    None
+}
+
+/// Put `bytes` in place of `path`, Coach's own copy, and say whether it happened.
+///
+/// The copy is moved aside first and its bytes checked *after* the move, so what gets replaced
+/// is exactly what was checked. An edit the rider saved a moment before can't slip in between.
+/// If it isn't Coach's untouched copy, or the game has opened, it goes back where it was
+/// and the caller writes a new file instead. Every name used is reserved first, so nothing
+/// else is ever overwritten.
+fn replace_own(path: &Path, book: &crate::setupbook::Book, bytes: &[u8]) -> bool {
+    let (Some(dir), Some(stem)) = (path.parent(), path.file_stem().and_then(|s| s.to_str())) else { return false };
+    let Some(tmp) = reserve(dir, stem, "coach-new") else { return false };
+    if fs::write(&tmp, bytes).is_err() {
+        let _ = fs::remove_file(&tmp);
+        return false;
+    }
+    let Some(parked) = reserve(dir, stem, "coach-old") else {
+        let _ = fs::remove_file(&tmp);
+        return false;
+    };
+    if fs::rename(path, &parked).is_err() {
+        let _ = fs::remove_file(&tmp);
+        let _ = fs::remove_file(&parked);
+        return false;
+    }
+    let hash = fs::read(&parked).ok().map(|b| crate::setupbook::fingerprint(&b));
+    let ok = book.ours(path, hash.as_deref()).is_some() && !mxb_core::gamewindow::is_game_running();
+    if ok && fs::rename(&tmp, path).is_ok() {
+        let _ = fs::remove_file(&parked);
+        return true;
+    }
+    // Not ours to replace after all, or the swap failed: put the rider's file back. If
+    // something has taken its place meanwhile, the parked copy is kept rather than lost.
+    let _ = fs::remove_file(&tmp);
+    if !path.exists() {
+        let _ = fs::rename(&parked, path);
+    }
+    false
+}
+
+/// A new file under the first of `save`'s names nothing has taken. Never overwrites.
+fn write_new(save: &Save, bytes: &[u8]) -> Result<PathBuf, String> {
     for name in &save.names {
         let path = save.dir.join(format!("{name}.stp"));
         match fs::OpenOptions::new().write(true).create_new(true).open(&path) {
             Ok(mut f) => {
-                std::io::Write::write_all(&mut f, out.bytes()).map_err(err)?;
-                // A setup the rider has to go and find in the garage is a setup they ride
-                // without. Failing to select it is not failing to save it, so it is reported
-                // rather than raised.
-                let picked = select(&path, &rec.event.track_id, rec.session.conditions == 2).unwrap_or(Picked::Missed);
-                let (selected, game_open) = (picked == Picked::Done, picked == Picked::GameOpen);
-                return Ok(SavedSetup { name: name.clone(), changed, selected, game_open });
+                std::io::Write::write_all(&mut f, bytes).map_err(err)?;
+                return Ok(path);
             }
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
             Err(e) => return Err(err(e)),
@@ -1802,12 +1917,65 @@ mod tests {
     fn a_copy_of_a_common_setup_is_saved_under_the_track() {
         let (root, mine) = common_setup("common-save");
         let track = root.join("Frost").join("setups").join("indiana").join("2027_K85M");
-        let save = Save::beside(&mine, "indiana").expect("somewhere to save");
+        let save = Save::beside(&mine, "indiana", &crate::setupbook::Book::default()).expect("somewhere to save");
         assert_eq!(save.dir, track, "under the track, not beside the setup it came from");
-        assert_eq!(save.free().as_deref(), Some("frost-race (coach)"), "still named off the rider's own");
+        assert_eq!(save.target(&crate::setupbook::Book::default(), false).map(|t| t.name()).as_deref(), Some("frost-race (coach)"), "still named off the rider's own");
         // A setup already under a track stays where it is.
         let theirs = track.join("wet.stp");
-        assert_eq!(Save::beside(&theirs, "indiana").unwrap().dir, track);
+        assert_eq!(Save::beside(&theirs, "indiana", &crate::setupbook::Book::default()).unwrap().dir, track);
+        // Riding a "Coach <track>" setup built from the default keeps it in that lineage,
+        // rather than becoming "Coach indiana (coach)" on the next save.
+        let fresh = track.join("Coach indiana 2.stp");
+        let s = Save::beside(&fresh, "indiana", &crate::setupbook::Book::default()).unwrap();
+        assert_eq!(s.lineage, "fresh:indiana");
+        assert_eq!(s.names[0], "Coach indiana");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// Replacing Coach's own copy: done when it's untouched, refused when the rider edited it,
+    /// and either way no temp or parked file is left behind in their setups folder.
+    #[test]
+    fn replacing_coachs_copy_checks_the_bytes_it_replaces() {
+        let dir = std::env::temp_dir().join(format!("coach-replace-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let copy = dir.join("Fast (coach).stp");
+        fs::write(&copy, b"v1").unwrap();
+        let mut book = crate::setupbook::Book::default();
+        book.record(&copy, b"v1", "coach:Fast", 1, &|p| p.exists());
+        let only_the_copy = || fs::read_dir(&dir).unwrap().count() == 1;
+
+        assert!(replace_own(&copy, &book, b"v2"), "untouched: replaced");
+        assert_eq!(fs::read(&copy).unwrap(), b"v2");
+        assert!(only_the_copy(), "nothing left over");
+
+        // The book still remembers v1, so v2 on disk reads as changed: it isn't replaced.
+        assert!(!replace_own(&copy, &book, b"v3"), "not what Coach wrote: refused");
+        assert_eq!(fs::read(&copy).unwrap(), b"v2", "and put back exactly as it was");
+        assert!(only_the_copy(), "nothing left over");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Riding the copy Coach wrote, a new save goes back onto it under the same name.
+    #[test]
+    fn saving_again_from_coachs_copy_keeps_its_name() {
+        let (root, mine) = common_setup("coach-again");
+        let first = Save::beside(&mine, "indiana", &crate::setupbook::Book::default()).unwrap();
+        fs::create_dir_all(&first.dir).unwrap();
+        let copy = first.dir.join("frost-race (coach).stp");
+        fs::write(&copy, b"coach v1").unwrap();
+        let mut book = crate::setupbook::Book::default();
+        book.record(&copy, b"coach v1", &first.lineage, 1, &|p| p.exists());
+
+        // Next session the rider is on the copy.
+        let again = Save::beside(&copy, "indiana", &book).unwrap();
+        assert_eq!(again.lineage, "coach:frost-race");
+        assert_eq!(again.target(&book, false), Some(crate::setupbook::Target::Over(copy.clone())));
+        assert_eq!(again.target(&book, true).map(|t| t.name()).as_deref(), Some("frost-race (coach 2)"), "not with the game open");
+
+        // Edited in the garage: it's the rider's now.
+        fs::write(&copy, b"rider tweaked it").unwrap();
+        assert_eq!(again.target(&book, false).map(|t| t.name()).as_deref(), Some("frost-race (coach 2)"));
         let _ = fs::remove_dir_all(&root);
     }
 
@@ -1815,7 +1983,7 @@ mod tests {
     #[test]
     fn the_game_is_pointed_at_the_copy_and_says_so_itself() {
         let (root, mine) = common_setup("common-point");
-        let save = Save::beside(&mine, "indiana").expect("somewhere to save");
+        let save = Save::beside(&mine, "indiana", &crate::setupbook::Book::default()).expect("somewhere to save");
         let copy = save.dir.join("frost-race (coach).stp");
         fs::create_dir_all(&save.dir).unwrap();
         fs::write(&copy, b"x").unwrap();
