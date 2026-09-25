@@ -527,8 +527,11 @@ bunx wrangler d1 migrations apply mxb-control-plane --remote   # 0043_device_lin
 bunx wrangler secret put MXB_DEVICE_SALT                        # any long random string
 ```
 
-Rotating the secret orphans every stored link — safe, but the links are forgotten until each
-install next opens.
+Rotating the secret stops new reports matching the stored hashes, so a machine is linked afresh
+the next time each install opens. It does not unlink accounts already linked to each other: those
+rows still share a hash. To forget every link, delete them (`DELETE FROM device_links`) with the
+rotation. Apply `0043` before deploying this worker at all — erasure deletes from the table
+whether or not the secret is set, so that a link written while it was on is never left behind.
 
 What a ban cannot reach is what carries no identity: the anonymous usage counters, the
 master-server probe, the shared server book, a live share code, and track generation (capped by

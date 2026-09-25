@@ -21,6 +21,6 @@ CREATE TABLE device_links (
   PRIMARY KEY (account_id, device_hash)
 );
 
--- The two directions: what machines an account has been on, and who else has been on one.
-CREATE INDEX device_links_account ON device_links (account_id, last_seen_at);
+-- The other direction: who else has been on a machine. What machines an account has been on is
+-- the primary key's own prefix, so it needs no index of its own.
 CREATE INDEX device_links_device ON device_links (device_hash, last_seen_at);

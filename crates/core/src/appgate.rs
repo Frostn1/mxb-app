@@ -503,6 +503,7 @@ async fn ask(app: &AppHandle) -> Option<Answer> {
     let resp = match crate::device::with_device(
         http().get(format!("{}/v1/app/gate", control_plane())).bearer_auth(&token),
     )
+    .await
     .send()
     .await
     {

@@ -111,8 +111,24 @@ describe("recording a device", () => {
     await account(env, "acc_a", "token-a", null, CLEAN_GUID);
     const reported = await clientHash(MACHINE);
     await gate(env, "token-a", reported);
+    await env.DB.prepare("UPDATE device_links SET first_seen_at = 1, last_seen_at = 1").run();
     await gate(env, "token-a", reported);
-    expect(await links(env)).toHaveLength(1);
+    const rows = await env.DB.prepare("SELECT first_seen_at, last_seen_at FROM device_links").all<{
+      first_seen_at: number;
+      last_seen_at: number;
+    }>();
+    expect(rows.results).toHaveLength(1);
+    expect(rows.results?.[0].first_seen_at).toBe(1);
+    expect(rows.results?.[0].last_seen_at).toBeGreaterThan(1);
+  });
+
+  it("never fails a sign-up when the sighting cannot be written", async () => {
+    const env = deployment();
+    await env.DB.prepare("DROP TABLE device_links").run();
+    // Linking is on but the write fails: it is logged, and the sign-up still succeeds. (The mint
+    // only writes; the gate also reads the table, which is why 0043 goes in before the secret.)
+    const res = await call(env, req("POST", "/v1/account", { device: await clientHash(MACHINE), body: { riderName: "Rider" } }));
+    expect(res.status).toBe(201);
   });
 
   it("ignores a report that is not a client hash, and still answers", async () => {
@@ -168,6 +184,24 @@ describe("a ban follows the machine", () => {
     expect((await gate(env, "steam-token", reported)).status).toBe("unsupported");
   });
 
+  it("widens one hop and no further", async () => {
+    const env = deployment();
+    await account(env, "acc_banned", "banned-token", null, BANNED_GUID);
+    await account(env, "acc_both", "both-token", null, null);
+    await account(env, "acc_far", "far-token", null, CLEAN_GUID);
+    const one = await clientHash(MACHINE);
+    const two = await clientHash(OTHER_MACHINE);
+    await gate(env, "banned-token", one);
+    await gate(env, "both-token", one);
+    await gate(env, "both-token", two);
+    await addBan(env, { guid: BANNED_GUID, reason: "unlocked and shared protected content" }, "admin");
+
+    // Shares a machine with the banned account: banned.
+    expect((await gate(env, "both-token", two)).status).toBe("unsupported");
+    // Only shares a machine with an account that shares one with the banned account: two hops.
+    expect((await gate(env, "far-token", two)).status).toBe("ok");
+  });
+
   it("leaves another machine alone, and lets go when the ban is lifted", async () => {
     const env = deployment();
     await account(env, "acc_banned", "banned-token", null, BANNED_GUID);
@@ -210,6 +244,39 @@ describe("without MXB_DEVICE_SALT", () => {
 
     const off = { ...on, MXB_DEVICE_SALT: undefined } as unknown as Env;
     expect((await gate(off, fresh.token, reported)).status).toBe("ok");
+  });
+
+  it("never touches the table, so it works before the migration is applied", async () => {
+    const env = deployment({ MXB_DEVICE_SALT: undefined });
+    await env.DB.prepare("DROP TABLE device_links").run();
+    await account(env, "acc_banned", "banned-token", null, BANNED_GUID);
+    await account(env, "acc_clean", "clean-token", null, CLEAN_GUID);
+    await addBan(env, { guid: BANNED_GUID, reason: "unlocked and shared protected content" }, "admin");
+
+    const reported = await clientHash(MACHINE);
+    expect((await gate(env, "clean-token", reported)).status).toBe("ok");
+    expect((await gate(env, "banned-token", reported)).status).toBe("unsupported");
+    expect((await mint(env, reported)).token).toBeTruthy();
+  });
+});
+
+describe("rotating MXB_DEVICE_SALT", () => {
+  it("stops new reports matching old links, and leaves linked accounts linked", async () => {
+    const env = deployment();
+    await account(env, "acc_banned", "banned-token", null, BANNED_GUID);
+    const reported = await clientHash(MACHINE);
+    await gate(env, "banned-token", reported);
+    await addBan(env, { guid: BANNED_GUID, reason: "unlocked and shared protected content" }, "admin");
+    const linked = await mint(env, reported);
+
+    const rotated = { ...env, MXB_DEVICE_SALT: "a-different-test-salt" } as unknown as Env;
+    // A fresh account after the rotation keys to a different value, so it is not tied to the
+    // banned PC's old row...
+    const fresh = await mint(rotated, reported);
+    expect(await banFor(rotated, { accountId: fresh.accountId })).toBeNull();
+    // ...while an account already linked to the banned one still shares that old row: rotation
+    // alone does not forget a link (the README says to delete the rows to do that).
+    expect((await banFor(rotated, { accountId: linked.accountId }))?.guid).toBe(BANNED_GUID);
   });
 });
 

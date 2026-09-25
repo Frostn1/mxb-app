@@ -20,8 +20,7 @@
  *   a Steam copy the two are one value and the derivation needs no row to exist;
  * - every GUID the calling account holds or has ever claimed;
  * - every account that shares the caller's Steam identity, now or in the link log, and every
- *   GUID *those* accounts hold or have ever claimed.
- *
+ *   GUID *those* accounts hold or have ever claimed;
  * - when the deployment links devices (`MXB_DEVICE_SALT`, `devices.ts`), every account that has
  *   been used on the same machine as the caller, through `device_links` — a keyed one-way hash of
  *   the machine identifier, never the identifier itself.
@@ -209,10 +208,12 @@ export async function rememberGuid(env: Env, accountId: string, raw: unknown): P
  *
  * The device side is the same one hop, beside the Steam one: `devices` is `?5`, the keyed device
  * the request reported, plus every device the seed accounts have been seen on, and `ids` takes in
- * every account seen on any of them. `?6` is 1 only when the deployment links devices; otherwise
- * `devices` is empty and the statement reads exactly as it did before the table existed.
+ * every account seen on any of them. It is only compiled in when the deployment links devices
+ * (`MXB_DEVICE_SALT`); otherwise the statement is exactly what it was before the table existed,
+ * so a deployment that has the feature off never touches `device_links` at all.
  */
-const RESOLVE =
+function resolve(devices: boolean): string {
+  return (
   "WITH seed AS (" +
   "  SELECT id AS account_id FROM accounts WHERE (?1 IS NOT NULL AND id = ?1) OR (?2 IS NOT NULL AND steam_id = ?2)" +
   "  UNION SELECT account_id FROM steam_links WHERE ?2 IS NOT NULL AND steam_id = ?2" +
@@ -220,14 +221,16 @@ const RESOLVE =
   "  SELECT ?2 AS steam_id WHERE ?2 IS NOT NULL" +
   "  UNION SELECT steam_id FROM accounts WHERE steam_id IS NOT NULL AND id IN (SELECT account_id FROM seed)" +
   "  UNION SELECT steam_id FROM steam_links WHERE account_id IN (SELECT account_id FROM seed)" +
-  "), devices AS (" +
-  "  SELECT ?5 AS device_hash WHERE ?6 = 1 AND ?5 IS NOT NULL" +
-  "  UNION SELECT device_hash FROM device_links WHERE ?6 = 1 AND account_id IN (SELECT account_id FROM seed)" +
+  (devices
+    ? "), devices AS (" +
+      "  SELECT ?5 AS device_hash WHERE ?5 IS NOT NULL" +
+      "  UNION SELECT device_hash FROM device_links WHERE account_id IN (SELECT account_id FROM seed)"
+    : "") +
   "), ids AS (" +
   "  SELECT account_id FROM seed" +
   "  UNION SELECT id FROM accounts WHERE steam_id IN (SELECT steam_id FROM steams)" +
   "  UNION SELECT account_id FROM steam_links WHERE steam_id IN (SELECT steam_id FROM steams)" +
-  "  UNION SELECT account_id FROM device_links WHERE device_hash IN (SELECT device_hash FROM devices)" +
+  (devices ? "  UNION SELECT account_id FROM device_links WHERE device_hash IN (SELECT device_hash FROM devices)" : "") +
   "), guids AS (" +
   "  SELECT ?3 AS guid WHERE ?3 IS NOT NULL" +
   "  UNION SELECT ?4 WHERE ?4 IS NOT NULL" +
@@ -236,7 +239,11 @@ const RESOLVE =
   ")" +
   " SELECT guid, reason, evidence, alt_of, banned_at, banned_by FROM guid_bans" +
   " WHERE lifted_at IS NULL AND guid IN (SELECT guid FROM guids)" +
-  " ORDER BY banned_at, guid LIMIT 1";
+  " ORDER BY banned_at, guid LIMIT 1"
+  );
+}
+const RESOLVE = resolve(false);
+const RESOLVE_WITH_DEVICES = resolve(true);
 
 /**
  * The live ban that applies to this caller, or null.
@@ -260,8 +267,9 @@ export async function banFor(env: Env, who: Who): Promise<Ban | null> {
   // For a Steam copy the GUID is the SteamID written in hex (`0039_derive_guids.sql`), so a
   // banned Steam login is a banned GUID with or without a row to join through.
   const derived = steamId ? guidFromSteamId(steamId) : null;
-  const row = await env.DB.prepare(RESOLVE)
-    .bind(accountId, steamId, guid, derived, device, linking ? 1 : 0)
+  const row = await (linking
+    ? env.DB.prepare(RESOLVE_WITH_DEVICES).bind(accountId, steamId, guid, derived, device)
+    : env.DB.prepare(RESOLVE).bind(accountId, steamId, guid, derived))
     .first<{
       guid: string;
       reason: string;

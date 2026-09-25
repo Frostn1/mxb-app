@@ -56,6 +56,7 @@ pub async fn ensure_token(app: &AppHandle) -> Result<String, String> {
             .post(format!("{}/v1/account", control_plane()))
             .json(&serde_json::json!({ "riderName": rider_name })),
     )
+    .await
     .send()
     .await
     .map_err(|e| format!("couldn't reach the service: {e}"))?;

@@ -45,7 +45,8 @@ declare global {
     /** Keys the device hash the apps report (`X-MXB-Device`) before it is stored, so a row in
      *  `device_links` is useless without it (`devices.ts`). Any long random string. Without it
      *  device linking is off: nothing is recorded and bans do not follow the machine — never an
-     *  error. Rotating it orphans every stored link, which is safe but forgets them. */
+     *  error. Rotating it stops new reports matching stored links; accounts already linked to each
+     *  other stay linked until their rows are deleted (`DELETE FROM device_links` forgets all). */
     MXB_DEVICE_SALT?: string;
     /** Reads the usage dashboard and the stats JSON. Without it both answer 503, which is
      *  the right default: a deployment that was never given a key has no admin surface

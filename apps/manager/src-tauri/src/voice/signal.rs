@@ -98,6 +98,7 @@ pub async fn ensure_account(cfg: &AppConfig) -> Result<(String, bool), String> {
             .post(format!("{}/v1/account", control_plane()))
             .json(&serde_json::json!({ "riderName": rider_name })),
     )
+    .await
     .send()
     .await
     .map_err(|e| format!("Couldn't reach MXB App's service: {e}"))?;

@@ -43,18 +43,33 @@ pub fn hash_machine_id(machine_id: &str) -> Option<String> {
     Some(hasher.finalize().iter().map(|b| format!("{b:02x}")).collect())
 }
 
+/// How long macOS's `ioreg` may take before the machine is treated as one that will not say.
+#[cfg(target_os = "macos")]
+const IOREG_DEADLINE: std::time::Duration = std::time::Duration::from_secs(2);
+
+static CACHE: OnceLock<Option<String>> = OnceLock::new();
+
 /// This machine's hash, read once per process. `None` when the OS will not say.
 ///
-/// The first call reads the registry, a file, or (on macOS) asks `ioreg` once — a few
-/// milliseconds, then cached, so it is cheap enough to call from the async paths that send it.
+/// The first call reads the registry, a file, or (on macOS) runs `ioreg`, bounded by a
+/// deadline; later calls are a cached read. Synchronous — call [`device_hash_async`] from async
+/// code, so the first read never stalls an executor thread.
 pub fn device_hash() -> Option<&'static str> {
-    static CACHE: OnceLock<Option<String>> = OnceLock::new();
     CACHE.get_or_init(|| machine_id().as_deref().and_then(hash_machine_id)).as_deref()
 }
 
+/// [`device_hash`] for async callers: the first read runs on the blocking pool, so the request
+/// timeouts around it keep working even if the OS is slow to answer.
+pub async fn device_hash_async() -> Option<&'static str> {
+    if let Some(cached) = CACHE.get() {
+        return cached.as_deref();
+    }
+    tauri::async_runtime::spawn_blocking(device_hash).await.ok().flatten()
+}
+
 /// A request with the device header added, when there is a hash to add.
-pub fn with_device(request: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
-    match device_hash() {
+pub async fn with_device(request: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+    match device_hash_async().await {
         Some(hash) => request.header(DEVICE_HEADER, hash),
         None => request,
     }
@@ -72,11 +87,35 @@ fn machine_id() -> Option<String> {
 
 #[cfg(target_os = "macos")]
 fn machine_id() -> Option<String> {
-    let out = std::process::Command::new("/usr/sbin/ioreg")
+    use std::io::Read;
+    use std::process::{Command, Stdio};
+    use std::time::Instant;
+
+    let mut child = Command::new("/usr/sbin/ioreg")
         .args(["-rd1", "-c", "IOPlatformExpertDevice"])
-        .output()
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
         .ok()?;
-    parse_ioreg(&String::from_utf8_lossy(&out.stdout))
+    // Bounded: an `ioreg` that never exits must not hold the first gate check with it. The output
+    // is a few kilobytes, well inside a pipe buffer, so waiting before reading cannot deadlock.
+    let started = Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => break,
+            Ok(None) if started.elapsed() < IOREG_DEADLINE => {
+                std::thread::sleep(std::time::Duration::from_millis(20))
+            }
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return None;
+            }
+        }
+    }
+    let mut out = String::new();
+    child.stdout.take()?.read_to_string(&mut out).ok()?;
+    parse_ioreg(&out)
 }
 
 #[cfg(all(unix, not(target_os = "macos")))]
