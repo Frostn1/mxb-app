@@ -17,6 +17,7 @@ mod hud;
 mod hudsheet;
 mod imports;
 mod ini;
+mod setupbook;
 mod lines;
 mod others;
 mod overlay;

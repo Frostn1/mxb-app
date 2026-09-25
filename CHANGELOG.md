@@ -24,6 +24,11 @@
   switch games.
 
 ### Fixed
+- MXB Coach keeps one name for the setup it makes you. Every save used to create another copy:
+  "Fast (coach)", then "Fast (coach 2)", "Fast (coach 3)". Coach now saves back onto the copy
+  it wrote, provided you haven't changed that copy in the garage since and MX Bikes is closed.
+  Otherwise it makes a new copy as before and saves onto that from then on. A setup Coach built
+  from the game's default stays "Coach <track>" instead of becoming "Coach <track> (coach)".
 - The MXBMRP3 suggestion stays in step everywhere it shows. "Suggest it again" in Settings
   brings the banner back, and "Not now" on the setup card also hides it on the dashboard. Its
   check no longer runs on the window's thread, so a slow or sleeping game drive can't freeze

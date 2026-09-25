@@ -26,6 +26,8 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 anyhow = "1"
 dirs-next = "2.0.0"
+# Fingerprints the setups Coach writes, so it only ever saves back onto one the rider left alone.
+sha2 = "0.10"
 # Fetching the recorder plugin from the FrostMod release. Same build as the other apps'.
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 
