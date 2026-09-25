@@ -37,6 +37,15 @@ jobs:
             args: ""
 
     runs-on: ${{ matrix.platform }}
+    # The environment gives the OIDC token one stable subject for Azure to trust
+    # (repo:Frostn1/mxb-app:environment:code-signing), whatever tag started the run; a tag's own
+    # subject names that tag, which no credential can be registered for in advance. No
+    # protection rules: it exists only to name the job. See docs/signing/SETUP.md.
+    environment: code-signing
+    # id-token: the Windows leg's OIDC login for code signing (.github/actions/artifact-signing).
+    permissions:
+      contents: read
+      id-token: write
 
     steps:
       - name: Checkout
@@ -111,6 +120,20 @@ jobs:
       # What shipped, for the release page. Reads this tag's section of CHANGELOG.md,
       # headed `## <date> — Frost's Studio v…`, so the Studio's v0.4.0 can't come out
       # reading the MXB App's. Falls back to the download guidance alone with no section.
+      # Windows code signing (Azure Artifact Signing). Skips with a notice until the secrets and
+      # variables in docs/signing/SETUP.md exist, and the build ships unsigned as before.
+      - name: Set up Windows code signing
+        id: signing
+        if: ${{ startsWith(matrix.platform, 'windows') }}
+        uses: ./.github/actions/artifact-signing
+        with:
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          endpoint: ${{ vars.ARTIFACT_SIGNING_ENDPOINT }}
+          account: ${{ vars.ARTIFACT_SIGNING_ACCOUNT }}
+          profile: ${{ vars.ARTIFACT_SIGNING_PROFILE }}
+
       - name: Compose release notes
         id: notes
         shell: bash
@@ -153,7 +176,8 @@ jobs:
           assetNamePattern: "Frost-Studio-[version]-[arch][ext]"
           releaseDraft: false
           prerelease: ${{ github.ref_type != 'tag' || contains(github.ref_name, '-beta') || contains(github.ref_name, '-rc') }}
-          args: ${{ matrix.args }}
+          # The signing overlay on a signed Windows leg; empty everywhere else.
+          args: ${{ matrix.args }} ${{ steps.signing.outputs.tauri-args }}
 
   # Announce the release in #studio-releases once every platform has uploaded. Real tags on
   # the canonical repo only, like the manager's. The Studio has no beta channel, so a beta
