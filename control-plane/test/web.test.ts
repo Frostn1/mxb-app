@@ -596,8 +596,12 @@ describe("creators on /admin/assets", () => {
     const got = await web(env, req("GET", file, { cookie: granted }));
     expect(got.status).toBe(200);
     expect(got.headers.get("content-type")).toBe("text/javascript; charset=utf-8");
-    expect(got.headers.get("cache-control")).toBe("private, max-age=3600");
+    expect(got.headers.get("cache-control")).toBe("no-store");
     expect(await got.text()).toBe("export default 1");
+    // Names that are only inherited properties of the allowlist are not files.
+    for (const bogus of ["constructor", "__proto__", "toString"]) {
+      expect((await web(env, req("GET", `/v1/web/fbx2edf/${bogus}`, { cookie: granted }))).status).toBe(404);
+    }
     // An admin always may.
     expect((await web(env, req("GET", file, { cookie: await cookieFor(CREATOR) }))).status).toBe(200);
 

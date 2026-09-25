@@ -44,7 +44,8 @@ const FILES: Record<string, string> = {
 /** `GET /v1/web/fbx2edf/<file>` — the converter, to a signed-in, granted, unbanned account. */
 export async function converterFile(request: Request, url: URL, env: Env, origin: string | null): Promise<Response> {
   const name = url.pathname.slice(CONVERTER_PREFIX.length);
-  const type = FILES[name];
+  // Own keys only: `constructor` or `__proto__` must not read as a servable name.
+  const type = Object.hasOwn(FILES, name) ? FILES[name] : undefined;
   if (!type) return cors(json(404, { error: "no such file" }), origin);
 
   const session = await webSession(request, env);
@@ -61,8 +62,9 @@ export async function converterFile(request: Request, url: URL, env: Env, origin
     new Response(object.body, {
       headers: {
         "Content-Type": type,
-        // The visitor's own browser may keep it; no shared cache may — it is not public.
-        "Cache-Control": "private, max-age=3600",
+        // Kept by nothing, not even the visitor's own browser: a cached copy would outlive a
+        // sign-out, an expired session or a ban, and every one of those has to take it away.
+        "Cache-Control": "no-store",
         "X-Content-Type-Options": "nosniff",
       },
     }),
