@@ -707,7 +707,7 @@ export const sv: Translation = {
   "secure.testHeading": "Testa formatet (frivilligt)",
   "secure.step3": "Bind till ditt Steam-konto och spela offline",
   "secure.step3Desc":
-    "Försegla nyckeln till ditt Steam-konto och lagra den lokalt. Från och med då öppnas den utan server – offline, på ett LAN, var som helst – men bara på ditt konto. En kopia på någon annans konto får ingenting.",
+    "Försegla nyckeln till ditt Steam-konto och lagra den lokalt. Från och med då fungerar den offline i upp till 30 dagar mellan kontroller – appen förnyar tyst när den är online – men bara på ditt konto. En kopia på någon annans konto får ingenting.",
   "secure.steamAccount": "Ditt Steam-konto:",
   "secure.noSteam": "Kunde inte läsa ditt Steam-konto. Är Steam installerat och loggat in?",
   "secure.provision": "Bind till mitt konto",

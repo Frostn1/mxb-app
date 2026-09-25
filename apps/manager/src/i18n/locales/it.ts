@@ -726,7 +726,7 @@ export const it: Translation = {
   "secure.testHeading": "Prova il formato (facoltativo)",
   "secure.step3": "Vincola al tuo account Steam e gioca offline",
   "secure.step3Desc":
-    "Sigilla la chiave al tuo account Steam e la salva in locale. Da quel momento si apre senza server — offline, in LAN, ovunque — ma solo sul tuo account. Una copia su un altro account non ottiene nulla.",
+    "Sigilla la chiave al tuo account Steam e la salva in locale. Da quel momento funziona offline fino a 30 giorni tra un controllo e l'altro — l'app la rinnova da sola quando è online — ma solo sul tuo account. Una copia su un altro account non ottiene nulla.",
   "secure.steamAccount": "Il tuo account Steam:",
   "secure.noSteam": "Impossibile leggere il tuo account Steam. Steam è installato e sei connesso?",
   "secure.provision": "Vincola al mio account",

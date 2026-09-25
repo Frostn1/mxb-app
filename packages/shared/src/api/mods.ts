@@ -404,10 +404,11 @@ export interface SecureProvisionOutcome {
   steamId: string;
 }
 
-/** Unlock purchased secured content for offline play — the buyer's one online step, and the
- *  only way a content key reaches a machine. Reads the asset id from the blob's own header,
+/** Unlock purchased secured content for offline play — the only way a content key reaches a
+ *  machine. Reads the asset id from the blob's own header,
  *  proves entitlement at `/v1/keys/grant`, and seals the released key to THIS machine (DPAPI),
- *  so the stored `.mxbkey` is useless if copied. From then on it opens offline. */
+ *  so the stored `.mxbkey` is useless if copied. From then on it opens offline for up to 30
+ *  days between check-ins; the app renews the key lease silently whenever it is online. */
 export function mxbsecureUnlock(blobPath: string): Promise<SecureProvisionOutcome> {
   return invoke<SecureProvisionOutcome>("mxbsecure_unlock", { blobPath });
 }
@@ -506,8 +507,9 @@ export interface MxbsecureRevoked {
 
 /** Fires when a pass takes back the keys for content this account is no longer entitled to.
  *
- *  A `.mxbsecure` key is sealed to the buyer's PC and opens offline, so removing a buyer on the
- *  site could never reach a machine that had already unlocked. The app now asks on every unlock
+ *  A `.mxbsecure` key is sealed to the buyer's PC and opens offline (on a 30-day key lease that
+ *  is about the account, not the asset), so removing a buyer on the site could never reach a
+ *  machine that had already unlocked. The app now asks on every unlock
  *  pass whether it may still hold what it holds, and deletes both copies of the key (the one
  *  beside the blob and the one in its vault) when the answer is no. This is that moment. */
 export function onMxbsecureRevoked(cb: (payload: MxbsecureRevoked) => void): Promise<UnlistenFn> {

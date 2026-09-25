@@ -50,13 +50,13 @@ export interface SignedVerdict {
   sig: string;
 }
 
-function b64url(bytes: Uint8Array): string {
+export function b64url(bytes: Uint8Array): string {
   let binary = "";
   for (const b of bytes) binary += String.fromCharCode(b);
   return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
-function unb64url(s: string): Uint8Array {
+export function unb64url(s: string): Uint8Array {
   const padded = s.replace(/-/g, "+").replace(/_/g, "/") + "===".slice((s.length + 3) % 4);
   const binary = atob(padded);
   return Uint8Array.from(binary, (c) => c.charCodeAt(0));
@@ -65,8 +65,11 @@ function unb64url(s: string): Uint8Array {
 /**
  * Import the signing key from its PKCS#8 DER, base64 or base64url, in `MXB_VERDICT_SIGNING_KEY`.
  * Null when unset or unreadable — either way the gate answers unsigned rather than not at all.
+ *
+ * Also the key `lease.ts` signs key leases with: one pair, one public half in the builds, and the
+ * two payloads kept apart by their shape (see `verifyVerdict`).
  */
-async function signingKey(env: Env): Promise<CryptoKey | null> {
+export async function signingKey(env: Env): Promise<CryptoKey | null> {
   const raw = env.MXB_VERDICT_SIGNING_KEY?.replace(/\s+/g, "");
   if (!raw) return null;
   try {
@@ -148,8 +151,12 @@ export async function verifyVerdict(signed: SignedVerdict, publicKey: CryptoKey)
   }
   if (!ok) return null;
   try {
-    const parsed = JSON.parse(signed.payload) as VerdictPayload;
-    return parsed.v === VERDICT_VERSION ? parsed : null;
+    const parsed = JSON.parse(signed.payload) as VerdictPayload & { purpose?: unknown };
+    // A key lease (`lease.ts`) is signed by the same key, so it is refused here by its shape: it
+    // carries a `purpose` and no `status` or `account`. Neither can be replayed as the other.
+    if (parsed.v !== VERDICT_VERSION || "purpose" in parsed) return null;
+    if (typeof parsed.status !== "string" || typeof parsed.account !== "string") return null;
+    return parsed;
   } catch {
     return null;
   }

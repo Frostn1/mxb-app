@@ -7,6 +7,10 @@
  * is compiled into every app, as `VERDICT_PUBLIC_KEY` in `crates/core/src/appgate.rs`. A pair of
  * its own, not the plugin one: a leak of either should not be a leak of both.
  *
+ * The same pair signs key leases (`src/lease.ts`), so the public half also goes into the private
+ * repo's DLL, as `LEASE_PUBLIC_KEY` in `secure/src/lease.rs` (or `MXBSECURE_LEASE_PUBLIC_KEY` at
+ * its build). Set the secret first: a DLL holding the key refuses to unseal without a lease.
+ *
  * Rotating means shipping app builds: an install verifies against the key it was built with, so
  * a verdict signed by a new pair is ignored by an old build (which then behaves as if the gate
  * sent no signature at all — it still acts on the verdict, it just cannot keep it offline).
@@ -37,7 +41,8 @@ Set it and then close this terminal:
   ${b64url(privatePkcs8)}
 
 Public key (raw, 32 bytes, base64url) — compile into the apps.
-Put it in crates/core/src/appgate.rs as VERDICT_PUBLIC_KEY:
+Put it in crates/core/src/appgate.rs as VERDICT_PUBLIC_KEY, and in the private repo's
+secure/src/lease.rs as LEASE_PUBLIC_KEY (only after the secret above is live):
 
   ${b64url(publicRaw)}
 `);

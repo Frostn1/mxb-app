@@ -30,6 +30,7 @@ consequences fall out of that, and they're baked into the schema:
 | POST | `/v1/servers/:id/hello` | agent token | A provisioned box announcing that it is up. Its address is taken from `cf-connecting-ip`, never from the body, so a box cannot register somebody else's. |
 | GET | `/v1/me` | bearer | Account, and a per-bike summary of what is stored for it. Looks ordinary to a banned install on purpose — see below. |
 | GET | `/v1/app/gate` | bearer | The desktop apps' startup gate. `{status:"ok"}` to run; `{status:"signin"}` when `MXB_REQUIRE_STEAM` is on and the account has no confirmed Steam link (the app shows a sign-in wall); `{status:"unsupported"}` for a banned install (a mundane untruth, never the word "ban"). With `MXB_VERDICT_SIGNING_KEY` set, each answer also carries `signed: {payload, sig}` — see **Signed verdicts, and the offline policy**. Reads the optional `X-MXB-Device` header — see **Device links** under **Banning a rider**. |
+| POST | `/v1/keys/lease` | bearer | A signed 30-day lease for the caller's Valve-confirmed Steam account, which the DLL needs beside a `.mxbkey` before it unseals it. 403 `code: "blocked"` for a banned account, 409 with no Steam link, 503 without `MXB_VERDICT_SIGNING_KEY` — see **Key leases, and the 30-day offline window** under **Banning a rider**. |
 | PUT | `/v1/me/guid` | bearer | Claim a GUID. Derived from the linked Steam identity and pinned (the client's value is ignored) for a Steam account; first-come for a non-Steam one; refused if banned. |
 | PUT | `/v1/loadout` | bearer | Replace **one bike's** loadout. Kept for clients older than per-bike storage. |
 | PUT | `/v1/loadouts` | bearer | Replace the whole look, every bike at once. Returns `missing` — the blobs still to upload. |
@@ -431,8 +432,8 @@ each is there because refusing it outright would work against the ban:
   machine — this is what makes the app delete the keys it already holds, and a blanket 403 there
   would read as "we don't know", which keeps them. It carries no ban flag: the per-asset
   `revoked` reads exactly like the creator having removed the buyer, which is the disguise. And
-  `.mxbkey` opens offline forever, so without this a ban would leave the banned install playing
-  everything it had already unlocked.
+  a `.mxbkey` opens offline, so without this a ban would leave the banned install playing
+  everything it had already unlocked until its key lease ran out (below).
 - `POST /v1/keys/grant` and `POST /v1/entitlements/check` still answer, and still write the
   denial to `entitlement_grants` as `banned` — a banned install walking the catalogue is only
   visible if the "no"s are recorded. What the app *sees* is the disguised failure (the grant) or
@@ -503,6 +504,46 @@ next app release. Never commit the private half. It is a pair of its own, not th
 Rotating it is a release: a build treats a verdict signed by any other key as unsigned — it still
 acts on it, it just cannot keep it — and a block kept under the old key stays until a build with
 the old key sees a newer lift, or the app is updated.
+
+#### Key leases, and the 30-day offline window
+
+A `.mxbkey` is sealed to the buyer's Steam ID and PC and opens with no server, so the status poll
+above only reaches it while the app is online and left alone. An install kept offline used to keep
+everything it had unlocked, forever. So the DLL now unseals a key only beside a **lease**: a small
+statement signed with the verdict key (`src/lease.ts`), from `POST /v1/keys/lease`:
+
+```json
+{
+  "lease": {
+    "payload": "{\"v\":1,\"purpose\":\"mxbsecure-lease\",\"steamId\":\"7656…\",\"issuedAt\":1800000000000,\"expiresAt\":1802592000000}",
+    "sig": "<Ed25519 over the payload's UTF-8 bytes, base64url>"
+  },
+  "expiresAt": 1802592000000
+}
+```
+
+It names the caller's Valve-confirmed Steam ID and runs 30 days. One lease covers every key that
+Steam account holds on the install. The app keeps it beside the DLL's manifest and renews it
+silently whenever it is online and fewer than 25 days are left; the DLL checks the signature, the
+purpose, that the Steam ID is the one it reads live, and that it has not run out. What that means
+for a buyer: **play offline for up to 30 days between check-ins; the app renews silently whenever
+it is online.**
+
+The route is behind the ban gate and not in `bannedMayUse`, so a banned account is refused with
+`code: "blocked"` — and the app deletes its lease (and runs the revocation sweep) when it hears
+that. A ban therefore reaches keys already on disk within 30 days even on a PC that never comes
+back online, and at once on one that does. Without a Steam link the answer is 409
+`no Steam account linked`, the grant's own words.
+
+Signed with the same key as the gate verdicts, so there is one secret and one public half. The two
+cannot be swapped: a lease carries `purpose: "mxbsecure-lease"` and no `status` or `account`, and
+each verifier refuses the other's shape.
+
+Without `MXB_VERDICT_SIGNING_KEY` the route answers 503 `leases not configured`. That is safe
+because the DLL only asks for a lease when it was built with the public half
+(`LEASE_PUBLIC_KEY` in the private repo's `secure/src/lease.rs`); a DLL built without it unseals
+exactly as before. Roll it out in that order: set the secret, ship an app that fetches leases, and
+only then ship a DLL with the public key in it.
 
 #### Device links
 
