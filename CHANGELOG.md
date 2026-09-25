@@ -3,6 +3,11 @@
 ## Unreleased
 
 ### Added
+- Frost Studio has a new **Bike** tab, the start of a bike builder for modders who have parts but
+  don't know Blender well. It finds the Blender you already have: installer, Steam or
+  Microsoft Store, or you choose `blender.exe`. It then runs Blender in the background to
+  open one part (`.blend`, `.fbx` or `.obj`) and shows what's in it: objects, their parents,
+  triangle counts and size. Blender 4.2 or newer is needed. Studio doesn't ship or bundle it.
 - Bikelife in Browse: mxb-mods.com's street and wheelie category (supermoto liveries and
   builds, streetwear, packs) gets its own tab. It's listed from mxb-mods like every other
   category, and each download comes from the post's own links. Because the category mixes

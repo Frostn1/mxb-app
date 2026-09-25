@@ -229,6 +229,9 @@ pub struct AppConfig {
     /// They are a separate download from the game and not ours to ship, so this is empty
     /// until someone points at them, and the compile step is simply not offered until then.
     pub track_tools_path: String,
+    /// The `blender.exe` the bike builder runs, when the rider picked one by hand. Empty
+    /// means "find it": Studio looks in the usual places each time (`blender::candidates`).
+    pub blender_path: String,
     /// The in-game rider name this account enrolled with. Kept so the UI can show which
     /// identity the paints are published under.
     pub cp_rider_name: String,
@@ -460,6 +463,7 @@ impl Default for AppConfig {
             servers: Vec::new(),
             cp_token: String::new(),
             track_tools_path: String::new(),
+            blender_path: String::new(),
             cp_rider_name: String::new(),
             cp_guid: String::new(),
             sync: SyncState::default(),
