@@ -3,8 +3,8 @@
 //! MXB App, Frost's Studio and MXB Coach are one product and one company, so a rider who is
 //! banned — or, when the deployment requires it, not signed in with Steam — is refused all of
 //! them, not just the one that happens to hold secured content. This is the client side of
-//! `GET /v1/app/gate`: each app calls [`enforce_marker`] and spawns [`check`] first thing in its
-//! `setup`, and the server's one verdict decides what happens.
+//! `GET /v1/app/gate`: each app calls [`enforce_marker`], spawns [`check`] and starts [`watch`]
+//! first thing in its `setup`, and the server's one verdict decides what happens.
 //!
 //! Three verdicts:
 //!  - `ok` — run;
@@ -12,20 +12,42 @@
 //!    `mxb-signin-required` event) and unlocks the moment Valve confirms the account. Never
 //!    fatal — the person can complete it.
 //!  - `unsupported` — a banned install. The app shows a mundane untruth ("this copy couldn't be
-//!    verified") and closes. Disguised on purpose, and it is written to a marker so a blocked
-//!    install stays blocked even offline. See the control plane's `bans.ts` for why the app is
-//!    lied to while the website is not.
+//!    verified") and closes. Disguised on purpose. See the control plane's `bans.ts` for why the
+//!    app is lied to while the website is not.
+//!
+//! ## Offline, and in between launches
+//!
+//! The server also sends each verdict as an Ed25519-signed statement (`signed`, from the control
+//! plane's `verdict.ts`) naming the account it is about and when it was issued. The last one is
+//! kept in the folder every app in the lineup shares ([`crate::config::data_dir`]), so a block
+//! given to MXB App holds in Studio and Coach too. The policy is the humane one:
+//!
+//!  - an install never told it is banned keeps working offline, exactly as it always has — no
+//!    network, a timeout or an unreadable answer is never a reason to refuse anybody;
+//!  - an install given a signed block stays blocked offline, and only a newer signed `ok` (or
+//!    `signin`) for the same account lifts it. A stored "ok" cannot be forged into a lift, and a
+//!    stored block cannot be carried onto another account, because the app holds only the half
+//!    of the key that checks.
+//!
+//! The older per-app `gate.lock` marker is still read as a block signal, for installs blocked
+//! before verdicts were signed. And a verdict is not only asked at launch: [`watch`] re-asks every
+//! half hour, and [`note_refusal`] re-asks at once when any control-plane call comes back 403
+//! with `code: "blocked"`, so a ban lands on a running app rather than on its next start.
 //!
 //! Living in `mxb-core` is the point: the gate, the account it needs (`account::ensure_token`)
 //! and the Steam-link round trip all sit here once, so a new app in the lineup is secured by
 //! calling three functions rather than by copying the machinery and letting it drift.
 
-use std::path::PathBuf;
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
 use std::sync::{Mutex, OnceLock};
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use serde::Deserialize;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use base64::Engine;
+use ed25519_dalek::{Signature, VerifyingKey};
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
 
@@ -52,6 +74,33 @@ const HTTP_TIMEOUT: Duration = Duration::from_secs(20);
 fn http() -> reqwest::Client {
     reqwest::Client::builder().timeout(HTTP_TIMEOUT).build().unwrap_or_default()
 }
+
+/// Public half of the pair the control plane signs gate verdicts with (raw 32 bytes, base64url).
+///
+/// Empty in source: the release sets it to the public key printed by the control plane's
+/// `scripts/verdict-keypair.ts`, whose private half lives only in the worker's
+/// `MXB_VERDICT_SIGNING_KEY` secret. It is not a secret itself — it can only check a signature,
+/// never make one. While it is empty no verdict verifies, nothing is kept, and the gate behaves
+/// exactly as it did before verdicts were signed.
+///
+/// Rotating it is a release: a build verifies against the key it was built with, and treats a
+/// verdict signed by any other as unsigned.
+pub const VERDICT_PUBLIC_KEY: &str = "";
+
+/// Signed-verdict format this build understands. A newer one is ignored rather than half-read.
+const VERDICT_VERSION: u32 = 1;
+
+/// How often a running app re-asks the gate. Long enough to be no load at all, short enough that
+/// a ban reaches an app left open all evening.
+const RECHECK_EVERY: Duration = Duration::from_secs(30 * 60);
+
+/// The fewest seconds between two re-asks prompted by a refused call. A burst of 403s — paint
+/// sync fanning out, say — is one question to the gate, not twenty.
+const NUDGE_EVERY_SECS: u64 = 60;
+
+/// How long a launch that already holds a block waits to hear it has been lifted, before refusing.
+/// Only a blocked install ever waits; everybody else starts without touching the network.
+const LIFT_WAIT: Duration = Duration::from_secs(8);
 
 /// The verdict `GET /v1/app/gate` returns.
 #[derive(Deserialize)]
@@ -147,8 +196,10 @@ pub async fn replay_verdict(app: AppHandle) {
     }
 }
 
-/// Where the "stay blocked, even offline" marker lives. `None` only if there is no data dir to
-/// write into, the same situation the rest of the app's local state cannot survive.
+/// Where the older, per-app "stay blocked" marker lives. From before verdicts were signed, and
+/// still written on a block and read at startup, so an install blocked by an earlier build stays
+/// blocked; being a plain file anybody can delete is why it is no longer the only signal. `None`
+/// only if there is no data dir to write into.
 fn marker_path(app: &AppHandle) -> Option<PathBuf> {
     app.path().app_local_data_dir().ok().map(|d| d.join("gate.lock"))
 }
@@ -179,6 +230,163 @@ fn unmark(app: &AppHandle) {
     }
 }
 
+// ---------------------------------------------------------------------------------------
+// Signed verdicts: the one kept in the shared folder, and the rules for replacing it.
+// ---------------------------------------------------------------------------------------
+
+/// The `signed` field of a gate answer: the payload as the exact string that was signed, and an
+/// Ed25519 signature over its UTF-8 bytes, base64url without padding.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SignedVerdict {
+    pub payload: String,
+    pub sig: String,
+}
+
+/// What a verified signed verdict says.
+#[derive(Debug, Clone, Deserialize, PartialEq)]
+pub struct VerdictPayload {
+    pub v: u32,
+    /// `ok`, `signin` or `unsupported` — the same three words as the unsigned verdict.
+    pub status: String,
+    /// The account it is about. A verdict for one account never decides anything for another.
+    pub account: String,
+    #[serde(rename = "steamId")]
+    pub steam_id: Option<String>,
+    pub guid: Option<String>,
+    /// Milliseconds since epoch, by the server's clock — the only clock the ordering trusts.
+    #[serde(rename = "issuedAt")]
+    pub issued_at: i64,
+}
+
+impl VerdictPayload {
+    fn blocks(&self) -> bool {
+        self.status == "unsupported"
+    }
+}
+
+/// Check a signed verdict against a named key and return what it says.
+///
+/// Every failure is the same answer — "not a verdict we can keep" — and the caller treats it as
+/// if the server had sent no signature at all, which is how every verdict was read before this.
+pub fn verify_verdict_with(signed: &SignedVerdict, public_key_b64: &str) -> Result<VerdictPayload, String> {
+    let key_bytes: [u8; 32] = URL_SAFE_NO_PAD
+        .decode(public_key_b64.trim())
+        .ok()
+        .and_then(|b| b.try_into().ok())
+        .ok_or("no verdict key is built in")?;
+    let key = VerifyingKey::from_bytes(&key_bytes).map_err(|_| "the built-in verdict key is invalid")?;
+    let sig: [u8; 64] = URL_SAFE_NO_PAD
+        .decode(signed.sig.trim())
+        .ok()
+        .and_then(|b| b.try_into().ok())
+        .ok_or("the verdict signature is malformed")?;
+    key.verify_strict(signed.payload.as_bytes(), &Signature::from_bytes(&sig))
+        .map_err(|_| "the verdict was not signed by us")?;
+    let payload: VerdictPayload =
+        serde_json::from_str(&signed.payload).map_err(|e| format!("unreadable verdict ({e})"))?;
+    if payload.v != VERDICT_VERSION {
+        return Err(format!("verdict version {} is not one this build reads", payload.v));
+    }
+    Ok(payload)
+}
+
+/// [`verify_verdict_with`] against the key this build ships with.
+pub fn verify_verdict(signed: &SignedVerdict) -> Result<VerdictPayload, String> {
+    verify_verdict_with(signed, VERDICT_PUBLIC_KEY)
+}
+
+/// The verdict as kept on disk, beside a digest of the token it was fetched with.
+///
+/// The app never learns its own account id except from a verdict, so "the current account" is
+/// the token in the shared config: a kept verdict applies to a start only when it was fetched with
+/// the token that start holds. The digest rather than the token, because this file has no reason
+/// to be a second copy of a credential.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct StoredVerdict {
+    pub token: String,
+    #[serde(flatten)]
+    pub signed: SignedVerdict,
+}
+
+/// SHA-256 of a token, lowercase hex — how a kept verdict names the token it belongs to.
+pub fn token_digest(token: &str) -> String {
+    Sha256::digest(token.trim().as_bytes()).iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// Whether a kept verdict refuses a start holding `token_digest`: it verifies, it is a block, and
+/// it was fetched with this token. A kept verdict for another account is ignored, never obeyed.
+pub fn stored_blocks(stored: &StoredVerdict, token_digest: &str, public_key_b64: &str) -> bool {
+    stored.token == token_digest
+        && verify_verdict_with(&stored.signed, public_key_b64).is_ok_and(|p| p.blocks())
+}
+
+/// Whether a freshly verified verdict should replace the one kept.
+///
+/// - Nothing kept, or nothing that still verifies: keep the new one.
+/// - The same account: only a strictly newer verdict replaces — so a replayed old `ok` cannot lift
+///   a block, and a block is lifted only by a later `ok` or `signin` for that account.
+/// - Another account: a kept block is not the new account's to lift, so it stays unless the new
+///   verdict is a block too; anything else is simply superseded.
+pub fn supersedes(kept: Option<&VerdictPayload>, incoming: &VerdictPayload) -> bool {
+    match kept {
+        None => true,
+        Some(k) if k.account == incoming.account => incoming.issued_at > k.issued_at,
+        Some(k) => !k.blocks() || incoming.blocks(),
+    }
+}
+
+/// Where the kept verdict lives: the folder every app in the lineup shares, beside the config
+/// that holds the token it was fetched with. Not `app_local_data_dir`, which is per app.
+fn verdict_path(app: &AppHandle) -> Option<PathBuf> {
+    crate::config::data_dir(app).map(|d| d.join("gate-verdict.json"))
+}
+
+/// The kept verdict, or `None` when there is none or it cannot be read. Unreadable is "none": a
+/// damaged file is not evidence of anything.
+pub fn read_stored(path: &Path) -> Option<StoredVerdict> {
+    let text = std::fs::read_to_string(path).ok()?;
+    serde_json::from_str(&text).ok()
+}
+
+/// Keep `incoming` if it supersedes what is there, and say whether it did. Written aside and
+/// moved in, like the config, so a crash mid-write never leaves half a verdict.
+pub fn keep_if_newer(
+    path: &Path,
+    token_digest: &str,
+    incoming_signed: &SignedVerdict,
+    incoming: &VerdictPayload,
+    public_key_b64: &str,
+) -> bool {
+    let kept = read_stored(path).and_then(|s| verify_verdict_with(&s.signed, public_key_b64).ok());
+    if !supersedes(kept.as_ref(), incoming) {
+        return false;
+    }
+    let record = StoredVerdict { token: token_digest.to_string(), signed: incoming_signed.clone() };
+    let Ok(text) = serde_json::to_string(&record) else { return false };
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let tmp = path.with_extension("json.tmp");
+    std::fs::write(&tmp, text).and_then(|_| std::fs::rename(&tmp, path)).is_ok()
+}
+
+/// The token this install holds in the shared config, read straight from the file.
+///
+/// Not `config::load`, which may migrate and rewrite the config — the gate runs before the app
+/// has decided anything, and reading one field is all it needs.
+fn current_token(app: &AppHandle) -> Option<String> {
+    let text = std::fs::read_to_string(crate::config::config_path(app)).ok()?;
+    let doc: serde_json::Value = serde_json::from_str(&text).ok()?;
+    let token = doc.get("cpToken")?.as_str()?.trim().to_string();
+    (!token.is_empty()).then_some(token)
+}
+
+/// Whether the kept, signed verdict refuses this start.
+fn stored_block(app: &AppHandle) -> bool {
+    let (Some(path), Some(token)) = (verdict_path(app), current_token(app)) else { return false };
+    read_stored(&path).is_some_and(|s| stored_blocks(&s, &token_digest(&token), VERDICT_PUBLIC_KEY))
+}
+
 /// The name to put on the dialog — this app's own product name, so Studio doesn't say "MXB App".
 fn app_name(app: &AppHandle) -> String {
     let n = app.package_info().name.clone();
@@ -199,27 +407,54 @@ pub fn deny(app: &AppHandle, message: &str) -> ! {
     std::process::exit(1);
 }
 
-/// Refuse instantly if a previous run was told to. Called at the very top of `setup`, before the
+/// Refuse at once if a previous run was told to. Called at the very top of `setup`, before the
 /// window is built, so a blocked install never flashes a usable window and never needs the
-/// network to enforce a block it has already been given. A no-op for everyone else.
+/// network to enforce a block it has already been given. A no-op, with no network, for everyone
+/// else.
+///
+/// A block here is either the signed verdict every app shares, for the account this install is
+/// signed in as, or the older per-app `gate.lock`. Before refusing, a blocked install asks the
+/// gate once, for at most [`LIFT_WAIT`]: that is how a lifted ban gets back in — otherwise the
+/// block would refuse every launch before any check could hear the lift. Offline, the ask fails
+/// and the block stands.
 pub fn enforce_marker(app: &AppHandle) {
+    if blocked(app).is_none() && !stored_block(app) {
+        return;
+    }
+
+    let handle = app.clone();
+    let answer = tauri::async_runtime::block_on(async move {
+        tokio::time::timeout(LIFT_WAIT, ask(&handle)).await.ok().flatten()
+    });
+    match answer {
+        Some(Verdict::Unsupported { message }) => {
+            let message = if message.trim().is_empty() { FALLBACK_BLOCK.to_string() } else { message };
+            mark(app, &message);
+            deny(app, &message);
+        }
+        // The server says this install may run. The per-app marker was only ever as good as the
+        // unsigned answer that wrote it, so an unsigned answer lifts it, as `check` always did; a
+        // signed block needs a newer signed lift, which `ask` has already kept if one came.
+        Some(_) => unmark(app),
+        None => {}
+    }
     if let Some(message) = blocked(app) {
         deny(app, &message);
     }
+    if stored_block(app) {
+        deny(app, FALLBACK_BLOCK);
+    }
 }
 
-/// Ask the server whether this install may run, and act on the answer.
-///
-/// Spawned in the background from `setup` so it never delays a legitimate launch. `ok` clears any
-/// stale marker and lowers the sign-in wall; `signin` raises the wall (never fatal); `unsupported`
-/// marks and tears the app down. Any network or auth error does nothing — a marker already
-/// written stands, and an install that was never blocked keeps running.
-pub async fn check(app: AppHandle) {
-    let token = match account::ensure_token(&app).await {
+/// One round trip to the gate: the verdict, with its signed form kept when it verifies and
+/// supersedes what is kept. `None` for any network, auth or parse failure — "don't know".
+async fn ask(app: &AppHandle) -> Option<Verdict> {
+    remember(app);
+    let token = match account::ensure_token(app).await {
         Ok(t) => t,
         Err(e) => {
             log::info!("[gate] no verdict this run ({e})");
-            return;
+            return None;
         }
     };
 
@@ -232,20 +467,65 @@ pub async fn check(app: AppHandle) {
         Ok(r) => r,
         Err(e) => {
             log::info!("[gate] no verdict this run ({e})");
-            return;
+            return None;
         }
     };
     if !resp.status().is_success() {
         log::info!("[gate] service answered {}", resp.status());
-        return;
+        return None;
     }
-    let verdict: Verdict = match resp.json().await {
+    let body: serde_json::Value = match resp.json().await {
         Ok(v) => v,
         Err(e) => {
             log::info!("[gate] unreadable verdict ({e})");
-            return;
+            return None;
         }
     };
+    let verdict: Verdict = match Verdict::deserialize(&body) {
+        Ok(v) => v,
+        Err(e) => {
+            log::info!("[gate] unreadable verdict ({e})");
+            return None;
+        }
+    };
+
+    // The signed form, kept when it verifies and says the same as the plain answer. One that does
+    // not verify — no key built in, a key rotated since this build — is simply not kept: the plain
+    // verdict is still acted on, as it always was.
+    if let Some(signed) = body.get("signed").and_then(|v| SignedVerdict::deserialize(v).ok()) {
+        match verify_verdict(&signed) {
+            Ok(payload) if payload.status == verdict.status() => {
+                if let Some(path) = verdict_path(app) {
+                    keep_if_newer(&path, &token_digest(&token), &signed, &payload, VERDICT_PUBLIC_KEY);
+                }
+            }
+            Ok(_) => log::warn!("[gate] the signed verdict disagrees with the plain one; not kept"),
+            Err(e) => log::debug!("[gate] signed verdict not kept ({e})"),
+        }
+    }
+    Some(verdict)
+}
+
+impl Verdict {
+    /// The wire word for this verdict, as the signed payload spells it.
+    fn status(&self) -> &'static str {
+        match self {
+            Verdict::Ok { .. } => "ok",
+            Verdict::Signin { .. } => "signin",
+            Verdict::Unsupported { .. } => "unsupported",
+        }
+    }
+}
+
+/// Ask the server whether this install may run, and act on the answer.
+///
+/// Spawned in the background from `setup` so it never delays a legitimate launch. `ok` clears any
+/// stale per-app marker and lowers the sign-in wall; `signin` raises the wall (never fatal);
+/// `unsupported` marks and tears the app down. Any network or auth error does nothing — a block
+/// already kept stands, and an install that was never blocked keeps running.
+pub async fn check(app: AppHandle) {
+    let _running = Running::claim();
+    let Some(verdict) = ask(&app).await else { return };
 
     match verdict {
         Verdict::Ok { steam } => {
@@ -272,6 +552,111 @@ pub async fn check(app: AppHandle) {
 }
 
 // ---------------------------------------------------------------------------------------
+// Asking again while the app runs: every half hour, and at once when a call is refused.
+// ---------------------------------------------------------------------------------------
+
+/// The handle the background re-checks run against, set by the first [`watch`] or [`check`]. Held
+/// here so a refused call in a module with no handle of its own can still say so.
+fn app_handle() -> &'static OnceLock<AppHandle> {
+    static APP: OnceLock<AppHandle> = OnceLock::new();
+    &APP
+}
+
+fn remember(app: &AppHandle) {
+    let _ = app_handle().set(app.clone());
+}
+
+/// Whether a [`check`] is running now. A background re-check that finds one running skips its
+/// turn — the answer is already on its way, and two at once on an install with no token yet
+/// would both claim a device account.
+static CHECKING: AtomicBool = AtomicBool::new(false);
+
+/// Marks a check as running for as long as it is held. [`check`] itself always runs — the sign-in
+/// wall's "I've signed in" must be answered, not skipped because a half-hourly check was in
+/// flight — so this only records, and only the claim that set the flag clears it.
+struct Running(bool);
+
+impl Running {
+    fn claim() -> Self {
+        Running(CHECKING.compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire).is_ok())
+    }
+}
+
+impl Drop for Running {
+    fn drop(&mut self) {
+        if self.0 {
+            CHECKING.store(false, Ordering::Release);
+        }
+    }
+}
+
+/// A re-check nobody is waiting on: skipped when one is already running.
+async fn background_check(app: AppHandle) {
+    if CHECKING.load(Ordering::Acquire) {
+        return;
+    }
+    check(app).await;
+}
+
+/// Re-ask the gate every [`RECHECK_EVERY`] for as long as the app runs. Call once from `setup`,
+/// beside the startup [`check`]; the first re-ask is one interval after launch.
+pub fn watch(app: &AppHandle) {
+    remember(app);
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        loop {
+            tokio::time::sleep(RECHECK_EVERY).await;
+            background_check(app.clone()).await;
+        }
+    });
+}
+
+/// Whether a control-plane answer is the refusal a block produces: a 403 whose body carries
+/// `code: "blocked"`. Any other 403 — not entitled, needs an invite — is not.
+pub fn is_block_refusal(status: u16, body: &str) -> bool {
+    status == 403
+        && serde_json::from_str::<serde_json::Value>(body)
+            .ok()
+            .is_some_and(|v| v.get("code").and_then(|c| c.as_str()) == Some("blocked"))
+}
+
+/// Tell the gate a control-plane call was refused. Call it with the status and body of a failed
+/// control-plane response; when it is a block refusal the gate is re-asked at once (at most once
+/// a minute) rather than at the next half-hourly check.
+///
+/// `body` is `None` for a caller that never read one (an `error_for_status` path): a bare 403
+/// there is taken as worth a re-ask, and the gate — not the guess — decides what it meant.
+pub fn note_refusal(status: u16, body: Option<&str>) {
+    let worth_asking = match body {
+        Some(body) => is_block_refusal(status, body),
+        None => status == 403,
+    };
+    if !worth_asking {
+        return;
+    }
+    static LAST: AtomicU64 = AtomicU64::new(0);
+    let now = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    let last = LAST.load(Ordering::Relaxed);
+    if now.saturating_sub(last) < NUDGE_EVERY_SECS
+        || LAST.compare_exchange(last, now, Ordering::Relaxed, Ordering::Relaxed).is_err()
+    {
+        return;
+    }
+    if let Some(app) = app_handle().get() {
+        log::info!("[gate] a call was refused; asking the gate again now");
+        tauri::async_runtime::spawn(background_check(app.clone()));
+    }
+}
+
+/// [`note_refusal`] for a `reqwest` error from `error_for_status`, which carries the status and
+/// nothing else.
+pub fn note_error(err: &reqwest::Error) {
+    if let Some(status) = err.status() {
+        note_refusal(status.as_u16(), None);
+    }
+}
+
+// ---------------------------------------------------------------------------------------
 // The Steam-link round trip the sign-in wall drives — shared so every app's wall is the same.
 // ---------------------------------------------------------------------------------------
 
@@ -286,7 +671,9 @@ pub async fn steam_link_start(app: &AppHandle) -> Result<String, String> {
         .await
         .map_err(|e| format!("couldn't reach the service: {e}"))?;
     if !resp.status().is_success() {
-        return Err(format!("the service refused the sign-in ({})", resp.status()));
+        let status = resp.status();
+        note_refusal(status.as_u16(), Some(&resp.text().await.unwrap_or_default()));
+        return Err(format!("the service refused the sign-in ({status})"));
     }
     #[derive(Deserialize)]
     struct Login {
@@ -313,7 +700,9 @@ pub async fn steam_link_status(app: &AppHandle) -> Result<Option<String>, String
     // Shown to the person when the wall gives up, so it has to read as a sentence rather than
     // as a log line.
     if !resp.status().is_success() {
-        return Err(format!("couldn't check the sign-in ({})", resp.status()));
+        let status = resp.status();
+        note_refusal(status.as_u16(), Some(&resp.text().await.unwrap_or_default()));
+        return Err(format!("couldn't check the sign-in ({status})"));
     }
     #[derive(Deserialize)]
     struct Ent {
@@ -322,4 +711,182 @@ pub async fn steam_link_status(app: &AppHandle) -> Result<Option<String>, String
     }
     let ent: Ent = resp.json().await.map_err(|e| format!("bad response: {e}"))?;
     Ok(ent.steam_id)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ed25519_dalek::{Signer, SigningKey};
+
+    /// A pair made here, for the tests only. The shipped key is a different one.
+    fn pair(seed: u8) -> (SigningKey, String) {
+        let key = SigningKey::from_bytes(&[seed; 32]);
+        let public = URL_SAFE_NO_PAD.encode(key.verifying_key().to_bytes());
+        (key, public)
+    }
+
+    fn sign(key: &SigningKey, status: &str, account: &str, issued_at: i64) -> SignedVerdict {
+        let payload = format!(
+            r#"{{"v":1,"status":"{status}","account":"{account}","steamId":null,"guid":"FF0110000111111111","issuedAt":{issued_at}}}"#
+        );
+        let sig = URL_SAFE_NO_PAD.encode(key.sign(payload.as_bytes()).to_bytes());
+        SignedVerdict { payload, sig }
+    }
+
+    fn scratch(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("mxb-appgate-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir.join("gate-verdict.json")
+    }
+
+    /// A verdict the control plane's own `signPayload` produced, in TypeScript, under a throwaway
+    /// pair — pasted verbatim. The one seam neither side can check alone: the exact bytes signed,
+    /// base64url without padding, field names in camelCase.
+    const TS_PUBLIC_KEY: &str = "-CFSs1uk9joAyTUjTyF8Tf705d0N2Y3nV_I-gH9N4Vo";
+    const TS_PAYLOAD: &str = r#"{"v":1,"status":"unsupported","account":"acc_test","steamId":"76561198000000042","guid":"FF0110000111111111","issuedAt":1800000000000}"#;
+    const TS_SIG: &str = "eH2uicU77qF7WunwnaqK8HpCZZhDPcD6DfxZRzvDewkBMZfh6N5AlDnPfRmhCgrfXZGHZzAKTsqrdOct5cJJCQ";
+
+    #[test]
+    fn verifies_a_verdict_the_typescript_worker_actually_signed() {
+        let signed = SignedVerdict { payload: TS_PAYLOAD.into(), sig: TS_SIG.into() };
+        let p = verify_verdict_with(&signed, TS_PUBLIC_KEY).expect("the worker's own verdict must verify");
+        assert_eq!(p.v, 1);
+        assert_eq!(p.status, "unsupported");
+        assert_eq!(p.account, "acc_test");
+        assert_eq!(p.steam_id.as_deref(), Some("76561198000000042"));
+        assert_eq!(p.guid.as_deref(), Some("FF0110000111111111"));
+        assert_eq!(p.issued_at, 1_800_000_000_000);
+    }
+
+    #[test]
+    fn a_good_signature_verifies_and_a_bad_or_tampered_one_does_not() {
+        let (key, public) = pair(1);
+        let signed = sign(&key, "ok", "acc_a", 10);
+        assert_eq!(verify_verdict_with(&signed, &public).unwrap().status, "ok");
+
+        // Tampered: the payload says something it was not signed saying.
+        let tampered = SignedVerdict { payload: signed.payload.replace("\"ok\"", "\"unsupported\""), ..signed.clone() };
+        assert!(verify_verdict_with(&tampered, &public).is_err());
+
+        // Signed by somebody else's key.
+        let (_, other) = pair(2);
+        assert!(verify_verdict_with(&signed, &other).is_err());
+
+        // Garbage where the signature goes.
+        let bad = SignedVerdict { sig: "not-a-signature".into(), ..signed.clone() };
+        assert!(verify_verdict_with(&bad, &public).is_err());
+
+        // A build with no key in it keeps nothing, rather than trusting everything.
+        assert!(verify_verdict_with(&signed, "").is_err());
+    }
+
+    #[test]
+    fn a_verdict_of_an_unknown_version_is_not_read() {
+        let (key, public) = pair(3);
+        let payload = r#"{"v":2,"status":"ok","account":"acc_a","steamId":null,"guid":null,"issuedAt":1}"#.to_string();
+        let sig = URL_SAFE_NO_PAD.encode(key.sign(payload.as_bytes()).to_bytes());
+        assert!(verify_verdict_with(&SignedVerdict { payload, sig }, &public).is_err());
+    }
+
+    #[test]
+    fn a_newer_ok_lifts_a_kept_block_and_an_older_one_does_not() {
+        let (key, public) = pair(4);
+        let path = scratch("precedence");
+        let tok = token_digest("token-a");
+
+        let block = sign(&key, "unsupported", "acc_a", 1_000);
+        let p = verify_verdict_with(&block, &public).unwrap();
+        assert!(keep_if_newer(&path, &tok, &block, &p, &public));
+        assert!(stored_blocks(&read_stored(&path).unwrap(), &tok, &public));
+
+        // An older ok — a replayed one, say — changes nothing.
+        let old_ok = sign(&key, "ok", "acc_a", 999);
+        let p = verify_verdict_with(&old_ok, &public).unwrap();
+        assert!(!keep_if_newer(&path, &tok, &old_ok, &p, &public));
+        assert!(stored_blocks(&read_stored(&path).unwrap(), &tok, &public));
+
+        // So does one issued at the same instant: strictly newer only.
+        let same = sign(&key, "ok", "acc_a", 1_000);
+        let p = verify_verdict_with(&same, &public).unwrap();
+        assert!(!keep_if_newer(&path, &tok, &same, &p, &public));
+
+        // A newer signin lifts it just as an ok does — neither is a block.
+        let lift = sign(&key, "signin", "acc_a", 1_001);
+        let p = verify_verdict_with(&lift, &public).unwrap();
+        assert!(keep_if_newer(&path, &tok, &lift, &p, &public));
+        assert!(!stored_blocks(&read_stored(&path).unwrap(), &tok, &public));
+    }
+
+    #[test]
+    fn another_accounts_verdict_neither_blocks_nor_lifts() {
+        let (key, public) = pair(5);
+        let path = scratch("accounts");
+        let tok_a = token_digest("token-a");
+        let tok_b = token_digest("token-b");
+
+        let block = sign(&key, "unsupported", "acc_a", 1_000);
+        let p = verify_verdict_with(&block, &public).unwrap();
+        assert!(keep_if_newer(&path, &tok_a, &block, &p, &public));
+
+        // A start holding another account's token is not refused by account A's block.
+        assert!(!stored_blocks(&read_stored(&path).unwrap(), &tok_b, &public));
+
+        // Nor does account B's ok, however new, lift account A's block.
+        let ok_b = sign(&key, "ok", "acc_b", 5_000);
+        let p = verify_verdict_with(&ok_b, &public).unwrap();
+        assert!(!keep_if_newer(&path, &tok_b, &ok_b, &p, &public));
+        assert!(stored_blocks(&read_stored(&path).unwrap(), &tok_a, &public));
+
+        // A block for the new account does replace it: that is the one the current start is about.
+        let block_b = sign(&key, "unsupported", "acc_b", 5_001);
+        let p = verify_verdict_with(&block_b, &public).unwrap();
+        assert!(keep_if_newer(&path, &tok_b, &block_b, &p, &public));
+        assert!(stored_blocks(&read_stored(&path).unwrap(), &tok_b, &public));
+    }
+
+    #[test]
+    fn a_kept_ok_never_blocks_and_a_forged_block_is_ignored() {
+        let (key, public) = pair(6);
+        let tok = token_digest("token-a");
+        let ok = StoredVerdict { token: tok.clone(), signed: sign(&key, "ok", "acc_a", 1) };
+        assert!(!stored_blocks(&ok, &tok, &public));
+
+        // A block written to disk by hand, or signed by anybody else, is not a block.
+        let (forger, _) = pair(7);
+        let forged = StoredVerdict { token: tok.clone(), signed: sign(&forger, "unsupported", "acc_a", 1) };
+        assert!(!stored_blocks(&forged, &tok, &public));
+    }
+
+    #[test]
+    fn supersedes_follows_the_rules_it_states() {
+        let v = |status: &str, account: &str, at: i64| VerdictPayload {
+            v: 1,
+            status: status.into(),
+            account: account.into(),
+            steam_id: None,
+            guid: None,
+            issued_at: at,
+        };
+        assert!(supersedes(None, &v("ok", "a", 1)));
+        assert!(supersedes(Some(&v("ok", "a", 1)), &v("unsupported", "a", 2)));
+        assert!(!supersedes(Some(&v("ok", "a", 2)), &v("unsupported", "a", 1)));
+        assert!(supersedes(Some(&v("ok", "a", 9)), &v("ok", "b", 1)));
+        assert!(!supersedes(Some(&v("unsupported", "a", 1)), &v("ok", "b", 9)));
+    }
+
+    #[test]
+    fn only_a_block_refusal_asks_the_gate_again() {
+        assert!(is_block_refusal(403, r#"{"error":"This copy couldn't be verified.","code":"blocked"}"#));
+        assert!(!is_block_refusal(403, r#"{"error":"that needs an invite"}"#));
+        assert!(!is_block_refusal(401, r#"{"code":"blocked"}"#));
+        assert!(!is_block_refusal(403, "not json"));
+    }
+
+    #[test]
+    fn the_token_digest_is_stable_and_ignores_surrounding_space() {
+        assert_eq!(token_digest("abc"), token_digest("  abc\n"));
+        assert_eq!(token_digest("abc").len(), 64);
+        assert_ne!(token_digest("abc"), token_digest("abd"));
+    }
 }

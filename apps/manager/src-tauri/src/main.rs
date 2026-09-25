@@ -1774,7 +1774,10 @@ async fn unlock_one(
         .map_err(|e| format!("couldn't reach the control plane: {e}"))?;
     if !resp.status().is_success() {
         // The control plane answers `{error}`; surface it (403 not entitled, 409 no key…).
+        let status = resp.status();
         let detail = resp.text().await.unwrap_or_default();
+        // A block refusal (`code: "blocked"`) re-asks the startup gate now.
+        gate::note_refusal(status.as_u16(), Some(&detail));
         let msg = serde_json::from_str::<serde_json::Value>(&detail)
             .ok()
             .and_then(|v| v.get("error").and_then(|e| e.as_str()).map(str::to_string))
@@ -2427,7 +2430,9 @@ async fn steam_link_status(app: tauri::AppHandle) -> Result<Option<String>, Stri
     // Shown to the person when the sign-in wall gives up, so it has to read as a sentence
     // rather than as a log line.
     if !resp.status().is_success() {
-        return Err(format!("couldn't check the sign-in ({})", resp.status()));
+        let status = resp.status();
+        gate::note_refusal(status.as_u16(), Some(&resp.text().await.unwrap_or_default()));
+        return Err(format!("couldn't check the sign-in ({status})"));
     }
     #[derive(serde::Deserialize)]
     struct Ent {
@@ -7854,6 +7859,9 @@ fn main() {
             // And ask the server afresh, off the startup path: this is what blocks a newly-banned
             // install on its first run, and what lets a lifted ban back in by clearing the marker.
             tauri::async_runtime::spawn(gate::check(app.handle().clone()));
+            // And again every half hour while it runs, so a ban reaches an app left open all
+            // evening rather than on its next launch.
+            gate::watch(app.handle());
 
             // The main window is `"create": false` in tauri.conf.json so it is built here
             // rather than by Tauri's own startup loop, which is the only way to decide the

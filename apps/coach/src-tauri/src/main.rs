@@ -149,6 +149,8 @@ fn main() {
             // server afresh in the background — the same lock as MXB App and Studio, one core.
             mxb_core::appgate::enforce_marker(app.handle());
             tauri::async_runtime::spawn(mxb_core::appgate::check(app.handle().clone()));
+            // And again every half hour while it runs, so a ban reaches an app left open.
+            mxb_core::appgate::watch(app.handle());
             overlay::start(app.handle());
             coach::watch_sessions(app.handle());
             // Anonymous counters, under the same switch and the same config file as the manager's
