@@ -727,7 +727,7 @@ export const es: Translation = {
   "secure.testHeading": "Probar el formato (opcional)",
   "secure.step3": "Vincular a tu cuenta de Steam y jugar sin conexión",
   "secure.step3Desc":
-    "Sella la clave a tu cuenta de Steam y la guarda localmente. A partir de ahí se abre sin servidor — sin conexión, en LAN, donde sea — pero solo en tu cuenta. Una copia en otra cuenta no obtiene nada.",
+    "Sella la clave a tu cuenta de Steam y la guarda localmente. A partir de ahí funciona sin conexión hasta 30 días entre comprobaciones — la app lo renueva sola cuando está en línea — pero solo en tu cuenta. Una copia en otra cuenta no obtiene nada.",
   "secure.steamAccount": "Tu cuenta de Steam:",
   "secure.noSteam": "No se pudo leer tu cuenta de Steam. ¿Está Steam instalado e iniciada la sesión?",
   "secure.provision": "Vincular a mi cuenta",

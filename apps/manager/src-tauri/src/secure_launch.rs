@@ -9,7 +9,8 @@
 //! started by Steam and we don't create that process. The DLL goes in shortly after the game
 //! appears — at the menu, before a track is loaded — which is in time for the reads that
 //! matter. The DLL reads its manifest from its own directory (no inherited environment), which
-//! is why the manifest is written there.
+//! is why the manifest is written there — and the key lease beside it ([`renew_lease`]), without
+//! which a DLL built with the lease key unseals nothing.
 
 use std::path::PathBuf;
 
@@ -455,6 +456,19 @@ fn write_manifest(assets: &[SecureAsset], dir: &std::path::Path) -> Result<(), S
         out.push_str(&format!("{}\t{}\t{}\n", a.game_name, a.blob_path, a.mxbkey_path));
     }
     std::fs::write(dir.join("manifest.tsv"), out).map_err(|e| e.to_string())
+}
+
+/// Renew the key lease in the DLL's run dir if it needs it (`mxb_core::keylease`): the signed,
+/// 30-day permission the DLL wants beside a `.mxbkey` before it unseals it. Written here, beside
+/// `manifest.tsv`, whether or not the game is running, so a launch that starts offline still finds
+/// the last one. Kept as it is when the app is offline or not enrolled; deleted on a block, which
+/// the caller follows with a revocation sweep.
+#[cfg_attr(not(mxbsecure), allow(dead_code))]
+pub async fn renew_lease(app: &AppHandle, force: bool) -> mxb_core::keylease::Renewal {
+    let Some(dir) = run_dir(app) else { return mxb_core::keylease::Renewal::Kept };
+    let token = crate::config::load(app).map(|c| c.cp_token).unwrap_or_default();
+    let live = crate::steamid::current_steam_id64();
+    mxb_core::keylease::renew(&token, &dir, live.as_deref(), force).await
 }
 
 /// Name the signed-in account for the DLL — an `identity` file in the run dir, the SteamID64 on

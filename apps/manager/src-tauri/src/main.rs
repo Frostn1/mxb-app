@@ -1660,15 +1660,16 @@ async fn provision_and_record(
     })
 }
 
-/// Unlock purchased secured content for offline play — the buyer's one online step, and the
-/// only way a content key reaches a machine.
+/// Unlock purchased secured content for offline play — the only way a content key reaches a
+/// machine.
 ///
 /// The asset id is read from the blob's own authenticated header, so the buyer just drops the
 /// `.mxbsecure` file in and clicks unlock. We prove entitlement at `/v1/keys/grant` (which
 /// releases the content key and the per-provision secret only to an entitled account), then
 /// seal both to *this* machine via [`provision_and_record`]. The resulting `.mxbkey` is
 /// DPAPI-bound, so a copy is useless on any other machine or account. From then on it opens
-/// offline with no further server call.
+/// offline for as long as the key lease beside the manifest holds — up to 30 days between
+/// check-ins, renewed silently whenever the app is online (`mxb_core::keylease`).
 #[tauri::command]
 async fn mxbsecure_unlock(
     app: tauri::AppHandle,
@@ -1774,7 +1775,10 @@ async fn unlock_one(
         .map_err(|e| format!("couldn't reach the control plane: {e}"))?;
     if !resp.status().is_success() {
         // The control plane answers `{error}`; surface it (403 not entitled, 409 no key…).
+        let status = resp.status();
         let detail = resp.text().await.unwrap_or_default();
+        // A block refusal (`code: "blocked"`) re-asks the startup gate now.
+        gate::note_refusal(status.as_u16(), Some(&detail));
         let msg = serde_json::from_str::<serde_json::Value>(&detail)
             .ok()
             .and_then(|v| v.get("error").and_then(|e| e.as_str()).map(str::to_string))
@@ -1976,8 +1980,9 @@ struct SecureRevoked {
 ///
 /// Removing a buyer revokes the entitlement, and `/v1/keys/grant` refuses from that moment. On a
 /// PC that had never unlocked the asset, that is the whole story. On one that had, it changed
-/// nothing: the `.mxbkey` beside the blob is sealed to that machine and opens **offline**, no
-/// server is ever asked again, and the key vault puts the file back if it is deleted. So the
+/// nothing: the `.mxbkey` beside the blob is sealed to that machine and opens **offline** — its
+/// key lease is about the account, not the asset — and the key vault puts the file back if it is
+/// deleted. So the
 /// removal was real everywhere except on the machines it was about. This is the missing half:
 /// the app asks, on the same triggers that unlock, whether it may still hold what it holds, and
 /// deletes both copies of the key when the answer is no.
@@ -2076,6 +2081,24 @@ pub(crate) async fn revoke_sweep(app: &tauri::AppHandle, force: bool) -> RevokeO
     out
 }
 
+/// Keep the key lease fresh while the app is open: once at startup, then every few hours. The
+/// lease runs 30 days and is renewed with fewer than 25 left, so most passes ask nothing; the
+/// loop is what renews it for a player who leaves the app running and never opens the Library.
+/// A block drops the lease and takes the keys back at once, like a removal on the site does.
+#[cfg(mxbsecure)]
+fn watch_lease(app: &tauri::AppHandle) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        loop {
+            if secure_launch::renew_lease(&app, false).await == mxb_core::keylease::Renewal::Blocked {
+                revoke_sweep(&app, true).await;
+                secure_launch::refresh_running(&app);
+            }
+            tokio::time::sleep(mxb_core::keylease::CHECK_EVERY).await;
+        }
+    });
+}
+
 /// When a revocation sweep last ran, so the several status reads one screen makes collapse into
 /// one pass.
 #[cfg(mxbsecure)]
@@ -2142,10 +2165,14 @@ pub(crate) async fn auto_unlock_now(app: &tauri::AppHandle, force: bool) -> usiz
         }
         *last = Some(std::time::Instant::now());
     }
+    // The key lease first: the DLL unseals nothing without a fresh one, and these are the moments
+    // it can need renewing — a sign-in that changed the Steam account, a game about to start. A
+    // block drops the lease, and forces the sweep below so the keys go with it.
+    let blocked = secure_launch::renew_lease(app, force).await == mxb_core::keylease::Renewal::Blocked;
     // Before unlocking anything, hand back what this account may no longer hold. Same triggers,
     // same pass: a removal on the site lands the next time the app would have unlocked, which
     // includes the moment the game starts — before `arm` writes the manifest.
-    let taken_back = revoke_sweep(app, force).await;
+    let taken_back = revoke_sweep(app, force || blocked).await;
     let live = steamid::current_steam_id64();
     let locked: Vec<String> = secure_launch::scan_blobs(app)
         .into_iter()
@@ -2427,7 +2454,9 @@ async fn steam_link_status(app: tauri::AppHandle) -> Result<Option<String>, Stri
     // Shown to the person when the sign-in wall gives up, so it has to read as a sentence
     // rather than as a log line.
     if !resp.status().is_success() {
-        return Err(format!("couldn't check the sign-in ({})", resp.status()));
+        let status = resp.status();
+        gate::note_refusal(status.as_u16(), Some(&resp.text().await.unwrap_or_default()));
+        return Err(format!("couldn't check the sign-in ({status})"));
     }
     #[derive(serde::Deserialize)]
     struct Ent {
@@ -7854,6 +7883,9 @@ fn main() {
             // And ask the server afresh, off the startup path: this is what blocks a newly-banned
             // install on its first run, and what lets a lifted ban back in by clearing the marker.
             tauri::async_runtime::spawn(gate::check(app.handle().clone()));
+            // And again every half hour while it runs, so a ban reaches an app left open all
+            // evening rather than on its next launch.
+            gate::watch(app.handle());
 
             // The main window is `"create": false` in tauri.conf.json so it is built here
             // rather than by Tauri's own startup loop, which is the only way to decide the
@@ -8127,6 +8159,8 @@ fn main() {
             // The link to MXB Coach: one overlay key for both apps.
             overlay::start_link(handle);
             secure_launch::watch(handle);
+            #[cfg(mxbsecure)]
+            watch_lease(handle);
             #[cfg(mxbsecure)]
             register_secure_key_check();
             // Voice follows the rider onto whatever server they join, and off it again.

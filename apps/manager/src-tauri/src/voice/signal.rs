@@ -92,12 +92,16 @@ pub async fn ensure_account(cfg: &AppConfig) -> Result<(String, bool), String> {
         .timeout(HTTP_TIMEOUT)
         .build()
         .map_err(|e| format!("Couldn't reach MXB App's service: {e}"))?;
-    let resp = client
-        .post(format!("{}/v1/account", control_plane()))
-        .json(&serde_json::json!({ "riderName": rider_name }))
-        .send()
-        .await
-        .map_err(|e| format!("Couldn't reach MXB App's service: {e}"))?;
+    // The machine's one-way hash, like the shared mint in `mxb_core::account` (`device.rs`).
+    let resp = mxb_core::device::with_device(
+        client
+            .post(format!("{}/v1/account", control_plane()))
+            .json(&serde_json::json!({ "riderName": rider_name })),
+    )
+    .await
+    .send()
+    .await
+    .map_err(|e| format!("Couldn't reach MXB App's service: {e}"))?;
 
     if resp.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
         return Err("Too many new accounts from this connection today. Try again tomorrow.".into());
