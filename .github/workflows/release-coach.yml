@@ -41,6 +41,15 @@ jobs:
             args: ""
 
     runs-on: ${{ matrix.platform }}
+    # The environment gives the OIDC token one stable subject for Azure to trust
+    # (repo:Frostn1/mxb-app:environment:code-signing), whatever tag started the run; a tag's own
+    # subject names that tag, which no credential can be registered for in advance. No
+    # protection rules: it exists only to name the job. See docs/signing/SETUP.md.
+    environment: code-signing
+    # id-token: the Windows leg's OIDC login for code signing (.github/actions/artifact-signing).
+    permissions:
+      contents: read
+      id-token: write
 
     steps:
       - name: Checkout
@@ -127,6 +136,20 @@ jobs:
       # body is composed from this tag's CHANGELOG section, the same one the changelog shows
       # under `## <date> — MXB Coach v…`. Falls back to the download guidance alone when the
       # version has no section yet.
+      # Windows code signing (Azure Artifact Signing). Skips with a notice until the secrets and
+      # variables in docs/signing/SETUP.md exist, and the build ships unsigned as before.
+      - name: Set up Windows code signing
+        id: signing
+        if: ${{ startsWith(matrix.platform, 'windows') }}
+        uses: ./.github/actions/artifact-signing
+        with:
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          endpoint: ${{ vars.ARTIFACT_SIGNING_ENDPOINT }}
+          account: ${{ vars.ARTIFACT_SIGNING_ACCOUNT }}
+          profile: ${{ vars.ARTIFACT_SIGNING_PROFILE }}
+
       - name: Compose release notes
         id: notes
         shell: bash
@@ -173,7 +196,8 @@ jobs:
           # A suffixed tag is a beta of the version it names. Unlike before the move, a plain
           # tag is a real release here: `releases/latest` in mxb-coach is the coach's own.
           prerelease: ${{ github.ref_type != 'tag' || contains(github.ref_name, '-') }}
-          args: ${{ matrix.args }}
+          # The signing overlay on a signed Windows leg; empty everywhere else.
+          args: ${{ matrix.args }} ${{ steps.signing.outputs.tauri-args }}
 
   # Installs from 0.1.3 to 0.1.17 shipped an updater that looks for `coach-v` releases in
   # *this* repo, and nothing can change that in a binary already on someone's machine. So

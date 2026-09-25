@@ -3,6 +3,10 @@
 ## Unreleased
 
 ### Added
+- Windows builds of MXB App, Frost Studio and MXB Coach can be code-signed as Creste LLC
+  through Azure Artifact Signing: the app, its installer and the DLL MXB App injects. It
+  switches on once the Azure account is set up (see `docs/signing/SETUP.md`). Until then
+  releases build unsigned, as before.
 - Expose bounded beta21e TRH main-centreline projection for native server timing gates.
 - MXB App, MXB Coach and Frost Studio can each be uninstalled from their own Settings. Type the
   app's name to confirm, and the app closes and removes itself:
