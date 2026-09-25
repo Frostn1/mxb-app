@@ -94,10 +94,40 @@ fn load(dir: &Path) -> Store {
     }
 }
 
+/// Write the history, replacing the old file in one step.
+///
+/// Written straight over itself, a crash, a full disk or antivirus holding the file mid-write
+/// left half a JSON file, and [`load`] reads that as empty: the whole history gone. So it's
+/// written to a temp file beside it and renamed over the old one, which leaves either the old
+/// history or the new, never a mix. A failure is logged, since nothing on screen says the row
+/// wasn't kept.
 fn save(dir: &Path, store: &Store) -> anyhow::Result<()> {
+    let result = write_atomically(&store_path(dir), &serde_json::to_string_pretty(store)?);
+    if let Err(e) = &result {
+        log::warn!("download history: couldn't save {}: {e:#}", store_path(dir).display());
+    }
+    result
+}
+
+fn write_atomically(path: &Path, text: &str) -> anyhow::Result<()> {
+    use anyhow::Context as _;
+    use std::io::Write as _;
+    let dir = path.parent().context("no parent folder")?;
     fs::create_dir_all(dir)?;
-    fs::write(store_path(dir), serde_json::to_string_pretty(store)?)?;
-    Ok(())
+    // Named per write, and created only if absent, so two saves can't share a temp file and
+    // nothing already there is ever truncated.
+    let name = path.file_name().context("no file name")?.to_string_lossy();
+    let tmp = dir.join(format!(".{name}.{}-{}.tmp", std::process::id(), now_ms()));
+    let written = (|| {
+        let mut f = fs::OpenOptions::new().write(true).create_new(true).open(&tmp)?;
+        f.write_all(text.as_bytes())?;
+        f.sync_all()?;
+        fs::rename(&tmp, path)
+    })();
+    if written.is_err() {
+        let _ = fs::remove_file(&tmp);
+    }
+    Ok(written?)
 }
 
 fn now_ms() -> u64 {
@@ -318,6 +348,38 @@ mod tests {
         // ...and writing over it recovers rather than erroring.
         record(&dir, sample("After", "installed")).unwrap();
         assert_eq!(history(&dir).len(), 1);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Saving replaces the file whole and leaves no temp file behind.
+    #[test]
+    fn a_save_replaces_the_file_and_leaves_nothing_behind() {
+        let dir = tmp("atomic");
+        record(&dir, sample("One", "installed")).unwrap();
+        record(&dir, sample("Two", "installed")).unwrap();
+        let names: Vec<String> = fs::read_dir(&dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(names, ["download-history.json"], "no temp file left over");
+        assert_eq!(history(&dir).len(), 2);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// A save that can't be written fails and leaves the old history as it was, never half of
+    /// a new one.
+    #[test]
+    fn a_failed_save_leaves_the_old_history_intact() {
+        let dir = tmp("atomic-fail");
+        record(&dir, sample("Kept", "installed")).unwrap();
+        let before = fs::read(store_path(&dir)).unwrap();
+        // Something in the way of the file's name: here, a folder at the temp's parent path.
+        let blocked = dir.join("nested");
+        fs::create_dir_all(&blocked).unwrap();
+        fs::write(blocked.join("download-history.json"), "x").unwrap();
+        let err = write_atomically(&blocked.join("download-history.json").join("child.json"), "new");
+        assert!(err.is_err(), "writing under a file can't work");
+        assert_eq!(fs::read(store_path(&dir)).unwrap(), before, "the real history untouched");
         let _ = fs::remove_dir_all(&dir);
     }
 }

@@ -29,6 +29,9 @@
   It still installs and updates as "MXB Coach", so shortcuts, updates and Uninstall keep working.
 
 ### Fixed
+- The Downloads history can no longer be wiped by a save that's cut short (a crash, a full
+  disk, antivirus holding the file). It's written whole to a temp file and swapped in, and a
+  save that fails is noted in the log.
 - MXB Coach keeps one name for the setup it makes you. Every save used to create another copy:
   "Fast (coach)", then "Fast (coach 2)", "Fast (coach 3)". Coach now saves back onto the copy
   it wrote, provided you haven't changed that copy in the garage since and MX Bikes is closed.
