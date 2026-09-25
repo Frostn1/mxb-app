@@ -141,6 +141,10 @@ pub struct AppConfig {
     /// to an install with no bikes in the mods tree, so an existing player sets this on
     /// the first launch after updating without ever seeing it.
     pub get_started_done: bool,
+    /// The rider said not to suggest MXBMRP3 again. Here, not in `localStorage`, for the same
+    /// reason as `welcome_seen`: a suggestion that came back after every WebView2 wipe would be
+    /// nagging. Settings still shows whether it is installed, and can turn the suggestion back on.
+    pub mxbmrp3_dismissed: bool,
     /// Register the global hotkey that summons the in-game overlay.
     pub overlay_enabled: bool,
     /// The combo that toggles the overlay, in Tauri accelerator syntax
@@ -437,6 +441,7 @@ impl Default for AppConfig {
             welcome_seen: false,
             tour_done: false,
             get_started_done: false,
+            mxbmrp3_dismissed: false,
             overlay_enabled: true,
             overlay_hotkey: DEFAULT_OVERLAY_HOTKEY.to_string(),
             preview_tyres: String::new(),
