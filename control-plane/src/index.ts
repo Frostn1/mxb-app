@@ -36,6 +36,7 @@ import {
 import { adminAssets, isAssetsPath } from "./assets";
 import { APP_BLOCK_CODE, APP_SIGNIN_MESSAGE, appBlocked, appGate, banFor, rememberGuid } from "./bans";
 import { signVerdict } from "./verdict";
+import { issueLease } from "./lease";
 import { deviceFromRequest, rememberDevice } from "./devices";
 import { isWebPath, landingSite, webRoutes } from "./web";
 import { steamResult, redirectPage } from "./page";
@@ -462,6 +463,9 @@ async function route(request: Request, env: Env): Promise<Response> {
     }
     return grantKey(request, account, env);
   }
+  // The signed lease a `.mxbkey` needs beside it to open (`lease.ts`). Deliberately *not* in
+  // `bannedMayUse`: stopping this renewal is how a ban reaches keys that are already on disk.
+  if (method === "POST" && path === "/v1/keys/lease") return issueLease(account, env);
   if (method === "GET" && path === "/v1/voice/room") return voiceRoom(request, url, account, env);
 
   // Paint sync, open on the same terms as voice, and for the same reason: a rider only sees
@@ -812,8 +816,8 @@ async function listEntitlements(account: Account, env: Env): Promise<Response> {
  *
  * It also answers the question that makes a removal real on a machine that is already
  * provisioned: `revoked`. A `.mxbsecure` key is sealed to the buyer's PC and opens **offline**
- * forever after (see the app's key vault), so revoking an entitlement only ever stopped the
- * *next* grant — the buyer who already unlocked kept playing. `revoked` is this batch poll's
+ * for as long as its 30-day lease lasts (see the app's key vault and `lease.ts`), so revoking an
+ * entitlement only ever stopped the *next* grant — the buyer who already unlocked kept playing. `revoked` is this batch poll's
  * standing answer to "should this machine still be holding a key for this asset?", and the app
  * deletes the key (beside the blob and in its vault) when it comes back true.
  *
@@ -848,8 +852,9 @@ async function assetStatus(request: Request, account: Account, env: Env): Promis
   // back rather than read as "not linked" — which here would mean reporting nothing revoked.
   const steamId = await steamIdFor(env, account);
   // The one answer here that doesn't need a Steam link to be certain. A `.mxbkey` already on
-  // disk opens offline forever, so a ban that only stopped the *next* grant would leave the
-  // banned install playing everything it had already unlocked — which is most of what it has.
+  // disk opens offline for as long as its lease lasts (`lease.ts`), so a ban that only stopped the
+  // *next* grant would leave the banned install playing everything it had already unlocked —
+  // which is most of what it has — for up to 30 days.
   // This poll is what reaches those keys, so a ban says "revoked" about every secured file the
   // machine is holding, and the app deletes each one on its next pass.
   const banned = !!(await banFor(env, { accountId: account.id, steamId, guid: account.guid }));

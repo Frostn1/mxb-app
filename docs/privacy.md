@@ -73,7 +73,9 @@ the game, not at what is on your PC.
 
 **Purchases**, if you buy protected content. Your Steam id against the thing you bought, so it
 opens on your machine, and your Steam id on the seller's buyer list, so they can see who has
-it and add or remove people.
+it and add or remove people. Protected content plays offline for up to 30 days between
+check-ins; the app renews that silently whenever it is online, and the check-in sends nothing
+beyond your sign-in.
 
 **Logs, only when you send them.** The Send logs button zips the app's own logs and uploads
 them to a public file host, which the app tells you before it does. Logs hold folder paths and

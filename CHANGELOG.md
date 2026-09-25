@@ -42,6 +42,13 @@
   switch games.
 
 ### Changed
+- Protected content you bought now plays offline for up to 30 days between check-ins, rather
+  than forever. The app renews a signed key lease silently whenever it is online (at startup,
+  after a Steam sign-in, when the game starts and every few hours while it is open), so a buyer
+  who is online now and then never notices. A ban stops the renewal, and the app deletes the
+  lease when it is told. New control-plane route `POST /v1/keys/lease`, signed with
+  `MXB_VERDICT_SIGNING_KEY`; without the secret it answers 503 and nothing changes, because only
+  a secure-content DLL built with the public key asks for a lease.
 - The startup check that MXB App, Studio and Coach share now keeps a signed copy of the
   service's answer, in the folder all three share. An install that was never refused keeps
   working offline exactly as before; one the service refused stays refused offline, in every

@@ -32,6 +32,7 @@ pub mod cfg;
 pub mod edf;
 pub mod gate;
 pub mod heightfield;
+pub mod keylease;
 pub mod linkwalk;
 pub mod lru;
 pub mod map;

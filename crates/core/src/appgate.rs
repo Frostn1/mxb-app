@@ -843,6 +843,16 @@ mod tests {
         assert_eq!(p.issued_at, 1_800_000_000_000);
     }
 
+    /// The same key signs key leases (`keylease`). A genuine lease must never read as a verdict:
+    /// it has no `status` or `account`, so it cannot be kept, and cannot lift or impose anything.
+    #[test]
+    fn a_key_lease_signed_by_the_same_key_is_not_a_verdict() {
+        let (key, public) = pair(1);
+        let payload = r#"{"v":1,"purpose":"mxbsecure-lease","steamId":"76561198000000042","issuedAt":1,"expiresAt":2}"#.to_string();
+        let sig = URL_SAFE_NO_PAD.encode(key.sign(payload.as_bytes()).to_bytes());
+        assert!(verify_verdict_with(&SignedVerdict { payload, sig }, &public).is_err());
+    }
+
     #[test]
     fn a_good_signature_verifies_and_a_bad_or_tampered_one_does_not() {
         let (key, public) = pair(1);
