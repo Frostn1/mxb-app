@@ -43,6 +43,7 @@ import { steamResult, redirectPage } from "./page";
 import { pinGuidFromSteam, rememberLink, steamIdFor } from "./steamlink";
 import { bmacWebhook } from "./bmac";
 import { pruneCrashes, putCrash } from "./crashes";
+import { pruneLockAttempts } from "./lockpermit";
 import { pruneReports, putReport } from "./diagnostics";
 import { eraseAccount } from "./erasure";
 import { stateRegions } from "./stateinvariants";
@@ -133,6 +134,7 @@ export default {
         pruneRoster(env),
         pruneReports(env),
         pruneCrashes(env),
+        pruneLockAttempts(env),
         pruneQueue(env),
         resolveTrackCatalog(env),
       ]).then(

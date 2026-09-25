@@ -68,8 +68,8 @@ export interface Erasure {
  *
  * All of them are keyed on `account_id`. Order is not a constraint — nothing here points at
  * anything else here — but it reads as the shape of what is held: what you published, where
- * you were, how you signed in, which machine you used, what we looked at inside your game, and
- * where it crashed.
+ * you were, how you signed in, which machine you used, what we looked at inside your game,
+ * where it crashed, and how many GUIDs you asked to lock a file to.
  */
 const PERSONAL: readonly string[] = [
   "loadout_paints",
@@ -82,6 +82,7 @@ const PERSONAL: readonly string[] = [
   "client_modules",
   "client_module_seen",
   "client_crashes",
+  "lock_attempts",
 ];
 
 /**

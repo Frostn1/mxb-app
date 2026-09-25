@@ -57,6 +57,7 @@ async function fillPersonal(DB: DB, id: string) {
       "INSERT INTO client_crashes (account_id, rider_name, site, crashed_at, received_at)" +
         " VALUES (?, 'Frost', 'mxbikes.exe+0x11D753', ?, ?)",
     ).bind(id, NOW, NOW),
+    DB.prepare("INSERT INTO lock_attempts (account_id, attempted_at, guids) VALUES (?, ?, 3)").bind(id, NOW),
     DB.prepare(
       "INSERT INTO guid_claims (account_id, guid, first_seen_at, last_seen_at) VALUES (?, ?, ?, ?)",
     ).bind(id, "FF011000013A7C2E91", NOW, NOW),
