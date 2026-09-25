@@ -1,6 +1,63 @@
-# Bitdefender false-positive report: draft
+# Antivirus false-positive reports: drafts
 
-**Status: DRAFT, not submitted.** Sean reviews it and submits it himself.
+**Status: DRAFTS, not submitted.** Sean reviews them and submits them himself.
+
+1. [Microsoft Defender](#1-microsoft-defender): the 0.18.4 installer, flagged as
+   `Trojan:Win32/Ravartar!rfn`.
+2. [Bitdefender](#2-bitdefender): `MXB App.exe`, flagged as `Trojan.RTF.Agent.GY` or behaviourally.
+
+Both describe the same app. Fill in the `⟨…⟩` placeholders; everything else is ready to paste.
+
+---
+
+## 1. Microsoft Defender
+
+**Where:** <https://www.microsoft.com/wdsi/filesubmission>
+- Sign in with a Microsoft account. Pick **Software developer** as the submitter type. That
+  queues it with more weight, and Microsoft replies with a submission ID to track.
+- **Product:** *Microsoft Defender Antivirus (Windows 10/11)*.
+- **Select the file:** `MXB-App-0.18.4-x64.exe`, the installer exactly as downloaded from the
+  release. Zip it if the form asks for an archive.
+- **Should this file be detected as malware?** *No, it's a false positive (incorrectly detected).*
+- **Detection name:** `Trojan:Win32/Ravartar!rfn`
+- **Definition version:** ⟨Windows Security → Virus & threat protection → *Protection updates* → Security intelligence version⟩
+
+**Additional information** (paste):
+
+> MXB App is a free mod manager for the PC racing game MX Bikes (PiBoSo), published by Creste LLC
+> (https://www.creste.dev). Defender detected the installer from our official GitHub release as
+> Trojan:Win32/Ravartar!rfn (ThreatID 2147965211) on 2026-09-23. Being an "!rfn" verdict, this
+> looks like a cloud or machine-learning classification rather than a signature match. Users
+> downloading it from GitHub are seeing the download blocked and the file removed.
+>
+> - File: MXB-App-0.18.4-x64.exe (NSIS installer built by Tauri; per-user install, no admin
+>   rights)
+> - Version: 0.18.4
+> - SHA-256: eb46a92bf8785e536540dc4837ddd952c13b7f8d2bfee5e8ba6f6dc7bc412ba1
+> - Size: 9,030,907 bytes
+> - Official download: https://github.com/Frostn1/mxb-app/releases/tag/v0.18.4
+> - Source code (public): https://github.com/Frostn1/mxb-app
+>
+> The installer puts MXB App in %LOCALAPPDATA%\MXB App. The app downloads community mods from
+> mxb-mods.com and mxbikes-shop.com into the game's mods folder, launches the game, and updates
+> itself from its GitHub releases through Tauri's signed updater. An optional feature, off by
+> default and only turned on with the user's consent, loads a helper DLL (mxbsecure.dll) into
+> the running MX Bikes process so the game can open creators' protected paid mods. It targets
+> only that game process.
+>
+> We're moving our Windows releases to Authenticode signing as Creste LLC through Azure
+> Artifact Signing, and can send signed builds for re-analysis. Please review and clear this
+> detection. Contact: ⟨name⟩, ⟨email@creste.dev⟩.
+
+Before sending:
+- [ ] The file is the exact one from the release page. Its SHA-256 must match the value above:
+      `Get-FileHash .\MXB-App-0.18.4-x64.exe`.
+- [ ] If newer releases are flagged too, submit each of those installers separately with its
+      own hash.
+
+---
+
+## 2. Bitdefender
 
 Where to submit:
 - Consumer form: <https://www.bitdefender.com/consumer/support/answer/29358/> (Report a false
