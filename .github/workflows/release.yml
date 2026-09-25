@@ -1,6 +1,7 @@
 name: Release
 
-# Build signed-less desktop bundles and publish them to a GitHub Release.
+# Build the desktop bundles and publish them to a GitHub Release. The Windows leg is
+# code-signed once Azure Artifact Signing is set up (docs/signing/SETUP.md), unsigned until then.
 # Triggers on any tag like `v0.1.0`. You can also run it manually from the
 # Actions tab (workflow_dispatch) to build without tagging. Releases are
 # published, not drafted (`releaseDraft: false`).
@@ -40,6 +41,15 @@ jobs:
             args: ""
 
     runs-on: ${{ matrix.platform }}
+    # The environment gives the OIDC token one stable subject for Azure to trust
+    # (repo:Frostn1/mxb-app:environment:code-signing), whatever tag started the run; a tag's own
+    # subject names that tag, which no credential can be registered for in advance. No
+    # protection rules: it exists only to name the job. See docs/signing/SETUP.md.
+    environment: code-signing
+    # id-token: the Windows leg's OIDC login for code signing (.github/actions/artifact-signing).
+    permissions:
+      contents: write
+      id-token: write
 
     steps:
       - name: Checkout
@@ -148,6 +158,28 @@ jobs:
           test -f apps/manager/src-tauri/src/worldnet.rs || { echo "::error::worldnet.rs missing after sync.sh"; exit 1; }
 
 
+      # Windows code signing (Azure Artifact Signing). Skips with a notice until the secrets and
+      # variables in docs/signing/SETUP.md exist, and the build ships unsigned as before. When
+      # set up, `tauri-args` makes Tauri sign the exe and the installer as it bundles them.
+      - name: Set up Windows code signing
+        id: signing
+        if: ${{ startsWith(matrix.platform, 'windows') }}
+        uses: ./.github/actions/artifact-signing
+        with:
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          endpoint: ${{ vars.ARTIFACT_SIGNING_ENDPOINT }}
+          account: ${{ vars.ARTIFACT_SIGNING_ACCOUNT }}
+          profile: ${{ vars.ARTIFACT_SIGNING_PROFILE }}
+
+      # The DLL the app injects into the game is shipped as a resource, not a binary Tauri
+      # signs, so it's signed here, where sync.sh left it and before build.rs stages it.
+      - name: Sign the secure-content DLL
+        if: ${{ github.repository == 'Frostn1/mxb-app' && startsWith(matrix.platform, 'windows') && steps.signing.outputs.enabled == 'true' }}
+        shell: pwsh
+        run: ./scripts/sign-windows.ps1 apps/manager/src-tauri/src/mxbsecure.dll
+
       # Ask the bundler for the secure-content files only on the legs that have them. Tauri's
       # `resources` glob is a hard error when it matches nothing, so keeping it in the committed
       # config broke every build without the private module. By now sync.sh has put the files in
@@ -237,7 +269,8 @@ jobs:
           # check — stays on the last full release until the plain tag is cut.
           # A manual `workflow_dispatch` build is never the release everyone should get.
           prerelease: ${{ github.ref_type != 'tag' || contains(github.ref_name, '-') }}
-          args: ${{ matrix.args }}
+          # The signing overlay on a signed Windows leg; empty everywhere else.
+          args: ${{ matrix.args }} ${{ steps.signing.outputs.tauri-args }}
 
   # Tauri names bundles like `MXB.App_0.1.0_x64-setup.exe`, which reads as ugly/
   # fishy. Rename the user-facing installers to `MXB-App-<ver>-<arch>.<ext>` and
