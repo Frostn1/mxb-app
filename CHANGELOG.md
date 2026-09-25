@@ -28,12 +28,6 @@
   brings the banner back, and "Not now" on the setup card also hides it on the dashboard. Its
   check no longer runs on the window's thread, so a slow or sleeping game drive can't freeze
   the app.
-- MXB Coach's live cues now follow the session you're riding. On a track you'd ridden before,
-  they were picked from a lap in your oldest session there.
-- MXB Coach no longer skips rewriting the cue sheet when a lap finishes less than 45 seconds after
-  the last rewrite. It does the rewrite as soon as the 45 seconds are up, so the first sheet on a
-  new track isn't a lap late. Coaching starting without a game restart also needs the recorder
-  fix in frostmod (Frostn1/frostmod `fix/coach-live-reference`).
 - Open track packages that carry helper files beside the track (generator or algorithm `.ini`, alternate
   layout `.rdf`) by selecting the folder-named `<track>/<track>.<ext>` entry.
 - Accept track RDFs with no `holeshot` block; a present holeshot is still strictly validated.
@@ -47,6 +41,26 @@
 - A mod page that can't load now offers "Open on mxb-mods.com" next to Retry.
 - The mxb-mods.com browser window no longer pretends to be a year-old Chrome, which contradicted
   the Edge version WebView2 reports in its client hints. The app logs the real user agent at startup.
+
+## 2026-09-24 — MXB Coach v0.1.20-beta.20 — Coached from your first good lap
+
+### Fixed
+- **Coaching starts on the lap after your first good one, with no game restart.** On a track
+  Coach hadn't coached you on yet, you had to set a lap, quit the game and load the same track
+  again before the cues, the gap and the ghost showed up. The recorder now picks up Coach's
+  first sheet while you ride. This needs recorder 0.38, which Coach installs for you, and it
+  now asks for that version.
+- Live cues follow the session you're riding. On a track you'd ridden before, they were picked
+  from a lap in your oldest session there.
+- A lap that finishes less than 45 seconds after the last cue update no longer waits for the
+  next one to be coached. Coach updates the cues as soon as the 45 seconds are up.
+- Updating the cues while the game is reading them no longer fails now and then. Coach tries once
+  more after a moment.
+
+### Added
+- Uninstall MXB Coach from Settings. Type its name to confirm, and it closes and removes itself.
+  "Also delete my data" is off by default and only ever removes Coach's own settings, caches and
+  logs, never your game folder or recordings.
 
 ## 2026-09-23 — v0.18.4 — Lighter navigation and background work
 
