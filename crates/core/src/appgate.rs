@@ -498,11 +498,14 @@ async fn ask(app: &AppHandle) -> Option<Answer> {
         }
     };
 
-    let resp = match http()
-        .get(format!("{}/v1/app/gate", control_plane()))
-        .bearer_auth(&token)
-        .send()
-        .await
+    // The machine's one-way hash rides along (`device.rs`), so a ban follows the PC to a fresh
+    // account. Never the machine id itself; absent when the OS will not say.
+    let resp = match crate::device::with_device(
+        http().get(format!("{}/v1/app/gate", control_plane())).bearer_auth(&token),
+    )
+    .await
+    .send()
+    .await
     {
         Ok(r) => r,
         Err(e) => {

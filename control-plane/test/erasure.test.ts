@@ -39,6 +39,10 @@ async function fillPersonal(DB: DB, id: string) {
     ).bind(id, NOW, NOW),
     DB.prepare("INSERT INTO steam_logins (id, account_id, created_at) VALUES ('login-1', ?, ?)").bind(id, NOW),
     DB.prepare("INSERT INTO steam_links (account_id, steam_id, linked_at) VALUES (?, '76561198000000001', ?)").bind(id, NOW),
+    // A keyed device hash, as `devices.ts` stores it: synthetic, 64 hex, identifies no machine.
+    DB.prepare(
+      "INSERT INTO device_links (account_id, device_hash, first_seen_at, last_seen_at) VALUES (?, ?, ?, ?)",
+    ).bind(id, "d".repeat(64), NOW, NOW),
     DB.prepare(
       "INSERT INTO client_modules" +
         " (account_id, state, rules_version, module_count, unknown_count, matched, worst_state," +
@@ -89,6 +93,7 @@ describe("erasing an account", () => {
       "server_queue",
       "steam_logins",
       "steam_links",
+      "device_links",
       "client_modules",
       "client_module_seen",
       "client_crashes",
@@ -162,6 +167,9 @@ describe("erasing an account", () => {
     expect(body.kept.some((k) => k.what.includes("guid_bans"))).toBe(true);
     // Everything that is not the ban record still goes.
     expect(await count(DB, "client_module_seen", "acc-1")).toBe(0);
+    // The device link included: a banned account keeps its claims, never its machine's hash.
+    expect(await count(DB, "device_links", "acc-1")).toBe(0);
+    expect(body.kept.some((k) => k.what.includes("device_links"))).toBe(false);
   });
 
   it("leaves purchases alone, and says that it did", async () => {

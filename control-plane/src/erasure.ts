@@ -25,6 +25,11 @@
  * `guid_bans` row. Everything else on it still goes, and the response says so rather than
  * quietly doing less than it claims.
  *
+ * That includes the device links (`device_links`, `devices.ts`): the keyed hash of the machine
+ * the account was used on is deleted for every account, banned or not. It describes a person's
+ * hardware rather than what they did, and the ban already survives through the GUID claims, so it
+ * is not one of the things kept.
+ *
  * **Purchases.** `entitlements` is keyed by Steam id, not by account, and it is what makes a
  * locked track open on the machine of the person who paid for it. Deleting it would take
  * content off a buyer and a name off a creator's buyer list, which is not what anybody means
@@ -63,7 +68,8 @@ export interface Erasure {
  *
  * All of them are keyed on `account_id`. Order is not a constraint — nothing here points at
  * anything else here — but it reads as the shape of what is held: what you published, where
- * you were, how you signed in, what we looked at inside your game, and where it crashed.
+ * you were, how you signed in, which machine you used, what we looked at inside your game, and
+ * where it crashed.
  */
 const PERSONAL: readonly string[] = [
   "loadout_paints",
@@ -72,6 +78,7 @@ const PERSONAL: readonly string[] = [
   "server_queue",
   "steam_logins",
   "steam_links",
+  "device_links",
   "client_modules",
   "client_module_seen",
   "client_crashes",
