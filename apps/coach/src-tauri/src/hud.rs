@@ -12,8 +12,11 @@ use tauri::AppHandle;
 use crate::coach::{load_config, session_dirs};
 use crate::ini;
 
-/// The version of the recorder the HUD and the spoken cues need.
-pub(crate) const RECORDER_NEEDS: &str = "0.23";
+/// The recorder this Coach asks for: older ones are called out of date and refreshed. 0.38 is
+/// the first to pick up Coach's first sheet mid-event, so coaching starts without a restart.
+pub(crate) const RECORDER_NEEDS: &str = "0.38";
+/// The oldest recorder that draws the HUD parts and speaks the cues at all.
+pub(crate) const HUD_NEEDS: &str = "0.23";
 /// The version that reads where the cue box goes, the suspension bars, the reference trail and
 /// the choice of voice. Coach writes them either way: an older recorder ignores what it doesn't
 /// know, so nothing breaks by setting them early — the rider is just told they need 0.24.
@@ -26,14 +29,14 @@ pub(crate) const EXTRAS_NEED: &str = "0.24";
 /// rather than coaching, so a rider who never opens this panel should not find their view
 /// covered in bars they didn't ask for.
 pub const HUD_PARTS: &[Part] = &[
-    Part { key: "cue", label: "Live cue", default_on: true, needs: RECORDER_NEEDS },
-    Part { key: "section", label: "Section and tip", default_on: true, needs: RECORDER_NEEDS },
-    Part { key: "gap", label: "Gap to Coach's lap", default_on: true, needs: RECORDER_NEEDS },
-    Part { key: "stance", label: "Sit / stand", default_on: true, needs: RECORDER_NEEDS },
-    Part { key: "map", label: "Track map with ghost and cues", default_on: true, needs: RECORDER_NEEDS },
+    Part { key: "cue", label: "Live cue", default_on: true, needs: HUD_NEEDS },
+    Part { key: "section", label: "Section and tip", default_on: true, needs: HUD_NEEDS },
+    Part { key: "gap", label: "Gap to Coach's lap", default_on: true, needs: HUD_NEEDS },
+    Part { key: "stance", label: "Sit / stand", default_on: true, needs: HUD_NEEDS },
+    Part { key: "map", label: "Track map with ghost and cues", default_on: true, needs: HUD_NEEDS },
     Part { key: "susp", label: "Suspension bars", default_on: false, needs: EXTRAS_NEED },
     Part { key: "trail", label: "Blue trail of the line to take", default_on: false, needs: EXTRAS_NEED },
-    Part { key: "setup", label: "Setup card (when stopped)", default_on: true, needs: RECORDER_NEEDS },
+    Part { key: "setup", label: "Setup card (when stopped)", default_on: true, needs: HUD_NEEDS },
 ];
 
 pub struct Part {
@@ -308,7 +311,7 @@ mod tests {
         // And they say which recorder they need, so the panel can warn.
         assert_eq!(part(&hud, "susp").needs, EXTRAS_NEED);
         assert_eq!(part(&hud, "trail").needs, EXTRAS_NEED);
-        assert_eq!(part(&hud, "cue").needs, RECORDER_NEEDS);
+        assert_eq!(part(&hud, "cue").needs, HUD_NEEDS);
     }
 
     /// The reported map state has to be the one the rider will actually get, or the switch
@@ -363,13 +366,18 @@ mod tests {
 
     #[test]
     fn the_recorder_version_is_read_by_number_not_by_text() {
-        assert!(at_least("0.23.0", RECORDER_NEEDS));
-        assert!(at_least("0.23", RECORDER_NEEDS));
-        assert!(at_least("1.0.0", RECORDER_NEEDS));
-        assert!(at_least("0.23.0-beta.1", RECORDER_NEEDS), "a beta of it has what it needs");
-        assert!(!at_least("0.22.9", RECORDER_NEEDS));
-        assert!(!at_least("0.9.0", RECORDER_NEEDS), "0.9 is older than 0.23, though it sorts after it");
-        assert!(!at_least("", RECORDER_NEEDS));
+        assert!(at_least("0.23.0", HUD_NEEDS));
+        assert!(at_least("0.23", HUD_NEEDS));
+        assert!(at_least("1.0.0", HUD_NEEDS));
+        assert!(at_least("0.23.0-beta.1", HUD_NEEDS), "a beta of it has what it needs");
+        assert!(!at_least("0.22.9", HUD_NEEDS));
+        assert!(!at_least("0.9.0", HUD_NEEDS), "0.9 is older than 0.23, though it sorts after it");
+        assert!(!at_least("", HUD_NEEDS));
+        // The recorder this Coach asks for: 0.37 draws the HUD but can't start coaching without
+        // a restart, so it's out of date.
+        assert!(at_least("0.38.0", RECORDER_NEEDS));
+        assert!(!at_least("0.37.0", RECORDER_NEEDS));
+        assert!(at_least("0.37.0", HUD_NEEDS), "and still draws everything it did");
         assert!(!at_least("what", RECORDER_NEEDS));
         assert!(!at_least("0.23.0", EXTRAS_NEED), "the newer settings need 0.24");
         assert!(at_least("0.24.0", EXTRAS_NEED));
@@ -387,7 +395,8 @@ mod tests {
         fs::write(dir.join("recorder.ini"), "[recorder]\nversion=0.23.0\n").unwrap();
         assert_eq!(recorder_version(&dir).as_deref(), Some("0.23.0"));
         assert!(older_than(&dir, EXTRAS_NEED), "0.23 is older than the newer settings need");
-        assert!(!older_than(&dir, RECORDER_NEEDS));
+        assert!(!older_than(&dir, HUD_NEEDS));
+        assert!(older_than(&dir, RECORDER_NEEDS), "and out of date for this Coach");
         let _ = fs::remove_dir_all(&dir);
     }
 
