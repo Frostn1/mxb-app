@@ -13,6 +13,8 @@
 use mxb_core::antidebug;
 
 // The studio's own modules: making a track, packing a paint, sealing content for a buyer.
+/// The bike builder's parts, catalogued once and kept.
+mod bikeparts;
 mod blender;
 mod edfwrite;
 mod gearrepair;
@@ -194,6 +196,11 @@ fn main() {
             blender_status,
             set_blender_path,
             bike_part_inspect,
+            bike_parts_list,
+            bike_part_add,
+            bike_part_set_role,
+            bike_part_remove,
+            bike_slot_set,
             scan_gear_repairs,
             repair_gear,
             generate_track,
@@ -1411,15 +1418,7 @@ async fn bike_part_inspect(app: tauri::AppHandle, part: String) -> Result<serde_
         .map_err(|e| format!("no cache directory: {e}"))?
         .join("bike-builder");
     tauri::async_runtime::spawn_blocking(move || {
-        let found = blender::detect(&saved).ok_or("Blender wasn't found. Install Blender 4.2 or newer, or choose blender.exe.")?;
-        if !found.supported {
-            return Err(format!(
-                "Blender {} is too old for the bike builder; it needs {}.{} or newer.",
-                found.version,
-                blender::MIN_VERSION.0,
-                blender::MIN_VERSION.1
-            ));
-        }
+        let found = supported_blender(&saved)?;
         // A folder per inspection (see `blender::job`): two can't write into each other's,
         // and the last one is kept for the preview.
         blender::job(std::path::Path::new(&found.path), &cache, "inspect", |work| {
@@ -1434,6 +1433,158 @@ async fn bike_part_inspect(app: tauri::AppHandle, part: String) -> Result<serde_
     })
     .await
     .map_err(|e| format!("part inspection failed: {e}"))?
+}
+
+/// The Blender a bike job runs on, or why there isn't one.
+fn supported_blender(saved: &str) -> Result<blender::BlenderInfo, String> {
+    let found = blender::detect(saved)
+        .ok_or("Blender wasn't found. Install Blender 4.2 or newer, or choose blender.exe.")?;
+    if !found.supported {
+        return Err(format!(
+            "Blender {} is too old for the bike builder; it needs {}.{} or newer.",
+            found.version,
+            blender::MIN_VERSION.0,
+            blender::MIN_VERSION.1
+        ));
+    }
+    Ok(found)
+}
+
+/// One writer at a time on the part library: an add and a role change landing together
+/// must not each save a slots file the other never saw.
+static BIKE_LIBRARY: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn bike_library(app: &tauri::AppHandle) -> Result<bikeparts::Library, String> {
+    let dir = app.path().app_data_dir().map_err(|e| format!("no app data directory: {e}"))?;
+    Ok(bikeparts::Library::new(dir.join("bike-parts")))
+}
+
+/// A part as the tray shows it: the sidecar, its thumbnail inline (Studio has no asset
+/// protocol), and whether the rider's file has changed or gone since it was catalogued.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BikePartView {
+    #[serde(flatten)]
+    part: bikeparts::Part,
+    thumb: Option<String>,
+    stale: bool,
+    missing: bool,
+}
+
+fn bike_part_view(lib: &bikeparts::Library, part: bikeparts::Part) -> BikePartView {
+    use base64::Engine;
+    let thumb = part
+        .has_thumb
+        .then(|| std::fs::read(lib.part_dir(&part.id).join("thumb.png")).ok())
+        .flatten()
+        .map(|b| format!("data:image/png;base64,{}", base64::engine::general_purpose::STANDARD.encode(b)));
+    let source = std::path::Path::new(&part.source);
+    let missing = !source.is_file();
+    let stale = !missing && bikeparts::file_stamp(source) != part.stamp;
+    BikePartView { part, thumb, stale, missing }
+}
+
+#[derive(serde::Serialize)]
+struct BikeParts {
+    parts: Vec<BikePartView>,
+    slots: std::collections::BTreeMap<bikeparts::Role, String>,
+}
+
+#[tauri::command]
+async fn bike_parts_list(app: tauri::AppHandle) -> Result<BikeParts, String> {
+    let lib = bike_library(&app)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let _one = BIKE_LIBRARY.lock().unwrap_or_else(|p| p.into_inner());
+        let parts = lib.list().into_iter().map(|p| bike_part_view(&lib, p)).collect();
+        BikeParts { parts, slots: lib.slots() }
+    })
+    .await
+    .map_err(|e| format!("reading the part library failed: {e}"))
+}
+
+/// Run a part through Blender and keep what it says: its objects, attach empties, a
+/// thumbnail and a GLB. Adding a part already there refreshes it.
+#[tauri::command]
+async fn bike_part_add(app: tauri::AppHandle, part: String) -> Result<BikePartView, String> {
+    let saved = config::load_or_detect(&app).unwrap_or_default().blender_path;
+    let lib = bike_library(&app)?;
+    let cache = app
+        .path()
+        .app_cache_dir()
+        .map_err(|e| format!("no cache directory: {e}"))?
+        .join("bike-builder");
+    tauri::async_runtime::spawn_blocking(move || {
+        let found = supported_blender(&saved)?;
+        let source = std::path::PathBuf::from(&part);
+        // Taken before Blender reads the file: a save during the job then shows as changed.
+        let stamp = bikeparts::file_stamp(&source);
+        let make = |work: &std::path::Path| {
+            serde_json::json!({
+                "op": "catalog",
+                "part": part,
+                "thumb": work.join("thumb.png"),
+                "thumbSize": 256,
+                "glb": work.join("part.glb"),
+            })
+        };
+        // Kept while the job's folder is still ours: the next catalog job clears it.
+        let keep = |answer: serde_json::Value| {
+            if let Some(err) = answer.get("thumbError").and_then(|e| e.as_str()) {
+                log::warn!("bike part {}: no thumbnail: {err}", source.display());
+            }
+            let _one = BIKE_LIBRARY.lock().unwrap_or_else(|p| p.into_inner());
+            let added = lib.add(&source, &answer, stamp)?;
+            Ok(bike_part_view(&lib, added))
+        };
+        blender::job_then(std::path::Path::new(&found.path), &cache, "catalog", make, keep)
+            .map_err(|e| format!("{e:#}"))
+    })
+    .await
+    .map_err(|e| format!("adding the part failed: {e}"))?
+}
+
+#[tauri::command]
+async fn bike_part_set_role(
+    app: tauri::AppHandle,
+    id: String,
+    role: Option<bikeparts::Role>,
+) -> Result<BikePartView, String> {
+    let lib = bike_library(&app)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let _one = BIKE_LIBRARY.lock().unwrap_or_else(|p| p.into_inner());
+        let part = lib.set_role(&id, role).map_err(|e| format!("{e:#}"))?;
+        Ok(bike_part_view(&lib, part))
+    })
+    .await
+    .map_err(|e| format!("setting the role failed: {e}"))?
+}
+
+/// Take a part out of the library. The rider's own file is left where it is.
+#[tauri::command]
+async fn bike_part_remove(app: tauri::AppHandle, id: String) -> Result<(), String> {
+    let lib = bike_library(&app)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let _one = BIKE_LIBRARY.lock().unwrap_or_else(|p| p.into_inner());
+        lib.remove(&id).map_err(|e| format!("{e:#}"))
+    })
+    .await
+    .map_err(|e| format!("removing the part failed: {e}"))?
+}
+
+/// Put a part in a role's slot, or empty it with no id.
+#[tauri::command]
+async fn bike_slot_set(
+    app: tauri::AppHandle,
+    role: bikeparts::Role,
+    id: Option<String>,
+) -> Result<std::collections::BTreeMap<bikeparts::Role, String>, String> {
+    let lib = bike_library(&app)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let _one = BIKE_LIBRARY.lock().unwrap_or_else(|p| p.into_inner());
+        lib.set_slot(role, id.as_deref()).map_err(|e| format!("{e:#}"))
+    })
+    .await
+    .map_err(|e| format!("filling the slot failed: {e}"))?
 }
 
 /// What a generated track measures, so the studio can show it rather than assert it.

@@ -1,0 +1,576 @@
+//! The bike builder's part library.
+//!
+//! A modder brings parts one file at a time; the library remembers each one so it is only
+//! run through Blender once. Every part gets a folder of its own under the library root,
+//!
+//! ```text
+//! <app data>/bike-parts/<id>/part.json   what the part is: role, attach empties, size
+//!                           /thumb.png   a picture Blender rendered, for the tray
+//!                           /part.glb    for the preview to come (phase D)
+//! <app data>/bike-parts/slots.json       which part fills each role of the bike
+//! ```
+//!
+//! and nothing is ever written beside the rider's own files. A part's id comes from its
+//! path, so adding the same file again refreshes it rather than making a second copy.
+
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
+
+use sha2::{Digest, Sha256};
+
+/// What a part is on the bike: the pieces MX Bikes puts a bike together from. Each one
+/// hangs off a point on its parent, which is phase C's business; here it only decides
+/// which slot a part can go in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Role {
+    Chassis,
+    Steer,
+    Fsusp,
+    Rsusp,
+    WheelF,
+    WheelR,
+    Levers,
+    Pedals,
+}
+
+impl Role {
+    pub const ALL: [Role; 8] = [
+        Role::Chassis,
+        Role::Steer,
+        Role::Fsusp,
+        Role::Rsusp,
+        Role::WheelF,
+        Role::WheelR,
+        Role::Levers,
+        Role::Pedals,
+    ];
+}
+
+/// Name fragments that say which role a part plays, most specific first: "rear wheel"
+/// must be decided before "wheel", "swingarm" before "arm". Matched against the file name
+/// and the object names inside, lowercased with separators squeezed out.
+const HINTS: &[(&str, Role)] = &[
+    ("rearwheel", Role::WheelR),
+    ("rwheel", Role::WheelR),
+    ("wheelr", Role::WheelR),
+    ("frontwheel", Role::WheelF),
+    ("fwheel", Role::WheelF),
+    ("wheelf", Role::WheelF),
+    ("swingarm", Role::Rsusp),
+    ("rsusp", Role::Rsusp),
+    ("rearsusp", Role::Rsusp),
+    ("shock", Role::Rsusp),
+    ("linkage", Role::Rsusp),
+    ("fsusp", Role::Fsusp),
+    ("frontsusp", Role::Fsusp),
+    ("fork", Role::Fsusp),
+    ("triple", Role::Steer),
+    ("handlebar", Role::Steer),
+    ("steer", Role::Steer),
+    ("clutchlever", Role::Levers),
+    ("brakelever", Role::Levers),
+    ("gearlever", Role::Levers),
+    ("shifter", Role::Levers),
+    ("lever", Role::Levers),
+    ("footpeg", Role::Pedals),
+    ("pedal", Role::Pedals),
+    ("peg", Role::Pedals),
+    ("chassis", Role::Chassis),
+    ("frame", Role::Chassis),
+];
+
+fn squeeze(name: &str) -> String {
+    name.chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .map(|c| c.to_ascii_lowercase())
+        .collect()
+}
+
+/// The role a part's names suggest, or `None` when they say nothing. The file name is
+/// asked first, since a modder names the file for what it is and the objects inside are
+/// often whatever the source model called them; then the most common hint among the objects.
+pub fn guess_role<'a>(file_stem: &str, objects: impl IntoIterator<Item = &'a str>) -> Option<Role> {
+    let first_hint = |name: &str| {
+        let s = squeeze(name);
+        HINTS.iter().find(|(k, _)| s.contains(k)).map(|(_, r)| *r)
+    };
+    if let Some(r) = first_hint(file_stem) {
+        return Some(r);
+    }
+    let mut votes: BTreeMap<Role, usize> = BTreeMap::new();
+    for o in objects {
+        if let Some(r) = first_hint(o) {
+            *votes.entry(r).or_default() += 1;
+        }
+    }
+    // Ties go to the role listed first in `Role::ALL`, so the answer never depends on order.
+    votes.into_iter().max_by(|a, b| a.1.cmp(&b.1).then(b.0.cmp(&a.0))).map(|(r, _)| r)
+}
+
+/// An attach point a part brings with it, where it sits in Blender's world (Z up).
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Empty {
+    pub name: String,
+    #[serde(default)]
+    pub parent: Option<String>,
+    pub location: [f64; 3],
+}
+
+/// The sidecar: what the library knows of one part.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Part {
+    pub id: String,
+    /// The file name without its extension, as the tray shows it.
+    pub name: String,
+    /// The rider's file, read from and never written to.
+    pub source: String,
+    pub role: Option<Role>,
+    /// Whether `role` is the library's guess rather than the rider's choice. A guess is
+    /// made again when the part is refreshed; a choice is kept.
+    #[serde(default)]
+    pub role_guessed: bool,
+    pub empties: Vec<Empty>,
+    pub objects: usize,
+    pub meshes: usize,
+    pub tris: u64,
+    pub bounds: Option<Bounds>,
+    pub has_thumb: bool,
+    pub has_glb: bool,
+    /// The source's size and modified time when it was catalogued, so a changed file shows.
+    pub stamp: String,
+    /// Unix seconds.
+    pub added: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct Bounds {
+    pub min: [f64; 3],
+    pub max: [f64; 3],
+}
+
+/// A part's id: the first 16 hex of the SHA-256 of its path, case folded on Windows where
+/// the file system is too.
+pub fn part_id(source: &Path) -> String {
+    let mut s = source.to_string_lossy().replace('\\', "/");
+    if cfg!(windows) {
+        s = s.to_lowercase();
+    }
+    let digest = Sha256::digest(s.as_bytes());
+    digest.iter().take(8).map(|b| format!("{b:02x}")).collect()
+}
+
+/// Size and modified time of a file, as one string that changes when the file does.
+pub fn file_stamp(path: &Path) -> String {
+    let Ok(meta) = std::fs::metadata(path) else {
+        return String::new();
+    };
+    let mtime = meta
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    format!("{}:{mtime}", meta.len())
+}
+
+fn now_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+/// An id is 16 hex and nothing else, so one handed in from the UI can't point outside the library.
+fn check_id(id: &str) -> anyhow::Result<()> {
+    if id.len() == 16 && id.bytes().all(|b| b.is_ascii_hexdigit()) {
+        Ok(())
+    } else {
+        anyhow::bail!("not a part id: {id:?}")
+    }
+}
+
+/// The library under one root folder.
+pub struct Library {
+    root: PathBuf,
+}
+
+impl Library {
+    pub fn new(root: impl Into<PathBuf>) -> Self {
+        Self { root: root.into() }
+    }
+
+    pub fn part_dir(&self, id: &str) -> PathBuf {
+        self.root.join(id)
+    }
+
+    /// Every part the library holds, newest first. A folder whose sidecar won't read is
+    /// skipped, not an error: one bad part must not empty the tray.
+    pub fn list(&self) -> Vec<Part> {
+        let mut parts: Vec<Part> = std::fs::read_dir(&self.root)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter(|e| e.path().is_dir())
+            .filter_map(|e| {
+                let bytes = std::fs::read(e.path().join("part.json")).ok()?;
+                serde_json::from_slice::<Part>(&bytes).ok()
+            })
+            .collect();
+        parts.sort_by(|a, b| b.added.cmp(&a.added).then(a.name.cmp(&b.name)));
+        parts
+    }
+
+    pub fn get(&self, id: &str) -> anyhow::Result<Part> {
+        check_id(id)?;
+        let bytes = std::fs::read(self.part_dir(id).join("part.json"))
+            .map_err(|_| anyhow::anyhow!("that part isn't in the library any more"))?;
+        Ok(serde_json::from_slice(&bytes)?)
+    }
+
+    fn save(&self, part: &Part) -> anyhow::Result<()> {
+        let dir = self.part_dir(&part.id);
+        std::fs::create_dir_all(&dir)?;
+        write_atomic(&dir.join("part.json"), &serde_json::to_vec_pretty(part)?)
+    }
+
+    /// Put a catalogued part in the library. `answer` is what `frost_bike.py`'s `catalog`
+    /// op wrote; its thumbnail and GLB, if any, are moved in from the job's folder.
+    ///
+    /// `stamp` is the source's [`file_stamp`] from before Blender read it, so a file saved
+    /// while the job ran still shows as changed. Re-adding a part keeps a role the rider
+    /// chose and its place in the list.
+    pub fn add(&self, source: &Path, answer: &serde_json::Value, stamp: String) -> anyhow::Result<Part> {
+        let id = part_id(source);
+        let dir = self.part_dir(&id);
+        std::fs::create_dir_all(&dir)?;
+        let before = self.get(&id).ok();
+
+        let objects = answer["objects"].as_array().cloned().unwrap_or_default();
+        let names: Vec<&str> = objects.iter().filter_map(|o| o["name"].as_str()).collect();
+        let stem = source.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+        let (role, role_guessed) = match &before {
+            Some(p) if !p.role_guessed => (p.role, false),
+            _ => (guess_role(&stem, names.iter().copied()), true),
+        };
+
+        // Both new files are staged beside the old ones before either is replaced, so a copy
+        // that fails leaves the part as it was and says so, rather than losing its picture.
+        let mut staged = Vec::new();
+        for (key, into) in [("thumb", "thumb.png"), ("glb", "part.glb")] {
+            if let Some(from) = answer[key].as_str() {
+                let next = dir.join(format!("{into}.new"));
+                if let Err(e) = move_file(Path::new(from), &next) {
+                    for (n, _) in &staged {
+                        let _ = std::fs::remove_file(n);
+                    }
+                    let _ = std::fs::remove_file(&next);
+                    anyhow::bail!("couldn't keep the part's {into}: {e}");
+                }
+                staged.push((next, dir.join(into)));
+            }
+        }
+        let has_thumb = answer["thumb"].is_string();
+        let has_glb = answer["glb"].is_string();
+
+        let part = Part {
+            id: id.clone(),
+            name: stem,
+            source: source.to_string_lossy().into_owned(),
+            role,
+            role_guessed,
+            empties: serde_json::from_value(answer["empties"].clone()).unwrap_or_default(),
+            objects: objects.len(),
+            meshes: objects.iter().filter(|o| o["type"] == "MESH").count(),
+            tris: answer["tris"].as_u64().unwrap_or(0),
+            bounds: serde_json::from_value(answer["bounds"].clone()).ok(),
+            has_thumb,
+            has_glb,
+            stamp,
+            added: before.as_ref().map(|p| p.added).unwrap_or_else(now_secs),
+        };
+        self.commit(&part, staged)?;
+        // A fresh guess can say something else: then the part leaves the slot it no longer fits.
+        if before.is_some_and(|p| p.role != part.role) {
+            let mut slots = self.slots();
+            slots.retain(|_, v| *v != id);
+            self.save_slots(&slots)?;
+        }
+        Ok(part)
+    }
+
+    /// Swap a part's files for a new generation all together: the old thumbnail and GLB
+    /// step aside, the staged ones and the sidecar go in, and on any failure the old ones
+    /// come back. A part never ends up with one generation's picture and another's sidecar.
+    fn commit(&self, part: &Part, staged: Vec<(PathBuf, PathBuf)>) -> anyhow::Result<()> {
+        let dir = self.part_dir(&part.id);
+        let assets = ["thumb.png", "part.glb"].map(|n| dir.join(n));
+        let aside = |p: &Path| p.with_extension(format!("{}.old", p.extension().unwrap_or_default().to_string_lossy()));
+        let mut moved = Vec::new();
+        let result = (|| -> anyhow::Result<()> {
+            for a in &assets {
+                if a.exists() {
+                    std::fs::rename(a, aside(a))?;
+                    moved.push(a.clone());
+                }
+            }
+            for (next, target) in &staged {
+                std::fs::rename(next, target)?;
+            }
+            self.save(part)
+        })();
+        match result {
+            Ok(()) => {
+                for a in &moved {
+                    let _ = std::fs::remove_file(aside(a));
+                }
+                Ok(())
+            }
+            Err(e) => {
+                for a in &assets {
+                    let _ = std::fs::remove_file(a);
+                }
+                for a in &moved {
+                    let _ = std::fs::rename(aside(a), a);
+                }
+                for (next, _) in &staged {
+                    let _ = std::fs::remove_file(next);
+                }
+                Err(e)
+            }
+        }
+    }
+
+    /// The rider says what a part is; `None` clears it. A slot the part filled under its
+    /// old role is emptied, since it no longer fits there.
+    pub fn set_role(&self, id: &str, role: Option<Role>) -> anyhow::Result<Part> {
+        let mut part = self.get(id)?;
+        if part.role != role {
+            let mut slots = self.slots();
+            slots.retain(|_, v| v != id);
+            self.save_slots(&slots)?;
+        }
+        part.role = role;
+        part.role_guessed = false;
+        self.save(&part)?;
+        Ok(part)
+    }
+
+    /// Take a part out of the library. The rider's file is not touched.
+    pub fn remove(&self, id: &str) -> anyhow::Result<()> {
+        check_id(id)?;
+        let mut slots = self.slots();
+        if slots.values().any(|v| v == id) {
+            slots.retain(|_, v| v != id);
+            self.save_slots(&slots)?;
+        }
+        let dir = self.part_dir(id);
+        if dir.exists() {
+            std::fs::remove_dir_all(dir)?;
+        }
+        Ok(())
+    }
+
+    /// Which part fills each role. A slot naming a part that has gone is left out.
+    pub fn slots(&self) -> BTreeMap<Role, String> {
+        let mut slots: BTreeMap<Role, String> = std::fs::read(self.root.join("slots.json"))
+            .ok()
+            .and_then(|b| serde_json::from_slice(&b).ok())
+            .unwrap_or_default();
+        slots.retain(|_, id| check_id(id).is_ok() && self.part_dir(id).join("part.json").is_file());
+        slots
+    }
+
+    fn save_slots(&self, slots: &BTreeMap<Role, String>) -> anyhow::Result<()> {
+        std::fs::create_dir_all(&self.root)?;
+        write_atomic(&self.root.join("slots.json"), &serde_json::to_vec_pretty(slots)?)
+    }
+
+    /// Put a part in a role's slot, or empty the slot with `None`. The part has to be one
+    /// of that role: a wheel can't be the chassis.
+    pub fn set_slot(&self, role: Role, id: Option<&str>) -> anyhow::Result<BTreeMap<Role, String>> {
+        let mut slots = self.slots();
+        match id {
+            Some(id) => {
+                let part = self.get(id)?;
+                if part.role != Some(role) {
+                    anyhow::bail!("{} isn't a {:?} part", part.name, role);
+                }
+                slots.insert(role, id.to_string());
+            }
+            None => {
+                slots.remove(&role);
+            }
+        }
+        self.save_slots(&slots)?;
+        Ok(slots)
+    }
+}
+
+/// Write through a temporary file and rename, so a crash mid-write leaves the old file.
+fn write_atomic(path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
+    let tmp = path.with_extension("tmp");
+    std::fs::write(&tmp, bytes)?;
+    std::fs::rename(&tmp, path)?;
+    Ok(())
+}
+
+/// Rename when the job folder is on the same drive as the library, copy when it isn't.
+fn move_file(from: &Path, to: &Path) -> std::io::Result<()> {
+    if std::fs::rename(from, to).is_ok() {
+        return Ok(());
+    }
+    std::fs::copy(from, to)?;
+    let _ = std::fs::remove_file(from);
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn roles_are_guessed_from_names() {
+        assert_eq!(guess_role("KTM_rear_wheel", []), Some(Role::WheelR));
+        assert_eq!(guess_role("front-wheel", []), Some(Role::WheelF));
+        assert_eq!(guess_role("Swingarm v2", []), Some(Role::Rsusp));
+        assert_eq!(guess_role("forks", []), Some(Role::Fsusp));
+        assert_eq!(guess_role("handlebars_renthal", []), Some(Role::Steer));
+        assert_eq!(guess_role("clutch lever", []), Some(Role::Levers));
+        assert_eq!(guess_role("footpegs", []), Some(Role::Pedals));
+        assert_eq!(guess_role("frame_450", []), Some(Role::Chassis));
+        // The file says nothing: the objects vote.
+        assert_eq!(guess_role("part01", ["fork_l", "fork_r", "axle"]), Some(Role::Fsusp));
+        assert_eq!(guess_role("part01", ["Cube", "Cube.001"]), None);
+        // The file name wins over what's inside.
+        assert_eq!(guess_role("chassis", ["fork_l", "fork_r"]), Some(Role::Chassis));
+        // A tie is settled the same way every time.
+        assert_eq!(guess_role("x", ["fork", "frame"]), Some(Role::Chassis));
+        assert_eq!(guess_role("x", ["frame", "fork"]), Some(Role::Chassis));
+    }
+
+    #[test]
+    fn roles_read_and_write_the_way_the_ui_names_them() {
+        assert_eq!(serde_json::to_string(&Role::WheelF).unwrap(), "\"wheel_f\"");
+        assert_eq!(serde_json::from_str::<Role>("\"rsusp\"").unwrap(), Role::Rsusp);
+    }
+
+    #[test]
+    fn ids_are_stable_and_safe() {
+        let a = part_id(Path::new(r"C:\Parts\Fork.blend"));
+        assert_eq!(a.len(), 16);
+        assert_eq!(a, part_id(Path::new(r"C:\Parts\Fork.blend")));
+        assert_ne!(a, part_id(Path::new(r"C:\Parts\Frame.blend")));
+        if cfg!(windows) {
+            assert_eq!(a, part_id(Path::new(r"c:/parts/fork.BLEND")));
+        }
+        assert!(check_id(&a).is_ok());
+        assert!(check_id("../../etc").is_err());
+        assert!(check_id("").is_err());
+    }
+
+    fn tmp_lib(tag: &str) -> (PathBuf, Library) {
+        let root = std::env::temp_dir().join(format!("frost-bikeparts-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        (root.clone(), Library::new(root.join("lib")))
+    }
+
+    fn answer(work: &Path, objs: &[(&str, &str)]) -> serde_json::Value {
+        std::fs::create_dir_all(work).unwrap();
+        std::fs::write(work.join("t.png"), b"png").unwrap();
+        serde_json::json!({
+            "objects": objs.iter().map(|(n, t)| serde_json::json!({"name": n, "type": t})).collect::<Vec<_>>(),
+            "empties": [{"name": "axle", "parent": null, "location": [0.0, 0.7, 0.3]}],
+            "bounds": {"min": [0.0, 0.0, 0.0], "max": [0.1, 0.8, 0.6]},
+            "tris": 1200,
+            "thumb": work.join("t.png"),
+        })
+    }
+
+    #[test]
+    fn a_part_is_added_refreshed_and_removed() {
+        let (root, lib) = tmp_lib("add");
+        let src = root.join("my fork.fbx");
+        std::fs::write(&src, b"fbx").unwrap();
+
+        let p = lib.add(&src, &answer(&root.join("job1"), &[("fork_l", "MESH"), ("axle", "EMPTY")]), file_stamp(&src)).unwrap();
+        assert_eq!(p.name, "my fork");
+        assert_eq!((p.role, p.role_guessed), (Some(Role::Fsusp), true));
+        assert_eq!((p.objects, p.meshes, p.tris), (2, 1, 1200));
+        assert_eq!(p.empties[0].name, "axle");
+        assert!(p.has_thumb && lib.part_dir(&p.id).join("thumb.png").is_file());
+        assert!(!root.join("job1").join("t.png").exists(), "the thumbnail moved in");
+        assert!(!p.has_glb);
+        assert_eq!(lib.list(), vec![p.clone()]);
+
+        // The rider says it's the steer; a refresh keeps that and the id.
+        lib.set_role(&p.id, Some(Role::Steer)).unwrap();
+        let again = lib.add(&src, &answer(&root.join("job2"), &[("fork_l", "MESH")]), file_stamp(&src)).unwrap();
+        assert_eq!(again.id, p.id);
+        assert_eq!((again.role, again.role_guessed), (Some(Role::Steer), false));
+        assert_eq!(again.added, p.added);
+        assert_eq!(lib.list().len(), 1, "one part, not two");
+        let dir = lib.part_dir(&p.id);
+        let names = |d: &Path| {
+            let mut n: Vec<String> = std::fs::read_dir(d).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
+            n.sort();
+            n
+        };
+        assert_eq!(names(&dir), ["part.json", "thumb.png"], "no staged or set-aside files left");
+
+        // A refresh whose picture didn't render drops the old one rather than keep a stale picture.
+        let bare = serde_json::json!({ "objects": [], "empties": [], "bounds": null, "tris": 0 });
+        let third = lib.add(&src, &bare, file_stamp(&src)).unwrap();
+        assert!(!third.has_thumb);
+        assert_eq!(names(&dir), ["part.json"]);
+
+        lib.remove(&p.id).unwrap();
+        assert!(lib.list().is_empty());
+        assert!(src.is_file(), "the rider's file stays");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn slots_take_only_parts_of_their_role() {
+        let (root, lib) = tmp_lib("slots");
+        let fork_src = root.join("fork.obj");
+        let frame_src = root.join("frame.obj");
+        std::fs::write(&fork_src, b"o").unwrap();
+        std::fs::write(&frame_src, b"o").unwrap();
+        let fork = lib.add(&fork_src, &answer(&root.join("j1"), &[]), file_stamp(&fork_src)).unwrap();
+        let frame = lib.add(&frame_src, &answer(&root.join("j2"), &[]), file_stamp(&frame_src)).unwrap();
+
+        assert!(lib.set_slot(Role::Chassis, Some(&fork.id)).is_err(), "a fork isn't a chassis");
+        lib.set_slot(Role::Chassis, Some(&frame.id)).unwrap();
+        lib.set_slot(Role::Fsusp, Some(&fork.id)).unwrap();
+        assert_eq!(lib.slots().len(), 2);
+
+        // Changing a part's role takes it out of the slot it no longer fits.
+        lib.set_role(&fork.id, Some(Role::Steer)).unwrap();
+        assert_eq!(lib.slots().get(&Role::Fsusp), None);
+        // Removing a part empties its slot.
+        lib.remove(&frame.id).unwrap();
+        assert!(lib.slots().is_empty());
+        lib.set_slot(Role::Steer, Some(&fork.id)).unwrap();
+        lib.set_slot(Role::Steer, None).unwrap();
+        assert!(lib.slots().is_empty());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_broken_sidecar_does_not_empty_the_tray() {
+        let (root, lib) = tmp_lib("broken");
+        let src = root.join("peg.obj");
+        std::fs::write(&src, b"o").unwrap();
+        lib.add(&src, &answer(&root.join("j"), &[]), file_stamp(&src)).unwrap();
+        let bad = root.join("lib").join("0123456789abcdef");
+        std::fs::create_dir_all(&bad).unwrap();
+        std::fs::write(bad.join("part.json"), b"{not json").unwrap();
+        assert_eq!(lib.list().len(), 1);
+        assert!(lib.get("0123456789abcdef").is_err());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+}

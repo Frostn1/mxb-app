@@ -1,34 +1,24 @@
 import { useCallback, useEffect, useState } from "react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import { Box, FolderOpen, Loader2, RefreshCw, Undo2 } from "lucide-react";
+import { FolderOpen, Loader2, RefreshCw, Undo2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@frost/shared/Components/ui/button";
 import { useT } from "@/i18n";
-import {
-  PART_EXTENSIONS,
-  blenderStatus,
-  inspectPart,
-  partSize,
-  setBlenderPath,
-  type BlenderStatus,
-  type PartInspection,
-} from "../../../api/bikebuild";
+import { blenderStatus, setBlenderPath, type BlenderStatus } from "../../../api/bikebuild";
+import PartLibrary from "./PartLibrary";
 
 /**
  * Bike builder: put a bike together from parts, without having to be good at Blender.
  *
  * Studio chooses the parts and where they go; the rider's own Blender, run in the
  * background, does the importing, placing and exporting (see `src-tauri/src/blender.rs`).
- * This first cut is the part that has to work before anything else can: find Blender, and
- * bring one part through it, saying what came out.
+ * Here: find Blender, then the part library — parts added once, each given a role, and one
+ * slot per role for the bike being built.
  */
 export default function BikeBuilder() {
   const t = useT();
   const [status, setStatus] = useState<BlenderStatus | null>(null);
   const [checking, setChecking] = useState(false);
-  const [part, setPart] = useState<string | null>(null);
-  const [inspecting, setInspecting] = useState(false);
-  const [result, setResult] = useState<PartInspection | null>(null);
 
   const check = useCallback(() => {
     setChecking(true);
@@ -67,27 +57,8 @@ export default function BikeBuilder() {
     }
   }
 
-  async function onTryPart() {
-    const file = await openDialog({
-      multiple: false,
-      filters: [{ name: t("bike.partFiles"), extensions: PART_EXTENSIONS }],
-    });
-    if (typeof file !== "string") return;
-    setPart(file);
-    setResult(null);
-    setInspecting(true);
-    try {
-      setResult(await inspectPart(file));
-    } catch (e) {
-      toast.error(t("bike.inspectFailed"), { description: String(e) });
-    } finally {
-      setInspecting(false);
-    }
-  }
-
   const found = status?.found ?? null;
   const ready = !!found?.supported;
-  const size = result ? partSize(result.bounds) : null;
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-4 overflow-y-auto p-6">
@@ -130,43 +101,7 @@ export default function BikeBuilder() {
         </div>
       </section>
 
-      <section className="flex flex-col gap-2 border border-border bg-card p-4">
-        <h2 className="text-[11px] font-semibold uppercase tracking-[0.09em] text-faint">
-          {t("bike.tryPart")}
-        </h2>
-        <p className="text-sm text-muted-foreground">{t("bike.tryPartHint")}</p>
-        <div>
-          <Button size="sm" onClick={onTryPart} disabled={!ready || inspecting}>
-            {inspecting ? <Loader2 className="size-3.5 animate-spin" /> : <Box className="size-3.5" />}
-            {t("bike.openPart")}
-          </Button>
-        </div>
-        {part && (
-          <p className="truncate font-mono text-[11px] text-muted-foreground">{part}</p>
-        )}
-        {result && (
-          <div className="flex flex-col gap-1 text-sm">
-            <p>
-              {t("bike.partSummary", {
-                objects: result.objects.length,
-                tris: result.tris.toLocaleString(),
-              })}
-              {size &&
-                ` · ${size.map((v) => v.toFixed(2)).join(" × ")} m`}
-            </p>
-            <ul className="max-h-64 overflow-y-auto font-mono text-[11px] text-muted-foreground">
-              {result.objects.map((o) => (
-                <li key={o.name} className="truncate">
-                  {o.type === "MESH" ? "▪" : "·"} {o.name}
-                  {o.parent ? ` ← ${o.parent}` : ""}
-                  {o.tris !== undefined ? ` · ${o.tris.toLocaleString()} tris` : ""}
-                  {o.type === "MESH" && o.uv === false ? ` · ${t("bike.noUv")}` : ""}
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-      </section>
+      <PartLibrary ready={ready} />
     </div>
   );
 }
