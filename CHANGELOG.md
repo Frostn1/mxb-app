@@ -74,6 +74,13 @@
   It still installs and updates as "MXB Coach", so shortcuts, updates and Uninstall keep working.
 
 ### Fixed
+- The in-browser locker route (`GET /v1/web/lockweb/<name>`) could be asked for `constructor`,
+  `__proto__`, or another name inherited from `Object.prototype` instead of one of the two real
+  files, and the lookup would resolve it anyway. It now checks the name is the object's own
+  property first, so only `mxb_lockweb.js` and `mxb_lockweb_bg.wasm` are ever servable. The
+  response is also no longer cached (`Cache-Control: no-store`), so a sign-out, an expired
+  session, a ban, or losing creator standing takes the locker away immediately rather than up to
+  an hour later.
 - The Downloads history can no longer be wiped by a save that's cut short (a crash, a full
   disk, antivirus holding the file). It's written whole to a temp file and swapped in, and a
   save that fails is noted in the log.

@@ -554,13 +554,18 @@ describe("creators on /admin/assets", () => {
     // A name that was never servable, whoever asks.
     expect((await web(env, req("GET", "/v1/web/lockweb/../secrets", { cookie: frost }))).status).toBe(404);
     expect((await web(env, req("GET", "/v1/web/lockweb/anything.txt", { cookie: frost }))).status).toBe(404);
+    // Inherited `Object.prototype` properties are not files: a plain object's lookup would find
+    // them and hand back whatever object that key happens to resolve to.
+    for (const name of ["constructor", "__proto__", "toString", "hasOwnProperty"]) {
+      expect([name, (await web(env, req("GET", `/v1/web/lockweb/${name}`, { cookie: frost }))).status]).toEqual([name, 404]);
+    }
 
     // Uploaded: served as a module, and never at a shared cache.
     (env as unknown as { LOCKWEB: { objects: Map<string, string> } }).LOCKWEB.objects.set("mxb_lockweb.js", "export default 1");
     const got = await web(env, req("GET", "/v1/web/lockweb/mxb_lockweb.js", { cookie: frost }));
     expect(got.status).toBe(200);
     expect(got.headers.get("content-type")).toBe("text/javascript; charset=utf-8");
-    expect(got.headers.get("cache-control")).toBe("private, max-age=3600");
+    expect(got.headers.get("cache-control")).toBe("no-store");
     expect(await got.text()).toBe("export default 1");
 
     // Signed in but not a creator: both locks are creators-only, and the refusal says which
