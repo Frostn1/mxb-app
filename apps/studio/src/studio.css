@@ -2,118 +2,21 @@
  *
  * The manager's "Paddock" look is a motocross number plate: radius 0, a shallow left lean
  * on every button, and dense uppercase micro-labels. That reads as a race product, which is
- * what it is. It reads badly here. A studio is a room you sit in for an hour with one
- * picture in the middle of it, and hard-cut leaning chrome around that picture competes
- * with it — every edge is a line your eye has to rule out before it can look at the work.
- *
- * So the Studio keeps the palette and the type, and changes the geometry: rounded, upright,
- * and quieter. Nothing here is a new component — it is the same shared shadcn primitives
- * with different tokens under them, which is the point of having tokens.
+ * what it is. It reads badly here, and Sean's call was blunter still: Studio should look like
+ * Coach, not like a half-restyled App. So the palette, radius, type and button geometry all
+ * come from the shared `coach-skin` class now (`packages/shared/src/Skins/dark.css`) — Studio
+ * applies that class on `<html>` alongside this one. What's left here is Studio-specific and
+ * structural: the editor's own panel/dock/scrollbar/slider treatment, none of which Coach
+ * needs because Coach doesn't have a dense multi-pane editor screen.
  */
 
+/* The canvas/panel tokens Studio's editors use for their docks and the mid-gray behind
+   artwork. Derived from the coach-skin tokens this class now sits alongside, the way
+   `mxbsecure.css` used to derive them from the App's — kept here instead so Studio has one
+   skin file, not two disagreeing ones. */
 .studio-skin {
-  color-scheme: light;
-
-  /* One line rounds the whole app. The shared theme maps every radius step to `--radius`
-     through `@theme inline`, so `rounded-sm` through `rounded-xl` all compile to
-     `border-radius: var(--radius)` and pick this up by inheritance — there is no
-     `--radius-md` custom property to override, and `calc(var(--radius-md) …)` in a
-     component would be reading nothing. */
-  --radius: 0.5rem;
-
-  /* The Studio keeps Barlow Condensed for its panel titles. The shared theme moved the
-     display face to the brand's mono, which is the manager's voice, not this one's. */
-  --font-cond: "Barlow Condensed", "Barlow", system-ui, sans-serif;
-
-  /* Light gray. The manager is near-black because it is a launcher you glance at; a studio
-     is a window you stare into while judging colour, and a dark surround pushes every value
-     you are looking at lighter than it really is. Four grounds: the rail frames, the app
-     sits above it, panels are white and float, and the canvas is the one mid gray — the
-     deepest layer, so artwork reads against it whether it is light or dark.
-     Kept achromatic on purpose; the only saturated thing on screen should be the paint. */
-  --window: #e6e6ea;
-  --background: #f4f4f7;
-  --canvas: #c9c9d2;
-  --card: #ffffff;
-  --panel: #fcfcfd;
-
-  --foreground: #16161a;
-  --card-foreground: #16161a;
-  --popover: #ffffff;
-  --popover-foreground: #16161a;
-
-  /* The brand's ice blue is a light-on-dark accent — at 77% lightness it cannot carry white
-     text or sit on white. Same hue, taken down until it can do both. */
-  --primary: #2b7ba8;
-  --primary-foreground: #ffffff;
-  --primary-hover: color-mix(in oklab, var(--primary) 88%, #000 12%);
-  --primary-press: color-mix(in oklab, var(--primary) 78%, #000 22%);
-  --primary-tint: color-mix(in srgb, var(--primary) 12%, transparent);
-  --primary-line: color-mix(in srgb, var(--primary) 45%, transparent);
-
-  --secondary: #e5e5ea;
-  --secondary-foreground: #16161a;
-  --muted: #f0f0f3;
-  --muted-foreground: #5b5b65;
-  --faint: #8a8a94;
-
-  --accent: rgba(43, 123, 168, 0.12);
-  --accent-foreground: #1d5c80;
-
-  --destructive: #b3382c;
-  --destructive-foreground: #ffffff;
-  --success: #2c7a4b;
-  --warning: #96681a;
-
-  --border: rgba(0, 0, 0, 0.13);
-  --input: rgba(0, 0, 0, 0.18);
-  --ring: #2b7ba8;
-}
-
-/* Dark, for whoever wants it — light stays the default, for the reason above. Same structure:
-   achromatic grounds, and the canvas still the one mid gray so artwork reads against it. The
-   accent goes back to the brand's own ice blue, which is a light-on-dark colour to begin with.
-   Every derived blue is restated: they resolve where they are declared, so the light skin's
-   would otherwise stay on its darker blue. Two classes, so this outranks both `.studio-skin`
-   and the shared `.dark`. */
-.studio-skin.dark {
-  color-scheme: dark;
-
-  --window: #141416;
-  --background: #1b1b1e;
-  --canvas: #38383f;
-  --card: #232327;
-  --panel: #1f1f22;
-
-  --foreground: #ececf0;
-  --card-foreground: #ececf0;
-  --popover: #2a2a2f;
-  --popover-foreground: #ececf0;
-
-  --primary: #9ccfec;
-  --primary-foreground: #0d1216;
-  --primary-hover: color-mix(in oklab, var(--primary) 88%, #fff 12%);
-  --primary-press: color-mix(in oklab, var(--primary) 80%, #000 20%);
-  --primary-tint: color-mix(in srgb, var(--primary) 14%, transparent);
-  --primary-line: color-mix(in srgb, var(--primary) 45%, transparent);
-
-  --secondary: #2c2c31;
-  --secondary-foreground: #ececf0;
-  --muted: #26262a;
-  --muted-foreground: #a2a2ab;
-  --faint: #75757e;
-
-  --accent: rgba(156, 207, 236, 0.14);
-  --accent-foreground: #c3e3f7;
-
-  --destructive: #ef8078;
-  --destructive-foreground: #1a0c0b;
-  --success: #6fd99a;
-  --warning: #e8bd6a;
-
-  --border: rgba(255, 255, 255, 0.1);
-  --input: rgba(255, 255, 255, 0.14);
-  --ring: #9ccfec;
+  --canvas: color-mix(in srgb, var(--background) 82%, var(--foreground));
+  --panel: var(--card);
 }
 
 @theme inline {
@@ -122,7 +25,8 @@
 }
 
 /* The lean comes off. `Button` applies `.u-skew` to the box and `.u-unskew` to the label,
-   so neutralising both leaves the geometry upright with no change to any component. */
+   so neutralising both leaves the geometry upright with no change to any component.
+   `coach-skin` already does this; restated here so Studio doesn't depend on load order. */
 .studio-skin .u-skew,
 .studio-skin .u-unskew {
   transform: none;
@@ -131,14 +35,11 @@
   clip-path: none;
 }
 
-/* Buttons stop shouting.
- *
- * `Button` sets Barlow Condensed, uppercase, 0.14em — the manager's number-plate voice, and
- * the single loudest thing carried over. "SAVE PAINT" and "STOCK AS BASE" as banners is a
- * race product talking; a tool labels its controls the way a sentence does. Panel titles keep
- * their small caps, because there a label needs to read as a label and not as content. */
-.studio-skin [data-slot="button"],
-.studio-skin button:not([data-keep-case]) {
+/* Panel titles keep their small caps — a label needs to read as a label, not as content —
+   but otherwise buttons talk in Coach's own voice now, set by `coach-skin`. This is the one
+   piece that's still Studio's alone: `data-slot="button"` covers spots that render a button
+   without the `Button` component reaching it directly. */
+.studio-skin [data-slot="button"] {
   font-family: var(--font-sans);
   font-weight: 500;
   text-transform: none;

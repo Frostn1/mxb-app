@@ -1,9 +1,12 @@
-/* Same arrangement as the manager's: Tailwind's own scanner is off, so every source glob
-   is declared, and the shared package declares its own inside @frost/shared/theme.css.
-   `studio.css` comes after the theme because it overrides its tokens. */
+/* Same arrangement as the manager's and Coach's: Tailwind's own scanner is off, so every
+   source glob is declared, and the shared package declares its own inside
+   @frost/shared/theme.css. The shared dark skin (`Skins/dark.css`, Coach's look) comes next,
+   then `studio.css` for the editor-specific structure layered on top of it — see the note
+   at the top of that file for why `mxbsecure.css` is gone: its canvas/panel tokens moved
+   into `studio.css` so there's one skin file instead of two disagreeing ones. */
 @import "tailwindcss" source(none);
 @import "@frost/shared/theme.css";
+@import "@frost/shared/Skins/dark.css";
 @import "./studio.css";
-@import "./mxbsecure.css";
 @source "./**/*.{ts,tsx}";
 @source "../index.html";

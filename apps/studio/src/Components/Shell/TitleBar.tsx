@@ -78,15 +78,11 @@ export default function TitleBar<T extends string>({
         IS_MAC ? "pl-[82px] pr-4" : "pl-[18px]",
       )}
     >
-      <div data-tauri-drag-region className="flex shrink-0 items-center">
-        <span className="u-skew grid h-[26px] place-items-center bg-primary px-2">
-          <span className="u-unskew font-cond text-[15px] font-bold leading-none tracking-[-0.04em] text-primary-foreground">
-            {"FROST'S"}
-          </span>
-        </span>
-        <span className="ml-[9px] font-cond text-[15px] font-semibold leading-none tracking-[-0.04em] text-muted-foreground">
-          Studio
-        </span>
+      {/* Coach's own wordmark: a headline and "by mxbsecure" under it, not a badge-plus-label
+          pair borrowed from the App's number-plate chrome. */}
+      <div data-tauri-drag-region className="flex shrink-0 flex-col justify-center leading-none">
+        <span className="headline text-[16px] leading-none">Studio</span>
+        <span className="mt-0.5 text-[10px] leading-none text-muted-foreground">by mxbsecure</span>
       </div>
 
       <DropdownMenu>

@@ -2781,7 +2781,7 @@ fn app_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wr
     let mut menu = MenuBuilder::new(app);
     #[cfg(target_os = "macos")]
     {
-        let about = SubmenuBuilder::new(app, "Frost's Studio")
+        let about = SubmenuBuilder::new(app, "Studio")
             .about(None)
             .separator()
             .hide()

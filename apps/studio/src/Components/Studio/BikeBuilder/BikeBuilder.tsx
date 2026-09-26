@@ -1,127 +1,75 @@
-import { useCallback, useEffect, useState } from "react";
-import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import { FolderOpen, Loader2, RefreshCw, Undo2 } from "lucide-react";
-import { toast } from "sonner";
+import { useCallback, useState } from "react";
+import { Box } from "lucide-react";
 import { Button } from "@frost/shared/Components/ui/button";
 import { useT } from "@/i18n";
-import { blenderStatus, setBlenderPath, type BlenderStatus } from "../../../api/bikebuild";
-import Assembly from "./Assembly";
-import PartLibrary from "./PartLibrary";
+import BlenderBar from "./BlenderBar";
+import PartTray from "./PartTray";
+import PartSlots from "./PartSlots";
+import PreviewPane, { useAssemblyView } from "./PreviewPane";
+import BuildPanel from "./BuildPanel";
 import PartMaker from "./PartMaker";
+import { useBikeLibrary } from "./useBikeLibrary";
+import { usePartDrag } from "./usePartDrag";
 
 /**
  * Bike builder: put a bike together from parts, without having to be good at Blender.
  *
  * Studio chooses the parts and where they go; the rider's own Blender, run in the
  * background, does the importing, placing and exporting (see `src-tauri/src/blender.rs`).
- * Two modes. Assemble: the part library (parts added once, each given a role, one slot per
- * role), the bike put together on its template in 3D, and the build. Part Maker: parts made
- * from templates and briefs, which join the same library.
+ * Two modes. Assemble: the 3D view is the main panel — a base bike (a full-bike import or an
+ * installed template) shows there right away, and placing a part means dragging one from the
+ * tray onto it or clicking an open mount, not hunting through a slot grid. The tray sits to
+ * its left; the role outliner is a collapsible strip on the right, for checking what's still
+ * missing rather than for placing itself. Part Maker: parts made from templates and briefs,
+ * which join the same library, as its own mode below the same bar.
  */
 export default function BikeBuilder() {
   const t = useT();
-  const [status, setStatus] = useState<BlenderStatus | null>(null);
-  const [checking, setChecking] = useState(false);
   const [mode, setMode] = useState<"assemble" | "maker">("assemble");
+  const [ready, setReady] = useState(false);
   /** Bumped whenever one panel changes the library, so the others read it again. */
   const [version, setVersion] = useState(0);
   const changed = useCallback(() => setVersion((v) => v + 1), []);
-
-  const check = useCallback(() => {
-    setChecking(true);
-    blenderStatus()
-      .then(setStatus)
-      .catch((e) => toast.error(t("bike.blenderCheckFailed"), { description: String(e) }))
-      .finally(() => setChecking(false));
-  }, [t]);
-  useEffect(() => check(), [check]);
-
-  async function onPickBlender() {
-    const file = await openDialog({
-      multiple: false,
-      filters: [{ name: "Blender", extensions: ["exe"] }],
-    });
-    if (typeof file !== "string") return;
-    setChecking(true);
-    try {
-      const next = await setBlenderPath(file);
-      setStatus(next);
-      if (!next.found || next.found.path.toLowerCase() !== file.toLowerCase())
-        toast.error(t("bike.notBlender"));
-    } catch (e) {
-      toast.error(t("bike.notBlender"), { description: String(e) });
-    } finally {
-      setChecking(false);
-    }
-  }
-
-  async function onForgetBlender() {
-    setChecking(true);
-    try {
-      setStatus(await setBlenderPath(""));
-    } finally {
-      setChecking(false);
-    }
-  }
-
-  const found = status?.found ?? null;
-  const ready = !!found?.supported;
+  const lib = useBikeLibrary(version, changed);
+  const [view, setView] = useAssemblyView(version);
+  const { dragging, startDrag } = usePartDrag((part) => {
+    if (part.role) void lib.onSlot(part.role, part.id);
+  });
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-4 overflow-y-auto p-6">
-      <section className="flex flex-col gap-2 border border-border bg-card p-4">
-        <div className="flex items-center gap-2">
-          <h2 className="text-[11px] font-semibold uppercase tracking-[0.09em] text-faint">
-            {t("bike.blender")}
-          </h2>
-          <Button size="sm" variant="ghost" className="ml-auto" onClick={check} disabled={checking}>
-            {checking ? <Loader2 className="size-3.5 animate-spin" /> : <RefreshCw className="size-3.5" />}
-          </Button>
+    <div className="relative flex h-full min-h-0 flex-col">
+      <BlenderBar onReadyChange={setReady} />
+      {dragging && (
+        <div
+          className="pointer-events-none fixed z-50 flex items-center gap-1.5 border border-primary bg-popover px-2 py-1 text-[12px] shadow-lg"
+          style={{ left: dragging.x + 12, top: dragging.y + 12 }}
+        >
+          <Box className="size-3.5 text-primary" />
+          {dragging.part.name}
         </div>
-        {status === null ? (
-          <p className="text-sm text-muted-foreground">{t("bike.looking")}</p>
-        ) : found ? (
-          <p className="text-sm">
-            {found.supported
-              ? t("bike.blenderFound", { version: found.version })
-              : t("bike.blenderTooOld", { version: found.version, min: status.minVersion })}
-            <span className="mt-0.5 block truncate font-mono text-[11px] text-muted-foreground">
-              {found.path}
-            </span>
-          </p>
-        ) : (
-          <p className="text-sm text-muted-foreground">
-            {t("bike.blenderMissing", { min: status.minVersion })}
-          </p>
-        )}
-        <div className="flex gap-2">
-          <Button size="sm" variant="outline" onClick={onPickBlender} disabled={checking}>
-            <FolderOpen className="size-3.5" />
-            {t("bike.chooseBlender")}
-          </Button>
-          {status?.saved && (
-            <Button size="sm" variant="ghost" onClick={onForgetBlender} disabled={checking}>
-              <Undo2 className="size-3.5" />
-              {t("bike.findBlender")}
-            </Button>
-          )}
-        </div>
-      </section>
+      )}
 
-      <div className="flex gap-1">
+      <div className="flex items-center gap-1 border-b border-border px-4 py-2">
         {(["assemble", "maker"] as const).map((m) => (
           <Button key={m} size="sm" variant={mode === m ? "default" : "outline"} onClick={() => setMode(m)}>
             {t(m === "assemble" ? "bike.modeAssemble" : "bike.modeMaker")}
           </Button>
         ))}
       </div>
+
       {mode === "assemble" ? (
-        <>
-          <PartLibrary ready={ready} version={version} onChanged={changed} />
-          <Assembly ready={ready} version={version} onChanged={changed} />
-        </>
+        <div className="flex min-h-0 flex-1 flex-col">
+          <div className="grid min-h-0 flex-1 grid-cols-[18rem_1fr_auto] divide-x divide-border overflow-hidden">
+            <PartTray ready={ready} lib={lib} onStartDrag={startDrag} />
+            <PreviewPane version={version} onChanged={changed} view={view} setView={setView} lib={lib} />
+            <PartSlots lib={lib} />
+          </div>
+          <BuildPanel view={view} placedCount={view?.assembly.placed.length ?? 0} />
+        </div>
       ) : (
-        <PartMaker ready={ready} onChanged={changed} />
+        <div className="min-h-0 flex-1 overflow-y-auto p-6">
+          <PartMaker ready={ready} onChanged={changed} />
+        </div>
       )}
     </div>
   );
