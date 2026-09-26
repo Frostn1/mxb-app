@@ -83,6 +83,20 @@
   switch games.
 
 ### Changed
+- Paint sync now runs by itself for the server you're on. When you join a server, from the app
+  or from the game's own server list, the app tells MXB App's service where you are and gets
+  the other riders' paints. It then stays connected, so riders who join or leave later are
+  picked up within seconds, and it leaves when you leave the server or close the game. Only
+  what is missing is sent: your paints go up only if the service doesn't have them, and a paint
+  already anywhere in your mods folder is never downloaded again.
+- When two riders use the same paint file name for different paints, the one most riders on
+  the server wear is installed; on a tie, the one who joined first wins. Each version is kept in
+  the app's own data folder (never in the game's folders), so the file switches without a new
+  download when riders come and go. Your own paint files are still never replaced.
+- Paints received from other riders are removed once nobody you've ridden with has worn them
+  for 7 days, and the app's stored copies are cleaned up on the same schedule.
+- Paint sync needs Game Integration. With it turned off or not installed, the paint sync switch
+  in Settings is greyed out and says why, and nothing is synced.
 - Protected content you bought now plays offline for up to 30 days between check-ins, rather
   than forever. The app renews a signed key lease silently whenever it is online (at startup,
   after a Steam sign-in, when the game starts and every few hours while it is open), so a buyer

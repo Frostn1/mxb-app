@@ -580,6 +580,8 @@ export const en = {
   "settings.paintSyncOn": "Sync paints automatically",
   "settings.paintSyncOnDesc":
     "Turned off, nothing of yours is published and nobody else's paints are installed.",
+  "settings.paintSyncNeedsFrostmod":
+    "Paint sync needs Game Integration. Install it and turn on \"Start Game Integration automatically\" to use paint sync.",
   "settings.gameFolder": "Game folder",
   "settings.general": "General",
   "settings.appearance": "Appearance",

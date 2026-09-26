@@ -587,6 +587,8 @@ export const it: Translation = {
   "settings.paintSyncOn": "Sincronizza le grafiche automaticamente",
   "settings.paintSyncOnDesc":
     "Se disattivato, nulla di tuo viene pubblicato e nessuna grafica altrui viene installata.",
+  "settings.paintSyncNeedsFrostmod":
+    "Paint sync needs Game Integration. Install it and turn on \"Start Game Integration automatically\" to use paint sync.",
   "settings.gameFolder": "Cartella di gioco",
   "settings.general": "Generali",
   "settings.appearance": "Aspetto",

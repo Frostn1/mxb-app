@@ -595,6 +595,8 @@ export const de: Translation = {
   "settings.paintSyncOn": "Lackierungen automatisch synchronisieren",
   "settings.paintSyncOnDesc":
     "Ausgeschaltet wird nichts von dir veröffentlicht und keine Lackierung von anderen installiert.",
+  "settings.paintSyncNeedsFrostmod":
+    "Paint sync needs Game Integration. Install it and turn on \"Start Game Integration automatically\" to use paint sync.",
   "settings.gameFolder": "Spielordner",
   "settings.general": "Allgemein",
   "settings.appearance": "Darstellung",

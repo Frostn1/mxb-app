@@ -64,6 +64,8 @@ import {
   setVoiceProximity,
   setVoiceEnabled,
   setPaintSyncEnabled,
+  paintSyncReadiness,
+  type PaintSyncReadiness,
   setMxbsecureEnabled,
   contentSecureAvailable,
   mxbsecureUnlock,
@@ -555,6 +557,15 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
   const voiceEnabled = config.voiceEnabled ?? false;
   // Off unless it was turned on, matching the backend's default.
   const paintSyncEnabled = config.paintSyncEnabled ?? false;
+  // Paint sync runs through Game Integration, so the switch is only live when that is
+  // installed and set to start. Re-asked when the section opens or the FrostMod switch moves.
+  const [syncReadiness, setSyncReadiness] = useState<PaintSyncReadiness | null>(null);
+  useEffect(() => {
+    paintSyncReadiness()
+      .then(setSyncReadiness)
+      .catch(() => {});
+  }, [active, autoRunFrostmod]);
+  const paintSyncBlocked = syncReadiness?.ready === false;
   const mxbsecureEnabled = config.mxbsecureEnabled ?? true;
   const [unlocking, setUnlocking] = useState(false);
   const [repairing, setRepairing] = useState(false);
@@ -1635,9 +1646,14 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
                 paint sync is, so repeating it here would say it twice on one screen. */}
             <ToggleRow
               label={t("settings.paintSyncOn")}
-              desc={t("settings.paintSyncOnDesc")}
-              checked={paintSyncEnabled}
+              desc={
+                paintSyncBlocked
+                  ? t("settings.paintSyncNeedsFrostmod")
+                  : t("settings.paintSyncOnDesc")
+              }
+              checked={paintSyncEnabled && !paintSyncBlocked}
               onChange={togglePaintSync}
+              disabled={paintSyncBlocked}
             />
             <PaintSync />
           </Section>

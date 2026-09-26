@@ -92,6 +92,7 @@ mod secure_launch;
 mod server_admin;
 
 pub(crate) use mxb_core::presets;
+mod paintroom;
 mod paintsync;
 mod ranked;
 mod reshade;
@@ -2819,6 +2820,9 @@ async fn publish_paints(
     if cfg.cp_token.trim().is_empty() {
         return Err("Enroll with an invite code first.".into());
     }
+    if paint_sync_blocker(&app, &cfg).is_some() {
+        return Err("Paint sync needs Game Integration.".into());
+    }
     let profile = match profile.map(|p| p.trim().to_string()).filter(|p| !p.is_empty()) {
         Some(p) => p,
         None => sync_profile(&cfg).ok_or("No MX Bikes profile to publish.")?,
@@ -3041,6 +3045,41 @@ impl SyncEvent {
     }
 }
 
+/// Why paint sync can't run on this machine, or `None` when it can.
+///
+/// It needs the game integration. The server a rider picked in the game's own browser is
+/// only known through FrostMod, and so is the moment they leave it — without it, sync would
+/// publish a look and then have no idea where anyone is.
+fn paint_sync_blocker(app: &tauri::AppHandle, cfg: &AppConfig) -> Option<&'static str> {
+    if !frostmod_manage::is_installed(app) {
+        return Some("frostmodMissing");
+    }
+    if !cfg.auto_run_frostmod {
+        return Some("frostmodDisabled");
+    }
+    None
+}
+
+/// Paint sync is switched on and has what it needs to run.
+fn paint_sync_active(app: &tauri::AppHandle, cfg: &AppConfig) -> bool {
+    cfg.paint_sync_enabled && paint_sync_blocker(app, cfg).is_none()
+}
+
+/// Whether paint sync can run, and if not, why — for Settings to grey the switch out.
+#[derive(Debug, Clone, serde::Serialize)]
+struct PaintSyncReadiness {
+    ready: bool,
+    /// `frostmodMissing` | `frostmodDisabled`
+    reason: Option<&'static str>,
+}
+
+#[tauri::command]
+fn paint_sync_readiness(app: tauri::AppHandle) -> PaintSyncReadiness {
+    let cfg = config::load_or_detect(&app).unwrap_or_default();
+    let reason = paint_sync_blocker(&app, &cfg);
+    PaintSyncReadiness { ready: reason.is_none(), reason }
+}
+
 /// Publish because something outside the app changed the look on disk.
 ///
 /// The watcher runs on the notify thread with no config in hand, so this reads it and hands
@@ -3086,7 +3125,7 @@ fn emit_sync(app: &tauri::AppHandle, event: SyncEvent) {
 /// succeeded on disk, so a failure here logs and is dropped rather than surfacing as an
 /// error on the apply the player actually asked for.
 fn publish_paints_soon(app: &tauri::AppHandle, cfg: &AppConfig, profile: Option<&str>) {
-    if !cfg.paint_sync_enabled {
+    if !paint_sync_active(app, cfg) {
         return;
     }
     let generation = PUBLISH_GEN.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
@@ -3101,7 +3140,7 @@ fn publish_paints_soon(app: &tauri::AppHandle, cfg: &AppConfig, profile: Option<
         // Re-read rather than reusing the captured config: the debounce is long enough for
         // the player to have enrolled, or re-enrolled, since the change that queued this.
         let cfg = config::load_or_detect(&app).unwrap_or_default();
-        if !cfg.paint_sync_enabled {
+        if !paint_sync_active(&app, &cfg) {
             return;
         }
         let Some(profile) = profile.or_else(|| sync_profile(&cfg)) else {
@@ -3131,6 +3170,8 @@ fn publish_paints_soon(app: &tauri::AppHandle, cfg: &AppConfig, profile: Option<
                     );
                     remember_publish(&app, &o);
                     usage::track("paint.publish");
+                    // A room only hears about a new look through a join.
+                    paintroom::note_look_changed();
                 }
                 emit_sync(&app, SyncEvent::published(&o));
             }
@@ -3156,7 +3197,12 @@ fn sync_paints_soon(app: &tauri::AppHandle, address: Option<String>) {
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
         let cfg = config::load_or_detect(&app).unwrap_or_default();
-        if !cfg.paint_sync_enabled {
+        if !paint_sync_active(&app, &cfg) {
+            return;
+        }
+        // A paint room pulls on joining, and only what is missing. The roster read is for a
+        // control plane that has answered a join with 404.
+        if !paintroom::rooms_unavailable() {
             return;
         }
         emit_sync(&app, SyncEvent::phase("pulling"));
@@ -3243,6 +3289,10 @@ impl Drop for LiveSyncGuard {
 
 /// A session's worth of syncing, so a rider who arrives after you do still renders.
 ///
+/// A paint room first ([`paintroom::Session`]): join the server the rider is on, follow the
+/// room's socket, leave when they do. The roster loop below it is the fallback for a control
+/// plane that answers the join with 404.
+///
 /// The pull used to happen once, at launch. That made the whole thing lopsided: whoever
 /// joined last saw everybody, and whoever was there first never saw anyone who turned up
 /// afterwards — they had pulled before those riders existed.
@@ -3262,11 +3312,17 @@ fn live_sync_session(app: &tauri::AppHandle, address: Option<String>) {
         let mut seen_running = false;
         let mut grid = GridWatch::default();
         let mut last_pull = std::time::Instant::now();
+        let mut room = paintroom::Session::new(address.clone());
+        let mut by_roster = paintroom::rooms_unavailable();
+        // Set when the room turns out not to exist, so the roster pulls straight away rather
+        // than a heartbeat later.
+        let mut pull_now = false;
         loop {
             tokio::time::sleep(GRID_POLL).await;
 
             let cfg = config::load_or_detect(&app).unwrap_or_default();
-            if !cfg.paint_sync_enabled {
+            if !paint_sync_active(&app, &cfg) {
+                room.end(&app, &cfg).await;
                 return;
             }
             // The game is the session. Once it has been seen and then gone, so are we.
@@ -3274,7 +3330,20 @@ fn live_sync_session(app: &tauri::AppHandle, address: Option<String>) {
                 seen_running = true;
             } else if seen_running || started.elapsed() > LIVE_SYNC_STARTUP_GRACE {
                 log::info!("[sync] session over, stopping the live sync");
+                room.end(&app, &cfg).await;
                 return;
+            }
+
+            if !by_roster {
+                let reported = live_session().filter(|s| s.on_a_server()).map(|s| s.server_name);
+                match room.tick(&app, &cfg, reported).await {
+                    paintroom::Tick::Live => continue,
+                    paintroom::Tick::NotDeployed => {
+                        log::info!("[sync] the control plane has no paint rooms; syncing by roster");
+                        by_roster = true;
+                        pull_now = true;
+                    }
+                }
             }
 
             // Someone new on the grid is the reason to pull; the heartbeat is the fallback
@@ -3288,7 +3357,7 @@ fn live_sync_session(app: &tauri::AppHandle, address: Option<String>) {
                 }
                 None => 0,
             };
-            let due = last_pull.elapsed() >= LIVE_SYNC_EVERY;
+            let due = std::mem::take(&mut pull_now) || last_pull.elapsed() >= LIVE_SYNC_EVERY;
             if arrivals == 0 && !due {
                 continue;
             }
@@ -3508,6 +3577,9 @@ async fn pull_rosters(
 /// before a rider had published, or failed on a flaky connection.
 #[tauri::command]
 async fn sync_paints(app: tauri::AppHandle) -> Result<paintsync::PullOutcome, String> {
+    if paint_sync_blocker(&app, &config::load_or_detect(&app).unwrap_or_default()).is_some() {
+        return Err("Paint sync needs Game Integration.".into());
+    }
     emit_sync(&app, SyncEvent::phase("pulling"));
     // The one place a sweep is right: a person pressed Sync, and if they are not on a server
     // the whole registry is the only answer to "whose paints do you mean".
@@ -5809,11 +5881,18 @@ fn set_voice_enabled(
 #[tauri::command]
 fn set_paint_sync_enabled(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
     let mut cfg = config::load(&app).unwrap_or_default();
+    if enabled && paint_sync_blocker(&app, &cfg).is_some() {
+        return Err("Paint sync needs Game Integration installed and set to start automatically.".into());
+    }
     cfg.paint_sync_enabled = enabled;
     config::save(&app, &cfg).map_err(|e| format!("{e:#}"))?;
-    // Turning it back on shouldn't wait for the next thing that happens to change a look.
+    // Turning it back on shouldn't wait for the next thing that happens to change a look —
+    // nor for the next session, when the game is already on a server.
     if enabled {
         publish_paints_soon(&app, &cfg, None);
+        if gameproc::is_game_running() {
+            live_sync_session(&app, None);
+        }
     }
     Ok(())
 }
@@ -8398,6 +8477,7 @@ fn main() {
             set_voice_proximity,
             set_voice_enabled,
             set_paint_sync_enabled,
+            paint_sync_readiness,
             remove_synced_paints,
             set_preview_tyres,
             set_voice_input_device,
