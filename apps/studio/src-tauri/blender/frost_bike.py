@@ -100,12 +100,20 @@ def describe(obj):
     return info
 
 
-def export_fbx(path):
+def export_fbx(path, objs=None):
+    """`objs`, when given, exports only those objects — `op_split` uses this to give each
+    group its own standalone file, which is what a later build imports for that group
+    instead of pulling in the whole bike it was cut from. Left `None` (every other caller),
+    this is the same whole-scene export it always was."""
+    if objs is not None:
+        bpy.ops.object.select_all(action="DESELECT")
+        for o in objs:
+            o.select_set(True)
     # Pinned so every build exports the same way. Axes and scale are checked against the
     # reference bike in the converter before anything is trusted in the game.
     bpy.ops.export_scene.fbx(
         filepath=path,
-        use_selection=False,
+        use_selection=objs is not None,
         object_types={"MESH", "EMPTY"},
         apply_unit_scale=True,
         apply_scale_options="FBX_SCALE_ALL",
@@ -223,11 +231,22 @@ def catalog(objs, job):
         "tris": sum(len(o.data.loop_triangles) for o in meshes),
     }
     if job.get("thumb"):
+        # Rendering, not exporting, so `use_selection` has no say here — for a plain add the
+        # scene never holds anything but `objs` anyway, but `op_split` leaves every other
+        # group sitting right there, and a thumbnail with the rest of the bike still in
+        # frame isn't a picture of the part. Hidden from the render only, not deleted, and
+        # put back whether the render worked or not.
+        rest = [o for o in bpy.data.objects if o not in set(objs) and not o.hide_render]
+        for o in rest:
+            o.hide_render = True
         try:
             if render_thumb(job["thumb"], meshes, int(job.get("thumbSize") or 256)):
                 out["thumb"] = job["thumb"]
         except Exception as e:
             out["thumbError"] = "%s: %s" % (type(e).__name__, e)
+        finally:
+            for o in rest:
+                o.hide_render = False
     if job.get("glb"):
         export_glb(job["glb"], objs)
         out["glb"] = job["glb"]
@@ -316,13 +335,20 @@ def op_split(job):
     Anything left with no hint anywhere up its chain is its own "unassigned" group, never
     silently dropped or folded into whichever group happened to import first.
 
-    One GLB and thumbnail per group, in `job["workDir"]`; the caller (`bike_part_split` in
-    `main.rs`) turns each into its own library part and removes the one this replaces."""
+    Each group gets its own standalone FBX, in `job["partsDir"]` (a folder that outlives
+    this job, unlike `job["workDir"]`) — not just a GLB and a thumbnail. A later build
+    imports a part's `source` fresh (`op_assemble` doesn't work from the catalogued GLB),
+    and that has to be the group's own file, not the whole bike it was cut from, or building
+    with a split part in a slot would import the entire bike into every slot that used one.
+    The caller (`bike_part_split` in `main.rs`) turns each group into its own library part,
+    with this FBX as its `source`, and removes the one part this replaces."""
     empty_scene()
     objs = import_part(job["part"])
     if not objs:
         raise ValueError("nothing to import in %s" % os.path.basename(job["part"]))
     work = job["workDir"]
+    parts_dir = job["partsDir"]
+    os.makedirs(parts_dir, exist_ok=True)
     cache = {}
     buckets = {}
     for o in objs:
@@ -335,6 +361,8 @@ def op_split(job):
     # not whatever order Blender happened to import the objects in.
     for i, (key, group_objs) in enumerate(sorted(buckets.items())):
         tag = key if key != "unassigned" else "part-%d" % (i + 1)
+        source = os.path.join(parts_dir, "%s.fbx" % tag)
+        export_fbx(source, group_objs)
         sub = catalog(
             group_objs,
             {"thumb": os.path.join(work, "%s-thumb.png" % tag), "thumbSize": job.get("thumbSize") or 256,
@@ -342,6 +370,7 @@ def op_split(job):
         )
         sub["tag"] = tag
         sub["role"] = None if key == "unassigned" else key
+        sub["source"] = source
         groups.append(sub)
     return {"groups": groups}
 

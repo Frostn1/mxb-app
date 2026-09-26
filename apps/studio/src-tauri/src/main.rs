@@ -1584,11 +1584,25 @@ async fn bike_part_split(app: tauri::AppHandle, id: String) -> Result<BikeParts,
             let _one = BIKE_LIBRARY.lock().unwrap_or_else(|p| p.into_inner());
             lib.get(&id).map_err(|e| format!("{e:#}"))?
         };
-        let source = std::path::PathBuf::from(&part.source);
-        // Taken before Blender re-reads the file, like any other job on it.
-        let stamp = bikeparts::file_stamp(&source);
+        // Each group gets its own exported FBX (see `op_split`'s own doc comment for why:
+        // a build imports a part's `source` fresh, and that has to be just the group's
+        // geometry). Kept in the app's own data dir, not the job's — that folder is cleared
+        // by the next "split" job, same reasoning as the placeholder bike's `bike-made`.
+        let parts_dir = app
+            .path()
+            .app_data_dir()
+            .map_err(|e| format!("no app data directory: {e}"))?
+            .join("bike-made")
+            .join("split")
+            .join(&id);
         let make = |work: &std::path::Path| {
-            serde_json::json!({ "op": "split", "part": part.source, "thumbSize": 256, "workDir": work })
+            serde_json::json!({
+                "op": "split",
+                "part": part.source,
+                "thumbSize": 256,
+                "workDir": work,
+                "partsDir": parts_dir,
+            })
         };
         let keep = |answer: serde_json::Value| -> anyhow::Result<BikeParts> {
             let groups = answer["groups"].as_array().cloned().unwrap_or_default();
@@ -1596,12 +1610,17 @@ async fn bike_part_split(app: tauri::AppHandle, id: String) -> Result<BikeParts,
                 anyhow::bail!("that didn't turn up more than one part to split it into");
             }
             let _one = BIKE_LIBRARY.lock().unwrap_or_else(|p| p.into_inner());
-            lib.remove(&id)?;
+            // Every group is added before the part it replaces is removed: if one of them
+            // fails partway (a disk error, say), the rider keeps the original and whatever
+            // groups did land, rather than losing the original for an incomplete split.
             for g in &groups {
                 let tag = g["tag"].as_str().unwrap_or("part").to_string();
                 let role: Option<bikeparts::Role> = serde_json::from_value(g["role"].clone()).unwrap_or(None);
-                lib.add_split_group(&source, &tag, role, g, stamp.clone())?;
+                let source = std::path::PathBuf::from(g["source"].as_str().unwrap_or_default());
+                let stamp = bikeparts::file_stamp(&source);
+                lib.add_split_group(&part.name, &source, &tag, role, g, stamp)?;
             }
+            lib.remove(&id)?;
             let parts = lib.list().into_iter().map(|p| bike_part_view(&lib, p)).collect();
             Ok(BikeParts { parts, slots: lib.slots() })
         };

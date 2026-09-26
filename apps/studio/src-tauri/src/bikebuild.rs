@@ -347,9 +347,10 @@ mod real {
         let root = std::env::temp_dir().join(format!("frost-bike-split-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         let cache = root.join("cache");
+        let parts_dir = root.join("parts");
 
         let answer = blender::job(&exe, &cache, "split", |w| {
-            json!({ "op": "split", "part": src, "thumbSize": 64, "workDir": w })
+            json!({ "op": "split", "part": src, "thumbSize": 64, "workDir": w, "partsDir": parts_dir })
         })
         .expect("split");
         let groups = answer["groups"].as_array().expect("groups");
@@ -361,7 +362,30 @@ mod real {
         for g in groups {
             assert!(g["glb"].is_string(), "{}: no glb ({g})", g["tag"]);
             assert!(g["tris"].as_u64().unwrap() > 0, "{}: no geometry ({g})", g["tag"]);
+            // Its own FBX, not just a preview GLB: a build imports this fresh, and it must
+            // hold only this group's geometry, not the whole bike it was cut from.
+            let fbx = PathBuf::from(g["source"].as_str().expect("a source fbx"));
+            assert!(fbx.is_file(), "{}: {} isn't a file", g["tag"], fbx.display());
         }
+
+        // Spot-check the one this bug was about: re-import the levers group's own FBX and
+        // make sure it's just the levers, not the whole bike still riding along inside it —
+        // exactly the failure a shared `source` used to cause before each group got its own.
+        let levers = groups.iter().find(|g| g["tag"] == "levers").expect("a levers group");
+        let levers_fbx = PathBuf::from(levers["source"].as_str().unwrap());
+        let reimported = blender::job(&exe, &cache, "inspect", |w| {
+            json!({ "op": "inspect", "part": levers_fbx, "fbx": w.join("check.fbx") })
+        })
+        .expect("re-inspecting the levers fbx");
+        let names: Vec<&str> =
+            reimported["objects"].as_array().unwrap().iter().map(|o| o["name"].as_str().unwrap()).collect();
+        eprintln!("levers.fbx holds: {names:?}");
+        assert!(!names.is_empty(), "the levers fbx re-imported empty");
+        assert!(
+            names.iter().all(|n| !n.to_ascii_lowercase().contains("chassis")),
+            "the levers fbx still has the chassis in it: {names:?}",
+        );
+
         let _ = std::fs::remove_dir_all(&root);
     }
 }

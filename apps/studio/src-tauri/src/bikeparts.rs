@@ -338,8 +338,14 @@ impl Library {
     /// from. `tag` (the group's slug — "chassis", "part-2"…) becomes part of its id: every
     /// group in a split shares one source file, so the plain path-derived id would collide
     /// between them.
+    /// `source` is this group's own exported FBX (`op_split` writes one per group), not the
+    /// whole-bike file it was cut from: a later build imports a part's `source` fresh, and
+    /// that has to be just this group's geometry. `origin_name` is the whole bike's own
+    /// name, kept for the tray's sake — "KTMRM — chassis" reads better than the group's own
+    /// file stem, which is the tag again.
     pub fn add_split_group(
         &self,
+        origin_name: &str,
         source: &Path,
         tag: &str,
         role: Option<Role>,
@@ -348,11 +354,10 @@ impl Library {
     ) -> anyhow::Result<Part> {
         let id = part_id_tagged(source, Some(tag));
         let before = self.get(&id).ok();
-        let stem = source.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
         // Not run through `multi_part_hint`: a split group is already as split as Blender's
         // grouping could make it, so flagging it again would just repeat the same warning
         // the split was the answer to.
-        self.finish(id, format!("{stem} — {tag}"), source, role, false, false, answer, stamp, before)
+        self.finish(id, format!("{origin_name} — {tag}"), source, role, false, false, answer, stamp, before)
     }
 
     /// The tail [`add_as`] and [`add_split_group`] share: stage the new thumbnail/GLB in,
@@ -661,6 +666,7 @@ mod tests {
 
         let chassis = lib
             .add_split_group(
+                "KTMRM",
                 &src,
                 "chassis",
                 Some(Role::Chassis),
@@ -670,6 +676,7 @@ mod tests {
             .unwrap();
         let levers = lib
             .add_split_group(
+                "KTMRM",
                 &src,
                 "levers",
                 Some(Role::Levers),
@@ -678,7 +685,14 @@ mod tests {
             )
             .unwrap();
         let leftover = lib
-            .add_split_group(&src, "part-3", None, &answer(&root.join("j3"), &[("Cube", "MESH")]), file_stamp(&src))
+            .add_split_group(
+                "KTMRM",
+                &src,
+                "part-3",
+                None,
+                &answer(&root.join("j3"), &[("Cube", "MESH")]),
+                file_stamp(&src),
+            )
             .unwrap();
 
         // Same source file, three distinct ids: the plain path-derived id would have
