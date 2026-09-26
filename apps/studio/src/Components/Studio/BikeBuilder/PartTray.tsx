@@ -9,7 +9,7 @@ import {
   SelectValue,
 } from "@frost/shared/Components/ui/select";
 import { useT } from "@/i18n";
-import { ROLES, type LibraryPart } from "../../../api/bikebuild";
+import { ROLES, type LibraryPart, type Role } from "../../../api/bikebuild";
 import { NONE, type useBikeLibrary } from "./useBikeLibrary";
 
 function Thumb({ part }: { part: LibraryPart | undefined }) {
@@ -44,7 +44,7 @@ export default function PartTray({
   onStartDrag: (part: LibraryPart, e: React.PointerEvent) => void;
 }) {
   const t = useT();
-  const { parts, adding, busy, onAdd, add, onRole, onRemove, onSplit } = lib;
+  const { parts, adding, busy, onAdd, add, onRole, onRemove, onSplit, onUseAsBase } = lib;
 
   return (
     <section data-dock="left" className="flex h-full min-w-0 flex-col gap-3 overflow-y-auto p-4">
@@ -92,15 +92,26 @@ export default function PartTray({
                     <AlertTriangle className="mt-px size-3 shrink-0" />
                     {t("bike.multiPartHint")}
                   </p>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="border-amber-500/40 text-amber-600 hover:text-amber-600"
-                    onClick={() => onSplit(p)}
-                    disabled={busy}
-                  >
-                    {t("bike.splitIntoParts")}
-                  </Button>
+                  <p className="pl-[18px] text-amber-600/80">
+                    {t("bike.roleHintsFound")}{" "}
+                    {(Object.entries(p.roleHints) as [Role, number][])
+                      .map(([role, n]) => (n > 1 ? `${t(`bike.role.${role}`)} ×${n}` : t(`bike.role.${role}`)))
+                      .join(" · ")}
+                  </p>
+                  <div className="flex gap-1.5">
+                    <Button size="sm" onClick={() => onUseAsBase(p)} disabled={busy}>
+                      {t("bike.useAsBase")}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="border-amber-500/40 text-amber-600 hover:text-amber-600"
+                      onClick={() => onSplit(p)}
+                      disabled={busy}
+                    >
+                      {t("bike.splitIntoParts")}
+                    </Button>
+                  </div>
                 </div>
               )}
               <Select value={p.role ?? NONE} onValueChange={(v) => onRole(p, v)} disabled={busy}>

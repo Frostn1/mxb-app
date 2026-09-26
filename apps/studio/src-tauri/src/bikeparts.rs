@@ -135,8 +135,21 @@ pub fn guess_role<'a>(file_stem: &str, objects: impl IntoIterator<Item = (&'a st
 /// "steer" and "rsusp" as loudly as a real steer or swingarm mesh would — a well-modelled
 /// single part would flag itself as a whole bike if those were counted in.
 pub fn multi_part_hint<'a>(objects: impl IntoIterator<Item = &'a str>) -> bool {
-    let roles: std::collections::BTreeSet<Role> = objects.into_iter().filter_map(first_hint).collect();
-    roles.len() >= 3
+    role_hints(objects).len() >= 3
+}
+
+/// How many mesh objects hinted at each role — the same per-name hints [`multi_part_hint`]
+/// collapses to a yes/no, kept broken down instead so the tray can say *what* it found
+/// ("chassis · steer · fsusp · rsusp · levers ×4") before the rider decides to split it or
+/// use it whole as a base bike.
+pub fn role_hints<'a>(objects: impl IntoIterator<Item = &'a str>) -> BTreeMap<Role, usize> {
+    let mut hints: BTreeMap<Role, usize> = BTreeMap::new();
+    for name in objects {
+        if let Some(role) = first_hint(name) {
+            *hints.entry(role).or_default() += 1;
+        }
+    }
+    hints
 }
 
 /// An attach point a part brings with it, where it sits in Blender's world (Z up).
@@ -180,6 +193,11 @@ pub struct Part {
     /// rider knows to check it rather than trust it.
     #[serde(default)]
     pub multi_part_hint: bool,
+    /// What [`multi_part_hint`] found, broken down: how many objects hinted at each role.
+    /// Only meaningful alongside `multi_part_hint` — a part that doesn't trip it may still
+    /// carry a hint or two, which isn't worth showing.
+    #[serde(default)]
+    pub role_hints: BTreeMap<Role, usize>,
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -327,8 +345,8 @@ impl Library {
         // Counted in, a single well-modelled chassis part would flag itself as a whole bike.
         let mesh_names: Vec<&str> =
             objects.iter().filter(|o| o["type"] == "MESH").filter_map(|o| o["name"].as_str()).collect();
-        let hint = multi_part_hint(mesh_names.iter().copied());
-        self.finish(id, stem, source, role, role_guessed, hint, answer, stamp, before)
+        let hints = role_hints(mesh_names.iter().copied());
+        self.finish(id, stem, source, role, role_guessed, hints, answer, stamp, before)
     }
 
     /// A group `frost_bike.py`'s "split" op cut a whole bike into — `role` is whatever
@@ -354,10 +372,10 @@ impl Library {
     ) -> anyhow::Result<Part> {
         let id = part_id_tagged(source, Some(tag));
         let before = self.get(&id).ok();
-        // Not run through `multi_part_hint`: a split group is already as split as Blender's
+        // Not run through `role_hints`: a split group is already as split as Blender's
         // grouping could make it, so flagging it again would just repeat the same warning
         // the split was the answer to.
-        self.finish(id, format!("{origin_name} — {tag}"), source, role, false, false, answer, stamp, before)
+        self.finish(id, format!("{origin_name} — {tag}"), source, role, false, BTreeMap::new(), answer, stamp, before)
     }
 
     /// The tail [`add_as`] and [`add_split_group`] share: stage the new thumbnail/GLB in,
@@ -371,7 +389,7 @@ impl Library {
         source: &Path,
         role: Option<Role>,
         role_guessed: bool,
-        multi_part_hint: bool,
+        role_hints: BTreeMap<Role, usize>,
         answer: &serde_json::Value,
         stamp: String,
         before: Option<Part>,
@@ -414,7 +432,8 @@ impl Library {
             has_glb,
             stamp,
             added: before.as_ref().map(|p| p.added).unwrap_or_else(now_secs),
-            multi_part_hint,
+            multi_part_hint: role_hints.len() >= 3,
+            role_hints,
         };
         self.commit(&part, staged)?;
         // A fresh guess can say something else: then the part leaves the slot it no longer fits.
@@ -601,6 +620,16 @@ mod tests {
         assert!(multi_part_hint(["chassis", "steer", "fsusp", "brake_lever"]));
         assert!(!multi_part_hint(["fork_l", "fork_r", "axle"]), "one role, however many objects");
         assert!(!multi_part_hint(["Cube", "Cube.001"]), "no hints at all");
+    }
+
+    #[test]
+    fn role_hints_break_down_what_multi_part_hint_only_flags() {
+        let hints = role_hints(["chassis", "steer", "brake_lever", "clutch_lever"]);
+        assert_eq!(hints.get(&Role::Chassis), Some(&1));
+        assert_eq!(hints.get(&Role::Steer), Some(&1));
+        assert_eq!(hints.get(&Role::Levers), Some(&2), "both levers count towards the one role");
+        assert_eq!(hints.len(), 3);
+        assert!(role_hints(["Cube", "Cube.001"]).is_empty());
     }
 
     #[test]

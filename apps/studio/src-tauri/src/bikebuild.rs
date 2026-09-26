@@ -388,4 +388,50 @@ mod real {
 
         let _ = std::fs::remove_dir_all(&root);
     }
+
+    /// Sean's actual report: he added the full-bike FBX as a plain part (not split) and it
+    /// didn't show in the 3D viewport. This runs exactly that path — the "catalog" op, the
+    /// same one `bike_part_add` calls — headlessly against the real sample, and prints every
+    /// number the preview pipeline depends on: whether the GLB export raised anything, its
+    /// size, and the bounds the camera would frame around. `cargo test
+    /// catalogued_full_bike_gets_a_working_glb -- --ignored --nocapture`.
+    #[test]
+    #[ignore = "needs Blender installed, and a full-bike FBX named by FROST_SPLIT_SAMPLE"]
+    fn catalogued_full_bike_gets_a_working_glb() {
+        let Some(src) = std::env::var_os("FROST_SPLIT_SAMPLE").map(PathBuf::from) else {
+            eprintln!("set FROST_SPLIT_SAMPLE to a full-bike .fbx to run this");
+            return;
+        };
+        assert!(src.is_file(), "{}: not a file", src.display());
+        let exe = PathBuf::from(blender::detect("").expect("a Blender").path);
+        let root = std::env::temp_dir().join(format!("frost-bike-catalog-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let cache = root.join("cache");
+
+        let answer = blender::job(&exe, &cache, "catalog", |w| {
+            json!({
+                "op": "catalog", "part": src, "thumb": w.join("thumb.png"), "thumbSize": 256,
+                "glb": w.join("part.glb"),
+            })
+        })
+        .expect("catalog");
+        eprintln!("catalog answer: {answer}");
+        assert!(answer["thumbError"].is_null(), "thumbnail failed: {}", answer["thumbError"]);
+        let glb = PathBuf::from(answer["glb"].as_str().expect("a glb path"));
+        assert!(glb.is_file(), "no glb written at all");
+        let bytes = std::fs::metadata(&glb).unwrap().len();
+        eprintln!("glb: {} bytes", bytes);
+        assert!(bytes > 1000, "the glb is basically empty ({bytes} bytes)");
+        let bounds = &answer["bounds"];
+        eprintln!("bounds: {bounds}");
+        assert!(!bounds.is_null(), "no bounds — the camera has nothing to frame the preview around");
+        let min = bounds["min"].as_array().unwrap();
+        let max = bounds["max"].as_array().unwrap();
+        let size: f64 = (0..3).map(|i| max[i].as_f64().unwrap() - min[i].as_f64().unwrap()).sum();
+        eprintln!("bounds span (sum of 3 axes): {size:.3} m");
+        assert!(size > 0.05, "the bike's bounds are near zero — nothing for the camera to frame");
+        assert!(size < 50.0, "the bike's bounds are enormous ({size:.1} m) — a scale or unit problem");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
 }
