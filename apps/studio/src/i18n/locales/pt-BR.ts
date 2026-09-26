@@ -104,6 +104,7 @@ export const ptBR: Translation = {
   "bike.placeholderTemplate": "O exemplo do Studio",
   "bike.startFromBike": "Começar a partir de uma moto instalada",
   "bike.startFromBikeEmpty": "Nenhuma moto instalada encontrada na sua pasta de mods ainda.",
+  "bike.startFromBikeScopeNote": "Só mods empacotados, por enquanto. Uma moto instalada como pasta simples ainda não aparece aqui — use \"Escolher uma moto…\" para isso.",
   "bike.bikeLocked": "Bloqueada — não pode ser lida sem descriptografá-la",
   "bike.chooseTemplate": "Escolher uma moto…",
   "bike.usePlaceholder": "Usar o exemplo",

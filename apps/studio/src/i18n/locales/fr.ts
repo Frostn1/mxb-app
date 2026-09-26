@@ -104,6 +104,7 @@ export const fr: Translation = {
   "bike.placeholderTemplate": "L'exemple de Studio",
   "bike.startFromBike": "Partir d'une moto installée",
   "bike.startFromBikeEmpty": "Aucune moto installée trouvée dans ton dossier de mods pour l'instant.",
+  "bike.startFromBikeScopeNote": "Seulement les mods empaquetés, pour l'instant. Une moto installée comme simple dossier n'apparaît pas encore ici — utilise « Choisir une moto… » pour ça.",
   "bike.bikeLocked": "Verrouillée — impossible à lire sans la déchiffrer",
   "bike.chooseTemplate": "Choisir une moto…",
   "bike.usePlaceholder": "Utiliser l'exemple",

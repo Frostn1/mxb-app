@@ -19,6 +19,11 @@ import { useT } from "@/i18n";
  * OEM/stock bikes aren't in this list yet: they ship inside the game's own locked archive,
  * and reading even their names needs a bit of the same care as a locked mod. Left for a
  * follow-up rather than guessed at here.
+ *
+ * Also only as complete as `scanLibrary`'s bike scan is: it finds a mod packed as a `.pkz`
+ * or a secured file, but not one installed as a plain, unpacked folder (`scan_bikes` in
+ * `crates/core/src/library.rs` only walks for those two file shapes) — "Choose a bike…"
+ * next to this still reaches a folder install by hand.
  */
 export default function BikePicker({
   onPick,
@@ -74,6 +79,9 @@ export default function BikePicker({
             ))}
           </ul>
         )}
+        <p className="border-t border-border px-2 pt-1.5 text-[11px] text-faint">
+          {t("bike.startFromBikeScopeNote")}
+        </p>
       </PopoverContent>
     </Popover>
   );

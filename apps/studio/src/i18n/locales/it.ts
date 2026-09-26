@@ -104,6 +104,7 @@ export const it: Translation = {
   "bike.placeholderTemplate": "Quella di prova di Studio",
   "bike.startFromBike": "Parti da una moto installata",
   "bike.startFromBikeEmpty": "Nessuna moto installata trovata nella cartella mods, per ora.",
+  "bike.startFromBikeScopeNote": "Solo mod pacchettizzate, per ora. Una moto installata come semplice cartella non è ancora qui — usa \"Scegli una moto…\" per quella.",
   "bike.bikeLocked": "Bloccata — non può essere letta senza decifrarla",
   "bike.chooseTemplate": "Scegli una moto…",
   "bike.usePlaceholder": "Usa quella di prova",

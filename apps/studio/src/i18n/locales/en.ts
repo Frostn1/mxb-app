@@ -99,6 +99,7 @@ export const en = {
   "bike.placeholderTemplate": "Studio's placeholder",
   "bike.startFromBike": "Start from an installed bike",
   "bike.startFromBikeEmpty": "No installed bikes found in your mods folder yet.",
+  "bike.startFromBikeScopeNote": "Packaged mods only, for now. A bike installed as a plain folder isn't listed yet — use \"Choose a bike…\" for that.",
   "bike.bikeLocked": "Locked — can't be read without decrypting it",
   "bike.chooseTemplate": "Choose a bike…",
   "bike.usePlaceholder": "Use the placeholder",

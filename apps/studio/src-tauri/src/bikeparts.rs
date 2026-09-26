@@ -129,6 +129,11 @@ pub fn guess_role<'a>(file_stem: &str, objects: impl IntoIterator<Item = (&'a st
 /// file, not a single part, whatever role the file name or the vote above settled on. Kept
 /// separate from [`guess_role`] because a rider who deliberately names a whole-bike proxy
 /// "chassis" should still get that role; this only flags the file for a second look.
+///
+/// Callers must pass mesh names only, not empties: a single ordinary chassis brings attach
+/// points named for what they snap to (`steer_axis`, `swingarm_pivot`…), which hint at
+/// "steer" and "rsusp" as loudly as a real steer or swingarm mesh would — a well-modelled
+/// single part would flag itself as a whole bike if those were counted in.
 pub fn multi_part_hint<'a>(objects: impl IntoIterator<Item = &'a str>) -> bool {
     let roles: std::collections::BTreeSet<Role> = objects.into_iter().filter_map(first_hint).collect();
     roles.len() >= 3
@@ -297,10 +302,18 @@ impl Library {
         let before = self.get(&id).ok();
 
         let objects = answer["objects"].as_array().cloned().unwrap_or_default();
-        let names: Vec<&str> = objects.iter().filter_map(|o| o["name"].as_str()).collect();
         let weighted: Vec<(&str, u64)> = objects
             .iter()
             .filter_map(|o| Some((o["name"].as_str()?, o["tris"].as_u64().unwrap_or(0))))
+            .collect();
+        // Mesh names only, for the whole-bike check below: an ordinary chassis brings attach
+        // empties named for what they snap to (`steer_axis`, `swingarm_pivot`…), and those
+        // hint at "steer" and "rsusp" just as loudly as a real steer or swingarm mesh would.
+        // Counted in, a single well-modelled chassis part would flag itself as a whole bike.
+        let mesh_names: Vec<&str> = objects
+            .iter()
+            .filter(|o| o["type"] == "MESH")
+            .filter_map(|o| o["name"].as_str())
             .collect();
         let stem = source.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
         let (role, role_guessed) = match &before {
@@ -343,7 +356,7 @@ impl Library {
             has_glb,
             stamp,
             added: before.as_ref().map(|p| p.added).unwrap_or_else(now_secs),
-            multi_part_hint: multi_part_hint(names.iter().copied()),
+            multi_part_hint: multi_part_hint(mesh_names.iter().copied()),
         };
         self.commit(&part, staged)?;
         // A fresh guess can say something else: then the part leaves the slot it no longer fits.
@@ -569,6 +582,22 @@ mod tests {
             "tris": 1200,
             "thumb": work.join("t.png"),
         })
+    }
+
+    #[test]
+    fn an_ordinary_chassis_does_not_flag_itself_as_a_whole_bike() {
+        // The chassis' own attach empties are named for what they snap to — "steer_axis",
+        // "swingarm_pivot" — which hint at "steer" and "rsusp" just as loudly as a real steer
+        // or swingarm mesh would. `multi_part_hint` must look at the mesh only, or a single,
+        // correctly modelled chassis part flags itself as a whole bike on its own empties.
+        let (root, lib) = tmp_lib("chassis-empties");
+        let src = root.join("chassis.fbx");
+        std::fs::write(&src, b"fbx").unwrap();
+        let objs = [("chassis", "MESH"), ("steer_axis", "EMPTY"), ("swingarm_pivot", "EMPTY")];
+        let p = lib.add(&src, &answer(&root.join("job"), &objs), file_stamp(&src)).unwrap();
+        assert_eq!(p.role, Some(Role::Chassis));
+        assert!(!p.multi_part_hint);
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

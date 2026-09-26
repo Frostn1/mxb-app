@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { FolderOpen, Hammer, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@frost/shared/Components/ui/button";
@@ -16,9 +16,15 @@ export default function BuildPanel({ view, placedCount }: { view: AssemblyView |
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   const [report, setReport] = useState<BuildReport | null>(null);
-
+  /** What we last set the field to from the backend, so a rider typing a name doesn't have
+   *  it overwritten every time *anything* elsewhere in the assembly changes — adding a part
+   *  or nudging one also bumps `version` and re-reads the assembly, and the name used to
+   *  reset to the saved one on every one of those, not just the first load. */
+  const lastSynced = useRef<string | null>(null);
   useEffect(() => {
-    if (view) setName(view.name);
+    if (!view) return;
+    setName((current) => (lastSynced.current === null || current === lastSynced.current ? view.name : current));
+    lastSynced.current = view.name;
   }, [view]);
 
   async function onBuild() {

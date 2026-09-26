@@ -87,6 +87,7 @@ export const sv: Translation = {
   "bike.placeholderTemplate": "Studios exempel",
   "bike.startFromBike": "Börja från en installerad hoj",
   "bike.startFromBikeEmpty": "Inga installerade hojar hittades i din mods-mapp än.",
+  "bike.startFromBikeScopeNote": "Bara paketerade mods, än så länge. En hoj installerad som en vanlig mapp listas inte här än — använd \"Välj en hoj…\" för det.",
   "bike.bikeLocked": "Låst — kan inte läsas utan att dekryptera den",
   "bike.chooseTemplate": "Välj en hoj…",
   "bike.usePlaceholder": "Använd exemplet",
