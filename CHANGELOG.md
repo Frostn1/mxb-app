@@ -101,6 +101,10 @@
   It still installs and updates as "MXB Coach", so shortcuts, updates and Uninstall keep working.
 
 ### Fixed
+- Joining a server directly no longer brings up Steam's "additional command line options"
+  prompt behind its launch splash. A Steam copy now starts through `steam.exe -applaunch`,
+  found via the registry (falling back to the default install path), instead of a
+  `steam://rungameid` URL or running the game's own exe.
 - The Downloads history can no longer be wiped by a save that's cut short (a crash, a full
   disk, antivirus holding the file). It's written whole to a temp file and swapped in, and a
   save that fails is noted in the log.

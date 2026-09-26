@@ -1572,49 +1572,95 @@ fn steam_owned(dir: &std::path::Path) -> bool {
 /// the Steam route away from everybody.
 #[cfg(windows)]
 fn steam_thinks_running(appid: &str) -> Option<bool> {
-    use std::os::raw::c_void;
-
-    const HKEY_CURRENT_USER: isize = -2147483647; // 0x80000001
-    const RRF_RT_REG_DWORD: u32 = 0x0000_0010;
-
-    #[link(name = "advapi32")]
-    unsafe extern "system" {
-        fn RegGetValueW(
-            hkey: isize,
-            subkey: *const u16,
-            value: *const u16,
-            flags: u32,
-            typ: *mut u32,
-            data: *mut c_void,
-            data_len: *mut u32,
-        ) -> i32;
-    }
-
-    fn dword(subkey: &str, value: &str) -> Option<u32> {
-        let subkey = wide(subkey);
-        let value = wide(value);
-        let mut out: u32 = 0;
-        let mut len = std::mem::size_of::<u32>() as u32;
-        // SAFETY: a read-only registry query into one stack u32, length passed in bytes.
-        let rc = unsafe {
-            RegGetValueW(
-                HKEY_CURRENT_USER,
-                subkey.as_ptr(),
-                value.as_ptr(),
-                RRF_RT_REG_DWORD,
-                std::ptr::null_mut(),
-                &mut out as *mut u32 as *mut c_void,
-                &mut len,
-            )
-        };
-        (rc == 0).then_some(out)
-    }
-
-    if let Some(running) = dword(&format!("Software\\Valve\\Steam\\Apps\\{appid}"), "Running") {
+    if let Some(running) = hkcu_dword(&format!("Software\\Valve\\Steam\\Apps\\{appid}"), "Running") {
         return Some(running != 0);
     }
     let wanted: u32 = appid.parse().ok()?;
-    dword("Software\\Valve\\Steam", "RunningAppID").map(|id| id == wanted)
+    hkcu_dword("Software\\Valve\\Steam", "RunningAppID").map(|id| id == wanted)
+}
+
+#[cfg(windows)]
+const HKEY_CURRENT_USER: isize = -2147483647; // 0x80000001
+
+#[cfg(windows)]
+#[link(name = "advapi32")]
+unsafe extern "system" {
+    fn RegGetValueW(
+        hkey: isize,
+        subkey: *const u16,
+        value: *const u16,
+        flags: u32,
+        typ: *mut u32,
+        data: *mut std::os::raw::c_void,
+        data_len: *mut u32,
+    ) -> i32;
+}
+
+/// A `REG_DWORD` under `HKCU`, or `None` when it's missing or Windows won't say.
+#[cfg(windows)]
+fn hkcu_dword(subkey: &str, value: &str) -> Option<u32> {
+    const RRF_RT_REG_DWORD: u32 = 0x0000_0010;
+    let subkey = wide(subkey);
+    let value = wide(value);
+    let mut out: u32 = 0;
+    let mut len = std::mem::size_of::<u32>() as u32;
+    // SAFETY: a read-only registry query into one stack u32, length passed in bytes.
+    let rc = unsafe {
+        RegGetValueW(
+            HKEY_CURRENT_USER,
+            subkey.as_ptr(),
+            value.as_ptr(),
+            RRF_RT_REG_DWORD,
+            std::ptr::null_mut(),
+            &mut out as *mut u32 as *mut std::os::raw::c_void,
+            &mut len,
+        )
+    };
+    (rc == 0).then_some(out)
+}
+
+/// A `REG_SZ` under `HKCU`, or `None` when it's missing, empty or Windows won't say.
+#[cfg(windows)]
+fn hkcu_string(subkey: &str, value: &str) -> Option<String> {
+    const RRF_RT_REG_SZ: u32 = 0x0000_0002;
+    let subkey = wide(subkey);
+    let value = wide(value);
+    let mut len: u32 = 0;
+    // SAFETY: a size query — no buffer, Windows only writes the byte count to `len`.
+    let rc = unsafe {
+        RegGetValueW(
+            HKEY_CURRENT_USER,
+            subkey.as_ptr(),
+            value.as_ptr(),
+            RRF_RT_REG_SZ,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            &mut len,
+        )
+    };
+    if rc != 0 || len == 0 {
+        return None;
+    }
+    let mut buf = vec![0u16; (len as usize).div_ceil(2)];
+    let mut len = (buf.len() * 2) as u32;
+    // SAFETY: `buf` holds `len` bytes; RRF_RT_REG_SZ makes Windows NUL-terminate what it writes.
+    let rc = unsafe {
+        RegGetValueW(
+            HKEY_CURRENT_USER,
+            subkey.as_ptr(),
+            value.as_ptr(),
+            RRF_RT_REG_SZ,
+            std::ptr::null_mut(),
+            buf.as_mut_ptr() as *mut std::os::raw::c_void,
+            &mut len,
+        )
+    };
+    if rc != 0 {
+        return None;
+    }
+    let end = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
+    let s = String::from_utf16(&buf[..end]).ok()?;
+    (!s.trim().is_empty()).then_some(s)
 }
 
 /// Watch for the game after a launch we handed to somebody else, and say so if it never
@@ -1650,6 +1696,9 @@ fn watch_for_start(via: &'static str) {
 enum SteamRoute {
     /// Hand Steam the `steam://` URL and let it start its own game.
     Url,
+    /// Run `steam.exe -applaunch <appid> <args>`: Steam starts its own game with our
+    /// arguments and, unlike the URL, doesn't ask permission for them.
+    AppLaunch,
     /// Start the exe ourselves. Carries the line that says why, for the log.
     Exe(&'static str),
 }
@@ -1663,18 +1712,17 @@ enum SteamRoute {
 /// Arguments are the one a rider actually meets. A `rungameid/…//args` URL makes Steam ask
 /// permission for the extra command line, and that dialog opens *behind* Steam's own
 /// "Launching …" splash: the splash sits there forever, the game never starts, and nothing
-/// on screen says why. The game reads the same argv from us directly, so a launch carrying
-/// arguments — joining a server — goes straight to the exe.
+/// on screen says why. Running the exe ourselves doesn't escape it either — the build's
+/// Steam layer hands itself back to the client, arguments and all, and the same prompt
+/// comes up. `steam.exe -applaunch` is the one door that takes arguments without asking,
+/// so a launch carrying them — joining a server — goes through that.
 ///
 /// The other is Steam holding a session for an app with no process behind it, where a
 /// launch URL is simply ignored.
 #[cfg_attr(not(windows), allow(dead_code))]
 fn steam_route(address: Option<&str>, steam_thinks_running: Option<bool>) -> SteamRoute {
     if address.is_some() {
-        return SteamRoute::Exe(
-            "joining a server needs command-line arguments, and a Steam launch URL that \
-             carries them puts Steam's approval dialog behind its own launch splash",
-        );
+        return SteamRoute::AppLaunch;
     }
     if steam_thinks_running == Some(true) {
         return SteamRoute::Exe(
@@ -1698,6 +1746,87 @@ fn steam_url(appid: &str, address: Option<&str>) -> String {
         Some(addr) => format!("steam://rungameid/{appid}//{}", connect_args(addr).join("%20")),
         None => format!("steam://rungameid/{appid}"),
     }
+}
+
+/// Where `steam.exe` might be, best guess first: the client's own `SteamExe`, then
+/// `SteamPath` with the exe appended, then the default install. Both registry values are
+/// written by the client with forward slashes, which Windows takes as they are.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn steam_exe_candidates(
+    steam_exe: Option<String>,
+    steam_path: Option<String>,
+    program_files_x86: Option<String>,
+) -> Vec<std::path::PathBuf> {
+    let mut out = Vec::new();
+    if let Some(exe) = steam_exe {
+        out.push(std::path::PathBuf::from(exe.trim()));
+    }
+    if let Some(dir) = steam_path {
+        out.push(std::path::PathBuf::from(dir.trim()).join("steam.exe"));
+    }
+    let pf = program_files_x86.unwrap_or_else(|| "C:\\Program Files (x86)".to_string());
+    out.push(std::path::PathBuf::from(pf).join("Steam").join("steam.exe"));
+    out
+}
+
+/// The Steam client's exe, or `None` when there's no sign of one.
+#[cfg(windows)]
+fn find_steam_exe() -> Option<std::path::PathBuf> {
+    const KEY: &str = "Software\\Valve\\Steam";
+    steam_exe_candidates(
+        hkcu_string(KEY, "SteamExe"),
+        hkcu_string(KEY, "SteamPath"),
+        std::env::var("ProgramFiles(x86)").ok(),
+    )
+    .into_iter()
+    .find(|p| {
+        p.is_absolute()
+            && p.file_name().is_some_and(|n| n.eq_ignore_ascii_case("steam.exe"))
+            && p.is_file()
+    })
+}
+
+/// The argv for `steam.exe` that starts `appid` connected to `address`.
+///
+/// Checked again here rather than trusted: this goes on Steam's command line, and an appid
+/// that isn't digits or an address that doesn't survive [`parse_server_address`] unchanged
+/// is one that could carry an argument of its own.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn applaunch_args(appid: &str, address: &str) -> anyhow::Result<Vec<String>> {
+    if appid.is_empty() || !appid.chars().all(|c| c.is_ascii_digit()) {
+        anyhow::bail!("\"{appid}\" isn't a Steam app id");
+    }
+    if parse_server_address(address)? != address {
+        anyhow::bail!("\"{address}\" isn't a normalized server address");
+    }
+    let mut args = vec!["-applaunch".to_string(), appid.to_string()];
+    args.extend(connect_args(address));
+    Ok(args)
+}
+
+/// Ask the Steam client to start `appid` into `address` with `-applaunch`.
+///
+/// Detached and windowless: Steam hands the request to the client that's already up (or
+/// starts one) and we have no reason to wait on it. `Command` quotes each argv entry for
+/// us, and [`applaunch_args`] has already made sure none of them can become two.
+#[cfg(windows)]
+fn steam_applaunch(appid: &str, address: &str) -> anyhow::Result<()> {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+
+    let args = applaunch_args(appid, address)?;
+    let steam = find_steam_exe().ok_or_else(|| anyhow::anyhow!("couldn't find steam.exe"))?;
+    log::info!("asking Steam to start the game: {} {}", steam.display(), args.join(" "));
+    std::process::Command::new(&steam)
+        .args(&args)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .creation_flags(CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP)
+        .spawn()
+        .map_err(|e| anyhow::anyhow!("couldn't run {}: {e}", steam.display()))?;
+    Ok(())
 }
 
 #[cfg(windows)]
@@ -1979,6 +2108,19 @@ fn launch_with(cfg: &AppConfig, address: Option<&str>) -> anyhow::Result<LaunchO
                     "starting {} directly rather than through Steam: {why}",
                     cfg.game().exe
                 ),
+                SteamRoute::AppLaunch => {
+                    // `steam_route` only picks this with an address in hand.
+                    let addr = address.unwrap_or_default();
+                    match steam_applaunch(appid, addr) {
+                        Ok(()) => {
+                            watch_for_start("Steam");
+                            return Ok(LaunchOutcome::Launched);
+                        }
+                        // No Steam client to ask is no reason to leave Join dead: the exe
+                        // still takes the same arguments.
+                        Err(e) => log::warn!("{e:#}; running {} directly instead", exe.display()),
+                    }
+                }
                 SteamRoute::Url => {
                     let url = steam_url(appid, address);
                     match shell_open(&url) {
@@ -2136,13 +2278,56 @@ mod tests {
     }
 
     /// The rider's report: Steam's "Launching MX Bikes" splash sat there forever with the
-    /// approval dialog for the extra command line hidden underneath it.
+    /// approval dialog for the extra command line hidden underneath it — and running the exe
+    /// ourselves only brought the same prompt back through the build's Steam layer.
     #[test]
-    fn joining_a_server_runs_the_exe_so_steam_never_asks_about_the_arguments() {
-        assert!(matches!(
-            steam_route(Some("203.0.113.10:54210"), Some(false)),
-            SteamRoute::Exe(_)
-        ));
+    fn joining_a_server_uses_applaunch_so_steam_never_asks_about_the_arguments() {
+        assert_eq!(steam_route(Some("203.0.113.10:54210"), Some(false)), SteamRoute::AppLaunch);
+        assert_eq!(steam_route(Some("203.0.113.10:54210"), None), SteamRoute::AppLaunch);
+    }
+
+    #[test]
+    fn applaunch_args_start_the_app_and_connect_it() {
+        assert_eq!(
+            applaunch_args("655500", "203.0.113.10:54210").unwrap(),
+            ["-applaunch", "655500", "-directconnect", "203.0.113.10:54210"]
+        );
+    }
+
+    #[test]
+    fn applaunch_args_refuse_anything_that_could_become_a_second_argument() {
+        for appid in ["", "655500 -x", "-1", "65a"] {
+            assert!(applaunch_args(appid, "203.0.113.10:54210").is_err(), "{appid:?}");
+        }
+        for addr in [
+            "203.0.113.10:54210 -log",
+            "-directconnect",
+            "203.0.113.10",
+            " 203.0.113.10:54210",
+            "203.0.113.10:54210\"",
+        ] {
+            assert!(applaunch_args("655500", addr).is_err(), "{addr:?}");
+        }
+    }
+
+    #[test]
+    fn steam_exe_is_looked_for_in_the_registry_first_then_the_default_install() {
+        assert_eq!(
+            steam_exe_candidates(
+                Some("c:/program files (x86)/steam/steam.exe".into()),
+                Some("D:/Steam".into()),
+                Some("C:\\PF86".into()),
+            ),
+            [
+                std::path::PathBuf::from("c:/program files (x86)/steam/steam.exe"),
+                std::path::PathBuf::from("D:/Steam").join("steam.exe"),
+                std::path::PathBuf::from("C:\\PF86").join("Steam").join("steam.exe"),
+            ]
+        );
+        assert_eq!(
+            steam_exe_candidates(None, None, None),
+            [std::path::PathBuf::from("C:\\Program Files (x86)").join("Steam").join("steam.exe")]
+        );
     }
 
     #[test]
