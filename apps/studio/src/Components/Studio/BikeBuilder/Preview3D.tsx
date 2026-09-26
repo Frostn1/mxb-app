@@ -43,17 +43,20 @@ interface Props {
   onSelect: (role: Role) => void;
   /** Bumped whenever the library changes, so refreshed parts load their new models. */
   version: number;
-  /** A mount dot was clicked and nothing under it is a placed part — "what goes here". */
-  onMountClick?: (mount: string) => void;
-  /** A part card was dropped on the viewport, by the id it was dragged with. */
-  onDropPart?: (partId: string) => void;
+  /** An open mount dot was clicked — "what goes here" — as every mount at that same point
+   *  (the placeholder's `steer_axis` and `fork_clamp` sit on top of each other, since the
+   *  steer hasn't been placed to move `fork_clamp` off it yet), so the popover can offer
+   *  every role one of them takes rather than only whichever the raycast happened to hit. */
+  onMountClick?: (mounts: string[]) => void;
 }
 
 /**
  * The bike as it's put together: each slotted part's preview model at its offset, and the
  * anchors as small dots — themselves clickable, so an empty mount is something to click on,
  * not just a thing to look at. Plain three.js, drawn only when something changes. Click a
- * part to pick it for nudging; drop a part from the tray to fill its slot.
+ * part to pick it for nudging, or an open mount to say what should fill it. A part dropped
+ * from the tray lands on this same element from outside — `usePartDrag` checks for it by a
+ * DOM marker, not through this component.
  */
 export default function Preview3D({
   placed,
@@ -62,7 +65,6 @@ export default function Preview3D({
   onSelect,
   version,
   onMountClick,
-  onDropPart,
 }: Props) {
   const t = useT();
   const host = useRef<HTMLDivElement>(null);
@@ -86,8 +88,6 @@ export default function Preview3D({
   select.current = onSelect;
   const mountClick = useRef(onMountClick);
   mountClick.current = onMountClick;
-  const dropPart = useRef(onDropPart);
-  dropPart.current = onDropPart;
 
   // The scene, once.
   useEffect(() => {
@@ -130,9 +130,10 @@ export default function Preview3D({
     ro.observe(el);
     size();
 
-    // A click (not a drag) picks the part under it, or — if nothing's there — a mount dot,
-    // for "what goes here". Parts win the hit test: a mount that already has its part sitting
-    // on it should still select the part, not ask what to put there.
+    // A click (not a drag) picks a mount dot, or — if it missed every dot — the part under
+    // it. Dots go first: they're drawn with `depthTest: false` so they always show through
+    // the bike's own geometry, and a raycast that let the (honestly depth-tested) mesh win
+    // would pick the part sitting behind a dot the rider can plainly see and clicked on.
     let down: { x: number; y: number } | null = null;
     const onDown = (e: PointerEvent) => (down = { x: e.clientX, y: e.clientY });
     const onUp = (e: PointerEvent) => {
@@ -143,31 +144,29 @@ export default function Preview3D({
         new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1),
         camera,
       );
+      // Only the open (nothing-mounted-yet) dots pre-empt the part hit test — a filled
+      // mount's small, faint marker is a hint, not a click target, and shouldn't steal a
+      // click meant for the part sitting right there.
+      const dotHits = ray.intersectObjects(dots.children, false).filter((h) => h.object.userData.open);
+      if (dotHits.length) {
+        // More than one mount can sit at the same point — the placeholder's `steer_axis`
+        // and `fork_clamp` do, until the steer is placed and moves `fork_clamp` off it —
+        // so every dot within a hair of the nearest is offered, not just whichever the
+        // raycast happened to return first.
+        const nearest = dotHits[0].distance;
+        const mounts = dotHits
+          .filter((h) => h.distance <= nearest + 0.02)
+          .map((h) => h.object.userData.mount as string);
+        mountClick.current?.(mounts);
+        return;
+      }
       const hit = ray.intersectObjects(bike.children, true)[0];
       let o: THREE.Object3D | null = hit?.object ?? null;
       while (o && !o.userData.role) o = o.parent;
-      if (o) {
-        select.current(o.userData.role as Role);
-        return;
-      }
-      const dotHit = ray.intersectObjects(dots.children, false)[0];
-      if (dotHit?.object.userData.mount) mountClick.current?.(dotHit.object.userData.mount as string);
+      if (o) select.current(o.userData.role as Role);
     };
     renderer.domElement.addEventListener("pointerdown", onDown);
     renderer.domElement.addEventListener("pointerup", onUp);
-
-    // A part card dropped from the tray fills its own slot — the backend already knows
-    // exactly where a role's part goes (its mount, its own attach empty or its centre), so
-    // the drop doesn't need to hit-test a particular mount; landing anywhere on the viewport
-    // is "put this where it goes".
-    const onDragOver = (e: DragEvent) => e.preventDefault();
-    const onDrop = (e: DragEvent) => {
-      e.preventDefault();
-      const id = e.dataTransfer?.getData("text/frost-bike-part");
-      if (id) dropPart.current?.(id);
-    };
-    renderer.domElement.addEventListener("dragover", onDragOver);
-    renderer.domElement.addEventListener("drop", onDrop);
 
     three.current = { renderer, scene, camera, controls, bike, dots, draw };
     return () => {
@@ -253,6 +252,7 @@ export default function Preview3D({
       const dot = new THREE.Mesh(open ? openGeo : filledGeo, open ? openMat : filledMat);
       dot.renderOrder = 10;
       dot.userData.mount = mount;
+      dot.userData.open = open;
       const [x, y, z] = toThree(p);
       dot.position.set(x, y, z);
       t.dots.add(dot);

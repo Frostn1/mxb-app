@@ -35,9 +35,13 @@ function Thumb({ part }: { part: LibraryPart | undefined }) {
 export default function PartTray({
   ready,
   lib,
+  onStartDrag,
 }: {
   ready: boolean;
   lib: ReturnType<typeof useBikeLibrary>;
+  /** Picked up the thumbnail as a drag handle — see `usePartDrag` for why this is a plain
+   *  pointer sequence and not HTML5 drag-and-drop. */
+  onStartDrag: (part: LibraryPart, e: React.PointerEvent) => void;
 }) {
   const t = useT();
   const { parts, adding, busy, onAdd, add, onRole, onRemove } = lib;
@@ -58,22 +62,13 @@ export default function PartTray({
       ) : (
         <ul className="flex flex-col gap-2">
           {parts.map((p) => (
-            <li
-              key={p.id}
-              draggable={!!p.role}
-              onDragStart={(e) => {
-                if (!p.role) return;
-                e.dataTransfer.setData("text/frost-bike-part", p.id);
-                e.dataTransfer.effectAllowed = "copy";
-              }}
-              title={p.role ? t("bike.dragToPlace") : undefined}
-              className={cn(
-                "flex flex-col gap-1.5 border border-border bg-background p-2",
-                p.role && "cursor-grab active:cursor-grabbing",
-              )}
-            >
+            <li key={p.id} className="flex flex-col gap-1.5 border border-border bg-background p-2">
               <div className="flex gap-2">
-                <div className="w-16 shrink-0">
+                <div
+                  className={cn("w-16 shrink-0", p.role && "cursor-grab active:cursor-grabbing")}
+                  title={p.role ? t("bike.dragToPlace") : undefined}
+                  onPointerDown={(e) => p.role && onStartDrag(p, e)}
+                >
                   <Thumb part={p} />
                 </div>
                 <div className="flex min-w-0 flex-1 flex-col gap-1">

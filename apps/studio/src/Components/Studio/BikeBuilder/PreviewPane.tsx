@@ -98,17 +98,11 @@ export default function PreviewPane({
     }
   }
 
-  /** A tray part dropped on the viewport: it has its own role already (guessed or chosen),
-   *  so the drop just fills that role's slot — the backend already knows exactly where a
-   *  role's part goes. */
-  function onDropPart(partId: string) {
-    const part = (lib.parts ?? []).find((p) => p.id === partId);
-    if (part?.role) void lib.onSlot(part.role, partId);
-  }
-
-  function onMountClick(mount: string) {
-    const roles = MOUNT_ROLES[mount];
-    if (roles) setMountPick(roles);
+  function onMountClick(mounts: string[]) {
+    // Every role any of the clicked mounts takes, deduplicated — more than one mount can
+    // share a point (see `Preview3D`'s note on `steer_axis`/`fork_clamp`).
+    const roles = [...new Set(mounts.flatMap((m) => MOUNT_ROLES[m] ?? []))];
+    if (roles.length) setMountPick(roles);
   }
 
   const placed = view?.assembly.placed ?? [];
@@ -151,14 +145,16 @@ export default function PreviewPane({
         </p>
       )}
 
-      <div className="relative min-h-0 flex-1">
+      {/* The marker `usePartDrag` looks for on drop — the pointer-based drag from the tray
+          checks `elementFromPoint` against this rather than a raycast onto a particular
+          mount, since a part's role already says exactly where it goes. */}
+      <div data-bike-viewport className="relative min-h-0 flex-1">
         <Preview3D
           placed={placed}
           anchors={view?.assembly.anchors ?? {}}
           selected={selected}
           onSelect={setSelected}
           onMountClick={onMountClick}
-          onDropPart={onDropPart}
           version={version}
         />
         {placed.length === 0 && (

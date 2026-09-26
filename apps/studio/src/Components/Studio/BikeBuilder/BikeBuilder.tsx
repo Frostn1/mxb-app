@@ -1,4 +1,5 @@
 import { useCallback, useState } from "react";
+import { Box } from "lucide-react";
 import { Button } from "@frost/shared/Components/ui/button";
 import { useT } from "@/i18n";
 import BlenderBar from "./BlenderBar";
@@ -8,6 +9,7 @@ import PreviewPane, { useAssemblyView } from "./PreviewPane";
 import BuildPanel from "./BuildPanel";
 import PartMaker from "./PartMaker";
 import { useBikeLibrary } from "./useBikeLibrary";
+import { usePartDrag } from "./usePartDrag";
 
 /**
  * Bike builder: put a bike together from parts, without having to be good at Blender.
@@ -30,10 +32,22 @@ export default function BikeBuilder() {
   const changed = useCallback(() => setVersion((v) => v + 1), []);
   const lib = useBikeLibrary(version, changed);
   const [view, setView] = useAssemblyView(version);
+  const { dragging, startDrag } = usePartDrag((part) => {
+    if (part.role) void lib.onSlot(part.role, part.id);
+  });
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    <div className="relative flex h-full min-h-0 flex-col">
       <BlenderBar onReadyChange={setReady} />
+      {dragging && (
+        <div
+          className="pointer-events-none fixed z-50 flex items-center gap-1.5 border border-primary bg-popover px-2 py-1 text-[12px] shadow-lg"
+          style={{ left: dragging.x + 12, top: dragging.y + 12 }}
+        >
+          <Box className="size-3.5 text-primary" />
+          {dragging.part.name}
+        </div>
+      )}
 
       <div className="flex items-center gap-1 border-b border-border px-4 py-2">
         {(["assemble", "maker"] as const).map((m) => (
@@ -46,7 +60,7 @@ export default function BikeBuilder() {
       {mode === "assemble" ? (
         <div className="flex min-h-0 flex-1 flex-col">
           <div className="grid min-h-0 flex-1 grid-cols-[18rem_1fr_auto] divide-x divide-border overflow-hidden">
-            <PartTray ready={ready} lib={lib} />
+            <PartTray ready={ready} lib={lib} onStartDrag={startDrag} />
             <PreviewPane version={version} onChanged={changed} view={view} setView={setView} lib={lib} />
             <PartSlots lib={lib} />
           </div>
