@@ -547,6 +547,7 @@ mod tests {
             added: 0,
             multi_part_hint: false,
             role_hints: Default::default(),
+            missing_textures: Vec::new(),
         }
     }
 

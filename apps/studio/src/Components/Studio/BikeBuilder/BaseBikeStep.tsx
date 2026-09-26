@@ -3,7 +3,7 @@
 // "bike.importFullBikeFile": "Import a full-bike file…"
 
 import { useEffect, useState } from "react";
-import { AlertTriangle, FolderOpen, Grid2x2, Loader2, Lock } from "lucide-react";
+import { AlertTriangle, FolderOpen, Grid2x2, Loader2, Lock, Scissors } from "lucide-react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { Button } from "@frost/shared/Components/ui/button";
 import { Popover, PopoverTrigger, PopoverContent } from "@frost/shared/Components/ui/popover";
@@ -19,14 +19,21 @@ import { bikeTemplateReadable, PART_EXTENSIONS } from "../../../api/bikebuild";
  */
 export default function BaseBikeStep({
   baseName,
+  baseChosen,
   problem,
   onPick,
   onImportFile,
   onPlaceholder,
   busy,
   blenderReady,
+  onSplitBase,
+  splitBusy,
 }: {
   baseName: string | null;
+  /** Whether the rider has actually picked a base yet — distinct from `baseName` being
+   *  non-null, since the backend always has *some* template loaded (a fresh build defaults
+   *  to the placeholder on its own). Drives the empty-state hint. */
+  baseChosen: boolean;
   /** Why the chosen template couldn't be read, when the placeholder had to stand in for it. */
   problem: string | null;
   onPick: (path: string) => void;
@@ -39,6 +46,15 @@ export default function BaseBikeStep({
    *  bike doesn't (it's a plain header check, `bikeTemplateReadable`), so only those two wait
    *  on it — the picker itself works before Blender's even found. */
   blenderReady: boolean;
+  /** Split the current base bike part into its parts, right here — not just in the tray, and
+   *  not only when the auto-detected `multiPartHint` happens to fire (a real-world file's
+   *  object names don't always trip that heuristic). Undefined when there's no base part to
+   *  split (nothing chosen yet, or the placeholder, which isn't one file to cut up). */
+  onSplitBase: (() => void) | undefined;
+  /** The split this button starts is a library change, not one of this step's own picks — so
+   *  it needs the library's own busy state too, or a second click before the first split has
+   *  replaced the part queues a duplicate split of a part that's already gone. */
+  splitBusy: boolean;
 }) {
   const t = useT();
   const [open, setOpen] = useState(false);
@@ -87,6 +103,12 @@ export default function BaseBikeStep({
               {baseName}
             </span>
           </div>
+        )}
+        {onSplitBase && (
+          <Button type="button" size="sm" variant="outline" onClick={onSplitBase} disabled={busy || splitBusy}>
+            <Scissors className="size-3.5" />
+            {t("bike.splitIntoParts")}
+          </Button>
         )}
         <Popover open={open} onOpenChange={setOpen}>
           <PopoverTrigger asChild>
@@ -168,6 +190,7 @@ export default function BaseBikeStep({
           {t("bike.templateProblem", { problem })}
         </p>
       )}
+      {!baseChosen && <p className="text-[12px] text-muted-foreground">{t("bike.baseBikeHint")}</p>}
     </section>
   );
 }
