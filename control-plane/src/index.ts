@@ -279,7 +279,10 @@ async function route(request: Request, env: Env): Promise<Response> {
   // once distinct networks have independently seen it in the game's own master list. Without
   // that, this would be a reflection amplifier with a public API.
   if (method === "POST" && path === "/v1/roster") return reportRoster(request, env);
-  if (method === "GET" && path === "/v1/roster") return readRoster(env);
+  // The bearer paint roster shares this path and is told apart by `?server=`: the book never
+  // takes one, the paint roster always does. Without this the book answered every paint sync
+  // with `{ addresses }` and the app failed with "missing field `riders`".
+  if (method === "GET" && path === "/v1/roster" && !url.searchParams.has("server")) return readRoster(env);
 
   // The same book with the live half attached: what those servers were doing a minute ago, so
   // the Servers tab opens with a list in it rather than a spinner while its own sweep runs. It

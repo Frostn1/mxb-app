@@ -101,6 +101,7 @@
   It still installs and updates as "MXB Coach", so shortcuts, updates and Uninstall keep working.
 
 ### Fixed
+- **Sync paints works again.** The public server book and the paint roster share `GET /v1/roster`, and the book answered first, so every sync got a list of addresses and failed with "missing field `riders`". The book now answers only when no `?server=` is given.
 - Joining a server directly no longer brings up Steam's "additional command line options"
   prompt behind its launch splash. A Steam copy now starts through `steam.exe -applaunch`,
   found via the registry (falling back to the default install path), instead of a
