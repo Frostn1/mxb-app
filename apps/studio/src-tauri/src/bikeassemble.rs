@@ -529,6 +529,7 @@ mod tests {
             has_glb: false,
             stamp: String::new(),
             added: 0,
+            multi_part_hint: false,
         }
     }
 

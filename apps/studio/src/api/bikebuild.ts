@@ -102,6 +102,10 @@ export interface LibraryPart {
   stale: boolean;
   /** The rider's file is gone. */
   missing: boolean;
+  /** The object names inside hint at three or more different roles — this file is probably
+   *  a whole bike (or a big sub-assembly), not the one part `role` says. Studio still picked
+   *  its best single guess rather than leave the part unusable; this says to check it. */
+  multiPartHint: boolean;
 }
 
 export type Slots = Partial<Record<Role, string>>;

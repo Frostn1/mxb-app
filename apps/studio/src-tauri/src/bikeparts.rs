@@ -96,25 +96,42 @@ fn squeeze(name: &str) -> String {
         .collect()
 }
 
+fn first_hint(name: &str) -> Option<Role> {
+    let s = squeeze(name);
+    HINTS.iter().find(|(k, _)| s.contains(k)).map(|(_, r)| *r)
+}
+
 /// The role a part's names suggest, or `None` when they say nothing. The file name is
 /// asked first, since a modder names the file for what it is and the objects inside are
-/// often whatever the source model called them; then the most common hint among the objects.
-pub fn guess_role<'a>(file_stem: &str, objects: impl IntoIterator<Item = &'a str>) -> Option<Role> {
-    let first_hint = |name: &str| {
-        let s = squeeze(name);
-        HINTS.iter().find(|(k, _)| s.contains(k)).map(|(_, r)| *r)
-    };
+/// often whatever the source model called them; then the heaviest hint among the objects —
+/// weighted by each object's triangle count, not just counted once each, so four tiny lever
+/// meshes in a whole-bike import can't outvote the one big chassis mesh sitting next to them
+/// (a real case: a full bike FBX with `brake_lever`/`clutch_lever`/`gear_lever`/`rearbrake_lever`
+/// all matching "lever" was guessed as levers over its one `chassis` object). A weight of zero
+/// (an object with no triangle count, e.g. an empty) still counts for one, so a hint from a
+/// non-mesh object isn't thrown away.
+pub fn guess_role<'a>(file_stem: &str, objects: impl IntoIterator<Item = (&'a str, u64)>) -> Option<Role> {
     if let Some(r) = first_hint(file_stem) {
         return Some(r);
     }
-    let mut votes: BTreeMap<Role, usize> = BTreeMap::new();
-    for o in objects {
-        if let Some(r) = first_hint(o) {
-            *votes.entry(r).or_default() += 1;
+    let mut votes: BTreeMap<Role, u64> = BTreeMap::new();
+    for (name, weight) in objects {
+        if let Some(r) = first_hint(name) {
+            *votes.entry(r).or_default() += weight.max(1);
         }
     }
     // Ties go to the role listed first in `Role::ALL`, so the answer never depends on order.
     votes.into_iter().max_by(|a, b| a.1.cmp(&b.1).then(b.0.cmp(&a.0))).map(|(r, _)| r)
+}
+
+/// How many *distinct* roles the objects' names hint at, ignoring the file name and ignoring
+/// weight — three or more is a full bike (chassis, suspension, wheels…) brought in as one
+/// file, not a single part, whatever role the file name or the vote above settled on. Kept
+/// separate from [`guess_role`] because a rider who deliberately names a whole-bike proxy
+/// "chassis" should still get that role; this only flags the file for a second look.
+pub fn multi_part_hint<'a>(objects: impl IntoIterator<Item = &'a str>) -> bool {
+    let roles: std::collections::BTreeSet<Role> = objects.into_iter().filter_map(first_hint).collect();
+    roles.len() >= 3
 }
 
 /// An attach point a part brings with it, where it sits in Blender's world (Z up).
@@ -152,6 +169,12 @@ pub struct Part {
     pub stamp: String,
     /// Unix seconds.
     pub added: u64,
+    /// The object names inside hint at three or more different roles — this file is probably
+    /// a whole bike (or a big sub-assembly), not the one part `role` says. Studio still picks
+    /// its best single guess so the part isn't left unusable, but the tray shows this so the
+    /// rider knows to check it rather than trust it.
+    #[serde(default)]
+    pub multi_part_hint: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -275,11 +298,15 @@ impl Library {
 
         let objects = answer["objects"].as_array().cloned().unwrap_or_default();
         let names: Vec<&str> = objects.iter().filter_map(|o| o["name"].as_str()).collect();
+        let weighted: Vec<(&str, u64)> = objects
+            .iter()
+            .filter_map(|o| Some((o["name"].as_str()?, o["tris"].as_u64().unwrap_or(0))))
+            .collect();
         let stem = source.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
         let (role, role_guessed) = match &before {
             _ if known.is_some() => (known, false),
             Some(p) if !p.role_guessed => (p.role, false),
-            _ => (guess_role(&stem, names.iter().copied()), true),
+            _ => (guess_role(&stem, weighted.iter().copied()), true),
         };
 
         // Both new files are staged beside the old ones before either is replaced, so a copy
@@ -316,6 +343,7 @@ impl Library {
             has_glb,
             stamp,
             added: before.as_ref().map(|p| p.added).unwrap_or_else(now_secs),
+            multi_part_hint: multi_part_hint(names.iter().copied()),
         };
         self.commit(&part, staged)?;
         // A fresh guess can say something else: then the part leaves the slot it no longer fits.
@@ -457,6 +485,13 @@ fn move_file(from: &Path, to: &Path) -> std::io::Result<()> {
 mod tests {
     use super::*;
 
+    /// `guess_role` with no per-object weight: every hint counts once, as when nothing is
+    /// known of an object's size (an `.obj`'s vertex-only names, or a test that isn't about
+    /// weighting at all).
+    fn unweighted<'a>(names: impl IntoIterator<Item = &'a str>) -> Vec<(&'a str, u64)> {
+        names.into_iter().map(|n| (n, 1)).collect()
+    }
+
     #[test]
     fn roles_are_guessed_from_names() {
         assert_eq!(guess_role("KTM_rear_wheel", []), Some(Role::WheelR));
@@ -470,13 +505,31 @@ mod tests {
         assert_eq!(guess_role("KTM handguards", []), Some(Role::Handguards));
         assert_eq!(guess_role("front number plate", []), Some(Role::Plate));
         // The file says nothing: the objects vote.
-        assert_eq!(guess_role("part01", ["fork_l", "fork_r", "axle"]), Some(Role::Fsusp));
-        assert_eq!(guess_role("part01", ["Cube", "Cube.001"]), None);
+        assert_eq!(guess_role("part01", unweighted(["fork_l", "fork_r", "axle"])), Some(Role::Fsusp));
+        assert_eq!(guess_role("part01", unweighted(["Cube", "Cube.001"])), None);
         // The file name wins over what's inside.
-        assert_eq!(guess_role("chassis", ["fork_l", "fork_r"]), Some(Role::Chassis));
+        assert_eq!(guess_role("chassis", unweighted(["fork_l", "fork_r"])), Some(Role::Chassis));
         // A tie is settled the same way every time.
-        assert_eq!(guess_role("x", ["fork", "frame"]), Some(Role::Chassis));
-        assert_eq!(guess_role("x", ["frame", "fork"]), Some(Role::Chassis));
+        assert_eq!(guess_role("x", unweighted(["fork", "frame"])), Some(Role::Chassis));
+        assert_eq!(guess_role("x", unweighted(["frame", "fork"])), Some(Role::Chassis));
+    }
+
+    #[test]
+    fn a_heavier_object_outvotes_a_crowd_of_light_ones() {
+        // The real case: a full bike FBX with one big `chassis` mesh and four small lever
+        // meshes used to be guessed "levers" on a flat count of 4 to 1. Weighted by size, the
+        // chassis wins.
+        let objects = [("chassis", 40_000), ("brake_lever", 300), ("clutch_lever", 280), ("gear_lever", 260), ("rearbrake_lever", 240)];
+        assert_eq!(guess_role("KTMRM", objects), Some(Role::Chassis));
+        // Without the weighting it would have been the crowd: kept as a regression marker.
+        assert_eq!(guess_role("KTMRM", unweighted(objects.iter().map(|(n, _)| *n))), Some(Role::Levers));
+    }
+
+    #[test]
+    fn three_or_more_roles_hint_at_a_whole_bike() {
+        assert!(multi_part_hint(["chassis", "steer", "fsusp", "brake_lever"]));
+        assert!(!multi_part_hint(["fork_l", "fork_r", "axle"]), "one role, however many objects");
+        assert!(!multi_part_hint(["Cube", "Cube.001"]), "no hints at all");
     }
 
     #[test]
