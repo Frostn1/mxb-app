@@ -36,8 +36,11 @@ export default function BikePicker({
   const [open, setOpen] = useState(false);
   const [bikes, setBikes] = useState<LibraryEntry[] | null>(null);
   /** Which `.pkz` paths this build actually opened — everything else (folders, and
-   *  `.mxbsecure` blobs already caught by `locked`) doesn't need asking. */
+   *  `.mxbsecure` blobs already caught by `locked`) doesn't need asking. Fails closed: a
+   *  path missing from this map — still being checked, or the check itself failed — reads
+   *  as "can't tell, so don't offer it", not as "fine to click". */
   const [readable, setReadable] = useState<Record<string, boolean>>({});
+  const [checking, setChecking] = useState(false);
 
   useEffect(() => {
     if (!open || bikes !== null) return;
@@ -46,7 +49,16 @@ export default function BikePicker({
         const list = entries.filter((e) => e.category === "bike");
         setBikes(list);
         const toCheck = list.filter((e) => e.kind === "pkz" && !e.locked).map((e) => e.path);
-        if (toCheck.length) setReadable(await bikeTemplateReadable(toCheck).catch(() => ({})));
+        if (!toCheck.length) return;
+        setChecking(true);
+        try {
+          setReadable(await bikeTemplateReadable(toCheck));
+        } catch {
+          // Left empty: every one of `toCheck` stays blocked, same as a path the call
+          // never got around to.
+        } finally {
+          setChecking(false);
+        }
       })
       .catch(() => setBikes([]));
   }, [open, bikes]);
@@ -69,14 +81,17 @@ export default function BikePicker({
         ) : (
           <ul className="flex max-h-72 flex-col gap-0.5 overflow-y-auto">
             {bikes.map((b) => {
-              const protectedPkz = b.kind === "pkz" && !b.locked && readable[b.path] === false;
-              const blocked = !!b.locked || protectedPkz;
+              const isPkz = b.kind === "pkz" && !b.locked;
+              const stillChecking = isPkz && checking && readable[b.path] === undefined;
+              const protectedPkz = isPkz && !stillChecking && readable[b.path] !== true;
+              const blocked = !!b.locked || protectedPkz || stillChecking;
+              const reason = b.locked ? "bike.bikeLocked" : stillChecking ? "bike.looking" : "bike.bikeProtected";
               return (
                 <li key={`${b.path}#${b.prefix ?? ""}`}>
                   <button
                     type="button"
                     disabled={blocked}
-                    title={blocked ? t(b.locked ? "bike.bikeLocked" : "bike.bikeProtected") : undefined}
+                    title={blocked ? t(reason) : undefined}
                     onClick={() => {
                       onPick(b.path);
                       setOpen(false);

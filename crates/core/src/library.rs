@@ -724,13 +724,20 @@ fn scan_bikes(dir: &Path, sound_bikes: &[String]) -> Vec<LibraryEntry> {
     // A bike installed as a plain folder rather than packed into a `.pkz` — the walk above
     // only ever finds files, so a folder install was invisible to it (and, before this, to
     // anything built on this scan: Studio's bike-template picker among them).
-    let packed: HashSet<String> = out
+    //
+    // A same-named packed bike only shadows the folder when it's actually a plain, readable
+    // `.pkz` — not when it's `.mxbsecure` or a protected archive `is_plain_zip` doesn't
+    // recognise (an OEM pack, say): a rider who keeps an unpacked copy of one of those
+    // alongside it almost certainly wants that copy offered, not hidden behind the one
+    // nothing here can open.
+    let packed_readable: HashSet<String> = out
         .iter()
-        .filter(|e| e.category == "bike" && e.folder.is_empty())
+        .filter(|e| e.category == "bike" && e.folder.is_empty() && e.kind == "pkz")
+        .filter(|e| crate::pkz::is_plain_zip(Path::new(&e.path)))
         .map(|e| strip_ext(&e.name).to_lowercase())
         .collect();
     for name in immediate_dirs(dir) {
-        if packed.contains(&name.to_lowercase()) {
+        if packed_readable.contains(&name.to_lowercase()) {
             continue;
         }
         let folder = dir.join(&name);
@@ -997,11 +1004,31 @@ mod tests {
         let root = tmp("lib-folder-vs-packed");
         let base = root.join("mods/bikes");
         touch(&base.join("KTM450.pkz"));
+        fs::write(base.join("KTM450.pkz"), b"PK\x03\x04").unwrap(); // a real (if empty) zip
         touch(&base.join("KTM450/KTM450.cfg"));
 
         let v = scan_library(root.to_str().unwrap(), "mods/bikes", &[], &crate::game::MXB).unwrap();
         let bikes: Vec<_> = v.iter().filter(|e| e.category == "bike").collect();
         assert_eq!(bikes.len(), 1, "one KTM450, not a packed and a folder copy: {bikes:?}");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_protected_packed_bike_does_not_hide_a_usable_folder_copy() {
+        // The other side of the dedup above: a `.pkz` that isn't a plain zip at all (an OEM
+        // pack, say) can't be read regardless, so a folder copy sitting next to it under the
+        // same name is what the rider actually wants offered — not hidden behind the one
+        // nothing here can open.
+        let root = tmp("lib-protected-packed-vs-folder");
+        let base = root.join("mods/bikes");
+        touch(&base.join("MX1OEM_2025_Triumph_TF_450-RC.pkz")); // not real zip bytes
+        touch(&base.join("MX1OEM_2025_Triumph_TF_450-RC/MX1OEM_2025_Triumph_TF_450-RC.cfg"));
+
+        let v = scan_library(root.to_str().unwrap(), "mods/bikes", &[], &crate::game::MXB).unwrap();
+        let bikes: Vec<_> = v.iter().filter(|e| e.category == "bike").collect();
+        assert_eq!(bikes.len(), 2, "the packed copy and the usable folder copy, both: {bikes:?}");
+        assert!(bikes.iter().any(|e| e.kind == "folder"));
+        assert!(bikes.iter().any(|e| e.kind == "pkz"));
         let _ = fs::remove_dir_all(&root);
     }
 

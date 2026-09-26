@@ -2912,4 +2912,33 @@ mod folder_bike_smoke {
 
         let _ = std::fs::remove_dir_all(&root);
     }
+
+    #[test]
+    fn a_protected_packed_bike_leaves_its_folder_copy_listed() {
+        let root =
+            std::env::temp_dir().join(format!("frost-studio-protected-vs-folder-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let base = root.join("mods/bikes");
+        // Not real zip bytes — `bike_template_readable`'s own check (and `scan_bikes`' dedup)
+        // both read this as protected, the same shape Sean's real OEM report was.
+        std::fs::create_dir_all(base.join("MX1OEM_2025_Triumph_TF_450-RC")).unwrap();
+        std::fs::write(base.join("MX1OEM_2025_Triumph_TF_450-RC.pkz"), b"not a zip").unwrap();
+        std::fs::write(base.join("MX1OEM_2025_Triumph_TF_450-RC/model.edf"), b"x").unwrap();
+        std::fs::write(
+            base.join("MX1OEM_2025_Triumph_TF_450-RC/MX1OEM_2025_Triumph_TF_450-RC.cfg"),
+            b"x",
+        )
+        .unwrap();
+
+        let entries =
+            mxb_core::library::scan_library(root.to_str().unwrap(), "mods/bikes", &[], &mxb_core::game::MXB)
+                .expect("scan_library");
+        let bikes: Vec<_> = entries.iter().filter(|e| e.category == "bike").collect();
+        assert_eq!(bikes.len(), 2, "the packed copy and the usable folder copy, both: {bikes:?}");
+        assert!(!mxb_core::pkz::is_plain_zip(std::path::Path::new(
+            &bikes.iter().find(|e| e.kind == "pkz").unwrap().path
+        )));
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
 }
