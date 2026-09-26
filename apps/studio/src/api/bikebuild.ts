@@ -298,3 +298,15 @@ export function makePreview(
 export function makeKeep(name: string): Promise<LibraryPart> {
   return invoke<LibraryPart>("bike_make_keep", { name });
 }
+
+// ---------------------------------------------------------------------------
+// the bike template picker
+
+/** Which of these `.pkz` bikes Studio can actually read a template from — a cheap header
+ *  check, nothing opened or decrypted. An entry's `locked` (from `scanLibrary`) only ever
+ *  means "an .mxbsecure blob with no key"; the game's own OEM content ships as a plain
+ *  `.pkz` in a format only a build with the (optional, not always present) sidecar module
+ *  can open, and this is how the picker tells the two apart. */
+export function bikeTemplateReadable(paths: string[]): Promise<Record<string, boolean>> {
+  return invoke<Record<string, boolean>>("bike_template_readable", { paths });
+}

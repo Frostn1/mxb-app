@@ -260,7 +260,23 @@ impl Template {
             }),
             TemplateSource::Bike { path } => {
                 let p = Path::new(path);
-                let files = mxb_core::viewer::gather_bike_files(p)?;
+                let files = mxb_core::viewer::gather_bike_files(p).map_err(|e| {
+                    // The bike picker already keeps a protected `.pkz` from being chosen in
+                    // the first place (`bike_template_readable`); this is the fallback for
+                    // whatever reaches here anyway — "Choose a bike…" pointed straight at
+                    // one, say — so the rider gets a reason instead of Blender's own
+                    // "unsupported .pkz" wording, which reads like a bug report, not an
+                    // answer.
+                    let msg = format!("{e:#}");
+                    if msg.contains("unsupported .pkz") || msg.contains("secured content") {
+                        anyhow::anyhow!(
+                            "{} is protected content this build can't read (OEM/stock bikes need the game itself, or a build with that support)",
+                            p.display()
+                        )
+                    } else {
+                        e
+                    }
+                })?;
                 let geom = files
                     .iter()
                     .find(|(n, _)| n.to_ascii_lowercase().ends_with(".geom"))

@@ -207,6 +207,7 @@ fn main() {
             bike_parts_list,
             bike_part_add,
             bike_part_split,
+            bike_template_readable,
             bike_part_set_role,
             bike_part_remove,
             bike_slot_set,
@@ -2587,6 +2588,27 @@ async fn scan_library(
     .map_err(|e| format!("scan_library task failed: {e}"))?
 }
 
+/// Which of these `.pkz` bikes Studio can actually read a template from, without opening or
+/// decrypting anything — just the cheap "is this a plain zip" header check `scan_library`
+/// itself uses to tell a mod's own pack from the game's protected format. An entry's
+/// `locked` flag alone isn't enough here: it's true only for an `.mxbsecure` blob without a
+/// key, but the game's own OEM content ships as a plain `.pkz` in a format only the sidecar
+/// (this build may not have it) can open, and `locked` has no way to say that.
+#[tauri::command]
+async fn bike_template_readable(paths: Vec<String>) -> Result<std::collections::HashMap<String, bool>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        paths
+            .into_iter()
+            .map(|p| {
+                let readable = mxb_core::pkz::is_plain_zip(std::path::Path::new(&p));
+                (p, readable)
+            })
+            .collect()
+    })
+    .await
+    .map_err(|e| format!("checking the bikes failed: {e}"))
+}
+
 #[tauri::command]
 async fn scan_bike_targets(app: tauri::AppHandle) -> Result<Vec<String>, String> {
     tauri::async_runtime::spawn_blocking(move || {
@@ -2860,4 +2882,34 @@ fn app_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wr
         menu = menu.item(&about);
     }
     menu.item(&file).item(&edit).item(&view).item(&window).build()
+}
+
+/// `mxb-core`'s own test binary doesn't run on this machine (an environment issue unrelated
+/// to this crate — every one of its tests aborts at process start, before any test code
+/// runs), so its new folder-bike detection is exercised here instead, through the same
+/// `scan_library` entry point `scan_bike_targets`/the bike picker actually call.
+#[cfg(test)]
+mod folder_bike_smoke {
+    #[test]
+    fn a_bike_installed_as_a_plain_folder_reaches_the_picker() {
+        let root = std::env::temp_dir().join(format!("frost-studio-folder-bike-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let bikes = root.join("mods/bikes/MX1OEM_2025_Triumph_TF_450-RC");
+        std::fs::create_dir_all(&bikes).unwrap();
+        std::fs::write(bikes.join("MX1OEM_2025_Triumph_TF_450-RC.cfg"), b"x").unwrap();
+        std::fs::write(bikes.join("model.edf"), b"x").unwrap();
+
+        let entries =
+            mxb_core::library::scan_library(root.to_str().unwrap(), "mods/bikes", &[], &mxb_core::game::MXB)
+                .expect("scan_library");
+        let bike = entries
+            .iter()
+            .find(|e| e.name.eq_ignore_ascii_case("MX1OEM_2025_Triumph_TF_450-RC"))
+            .expect("the folder bike is listed");
+        assert_eq!(bike.category, "bike");
+        assert_eq!(bike.kind, "folder");
+        assert!(!bike.locked, "a plain folder can't be locked content");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
 }
