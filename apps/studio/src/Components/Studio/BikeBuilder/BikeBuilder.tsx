@@ -2,6 +2,7 @@ import { useCallback, useMemo, useState } from "react";
 import { Box } from "lucide-react";
 import { toast } from "sonner";
 import { useT } from "@/i18n";
+import { ContextBarRight } from "../../Shell/ContextBar";
 import { addPart, addPlaceholderBike, setPartRole, setSlot, setTemplate } from "../../../api/bikebuild";
 import BaseBikeStep from "./BaseBikeStep";
 import BlenderBar from "./BlenderBar";
@@ -11,6 +12,7 @@ import PreviewPane, { useAssemblyView } from "./PreviewPane";
 import BuildPanel from "./BuildPanel";
 import StepHeader, { type BuildStep } from "./StepHeader";
 import { useBikeLibrary } from "./useBikeLibrary";
+import { useBlenderStatus } from "./useBlenderStatus";
 import { usePartDrag } from "./usePartDrag";
 
 /**
@@ -18,15 +20,17 @@ import { usePartDrag } from "./usePartDrag";
  *
  * Studio chooses the parts and where they go; the rider's own Blender, run in the
  * background, does the importing, placing and exporting (see `src-tauri/src/blender.rs`).
- * One screen: `BaseBikeStep` picks what the build starts from (an installed bike, a full-bike
- * file, or the placeholder), the 3D view is the main panel — placing a part means dragging one
- * from the tray onto it, clicking an open mount, or the tray's own "Place ▸" — the tray sits to
- * its left, and the role outliner is a collapsible strip on the right, read-only, for checking
- * what's still missing. Part Maker joins the tray as a dialog, not a separate mode.
+ * One screen, one header row: the step breadcrumb and the base-bike picker share it — Blender's
+ * status moved out entirely, into the title bar's own right-hand slot, since it's a fact about
+ * the tool, not a step in building a bike. Below that, the 3D view is the main panel — placing
+ * a part means dragging one from the tray onto it, clicking an open mount, or the tray's own
+ * "Place ▸" — the tray sits to its left, and the role outliner is a collapsible strip on the
+ * right, read-only, for checking what's still missing. Build is a small floating control in
+ * the bottom-right corner, not a footer of its own. Part Maker joins the tray as a dialog.
  */
 export default function BikeBuilder() {
   const t = useT();
-  const [ready, setReady] = useState(false);
+  const blender = useBlenderStatus();
   /** Bumped whenever one panel changes the library, so the others read it again. */
   const [version, setVersion] = useState(0);
   const changed = useCallback(() => setVersion((v) => v + 1), []);
@@ -91,12 +95,6 @@ export default function BikeBuilder() {
     }
   }
 
-  const baseName = view
-    ? view.template.source.kind === "placeholder"
-      ? t("bike.placeholderTemplate")
-      : view.template.name
-    : null;
-
   // The whole-bike part playing chassis, when there is one — the "Split into parts" action in
   // step 1 cuts *this* up, not the template (the template is just the anchor geometry parts
   // snap to; splitting it wouldn't mean anything).
@@ -104,14 +102,45 @@ export default function BikeBuilder() {
     () => lib.parts?.find((p) => p.role === "chassis" && lib.slots.chassis === p.id) ?? null,
     [lib.parts, lib.slots.chassis],
   );
+  // What the base-bike button shows: the chassis part's own name when there is one — that's
+  // what a rider thinks of as "the base bike" after importing a file or using one as the base
+  // — falling back to the template's name only when nothing's been brought in as chassis yet
+  // (an installed bike picked for its anchors alone, or truly nothing). Showing the template's
+  // name here regardless used to read as "Studio's placeholder" right after importing a real
+  // file as the base, since the anchor template stays the placeholder either way.
+  const baseName = chassisPart
+    ? chassisPart.name
+    : view
+      ? view.template.source.kind === "placeholder"
+        ? t("bike.placeholderTemplate")
+        : view.template.name
+      : null;
   const baseChosen = explicitBase || !!chassisPart || view?.template.source.kind === "bike";
   const placedCount = view?.assembly.placed.length ?? 0;
   const step: BuildStep = !baseChosen ? 1 : placedCount <= 1 ? 2 : 3;
 
   return (
     <div className="relative flex h-full min-h-0 flex-col">
-      <BlenderBar onReadyChange={setReady} />
-      <StepHeader step={step} />
+      <ContextBarRight>
+        <BlenderBar blender={blender} />
+      </ContextBarRight>
+
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-window px-4 py-2">
+        <StepHeader step={step} />
+        <BaseBikeStep
+          baseName={baseName}
+          baseChosen={baseChosen}
+          problem={view?.template.problem ?? null}
+          onPick={onPickTemplate}
+          onImportFile={onImportFile}
+          onPlaceholder={onPlaceholder}
+          busy={baseBusy}
+          blenderReady={blender.ready}
+          onSplitBase={chassisPart ? () => void lib.onSplit(chassisPart) : undefined}
+          splitBusy={lib.busy}
+        />
+      </div>
+
       {dragging && (
         <div
           className="pointer-events-none fixed z-50 flex items-center gap-1.5 border border-primary bg-popover px-2 py-1 text-[12px] shadow-lg"
@@ -122,23 +151,10 @@ export default function BikeBuilder() {
         </div>
       )}
 
-      <BaseBikeStep
-        baseName={baseName}
-        baseChosen={baseChosen}
-        problem={view?.template.problem ?? null}
-        onPick={onPickTemplate}
-        onImportFile={onImportFile}
-        onPlaceholder={onPlaceholder}
-        busy={baseBusy}
-        blenderReady={ready}
-        onSplitBase={chassisPart ? () => void lib.onSplit(chassisPart) : undefined}
-        splitBusy={lib.busy}
-      />
-
-      <div className="flex min-h-0 flex-1 flex-col">
-        <div className="grid min-h-0 flex-1 grid-cols-[18rem_1fr_auto] divide-x divide-border overflow-hidden">
-          <PartTray ready={ready} lib={lib} onStartDrag={startDrag} onChanged={changed} />
-          <PreviewPane version={version} view={view} setView={setView} lib={lib} />
+      <div className="relative min-h-0 flex-1">
+        <div className="grid h-full min-h-0 grid-cols-[18rem_1fr_auto] divide-x divide-border overflow-hidden">
+          <PartTray ready={blender.ready} lib={lib} onStartDrag={startDrag} onChanged={changed} />
+          <PreviewPane version={version} view={view} setView={setView} lib={lib} baseChosen={baseChosen} />
           <PartSlots lib={lib} />
         </div>
         <BuildPanel view={view} placedCount={placedCount} />
