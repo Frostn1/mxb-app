@@ -8,7 +8,7 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "tauri": "tauri",
+    "tauri": "node ../../scripts/safe-cargo-target.mjs",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
