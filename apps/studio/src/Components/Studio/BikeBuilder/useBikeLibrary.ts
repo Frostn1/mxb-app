@@ -95,10 +95,15 @@ export function useBikeLibrary(version: number, onChanged: () => void) {
   const onSplit = (part: LibraryPart) => change(() => splitPart(part.id), "bike.splitFailed");
   /** A whole-bike part, used as-is instead of split: the chassis slot is the one every other
    *  part mounts on, so putting it there is what makes a full bike show in the preview right
-   *  away, the same as any other slotted part — no separate "base bike" concept needed. */
+   *  away, the same as any other slotted part — no separate "base bike" concept needed.
+   *
+   *  Always sets the role, even when it's already "chassis": that's a guess until the rider
+   *  says otherwise, and `setPartRole` is also what clears `roleGuessed` server-side. Skip it
+   *  on an already-guessed chassis and a later refresh could re-guess a different role from
+   *  scratch, silently un-basing a bike the rider explicitly chose. */
   const onUseAsBase = (part: LibraryPart) =>
     change(async () => {
-      if (part.role !== "chassis") await setPartRole(part.id, "chassis");
+      await setPartRole(part.id, "chassis");
       await setSlot("chassis", part.id);
     }, "bike.useAsBaseFailed");
 
