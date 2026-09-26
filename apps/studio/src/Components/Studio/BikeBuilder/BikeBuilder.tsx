@@ -14,10 +14,12 @@ import { useBikeLibrary } from "./useBikeLibrary";
  *
  * Studio chooses the parts and where they go; the rider's own Blender, run in the
  * background, does the importing, placing and exporting (see `src-tauri/src/blender.rs`).
- * Two modes. Assemble: tray, slots and preview as three panels side by side — a rider brings
- * parts into the tray, fills the bike's slots from them, and watches the 3D preview update,
- * all three visible together instead of stacked one under another. Part Maker: parts made
- * from templates and briefs, which join the same library, as its own mode below the same bar.
+ * Two modes. Assemble: the 3D view is the main panel — a base bike (a full-bike import or an
+ * installed template) shows there right away, and placing a part means dragging one from the
+ * tray onto it or clicking an open mount, not hunting through a slot grid. The tray sits to
+ * its left; the role outliner is a collapsible strip on the right, for checking what's still
+ * missing rather than for placing itself. Part Maker: parts made from templates and briefs,
+ * which join the same library, as its own mode below the same bar.
  */
 export default function BikeBuilder() {
   const t = useT();
@@ -43,10 +45,10 @@ export default function BikeBuilder() {
 
       {mode === "assemble" ? (
         <div className="flex min-h-0 flex-1 flex-col">
-          <div className="grid min-h-0 flex-1 grid-cols-[18rem_1fr_24rem] divide-x divide-border overflow-hidden">
+          <div className="grid min-h-0 flex-1 grid-cols-[18rem_1fr_auto] divide-x divide-border overflow-hidden">
             <PartTray ready={ready} lib={lib} />
+            <PreviewPane version={version} onChanged={changed} view={view} setView={setView} lib={lib} />
             <PartSlots lib={lib} />
-            <PreviewPane version={version} onChanged={changed} view={view} setView={setView} />
           </div>
           <BuildPanel view={view} placedCount={view?.assembly.placed.length ?? 0} />
         </div>

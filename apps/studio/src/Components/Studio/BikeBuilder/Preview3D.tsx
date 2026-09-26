@@ -43,14 +43,27 @@ interface Props {
   onSelect: (role: Role) => void;
   /** Bumped whenever the library changes, so refreshed parts load their new models. */
   version: number;
+  /** A mount dot was clicked and nothing under it is a placed part — "what goes here". */
+  onMountClick?: (mount: string) => void;
+  /** A part card was dropped on the viewport, by the id it was dragged with. */
+  onDropPart?: (partId: string) => void;
 }
 
 /**
  * The bike as it's put together: each slotted part's preview model at its offset, and the
- * anchors as small dots. Plain three.js, drawn only when something changes. Click a part to
- * pick it for nudging.
+ * anchors as small dots — themselves clickable, so an empty mount is something to click on,
+ * not just a thing to look at. Plain three.js, drawn only when something changes. Click a
+ * part to pick it for nudging; drop a part from the tray to fill its slot.
  */
-export default function Preview3D({ placed, anchors, selected, onSelect, version }: Props) {
+export default function Preview3D({
+  placed,
+  anchors,
+  selected,
+  onSelect,
+  version,
+  onMountClick,
+  onDropPart,
+}: Props) {
   const t = useT();
   const host = useRef<HTMLDivElement>(null);
   const three = useRef<{
@@ -71,6 +84,10 @@ export default function Preview3D({ placed, anchors, selected, onSelect, version
   const [partErrors, setPartErrors] = useState<Partial<Record<Role, string>>>({});
   const select = useRef(onSelect);
   select.current = onSelect;
+  const mountClick = useRef(onMountClick);
+  mountClick.current = onMountClick;
+  const dropPart = useRef(onDropPart);
+  dropPart.current = onDropPart;
 
   // The scene, once.
   useEffect(() => {
@@ -113,7 +130,9 @@ export default function Preview3D({ placed, anchors, selected, onSelect, version
     ro.observe(el);
     size();
 
-    // A click (not a drag) picks the part under it.
+    // A click (not a drag) picks the part under it, or — if nothing's there — a mount dot,
+    // for "what goes here". Parts win the hit test: a mount that already has its part sitting
+    // on it should still select the part, not ask what to put there.
     let down: { x: number; y: number } | null = null;
     const onDown = (e: PointerEvent) => (down = { x: e.clientX, y: e.clientY });
     const onUp = (e: PointerEvent) => {
@@ -127,10 +146,28 @@ export default function Preview3D({ placed, anchors, selected, onSelect, version
       const hit = ray.intersectObjects(bike.children, true)[0];
       let o: THREE.Object3D | null = hit?.object ?? null;
       while (o && !o.userData.role) o = o.parent;
-      if (o) select.current(o.userData.role as Role);
+      if (o) {
+        select.current(o.userData.role as Role);
+        return;
+      }
+      const dotHit = ray.intersectObjects(dots.children, false)[0];
+      if (dotHit?.object.userData.mount) mountClick.current?.(dotHit.object.userData.mount as string);
     };
     renderer.domElement.addEventListener("pointerdown", onDown);
     renderer.domElement.addEventListener("pointerup", onUp);
+
+    // A part card dropped from the tray fills its own slot — the backend already knows
+    // exactly where a role's part goes (its mount, its own attach empty or its centre), so
+    // the drop doesn't need to hit-test a particular mount; landing anywhere on the viewport
+    // is "put this where it goes".
+    const onDragOver = (e: DragEvent) => e.preventDefault();
+    const onDrop = (e: DragEvent) => {
+      e.preventDefault();
+      const id = e.dataTransfer?.getData("text/frost-bike-part");
+      if (id) dropPart.current?.(id);
+    };
+    renderer.domElement.addEventListener("dragover", onDragOver);
+    renderer.domElement.addEventListener("drop", onDrop);
 
     three.current = { renderer, scene, camera, controls, bike, dots, draw };
     return () => {
@@ -200,27 +237,33 @@ export default function Preview3D({ placed, anchors, selected, onSelect, version
     };
   }, [placed, selected, version]);
 
-  // The anchors.
+  // The anchors: bigger and brighter where nothing is mounted yet, since those are now
+  // something to click — "put a part here" — not just a picture of where things snap.
   useEffect(() => {
     const t = three.current;
     if (!t) return;
     t.dots.clear();
-    const geo = new THREE.SphereGeometry(0.012, 12, 8);
-    const mat = new THREE.MeshBasicMaterial({ color: 0xffb020, depthTest: false });
-    for (const p of Object.values(anchors)) {
-      const dot = new THREE.Mesh(geo, mat);
+    const filled = new Set(placed.map((p) => p.mount).filter((m): m is string => !!m));
+    const openGeo = new THREE.SphereGeometry(0.018, 12, 8);
+    const openMat = new THREE.MeshBasicMaterial({ color: 0xffb020, depthTest: false });
+    const filledGeo = new THREE.SphereGeometry(0.01, 8, 6);
+    const filledMat = new THREE.MeshBasicMaterial({ color: 0xffb020, opacity: 0.35, transparent: true, depthTest: false });
+    for (const [mount, p] of Object.entries(anchors)) {
+      const open = !filled.has(mount);
+      const dot = new THREE.Mesh(open ? openGeo : filledGeo, open ? openMat : filledMat);
       dot.renderOrder = 10;
+      dot.userData.mount = mount;
       const [x, y, z] = toThree(p);
       dot.position.set(x, y, z);
       t.dots.add(dot);
     }
     t.draw();
-  }, [anchors]);
+  }, [anchors, placed]);
 
   const errorEntries = Object.entries(partErrors) as [Role, string][];
 
   return (
-    <div ref={host} className="relative h-80 w-full overflow-hidden border border-border bg-background">
+    <div ref={host} className="relative h-full min-h-64 w-full overflow-hidden border border-border bg-background">
       {failed && <p className="absolute inset-0 p-4 text-sm text-muted-foreground">{failed}</p>}
       {!failed && errorEntries.length > 0 && (
         <div className="absolute inset-x-0 bottom-0 flex flex-col gap-1 bg-background/90 p-2 text-[11px] text-destructive">

@@ -1,5 +1,6 @@
 import { AlertTriangle, Box, Loader2, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { Button } from "@frost/shared/Components/ui/button";
+import { cn } from "@frost/shared/lib/utils";
 import {
   Select,
   SelectContent,
@@ -57,7 +58,20 @@ export default function PartTray({
       ) : (
         <ul className="flex flex-col gap-2">
           {parts.map((p) => (
-            <li key={p.id} className="flex flex-col gap-1.5 border border-border bg-background p-2">
+            <li
+              key={p.id}
+              draggable={!!p.role}
+              onDragStart={(e) => {
+                if (!p.role) return;
+                e.dataTransfer.setData("text/frost-bike-part", p.id);
+                e.dataTransfer.effectAllowed = "copy";
+              }}
+              title={p.role ? t("bike.dragToPlace") : undefined}
+              className={cn(
+                "flex flex-col gap-1.5 border border-border bg-background p-2",
+                p.role && "cursor-grab active:cursor-grabbing",
+              )}
+            >
               <div className="flex gap-2">
                 <div className="w-16 shrink-0">
                   <Thumb part={p} />

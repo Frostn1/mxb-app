@@ -73,6 +73,23 @@ export const ROLES = [
 ] as const;
 export type Role = (typeof ROLES)[number];
 
+/** Which role(s) a mount point takes, the frontend's mirror of `role_rule` in
+ *  `bikeassemble.rs` — kept in sync by hand since the mount names are the join between
+ *  the two sides. Used only to turn a click on an anchor dot into "which role were you
+ *  trying to fill", never to compute a placement: the backend's `place()` still owns that.
+ *  A mount with more than one role (the steer's `handlebar` takes levers and handguards
+ *  both) offers all of them. */
+export const MOUNT_ROLES: Record<string, Role[]> = {
+  steer_axis: ["steer"],
+  swingarm_pivot: ["rsusp"],
+  footpegs: ["pedals"],
+  fork_clamp: ["fsusp"],
+  front_axle: ["wheel_f"],
+  rear_axle: ["wheel_r"],
+  handlebar: ["levers", "handguards"],
+  plate_mount: ["plate"],
+};
+
 /** An attach point a part brings, in Blender's world (Z up). */
 export interface PartEmpty {
   name: string;
