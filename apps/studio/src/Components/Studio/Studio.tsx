@@ -10,6 +10,7 @@ import PoseStudio from "../Rider/PoseStudio";
 import Diagnose from "./Diagnose/Diagnose";
 import ReplayStudio from "../Replay/ReplayStudio";
 import TrackStudio from "./TrackStudio/TrackStudio";
+import BikeBuilder from "./BikeBuilder/BikeBuilder";
 import RiderKitProvider from "../Rider/RiderKit";
 
 /**
@@ -31,6 +32,7 @@ export type StudioTab =
   | "rider"
   | "pose"
   | "track"
+  | "bike"
   | "replay"
   | "diagnose";
 
@@ -86,6 +88,11 @@ export default function Studio({
       {visited.has("track") && (
         <Pane active={tab === "track"}>
           <TrackStudio />
+        </Pane>
+      )}
+      {visited.has("bike") && (
+        <Pane active={tab === "bike"}>
+          <BikeBuilder />
         </Pane>
       )}
       {visited.has("replay") && (

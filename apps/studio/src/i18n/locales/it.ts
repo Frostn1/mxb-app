@@ -53,6 +53,25 @@ export const it: Translation = {
   "rider.showOnModel": "Mostra sul modello",
   "nav.diagnose": "Diagnostica",
 
+  // ── Bike builder: parts assembled in the rider's own Blender ────────────
+  "nav.bike": "Moto",
+  "bike.blender": "Blender",
+  "bike.looking": "Cerco Blender…",
+  "bike.blenderFound": "Blender {{version}} è pronto.",
+  "bike.blenderTooOld": "Blender {{version}} è troppo vecchio. Il costruttore di moto richiede {{min}} o successivo.",
+  "bike.blenderMissing": "Blender non trovato. Installa Blender {{min}} o successivo (è gratuito) oppure scegli blender.exe.",
+  "bike.chooseBlender": "Scegli blender.exe",
+  "bike.findBlender": "Trovalo automaticamente",
+  "bike.notBlender": "Questo non è un Blender che Studio può avviare.",
+  "bike.blenderCheckFailed": "Impossibile verificare Blender",
+  "bike.tryPart": "Prova un pezzo",
+  "bike.tryPartHint": "Apri un pezzo (.blend, .fbx o .obj). Blender lo importa in background e Studio mostra cosa contiene: il primo passo per costruire una moto dai pezzi.",
+  "bike.partFiles": "Pezzi della moto",
+  "bike.openPart": "Apri un pezzo…",
+  "bike.inspectFailed": "Blender non è riuscito ad aprire il pezzo",
+  "bike.partSummary": "{{objects}} oggetti, {{tris}} triangoli",
+  "bike.noUv": "senza UV",
+
   // ── Replay ────────────────────────────────────────────────────────────────
   "nav.replay": "Replay",
   "replay.title": "Replay",

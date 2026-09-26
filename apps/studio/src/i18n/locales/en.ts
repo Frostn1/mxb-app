@@ -48,6 +48,25 @@ export const en = {
   "rider.showOnModel": "Show on model",
   "nav.diagnose": "Diagnose",
 
+  // ── Bike builder: parts assembled in the rider's own Blender ────────────
+  "nav.bike": "Bike",
+  "bike.blender": "Blender",
+  "bike.looking": "Looking for Blender…",
+  "bike.blenderFound": "Blender {{version}} is ready.",
+  "bike.blenderTooOld": "Blender {{version}} is too old. The bike builder needs {{min}} or newer.",
+  "bike.blenderMissing": "Blender wasn't found. Install Blender {{min}} or newer (it's free), or choose blender.exe.",
+  "bike.chooseBlender": "Choose blender.exe",
+  "bike.findBlender": "Find it automatically",
+  "bike.notBlender": "That isn't a Blender Studio can run.",
+  "bike.blenderCheckFailed": "Couldn't check for Blender",
+  "bike.tryPart": "Try a part",
+  "bike.tryPartHint": "Open one part (.blend, .fbx or .obj). Blender imports it in the background and Studio shows what's inside, the first step to building a bike from parts.",
+  "bike.partFiles": "Bike parts",
+  "bike.openPart": "Open a part…",
+  "bike.inspectFailed": "Blender couldn't open that part",
+  "bike.partSummary": "{{objects}} objects, {{tris}} triangles",
+  "bike.noUv": "no UVs",
+
   // ── Replay: the mod's camera paths, and keeping what it flies ─────────────
   "nav.replay": "Replay",
   "replay.title": "Replay",

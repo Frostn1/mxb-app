@@ -3,6 +3,11 @@
 ## Unreleased
 
 ### Added
+- Frost Studio has a new **Bike** tab, the start of a bike builder for modders who have parts but
+  don't know Blender well. It finds the Blender you already have: installer, Steam or
+  Microsoft Store, or you choose `blender.exe`. It then runs Blender in the background to
+  open one part (`.blend`, `.fbx` or `.obj`) and shows what's in it: objects, their parents,
+  triangle counts and size. Blender 4.2 or newer is needed. Studio doesn't ship or bundle it.
 - The control plane can hand mxbsecure.com's FBX to EDF converter to invited accounts. It serves
   the converter only to signed-in Steam accounts listed in `MXB_CONVERTER_STEAM_IDS`, plus
   admins, and never to banned accounts. The files come from a new `mxb-fbx2edf` R2 bucket at

@@ -13,6 +13,7 @@
 use mxb_core::antidebug;
 
 // The studio's own modules: making a track, packing a paint, sealing content for a buyer.
+mod blender;
 mod edfwrite;
 mod gearrepair;
 mod paintstudio;
@@ -190,6 +191,9 @@ fn main() {
             paint_studio_target,
             paint_studio_hints,
             set_track_tools,
+            blender_status,
+            set_blender_path,
+            bike_part_inspect,
             scan_gear_repairs,
             repair_gear,
             generate_track,
@@ -1364,6 +1368,74 @@ async fn set_track_tools(app: tauri::AppHandle, dir: String) -> Result<TrackTool
     cfg.track_tools_path = dir.trim().to_string();
     config::save(&app, &cfg).map_err(|e| format!("{e:#}"))?;
     track_tools_status(app).await
+}
+
+/// Which Blender the bike builder would run, if any. `saved` is the one picked by hand,
+/// empty when Studio is left to find it.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BlenderStatus {
+    saved: String,
+    found: Option<blender::BlenderInfo>,
+    min_version: String,
+}
+
+#[tauri::command]
+async fn blender_status(app: tauri::AppHandle) -> Result<BlenderStatus, String> {
+    let saved = config::load_or_detect(&app).unwrap_or_default().blender_path;
+    let probe_from = saved.clone();
+    let found = tauri::async_runtime::spawn_blocking(move || blender::detect(&probe_from))
+        .await
+        .map_err(|e| format!("blender detection failed: {e}"))?;
+    let (a, b, c) = blender::MIN_VERSION;
+    Ok(BlenderStatus { saved, found, min_version: format!("{a}.{b}.{c}") })
+}
+
+/// Point the builder at a `blender.exe`, or pass an empty path to go back to finding it.
+#[tauri::command]
+async fn set_blender_path(app: tauri::AppHandle, path: String) -> Result<BlenderStatus, String> {
+    // One key, patched in place: a config that won't load is an error here, never a reason
+    // to write defaults over the rider's settings.
+    let mut keys = serde_json::Map::new();
+    keys.insert("blenderPath".into(), serde_json::Value::String(path.trim().to_string()));
+    config::patch_json(&app, keys).map_err(|e| format!("{e:#}"))?;
+    blender_status(app).await
+}
+
+/// The bike builder's first step, and its test that Blender works here: import one part,
+/// say what is in it, and export it as FBX plus a GLB for the preview.
+#[tauri::command]
+async fn bike_part_inspect(app: tauri::AppHandle, part: String) -> Result<serde_json::Value, String> {
+    let saved = config::load_or_detect(&app).unwrap_or_default().blender_path;
+    let cache = app
+        .path()
+        .app_cache_dir()
+        .map_err(|e| format!("no cache directory: {e}"))?
+        .join("bike-builder");
+    tauri::async_runtime::spawn_blocking(move || {
+        let found = blender::detect(&saved).ok_or("Blender wasn't found. Install Blender 4.2 or newer, or choose blender.exe.")?;
+        if !found.supported {
+            return Err(format!(
+                "Blender {} is too old for the bike builder; it needs {}.{} or newer.",
+                found.version,
+                blender::MIN_VERSION.0,
+                blender::MIN_VERSION.1
+            ));
+        }
+        // A folder per inspection (see `blender::job`): two can't write into each other's,
+        // and the last one is kept for the preview.
+        blender::job(std::path::Path::new(&found.path), &cache, "inspect", |work| {
+            serde_json::json!({
+                "op": "inspect",
+                "part": part,
+                "fbx": work.join("part.fbx"),
+                "glb": work.join("part.glb"),
+            })
+        })
+        .map_err(|e| format!("{e:#}"))
+    })
+    .await
+    .map_err(|e| format!("part inspection failed: {e}"))?
 }
 
 /// What a generated track measures, so the studio can show it rather than assert it.

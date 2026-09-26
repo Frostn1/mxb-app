@@ -171,6 +171,8 @@ function Shell() {
       { id: "rider", label: t("nav.rider"), group: "make", when: game.caps.viewer },
       { id: "pose", label: t("nav.pose"), group: "make", when: game.caps.viewer },
       { id: "track", label: t("nav.track"), group: "make" },
+      // Builds a bike from parts in the rider's own Blender. MX Bikes' model layout only.
+      { id: "bike", label: t("nav.bike"), group: "make", when: game.caps.viewer },
       // Recording a replay needs an in-game mod, and the Replay Mod is an MX Bikes plugin
       // like FrostMod — so it is gated on the same capability rather than on the game's id.
       { id: "replay", label: t("nav.replay"), group: "make", when: game.caps.frostmod },
