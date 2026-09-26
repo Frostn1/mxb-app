@@ -191,9 +191,21 @@ pub struct Bounds {
 /// A part's id: the first 16 hex of the SHA-256 of its path, case folded on Windows where
 /// the file system is too.
 pub fn part_id(source: &Path) -> String {
+    part_id_tagged(source, None)
+}
+
+/// [`part_id`], with a tag folded in — for a part that shares its source file with others,
+/// which a plain path-derived id can't tell apart. A whole-bike split (`Library::add_tagged`)
+/// is the only caller with a tag: each of its groups comes from the *same* file, so without
+/// this they'd all hash to one id and overwrite each other in the library.
+pub fn part_id_tagged(source: &Path, tag: Option<&str>) -> String {
     let mut s = source.to_string_lossy().replace('\\', "/");
     if cfg!(windows) {
         s = s.to_lowercase();
+    }
+    if let Some(t) = tag {
+        s.push('#');
+        s.push_str(t);
     }
     let digest = Sha256::digest(s.as_bytes());
     digest.iter().take(8).map(|b| format!("{b:02x}")).collect()
@@ -297,23 +309,11 @@ impl Library {
         known: Option<Role>,
     ) -> anyhow::Result<Part> {
         let id = part_id(source);
-        let dir = self.part_dir(&id);
-        std::fs::create_dir_all(&dir)?;
         let before = self.get(&id).ok();
-
         let objects = answer["objects"].as_array().cloned().unwrap_or_default();
         let weighted: Vec<(&str, u64)> = objects
             .iter()
             .filter_map(|o| Some((o["name"].as_str()?, o["tris"].as_u64().unwrap_or(0))))
-            .collect();
-        // Mesh names only, for the whole-bike check below: an ordinary chassis brings attach
-        // empties named for what they snap to (`steer_axis`, `swingarm_pivot`…), and those
-        // hint at "steer" and "rsusp" just as loudly as a real steer or swingarm mesh would.
-        // Counted in, a single well-modelled chassis part would flag itself as a whole bike.
-        let mesh_names: Vec<&str> = objects
-            .iter()
-            .filter(|o| o["type"] == "MESH")
-            .filter_map(|o| o["name"].as_str())
             .collect();
         let stem = source.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
         let (role, role_guessed) = match &before {
@@ -321,6 +321,59 @@ impl Library {
             Some(p) if !p.role_guessed => (p.role, false),
             _ => (guess_role(&stem, weighted.iter().copied()), true),
         };
+        // Mesh names only, for the whole-bike check: an ordinary chassis brings attach
+        // empties named for what they snap to (`steer_axis`, `swingarm_pivot`…), and those
+        // hint at "steer" and "rsusp" just as loudly as a real steer or swingarm mesh would.
+        // Counted in, a single well-modelled chassis part would flag itself as a whole bike.
+        let mesh_names: Vec<&str> =
+            objects.iter().filter(|o| o["type"] == "MESH").filter_map(|o| o["name"].as_str()).collect();
+        let hint = multi_part_hint(mesh_names.iter().copied());
+        self.finish(id, stem, source, role, role_guessed, hint, answer, stamp, before)
+    }
+
+    /// A group `frost_bike.py`'s "split" op cut a whole bike into — `role` is whatever
+    /// Blender's own per-object grouping decided for it (`None` for its leftover
+    /// "unassigned" bucket), taken as given rather than run back through [`guess_role`]'s
+    /// file-wide vote, which is exactly what splitting a whole bike is trying to get away
+    /// from. `tag` (the group's slug — "chassis", "part-2"…) becomes part of its id: every
+    /// group in a split shares one source file, so the plain path-derived id would collide
+    /// between them.
+    pub fn add_split_group(
+        &self,
+        source: &Path,
+        tag: &str,
+        role: Option<Role>,
+        answer: &serde_json::Value,
+        stamp: String,
+    ) -> anyhow::Result<Part> {
+        let id = part_id_tagged(source, Some(tag));
+        let before = self.get(&id).ok();
+        let stem = source.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+        // Not run through `multi_part_hint`: a split group is already as split as Blender's
+        // grouping could make it, so flagging it again would just repeat the same warning
+        // the split was the answer to.
+        self.finish(id, format!("{stem} — {tag}"), source, role, false, false, answer, stamp, before)
+    }
+
+    /// The tail [`add_as`] and [`add_split_group`] share: stage the new thumbnail/GLB in,
+    /// build the sidecar, commit both together, and drop the part from any slot it no
+    /// longer fits now that its role has (possibly) changed.
+    #[allow(clippy::too_many_arguments)]
+    fn finish(
+        &self,
+        id: String,
+        name: String,
+        source: &Path,
+        role: Option<Role>,
+        role_guessed: bool,
+        multi_part_hint: bool,
+        answer: &serde_json::Value,
+        stamp: String,
+        before: Option<Part>,
+    ) -> anyhow::Result<Part> {
+        let dir = self.part_dir(&id);
+        std::fs::create_dir_all(&dir)?;
+        let objects = answer["objects"].as_array().cloned().unwrap_or_default();
 
         // Both new files are staged beside the old ones before either is replaced, so a copy
         // that fails leaves the part as it was and says so, rather than losing its picture.
@@ -343,7 +396,7 @@ impl Library {
 
         let part = Part {
             id: id.clone(),
-            name: stem,
+            name,
             source: source.to_string_lossy().into_owned(),
             role,
             role_guessed,
@@ -356,7 +409,7 @@ impl Library {
             has_glb,
             stamp,
             added: before.as_ref().map(|p| p.added).unwrap_or_else(now_secs),
-            multi_part_hint: multi_part_hint(mesh_names.iter().copied()),
+            multi_part_hint,
         };
         self.commit(&part, staged)?;
         // A fresh guess can say something else: then the part leaves the slot it no longer fits.
@@ -597,6 +650,47 @@ mod tests {
         let p = lib.add(&src, &answer(&root.join("job"), &objs), file_stamp(&src)).unwrap();
         assert_eq!(p.role, Some(Role::Chassis));
         assert!(!p.multi_part_hint);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn split_groups_from_one_file_get_distinct_ids_and_names() {
+        let (root, lib) = tmp_lib("split");
+        let src = root.join("KTMRM.fbx");
+        std::fs::write(&src, b"fbx").unwrap();
+
+        let chassis = lib
+            .add_split_group(
+                &src,
+                "chassis",
+                Some(Role::Chassis),
+                &answer(&root.join("j1"), &[("chassis", "MESH")]),
+                file_stamp(&src),
+            )
+            .unwrap();
+        let levers = lib
+            .add_split_group(
+                &src,
+                "levers",
+                Some(Role::Levers),
+                &answer(&root.join("j2"), &[("brake_lever", "MESH")]),
+                file_stamp(&src),
+            )
+            .unwrap();
+        let leftover = lib
+            .add_split_group(&src, "part-3", None, &answer(&root.join("j3"), &[("Cube", "MESH")]), file_stamp(&src))
+            .unwrap();
+
+        // Same source file, three distinct ids: the plain path-derived id would have
+        // collided every one of these into the same part.
+        assert_ne!(chassis.id, levers.id);
+        assert_ne!(levers.id, leftover.id);
+        assert_eq!(chassis.name, "KTMRM — chassis");
+        assert_eq!((chassis.role, chassis.role_guessed), (Some(Role::Chassis), false));
+        assert_eq!((leftover.role, leftover.role_guessed), (None, false));
+        // A split group isn't re-flagged as a whole bike itself.
+        assert!(!chassis.multi_part_hint && !levers.multi_part_hint && !leftover.multi_part_hint);
+        assert_eq!(lib.list().len(), 3, "three parts in the tray, not one");
         let _ = std::fs::remove_dir_all(&root);
     }
 

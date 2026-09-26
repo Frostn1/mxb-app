@@ -327,4 +327,41 @@ mod real {
             let _ = std::fs::remove_dir_all(&root);
         }
     }
+
+    /// The bug that started `op_split`: a full bike FBX, brought in as one part, used to be
+    /// guessed "levers" (four small lever meshes outvoting the one big chassis mesh — see
+    /// `guess_role`'s regression test in `bikeparts.rs`). This asks Blender to actually cut
+    /// it into its parts and checks the ones that matter come out. Point
+    /// `FROST_SPLIT_SAMPLE` at a full-bike file to run it — there's no such file checked
+    /// into the repo, so this needs one on disk. `cargo test full_bike_splits_into_its_parts
+    /// -- --ignored --nocapture`.
+    #[test]
+    #[ignore = "needs Blender installed, and a full-bike FBX named by FROST_SPLIT_SAMPLE"]
+    fn full_bike_splits_into_its_parts() {
+        let Some(src) = std::env::var_os("FROST_SPLIT_SAMPLE").map(PathBuf::from) else {
+            eprintln!("set FROST_SPLIT_SAMPLE to a full-bike .fbx to run this");
+            return;
+        };
+        assert!(src.is_file(), "{}: not a file", src.display());
+        let exe = PathBuf::from(blender::detect("").expect("a Blender").path);
+        let root = std::env::temp_dir().join(format!("frost-bike-split-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let cache = root.join("cache");
+
+        let answer = blender::job(&exe, &cache, "split", |w| {
+            json!({ "op": "split", "part": src, "thumbSize": 64, "workDir": w })
+        })
+        .expect("split");
+        let groups = answer["groups"].as_array().expect("groups");
+        let tags: Vec<&str> = groups.iter().map(|g| g["tag"].as_str().unwrap()).collect();
+        eprintln!("groups: {tags:?}");
+        for want in ["chassis", "steer", "fsusp", "rsusp", "levers"] {
+            assert!(tags.contains(&want), "no {want} group, got {tags:?}");
+        }
+        for g in groups {
+            assert!(g["glb"].is_string(), "{}: no glb ({g})", g["tag"]);
+            assert!(g["tris"].as_u64().unwrap() > 0, "{}: no geometry ({g})", g["tag"]);
+        }
+        let _ = std::fs::remove_dir_all(&root);
+    }
 }

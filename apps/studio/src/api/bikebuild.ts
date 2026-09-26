@@ -150,6 +150,13 @@ export function removePart(id: string): Promise<void> {
   return invoke<void>("bike_part_remove", { id });
 }
 
+/** Cut a part with `multiPartHint` into its parts, by name — each object's own name if it
+ *  hints at a role, else its nearest named ancestor's. Replaces it in the library with one
+ *  new part per group Blender found. */
+export function splitPart(id: string): Promise<PartLibrary> {
+  return invoke<PartLibrary>("bike_part_split", { id });
+}
+
 export function setSlot(role: Role, id: string | null): Promise<Slots> {
   return invoke<Slots>("bike_slot_set", { role, id });
 }

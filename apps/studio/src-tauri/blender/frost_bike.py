@@ -117,9 +117,19 @@ def export_fbx(path):
     )
 
 
-def export_glb(path):
-    """What Studio's preview draws."""
-    bpy.ops.export_scene.gltf(filepath=path, export_format="GLB", use_selection=False, export_apply=True)
+def export_glb(path, objs=None):
+    """What Studio's preview draws. `objs`, when given, exports only those objects — the
+    whole-bike split (`op_split`) needs one group's geometry per file, not the scene the
+    other groups are still sitting in. Left `None` (every other caller), this is the same
+    "everything in the scene" export it always was: the scene never holds anything but the
+    one part being catalogued in the first place."""
+    if objs is not None:
+        bpy.ops.object.select_all(action="DESELECT")
+        for o in objs:
+            o.select_set(True)
+    bpy.ops.export_scene.gltf(
+        filepath=path, export_format="GLB", use_selection=objs is not None, export_apply=True
+    )
 
 
 def op_inspect(job):
@@ -197,9 +207,14 @@ def render_thumb(path, meshes, size):
 
 
 def catalog(objs, job):
-    """What the part library keeps of the objects now in the scene: their descriptions, attach
-    empties, a thumbnail, and a GLB for the preview. A thumbnail that won't render is a part
-    without a picture, never a part that can't be added."""
+    """What the part library keeps of `objs`: their descriptions, attach empties, a
+    thumbnail, and a GLB for the preview. A thumbnail that won't render is a part without a
+    picture, never a part that can't be added.
+
+    `objs` scopes the GLB to that group alone — for a plain add this is every object in the
+    scene (the same as exporting the whole thing), but `op_split` calls this once per group
+    while the others are still sitting in the same scene, and each group's file must hold
+    only its own geometry."""
     meshes = [o for o in objs if o.type == "MESH"]
     out = {
         "objects": [describe(o) for o in objs],
@@ -214,7 +229,7 @@ def catalog(objs, job):
         except Exception as e:
             out["thumbError"] = "%s: %s" % (type(e).__name__, e)
     if job.get("glb"):
-        export_glb(job["glb"])
+        export_glb(job["glb"], objs)
         out["glb"] = job["glb"]
     return out
 
@@ -226,6 +241,109 @@ def op_catalog(job):
     if not objs:
         raise ValueError("nothing to import in %s" % os.path.basename(job["part"]))
     return catalog(objs, job)
+
+
+# Name fragments that say which role an object plays, most specific first — "rear wheel"
+# before "wheel", "swingarm" before "arm". A hand-kept mirror of `HINTS` in
+# `bikeparts.rs`: that copy decides a *whole file's* guessed role from a weighted vote
+# across every object's name; this one decides which group a full bike's *own* object
+# belongs to, one object at a time, so it only needs the name itself, not a vote.
+SPLIT_HINTS = [
+    ("rearwheel", "wheel_r"),
+    ("rwheel", "wheel_r"),
+    ("wheelr", "wheel_r"),
+    ("frontwheel", "wheel_f"),
+    ("fwheel", "wheel_f"),
+    ("wheelf", "wheel_f"),
+    ("swingarm", "rsusp"),
+    ("rsusp", "rsusp"),
+    ("rearsusp", "rsusp"),
+    ("shock", "rsusp"),
+    ("linkage", "rsusp"),
+    ("fsusp", "fsusp"),
+    ("frontsusp", "fsusp"),
+    ("fork", "fsusp"),
+    ("handguard", "handguards"),
+    ("brushguard", "handguards"),
+    ("numberplate", "plate"),
+    ("frontplate", "plate"),
+    ("triple", "steer"),
+    ("handlebar", "steer"),
+    ("steer", "steer"),
+    ("clutchlever", "levers"),
+    ("brakelever", "levers"),
+    ("gearlever", "levers"),
+    ("shifter", "levers"),
+    ("lever", "levers"),
+    ("footpeg", "pedals"),
+    ("pedal", "pedals"),
+    ("peg", "pedals"),
+    ("chassis", "chassis"),
+    ("frame", "chassis"),
+]
+
+
+def squeeze(name):
+    return "".join(c.lower() for c in name if c.isalnum())
+
+
+def split_hint(name):
+    s = squeeze(name)
+    for key, role in SPLIT_HINTS:
+        if key in s:
+            return role
+    return None
+
+
+def group_of(obj, cache):
+    """Which group `obj` falls into: its own name's hint, or — walking up — the nearest
+    ancestor's. A wheel's hub bolts and an empty's own name rarely say "wheel", but the
+    object they're parented to almost always does; asking the chain is what keeps those
+    with the part they belong to instead of scattering them into "unassigned"."""
+    if obj.name in cache:
+        return cache[obj.name]
+    cache[obj.name] = None  # breaks a cycle, which a well-formed scene never has anyway
+    hint = split_hint(obj.name)
+    if hint is None and obj.parent is not None:
+        hint = group_of(obj.parent, cache)
+    cache[obj.name] = hint
+    return hint
+
+
+def op_split(job):
+    """A full bike (or a big sub-assembly) brought in as one file, cut into its parts by
+    name — each object's own name if it hints at a role, else its nearest named ancestor's.
+    Anything left with no hint anywhere up its chain is its own "unassigned" group, never
+    silently dropped or folded into whichever group happened to import first.
+
+    One GLB and thumbnail per group, in `job["workDir"]`; the caller (`bike_part_split` in
+    `main.rs`) turns each into its own library part and removes the one this replaces."""
+    empty_scene()
+    objs = import_part(job["part"])
+    if not objs:
+        raise ValueError("nothing to import in %s" % os.path.basename(job["part"]))
+    work = job["workDir"]
+    cache = {}
+    buckets = {}
+    for o in objs:
+        buckets.setdefault(group_of(o, cache) or "unassigned", []).append(o)
+    if len(buckets) < 2:
+        raise ValueError("this file only has one part in it — nothing to split")
+
+    groups = []
+    # Sorted so the result (and so the tag on each exported file) is the same every run,
+    # not whatever order Blender happened to import the objects in.
+    for i, (key, group_objs) in enumerate(sorted(buckets.items())):
+        tag = key if key != "unassigned" else "part-%d" % (i + 1)
+        sub = catalog(
+            group_objs,
+            {"thumb": os.path.join(work, "%s-thumb.png" % tag), "thumbSize": job.get("thumbSize") or 256,
+             "glb": os.path.join(work, "%s.glb" % tag)},
+        )
+        sub["tag"] = tag
+        sub["role"] = None if key == "unassigned" else key
+        groups.append(sub)
+    return {"groups": groups}
 
 
 def save_part(path):
@@ -442,6 +560,7 @@ def op_assemble(job):
 OPS = {
     "inspect": op_inspect,
     "catalog": op_catalog,
+    "split": op_split,
     "placeholder": op_placeholder,
     "templates": op_templates,
     "make": op_make,
