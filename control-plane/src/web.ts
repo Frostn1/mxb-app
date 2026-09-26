@@ -293,7 +293,7 @@ const LOCKWEB_FILES: Record<string, string> = {
  */
 async function lockweb(request: Request, url: URL, env: Env, origin: string | null): Promise<Response> {
   const name = url.pathname.slice("/v1/web/lockweb/".length);
-  const type = LOCKWEB_FILES[name];
+  const type = Object.hasOwn(LOCKWEB_FILES, name) ? LOCKWEB_FILES[name] : undefined;
   if (!type) return cors(json(404, { error: "no such file" }), origin);
 
   const session = await webSession(request, env);
@@ -322,9 +322,9 @@ async function lockweb(request: Request, url: URL, env: Env, origin: string | nu
     new Response(object.body, {
       headers: {
         "Content-Type": type,
-        // The creator's own browser may keep it; no shared cache may, because this response
-        // is the one thing on this host that is large, static and not public.
-        "Cache-Control": "private, max-age=3600",
+        // No caching: a sign-out, expired session, ban, or loss of creator standing must take
+        // the locker away immediately, not up to an hour later.
+        "Cache-Control": "no-store",
         "X-Content-Type-Options": "nosniff",
       },
     }),
