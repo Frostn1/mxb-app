@@ -1,5 +1,15 @@
 import { useState } from "react";
-import { AlertTriangle, ArrowRightToLine, Box, Loader2, Plus, RefreshCw, Sparkles, Trash2 } from "lucide-react";
+import {
+  AlertTriangle,
+  ArrowRightToLine,
+  Box,
+  Loader2,
+  Plus,
+  RefreshCw,
+  Scissors,
+  Sparkles,
+  Trash2,
+} from "lucide-react";
 import { Button } from "@frost/shared/Components/ui/button";
 import { cn } from "@frost/shared/lib/utils";
 import {
@@ -63,11 +73,11 @@ export default function PartTray({
 
   return (
     <section data-dock="left" className="flex h-full min-w-0 flex-col gap-3 overflow-y-auto p-4">
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <h2 className="text-[11px] font-semibold uppercase tracking-[0.09em] text-faint">
           {t("bike.parts")}
         </h2>
-        <div className="ml-auto flex gap-1.5">
+        <div className="flex flex-wrap gap-1.5">
           <Button size="sm" variant="outline" onClick={() => setMaking(true)} disabled={!ready || busy}>
             <Sparkles className="size-3.5" />
             {t("bike.makeAPart")}
@@ -84,6 +94,12 @@ export default function PartTray({
         <ul className="flex flex-col gap-2">
           {parts.map((p) => {
             const placed = !!p.role && slots[p.role] === p.id;
+            // MX Bikes' own convention for a shadow-only mesh, not a naming rule Studio invented —
+            // `bikebuild.rs` writes the game's low-detail render-shadow FBX the same way. Only the
+            // filename is checked, not the whole path — a project folder that happens to be named
+            // "shadow-something" shouldn't flag every ordinary part brought in from inside it.
+            const fileName = p.source.split(/[\\/]/).pop() ?? p.source;
+            const isShadow = /shadow/i.test(p.name) || /shadow/i.test(fileName);
             return (
               <li key={p.id} className="flex flex-col gap-1.5 border border-border bg-background p-2">
                 <div className="flex gap-2">
@@ -105,6 +121,13 @@ export default function PartTray({
                       <p className="flex items-center gap-1 text-[11px] text-amber-500">
                         <AlertTriangle className="size-3" />
                         {p.missing ? t("bike.partMissing") : t("bike.partStale")}
+                      </p>
+                    )}
+                    {isShadow && <p className="text-[11px] text-muted-foreground">{t("bike.shadowModel")}</p>}
+                    {p.missingTextures.length > 0 && (
+                      <p className="flex items-start gap-1 text-[11px] text-amber-500">
+                        <AlertTriangle className="mt-px size-3 shrink-0" />
+                        {t("bike.missingTextures", { names: p.missingTextures.join(", ") })}
                       </p>
                     )}
                   </div>
@@ -174,6 +197,15 @@ export default function PartTray({
                       <RefreshCw className="size-3.5" />
                     </Button>
                   )}
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    title={t("bike.splitIntoParts")}
+                    onClick={() => onSplit(p)}
+                    disabled={busy}
+                  >
+                    <Scissors className="size-3.5" />
+                  </Button>
                   <Button
                     size="sm"
                     variant="ghost"

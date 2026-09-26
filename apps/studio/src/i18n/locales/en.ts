@@ -50,6 +50,12 @@ export const en = {
 
   // ── Bike builder: parts assembled in the rider's own Blender ────────────
   "nav.bike": "Bike",
+  "bike.step1": "Base bike",
+  "bike.step2": "Parts",
+  "bike.step3": "Build",
+  "bike.shadowModel": "Shadow model — a low-detail, texture-less mesh MX Bikes renders for shadows, not the rideable one.",
+  "bike.missingTextures": "Missing textures: {{names}}",
+  "bike.baseBikeHint": "Pick an installed bike, import a full-bike file, or start from the placeholder.",
   "bike.blender": "Blender",
   "bike.looking": "Looking for Blender…",
   "bike.blenderFound": "Blender {{version}} is ready.",
@@ -143,6 +149,7 @@ export const en = {
   "bike.build": "Build",
   "bike.buildNamePlaceholder": "Bike name",
   "bike.buildIt": "Build the bike",
+  "bike.buildReport": "How it built",
   "bike.buildFailed": "The build failed",
   "bike.openFolder": "Open folder",
   "bike.shadow": "shadow",

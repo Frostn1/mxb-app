@@ -55,6 +55,11 @@ export const de: Translation = {
 
   // ── Bike builder: parts assembled in the rider's own Blender ────────────
   "nav.bike": "Bike",
+  "bike.step1": "Basis-Bike",
+  "bike.step2": "Teile",
+  "bike.step3": "Bauen",
+  "bike.shadowModel": "Schattenmodell — ein Low-Detail-Mesh ohne Textur, das MX Bikes für Schatten rendert, nicht das fahrbare Modell.",
+  "bike.missingTextures": "Fehlende Texturen: {{names}}",
   "bike.blender": "Blender",
   "bike.looking": "Suche Blender…",
   "bike.blenderFound": "Blender {{version}} ist bereit.",
@@ -123,6 +128,7 @@ export const de: Translation = {
   "bike.usePlaceholder": "Platzhalter verwenden",
   "bike.templateFailed": "Dieses Bike kann keine Vorlage sein",
   "bike.templateProblem": "Die Vorlage konnte nicht gelesen werden, der Platzhalter springt ein: {{problem}}",
+  "bike.baseBikeHint": "Wähle ein installiertes Bike, importiere ein komplettes Bike, oder starte mit dem Platzhalter.",
   "bike.baseBikeStep": "Schritt 1: Basis-Bike",
   "bike.importFullBikeFile": "Ein komplettes Bike importieren…",
   "bike.importBaseFailed": "Konnte nicht als Basis-Bike importiert werden",
@@ -148,6 +154,7 @@ export const de: Translation = {
   "bike.build": "Bauen",
   "bike.buildNamePlaceholder": "Bike-Name",
   "bike.buildIt": "Bike bauen",
+  "bike.buildReport": "Wie es gebaut wurde",
   "bike.buildFailed": "Der Bau ist fehlgeschlagen",
   "bike.openFolder": "Ordner öffnen",
   "bike.shadow": "Schatten",

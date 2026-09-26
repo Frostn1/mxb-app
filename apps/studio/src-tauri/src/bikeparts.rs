@@ -198,6 +198,9 @@ pub struct Part {
     /// carry a hint or two, which isn't worth showing.
     #[serde(default)]
     pub role_hints: BTreeMap<Role, usize>,
+    /// Texture files the part needs that couldn't be found.
+    #[serde(default)]
+    pub missing_textures: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -398,6 +401,15 @@ impl Library {
         std::fs::create_dir_all(&dir)?;
         let objects = answer["objects"].as_array().cloned().unwrap_or_default();
 
+        let mut missing_textures: Vec<String> = objects
+            .iter()
+            .filter_map(|o| o["missingTextures"].as_array())
+            .flatten()
+            .filter_map(|texture| texture.as_str().map(str::to_owned))
+            .collect();
+        missing_textures.sort();
+        missing_textures.dedup();
+
         // Both new files are staged beside the old ones before either is replaced, so a copy
         // that fails leaves the part as it was and says so, rather than losing its picture.
         let mut staged = Vec::new();
@@ -434,6 +446,7 @@ impl Library {
             added: before.as_ref().map(|p| p.added).unwrap_or_else(now_secs),
             multi_part_hint: role_hints.len() >= 3,
             role_hints,
+            missing_textures,
         };
         self.commit(&part, staged)?;
         // A fresh guess can say something else: then the part leaves the slot it no longer fits.

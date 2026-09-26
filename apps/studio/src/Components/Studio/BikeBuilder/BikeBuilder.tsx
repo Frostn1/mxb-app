@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { Box } from "lucide-react";
 import { toast } from "sonner";
 import { useT } from "@/i18n";
@@ -9,6 +9,7 @@ import PartTray from "./PartTray";
 import PartSlots from "./PartSlots";
 import PreviewPane, { useAssemblyView } from "./PreviewPane";
 import BuildPanel from "./BuildPanel";
+import StepHeader, { type BuildStep } from "./StepHeader";
 import { useBikeLibrary } from "./useBikeLibrary";
 import { usePartDrag } from "./usePartDrag";
 
@@ -32,6 +33,13 @@ export default function BikeBuilder() {
   const [view, setView] = useAssemblyView(version);
   const [baseBusy, setBaseBusy] = useState(false);
   const lib = useBikeLibrary(version, changed, baseBusy);
+  /** The backend always has *some* template loaded — a fresh build defaults to the
+   *  placeholder without anyone having asked for it — so `view.template` alone can't say
+   *  whether the rider has actually done step 1 yet. Set the moment one of this step's own
+   *  picks lands, so the step indicator and its hint don't treat "never touched" the same as
+   *  "chose the placeholder". A saved build that already has a chassis part or a real bike
+   *  template counts too, for a build reopened from a previous session. */
+  const [explicitBase, setExplicitBase] = useState(false);
   const { dragging, startDrag } = usePartDrag((part) => {
     if (part.role) void lib.onSlot(part.role, part.id);
   });
@@ -40,6 +48,7 @@ export default function BikeBuilder() {
     setBaseBusy(true);
     try {
       setView(await setTemplate(path));
+      setExplicitBase(true);
     } catch (e) {
       toast.error(t("bike.templateFailed"), { description: String(e) });
     } finally {
@@ -59,6 +68,7 @@ export default function BikeBuilder() {
       await setPartRole(part.id, "chassis");
       await setSlot("chassis", part.id);
       setView(await setTemplate(null));
+      setExplicitBase(true);
       changed();
     } catch (e) {
       toast.error(t("bike.importBaseFailed"), { description: String(e) });
@@ -72,6 +82,7 @@ export default function BikeBuilder() {
     try {
       await addPlaceholderBike();
       setView(await setTemplate(null));
+      setExplicitBase(true);
       changed();
     } catch (e) {
       toast.error(t("bike.placeholderFailed"), { description: String(e) });
@@ -86,9 +97,21 @@ export default function BikeBuilder() {
       : view.template.name
     : null;
 
+  // The whole-bike part playing chassis, when there is one — the "Split into parts" action in
+  // step 1 cuts *this* up, not the template (the template is just the anchor geometry parts
+  // snap to; splitting it wouldn't mean anything).
+  const chassisPart = useMemo(
+    () => lib.parts?.find((p) => p.role === "chassis" && lib.slots.chassis === p.id) ?? null,
+    [lib.parts, lib.slots.chassis],
+  );
+  const baseChosen = explicitBase || !!chassisPart || view?.template.source.kind === "bike";
+  const placedCount = view?.assembly.placed.length ?? 0;
+  const step: BuildStep = !baseChosen ? 1 : placedCount <= 1 ? 2 : 3;
+
   return (
     <div className="relative flex h-full min-h-0 flex-col">
       <BlenderBar onReadyChange={setReady} />
+      <StepHeader step={step} />
       {dragging && (
         <div
           className="pointer-events-none fixed z-50 flex items-center gap-1.5 border border-primary bg-popover px-2 py-1 text-[12px] shadow-lg"
@@ -101,12 +124,15 @@ export default function BikeBuilder() {
 
       <BaseBikeStep
         baseName={baseName}
+        baseChosen={baseChosen}
         problem={view?.template.problem ?? null}
         onPick={onPickTemplate}
         onImportFile={onImportFile}
         onPlaceholder={onPlaceholder}
         busy={baseBusy}
         blenderReady={ready}
+        onSplitBase={chassisPart ? () => void lib.onSplit(chassisPart) : undefined}
+        splitBusy={lib.busy}
       />
 
       <div className="flex min-h-0 flex-1 flex-col">
@@ -115,7 +141,7 @@ export default function BikeBuilder() {
           <PreviewPane version={version} view={view} setView={setView} lib={lib} />
           <PartSlots lib={lib} />
         </div>
-        <BuildPanel view={view} placedCount={view?.assembly.placed.length ?? 0} />
+        <BuildPanel view={view} placedCount={placedCount} />
       </div>
     </div>
   );

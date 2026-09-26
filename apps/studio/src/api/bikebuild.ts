@@ -126,6 +126,8 @@ export interface LibraryPart {
   /** What `multiPartHint` found, broken down: how many objects hinted at each role. Only
    *  meaningful alongside `multiPartHint` — empty otherwise. */
   roleHints: Partial<Record<Role, number>>;
+  /** Texture files this part needs that couldn't be found. */
+  missingTextures: string[];
 }
 
 export type Slots = Partial<Record<Role, string>>;

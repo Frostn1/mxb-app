@@ -22,11 +22,14 @@ export default function PartSlots({ lib }: { lib: ReturnType<typeof useBikeLibra
 
   if (!open) {
     return (
+      // Centered top-to-bottom used to read as "jumped to the middle" next to the expanded
+      // header's chevron sitting at the top — pinned to the same spot here instead, so
+      // collapsing doesn't move it.
       <button
         type="button"
         onClick={() => setOpen(true)}
         title={t("bike.slots")}
-        className="flex h-full w-8 shrink-0 items-center justify-center border-l border-border bg-window text-faint hover:text-foreground"
+        className="flex h-full w-8 shrink-0 justify-center border-l border-border bg-window pt-3 text-faint hover:text-foreground"
       >
         <ChevronLeft className="size-4" />
       </button>
@@ -46,6 +49,7 @@ export default function PartSlots({ lib }: { lib: ReturnType<typeof useBikeLibra
           <ChevronRight className="size-4" />
         </button>
       </div>
+      <p className="text-[11px] text-muted-foreground">{t("bike.slotsHint")}</p>
       <ul className="flex flex-col gap-1">
         {ROLES.map((role) => {
           const filled = slots[role] ? byId.get(slots[role]!) : undefined;

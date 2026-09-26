@@ -55,6 +55,11 @@ export const fr: Translation = {
 
   // ── Bike builder: parts assembled in the rider's own Blender ────────────
   "nav.bike": "Moto",
+  "bike.step1": "Moto de base",
+  "bike.step2": "Pièces",
+  "bike.step3": "Construction",
+  "bike.shadowModel": "Modèle d'ombre — un maillage basse résolution sans texture que MX Bikes utilise pour les ombres, pas le modèle roulant.",
+  "bike.missingTextures": "Textures manquantes : {{names}}",
   "bike.blender": "Blender",
   "bike.looking": "Recherche de Blender…",
   "bike.blenderFound": "Blender {{version}} est prêt.",
@@ -123,6 +128,7 @@ export const fr: Translation = {
   "bike.usePlaceholder": "Utiliser l'exemple",
   "bike.templateFailed": "Cette moto ne peut pas servir de modèle",
   "bike.templateProblem": "Le modèle est illisible, l'exemple le remplace : {{problem}}",
+  "bike.baseBikeHint": "Choisissez une moto installée, importez un fichier de moto complète, ou partez de l'exemple.",
   "bike.baseBikeStep": "Étape 1 : moto de base",
   "bike.importFullBikeFile": "Importer un fichier de moto complète…",
   "bike.importBaseFailed": "Impossible de l'importer comme moto de base",
@@ -148,6 +154,7 @@ export const fr: Translation = {
   "bike.build": "Construire",
   "bike.buildNamePlaceholder": "Nom de la moto",
   "bike.buildIt": "Construire la moto",
+  "bike.buildReport": "Comment elle a été construite",
   "bike.buildFailed": "La construction a échoué",
   "bike.openFolder": "Ouvrir le dossier",
   "bike.shadow": "ombre",

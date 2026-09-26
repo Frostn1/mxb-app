@@ -89,6 +89,7 @@ def describe(obj):
         "type": obj.type,
         "parent": obj.parent.name if obj.parent else None,
         "location": list(obj.matrix_world.translation),
+        "missingTextures": [],
     }
     if obj.type == "MESH":
         mesh = obj.data
@@ -97,6 +98,18 @@ def describe(obj):
         info["tris"] = len(mesh.loop_triangles)
         info["materials"] = [m.name for m in mesh.materials if m is not None]
         info["uv"] = len(mesh.uv_layers) > 0
+        missing_textures = []
+        for material in mesh.materials:
+            if not (material and material.use_nodes and material.node_tree):
+                continue
+            for node in material.node_tree.nodes:
+                if node.type != "TEX_IMAGE" or node.image is None:
+                    continue
+                image = node.image
+                if image.source == "FILE" and image.packed_file is None:
+                    if not os.path.exists(bpy.path.abspath(image.filepath)):
+                        missing_textures.append(bpy.path.basename(image.filepath) if image.filepath else image.name)
+        info["missingTextures"] = sorted(set(missing_textures))
     return info
 
 

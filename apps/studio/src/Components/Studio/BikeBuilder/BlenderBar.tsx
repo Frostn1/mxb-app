@@ -78,7 +78,7 @@ export default function BlenderBar({ onReadyChange }: { onReadyChange?: (ready: 
       ) : (
         <XCircle className="size-3.5 shrink-0 text-amber-500" />
       )}
-      <span className="min-w-0 flex-1 truncate text-muted-foreground">{summary}</span>
+      <span className="min-w-0 truncate text-muted-foreground">{summary}</span>
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
           <Button size="sm" variant="ghost" className="h-6 gap-1 px-1.5 text-[11px]">
