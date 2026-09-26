@@ -2600,13 +2600,27 @@ async fn bike_template_readable(paths: Vec<String>) -> Result<std::collections::
         paths
             .into_iter()
             .map(|p| {
-                let readable = mxb_core::pkz::is_plain_zip(std::path::Path::new(&p));
+                let path = std::path::Path::new(&p);
+                // A plain zip needs nothing further; the game's own KCOL format needs the
+                // sidecar, and only says so when this build actually has it — a build
+                // without it still reports one of these as unreadable, same as before.
+                let readable = mxb_core::pkz::is_plain_zip(path) || is_kcol_readable(path);
                 (p, readable)
             })
             .collect()
     })
     .await
     .map_err(|e| format!("checking the bikes failed: {e}"))
+}
+
+#[cfg(sidecar)]
+fn is_kcol_readable(path: &std::path::Path) -> bool {
+    mxb_core::sidecar::is_kcol(path)
+}
+
+#[cfg(not(sidecar))]
+fn is_kcol_readable(_path: &std::path::Path) -> bool {
+    false
 }
 
 #[tauri::command]
