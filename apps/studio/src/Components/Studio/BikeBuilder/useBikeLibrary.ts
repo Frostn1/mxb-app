@@ -9,6 +9,7 @@ import {
   removePart,
   setPartRole,
   setSlot,
+  splitPart,
   type LibraryPart,
   type Role,
   type Slots,
@@ -91,8 +92,9 @@ export function useBikeLibrary(version: number, onChanged: () => void) {
   const onRemove = (part: LibraryPart) => change(() => removePart(part.id), "bike.removeFailed");
   const onSlot = (role: Role, value: string) =>
     change(() => setSlot(role, value === NONE ? null : value), "bike.slotFailed");
+  const onSplit = (part: LibraryPart) => change(() => splitPart(part.id), "bike.splitFailed");
 
   const busy = adding !== null || changing;
 
-  return { parts, slots, adding, busy, onAdd, add, onRole, onRemove, onSlot };
+  return { parts, slots, adding, busy, onAdd, add, onRole, onRemove, onSlot, onSplit };
 }

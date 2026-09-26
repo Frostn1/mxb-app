@@ -327,4 +327,65 @@ mod real {
             let _ = std::fs::remove_dir_all(&root);
         }
     }
+
+    /// The bug that started `op_split`: a full bike FBX, brought in as one part, used to be
+    /// guessed "levers" (four small lever meshes outvoting the one big chassis mesh — see
+    /// `guess_role`'s regression test in `bikeparts.rs`). This asks Blender to actually cut
+    /// it into its parts and checks the ones that matter come out. Point
+    /// `FROST_SPLIT_SAMPLE` at a full-bike file to run it — there's no such file checked
+    /// into the repo, so this needs one on disk. `cargo test full_bike_splits_into_its_parts
+    /// -- --ignored --nocapture`.
+    #[test]
+    #[ignore = "needs Blender installed, and a full-bike FBX named by FROST_SPLIT_SAMPLE"]
+    fn full_bike_splits_into_its_parts() {
+        let Some(src) = std::env::var_os("FROST_SPLIT_SAMPLE").map(PathBuf::from) else {
+            eprintln!("set FROST_SPLIT_SAMPLE to a full-bike .fbx to run this");
+            return;
+        };
+        assert!(src.is_file(), "{}: not a file", src.display());
+        let exe = PathBuf::from(blender::detect("").expect("a Blender").path);
+        let root = std::env::temp_dir().join(format!("frost-bike-split-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let cache = root.join("cache");
+        let parts_dir = root.join("parts");
+
+        let answer = blender::job(&exe, &cache, "split", |w| {
+            json!({ "op": "split", "part": src, "thumbSize": 64, "workDir": w, "partsDir": parts_dir })
+        })
+        .expect("split");
+        let groups = answer["groups"].as_array().expect("groups");
+        let tags: Vec<&str> = groups.iter().map(|g| g["tag"].as_str().unwrap()).collect();
+        eprintln!("groups: {tags:?}");
+        for want in ["chassis", "steer", "fsusp", "rsusp", "levers"] {
+            assert!(tags.contains(&want), "no {want} group, got {tags:?}");
+        }
+        for g in groups {
+            assert!(g["glb"].is_string(), "{}: no glb ({g})", g["tag"]);
+            assert!(g["tris"].as_u64().unwrap() > 0, "{}: no geometry ({g})", g["tag"]);
+            // Its own FBX, not just a preview GLB: a build imports this fresh, and it must
+            // hold only this group's geometry, not the whole bike it was cut from.
+            let fbx = PathBuf::from(g["source"].as_str().expect("a source fbx"));
+            assert!(fbx.is_file(), "{}: {} isn't a file", g["tag"], fbx.display());
+        }
+
+        // Spot-check the one this bug was about: re-import the levers group's own FBX and
+        // make sure it's just the levers, not the whole bike still riding along inside it —
+        // exactly the failure a shared `source` used to cause before each group got its own.
+        let levers = groups.iter().find(|g| g["tag"] == "levers").expect("a levers group");
+        let levers_fbx = PathBuf::from(levers["source"].as_str().unwrap());
+        let reimported = blender::job(&exe, &cache, "inspect", |w| {
+            json!({ "op": "inspect", "part": levers_fbx, "fbx": w.join("check.fbx") })
+        })
+        .expect("re-inspecting the levers fbx");
+        let names: Vec<&str> =
+            reimported["objects"].as_array().unwrap().iter().map(|o| o["name"].as_str().unwrap()).collect();
+        eprintln!("levers.fbx holds: {names:?}");
+        assert!(!names.is_empty(), "the levers fbx re-imported empty");
+        assert!(
+            names.iter().all(|n| !n.to_ascii_lowercase().contains("chassis")),
+            "the levers fbx still has the chassis in it: {names:?}",
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
 }

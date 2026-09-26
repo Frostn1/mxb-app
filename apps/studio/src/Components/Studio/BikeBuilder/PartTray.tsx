@@ -44,7 +44,7 @@ export default function PartTray({
   onStartDrag: (part: LibraryPart, e: React.PointerEvent) => void;
 }) {
   const t = useT();
-  const { parts, adding, busy, onAdd, add, onRole, onRemove } = lib;
+  const { parts, adding, busy, onAdd, add, onRole, onRemove, onSplit } = lib;
 
   return (
     <section data-dock="left" className="flex h-full min-w-0 flex-col gap-3 overflow-y-auto p-4">
@@ -87,10 +87,21 @@ export default function PartTray({
                 </div>
               </div>
               {p.multiPartHint && (
-                <p className="flex items-start gap-1.5 border border-amber-500/30 bg-amber-500/10 p-1.5 text-[11px] text-amber-600">
-                  <AlertTriangle className="mt-px size-3 shrink-0" />
-                  {t("bike.multiPartHint")}
-                </p>
+                <div className="flex flex-col gap-1.5 border border-amber-500/30 bg-amber-500/10 p-1.5 text-[11px] text-amber-600">
+                  <p className="flex items-start gap-1.5">
+                    <AlertTriangle className="mt-px size-3 shrink-0" />
+                    {t("bike.multiPartHint")}
+                  </p>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="border-amber-500/40 text-amber-600 hover:text-amber-600"
+                    onClick={() => onSplit(p)}
+                    disabled={busy}
+                  >
+                    {t("bike.splitIntoParts")}
+                  </Button>
+                </div>
               )}
               <Select value={p.role ?? NONE} onValueChange={(v) => onRole(p, v)} disabled={busy}>
                 <SelectTrigger className="h-8">

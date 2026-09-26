@@ -206,6 +206,7 @@ fn main() {
             bike_part_inspect,
             bike_parts_list,
             bike_part_add,
+            bike_part_split,
             bike_part_set_role,
             bike_part_remove,
             bike_slot_set,
@@ -1562,6 +1563,72 @@ async fn bike_part_add(app: tauri::AppHandle, part: String) -> Result<BikePartVi
     })
     .await
     .map_err(|e| format!("adding the part failed: {e}"))?
+}
+
+/// Cut a whole bike (or a big sub-assembly) brought in as one file into its parts, by name:
+/// each object's own name if it hints at a role, else its nearest named ancestor's up the
+/// parent chain. Replaces the part this was with one part per group it found — offered
+/// wherever `multiPartHint` says a part looks like more than one.
+#[tauri::command]
+async fn bike_part_split(app: tauri::AppHandle, id: String) -> Result<BikeParts, String> {
+    let saved = config::load_or_detect(&app).unwrap_or_default().blender_path;
+    let lib = bike_library(&app)?;
+    let cache = app
+        .path()
+        .app_cache_dir()
+        .map_err(|e| format!("no cache directory: {e}"))?
+        .join("bike-builder");
+    tauri::async_runtime::spawn_blocking(move || {
+        let found = supported_blender(&saved)?;
+        let part = {
+            let _one = BIKE_LIBRARY.lock().unwrap_or_else(|p| p.into_inner());
+            lib.get(&id).map_err(|e| format!("{e:#}"))?
+        };
+        // Each group gets its own exported FBX (see `op_split`'s own doc comment for why:
+        // a build imports a part's `source` fresh, and that has to be just the group's
+        // geometry). Kept in the app's own data dir, not the job's — that folder is cleared
+        // by the next "split" job, same reasoning as the placeholder bike's `bike-made`.
+        let parts_dir = app
+            .path()
+            .app_data_dir()
+            .map_err(|e| format!("no app data directory: {e}"))?
+            .join("bike-made")
+            .join("split")
+            .join(&id);
+        let make = |work: &std::path::Path| {
+            serde_json::json!({
+                "op": "split",
+                "part": part.source,
+                "thumbSize": 256,
+                "workDir": work,
+                "partsDir": parts_dir,
+            })
+        };
+        let keep = |answer: serde_json::Value| -> anyhow::Result<BikeParts> {
+            let groups = answer["groups"].as_array().cloned().unwrap_or_default();
+            if groups.is_empty() {
+                anyhow::bail!("that didn't turn up more than one part to split it into");
+            }
+            let _one = BIKE_LIBRARY.lock().unwrap_or_else(|p| p.into_inner());
+            // Every group is added before the part it replaces is removed: if one of them
+            // fails partway (a disk error, say), the rider keeps the original and whatever
+            // groups did land, rather than losing the original for an incomplete split.
+            for g in &groups {
+                let tag = g["tag"].as_str().unwrap_or("part").to_string();
+                let role: Option<bikeparts::Role> = serde_json::from_value(g["role"].clone()).unwrap_or(None);
+                let source = std::path::PathBuf::from(g["source"].as_str().unwrap_or_default());
+                let stamp = bikeparts::file_stamp(&source);
+                lib.add_split_group(&part.name, &source, &tag, role, g, stamp)?;
+            }
+            lib.remove(&id)?;
+            let parts = lib.list().into_iter().map(|p| bike_part_view(&lib, p)).collect();
+            Ok(BikeParts { parts, slots: lib.slots() })
+        };
+        blender::job_then(std::path::Path::new(&found.path), &cache, "split", make, keep)
+            .map_err(|e| format!("{e:#}"))
+    })
+    .await
+    .map_err(|e| format!("splitting the part failed: {e}"))?
 }
 
 #[tauri::command]
