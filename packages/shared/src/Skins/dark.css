@@ -1,36 +1,36 @@
-/* MXB Coach's own skin: the mxbsecure site's look, not MXB App's.
- *
- * Black ground, one blue, Geist Mono ExtraBold for headings and labels, the system sans for
- * text, and upright rounded controls. Same shared primitives with different tokens under
- * them, the way `studio.css` does it. On <html> so Radix portals get it too. */
+/* The Coach/App-family dark skin: black ground, one blue, Geist Mono ExtraBold for headings
+ * and labels, the system sans for text, upright rounded controls. Shared so Coach, Studio
+ * (and anything else in the family) draw from one source instead of drifting apart — this
+ * file used to live only in Coach as `coach.css`; Studio applies the same `coach-skin` class
+ * alongside its own structural rules in `studio.css`. On <html> so Radix portals get it too. */
 
 @font-face {
   font-family: "Geist Mono";
   font-style: normal;
   font-weight: 400;
   font-display: swap;
-  src: url("./fonts/geist-mono-latin-400-normal.woff2") format("woff2");
+  src: url("../fonts/geist-mono-latin-400-normal.woff2") format("woff2");
 }
 @font-face {
   font-family: "Geist Mono";
   font-style: normal;
   font-weight: 500;
   font-display: swap;
-  src: url("./fonts/geist-mono-latin-500-normal.woff2") format("woff2");
+  src: url("../fonts/geist-mono-latin-500-normal.woff2") format("woff2");
 }
 @font-face {
   font-family: "Geist Mono";
   font-style: normal;
   font-weight: 700;
   font-display: swap;
-  src: url("./fonts/geist-mono-latin-700-normal.woff2") format("woff2");
+  src: url("../fonts/geist-mono-latin-700-normal.woff2") format("woff2");
 }
 @font-face {
   font-family: "Geist Mono";
   font-style: normal;
   font-weight: 800;
   font-display: swap;
-  src: url("./fonts/geist-mono-latin-800-normal.woff2") format("woff2");
+  src: url("../fonts/geist-mono-latin-800-normal.woff2") format("woff2");
 }
 
 .coach-skin {
