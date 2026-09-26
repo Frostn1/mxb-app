@@ -87,6 +87,16 @@ import {
   reportSnapshot,
 } from "./roster";
 import { VoiceRoom } from "./voiceroom";
+import { PaintRoom } from "./paintroom";
+import {
+  liveKey,
+  missingPaints,
+  parseServerHint,
+  pruneLivePaints,
+  publicRider,
+  resolveServer,
+  ridersOn,
+} from "./paintsync";
 
 interface Account {
   id: string;
@@ -98,7 +108,7 @@ interface Account {
 }
 
 // The runtime finds a Durable Object class by its export from the entry module.
-export { VoiceRoom };
+export { VoiceRoom, PaintRoom };
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -136,6 +146,7 @@ export default {
         pruneCrashes(env),
         pruneLockAttempts(env),
         pruneQueue(env),
+        pruneLivePaints(env),
         resolveTrackCatalog(env),
       ]).then(
         () => undefined,
@@ -480,6 +491,14 @@ async function route(request: Request, env: Env): Promise<Response> {
   if (method === "PUT" && path === "/v1/loadouts") return putLoadouts(request, account, env);
   if (method === "GET" && path === "/v1/roster") return roster(url, account, env);
   if (method === "GET" && path === "/v1/presence") return whoIsOn(url, env);
+
+  // Paint sync v2 (`paintsync.ts`): join a server, upload only what is missing, and a room
+  // that pushes later arrivals. The routes above stay for apps that predate it.
+  if (method === "POST" && path === "/v1/paintsync/join") return paintsyncJoin(request, account, env);
+  if (method === "POST" && path === "/v1/paintsync/leave") return paintsyncLeave(request, account, env);
+  if (method === "GET" && path === "/v1/paintsync/room") return paintsyncRoom(request, url, account, env);
+  const livePaint = /^\/v1\/paintsync\/paints\/([0-9a-f]{64})$/.exec(path);
+  if (livePaint && method === "PUT") return putLivePaint(request, livePaint[1], account, env);
   if (method === "GET" && path === "/v1/presence/counts") return presenceCounts(env);
 
   // The line for a full server. Open to every account, like presence: the riders who need it
@@ -1405,6 +1424,22 @@ async function storeLoadouts(
   scope: "all" | "these",
   env: Env,
 ): Promise<Response> {
+  await writeLoadouts(account, bikes, scope, env);
+
+  // Tell the client which blobs we still need, so it uploads only what nobody has shared
+  // yet. Content addressing makes this cheap: the same paint from twenty riders is one
+  // object and nineteen skipped uploads. De-duplicated first — gear repeats across bikes,
+  // so a whole-profile publish asks about the same digest many times over.
+  const wanted = [...new Set(bikes.flatMap((b) => b.rows.map((r) => r.sha256)))];
+  const missing: string[] = [];
+  for (const sha of wanted) {
+    if (!(await env.PAINTS.head(sha))) missing.push(sha);
+  }
+  return json(200, { ok: true, missing });
+}
+
+/** Replace `scope` of an account's look with `bikes`. */
+async function writeLoadouts(account: Account, bikes: BikeRows[], scope: "all" | "these", env: Env): Promise<void> {
   const now = Date.now();
   // Replace rather than merge: a slot the player cleared has to disappear, and merging would
   // leave them wearing something they took off. `scope: "all"` is a whole-profile publish, so
@@ -1440,17 +1475,6 @@ async function storeLoadouts(
     ),
   ];
   await env.DB.batch(statements);
-
-  // Tell the client which blobs we still need, so it uploads only what nobody has shared
-  // yet. Content addressing makes this cheap: the same paint from twenty riders is one
-  // object and nineteen skipped uploads. De-duplicated first — gear repeats across bikes,
-  // so a whole-profile publish asks about the same digest many times over.
-  const wanted = [...new Set(bikes.flatMap((b) => b.rows.map((r) => r.sha256)))];
-  const missing: string[] = [];
-  for (const sha of wanted) {
-    if (!(await env.PAINTS.head(sha))) missing.push(sha);
-  }
-  return json(200, { ok: true, missing });
 }
 
 /**
@@ -1478,21 +1502,26 @@ async function putLoadout(request: Request, account: Account, env: Env): Promise
 async function putLoadouts(request: Request, account: Account, env: Env): Promise<Response> {
   const body = await readJson(request);
   if (!body) return json(400, { error: "expected a JSON body" });
-  const { bikes } = body as { bikes?: unknown };
-  if (!Array.isArray(bikes)) return json(400, { error: "bikes must be an array" });
-  if (bikes.length > MAX_BIKES) return json(400, { error: `at most ${MAX_BIKES} bikes` });
+  const parsed = parseBikes((body as { bikes?: unknown }).bikes);
+  if (typeof parsed === "string") return json(400, { error: parsed });
+  return storeLoadouts(account, parsed, "all", env);
+}
 
+/** A whole look, `{ bikeId, paints }[]`, validated into rows or the reason it isn't one. */
+function parseBikes(bikes: unknown): BikeRows[] | string {
+  if (!Array.isArray(bikes)) return "bikes must be an array";
+  if (bikes.length > MAX_BIKES) return `at most ${MAX_BIKES} bikes`;
   const parsed: BikeRows[] = [];
   const seen = new Set<string>();
   for (const entry of bikes) {
     const bike = bikeRows(entry);
-    if (typeof bike === "string") return json(400, { error: bike });
+    if (typeof bike === "string") return bike;
     const key = bike.bikeId.toLowerCase();
-    if (seen.has(key)) return json(400, { error: `${bike.bikeId} given twice` });
+    if (seen.has(key)) return `${bike.bikeId} given twice`;
     seen.add(key);
     parsed.push(bike);
   }
-  return storeLoadouts(account, parsed, "all", env);
+  return parsed;
 }
 
 /**
@@ -1562,7 +1591,8 @@ async function artifact(env: Env, key: string): Promise<Response> {
 }
 
 async function getPaint(sha256: string, env: Env): Promise<Response> {
-  const object = await env.PAINTS.get(sha256);
+  // The older flow's copy first, then paint sync v2's day-long one: either is the same bytes.
+  const object = (await env.PAINTS.get(sha256)) ?? (await env.PAINTS.get(liveKey(sha256)));
   if (!object) return json(404, { error: "no such paint" });
   // Streamed rather than buffered: no reason to hold it in the isolate on the way out.
   return new Response(object.body, {
@@ -2364,13 +2394,145 @@ async function putPresence(request: Request, account: Account, env: Env): Promis
 
 /** Record that an account is on a server. One writer, so the two callers cannot drift. */
 async function markPresent(accountId: string, serverId: string, env: Env): Promise<void> {
+  // `joined_at` survives a heartbeat on the same server and restarts when the rider moves.
+  const now = Date.now();
   await env.DB.prepare(
-    "INSERT INTO presence (account_id, server_id, updated_at) VALUES (?, ?, ?)" +
-      " ON CONFLICT(account_id) DO UPDATE SET server_id = excluded.server_id," +
-      " updated_at = excluded.updated_at",
+    "INSERT INTO presence (account_id, server_id, updated_at, joined_at) VALUES (?, ?, ?, ?)" +
+      " ON CONFLICT(account_id) DO UPDATE SET" +
+      " joined_at = CASE WHEN presence.server_id = excluded.server_id" +
+      " THEN COALESCE(presence.joined_at, excluded.joined_at) ELSE excluded.joined_at END," +
+      " server_id = excluded.server_id, updated_at = excluded.updated_at",
   )
-    .bind(accountId, serverId, Date.now())
+    .bind(accountId, serverId, now, now)
     .run();
+}
+
+/** Per account, on every paint-sync v2 write. Absent in tests and a bare `wrangler dev`. */
+async function paintsyncLimited(account: Account, env: Env): Promise<Response | null> {
+  if (!env.PAINTSYNC_LIMITER || (await env.PAINTSYNC_LIMITER.limit({ key: account.id })).success) return null;
+  return new Response(JSON.stringify({ error: "too many paint sync requests, wait a minute" }), {
+    status: 429,
+    headers: { "content-type": "application/json", "Retry-After": "60" },
+  });
+}
+
+/** Hand a frame to a server's room, for every socket but `accountId`'s. */
+async function notifyRoom(serverKey: string, accountId: string, frame: unknown, env: Env): Promise<void> {
+  if (!env.PAINT_ROOMS) return;
+  try {
+    const room = env.PAINT_ROOMS.get(env.PAINT_ROOMS.idFromName(serverKey));
+    await room.fetch("https://paint.room/notify", {
+      method: "POST",
+      headers: { "X-Account-Id": accountId, "X-Server-Key": serverKey },
+      body: JSON.stringify(frame),
+    });
+  } catch (err) {
+    // The join still answered; the others catch up on their next heartbeat.
+    console.error(JSON.stringify({ msg: "paint room notify failed", error: String(err) }));
+  }
+}
+
+/**
+ * `POST /v1/paintsync/join` — "I'm on this server wearing this look."
+ *
+ * Answers with the caller's own hashes nobody holds (upload exactly those) and every other
+ * rider on the server with theirs, and tells the room so the riders already there fetch the
+ * newcomer's paints without asking. Idempotent: the app repeats it as a heartbeat when its
+ * socket is down, and a repeat with the same look writes the same rows and uploads nothing.
+ */
+async function paintsyncJoin(request: Request, account: Account, env: Env): Promise<Response> {
+  const limited = await paintsyncLimited(account, env);
+  if (limited) return limited;
+  const body = (await readJson(request)) as { server?: unknown; bikes?: unknown } | null;
+  if (!body) return json(400, { error: "expected a JSON body" });
+  const hint = parseServerHint(body.server);
+  if (typeof hint === "string") return json(400, { error: hint });
+
+  if (body.bikes !== undefined) {
+    const bikes = parseBikes(body.bikes);
+    if (typeof bikes === "string") return json(400, { error: bikes });
+    await writeLoadouts(account, bikes, "all", env);
+  }
+
+  const server = await resolveServer(hint, env);
+  await markPresent(account.id, server, env);
+
+  const everyone = await ridersOn(server, env, PRESENCE_TTL_MS, isRelDest);
+  const self = everyone.find((r) => r.accountId === account.id);
+  const missing = await missingPaints(self?.paints.map((p) => p.sha256) ?? [], env);
+  if (self) await notifyRoom(server, account.id, { t: "joined", rider: publicRider(self) }, env);
+
+  return json(200, {
+    server,
+    missing,
+    riders: everyone.filter((r) => r.accountId !== account.id).map(publicRider),
+    room: `/v1/paintsync/room?server=${encodeURIComponent(server)}`,
+  });
+}
+
+/**
+ * `PUT /v1/paintsync/paints/:sha` — one of the caller's own paints, stored for a day.
+ *
+ * Only a hash in the caller's own look is accepted, so this is never a free file host: what
+ * can be stored is bounded by what a loadout can name (`.pnt` destinations, capped slots and
+ * size) and is swept a day later. The bytes are hashed here rather than trusted, for the same
+ * reason as `putPaint`. The content itself is not parsed: a paint from locked content is
+ * encrypted and has no header to check (`pntthumb.ts`).
+ */
+async function putLivePaint(request: Request, sha256: string, account: Account, env: Env): Promise<Response> {
+  const limited = await paintsyncLimited(account, env);
+  if (limited) return limited;
+  const worn = await env.DB.prepare("SELECT 1 AS one FROM loadout_paints WHERE account_id = ? AND sha256 = ? LIMIT 1")
+    .bind(account.id, sha256)
+    .first<{ one: number }>();
+  if (!worn) return json(403, { error: "that paint isn't in your look" });
+
+  const declared = Number(request.headers.get("content-length") ?? "0");
+  if (declared > MAX_PAINT_BYTES) return json(413, { error: "that paint is too large" });
+  const body = await request.arrayBuffer();
+  if (body.byteLength === 0) return json(400, { error: "empty body" });
+  if (body.byteLength > MAX_PAINT_BYTES) return json(413, { error: "that paint is too large" });
+  const digest = await crypto.subtle.digest("SHA-256", body);
+  const actual = [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+  if (actual !== sha256) return json(400, { error: "the body does not match the digest in the URL" });
+
+  // Written even when present: a re-upload is how a paint about to expire gets another day.
+  await env.PAINTS.put(liveKey(sha256), body);
+  return json(201, { ok: true, sha256, size: body.byteLength });
+}
+
+/** `POST /v1/paintsync/leave` — the rider left; tell the room, drop the presence. */
+async function paintsyncLeave(request: Request, account: Account, env: Env): Promise<Response> {
+  const body = (await readJson(request)) as { server?: unknown } | null;
+  const server = body?.server;
+  if (!isServerKey(server)) return json(400, { error: "that isn't a server" });
+  const key = server.trim();
+  const gone = await env.DB.prepare("DELETE FROM presence WHERE account_id = ? AND server_id = ?")
+    .bind(account.id, key)
+    .run();
+  if ((gone.meta?.changes ?? 0) > 0) {
+    await notifyRoom(key, account.id, { t: "left", riderName: account.rider_name, guid: account.guid }, env);
+  }
+  return json(200, { ok: true });
+}
+
+/** `GET /v1/paintsync/room?server=` — the push half, for a rider who has joined that server. */
+async function paintsyncRoom(request: Request, url: URL, account: Account, env: Env): Promise<Response> {
+  if (request.headers.get("Upgrade") !== "websocket") return json(426, { error: "expected a websocket" });
+  const server = url.searchParams.get("server");
+  if (!isServerKey(server)) return json(400, { error: "that isn't a server" });
+  const key = server.trim();
+  const here = await env.DB.prepare("SELECT updated_at FROM presence WHERE account_id = ? AND server_id = ?")
+    .bind(account.id, key)
+    .first<{ updated_at: number }>();
+  if (!here || Date.now() - here.updated_at > PRESENCE_TTL_MS) {
+    return json(403, { error: "join that server first" });
+  }
+  if (!env.PAINT_ROOMS) return json(503, { error: "paint rooms are not configured" });
+  const room = env.PAINT_ROOMS.get(env.PAINT_ROOMS.idFromName(key));
+  return room.fetch("https://paint.room/", {
+    headers: { Upgrade: "websocket", "X-Account-Id": account.id, "X-Server-Key": key },
+  });
 }
 
 /**
