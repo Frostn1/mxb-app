@@ -9,21 +9,21 @@ import { Button } from "@frost/shared/Components/ui/button";
 import { scanLibrary } from "@frost/shared/api/mods";
 import type { LibraryEntry } from "@frost/shared/types";
 import { useT } from "@/i18n";
+import { bikeTemplateReadable } from "../../../api/bikebuild";
 
 /**
- * "Start from an installed bike": the mod bikes already in the rider's `mods/bikes` folder,
- * so the template picker is a list of real bikes instead of a file dialog and a button whose
- * name ("Add placeholder bike") nobody could place. A locked (mxbsecure) mod is listed, not
- * hidden, but can't be picked — Studio never decrypts secured content to read it.
+ * "Start from an installed bike": the mod bikes already in the rider's `mods/bikes` folder
+ * (packed or installed as a plain folder), so the template picker is a list of real bikes
+ * instead of a file dialog and a button whose name ("Add placeholder bike") nobody could
+ * place. A locked (mxbsecure) mod is listed, not hidden, but can't be picked — Studio never
+ * decrypts secured content to read it. Neither can a `.pkz` that isn't one of those *and*
+ * isn't a plain zip either: that's the game's own protected format (OEM/stock content), and
+ * a build without the (optional) sidecar module can't open it — `bikeTemplateReadable` is
+ * what tells the difference, since `locked` alone only ever means the `.mxbsecure` case.
  *
- * OEM/stock bikes aren't in this list yet: they ship inside the game's own locked archive,
- * and reading even their names needs a bit of the same care as a locked mod. Left for a
- * follow-up rather than guessed at here.
- *
- * Also only as complete as `scanLibrary`'s bike scan is: it finds a mod packed as a `.pkz`
- * or a secured file, but not one installed as a plain, unpacked folder (`scan_bikes` in
- * `crates/core/src/library.rs` only walks for those two file shapes) — "Choose a bike…"
- * next to this still reaches a folder install by hand.
+ * OEM/stock content that ships inside the game's own install (not `mods/bikes`) isn't in
+ * this list at all yet: finding it needs the same sidecar support, plus knowing where the
+ * game keeps it, which is a bigger follow-up than this picker.
  */
 export default function BikePicker({
   onPick,
@@ -35,11 +35,31 @@ export default function BikePicker({
   const t = useT();
   const [open, setOpen] = useState(false);
   const [bikes, setBikes] = useState<LibraryEntry[] | null>(null);
+  /** Which `.pkz` paths this build actually opened — everything else (folders, and
+   *  `.mxbsecure` blobs already caught by `locked`) doesn't need asking. Fails closed: a
+   *  path missing from this map — still being checked, or the check itself failed — reads
+   *  as "can't tell, so don't offer it", not as "fine to click". */
+  const [readable, setReadable] = useState<Record<string, boolean>>({});
+  const [checking, setChecking] = useState(false);
 
   useEffect(() => {
     if (!open || bikes !== null) return;
     scanLibrary("mods/bikes")
-      .then((entries) => setBikes(entries.filter((e) => e.category === "bike")))
+      .then(async (entries) => {
+        const list = entries.filter((e) => e.category === "bike");
+        setBikes(list);
+        const toCheck = list.filter((e) => e.kind === "pkz" && !e.locked).map((e) => e.path);
+        if (!toCheck.length) return;
+        setChecking(true);
+        try {
+          setReadable(await bikeTemplateReadable(toCheck));
+        } catch {
+          // Left empty: every one of `toCheck` stays blocked, same as a path the call
+          // never got around to.
+        } finally {
+          setChecking(false);
+        }
+      })
       .catch(() => setBikes([]));
   }, [open, bikes]);
 
@@ -60,23 +80,30 @@ export default function BikePicker({
           <p className="p-2 text-sm text-muted-foreground">{t("bike.startFromBikeEmpty")}</p>
         ) : (
           <ul className="flex max-h-72 flex-col gap-0.5 overflow-y-auto">
-            {bikes.map((b) => (
-              <li key={`${b.path}#${b.prefix ?? ""}`}>
-                <button
-                  type="button"
-                  disabled={!!b.locked}
-                  title={b.locked ? t("bike.bikeLocked") : undefined}
-                  onClick={() => {
-                    onPick(b.path);
-                    setOpen(false);
-                  }}
-                  className="flex w-full items-center gap-2 px-2 py-1.5 text-left text-sm hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  <span className="min-w-0 flex-1 truncate">{b.name}</span>
-                  {b.locked && <Lock className="size-3 shrink-0 text-faint" />}
-                </button>
-              </li>
-            ))}
+            {bikes.map((b) => {
+              const isPkz = b.kind === "pkz" && !b.locked;
+              const stillChecking = isPkz && checking && readable[b.path] === undefined;
+              const protectedPkz = isPkz && !stillChecking && readable[b.path] !== true;
+              const blocked = !!b.locked || protectedPkz || stillChecking;
+              const reason = b.locked ? "bike.bikeLocked" : stillChecking ? "bike.looking" : "bike.bikeProtected";
+              return (
+                <li key={`${b.path}#${b.prefix ?? ""}`}>
+                  <button
+                    type="button"
+                    disabled={blocked}
+                    title={blocked ? t(reason) : undefined}
+                    onClick={() => {
+                      onPick(b.path);
+                      setOpen(false);
+                    }}
+                    className="flex w-full items-center gap-2 px-2 py-1.5 text-left text-sm hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <span className="min-w-0 flex-1 truncate">{b.name}</span>
+                    {blocked && <Lock className="size-3 shrink-0 text-faint" />}
+                  </button>
+                </li>
+              );
+            })}
           </ul>
         )}
         <p className="border-t border-border px-2 pt-1.5 text-[11px] text-faint">

@@ -644,6 +644,16 @@ fn dir_has_sound_markers(dir: &Path) -> bool {
     found.iter().all(|&f| f)
 }
 
+/// Whether this looks like a bike installed as a plain folder rather than packed into a
+/// `.pkz` — a `.cfg` sitting directly inside it, the same marker a packed bike's own
+/// `<name>.cfg` would have had before it was zipped up. Cheap and shallow on purpose: this
+/// only has to tell "a bike lives here" from "an empty or unrelated folder", not read
+/// anything a real bike load would still have to do properly.
+fn dir_has_bike_markers(dir: &Path) -> bool {
+    let Ok(rd) = fs::read_dir(dir) else { return false };
+    rd.flatten().any(|e| e.path().is_file() && has_ext(&e.path(), "cfg"))
+}
+
 /// Whether these folder segments name a bike livery, and which bike owns it — `Some(None)`
 /// for a livery loose at the bikes root, `None` when it isn't a livery at all.
 ///
@@ -709,6 +719,31 @@ fn scan_bikes(dir: &Path, sound_bikes: &[String]) -> Vec<LibraryEntry> {
             out.push(make_entry(dir, p, "bike", None));
         }
         // A loose `.pnt` outside any `paints` folder is a stray — ignore it.
+    }
+
+    // A bike installed as a plain folder rather than packed into a `.pkz` — the walk above
+    // only ever finds files, so a folder install was invisible to it (and, before this, to
+    // anything built on this scan: Studio's bike-template picker among them).
+    //
+    // A same-named packed bike only shadows the folder when it's actually a plain, readable
+    // `.pkz` — not when it's `.mxbsecure` or a protected archive `is_plain_zip` doesn't
+    // recognise (an OEM pack, say): a rider who keeps an unpacked copy of one of those
+    // alongside it almost certainly wants that copy offered, not hidden behind the one
+    // nothing here can open.
+    let packed_readable: HashSet<String> = out
+        .iter()
+        .filter(|e| e.category == "bike" && e.folder.is_empty() && e.kind == "pkz")
+        .filter(|e| crate::pkz::is_plain_zip(Path::new(&e.path)))
+        .map(|e| strip_ext(&e.name).to_lowercase())
+        .collect();
+    for name in immediate_dirs(dir) {
+        if packed_readable.contains(&name.to_lowercase()) {
+            continue;
+        }
+        let folder = dir.join(&name);
+        if dir_has_bike_markers(&folder) {
+            out.push(make_entry(dir, &folder, "bike", None));
+        }
     }
 
     let bike_names: HashSet<String> = out
@@ -941,6 +976,59 @@ mod tests {
         assert_eq!(lt.category, "track");
         // The .pkz inside the extracted track must not double-count.
         assert!(cat(&v, "Loose.pkz").is_none());
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_bike_installed_as_a_plain_folder_is_listed() {
+        // The walk that finds packed bikes only ever looks at files, so a bike installed
+        // unpacked — a folder with its own `.cfg` in it, not a `.pkz` — was invisible to it.
+        let root = tmp("lib-folder-bike");
+        let base = root.join("mods/bikes");
+        touch(&base.join("MX1OEM_2025_Triumph_TF_450-RC/MX1OEM_2025_Triumph_TF_450-RC.cfg"));
+        touch(&base.join("MX1OEM_2025_Triumph_TF_450-RC/model.edf"));
+        // An empty folder with nothing bike-shaped in it must not be listed as one.
+        touch(&base.join("not_a_bike/readme.txt"));
+
+        let v = scan_library(root.to_str().unwrap(), "mods/bikes", &[], &crate::game::MXB).unwrap();
+        let bike = cat(&v, "MX1OEM_2025_Triumph_TF_450-RC").expect("the folder bike is listed");
+        assert_eq!(bike.category, "bike");
+        assert_eq!(bike.kind, "folder");
+        assert!(!bike.locked && !bike.secured);
+        assert!(cat(&v, "not_a_bike").is_none(), "no .cfg in it — not a bike");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_folder_bike_does_not_double_count_a_packed_one_of_the_same_name() {
+        let root = tmp("lib-folder-vs-packed");
+        let base = root.join("mods/bikes");
+        touch(&base.join("KTM450.pkz"));
+        fs::write(base.join("KTM450.pkz"), b"PK\x03\x04").unwrap(); // a real (if empty) zip
+        touch(&base.join("KTM450/KTM450.cfg"));
+
+        let v = scan_library(root.to_str().unwrap(), "mods/bikes", &[], &crate::game::MXB).unwrap();
+        let bikes: Vec<_> = v.iter().filter(|e| e.category == "bike").collect();
+        assert_eq!(bikes.len(), 1, "one KTM450, not a packed and a folder copy: {bikes:?}");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_protected_packed_bike_does_not_hide_a_usable_folder_copy() {
+        // The other side of the dedup above: a `.pkz` that isn't a plain zip at all (an OEM
+        // pack, say) can't be read regardless, so a folder copy sitting next to it under the
+        // same name is what the rider actually wants offered — not hidden behind the one
+        // nothing here can open.
+        let root = tmp("lib-protected-packed-vs-folder");
+        let base = root.join("mods/bikes");
+        touch(&base.join("MX1OEM_2025_Triumph_TF_450-RC.pkz")); // not real zip bytes
+        touch(&base.join("MX1OEM_2025_Triumph_TF_450-RC/MX1OEM_2025_Triumph_TF_450-RC.cfg"));
+
+        let v = scan_library(root.to_str().unwrap(), "mods/bikes", &[], &crate::game::MXB).unwrap();
+        let bikes: Vec<_> = v.iter().filter(|e| e.category == "bike").collect();
+        assert_eq!(bikes.len(), 2, "the packed copy and the usable folder copy, both: {bikes:?}");
+        assert!(bikes.iter().any(|e| e.kind == "folder"));
+        assert!(bikes.iter().any(|e| e.kind == "pkz"));
         let _ = fs::remove_dir_all(&root);
     }
 
