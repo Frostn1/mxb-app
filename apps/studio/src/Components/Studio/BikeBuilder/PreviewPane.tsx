@@ -1,16 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
-import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import {
-  AlertTriangle,
   ArrowDown,
   ArrowLeft,
   ArrowRight,
   ArrowUp,
-  Bike,
   ChevronsDown,
   ChevronsUp,
-  FolderOpen,
-  Loader2,
   RotateCcw,
   X,
 } from "lucide-react";
@@ -19,16 +14,13 @@ import { Button } from "@frost/shared/Components/ui/button";
 import { useT } from "@/i18n";
 import {
   MOUNT_ROLES,
-  addPlaceholderBike,
   getAssembly,
   nudge,
-  setTemplate,
   type AssemblyView,
   type Role,
   type V3,
 } from "../../../api/bikebuild";
 import Preview3D from "./Preview3D";
-import BikePicker from "./BikePicker";
 import { NONE, type useBikeLibrary } from "./useBikeLibrary";
 
 /** Nudge steps, metres. */
@@ -39,18 +31,17 @@ const STEPS = [0.001, 0.005, 0.01];
  * bike, see it in 3D, and place on it" — so the viewport is the dominant thing here, mounted
  * whether or not anything is placed yet (a base bike or an installed template shows on its
  * own), and it's how a part gets placed: drag one from the tray onto it, or click an open
- * mount dot to pick a part for the role that mount takes. The template row above it and the
- * selected part's nudge controls below it are the only other things this panel does.
+ * mount dot to pick a part for the role that mount takes. Nudging the selected part is the
+ * only other thing this panel does — choosing the base bike moved up to `BaseBikeStep`, which
+ * is a decision made once per build, not something that belongs beside the thing it decides.
  */
 export default function PreviewPane({
   version,
-  onChanged,
   view,
   setView,
   lib,
 }: {
   version: number;
-  onChanged: () => void;
   view: AssemblyView | null;
   setView: (v: AssemblyView) => void;
   lib: ReturnType<typeof useBikeLibrary>;
@@ -58,36 +49,9 @@ export default function PreviewPane({
   const t = useT();
   const [selected, setSelected] = useState<Role | null>(null);
   const [step, setStep] = useState(STEPS[1]);
-  const [busy, setBusy] = useState<"placeholder" | "template" | null>(null);
   /** An open mount was clicked: which roles it takes, so a quick-pick panel can offer parts
    *  of one of them instead of the rider going to find the right slot in the outliner. */
   const [mountPick, setMountPick] = useState<Role[] | null>(null);
-
-  async function run<T>(what: typeof busy, f: () => Promise<T>, failed: Parameters<typeof t>[0]) {
-    setBusy(what);
-    try {
-      return await f();
-    } catch (e) {
-      toast.error(t(failed), { description: String(e) });
-      return undefined;
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  async function onPlaceholder() {
-    if (await run("placeholder", addPlaceholderBike, "bike.placeholderFailed")) onChanged();
-  }
-
-  async function onPickTemplate(path: string | null) {
-    const v = await run("template", () => setTemplate(path), "bike.templateFailed");
-    if (v) setView(v);
-  }
-
-  async function onChooseTemplate() {
-    const dir = await openDialog({ directory: true, multiple: false, title: t("bike.chooseTemplate") });
-    if (typeof dir === "string") await onPickTemplate(dir);
-  }
 
   async function onNudge(delta: V3 | null) {
     if (!selected) return;
@@ -120,31 +84,6 @@ export default function PreviewPane({
 
   return (
     <section className="flex h-full min-w-0 flex-col gap-2 p-4">
-      <div className="flex flex-wrap items-center gap-2 text-sm">
-        <span className="text-muted-foreground">{t("bike.template")}</span>
-        <span className="min-w-0 truncate font-medium">
-          {view?.template.source.kind === "bike" ? view.template.name : t("bike.placeholderTemplate")}
-        </span>
-        <div className="ml-auto flex flex-wrap gap-2">
-          <BikePicker onPick={onPickTemplate} disabled={busy !== null} />
-          <Button size="sm" variant="ghost" onClick={onChooseTemplate} disabled={busy !== null}>
-            <FolderOpen className="size-3.5" />
-            {t("bike.chooseTemplate")}
-          </Button>
-          {view?.template.source.kind === "bike" && (
-            <Button size="sm" variant="ghost" onClick={() => onPickTemplate(null)} disabled={busy !== null}>
-              {t("bike.usePlaceholder")}
-            </Button>
-          )}
-        </div>
-      </div>
-      {view?.template.problem && (
-        <p className="flex items-center gap-1 text-[12px] text-amber-500">
-          <AlertTriangle className="size-3.5" />
-          {t("bike.templateProblem", { problem: view.template.problem })}
-        </p>
-      )}
-
       {/* The marker `usePartDrag` looks for on drop — the pointer-based drag from the tray
           checks `elementFromPoint` against this rather than a raycast onto a particular
           mount, since a part's role already says exactly where it goes. */}
@@ -223,13 +162,6 @@ export default function PreviewPane({
       ) : (
         <p className="text-[12px] text-muted-foreground">{t("bike.pickToNudge")}</p>
       )}
-
-      <div className="flex items-center gap-2 border-t border-border pt-3">
-        <Button size="sm" variant="ghost" onClick={onPlaceholder} disabled={busy !== null} title={t("bike.placeholderHint")}>
-          {busy === "placeholder" ? <Loader2 className="size-3.5 animate-spin" /> : <Bike className="size-3.5" />}
-          {t("bike.addPlaceholder")}
-        </Button>
-      </div>
     </section>
   );
 }

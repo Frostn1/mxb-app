@@ -24,7 +24,15 @@ export const NONE = "none";
  * themselves (which used to be one component, `PartLibrary`) so the tray, the slots and the
  * preview can sit side by side instead of stacked, per Sean's "tray | slots | preview" ask.
  */
-export function useBikeLibrary(version: number, onChanged: () => void) {
+export function useBikeLibrary(
+  version: number,
+  onChanged: () => void,
+  /** Something outside this hook (picking or importing the base bike) is already mutating
+   *  the library or its slots — folded into `busy` so the tray and outliner disable too. A
+   *  base-bike import sets the chassis slot itself once it lands; a part placed into that
+   *  same slot while it's still running would otherwise be silently overwritten. */
+  externalBusy = false,
+) {
   const t = useT();
   const [parts, setParts] = useState<LibraryPart[] | null>(null);
   const [slots, setSlots] = useState<Slots>({});
@@ -93,9 +101,15 @@ export function useBikeLibrary(version: number, onChanged: () => void) {
   const onSlot = (role: Role, value: string) =>
     change(() => setSlot(role, value === NONE ? null : value), "bike.slotFailed");
   const onSplit = (part: LibraryPart) => change(() => splitPart(part.id), "bike.splitFailed");
-  /** A whole-bike part, used as-is instead of split: the chassis slot is the one every other
-   *  part mounts on, so putting it there is what makes a full bike show in the preview right
-   *  away, the same as any other slotted part — no separate "base bike" concept needed.
+  /** A part's own role is the one place that says where it goes — the tray's "Place ▸" is
+   *  this for every part, not just a whole bike used as the base, so there's one mechanism
+   *  for putting something on the bike (drag it, click an open mount, or this) instead of a
+   *  second role-setting surface living on the outliner. Requires a role already: it can't
+   *  guess one any better than the tray's own picker already did. */
+  const onPlace = (part: LibraryPart) =>
+    part.role ? change(() => setSlot(part.role!, part.id), "bike.placeFailed") : undefined;
+  /** A whole-bike part, used as its base: the chassis slot is the one every other part
+   *  mounts on, so putting it there is what makes a full bike show in the preview right away.
    *
    *  Always sets the role, even when it's already "chassis": that's a guess until the rider
    *  says otherwise, and `setPartRole` is also what clears `roleGuessed` server-side. Skip it
@@ -107,7 +121,20 @@ export function useBikeLibrary(version: number, onChanged: () => void) {
       await setSlot("chassis", part.id);
     }, "bike.useAsBaseFailed");
 
-  const busy = adding !== null || changing;
+  const busy = adding !== null || changing || externalBusy;
 
-  return { parts, slots, adding, busy, onAdd, add, onRole, onRemove, onSlot, onSplit, onUseAsBase };
+  return {
+    parts,
+    slots,
+    adding,
+    busy,
+    onAdd,
+    add,
+    onRole,
+    onRemove,
+    onSlot,
+    onSplit,
+    onPlace,
+    onUseAsBase,
+  };
 }
