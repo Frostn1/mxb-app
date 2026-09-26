@@ -40,11 +40,16 @@ export default function PreviewPane({
   view,
   setView,
   lib,
+  baseChosen,
 }: {
   version: number;
   view: AssemblyView | null;
   setView: (v: AssemblyView) => void;
   lib: ReturnType<typeof useBikeLibrary>;
+  /** Nothing's been picked for the base yet — mount dots floating over an empty grid don't
+   *  mean anything until there's a bike they belong to, so they're hidden rather than shown
+   *  with nothing around them to explain what they are. */
+  baseChosen: boolean;
 }) {
   const t = useT();
   const [selected, setSelected] = useState<Role | null>(null);
@@ -90,7 +95,7 @@ export default function PreviewPane({
       <div data-bike-viewport className="relative min-h-0 flex-1">
         <Preview3D
           placed={placed}
-          anchors={view?.assembly.anchors ?? {}}
+          anchors={baseChosen ? (view?.assembly.anchors ?? {}) : {}}
           selected={selected}
           onSelect={setSelected}
           onMountClick={onMountClick}
@@ -98,7 +103,7 @@ export default function PreviewPane({
         />
         {placed.length === 0 && (
           <p className="pointer-events-none absolute inset-x-4 top-3 text-[12px] text-muted-foreground">
-            {t("bike.assembleEmpty")}
+            {baseChosen ? t("bike.assembleEmpty") : t("bike.pickBaseFirst")}
           </p>
         )}
         {mountPick && (

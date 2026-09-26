@@ -109,7 +109,10 @@ export default function Preview3D({
     camera.position.set(2.2, 1.2, 1.6);
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.target.set(0, 0.6, 0);
-    const grid = new THREE.GridHelper(4, 40, 0x555555, 0x333333);
+    // Fewer, dimmer lines than a modelling app's grid needs — this is a neutral floor to judge
+    // scale against, not something to study, and 40 divisions of 0x555555 read as a wall of
+    // lines under a bike this small.
+    const grid = new THREE.GridHelper(4, 16, 0x3a3a3a, 0x232323);
     scene.add(grid);
     const bike = new THREE.Group();
     const dots = new THREE.Group();

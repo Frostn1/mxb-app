@@ -8,10 +8,12 @@ import { useT } from "@/i18n";
 import { buildBike, setBuildName, type AssemblyView, type BuildReport } from "../../../api/bikebuild";
 
 /**
- * The bottom strip: name the build and make it. One line, not a card — the report from a
- * finished build used to sit expanded underneath, always taking room whether or not anyone
- * was looking at it; it's a popover off an info button now, open only right after building
- * (and reopenable any time after) instead of permanently pushing everything above it up.
+ * Name the build and make it — a small floating pill in the bottom-right corner, not a strip
+ * of its own across the full width. It used to be a footer under the tray/preview/outliner
+ * row, which meant the build (the last thing a rider does) held a whole row hostage even
+ * though naming a bike and clicking one button never needed more than a few inches of it.
+ * The report from a finished build is a popover off an info button, open right after building
+ * and reopenable any time after, rather than always expanded underneath.
  */
 export default function BuildPanel({ view, placedCount }: { view: AssemblyView | null; placedCount: number }) {
   const t = useT();
@@ -44,10 +46,9 @@ export default function BuildPanel({ view, placedCount }: { view: AssemblyView |
   }
 
   return (
-    <section className="flex shrink-0 items-center gap-2 border-t border-border bg-card px-4 py-2">
-      <h2 className="text-[11px] font-semibold uppercase tracking-[0.09em] text-faint">{t("bike.build")}</h2>
+    <section className="pointer-events-auto absolute bottom-3 right-3 z-20 flex items-center gap-1.5 rounded-md border border-border bg-card/95 px-2 py-1.5 shadow-lg backdrop-blur">
       <input
-        className="h-7 w-56 border border-input bg-transparent px-2 text-[12px]"
+        className="h-7 w-36 border border-input bg-transparent px-2 text-[12px]"
         placeholder={t("bike.buildNamePlaceholder")}
         value={name}
         onChange={(e) => setName(e.target.value)}
