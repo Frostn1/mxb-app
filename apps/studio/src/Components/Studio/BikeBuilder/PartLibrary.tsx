@@ -42,7 +42,16 @@ function Thumb({ part, className }: { part: LibraryPart | undefined; className: 
  * that's where its thumbnail, attach empties and a first guess at its role come from. The
  * rider corrects the role if the guess is wrong, then puts one part in each slot.
  */
-export default function PartLibrary({ ready }: { ready: boolean }) {
+export default function PartLibrary({
+  ready,
+  version,
+  onChanged,
+}: {
+  ready: boolean;
+  /** Bumped when another panel changed the library. */
+  version: number;
+  onChanged: () => void;
+}) {
   const t = useT();
   const [parts, setParts] = useState<LibraryPart[] | null>(null);
   const [slots, setSlots] = useState<Slots>({});
@@ -74,10 +83,10 @@ export default function PartLibrary({ ready }: { ready: boolean }) {
       toast.error(t(failed), { description: String(e) });
     } finally {
       setChanging(false);
-      reload();
+      onChanged();
     }
   }
-  useEffect(() => reload(), [reload]);
+  useEffect(() => reload(), [reload, version]);
 
   async function add(files: string[]) {
     let failed = 0;
@@ -93,7 +102,7 @@ export default function PartLibrary({ ready }: { ready: boolean }) {
       }
     }
     setAdding(null);
-    if (failed < files.length) reload();
+    if (failed < files.length) onChanged();
   }
 
   async function onAdd() {

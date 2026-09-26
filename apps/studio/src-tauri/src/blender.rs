@@ -52,6 +52,8 @@ fn fresh_job_dir(root: &Path, kind: &str) -> PathBuf {
 
 /// The script every job runs. See `blender/frost_bike.py` for what each op does.
 const SCRIPT: &str = include_str!("../blender/frost_bike.py");
+/// Placeholder parts and the Part Maker's templates, which `frost_bike.py` imports.
+const MAKE_SCRIPT: &str = include_str!("../blender/frost_make.py");
 
 /// The oldest Blender the script is written against: 4.2 LTS, which has `wm.obj_import` and
 /// the FBX/glTF exporters with the options we pin.
@@ -425,6 +427,7 @@ fn run_job(
     std::fs::create_dir_all(work)?;
     let script = work.join("frost_bike.py");
     std::fs::write(&script, SCRIPT)?;
+    std::fs::write(work.join("frost_make.py"), MAKE_SCRIPT)?;
     let result = work.join("result.json");
     let _ = std::fs::remove_file(&result);
     job["result"] = serde_json::Value::String(result.to_string_lossy().into_owned());

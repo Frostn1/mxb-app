@@ -327,6 +327,37 @@ impl Direct {
     }
 }
 
+/// One request, answered as the model's plain text: for callers with their own prompt and
+/// their own reading of the answer (the bike builder's Part Maker). The key never reaches an
+/// error: a provider that echoes it has it taken out.
+pub async fn post_plain(model: &TrackModel, body: &Value) -> Result<String> {
+    let (status, text) = Direct { model: model.clone() }.post(body).await?;
+    if !(200..300).contains(&status) {
+        let said: String = model.scrub(&text).chars().take(400).collect();
+        bail!("{} answered {status}: {said}", model.host());
+    }
+    let v: Value = serde_json::from_str(&text)
+        .with_context(|| format!("{} sent something unreadable", model.host()))?;
+    let out = match model.kind {
+        Kind::Anthropic => v["content"]
+            .as_array()
+            .map(|blocks| {
+                blocks
+                    .iter()
+                    .filter(|b| b["type"] == "text")
+                    .filter_map(|b| b["text"].as_str())
+                    .collect::<Vec<_>>()
+                    .join("")
+            })
+            .unwrap_or_default(),
+        Kind::OpenAi => v["choices"][0]["message"]["content"].as_str().unwrap_or_default().to_string(),
+    };
+    if out.trim().is_empty() {
+        bail!("{} answered with nothing", model.host());
+    }
+    Ok(out)
+}
+
 /// One small request, to say whether the address, the model and the key work before a track
 /// is asked for.
 pub async fn check(model: &TrackModel) -> Result<()> {

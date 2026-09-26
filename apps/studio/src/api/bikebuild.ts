@@ -59,7 +59,18 @@ export function partSize(b: PartInspection["bounds"]): [number, number, number] 
 }
 
 /** What a part is on the bike, one slot each. Mirrors `bikeparts::Role`. */
-export const ROLES = ["chassis", "steer", "fsusp", "rsusp", "wheel_f", "wheel_r", "levers", "pedals"] as const;
+export const ROLES = [
+  "chassis",
+  "steer",
+  "fsusp",
+  "rsusp",
+  "wheel_f",
+  "wheel_r",
+  "levers",
+  "pedals",
+  "handguards",
+  "plate",
+] as const;
 export type Role = (typeof ROLES)[number];
 
 /** An attach point a part brings, in Blender's world (Z up). */
@@ -120,4 +131,139 @@ export function removePart(id: string): Promise<void> {
 
 export function setSlot(role: Role, id: string | null): Promise<Slots> {
   return invoke<Slots>("bike_slot_set", { role, id });
+}
+
+// ---------------------------------------------------------------------------
+// putting it together (phase C) and the preview (D)
+
+export type V3 = [number, number, number];
+
+export type TemplateSource = { kind: "placeholder" } | { kind: "bike"; path: string };
+
+/** One part on the bike. Mirrors `bikeassemble::Placed`; points are in Blender's frame. */
+export interface Placed {
+  role: Role;
+  partId: string;
+  offset: V3;
+  nudge: V3;
+  mount: string | null;
+  at: V3 | null;
+  /** How the part's end of the joint was found. */
+  by: "empty" | "centre" | "as modelled";
+  group: "chassis" | "steer" | "fsusp" | "rsusp" | null;
+}
+
+export interface AssemblyView {
+  template: { source: TemplateSource; name: string; rideable: boolean; problem: string | null };
+  assembly: { placed: Placed[]; anchors: Record<string, V3> };
+  name: string;
+}
+
+/** Make Studio's placeholder bike and slot all eight parts: the builder, ready to try. */
+export function addPlaceholderBike(): Promise<PartLibrary> {
+  return invoke<PartLibrary>("bike_placeholder_add");
+}
+
+export function getAssembly(): Promise<AssemblyView> {
+  return invoke<AssemblyView>("bike_assembly");
+}
+
+/** Move a role's part by `delta` metres (Blender's frame); null puts it back where it snapped. */
+export function nudge(role: Role, delta: V3 | null): Promise<AssemblyView> {
+  return invoke<AssemblyView>("bike_nudge", { role, delta });
+}
+
+/** An installed bike's folder or .pkz as the template; null for Studio's placeholder. */
+export function setTemplate(path: string | null): Promise<AssemblyView> {
+  return invoke<AssemblyView>("bike_template_set", { path });
+}
+
+export function setBuildName(name: string): Promise<AssemblyView> {
+  return invoke<AssemblyView>("bike_build_name_set", { name });
+}
+
+/** A part's preview model, as GLB bytes. */
+export function partGlb(id: string): Promise<ArrayBuffer> {
+  return invoke<ArrayBuffer>("bike_part_glb", { id });
+}
+
+/** Blender's frame (Z up, facing -Y) → glTF's and three.js' (Y up), as Blender's glTF export maps it. */
+export function toThree(p: V3): V3 {
+  return [p[0], p[2], -p[1]];
+}
+
+// ---------------------------------------------------------------------------
+// the build (phase E)
+
+export interface BuildReport {
+  folder: string;
+  files: string[];
+  tris: Record<string, number>;
+  shadowTris: Record<string, number>;
+  converted: boolean;
+  converter: string;
+  rideable: boolean;
+  notes: string[];
+}
+
+export function buildBike(): Promise<BuildReport> {
+  return invoke<BuildReport>("bike_build");
+}
+
+// ---------------------------------------------------------------------------
+// the Part Maker (phase F)
+
+export interface Slider {
+  name: string;
+  default: number;
+  min: number;
+  max: number;
+}
+
+export interface MakeTemplate {
+  role: Role;
+  about: string;
+  sliders: Slider[];
+  choices: Record<string, string[]>;
+}
+
+export type Params = Record<string, number | string>;
+
+export interface MakeAnswer {
+  template: string | null;
+  params: Params;
+  code: string | null;
+  role: Role | null;
+  name: string;
+  reply: string;
+  /** The model that answered, or "words" when none is set up and the brief was read here. */
+  by: string;
+}
+
+export interface MadePreview {
+  thumb: string | null;
+  role: Role;
+  tris: number;
+  size: V3 | null;
+}
+
+export function makeTemplates(): Promise<Record<string, MakeTemplate>> {
+  return invoke<Record<string, MakeTemplate>>("bike_make_templates");
+}
+
+export function makeAsk(brief: string, current: unknown, images: string[]): Promise<MakeAnswer> {
+  return invoke<MakeAnswer>("bike_make_ask", { brief, current, images });
+}
+
+export function makePreview(
+  req: { template: string; params: Params } | { code: string; role: Role },
+): Promise<MadePreview> {
+  return "code" in req
+    ? invoke<MadePreview>("bike_make_preview", { code: req.code, role: req.role })
+    : invoke<MadePreview>("bike_make_preview", { template: req.template, params: req.params });
+}
+
+/** Keep the last preview: into the library, and its slot when that's empty. */
+export function makeKeep(name: string): Promise<LibraryPart> {
+  return invoke<LibraryPart>("bike_make_keep", { name });
 }

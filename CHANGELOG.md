@@ -15,6 +15,21 @@
   Parts are kept in Studio's own data folder, and your files are never written to. A part whose
   file has changed or gone is flagged. Fixed: parts from a `.blend` reported every object at the
   origin.
+- The Bike tab can now **put a bike together and build it**. Slot a part per role (chassis,
+  steer, front/rear suspension, wheels, levers, pegs, plus handguards and a number plate), pick
+  a template — an installed bike so the parts snap to its real mount points and rake, or
+  Studio's own **placeholder bike** to try the builder with no parts of your own — and see it
+  assembled in a 3D preview. Nudge any part in millimetre steps if it needs adjusting. **Build**
+  writes a bike folder: the model, a low-poly shadow, the `.hrc`s and a `gfx.cfg`. With a local
+  `fbx2edf` set up (`FROST_FBX2EDF`, for development) it converts straight to `.edf`; otherwise
+  it tells you to finish at mxbsecure.com/convert.
+- The Bike tab has a **Part Maker**: describe a part ("KTM-style wraparound handguards, orange,
+  low profile") and it's built in Blender from a parametric template — handguards, a number
+  plate, or grips — with sliders you can also move by hand. With a model set up in Settings
+  (the same one Track AI uses; Anthropic accounts ask Sonnet 5) it reads the brief and can write
+  Blender Python for parts no template covers, checked before it runs and shown to you first.
+  With no model, the brief is read for its template and colour. Keep a part and it joins the
+  tray with its role set, ready to slot in.
 - The control plane can hand mxbsecure.com's FBX to EDF converter to invited accounts. It serves
   the converter only to signed-in Steam accounts listed in `MXB_CONVERTER_STEAM_IDS`, plus
   admins, and never to banned accounts. The files come from a new `mxb-fbx2edf` R2 bucket at
