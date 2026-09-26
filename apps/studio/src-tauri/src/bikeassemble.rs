@@ -530,6 +530,7 @@ mod tests {
             stamp: String::new(),
             added: 0,
             multi_part_hint: false,
+            role_hints: Default::default(),
         }
     }
 

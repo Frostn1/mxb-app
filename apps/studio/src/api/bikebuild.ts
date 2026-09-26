@@ -123,6 +123,9 @@ export interface LibraryPart {
    *  a whole bike (or a big sub-assembly), not the one part `role` says. Studio still picked
    *  its best single guess rather than leave the part unusable; this says to check it. */
   multiPartHint: boolean;
+  /** What `multiPartHint` found, broken down: how many objects hinted at each role. Only
+   *  meaningful alongside `multiPartHint` — empty otherwise. */
+  roleHints: Partial<Record<Role, number>>;
 }
 
 export type Slots = Partial<Record<Role, string>>;
