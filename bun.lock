@@ -1,5 +1,6 @@
 {
   "lockfileVersion": 1,
+  "configVersion": 0,
   "workspaces": {
     "": {
       "name": "frost-monorepo",
@@ -15,7 +16,7 @@
     },
     "apps/coach": {
       "name": "@frost/coach",
-      "version": "0.1.19",
+      "version": "0.1.20",
       "dependencies": {
         "@frost/shared": "*",
         "@tauri-apps/api": "^2.1.1",
@@ -39,7 +40,7 @@
     },
     "apps/manager": {
       "name": "@frost/manager",
-      "version": "0.15.1",
+      "version": "0.18.4",
       "dependencies": {
         "@frost/shared": "*",
         "@radix-ui/react-alert-dialog": "^1.1.19",
@@ -87,7 +88,7 @@
     },
     "apps/studio": {
       "name": "@frost/studio",
-      "version": "0.1.10",
+      "version": "0.5.0",
       "dependencies": {
         "@frost/shared": "*",
         "@tauri-apps/api": "^2.1.1",
@@ -124,6 +125,7 @@
         "@react-three/drei": "^9.122.0",
         "@react-three/fiber": "^8.18.0",
         "@tauri-apps/api": "^2.1.1",
+        "@tauri-apps/plugin-shell": "^2",
         "class-variance-authority": "^0.7.1",
         "clsx": "^2.1.1",
         "cmdk": "^1.1.1",
@@ -1248,8 +1250,6 @@
     "rollup/@types/estree": ["@types/estree@1.0.5", "", {}, "sha512-/kYRxGDLWzHOB7q+wtSUQlFrtcdUccpfy+X+9iMBpHK8QLLhx2wIPYuS5DYtR9Wa/YlZAbIovy7qVdB1Aq6Lyw=="],
 
     "stats-gl/three": ["three@0.170.0", "", {}, "sha512-FQK+LEpYc0fBD+J8g6oSEyyNzjp+Q7Ks1C568WWaoMRLW+TkNNWmenWeGgJjV105Gd+p/2ql1ZcjYvNiPZBhuQ=="],
-
-    "tinyglobby/picomatch": ["picomatch@4.0.5", "", {}, "sha512-RvwwcruNjI1ncT5xRakeyS9Lf8lcItv34KD+aif+VH9kduAyfYBipGh12274xtenIPZ119/R9BdTBa8gAwSh0A=="],
 
     "tunnel-rat/zustand": ["zustand@4.5.7", "", { "dependencies": { "use-sync-external-store": "^1.2.2" }, "peerDependencies": { "@types/react": ">=16.8", "immer": ">=9.0.6", "react": ">=16.8" }, "optionalPeers": ["immer"] }, "sha512-CHOUy7mu3lbD6o6LJLfllpjkzhHXSBlX8B9+qPddUsIfeF5S/UZ5q0kmCsnRqT1UHFQZchNFDDzMbQsuesHWlw=="],
 
