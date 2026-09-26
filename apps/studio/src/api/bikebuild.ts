@@ -57,3 +57,67 @@ export function partSize(b: PartInspection["bounds"]): [number, number, number] 
   if (!b) return null;
   return [b.max[0] - b.min[0], b.max[2] - b.min[2], b.max[1] - b.min[1]];
 }
+
+/** What a part is on the bike, one slot each. Mirrors `bikeparts::Role`. */
+export const ROLES = ["chassis", "steer", "fsusp", "rsusp", "wheel_f", "wheel_r", "levers", "pedals"] as const;
+export type Role = (typeof ROLES)[number];
+
+/** An attach point a part brings, in Blender's world (Z up). */
+export interface PartEmpty {
+  name: string;
+  parent: string | null;
+  location: [number, number, number];
+}
+
+/** A part in the library, as `bike_parts_list` shows it. */
+export interface LibraryPart {
+  id: string;
+  name: string;
+  source: string;
+  role: Role | null;
+  /** The role is the library's guess from the names, not the rider's choice. */
+  roleGuessed: boolean;
+  empties: PartEmpty[];
+  objects: number;
+  meshes: number;
+  tris: number;
+  bounds: PartInspection["bounds"];
+  hasThumb: boolean;
+  hasGlb: boolean;
+  added: number;
+  /** A `data:` URL of the picture Blender rendered, when it rendered one. */
+  thumb: string | null;
+  /** The rider's file changed since it was added: add it again to refresh. */
+  stale: boolean;
+  /** The rider's file is gone. */
+  missing: boolean;
+}
+
+export type Slots = Partial<Record<Role, string>>;
+
+export interface PartLibrary {
+  parts: LibraryPart[];
+  slots: Slots;
+}
+
+export function listParts(): Promise<PartLibrary> {
+  return invoke<PartLibrary>("bike_parts_list");
+}
+
+/** Run a part through Blender into the library. Adding one already there refreshes it. */
+export function addPart(part: string): Promise<LibraryPart> {
+  return invoke<LibraryPart>("bike_part_add", { part });
+}
+
+export function setPartRole(id: string, role: Role | null): Promise<LibraryPart> {
+  return invoke<LibraryPart>("bike_part_set_role", { id, role });
+}
+
+/** Out of the library; the rider's own file stays. */
+export function removePart(id: string): Promise<void> {
+  return invoke<void>("bike_part_remove", { id });
+}
+
+export function setSlot(role: Role, id: string | null): Promise<Slots> {
+  return invoke<Slots>("bike_slot_set", { role, id });
+}

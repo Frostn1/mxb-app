@@ -392,11 +392,23 @@ pub fn job(
     kind: &str,
     make: impl FnOnce(&Path) -> serde_json::Value,
 ) -> anyhow::Result<serde_json::Value> {
+    job_then(blender, root, kind, make, Ok)
+}
+
+/// [`job`], then `keep` the answer while the lock is still held: the next job of the same
+/// kind clears this one's folder, so anything `keep` moves out of it has to go first.
+pub fn job_then<R>(
+    blender: &Path,
+    root: &Path,
+    kind: &str,
+    make: impl FnOnce(&Path) -> serde_json::Value,
+    keep: impl FnOnce(serde_json::Value) -> anyhow::Result<R>,
+) -> anyhow::Result<R> {
     // A job that panicked while holding it poisoned nothing worth protecting.
     let _one = ONE_AT_A_TIME.lock().unwrap_or_else(|p| p.into_inner());
     let work = fresh_job_dir(root, kind);
     let spec = make(&work);
-    run_job(blender, &work, spec)
+    keep(run_job(blender, &work, spec)?)
 }
 
 /// Run one op of `frost_bike.py` in `work`, and hand back the JSON it wrote. Callers go
@@ -576,6 +588,17 @@ mod tests {
         let fbx = PathBuf::from(got["fbx"].as_str().unwrap());
         assert!(fbx.is_file() && fbx.with_extension("glb").is_file());
 
+        // The library's op: the same cube, catalogued with a thumbnail Blender renders.
+        let got = job(&exe, &root, "catalog", |w| {
+            serde_json::json!({ "op": "catalog", "part": obj, "thumb": w.join("t.png"), "thumbSize": 64, "glb": w.join("p.glb") })
+        })
+        .expect("catalog an OBJ");
+        assert_eq!(got["tris"], 12, "{got}");
+        assert!(got.get("thumbError").is_none(), "{got}");
+        let thumb = std::fs::read(got["thumb"].as_str().unwrap()).expect("a thumbnail");
+        assert!(thumb.starts_with(b"\x89PNG"), "the thumbnail is a PNG");
+        assert!(PathBuf::from(got["glb"].as_str().unwrap()).is_file());
+
         // A .blend, made by Blender: `mount` (an empty) with `fender` (a mesh) under it.
         let blend = root.join("fender.blend");
         let target = serde_json::to_string(&blend.to_string_lossy()).unwrap();
@@ -602,6 +625,12 @@ mod tests {
         let fender = got["objects"].as_array().unwrap().iter().find(|o| o["name"] == "fender").unwrap();
         assert_eq!(fender["parent"], "mount", "the hierarchy survives the append: {got}");
         assert_eq!(fender["tris"], 12);
+        let got = job(&exe, &root, "catalog", |_| serde_json::json!({ "op": "catalog", "part": blend }))
+            .expect("catalog a .blend");
+        let empties = got["empties"].as_array().unwrap();
+        assert_eq!(empties.len(), 1, "{got}");
+        assert_eq!(empties[0]["name"], "mount");
+        assert!((empties[0]["location"][1].as_f64().unwrap() - 0.8).abs() < 1e-4, "{got}");
 
         // And a part that isn't one answers with an error, not a hang.
         let err = job(&exe, &root, "bad", |_| serde_json::json!({ "op": "inspect", "part": root.join("x.png") }))

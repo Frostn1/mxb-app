@@ -59,6 +59,9 @@ def import_part(path):
         bpy.ops.import_scene.fbx(filepath=path)
     else:
         bpy.ops.wm.obj_import(filepath=path)
+    # Appended objects carry their local transforms but not yet their world ones: without
+    # this every matrix_world reads as the origin, and so would every bound and empty.
+    bpy.context.view_layer.update()
     return [o for o in bpy.data.objects if o not in before]
 
 
@@ -135,7 +138,88 @@ def op_inspect(job):
     return out
 
 
-OPS = {"inspect": op_inspect}
+def empties(objs):
+    """The attach points a part brings: every empty, where it sits in the world."""
+    return [
+        {"name": o.name, "parent": o.parent.name if o.parent else None, "location": list(o.matrix_world.translation)}
+        for o in objs
+        if o.type == "EMPTY"
+    ]
+
+
+def render_thumb(path, meshes, size):
+    """A small picture of the part, from the front-right and a little above, on transparent.
+
+    Workbench, not Eevee or Cycles: it needs no lights or materials, draws in a second and
+    shows the shape, which is all a tray thumbnail is for.
+    """
+    bounds = world_bounds(meshes)
+    if bounds is None:
+        return False
+    lo, hi = Vector(bounds["min"]), Vector(bounds["max"])
+    centre = (lo + hi) / 2
+    radius = max((hi - lo).length / 2, 1e-3)
+
+    scene = bpy.context.scene
+    cam_data = bpy.data.cameras.new("frost_thumb")
+    cam_data.type = "ORTHO"
+    cam_data.ortho_scale = radius * 2.2
+    cam_data.clip_end = radius * 20
+    cam = bpy.data.objects.new("frost_thumb", cam_data)
+    scene.collection.objects.link(cam)
+    # Blender is Z up; a bike part faces -Y, so look from the front-right, above.
+    direction = Vector((1.0, -1.2, 0.7)).normalized()
+    cam.location = centre + direction * radius * 6
+    cam.rotation_euler = (-direction).to_track_quat("-Z", "Y").to_euler()
+    scene.camera = cam
+
+    scene.render.engine = "BLENDER_WORKBENCH"
+    scene.render.resolution_x = size
+    scene.render.resolution_y = size
+    scene.render.resolution_percentage = 100
+    scene.render.film_transparent = True
+    scene.render.image_settings.file_format = "PNG"
+    scene.render.image_settings.color_mode = "RGBA"
+    shading = scene.display.shading
+    shading.light = "STUDIO"
+    shading.color_type = "MATERIAL"
+    shading.show_cavity = True
+    scene.render.filepath = path
+    bpy.ops.render.render(write_still=True)
+    # The camera was only for the picture: nothing exported after this should carry it.
+    bpy.data.objects.remove(cam)
+    bpy.data.cameras.remove(cam_data)
+    return os.path.isfile(path)
+
+
+def op_catalog(job):
+    """Phase B: what the part library keeps of a part. Its objects, its attach empties, a
+    thumbnail, and a GLB for the preview. A thumbnail that won't render is a part without
+    a picture, never a part that can't be added."""
+    empty_scene()
+    objs = import_part(job["part"])
+    if not objs:
+        raise ValueError("nothing to import in %s" % os.path.basename(job["part"]))
+    meshes = [o for o in objs if o.type == "MESH"]
+    out = {
+        "objects": [describe(o) for o in objs],
+        "empties": empties(objs),
+        "bounds": world_bounds(meshes),
+        "tris": sum(len(o.data.loop_triangles) for o in meshes),
+    }
+    if job.get("thumb"):
+        try:
+            if render_thumb(job["thumb"], meshes, int(job.get("thumbSize") or 256)):
+                out["thumb"] = job["thumb"]
+        except Exception as e:
+            out["thumbError"] = "%s: %s" % (type(e).__name__, e)
+    if job.get("glb"):
+        export_glb(job["glb"])
+        out["glb"] = job["glb"]
+    return out
+
+
+OPS = {"inspect": op_inspect, "catalog": op_catalog}
 
 
 def main():

@@ -8,6 +8,13 @@
   Microsoft Store, or you choose `blender.exe`. It then runs Blender in the background to
   open one part (`.blend`, `.fbx` or `.obj`) and shows what's in it: objects, their parents,
   triangle counts and size. Blender 4.2 or newer is needed. Studio doesn't ship or bundle it.
+- The Bike tab now keeps a **part library**. Add parts (several at once) and Blender opens each one
+  in the background, renders a thumbnail and records its attach points (empties). Studio
+  guesses each part's role from its names (chassis, steering, front or rear suspension, front or
+  rear wheel, levers, pegs and pedals); you can change it. The Bike section has one slot per role.
+  Parts are kept in Studio's own data folder, and your files are never written to. A part whose
+  file has changed or gone is flagged. Fixed: parts from a `.blend` reported every object at the
+  origin.
 - The control plane can hand mxbsecure.com's FBX to EDF converter to invited accounts. It serves
   the converter only to signed-in Steam accounts listed in `MXB_CONVERTER_STEAM_IDS`, plus
   admins, and never to banned accounts. The files come from a new `mxb-fbx2edf` R2 bucket at
