@@ -183,6 +183,17 @@ jobs:
         shell: pwsh
         run: ./scripts/sign-windows.ps1 apps/manager/src-tauri/src/mxbsecure.dll
 
+      # Windows doesn't bundle the DLL: Defender scored the installer on it. The app downloads it
+      # from this release when Game Integration is on and accepts only this digest, which is
+      # baked into the app here — after signing, since signing changes the bytes.
+      - name: Pin the secure-content DLL for download (Windows)
+        if: ${{ github.repository == 'Frostn1/mxb-app' && startsWith(matrix.platform, 'windows') }}
+        shell: bash
+        run: |
+          sha=$(sha256sum apps/manager/src-tauri/src/mxbsecure.dll | cut -d' ' -f1)
+          echo "MXB_SECURE_DLL_SHA256=$sha" >> "$GITHUB_ENV"
+          echo "MXB_SECURE_DLL_TAG=${{ github.ref_type == 'tag' && github.ref_name || format('v{0}', github.run_number) }}" >> "$GITHUB_ENV"
+
       # Ask the bundler for the secure-content files only on the legs that have them. Tauri's
       # `resources` glob is a hard error when it matches nothing, so keeping it in the committed
       # config broke every build without the private module. By now sync.sh has put the files in
@@ -200,13 +211,14 @@ jobs:
             test -f apps/manager/src-tauri/src/mxbsecure-inject.exe || { echo "::error::mxbsecure-inject.exe missing after sync.sh"; exit 1; }
           fi
           if [[ "${{ matrix.platform }}" == windows* ]]; then
-            rm -f apps/manager/src-tauri/src/mxbsecure-inject.exe apps/manager/src-tauri/resources/mxbsecure-inject.exe
-            resources='["resources/mxbsecure.dll"]'
+            # Nothing secure-content in the Windows installer: the DLL is a release asset the
+            # app downloads (above), and the injector doesn't ship at all.
+            rm -f apps/manager/src-tauri/src/mxbsecure-inject.exe apps/manager/src-tauri/resources/mxbsecure-inject.exe \
+                  apps/manager/src-tauri/resources/mxbsecure.dll
           else
-            resources='["resources/mxbsecure*"]'
+            jq '.bundle.resources = ["resources/mxbsecure*"]' apps/manager/src-tauri/tauri.conf.json > tauri.conf.patched
+            mv tauri.conf.patched apps/manager/src-tauri/tauri.conf.json
           fi
-          jq --argjson r "$resources" '.bundle.resources = $r' apps/manager/src-tauri/tauri.conf.json > tauri.conf.patched
-          mv tauri.conf.patched apps/manager/src-tauri/tauri.conf.json
 
       # The release page should say what shipped, not only which file to download — so
       # the body is composed from this tag's CHANGELOG section. Same section the Discord
@@ -281,6 +293,15 @@ jobs:
           prerelease: ${{ github.ref_type != 'tag' || contains(github.ref_name, '-') }}
           # The signing overlay on a signed Windows leg; empty everywhere else.
           args: ${{ matrix.args }} ${{ steps.signing.outputs.tauri-args }}
+
+      # The DLL the Windows app downloads, attached to the release it was built for. Staged by
+      # build.rs into resources/ before it was removed there, so take it from src/.
+      - name: Attach the secure-content DLL (Windows)
+        if: ${{ github.repository == 'Frostn1/mxb-app' && startsWith(matrix.platform, 'windows') }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "$MXB_SECURE_DLL_TAG" apps/manager/src-tauri/src/mxbsecure.dll --clobber --repo "$GITHUB_REPOSITORY"
 
   # Tauri names bundles like `MXB.App_0.1.0_x64-setup.exe`, which reads as ugly/
   # fishy. Rename the user-facing installers to `MXB-App-<ver>-<arch>.<ext>` and
