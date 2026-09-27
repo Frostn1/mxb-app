@@ -8,6 +8,9 @@
   It switches on once the Azure account is set up (see `docs/signing/SETUP.md`). Until then
   releases build unsigned, as before.
 
+### Fixed
+- **Paints arriving mid-race no longer make the game hitch.** When paint sync (or you) put new paints into the mods folder, the folder watcher asked FrostMod for a full content reload, which rebuilds every track and bike list in the game. A change made only of paint files now asks for FrostMod's paint refresh instead, which rebuilds just the paint lists. Anything else still gets the full reload, and a FrostMod older than v0.39.0 still gets the full reload too, because that is the only way it picks paints up.
+
 ### Changed
 - Paints shared through paint sync are now kept on the control plane for a week after their last upload, instead of 24 hours. A paint is re-uploaded once it is 6 days old if its owner is still riding.
 
