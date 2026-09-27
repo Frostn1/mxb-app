@@ -83,6 +83,7 @@
   switch games.
 
 ### Changed
+- **MXB App no longer injects anything into the game.** Windows Defender was quarantining the 0.18 installers because the app carried textbook DLL-injection code. Secured content now loads as a normal game plugin (`plugins\mxbsecure.dlo`), the same way FrostMod's session plugin does. Instant paint refresh now goes through FrostMod instead of the app starting a thread in the game. Until a FrostMod release handles the new `refresh_paints` command, a paint change shows at the next game start.
 - Settings → Paint sync is now just the on/off switch. The **Publish**, **Sync**, **Remove synced paints** and manual GUID controls are gone: publishing, syncing and cleanup all happen on their own, and the panel only shows status.
 - Paint sync now runs by itself for the server you're on. When you join a server, from the app
   or from the game's own server list, the app tells MXB App's service where you are and gets

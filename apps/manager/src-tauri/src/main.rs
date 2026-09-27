@@ -545,9 +545,9 @@ struct ReshadeApplyOutcome {
 }
 
 /// Re-run the game's look loader live if instant refresh is enabled, else report it off.
-fn live_refresh(enabled: bool) -> gameproc::LiveRefresh {
+fn live_refresh(app: &tauri::AppHandle, enabled: bool) -> gameproc::LiveRefresh {
     if enabled {
-        gameproc::refresh_look()
+        gameproc::refresh_look(frostmod_manage::installed_version(app).as_deref())
     } else {
         gameproc::LiveRefresh::Disabled
     }
@@ -555,7 +555,7 @@ fn live_refresh(enabled: bool) -> gameproc::LiveRefresh {
 
 /// Shortest gap between two unattended look refreshes.
 ///
-/// Every refresh is a thread started inside the running game, and the watcher that drives
+/// Every refresh re-runs the game's loader through FrostMod, and the watcher that drives
 /// them fires without anyone asking. A painter saving repeatedly, or a sync pull landing
 /// half a grid's paints, would otherwise queue one call per event; this collapses that
 /// burst into one. Sized to outlast a save the debounce didn't already fold together,
@@ -582,13 +582,13 @@ fn live_look_cooldown_passed() -> bool {
 
 /// Can a look change reach the running game at all?
 ///
-/// Two things have to hold, and both are fixed for the life of the process. The title needs
-/// a loader offset ([`game::Caps::instant_refresh`]), and the call that uses it is Windows'
-/// alone — under Wine or Proton the game is a Windows binary but we are not the one that can
-/// start a thread in it. Asked before watching as well as before firing, so a platform that
-/// could never act on a save doesn't hold OS watch handles waiting for one.
+/// Only for a title with a known customization loader ([`game::Caps::instant_refresh`]),
+/// fixed for the life of the process. FrostMod runs that loader from inside the game
+/// (`refresh_paints`) on every platform it runs on, so this is no longer Windows-only.
+/// Asked before watching as well as before firing, so a title that could never act on a save
+/// doesn't hold OS watch handles waiting for one.
 fn can_refresh_live_look() -> bool {
-    cfg!(windows) && game::active().caps.instant_refresh
+    game::active().caps.instant_refresh
 }
 
 /// Push a look that changed on disk into the running game.
@@ -615,7 +615,7 @@ fn refresh_live_look(app: &tauri::AppHandle) {
     }
     log::info!(
         "[look] refreshing the live game: {:?}",
-        gameproc::refresh_look()
+        gameproc::refresh_look(frostmod_manage::installed_version(app).as_deref())
     );
 }
 
@@ -801,7 +801,7 @@ fn apply_model_swap_blocking(
     Ok(SwapApplyOutcome {
         content_reload,
         game_running: gameproc::is_game_running(),
-        live_refresh: live_refresh(cfg.instant_refresh),
+        live_refresh: live_refresh(&app, cfg.instant_refresh),
         model_refresh,
         paints_stuck,
     })
@@ -845,7 +845,7 @@ async fn set_model_paints(
         Ok(SwapApplyOutcome {
             content_reload,
             game_running: gameproc::is_game_running(),
-            live_refresh: live_refresh(cfg.instant_refresh),
+            live_refresh: live_refresh(&app, cfg.instant_refresh),
             model_refresh: None, // the mesh didn't change, only which liveries sit beside it
             paints_stuck,
         })
@@ -878,7 +878,7 @@ async fn apply_sound_swap(
         Ok(SwapApplyOutcome {
             content_reload,
             game_running: gameproc::is_game_running(),
-            live_refresh: live_refresh(cfg.instant_refresh),
+            live_refresh: live_refresh(&app, cfg.instant_refresh),
             model_refresh: None, // a sound swap doesn't touch the model
             paints_stuck: 0,     // nor the liveries
         })
@@ -7053,7 +7053,7 @@ fn apply_loadout_now(
     Ok(PresetApplyOutcome {
         content_reload,
         game_running: gameproc::is_game_running(),
-        live_refresh: live_refresh(cfg.instant_refresh),
+        live_refresh: live_refresh(&app, cfg.instant_refresh),
         model_refresh,
     })
 }

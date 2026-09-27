@@ -136,6 +136,9 @@ pub fn is_running() -> bool {
 //       back; reselecting the same bike does not re-read the model.
 //   `swap_bike` — switch the active bike outright. NOT implemented in FrostMod
 //       yet (Stage B); it logs and ignores.
+//   `refresh_paints` — paints or gear changed on disk; re-run the game's customization
+//       loader in-process so the look is live. Carries no bike id. See
+//       `PAINT_REFRESH_MIN_VERSION`.
 //   `reset_server_browser` — close the game's half-open master session so the next Browse
 //       starts clean. FrostMod does this by itself when it recognises the wedge; this is
 //       the button for when it declines to. Carries no bike id.
@@ -279,6 +282,26 @@ fn send_command(json: String) -> CommandOutcome {
     // Still write the command file on dev builds so the contract can be inspected.
     let _ = std::fs::write(command_file_path(), json);
     CommandOutcome::Unsupported
+}
+
+/// The oldest FrostMod that handles `refresh_paints`. `None` until a release ships the verb:
+/// an older build logs it as unknown and drops it, which from here looks like success, so
+/// nothing is sent until this names the release that really does it.
+const PAINT_REFRESH_MIN_VERSION: Option<&str> = None;
+
+/// May we send `refresh_paints` to the installed FrostMod, tagged `tag`?
+pub fn paint_refresh_supported(tag: Option<&str>) -> bool {
+    let Some(min) = PAINT_REFRESH_MIN_VERSION else { return false };
+    match (tag.and_then(version_parts), version_parts(min)) {
+        (Some(have), Some(min)) => have >= min,
+        _ => false,
+    }
+}
+
+/// Ask FrostMod to re-run the game's customization loader, so changed paints show now.
+/// Callers clear [`paint_refresh_supported`] first.
+pub fn signal_refresh_paints() -> CommandOutcome {
+    send_command(command_json("refresh_paints", ""))
 }
 
 /// Ask FrostMod to swap the active bike to `bike_id`.
@@ -622,6 +645,15 @@ fn not_attached_reason() -> String {
 
 #[cfg(test)]
 mod tests {
+
+    /// No FrostMod is sent `refresh_paints` until a release that handles it is named: an
+    /// older one drops it silently, which would read as a refresh that happened.
+    #[test]
+    fn paint_refresh_waits_for_a_frostmod_that_has_it() {
+        assert!(!paint_refresh_supported(Some("v99.0.0")));
+        assert!(!paint_refresh_supported(None));
+    }
+
     use super::*;
 
     #[test]
