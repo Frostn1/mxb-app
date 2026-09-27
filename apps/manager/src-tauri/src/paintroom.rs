@@ -1212,10 +1212,17 @@ impl Session {
         // What the room said.
         let events = self.current.as_ref().and_then(|c| c.room.as_ref()).map(Room::drain).unwrap_or_default();
         let mut changed = false;
+        let mut arrived = false;
         let mut closed = None;
         for event in events {
             match event {
-                RoomEvent::Joined(rider) => changed |= self.grid.joined(rider),
+                RoomEvent::Joined(rider) => {
+                    // A rider (re)entering the game is a new vehicle there, whether or not their
+                    // look changed — and a rejoin brings nothing to download, so the install
+                    // count alone would never tell FrostMod to put their paints on it.
+                    arrived |= !rider.paints.is_empty();
+                    changed |= self.grid.joined(rider);
+                }
                 RoomEvent::Left { rider_name, guid } => changed |= self.grid.left(&rider_name, guid.as_deref()),
                 RoomEvent::Closed(why) => closed = Some(why),
             }
@@ -1227,7 +1234,9 @@ impl Session {
             cur.backoff = (cur.backoff * 2).min(HEARTBEAT);
         }
         if changed {
-            self.reconcile(app, cfg, &token).await;
+            self.reconcile(app, cfg, &token, arrived).await;
+        } else if arrived {
+            crate::refresh_live_look(app);
         }
 
         // Reopen a dropped room, with backoff.
@@ -1316,7 +1325,7 @@ impl Session {
 
         let changed = self.grid.replace(joined.riders);
         if changed || self.current.as_ref().is_some_and(|c| c.room.is_none()) {
-            self.reconcile(app, cfg, token).await;
+            self.reconcile(app, cfg, token, false).await;
         }
         if self.current.as_ref().is_some_and(|c| c.room.is_none()) {
             self.open_room(token).await;
@@ -1342,7 +1351,9 @@ impl Session {
         }
     }
 
-    async fn reconcile(&mut self, app: &tauri::AppHandle, cfg: &AppConfig, token: &str) {
+    /// Bring the grid's paints onto disk, then have FrostMod apply them: after anything was
+    /// installed, and whenever `arrived` says a rider just came onto the server.
+    async fn reconcile(&mut self, app: &tauri::AppHandle, cfg: &AppConfig, token: &str, arrived: bool) {
         let now = crate::now_ms();
         let grid = std::mem::take(&mut self.grid);
         let riders: Vec<&RoomRider> = grid.riders().collect();
@@ -1373,6 +1384,8 @@ impl Session {
         crate::emit_sync(app, crate::SyncEvent::pulled(&out));
         if out.installed > 0 {
             let _ = crate::frostmod::signal_reload();
+            crate::refresh_live_look(app);
+        } else if arrived {
             crate::refresh_live_look(app);
         }
     }
