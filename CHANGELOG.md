@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Added
+- **Paint sync v2 (control plane).** Joining a server now sends your paint hashes once, and the control plane answers with only the paints it still needs from you plus everyone else on that server and theirs. A room per server pushes later arrivals and departures over WebSocket, so nothing polls. Servers are keyed by address, and a name seen in the in-game browser is matched to its address. Paints shared this way are kept for 24 hours. Older apps keep using `/v1/roster` and `/v1/paints` unchanged.
 - Frost Studio has a new **Bike** tab, the start of a bike builder for modders who have parts but
   don't know Blender well. It finds the Blender you already have: installer, Steam or
   Microsoft Store, or you choose `blender.exe`. It then runs Blender in the background to

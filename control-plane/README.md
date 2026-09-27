@@ -35,6 +35,10 @@ consequences fall out of that, and they're baked into the schema:
 | PUT | `/v1/loadout` | bearer | Replace **one bike's** loadout. Kept for clients older than per-bike storage. |
 | PUT | `/v1/loadouts` | bearer | Replace the whole look, every bike at once. Returns `missing` — the blobs still to upload. |
 | GET | `/v1/roster?server=<id>` | bearer | Riders and their paints, for the sync. De-duplicated by destination. |
+| POST | `/v1/paintsync/join` | bearer | Paint sync v2: "I'm on this server (address and/or name) wearing this look." Returns the caller's hashes nobody holds (upload only those) and the other riders with theirs, and notifies the room. Also the heartbeat. |
+| PUT | `/v1/paintsync/paints/<sha256>` | bearer | Upload one paint from the caller's own look. Kept 24 h under `live/`. |
+| POST | `/v1/paintsync/leave` | bearer | Leave a server; the room is told. |
+| GET | `/v1/paintsync/room?server=<key>` | bearer (WebSocket) | Pushes `joined`/`left` for the server; `{t:"ping"}` every 5 min keeps presence. |
 | POST | `/v1/servers` | bearer | Publish a server you run. Five per account, one per address. |
 | DELETE | `/v1/servers/:id` | bearer + owner | Remove it, terminating the instance if we launched it |
 | GET | `/v1/servers/mine` | bearer | Your own servers, **with their agent tokens** — the only way to drive a box that has no console |
