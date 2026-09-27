@@ -136,6 +136,8 @@ pub fn is_running() -> bool {
 //       back; reselecting the same bike does not re-read the model.
 //   `swap_bike` — switch the active bike outright. NOT implemented in FrostMod
 //       yet (Stage B); it logs and ignores.
+//   `refresh_gear` — rider gear (helmet, boots, rider model) changed on disk; rebuild only
+//       the rider lists and their paints. See `GEAR_REFRESH_MIN_VERSION`.
 //   `refresh_paints` — paints or gear changed on disk; re-run the game's customization
 //       loader in-process so the look is live. Carries no bike id. See
 //       `PAINT_REFRESH_MIN_VERSION`.
@@ -301,6 +303,24 @@ pub fn paint_refresh_supported(tag: Option<&str>) -> bool {
 /// Callers clear [`paint_refresh_supported`] first.
 pub fn signal_refresh_paints() -> CommandOutcome {
     send_command(command_json("refresh_paints", ""))
+}
+
+/// The oldest FrostMod that handles `refresh_gear`: v0.39.3. An older one drops the verb as
+/// unknown, which from here looks like success, so it gets the full reload instead.
+const GEAR_REFRESH_MIN_VERSION: &str = "v0.39.3";
+
+/// May we send `refresh_gear` to the installed FrostMod, tagged `tag`?
+pub fn gear_refresh_supported(tag: Option<&str>) -> bool {
+    match (tag.and_then(version_parts), version_parts(GEAR_REFRESH_MIN_VERSION)) {
+        (Some(have), Some(min)) => have >= min,
+        _ => false,
+    }
+}
+
+/// Ask FrostMod to rebuild the rider gear lists (helmets, boots, rider models, protections
+/// and their paints). Callers clear [`gear_refresh_supported`] first.
+pub fn signal_refresh_gear() -> CommandOutcome {
+    send_command(command_json("refresh_gear", ""))
 }
 
 /// Ask FrostMod to swap the active bike to `bike_id`.
@@ -644,6 +664,15 @@ fn not_attached_reason() -> String {
 
 #[cfg(test)]
 mod tests {
+
+    /// `refresh_gear` goes only to v0.39.3 and later; an older FrostMod gets the full reload.
+    #[test]
+    fn gear_refresh_waits_for_v0_39_3() {
+        assert!(gear_refresh_supported(Some("v0.39.3")));
+        assert!(gear_refresh_supported(Some("v0.40.0")));
+        assert!(!gear_refresh_supported(Some("v0.39.2")));
+        assert!(!gear_refresh_supported(None));
+    }
 
     /// Only a FrostMod that handles `refresh_paints` is sent it: an older one drops it
     /// silently, which would read as a refresh that happened.

@@ -28,6 +28,7 @@
 - **Paints arriving mid-race no longer make the game hitch.** When paint sync (or you) put new paints into the mods folder, the folder watcher asked FrostMod for a full content reload, which rebuilds every track and bike list in the game. A change made only of paint files now asks for FrostMod's paint refresh instead, which rebuilds just the paint lists. Anything else still gets the full reload, and a FrostMod older than v0.39.0 still gets the full reload too, because that is the only way it picks paints up.
 
 ### Changed
+- Installing a helmet, boots or rider model while the game runs asks FrostMod (v0.39.3 or newer) for a gear-only refresh, which rebuilds just the rider lists instead of every track and bike. Older FrostMod still gets the full reload.
 - Paints shared through paint sync are now kept on the control plane for a week after their last upload, instead of 24 hours. A paint is re-uploaded once it is 6 days old if its owner is still riding.
 
 ## 2026-09-27 — v0.19.0 — Automatic paint sync, and nothing injected into the game
