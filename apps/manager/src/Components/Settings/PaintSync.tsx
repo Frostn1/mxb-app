@@ -1,16 +1,14 @@
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
-import { Loader2, Download, Upload, TriangleAlert, Trash2 } from "lucide-react";
+import { Loader2, TriangleAlert, Trash2 } from "lucide-react";
 import { Button } from "@frost/shared/Components/ui/button";
 import { Input } from "@frost/shared/Components/ui/input";
 import { cn } from "@frost/shared/lib/utils";
 import {
   experimentalState,
   onSyncEvent,
-  publishPaints,
   removeSyncedPaints,
   setGuid as setGuidApi,
-  syncPaints,
   type ExperimentalState,
   type SyncEvent,
 } from "@frost/shared/api/mods";
@@ -82,7 +80,8 @@ const StatusRow = ({
  * already hold their exact paint file. This is the panel that fixes that: publish what
  * you're wearing, pull back what everyone else published.
  *
- * Written as a checklist rather than a pair of buttons, because the thing a player needs to
+ * Written as a checklist with nothing to press: publishing and syncing run on their own
+ * (turning the feature on, joining a server, riders arriving). Written that way because the thing a player needs to
  * know is not "what can I do here" but "what is still missing". Both halves fail silently by
  * design — publishing is a side errand of an action that already succeeded, and the sync at
  * launch happens while the player is looking at the game — so if this doesn't say it, nothing
@@ -130,48 +129,6 @@ export const PaintSync = () => {
       refresh();
     } catch (e) {
       toast.error(t("sync.enrollFailed"), { description: String(e) });
-    }
-    setBusy(false);
-  };
-
-  const publish = async () => {
-    setBusy(true);
-    try {
-      // Forced: pressing this after a successful publish is otherwise correctly a no-op,
-      // which reads as a broken button.
-      const r = await publishPaints(true);
-      toast.success(
-        t("sync.published", { paints: r.published, bikes: r.bikes }),
-      );
-      if (r.skippedBikes > 0)
-        toast.warning(t("sync.skippedBikes", { count: r.skippedBikes }));
-      // A livery that never leaves the machine is worth saying out loud; otherwise the rider
-      // looks default to everyone else and nothing ever explains why.
-      if (r.oversizedPaints > 0)
-        toast.warning(t("sync.oversized", { count: r.oversizedPaints }));
-      refresh();
-    } catch (e) {
-      toast.error(t("sync.publishFailed"), { description: String(e) });
-    }
-    setBusy(false);
-  };
-
-  const pull = async () => {
-    setBusy(true);
-    try {
-      const r = await syncPaints();
-      toast.success(
-        t("sync.pulled", {
-          installed: r.installed,
-          riders: r.riders,
-          had: r.alreadyHad,
-        }),
-      );
-      if (r.rejected > 0)
-        toast.warning(t("sync.rejected", { count: r.rejected }));
-      refresh();
-    } catch (e) {
-      toast.error(t("sync.pullFailed"), { description: String(e) });
     }
     setBusy(false);
   };
@@ -237,16 +194,6 @@ export const PaintSync = () => {
                     : undefined
                   : t("sync.neverPublishedWhy")
               }
-              action={
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={busy}
-                  onClick={() => void publish()}
-                >
-                  <Upload className="size-3.5" /> {t("sync.publishNow")}
-                </Button>
-              }
             />
 
             <StatusRow
@@ -266,16 +213,6 @@ export const PaintSync = () => {
                     ? t("sync.lastPulled", { ago: pulledAgo })
                     : undefined
                   : t("sync.neverPulledWhy")
-              }
-              action={
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={busy}
-                  onClick={() => void pull()}
-                >
-                  <Download className="size-3.5" /> {t("sync.pull")}
-                </Button>
               }
             />
 

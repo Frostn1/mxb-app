@@ -83,6 +83,7 @@
   switch games.
 
 ### Changed
+- Settings → Paint sync no longer has **Publish** or **Sync** buttons. Both happen on their own when the feature is on, and the panel only shows their status.
 - Paint sync now runs by itself for the server you're on. When you join a server, from the app
   or from the game's own server list, the app tells MXB App's service where you are and gets
   the other riders' paints. It then stays connected, so riders who join or leave later are
