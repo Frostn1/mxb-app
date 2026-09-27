@@ -507,6 +507,7 @@ export const sv: Translation = {
   "track.across": "tvärs över",
   "track.hills": "kullar",
   "track.surface": "mark",
+  "track.style": "Stil",
   "track.soil": "Jord",
   "track.sand": "Sand",
   "track.grass": "Gräs",

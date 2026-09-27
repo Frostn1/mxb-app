@@ -552,6 +552,7 @@ export const ptBR: Translation = {
   "track.across": "de largura",
   "track.hills": "colinas",
   "track.surface": "solo",
+  "track.style": "Estilo",
   "track.soil": "Terra",
   "track.sand": "Areia",
   "track.grass": "Grama",

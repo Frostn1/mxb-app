@@ -1888,25 +1888,51 @@ fn rhythm_lane(rng: &mut Rng, at: f32, room: f32, sec: &Sections) -> Option<Feat
 /// What goes on a lane too short for a whole rhythm section and too long to leave bare. The
 /// pitch is clamped to the room rather than the lane being skipped: ten metres crest to crest
 /// is a double either way, and a bare lane is the one thing every ride report has been about.
-fn rhythm_double(rng: &mut Rng, at: f32, room: f32, sec: &Sections) -> Option<Feature> {
-    let pitch = rng
+fn rhythm_double(
+    rng: &mut Rng,
+    at: f32,
+    room: f32,
+    sec: &Sections,
+    speed: &crate::trackspeed::Speed,
+) -> Option<Feature> {
+    let mut pitch = rng
         .range(sec.rhythm_double_m.0, sec.rhythm_double_m.1)
         .min(room / 2.5);
     if pitch < sec.rhythm_double_m.0 * 0.85 {
         return None;
     }
-    let span = pitch * 2.5;
-    let mut marks: Vec<(f32, f32)> = vec![(0.0, 0.0)];
-    let mut x = pitch * 0.25;
-    for _ in 0..2 {
-        let h = rng.range(sec.rhythm_h_m.0, sec.rhythm_h_m.1);
-        marks.push((x + pitch * 0.34, h));
-        marks.push((x + pitch * 0.50, h));
-        marks.push((x + pitch * 0.92, h * 0.07));
-        x += pitch;
+    let heights = [
+        rng.range(sec.rhythm_h_m.0, sec.rhythm_h_m.1),
+        rng.range(sec.rhythm_h_m.0, sec.rhythm_h_m.1),
+    ];
+    // Changing pitch changes both the ramp and the centred lip position. Check each
+    // candidate where it will actually stand; callers must not shift it afterwards.
+    for _ in 0..16 {
+        if pitch < sec.rhythm_double_m.0 {
+            break;
+        }
+        let span = pitch * 2.5;
+        let placed_at = at + (room - span).max(0.0) * 0.5;
+        let ramp = pitch * (0.25 + 0.34);
+        let deg = crate::trackprog::face_sweep(heights[0], ramp).to_degrees();
+        // Crest to crest is conservative: it reaches the whole landing face.
+        let allowed = speed.carry(placed_at + ramp, deg) * 0.9;
+        if pitch > allowed {
+            pitch = allowed;
+            continue;
+        }
+        let mut marks: Vec<(f32, f32)> = vec![(0.0, 0.0)];
+        let mut x = pitch * 0.25;
+        for h in heights {
+            marks.push((x + pitch * 0.34, h));
+            marks.push((x + pitch * 0.50, h));
+            marks.push((x + pitch * 0.92, h * 0.07));
+            x += pitch;
+        }
+        marks.push((span, 0.0));
+        return Some(drawn(placed_at, span, &marks));
     }
-    marks.push((span, 0.0));
-    Some(drawn(at, span, &marks))
+    section_table(at, heights[0], room, sec)
 }
 
 /// A triple: a take-off, a lump in the middle and a landing, the two outer crests `span` apart.
@@ -1950,6 +1976,13 @@ fn table(at: f32, h: f32, deck: f32, lip_deg: f32) -> Feature {
     let down = crate::trackprog::lip_face_run(h, lip_deg * 0.62);
     let total = up + deck + down;
     drawn(at, total, &[(0.0, 0.0), (up, h), (up + deck, h), (total, 0.0)])
+}
+
+/// The same minimum-deck fallback for any section whose air cannot be cleared.
+fn section_table(at: f32, h: f32, room: f32, sec: &Sections) -> Option<Feature> {
+    let up = crate::trackprog::lip_face_run(h, 26.0);
+    let deck = sec.table_deck_m.0;
+    (up + deck + landing_run(h) <= room).then(|| table(at, h, deck, 26.0))
 }
 
 /// How far apart a triple's crests may go here, metres, or `None` where none fits.
@@ -2184,9 +2217,8 @@ fn section_features(
                     // nothing: the lane is already spoken for, so the pass that fills what is
                     // left over never sees it, and it would otherwise build bare.
                     None => {
-                        let deck = sec.table_deck_m.0;
-                        if up + deck + landing_run(h) <= r {
-                            lay(&mut out, table(at, h, deck, 26.0));
+                        if let Some(f) = section_table(at, h, r, &sec) {
+                            lay(&mut out, f);
                         }
                     }
                 }
@@ -2209,25 +2241,38 @@ fn section_features(
             }
             Section::Double => {
                 let height = rng.range(1.9, 2.4);
-                let faces = crate::trackprog::double_faces(height, 0.0);
+                let lip = 0.0;
+                let faces = crate::trackprog::double_faces(height, lip);
                 let span = rng.range(sec.double_m.0, sec.double_m.1);
                 let gap = (span - faces.back - faces.face).max(2.0);
                 let total = faces.total(gap);
+                let placed_at = at + (r - total).max(0.0) * 0.5;
+                let crest = placed_at + faces.ramp;
+                let deg = crate::trackprog::face_sweep(height, faces.ramp).to_degrees();
+                // Match trackllm::rhythm, including its quarter-face landing allowance.
+                let gives = speed.carry(crest, deg);
+                let gap_allowed = (gives - faces.back - faces.face * 0.25).max(0.0) * 0.9;
+                if gap_allowed < sec.double_m.0 {
+                    if let Some(f) = section_table(at, height, r, &sec) {
+                        lay(&mut out, f);
+                    }
+                    continue;
+                }
+                // Keep the checked lip fixed when shortening the gap.
                 lay(
                     &mut out,
                     Feature::Double {
-                        at: at + (r - total).max(0.0) * 0.5,
+                        at: placed_at,
                         height,
-                        gap,
-                        lip: 0.0,
+                        gap: gap.min(gap_allowed),
+                        lip,
                         finish: false,
                     },
                 );
             }
             Section::RhythmDouble => {
-                if let Some(f) = rhythm_double(rng, at, r, &sec) {
-                    let slack = r - f.length();
-                    lay(&mut out, shifted(f, slack.max(0.0) * 0.5));
+                if let Some(f) = rhythm_double(rng, at, r, &sec, &speed) {
+                    lay(&mut out, f);
                 }
             }
             Section::Table | Section::Single => {
@@ -2310,14 +2355,17 @@ fn section_features(
                 .count();
             let Some(f) = (if runs_down < sec.rhythm_lanes.1 as usize {
                 rhythm_lane(rng, at, room_here, &sec)
-                    .or_else(|| rhythm_double(rng, at, room_here, &sec))
+                    .map(|f| {
+                        let slack = room_here - f.length();
+                        shifted(f, slack.max(0.0) * 0.5)
+                    })
+                    .or_else(|| rhythm_double(rng, at, room_here, &sec, &speed))
             } else {
-                rhythm_double(rng, at, room_here, &sec)
+                rhythm_double(rng, at, room_here, &sec, &speed)
             }) else {
                 continue;
             };
-            let slack = room_here - f.length();
-            lay(&mut out, shifted(f, slack.max(0.0) * 0.5));
+            lay(&mut out, f);
         }
     }
 
@@ -3588,6 +3636,44 @@ mod tests {
                 r.fatal.is_empty() && r.problems.is_empty()
             })
             .count()
+    }
+
+    /// Every seed must clear its doubles, before repair can shrink or replace them.
+    ///
+    /// Ignored like this file's other multi-seed sweeps: 200 full draw-and-review passes
+    /// measured at ~8 minutes, which is not a "run it every commit" cost — this is here to be
+    /// run deliberately (`cargo test -- --ignored`) after touching jump placement, not to
+    /// slow down every default `cargo test`.
+    #[test]
+    #[ignore = "slow: 200 seeds, draws and reviews a full lap each time"]
+    fn random_track_never_produces_an_unclearable_double() {
+        let s = TrackSettings { discipline: Discipline::Sx, ..TrackSettings::default() };
+        let knobs = LayoutKnobs::from_settings(&s);
+        for seed in 500u64..700 {
+            let mut p = draw_with(seed, &knobs)
+                .unwrap_or_else(|| panic!("seed {seed} drew no SX lap"));
+            let speed = crate::trackspeed::of(&p);
+            for f in &p.features {
+                let Feature::Double { at, height, gap, lip, .. } = *f else { continue };
+                let faces = crate::trackprog::double_faces(height, lip);
+                let crest = at + faces.ramp;
+                let deg = crate::trackprog::face_sweep(height, faces.ramp).to_degrees();
+                let gives = speed.carry(crest, deg);
+                let needs = faces.back + gap + faces.face * 0.25;
+                assert!(
+                    needs <= gives,
+                    "seed {seed}: double at {at:.0} m needs {needs:.1} m, carries {gives:.1} m"
+                );
+            }
+            crate::trackllm::repair_for_tests(&mut p);
+            let r = crate::trackllm::review(&p);
+            assert!(r.fatal.is_empty(), "seed {seed}: {:?}", r.fatal);
+            assert!(
+                !r.problems.iter().any(|p| p.contains("cannot be cleared")),
+                "seed {seed}: {:?}",
+                r.problems
+            );
+        }
     }
 
     /// A setting at the edge of its range still draws: the clamps are where the walk stops

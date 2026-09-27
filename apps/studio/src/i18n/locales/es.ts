@@ -553,6 +553,7 @@ export const es: Translation = {
   "track.across": "de ancho",
   "track.hills": "colinas",
   "track.surface": "suelo",
+  "track.style": "Estilo",
   "track.soil": "Tierra",
   "track.sand": "Arena",
   "track.grass": "Hierba",
