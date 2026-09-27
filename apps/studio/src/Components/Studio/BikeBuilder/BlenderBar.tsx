@@ -1,110 +1,59 @@
-import { useCallback, useEffect, useState } from "react";
-import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import { CheckCircle2, ChevronDown, FolderOpen, Loader2, RefreshCw, Undo2, XCircle } from "lucide-react";
-import { toast } from "sonner";
+import { useState } from "react";
+import { CheckCircle2, FolderOpen, Loader2, RefreshCw, Undo2, XCircle } from "lucide-react";
 import { Button } from "@frost/shared/Components/ui/button";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@frost/shared/Components/ui/popover";
+import { Popover, PopoverContent, PopoverTrigger } from "@frost/shared/Components/ui/popover";
 import { useT } from "@/i18n";
-import { blenderStatus, setBlenderPath, type BlenderStatus } from "../../../api/bikebuild";
+import type { useBlenderStatus } from "./useBlenderStatus";
 
 /**
- * Blender's status, as one line instead of a card that used to sit above every mode
- * (Assemble and Part Maker both) — Sean's "the file picker is right inside all of the other
- * tabs" was this: whichever part of the bike builder a rider opened, the choose-blender.exe
- * button was already there, above everything else. It only matters once, and only until
- * Blender is found, so it's a status line with the details a click away, not a fixture.
+ * Blender's status: one small control in the title bar's own slot, not a bar the Bike tab
+ * used to draw above everything else in it — the same status text, and a "Blender ▾" pill
+ * that opened the same detail, were two ways to read one fact stacked on top of each other.
+ * This is the one control: the icon and short text ARE the button; its own popover holds the
+ * detail (the full path, choosing blender.exe, forgetting a saved one, checking again).
  */
-export default function BlenderBar({ onReadyChange }: { onReadyChange?: (ready: boolean) => void }) {
+export default function BlenderBar({ blender }: { blender: ReturnType<typeof useBlenderStatus> }) {
   const t = useT();
-  const [status, setStatus] = useState<BlenderStatus | null>(null);
-  const [checking, setChecking] = useState(false);
   const [open, setOpen] = useState(false);
-
-  const check = useCallback(() => {
-    setChecking(true);
-    blenderStatus()
-      .then(setStatus)
-      .catch((e) => toast.error(t("bike.blenderCheckFailed"), { description: String(e) }))
-      .finally(() => setChecking(false));
-  }, [t]);
-  useEffect(() => check(), [check]);
-  useEffect(() => onReadyChange?.(!!status?.found?.supported), [status, onReadyChange]);
-
-  async function onPickBlender() {
-    const file = await openDialog({ multiple: false, filters: [{ name: "Blender", extensions: ["exe"] }] });
-    if (typeof file !== "string") return;
-    setChecking(true);
-    try {
-      const next = await setBlenderPath(file);
-      setStatus(next);
-      if (!next.found || next.found.path.toLowerCase() !== file.toLowerCase()) toast.error(t("bike.notBlender"));
-    } catch (e) {
-      toast.error(t("bike.notBlender"), { description: String(e) });
-    } finally {
-      setChecking(false);
-    }
-  }
-
-  async function onForgetBlender() {
-    setChecking(true);
-    try {
-      setStatus(await setBlenderPath(""));
-    } finally {
-      setChecking(false);
-    }
-  }
-
+  const { status, checking, ready, summary, check, onPickBlender, onForgetBlender } = blender;
   const found = status?.found ?? null;
-  const ready = !!found?.supported;
-  const summary =
-    status === null
-      ? t("bike.looking")
-      : ready
-        ? t("bike.blenderFound", { version: found!.version })
-        : found
-          ? t("bike.blenderTooOld", { version: found.version, min: status.minVersion })
-          : t("bike.blenderMissing", { min: status.minVersion });
 
   return (
-    <div className="flex shrink-0 items-center gap-2 border-b border-border bg-window px-4 py-1.5 text-[12px]">
-      {status === null ? (
-        <Loader2 className="size-3.5 shrink-0 animate-spin text-faint" />
-      ) : ready ? (
-        <CheckCircle2 className="size-3.5 shrink-0 text-success" />
-      ) : (
-        <XCircle className="size-3.5 shrink-0 text-amber-500" />
-      )}
-      <span className="min-w-0 truncate text-muted-foreground">{summary}</span>
-      <Popover open={open} onOpenChange={setOpen}>
-        <PopoverTrigger asChild>
-          <Button size="sm" variant="ghost" className="h-6 gap-1 px-1.5 text-[11px]">
-            {t("bike.blender")}
-            <ChevronDown className="size-3" />
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          title={summary}
+          className="flex max-w-[11rem] items-center gap-1.5 rounded-md px-1.5 py-1 text-[12px] text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground"
+        >
+          {status === null ? (
+            <Loader2 className="size-3.5 shrink-0 animate-spin text-faint" />
+          ) : ready ? (
+            <CheckCircle2 className="size-3.5 shrink-0 text-success" />
+          ) : (
+            <XCircle className="size-3.5 shrink-0 text-amber-500" />
+          )}
+          <span className="min-w-0 truncate">{summary}</span>
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="end" className="flex w-72 flex-col gap-2 text-sm">
+        {found && <p className="truncate font-mono text-[11px] text-muted-foreground">{found.path}</p>}
+        <div className="flex flex-wrap gap-2">
+          <Button size="sm" variant="outline" onClick={onPickBlender} disabled={checking}>
+            <FolderOpen className="size-3.5" />
+            {t("bike.chooseBlender")}
           </Button>
-        </PopoverTrigger>
-        <PopoverContent align="end" className="flex w-72 flex-col gap-2 text-sm">
-          {found && <p className="truncate font-mono text-[11px] text-muted-foreground">{found.path}</p>}
-          <div className="flex flex-wrap gap-2">
-            <Button size="sm" variant="outline" onClick={onPickBlender} disabled={checking}>
-              <FolderOpen className="size-3.5" />
-              {t("bike.chooseBlender")}
+          {status?.saved && (
+            <Button size="sm" variant="ghost" onClick={onForgetBlender} disabled={checking}>
+              <Undo2 className="size-3.5" />
+              {t("bike.findBlender")}
             </Button>
-            {status?.saved && (
-              <Button size="sm" variant="ghost" onClick={onForgetBlender} disabled={checking}>
-                <Undo2 className="size-3.5" />
-                {t("bike.findBlender")}
-              </Button>
-            )}
-            <Button size="sm" variant="ghost" onClick={check} disabled={checking}>
-              {checking ? <Loader2 className="size-3.5 animate-spin" /> : <RefreshCw className="size-3.5" />}
-            </Button>
-          </div>
-        </PopoverContent>
-      </Popover>
-    </div>
+          )}
+          <Button size="sm" variant="ghost" onClick={check} disabled={checking}>
+            {checking ? <Loader2 className="size-3.5 animate-spin" /> : <RefreshCw className="size-3.5" />}
+          </Button>
+        </div>
+      </PopoverContent>
+    </Popover>
   );
 }
