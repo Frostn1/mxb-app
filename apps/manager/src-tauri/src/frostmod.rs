@@ -323,6 +323,18 @@ pub fn signal_refresh_gear() -> CommandOutcome {
     send_command(command_json("refresh_gear", ""))
 }
 
+/// The oldest FrostMod that filters the game's content scan by `frostmod_racemode.txt`, which
+/// Auto race mode hands it instead of moving files.
+const RACE_FILTER_MIN_VERSION: &str = "v0.40.0";
+
+/// Does the installed FrostMod, tagged `tag`, read Auto race mode's allow-list?
+pub fn race_filter_supported(tag: Option<&str>) -> bool {
+    match (tag.and_then(version_parts), version_parts(RACE_FILTER_MIN_VERSION)) {
+        (Some(have), Some(min)) => have >= min,
+        _ => false,
+    }
+}
+
 /// Ask FrostMod to swap the active bike to `bike_id`.
 /// NOTE: FrostMod does not implement this verb yet — it logs and ignores it.
 pub fn signal_swap_bike(bike_id: &str) -> CommandOutcome {
@@ -664,6 +676,15 @@ fn not_attached_reason() -> String {
 
 #[cfg(test)]
 mod tests {
+
+    /// The allow-list is only handed to a FrostMod that reads it; an older one would ignore it
+    /// and show everything, which is why the file-moving mode stays for it.
+    #[test]
+    fn the_race_filter_needs_v0_40_0() {
+        assert!(race_filter_supported(Some("v0.40.0")));
+        assert!(!race_filter_supported(Some("v0.39.4")));
+        assert!(!race_filter_supported(None));
+    }
 
     /// `refresh_gear` goes only to v0.39.3 and later; an older FrostMod gets the full reload.
     #[test]
