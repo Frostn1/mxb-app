@@ -7,6 +7,10 @@
   through Azure Artifact Signing: the app, its installer and the `mxbsecure.dll` game plugin.
   It switches on once the Azure account is set up (see `docs/signing/SETUP.md`). Until then
   releases build unsigned, as before.
+- Groundwork for server Race mode: the rules that decide which installed tracks and bikes a
+  server can't use (its track and bike classes known from the server list), so they can be set
+  aside before a join. Rider gear, paints, tyres, sounds, support packs, paint-sync paints and
+  secured content always stay; anything unreadable stays. Not switched on yet.
 
 ### Fixed
 - Paint sync asks FrostMod to re-apply paints whenever a rider joins or rejoins the server, not only when new paint files were downloaded. A rider who rejoined wearing paints you already had stayed on the default look.
