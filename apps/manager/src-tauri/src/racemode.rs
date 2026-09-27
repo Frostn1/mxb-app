@@ -285,6 +285,94 @@ pub struct Journal {
     pub moved: Vec<String>,
     /// Unix milliseconds.
     pub started_at: u64,
+    /// Nothing was moved: FrostMod was handed [`FILTER_FILE`] instead, and `moved` is what it
+    /// hides. Restoring is deleting that file.
+    pub filtered: bool,
+}
+
+// ─── The FrostMod filter ────────────────────────────────────────────────────────────────────
+//
+// FrostMod v0.40.0 filters the game's own content scan by an allow-list: a track or bike that
+// isn't on it is never listed and its archive never opened, which is everything moving it bought
+// with none of the moving. Nothing to put back after a crash either — delete the list and the
+// next start sees the whole library. Moving stays for a FrostMod without the filter.
+
+/// The allow-list FrostMod reads, beside `frostmod_mods.txt` in its folder.
+const FILTER_FILE: &str = "frostmod_racemode.txt";
+
+/// The roots FrostMod filters. Everything else under `mods/` is left alone by it, and so here.
+const FILTER_ROOTS: [&str; 2] = ["tracks", "bikes"];
+
+/// Every entry under `mods/tracks` and `mods/bikes` that stays visible when `hidden` (rels,
+/// `mods/`-prefixed) is set aside, as paths relative to `mods/` with forward slashes.
+///
+/// The complement is taken on disk rather than from the inventory, because the inventory only
+/// holds what Race mode knows how to judge: a stock bike's `paints` folder, a loose readme or a
+/// grouping folder is none of those, and FrostMod hides whatever the list leaves off. A folder
+/// that holds something hidden is walked into; anything else is listed whole.
+fn allow_list(mods_root: &Path, hidden: &[String]) -> Vec<String> {
+    let hidden: BTreeSet<String> = hidden
+        .iter()
+        .map(|r| key(r))
+        .map(|k| k.strip_prefix("mods/").map(str::to_owned).unwrap_or(k))
+        .collect();
+    let mut out = Vec::new();
+    fn visit(dir: &Path, rel: &str, hidden: &BTreeSet<String>, out: &mut Vec<String>) {
+        let Ok(rd) = fs::read_dir(dir) else { return };
+        let mut entries: Vec<_> = rd.flatten().collect();
+        entries.sort_by_key(|e| e.file_name());
+        for e in entries {
+            let name = e.file_name().to_string_lossy().into_owned();
+            let child = format!("{rel}/{name}");
+            let k = key(&child);
+            if hidden.contains(&k) {
+                continue;
+            }
+            let holds_hidden = hidden.iter().any(|h| h.starts_with(&format!("{k}/")));
+            if holds_hidden && e.path().is_dir() {
+                visit(&e.path(), &child, hidden, out);
+            } else {
+                out.push(child);
+            }
+        }
+    }
+    for root in FILTER_ROOTS {
+        visit(&mods_root.join(root), root, &hidden, &mut out);
+    }
+    out
+}
+
+/// Can this install hand FrostMod the filter instead of moving files?
+fn filter_usable(app: &tauri::AppHandle, cfg: &AppConfig) -> bool {
+    cfg.auto_run_frostmod
+        && crate::frostmod::race_filter_supported(crate::frostmod_manage::installed_version(app).as_deref())
+}
+
+fn filter_path(app: &tauri::AppHandle) -> PathBuf {
+    crate::frostmod_manage::frostmod_dir(app).join(FILTER_FILE)
+}
+
+/// Write the allow-list, whole or not at all.
+fn write_filter(path: &Path, lines: &[String]) -> Result<(), String> {
+    if let Some(dir) = path.parent() {
+        fs::create_dir_all(dir).map_err(|e| format!("couldn't create {}: {e}", dir.display()))?;
+    }
+    let tmp = path.with_extension("txt.tmp");
+    let mut text = String::from("# Written by MXB App's Auto race mode for this session. Deleted when it ends.\n");
+    for l in lines {
+        text.push_str(l);
+        text.push('\n');
+    }
+    fs::write(&tmp, text).map_err(|e| format!("couldn't write {}: {e}", tmp.display()))?;
+    fs::rename(&tmp, path).map_err(|e| format!("couldn't write {}: {e}", path.display()))
+}
+
+fn clear_filter(path: &Path) {
+    if let Err(e) = fs::remove_file(path) {
+        if e.kind() != std::io::ErrorKind::NotFound {
+            log::warn!("[race] couldn't remove {}: {e}", path.display());
+        }
+    }
 }
 
 /// What the "Race mode: N mods set aside" line shows.
@@ -697,6 +785,41 @@ pub fn before_join(app: &tauri::AppHandle, cfg: &AppConfig, address: &str) {
             return;
         }
     };
+    // FrostMod's filter first: nothing moves, and the journal only says the list is out there.
+    if filter_usable(app, cfg) {
+        let lines = allow_list(&crate::library::mods_root(&cfg.mods_path), &rels);
+        let journal = Journal {
+            session_id: uuid::Uuid::new_v4().to_string(),
+            server: address.to_string(),
+            server_name: row.name.clone(),
+            track: row.track.clone(),
+            mods_path: cfg.mods_path.clone(),
+            moved: rels.clone(),
+            started_at: crate::ledger::now_ms(),
+            filtered: true,
+        };
+        // Journal before the list, so the list is never out there without a record to clear it.
+        let written = write_journal(&path, &journal).and_then(|()| write_filter(&filter_path(app), &lines));
+        match written {
+            Ok(()) => log::info!(
+                "[race] {} ({} {}): FrostMod hides {} of {} mods ({} entries allowed)",
+                row.name,
+                needs.track,
+                needs.track_layout,
+                rels.len(),
+                items.len(),
+                lines.len()
+            ),
+            Err(e) => {
+                log::warn!("[race] couldn't hand FrostMod the filter: {e}");
+                clear_filter(&filter_path(app));
+                clear_journal(&path);
+            }
+        }
+        announce(app);
+        return;
+    }
+
     if let Err(why) = same_volume(&cfg.mods_path, &rels) {
         log::warn!("[race] not setting anything aside: {why}");
         return;
@@ -710,6 +833,7 @@ pub fn before_join(app: &tauri::AppHandle, cfg: &AppConfig, address: &str) {
         mods_path: cfg.mods_path.clone(),
         moved: Vec::new(),
         started_at: crate::ledger::now_ms(),
+        filtered: false,
     };
     // With the folder watcher parked: these moves are ours, and a reload pulsed for them
     // would land on the game's load screen.
@@ -728,6 +852,14 @@ pub fn before_join(app: &tauri::AppHandle, cfg: &AppConfig, address: &str) {
 }
 
 fn restore_locked(app: &tauri::AppHandle, cfg: &AppConfig, path: &Path, why: &str) {
+    // A filtered session moved nothing: taking the list away is the whole restore.
+    if read_journal(path).is_some_and(|j| j.filtered) {
+        clear_filter(&filter_path(app));
+        clear_journal(path);
+        log::info!("[race] {why}: FrostMod's filter removed");
+        announce(app);
+        return;
+    }
     let Some(out) = crate::with_watcher_parked(app, cfg, || unpark(path)) else {
         return;
     };
@@ -817,6 +949,31 @@ mod tests {
             known: true,
             ..Default::default()
         }
+    }
+
+    /// The list is the complement on disk: a hidden archive is left off, a folder holding one is
+    /// walked into, and everything the inventory never judged — a stock bike's paints folder, a
+    /// grouping folder with nothing hidden — is listed whole, so FrostMod doesn't hide it.
+    #[test]
+    fn the_allow_list_is_everything_not_hidden() {
+        let root = std::env::temp_dir().join(format!("race-filter-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        for dir in ["tracks/EU", "bikes/MX1OEM_2023_Yamaha_YZ450F/paints"] {
+            fs::create_dir_all(root.join(dir)).unwrap();
+        }
+        for file in ["tracks/EU/Farm 14.pkz", "tracks/EU/Red Bud.pkz", "tracks/Loretta.pkz", "bikes/KTM 450.pkz", "bikes/Yamaha.pkz"] {
+            fs::write(root.join(file), b"").unwrap();
+        }
+        let hidden = vec!["mods/tracks/EU/Red Bud.pkz".to_string(), "mods/Tracks/Loretta.pkz".to_string(), "mods/bikes/KTM 450.pkz".to_string()];
+        assert_eq!(
+            allow_list(&root, &hidden),
+            vec![
+                "tracks/EU/Farm 14.pkz".to_string(),
+                "bikes/MX1OEM_2023_Yamaha_YZ450F".to_string(),
+                "bikes/Yamaha.pkz".to_string(),
+            ]
+        );
+        let _ = fs::remove_dir_all(root);
     }
 
     fn server(track: &str, categories: &[&str]) -> ServerNeeds {
@@ -1114,6 +1271,7 @@ mod journal_tests {
             mods_path: root.to_string_lossy().into_owned(),
             moved: Vec::new(),
             started_at: 1_700_000_000_000,
+            filtered: false,
         }
     }
 
