@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 2026-09-27 — v0.19.1 — Auto race mode, gear refresh and beta updates that find the next beta
+
 ### Added
 - Windows builds of MXB App, Frost Studio and MXB Coach can be code-signed as Creste LLC
   through Azure Artifact Signing: the app, its installer and the `mxbsecure.dll` game plugin.
