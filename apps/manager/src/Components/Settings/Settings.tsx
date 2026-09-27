@@ -1303,7 +1303,7 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
       </nav>
 
       <div ref={pane} className="min-h-0 flex-1 overflow-y-auto px-2 py-5">
-        <div className="flex max-w-[640px] flex-col gap-[18px]">
+        <div className="flex min-w-0 max-w-[820px] flex-col gap-[18px]">
           {/* game — which title the app is driving. Its own card, above the folders it
               scopes: everything below belongs to whatever is picked here, so it isn't a
               property of the folder setting it used to sit inside. */}
@@ -2054,7 +2054,7 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
               </Select>
             </div>
 
-            <div className="flex items-center justify-between gap-4">
+            <div className="flex flex-wrap items-center justify-between gap-4">
               <span className="text-[11.5px] text-muted-foreground">
                 {t("voice.testOutputDesc")}
               </span>
@@ -2715,7 +2715,7 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
           {/* about */}
           {active === "about" && (
           <Section title={t("settings.about")}>
-            <div className="flex items-center gap-3 text-[12px] text-muted-foreground">
+            <div className="flex flex-wrap items-center gap-3 text-[12px] text-muted-foreground">
               <span>{shownVersion ? `mxb-app v${shownVersion}` : "mxb-app"}</span>
               {experimental?.prerelease && (
                 <span className="rounded-full bg-primary/15 px-2 py-0.5 text-[10.5px] font-semibold uppercase tracking-wide text-primary">
@@ -2735,7 +2735,7 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
                 Changelog
               </button>
             </div>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               <Button
                 variant="outline"
                 size="sm"
@@ -3055,7 +3055,7 @@ function Section({
   children: React.ReactNode;
 }) {
   return (
-    <div className="flex flex-col gap-3 rounded-xl bg-card p-[18px]">
+    <div className="flex min-w-0 flex-col gap-3 rounded-xl bg-card p-[18px]">
       <div className="flex items-center gap-2">
         <span className="flex-1 text-[14px] font-bold">{title}</span>
         {titleRight}

@@ -192,7 +192,7 @@ export default function SupportersCard() {
         </p>
       )}
 
-      <div className="flex gap-2 pt-0.5">
+      <div className="flex flex-wrap gap-2 pt-0.5">
         <Button size="sm" onClick={() => void openUrl(supportUrl)}>
           <Coffee className="size-3.5" /> {t("supporters.become")}
           <ExternalLink className="size-3" />
