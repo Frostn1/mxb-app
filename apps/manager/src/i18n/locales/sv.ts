@@ -572,6 +572,8 @@ export const sv: Translation = {
   "settings.paintSyncOn": "Synkronisera färger automatiskt",
   "settings.paintSyncOnDesc":
     "Stängt av, inget av ditt publiceras och ingen annans färger är installerade.",
+  "settings.paintSyncNeedsFrostmod":
+    "Paint sync needs Game Integration. Install it and turn on \"Start Game Integration automatically\" to use paint sync.",
   "settings.gameFolder": "Spelkatalog",
   "settings.general": "Allmänt",
   "settings.appearance": "Utseende",

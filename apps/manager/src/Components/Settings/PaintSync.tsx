@@ -1,16 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
-import { toast } from "sonner";
-import { Loader2, Download, Upload, TriangleAlert, Trash2 } from "lucide-react";
-import { Button } from "@frost/shared/Components/ui/button";
-import { Input } from "@frost/shared/Components/ui/input";
+import { Loader2, TriangleAlert } from "lucide-react";
 import { cn } from "@frost/shared/lib/utils";
 import {
   experimentalState,
   onSyncEvent,
-  publishPaints,
-  removeSyncedPaints,
-  setGuid as setGuidApi,
-  syncPaints,
   type ExperimentalState,
   type SyncEvent,
 } from "@frost/shared/api/mods";
@@ -82,7 +75,8 @@ const StatusRow = ({
  * already hold their exact paint file. This is the panel that fixes that: publish what
  * you're wearing, pull back what everyone else published.
  *
- * Written as a checklist rather than a pair of buttons, because the thing a player needs to
+ * Written as a checklist with nothing to press: publishing and syncing run on their own
+ * (turning the feature on, joining a server, riders arriving). Written that way because the thing a player needs to
  * know is not "what can I do here" but "what is still missing". Both halves fail silently by
  * design — publishing is a side errand of an action that already succeeded, and the sync at
  * launch happens while the player is looking at the game — so if this doesn't say it, nothing
@@ -91,9 +85,6 @@ const StatusRow = ({
 export const PaintSync = () => {
   const t = useT();
   const [state, setState] = useState<ExperimentalState | null>(null);
-  const [guid, setGuid] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [manualGuid, setManualGuid] = useState(false);
   // What the backend is doing right now, from the `paint-sync` event. `null` when idle.
   const [live, setLive] = useState<SyncEvent["phase"] | null>(null);
 
@@ -120,75 +111,6 @@ export const PaintSync = () => {
       void pending.then((unlisten) => unlisten());
     };
   }, [refresh]);
-
-  const claimGuid = async () => {
-    setBusy(true);
-    try {
-      await setGuidApi(guid.trim());
-      toast.success(t("sync.guidSaved"));
-      setGuid("");
-      refresh();
-    } catch (e) {
-      toast.error(t("sync.enrollFailed"), { description: String(e) });
-    }
-    setBusy(false);
-  };
-
-  const publish = async () => {
-    setBusy(true);
-    try {
-      // Forced: pressing this after a successful publish is otherwise correctly a no-op,
-      // which reads as a broken button.
-      const r = await publishPaints(true);
-      toast.success(
-        t("sync.published", { paints: r.published, bikes: r.bikes }),
-      );
-      if (r.skippedBikes > 0)
-        toast.warning(t("sync.skippedBikes", { count: r.skippedBikes }));
-      // A livery that never leaves the machine is worth saying out loud; otherwise the rider
-      // looks default to everyone else and nothing ever explains why.
-      if (r.oversizedPaints > 0)
-        toast.warning(t("sync.oversized", { count: r.oversizedPaints }));
-      refresh();
-    } catch (e) {
-      toast.error(t("sync.publishFailed"), { description: String(e) });
-    }
-    setBusy(false);
-  };
-
-  const pull = async () => {
-    setBusy(true);
-    try {
-      const r = await syncPaints();
-      toast.success(
-        t("sync.pulled", {
-          installed: r.installed,
-          riders: r.riders,
-          had: r.alreadyHad,
-        }),
-      );
-      if (r.rejected > 0)
-        toast.warning(t("sync.rejected", { count: r.rejected }));
-      refresh();
-    } catch (e) {
-      toast.error(t("sync.pullFailed"), { description: String(e) });
-    }
-    setBusy(false);
-  };
-
-  const remove = async () => {
-    setBusy(true);
-    try {
-      const r = await removeSyncedPaints();
-      toast.success(t("sync.removed", { count: r.removed }));
-      if (r.keptYours > 0)
-        toast.warning(t("sync.removeKeptYours", { count: r.keptYours }));
-      refresh();
-    } catch (e) {
-      toast.error(t("sync.removeFailed"), { description: String(e) });
-    }
-    setBusy(false);
-  };
 
   const sync = state?.sync;
   const publishedAgo = ago(t, sync?.publishedAt ?? 0);
@@ -237,16 +159,6 @@ export const PaintSync = () => {
                     : undefined
                   : t("sync.neverPublishedWhy")
               }
-              action={
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={busy}
-                  onClick={() => void publish()}
-                >
-                  <Upload className="size-3.5" /> {t("sync.publishNow")}
-                </Button>
-              }
             />
 
             <StatusRow
@@ -267,82 +179,16 @@ export const PaintSync = () => {
                     : undefined
                   : t("sync.neverPulledWhy")
               }
-              action={
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={busy}
-                  onClick={() => void pull()}
-                >
-                  <Download className="size-3.5" /> {t("sync.pull")}
-                </Button>
-              }
             />
-
-            {/* Other people's paints, in their mods folder, that nothing used to be able to
-                take out again. Turning the sync off deliberately leaves them — so this is
-                the only way back, and it has to be somewhere a player can find it. */}
-            {(state.syncedPaints ?? 0) > 0 && (
-              <StatusRow
-                tone="info"
-                title={t("sync.installedState", { count: state.syncedPaints })}
-                detail={t("sync.installedWhy")}
-                action={
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={busy}
-                    onClick={() => void remove()}
-                  >
-                    <Trash2 className="size-3.5" /> {t("sync.remove")}
-                  </Button>
-                }
-              />
-            )}
 
             {/* The GUID is the identity that survives a name change. A player can't read it
                 off their own machine, so this is no longer something to type: the app takes
                 it from the server log the first time one of their servers sees them connect.
                 Never an error — a rider name identifies you perfectly well until then. */}
-            {state.guid ? (
+            {state.guid && (
               <StatusRow
                 tone="good"
                 title={t("sync.guidClaimed", { guid: state.guid })}
-              />
-            ) : manualGuid ? (
-              <div className="flex flex-wrap items-end gap-2 py-2">
-                <label className="flex-1 text-[11.5px] text-muted-foreground">
-                  {t("sync.guidHint")}
-                  <Input
-                    value={guid}
-                    onChange={(e) => setGuid(e.target.value)}
-                    placeholder={t("sync.guidPlaceholder")}
-                    spellCheck={false}
-                    className="mt-1.5 h-8 text-[12.5px]"
-                  />
-                </label>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={busy || !guid.trim()}
-                  onClick={() => void claimGuid()}
-                >
-                  {t("sync.setGuid")}
-                </Button>
-              </div>
-            ) : (
-              <StatusRow
-                tone="info"
-                title={t("sync.guidPendingTitle")}
-                detail={t("sync.guidPending")}
-                action={
-                  <button
-                    onClick={() => setManualGuid(true)}
-                    className="cursor-default text-[11.5px] text-muted-foreground underline underline-offset-2 hover:text-foreground"
-                  >
-                    {t("sync.guidManual")}
-                  </button>
-                }
               />
             )}
           </div>

@@ -592,6 +592,8 @@ export const fr: Translation = {
   "settings.paintSyncOn": "Synchroniser les décos automatiquement",
   "settings.paintSyncOnDesc":
     "Désactivé, rien de ce qui t'appartient n'est publié et aucune déco des autres n'est installée.",
+  "settings.paintSyncNeedsFrostmod":
+    "Paint sync needs Game Integration. Install it and turn on \"Start Game Integration automatically\" to use paint sync.",
   "settings.gameFolder": "Dossier de jeu",
   "settings.general": "Général",
   "settings.appearance": "Apparence",

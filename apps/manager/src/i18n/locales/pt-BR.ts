@@ -590,6 +590,8 @@ export const ptBR: Translation = {
   "settings.paintSyncOn": "Sincronizar pinturas automaticamente",
   "settings.paintSyncOnDesc":
     "Desligado, nada seu é publicado e nenhuma pintura dos outros é instalada.",
+  "settings.paintSyncNeedsFrostmod":
+    "Paint sync needs Game Integration. Install it and turn on \"Start Game Integration automatically\" to use paint sync.",
   "settings.gameFolder": "Pasta do jogo",
   "settings.general": "Geral",
   "settings.appearance": "Aparência",

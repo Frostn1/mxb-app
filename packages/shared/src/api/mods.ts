@@ -2844,6 +2844,16 @@ export function setPaintSyncEnabled(enabled: boolean): Promise<void> {
   return invoke<void>("set_paint_sync_enabled", { enabled });
 }
 
+/** Whether paint sync can run here. It needs Game Integration installed and set to start. */
+export interface PaintSyncReadiness {
+  ready: boolean;
+  reason: "frostmodMissing" | "frostmodDisabled" | null;
+}
+
+export function paintSyncReadiness(): Promise<PaintSyncReadiness> {
+  return invoke<PaintSyncReadiness>("paint_sync_readiness");
+}
+
 /** Pick the tyre pack the 3D previews fit. `""` means "whatever the bike names". */
 export function setPreviewTyres(tyres: string): Promise<void> {
   return invoke<void>("set_preview_tyres", { tyres });
