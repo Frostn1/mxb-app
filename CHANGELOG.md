@@ -9,6 +9,9 @@
   releases build unsigned, as before.
 
 ### Fixed
+- Settings cards use more of the window, and their button rows wrap instead of running past the card edge (About & updates' "Join the Discord" stuck out on narrow windows).
+- The server detail window is wider, and its footer wraps (Copy server link turns icon-only on a narrow window), so the star button is no longer cut off.
+- Server cards breathe: "Not installed" moved off the track line to a faded badge in the picture's bottom-right corner, the track name and bike classes get the full row, and chips with no real value ("Unknown", "?") are hidden.
 - **Paints arriving mid-race no longer make the game hitch.** When paint sync (or you) put new paints into the mods folder, the folder watcher asked FrostMod for a full content reload, which rebuilds every track and bike list in the game. A change made only of paint files now asks for FrostMod's paint refresh instead, which rebuilds just the paint lists. Anything else still gets the full reload, and a FrostMod older than v0.39.0 still gets the full reload too, because that is the only way it picks paints up.
 
 ### Changed

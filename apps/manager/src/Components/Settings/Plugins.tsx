@@ -145,7 +145,7 @@ const PluginRow = ({
           <p className="mt-1 text-sm text-muted-foreground">{t("plugins.inStudio")}</p>
         )}
       </div>
-      <div className="flex shrink-0 gap-2">
+      <div className="flex shrink-0 flex-wrap gap-2">
         {inStudio && (
           <Button size="sm" variant="outline" onClick={onOpenStudio} disabled={busy}>
             <ExternalLink className="size-3.5" />
