@@ -284,10 +284,9 @@ fn send_command(json: String) -> CommandOutcome {
     CommandOutcome::Unsupported
 }
 
-/// The oldest FrostMod that handles `refresh_paints`. `None` until a release ships the verb:
-/// an older build logs it as unknown and drops it, which from here looks like success, so
-/// nothing is sent until this names the release that really does it.
-const PAINT_REFRESH_MIN_VERSION: Option<&str> = None;
+/// The oldest FrostMod that handles `refresh_paints`: v0.39.0. An older build logs the verb as
+/// unknown and drops it, which from here looks like success, so it is never sent one.
+const PAINT_REFRESH_MIN_VERSION: Option<&str> = Some("v0.39.0");
 
 /// May we send `refresh_paints` to the installed FrostMod, tagged `tag`?
 pub fn paint_refresh_supported(tag: Option<&str>) -> bool {
@@ -646,11 +645,13 @@ fn not_attached_reason() -> String {
 #[cfg(test)]
 mod tests {
 
-    /// No FrostMod is sent `refresh_paints` until a release that handles it is named: an
-    /// older one drops it silently, which would read as a refresh that happened.
+    /// Only a FrostMod that handles `refresh_paints` is sent it: an older one drops it
+    /// silently, which would read as a refresh that happened.
     #[test]
     fn paint_refresh_waits_for_a_frostmod_that_has_it() {
-        assert!(!paint_refresh_supported(Some("v99.0.0")));
+        assert!(paint_refresh_supported(Some("v0.39.0")));
+        assert!(paint_refresh_supported(Some("v0.40.1")));
+        assert!(!paint_refresh_supported(Some("v0.38.0")));
         assert!(!paint_refresh_supported(None));
     }
 
