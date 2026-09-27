@@ -127,6 +127,16 @@ stored anywhere.
      --scope "/subscriptions/<subscription id>/resourceGroups/rg-codesigning/providers/Microsoft.CodeSigning/codeSigningAccounts/<account>/certificateProfiles/<profile>"
    ```
 4. Note your **Subscription ID** (Subscriptions → your subscription).
+5. **FrostMod too.** `Frostn1/frostmod` signs `frostmod.dll`, `frostmod.dlo`, `frostmod.exe` and
+   `mxbcoach.dlo` with the same app registration. On the same app → **Federated credentials →
+   Add credential** a second time:
+   - **Organization:** `Frostn1`, **Repository:** `frostmod`
+   - **Entity type:** **Environment**, **Environment name:** `code-signing`
+   - The subject must be `repo:Frostn1/frostmod:environment:code-signing`.
+
+   No second role assignment is needed: the role in step 3 belongs to the app registration, and
+   both credentials sign in as it. Then add the same three secrets and three variables from §7
+   to **Frostn1/frostmod** as well.
 
 ## 7. Add the GitHub secrets and variables
 
@@ -170,10 +180,6 @@ show a warning until enough users have installed them.
 
 ## Not covered here
 
-- **FrostMod** (`Frostn1/frostmod`) builds `frostmod.dll`, `frostmod.exe` and `mxbcoach.dlo` in
-  its own workflow. The same `scripts/sign-windows.ps1` and action can be copied there, using the
-  same account and profile plus a second federated credential for that repo. It isn't wired up
-  yet.
 - The Linux and macOS bundles carry Windows PEs for Proton and Wine (`mxbsecure.dll`,
-  `mxbsecure-inject.exe`). Artifact Signing's client runs on Windows only, so those copies stay
+  `mxbsecure-inject.exe`, the attach injector those platforms still use). Artifact Signing's client runs on Windows only, so those copies stay
   unsigned.
