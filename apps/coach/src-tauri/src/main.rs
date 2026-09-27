@@ -73,7 +73,7 @@ async fn check_coach_update(
     webview: tauri::Webview,
     beta: bool,
 ) -> Result<Option<mxb_core::update_channel::UpdateMetadata>, String> {
-    mxb_core::update_channel::check(&webview, "Frostn1/mxb-coach", "v", beta, "mxb-coach")
+    mxb_core::update_channel::check(&webview, "Frostn1/mxb-coach", "v", beta, "mxb-coach", option_env!("MXB_RELEASE_TAG"))
         .await
         .map_err(|e| format!("{e:#}"))
 }
