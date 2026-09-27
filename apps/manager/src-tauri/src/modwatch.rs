@@ -119,6 +119,9 @@ struct Pending {
     last_seen: Option<Instant>,
     /// A settle thread is already waiting on this batch.
     settling: bool,
+    /// Something other than a paint changed. A batch of paints only needs FrostMod's
+    /// paint refresh; anything else still needs the full reload. See [`is_paint_file`].
+    content: bool,
 }
 
 impl Pending {
@@ -137,6 +140,11 @@ impl Pending {
     /// that a still-trickling download shouldn't hold the reload any longer. Taking it
     /// resets the state, so the next change starts a fresh batch.
     fn take_if_settled(&mut self, now: Instant) -> Option<Vec<String>> {
+        self.take_settled_batch(now).map(|(mods, _)| mods)
+    }
+
+    /// [`Self::take_if_settled`], plus whether anything but paints changed in the batch.
+    fn take_settled_batch(&mut self, now: Instant) -> Option<(Vec<String>, bool)> {
         let since = |t: Option<Instant>| t.map(|t| now.saturating_duration_since(t));
         let quiet = since(self.last_seen).is_none_or(|d| d >= SETTLE);
         let overdue = since(self.first_seen).is_some_and(|d| d >= MAX_SETTLE);
@@ -146,8 +154,27 @@ impl Pending {
         if overdue && !quiet {
             log::info!("mods watcher: still changing after {MAX_SETTLE:?} — reloading what's landed");
         }
-        Some(std::mem::take(self).mods.into_iter().collect())
+        let taken = std::mem::take(self);
+        Some((taken.mods.into_iter().collect(), taken.content))
     }
+}
+
+/// Is this a paint file: a `.pnt` in a bike's `paints` folder, or a rider model's
+/// `paints` / `gloves`, a helmet's `paints` / `goggles`, or a boots' `paints`?
+///
+/// A batch made only of these is what paint sync writes (and what a player dropping a
+/// livery in writes). FrostMod picks those up with its paint refresh, which rebuilds the
+/// six paint lists; the full reload rebuilds every content list in the game, and on a big
+/// mods folder that is a visible hitch mid-race for no gain.
+fn is_paint_file(path: &Path) -> bool {
+    let is_pnt = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| e.eq_ignore_ascii_case("pnt"));
+    let in_paint_folder = path.parent().and_then(|d| d.file_name()).and_then(|n| n.to_str()).is_some_and(|n| {
+        ["paints", "gloves", "goggles"].iter().any(|f| n.eq_ignore_ascii_case(f))
+    });
+    is_pnt && in_paint_folder
 }
 
 /// Start (or restart) the watcher on `<mods_path>/mods`. Replaces any existing
@@ -338,6 +365,7 @@ fn on_batch(
             evicted[0].display(),
         );
     }
+    let content = present.iter().any(|p| !is_paint_file(p));
     let keys: Vec<String> = present
         .into_iter()
         .flat_map(|p| mod_keys(root, links, p))
@@ -348,10 +376,11 @@ fn on_batch(
         return;
     }
 
-    let start_settling = pending
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .absorb(keys, Instant::now());
+    let start_settling = {
+        let mut p = pending.lock().unwrap_or_else(|e| e.into_inner());
+        p.content |= content;
+        p.absorb(keys, Instant::now())
+    };
 
     if start_settling {
         let app = app.clone();
@@ -398,11 +427,12 @@ fn settle_then_reload(app: AppHandle, pending: Arc<Mutex<Pending>>, live: Arc<At
         let settled = pending
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .take_if_settled(Instant::now());
-        if let Some(mods) = settled {
-            break mods;
+            .take_settled_batch(Instant::now());
+        if let Some(batch) = settled {
+            break batch;
         }
     };
+    let (mods, content) = mods;
 
     if mods.is_empty() {
         return;
@@ -411,7 +441,33 @@ fn settle_then_reload(app: AppHandle, pending: Arc<Mutex<Pending>>, live: Arc<At
     // update the record of what the library holds — including anything deleted by hand,
     // which no in-app action would have told us about.
     crate::ledger_reconcile_detached(&app);
-    reload(&app, mods);
+    if content {
+        reload(&app, mods);
+    } else {
+        refresh_paints(&app, mods);
+    }
+}
+
+/// Only paints changed: ask FrostMod for its paint refresh instead of the full reload.
+///
+/// A FrostMod too old to know `refresh_paints` still gets the full reload, which is how it
+/// picks up paints at all. With the game shut there is nothing to refresh; the next session
+/// reads the paints from disk anyway.
+fn refresh_paints(app: &AppHandle, mods: Vec<String>) {
+    use crate::gameproc::LiveRefresh;
+    let tag = crate::frostmod_manage::installed_version(app);
+    match crate::gameproc::refresh_look(tag.as_deref()) {
+        LiveRefresh::Refreshed => {
+            log::info!("mods watcher: only paints changed -> paint refresh: {mods:?}");
+        }
+        LiveRefresh::GameNotRunning => {
+            log::info!("mods watcher: only paints changed, game not running - nothing to do: {mods:?}");
+        }
+        other => {
+            log::info!("mods watcher: only paints changed, but no paint refresh ({other:?}) - full reload");
+            reload(app, mods);
+        }
+    }
 }
 
 /// Pulse FrostMod's reload once for the settled batch.
@@ -436,6 +492,48 @@ fn reload(app: &AppHandle, mods: Vec<String>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Paint files are recognised by folder and extension, case-insensitively, for bikes
+    /// and for rider gear; nothing else is.
+    #[test]
+    fn paint_files_are_recognised() {
+        for p in [
+            "/m/mods/bikes/KTM 250/paints/KODD v1_1.pnt",
+            "/m/mods/rider/riders/default_mx/paints/ONEAL.PNT",
+            "/m/mods/rider/riders/default_mx/gloves/Fox Flexair.pnt",
+            "/m/mods/rider/helmets/Airoh/goggles/Scott.pnt",
+            "/m/mods/rider/boots/A_Boots/Paints/Black.pnt",
+        ] {
+            assert!(is_paint_file(Path::new(p)), "{p}");
+        }
+        for p in [
+            "/m/mods/tracks/Red Bud/Red Bud.pkz",
+            "/m/mods/bikes/KTM 250/model.edf",
+            "/m/mods/bikes/KTM 250/paints/readme.txt",
+            "/m/mods/bikes/KTM 250/stock.pnt",
+            "/m/mods/rider/helmets/Airoh/gfx.cfg",
+        ] {
+            assert!(!is_paint_file(Path::new(p)), "{p}");
+        }
+    }
+
+    /// A batch of only paints settles as a paint batch; one non-paint change anywhere in
+    /// it makes the whole batch need the full reload.
+    #[test]
+    fn a_batch_is_content_once_anything_but_a_paint_lands() {
+        let t0 = Instant::now();
+        let mut p = Pending::default();
+        p.absorb(vec!["bikes/KTM".into()], t0);
+        assert_eq!(p.take_settled_batch(t0 + SETTLE), Some((vec!["bikes/KTM".into()], false)));
+
+        p.content |= false;
+        p.absorb(vec!["bikes/KTM".into()], t0);
+        p.content |= true;
+        p.absorb(vec!["tracks/Red Bud".into()], t0);
+        let (_, content) = p.take_settled_batch(t0 + SETTLE).unwrap();
+        assert!(content);
+        assert!(!p.content, "taking the batch resets it");
+    }
 
     /// A sync tool evicting a file's bytes is a folder change like any other. Reloading
     /// for it is what sends the game reading content that has left the disk.
