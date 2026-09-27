@@ -94,6 +94,7 @@ mod server_admin;
 pub(crate) use mxb_core::presets;
 mod paintroom;
 mod paintsync;
+mod racemode;
 mod ranked;
 mod reshade;
 mod serverbook;
