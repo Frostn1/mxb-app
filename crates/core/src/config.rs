@@ -109,6 +109,11 @@ pub struct AppConfig {
     /// Watch `<mods_path>/mods` and signal FrostMod to reload when tracks/bikes are
     /// added outside the app (e.g. a manual download dropped into the folder).
     pub watch_mods_reload: bool,
+    /// Race mode: on a join the app launches, set aside every track and bike the server
+    /// can't use before the game starts, and put them back when the session ends. Off by
+    /// default — it moves files in the player's mods folder, which nobody should find out
+    /// about by accident. See `racemode` in the manager.
+    pub race_mode: bool,
     /// Offer beta builds through the in-app updater, not only full releases.
     pub beta_updates: bool,
     /// Install updates on their own: at launch, or once the app has sat unused. Never while
@@ -437,6 +442,7 @@ impl Default for AppConfig {
             frostmod_args: String::new(),
             instant_refresh: true,
             watch_mods_reload: true,
+            race_mode: false,
             beta_updates: false,
             auto_updates: true,
             secure_content_inject: false,

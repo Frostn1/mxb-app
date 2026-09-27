@@ -7,10 +7,10 @@
 //! Everything else can step aside for the length of the session — the same move Manage makes
 //! (see [`crate::modstate`]), done automatically and undone when the game exits.
 //!
-//! This half is the *decision*, and nothing else: which of the installed mods to move. It
-//! reads no disk and moves no file, so every rule below is a unit test rather than a folder
-//! of fixtures. The caller builds the inventory (the library scan, each bike's `[data] cat`,
-//! each track's inner folders) and does the moving.
+//! [`set_aside`] is the *decision*, and nothing else: which of the installed mods to move. It
+//! reads no disk and moves no file, so every rule is a unit test rather than a folder of
+//! fixtures. The second half of this file builds its inventory (the library scan, each bike's
+//! `[data] cat`, each track's inner folders) and does the moving — see [`before_join`].
 //!
 //! The rules lean hard towards keeping. A mod set aside that the session needed is a rider
 //! who can't see the track, or a grid of riders on bikes the game can't draw; a mod kept that
@@ -25,12 +25,23 @@
 //! * With no known server track, or a track this install doesn't have, it does nothing at
 //!   all: the one mod that has to be there is the one it can't point at.
 
-// Only the tests call this until the join path is wired to it.
-#![allow(dead_code)]
+//!
+//! Moving is [`crate::modstate`]'s own mechanism — into `mxbapp_disabled`, mirroring the path
+//! — with one difference that matters: Manage's restore walks the whole shadow tree, and Race
+//! mode must not. A player who parked forty tracks by hand before joining expects those forty
+//! to still be parked afterwards. So every Race mode session writes a journal of exactly what
+//! *it* moved, before the first move, and puts back only that.
 
 use crate::bikeswap;
+use crate::config::AppConfig;
+use crate::modstate::{self, StateOutcome};
 use mxb_core::tracksource;
-use std::collections::BTreeSet;
+use serde::{Deserialize, Serialize};
+use std::collections::{BTreeSet, HashMap};
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+use std::time::Duration;
 
 /// What a server is running, as the server list reports it.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -234,6 +245,539 @@ pub fn set_aside(
 fn stem(rel: &str) -> String {
     let name = rel.rsplit(['/', '\\']).next().unwrap_or(rel);
     mxb_core::library::strip_ext(name)
+}
+
+// ─── Doing it ───────────────────────────────────────────────────────────────────────────────
+
+/// The journal's file name under the app's data folder.
+const JOURNAL_FILE: &str = "race_mode.json";
+
+/// Event the frontend listens on for the "N mods set aside" line. Carries a [`Status`].
+pub const EVENT: &str = "race-mode";
+
+/// How long after a launch the game has to show up before the moves are undone. A Steam
+/// launch the player cancelled, or one Steam never acted on, has no session to end — without
+/// this the library would stay narrowed until the next app start.
+const LAUNCH_GRACE: Duration = Duration::from_secs(180);
+
+/// How old a server-book row may be and still be trusted with the track. Servers rotate
+/// tracks between events, and a stale row is the one way Race mode could set aside the very
+/// track the session loads — so an old row is treated as no row at all.
+const BOOK_FRESH_MS: u64 = 10 * 60 * 1000;
+
+/// Everything Race mode moved for one session, written before the first move.
+///
+/// This file *is* the record. Restore reads it and nothing else — not the shadow tree, which
+/// also holds whatever the player parked themselves.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Journal {
+    pub session_id: String,
+    /// The server's `host:port`.
+    pub server: String,
+    pub server_name: String,
+    pub track: String,
+    /// The MX Bikes folder the moves were made in. Restore goes back to *this* tree, even
+    /// if the player pointed the app at another folder while the game was up.
+    pub mods_path: String,
+    /// `rel` paths, as [`modstate`] addresses them. Before the moves: everything about to
+    /// move. After: exactly what did.
+    pub moved: Vec<String>,
+    /// Unix milliseconds.
+    pub started_at: u64,
+}
+
+/// What the "Race mode: N mods set aside" line shows.
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Status {
+    pub active: bool,
+    pub count: usize,
+    pub server_name: String,
+}
+
+/// One Race mode operation at a time. The game exiting, paint sync ending its session and
+/// the launch watchdog can all ask for a restore within the same second.
+static LOCK: Mutex<()> = Mutex::new(());
+
+fn read_journal(path: &Path) -> Option<Journal> {
+    let text = fs::read_to_string(path).ok()?;
+    match serde_json::from_str(&text) {
+        Ok(j) => Some(j),
+        Err(e) => {
+            // Left in place rather than deleted: it's the only list of what moved. Manage's
+            // Restore all still brings every parked mod back, journal or not.
+            log::warn!(
+                "[race] journal at {} is unreadable ({e}); leaving it. Manage → Restore all \
+                 puts everything back.",
+                path.display()
+            );
+            None
+        }
+    }
+}
+
+/// Write-then-rename, so a crash mid-write leaves the old journal or the new one — never
+/// half of one, which would be a list of moves nobody can read back.
+fn write_journal(path: &Path, journal: &Journal) -> Result<(), String> {
+    if let Some(dir) = path.parent() {
+        fs::create_dir_all(dir).map_err(|e| format!("couldn't create {}: {e}", dir.display()))?;
+    }
+    let tmp = path.with_extension("json.tmp");
+    let text = serde_json::to_string_pretty(journal).map_err(|e| e.to_string())?;
+    fs::write(&tmp, text).map_err(|e| format!("couldn't write {}: {e}", tmp.display()))?;
+    fs::rename(&tmp, path).map_err(|e| format!("couldn't write {}: {e}", path.display()))
+}
+
+fn clear_journal(path: &Path) {
+    if let Err(e) = fs::remove_file(path) {
+        if e.kind() != std::io::ErrorKind::NotFound {
+            log::warn!("[race] couldn't remove {}: {e}", path.display());
+        }
+    }
+}
+
+/// Move `rels` out of the way, journal first.
+///
+/// The journal is written with the whole plan before anything moves, so a crash at any point
+/// leaves a record that covers every file that could have moved (restoring one that didn't is
+/// a no-op). Once the moves are done it's rewritten with exactly what did.
+///
+/// One failure stops the run and undoes it: half a Race mode is a session missing mods for
+/// no reason the player can see, while none at all is just an ordinary join.
+fn park(journal_path: &Path, mut journal: Journal, rels: &[String]) -> Result<Journal, String> {
+    journal.moved = rels.to_vec();
+    write_journal(journal_path, &journal)?;
+
+    let mut moved: Vec<String> = Vec::new();
+    for rel in rels {
+        match modstate::set_one(&journal.mods_path, rel, false) {
+            Ok(true) => moved.push(rel.clone()),
+            // Gone since the scan. Nothing to move, nothing to put back.
+            Ok(false) => {}
+            Err(e) => {
+                let mut stuck = Vec::new();
+                for back in moved.iter().rev() {
+                    if let Err(e) = modstate::set_one(&journal.mods_path, back, true) {
+                        log::warn!("[race] rollback couldn't put back {back}: {e:#}");
+                        stuck.push(back.clone());
+                    }
+                }
+                if stuck.is_empty() {
+                    clear_journal(journal_path);
+                } else {
+                    // Still recorded, so the next restore pass tries again.
+                    journal.moved = stuck;
+                    let _ = write_journal(journal_path, &journal);
+                }
+                return Err(format!(
+                    "couldn't set aside {rel}: {e:#} — put back the {} already moved",
+                    moved.len()
+                ));
+            }
+        }
+    }
+
+    journal.moved = moved;
+    if journal.moved.is_empty() {
+        clear_journal(journal_path);
+    } else {
+        write_journal(journal_path, &journal)?;
+    }
+    Ok(journal)
+}
+
+/// Put back what the journal says Race mode moved, and only that. `None` with no journal.
+///
+/// A path that won't go back stays in the journal for the next pass; the rest are done.
+fn unpark(journal_path: &Path) -> Option<StateOutcome> {
+    let mut journal = read_journal(journal_path)?;
+    let mut out = StateOutcome::default();
+    let mut left = Vec::new();
+    for rel in &journal.moved {
+        match modstate::set_one(&journal.mods_path, rel, true) {
+            Ok(true) => out.enabled += 1,
+            // Already back — Manage's Restore all got there first — or it never moved.
+            Ok(false) => {}
+            Err(e) => {
+                out.failed.push((rel.clone(), format!("{e:#}")));
+                left.push(rel.clone());
+            }
+        }
+    }
+    if left.is_empty() {
+        clear_journal(journal_path);
+    } else {
+        journal.moved = left;
+        let _ = write_journal(journal_path, &journal);
+    }
+    Some(out)
+}
+
+/// The volume a path lives on, following links: a `mods\tracks` junction onto another drive
+/// is on that drive, whatever its path says.
+#[cfg(windows)]
+fn volume_of(p: &Path) -> Option<String> {
+    let real = fs::canonicalize(p).ok()?;
+    match real.components().next()? {
+        std::path::Component::Prefix(pre) => {
+            Some(pre.as_os_str().to_string_lossy().to_lowercase())
+        }
+        _ => None,
+    }
+}
+
+#[cfg(unix)]
+fn volume_of(p: &Path) -> Option<String> {
+    use std::os::unix::fs::MetadataExt;
+    Some(fs::metadata(p).ok()?.dev().to_string())
+}
+
+fn nearest_existing(p: &Path) -> Option<PathBuf> {
+    p.ancestors().find(|a| a.exists()).map(Path::to_path_buf)
+}
+
+/// Every folder `rels` leave from has to share a volume with the shadow tree.
+///
+/// [`modstate`]'s moves fall back to copy-and-delete across volumes, which is fine for a
+/// dozen mods from Manage and not fine here: gigabytes copied on the way into a server,
+/// and again on the way out, is the opposite of joining faster. Refused rather than
+/// attempted, and "can't tell" is refused too.
+fn same_volume(mods_path: &str, rels: &[String]) -> Result<(), String> {
+    same_volume_by(mods_path, rels, volume_of)
+}
+
+/// [`same_volume`], with the drive lookup as a parameter so a second drive can be faked.
+fn same_volume_by(
+    mods_path: &str,
+    rels: &[String],
+    volume_of: impl Fn(&Path) -> Option<String>,
+) -> Result<(), String> {
+    let shadow = modstate::shadow_root(mods_path);
+    let at = nearest_existing(&shadow).ok_or("the MX Bikes folder doesn't exist")?;
+    let home = volume_of(&at).ok_or_else(|| format!("couldn't tell which drive {} is on", at.display()))?;
+    let mut seen = BTreeSet::new();
+    for rel in rels {
+        let Some(dir) = modstate::enabled_path(mods_path, rel).parent().map(Path::to_path_buf) else {
+            continue;
+        };
+        if !seen.insert(dir.clone()) {
+            continue;
+        }
+        let vol = volume_of(&dir).ok_or_else(|| format!("couldn't tell which drive {} is on", dir.display()))?;
+        if vol != home {
+            return Err(format!(
+                "{} is on a different drive from {} — moving between drives is a copy, not a rename",
+                dir.display(),
+                shadow.display()
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// What a track archive carries, keyed by path, size and mtime — reading an archive's file
+/// list for every track on every join would be the join getting *slower*.
+type TrackRead = (bool, Vec<String>);
+static TRACK_READS: Mutex<Option<HashMap<(String, u64, u64), TrackRead>>> = Mutex::new(None);
+
+/// The marker files the game's track loader looks for — the same set Manage's shadow walk
+/// uses to recognise a parked track.
+const TRACK_MARKERS: [&str; 5] = ["map", "trh", "tsc", "rdf", "ssc"];
+
+/// Whether a packed track really holds a track, and the id of each one it holds.
+fn read_track(path: &Path) -> TrackRead {
+    let meta = fs::metadata(path).ok();
+    let size = meta.as_ref().map(|m| m.len()).unwrap_or(0);
+    let mtime = meta
+        .and_then(|m| m.modified().ok())
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let cache_key = (path.to_string_lossy().into_owned(), size, mtime);
+    if let Some(hit) = TRACK_READS
+        .lock()
+        .ok()
+        .and_then(|c| c.as_ref().and_then(|m| m.get(&cache_key).cloned()))
+    {
+        return hit;
+    }
+
+    let read = match crate::pkz::entry_names(path) {
+        Ok(names) => {
+            let mut ids: Vec<String> = Vec::new();
+            for n in &names {
+                let ext = n.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
+                if !TRACK_MARKERS.contains(&ext.as_str()) {
+                    continue;
+                }
+                if let Some((top, _)) = n.split_once('/').filter(|(t, _)| !t.is_empty()) {
+                    if !ids.iter().any(|i| i.eq_ignore_ascii_case(top)) {
+                        ids.push(top.to_string());
+                    }
+                }
+            }
+            // Markers at the archive root still make it a track, just one named by its file.
+            let known = names.iter().any(|n| {
+                TRACK_MARKERS.contains(&n.rsplit('.').next().unwrap_or("").to_ascii_lowercase().as_str())
+            });
+            (known, ids)
+        }
+        Err(_) => (false, Vec::new()),
+    };
+    if let Ok(mut c) = TRACK_READS.lock() {
+        c.get_or_insert_with(HashMap::new).insert(cache_key, read.clone());
+    }
+    read
+}
+
+/// A `.mxbsecure` or `.mxbkey` anywhere under `dir`. Bounded, because an extracted track can
+/// hold thousands of files and none of them is where a key would be put.
+fn holds_secured(dir: &Path, depth: usize) -> bool {
+    let Ok(rd) = fs::read_dir(dir) else { return false };
+    rd.flatten().any(|e| {
+        let p = e.path();
+        if p.is_dir() {
+            return depth > 0 && holds_secured(&p, depth - 1);
+        }
+        let name = e.file_name().to_string_lossy().to_lowercase();
+        PROTECTED_EXTS.iter().any(|x| name.ends_with(x))
+    })
+}
+
+/// The installed library as [`set_aside`] reads it.
+fn inventory(cfg: &AppConfig, sound_bikes: &[String]) -> Vec<Item> {
+    modstate::scan(cfg, sound_bikes)
+        .into_iter()
+        .map(|m| {
+            let mut item = Item {
+                rel: m.rel.clone(),
+                category: m.category.clone(),
+                is_dir: m.is_dir,
+                enabled: m.enabled,
+                known: true,
+                ..Default::default()
+            };
+            // A parked mod is never a candidate, so there's nothing worth reading in it.
+            if !m.enabled {
+                return item;
+            }
+            let path = modstate::enabled_path(&cfg.mods_path, &m.rel);
+            match m.category.as_str() {
+                "track" if m.is_dir => {
+                    // The library only calls a folder a track once it has found the markers.
+                    item.tracks = vec![m.name.clone()];
+                    item.protected = holds_secured(&path, 4);
+                }
+                "track" => {
+                    let (known, mut ids) = read_track(&path);
+                    ids.insert(0, stem(&m.rel));
+                    item.known = known;
+                    item.tracks = ids;
+                }
+                "bike" if !m.is_dir => match bikeswap::read_identity(&path) {
+                    Some(b) => item.bikes = vec![BikeContent { id: b.id, class: b.class }],
+                    None => item.known = false,
+                },
+                _ => {}
+            }
+            item
+        })
+        .collect()
+}
+
+/// The profile's selected bike, the way the server join reads it.
+fn player(cfg: &AppConfig) -> Player {
+    let dir = cfg.profiles_dir();
+    let scan = crate::presets::scan_profiles(&dir);
+    let bike_id = scan
+        .active
+        .or_else(|| scan.profiles.first().cloned())
+        .and_then(|p| crate::presets::active_bike(&dir, &p))
+        .unwrap_or_default();
+    Player { bike_id }
+}
+
+/// Everything paint sync put in the mods folder, as `mods/…` rels.
+fn synced_paints(cfg: &AppConfig) -> Vec<String> {
+    crate::paintsync::Manifest::read(&crate::library::mods_root(&cfg.mods_path))
+        .installed
+        .into_keys()
+        .map(|rel| format!("mods/{rel}"))
+        .collect()
+}
+
+/// The server-list row for `address`, when one is fresh enough to trust with the track.
+fn server_row(app: &tauri::AppHandle, address: &str) -> Option<crate::WorldServer> {
+    let want = crate::gameproc::parse_server_address(address).ok()?;
+    let same = |a: &str| {
+        crate::gameproc::parse_server_address(a)
+            .is_ok_and(|a| a.eq_ignore_ascii_case(&want))
+    };
+    if let Some(row) = crate::serverwatch::warm_list()
+        .and_then(|l| l.servers.into_iter().find(|s| same(&s.address)))
+    {
+        return Some(row);
+    }
+    let now = crate::ledger::now_ms();
+    crate::serverbook::load(app)
+        .into_iter()
+        .find(|e| same(&e.row.address) && now.saturating_sub(e.last_seen) <= BOOK_FRESH_MS)
+        .map(|e| e.row)
+}
+
+fn journal_path(app: &tauri::AppHandle) -> Option<PathBuf> {
+    use tauri::Manager;
+    Some(app.path().app_data_dir().ok()?.join(JOURNAL_FILE))
+}
+
+/// What Race mode is holding right now.
+pub fn status(app: &tauri::AppHandle) -> Status {
+    match journal_path(app).and_then(|p| read_journal(&p)) {
+        Some(j) => Status {
+            active: !j.moved.is_empty(),
+            count: j.moved.len(),
+            server_name: j.server_name,
+        },
+        None => Status::default(),
+    }
+}
+
+fn announce(app: &tauri::AppHandle) {
+    use tauri::Emitter;
+    let _ = app.emit(EVENT, status(app));
+}
+
+/// Set aside what the server at `address` can't use, before the game is started into it.
+///
+/// Best-effort from end to end: every way this can decline or fail leaves an ordinary join,
+/// and says why in the log. Never touches a running game's files — a join made from the
+/// in-game browser never gets here, and one made while the game is up is refused below.
+pub fn before_join(app: &tauri::AppHandle, cfg: &AppConfig, address: &str) {
+    if !cfg.race_mode {
+        return;
+    }
+    if crate::gameproc::is_game_running() {
+        log::info!("[race] the game is already running; leaving the mods folder alone");
+        return;
+    }
+    let Some(path) = journal_path(app) else { return };
+    let _held = LOCK.lock().unwrap_or_else(|p| p.into_inner());
+
+    // An earlier session that never got its restore — the app was closed mid-game, say.
+    // Back first, so this session's plan starts from the whole library.
+    if path.exists() {
+        restore_locked(app, cfg, &path, "a new join");
+    }
+
+    let Some(row) = server_row(app, address) else {
+        log::info!("[race] {address} isn't in a recent server list, so its track is unknown; nothing set aside");
+        return;
+    };
+    let needs = ServerNeeds {
+        track: row.track.clone(),
+        track_layout: row.track_layout.clone(),
+        categories: row.categories.clone(),
+        track_is_stock: !row.track.trim().is_empty()
+            && crate::trackstock::find(&cfg.install_dir(), &row.track).is_some(),
+    };
+    let items = inventory(cfg, &crate::sound_bikes_of(app));
+    let rels = match set_aside(&needs, &items, &player(cfg), &synced_paints(cfg)) {
+        Ok(rels) if rels.is_empty() => {
+            log::info!("[race] {}: everything installed is needed; nothing set aside", row.name);
+            return;
+        }
+        Ok(rels) => rels,
+        Err(Skip::NoTrack) => {
+            log::info!("[race] {} doesn't say which track it runs; nothing set aside", row.name);
+            return;
+        }
+        Err(Skip::TrackNotInstalled(t)) => {
+            log::info!("[race] {} runs {t:?}, which isn't installed here; nothing set aside", row.name);
+            return;
+        }
+    };
+    if let Err(why) = same_volume(&cfg.mods_path, &rels) {
+        log::warn!("[race] not setting anything aside: {why}");
+        return;
+    }
+
+    let journal = Journal {
+        session_id: uuid::Uuid::new_v4().to_string(),
+        server: address.to_string(),
+        server_name: row.name.clone(),
+        track: row.track.clone(),
+        mods_path: cfg.mods_path.clone(),
+        moved: Vec::new(),
+        started_at: crate::ledger::now_ms(),
+    };
+    // With the folder watcher parked: these moves are ours, and a reload pulsed for them
+    // would land on the game's load screen.
+    match crate::with_watcher_parked(app, cfg, || park(&path, journal, &rels)) {
+        Ok(j) => log::info!(
+            "[race] {} ({} {}): set aside {} of {} mods",
+            row.name,
+            needs.track,
+            needs.track_layout,
+            j.moved.len(),
+            items.len()
+        ),
+        Err(e) => log::warn!("[race] {e}"),
+    }
+    announce(app);
+}
+
+fn restore_locked(app: &tauri::AppHandle, cfg: &AppConfig, path: &Path, why: &str) {
+    let Some(out) = crate::with_watcher_parked(app, cfg, || unpark(path)) else {
+        return;
+    };
+    if out.failed.is_empty() {
+        log::info!("[race] {why}: put back {} mods", out.enabled);
+    } else {
+        log::warn!(
+            "[race] {why}: put back {}, {} still set aside: {:?}",
+            out.enabled,
+            out.failed.len(),
+            out.failed
+        );
+    }
+    announce(app);
+}
+
+/// Put back what Race mode moved, unless the game is running — then it waits for the exit.
+///
+/// Safe to call from anywhere and as often as anyone likes: with no journal it's a no-op.
+pub fn restore_if_idle(app: &tauri::AppHandle, why: &str) {
+    let Some(path) = journal_path(app) else { return };
+    if !path.exists() {
+        return;
+    }
+    if crate::gameproc::is_game_running() {
+        log::info!("[race] {why}, but the game is running; the mods come back when it exits");
+        return;
+    }
+    let _held = LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    let cfg = crate::config::load_or_detect(app).unwrap_or_default();
+    restore_locked(app, &cfg, &path, why);
+}
+
+/// After a launch: if the game never turns up, don't leave the library narrowed.
+pub fn watch_launch(app: &tauri::AppHandle) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let started = std::time::Instant::now();
+        while started.elapsed() < LAUNCH_GRACE {
+            if crate::gameproc::is_game_running() {
+                // The session watcher owns it from here: its exit is the restore.
+                return;
+            }
+            tokio::time::sleep(Duration::from_secs(3)).await;
+        }
+        let _ = tauri::async_runtime::spawn_blocking(move || {
+            restore_if_idle(&app, "the game never started")
+        })
+        .await;
+    });
 }
 
 #[cfg(test)]
@@ -542,5 +1086,201 @@ mod tests {
         sorted.sort();
         sorted.dedup();
         assert_eq!(out, sorted);
+    }
+}
+
+#[cfg(test)]
+mod journal_tests {
+    use super::*;
+
+    fn tmp(name: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("frost-racemode-{name}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&d);
+        fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    fn touch(p: &Path) {
+        fs::create_dir_all(p.parent().unwrap()).unwrap();
+        fs::write(p, b"x").unwrap();
+    }
+
+    fn journal_for(root: &Path) -> Journal {
+        Journal {
+            session_id: "test-session".into(),
+            server: "203.0.113.10:54210".into(),
+            server_name: "Test MX".into(),
+            track: "Farm14".into(),
+            mods_path: root.to_string_lossy().into_owned(),
+            moved: Vec::new(),
+            started_at: 1_700_000_000_000,
+        }
+    }
+
+    #[test]
+    fn the_journal_round_trips() {
+        let root = tmp("journal");
+        let path = root.join("data").join(JOURNAL_FILE);
+        let mut j = journal_for(&root);
+        j.moved = vec!["mods/tracks/RedBud.pkz".into(), "mods/bikes/CR500.pkz".into()];
+        write_journal(&path, &j).unwrap();
+        assert_eq!(read_journal(&path), Some(j));
+        assert!(!path.with_extension("json.tmp").exists(), "no scratch file left behind");
+
+        // The field names are the file format, and a later build has to read this one.
+        let text = fs::read_to_string(&path).unwrap();
+        for field in ["sessionId", "server", "moved", "startedAt"] {
+            assert!(text.contains(&format!("\"{field}\"")), "{field} missing: {text}");
+        }
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// Parking and unparking through the journal, end to end — and only the journal's paths
+    /// come back: a track the player parked by hand stays parked.
+    #[test]
+    fn restore_puts_back_only_what_race_mode_moved() {
+        let root = tmp("only-ours");
+        touch(&root.join("mods/tracks/RedBud.pkz"));
+        touch(&root.join("mods/tracks/EU/Milestone.pkz"));
+        touch(&root.join("mods/bikes/CR500.pkz"));
+        // The player's own, parked before Race mode ever ran.
+        touch(&root.join("mxbapp_disabled/tracks/Mine.pkz"));
+        let path = root.join(JOURNAL_FILE);
+        let rels: Vec<String> = vec![
+            "mods/tracks/RedBud.pkz".into(),
+            "mods/tracks/EU/Milestone.pkz".into(),
+            "mods/bikes/CR500.pkz".into(),
+        ];
+
+        let j = park(&path, journal_for(&root), &rels).unwrap();
+        assert_eq!(j.moved, rels);
+        assert_eq!(read_journal(&path).unwrap().moved, rels, "journal holds what moved");
+        assert!(!root.join("mods/tracks/RedBud.pkz").exists());
+        assert!(root.join("mxbapp_disabled/tracks/EU/Milestone.pkz").is_file());
+
+        let out = unpark(&path).expect("a journal to restore from");
+        assert_eq!(out.enabled, 3, "{:?}", out.failed);
+        assert!(root.join("mods/tracks/RedBud.pkz").is_file());
+        assert!(root.join("mods/tracks/EU/Milestone.pkz").is_file());
+        assert!(root.join("mods/bikes/CR500.pkz").is_file());
+        assert!(root.join("mxbapp_disabled/tracks/Mine.pkz").is_file(), "the player's own stays parked");
+        assert!(!root.join("mods/tracks/Mine.pkz").exists());
+        assert!(!path.exists(), "a finished restore clears the journal");
+
+        // And with no journal, restore is a no-op rather than a walk of the shadow tree.
+        assert!(unpark(&path).is_none());
+        assert!(root.join("mxbapp_disabled/tracks/Mine.pkz").is_file());
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// The app died mid-session: the journal is on disk, the files are parked, and nothing
+    /// else is known. The next start restores from the journal alone — including a path the
+    /// journal names that never actually moved (the crash came between the journal and the
+    /// move), which is a no-op rather than an error.
+    #[test]
+    fn crash_repair_restores_from_the_journal_alone() {
+        let root = tmp("crash");
+        touch(&root.join("mxbapp_disabled/tracks/RedBud.pkz"));
+        touch(&root.join("mxbapp_disabled/bikes/CR500.pkz"));
+        touch(&root.join("mods/tracks/NeverMoved.pkz"));
+        touch(&root.join("mxbapp_disabled/tracks/Mine.pkz"));
+        let path = root.join(JOURNAL_FILE);
+        let mut j = journal_for(&root);
+        j.moved = vec![
+            "mods/tracks/RedBud.pkz".into(),
+            "mods/bikes/CR500.pkz".into(),
+            "mods/tracks/NeverMoved.pkz".into(),
+        ];
+        write_journal(&path, &j).unwrap();
+
+        let out = unpark(&path).unwrap();
+        assert_eq!(out.enabled, 2, "{:?}", out.failed);
+        assert!(out.failed.is_empty(), "{:?}", out.failed);
+        assert!(root.join("mods/tracks/RedBud.pkz").is_file());
+        assert!(root.join("mods/bikes/CR500.pkz").is_file());
+        assert!(root.join("mods/tracks/NeverMoved.pkz").is_file(), "untouched");
+        assert!(root.join("mxbapp_disabled/tracks/Mine.pkz").is_file());
+        assert!(!path.exists());
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// A path that won't go back stays in the journal for the next pass; the others are done.
+    #[test]
+    fn a_restore_that_cannot_finish_keeps_the_rest_recorded() {
+        let root = tmp("stuck");
+        touch(&root.join("mxbapp_disabled/tracks/RedBud.pkz"));
+        touch(&root.join("mxbapp_disabled/tracks/Farm.pkz"));
+        // Reinstalled during the session: putting the parked copy back would clobber it.
+        touch(&root.join("mods/tracks/Farm.pkz"));
+        let path = root.join(JOURNAL_FILE);
+        let mut j = journal_for(&root);
+        j.moved = vec!["mods/tracks/RedBud.pkz".into(), "mods/tracks/Farm.pkz".into()];
+        write_journal(&path, &j).unwrap();
+
+        let out = unpark(&path).unwrap();
+        assert_eq!(out.enabled, 1);
+        assert_eq!(out.failed.len(), 1);
+        assert_eq!(read_journal(&path).unwrap().moved, vec!["mods/tracks/Farm.pkz".to_string()]);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// One move fails part-way: everything already moved goes back, and no journal is left
+    /// claiming a Race mode that isn't happening.
+    #[test]
+    fn a_failed_move_rolls_back_what_already_moved() {
+        let root = tmp("rollback");
+        touch(&root.join("mods/tracks/A.pkz"));
+        touch(&root.join("mods/tracks/B.pkz"));
+        touch(&root.join("mods/tracks/C.pkz"));
+        // Something is already parked under B's name, so B's move is refused.
+        touch(&root.join("mxbapp_disabled/tracks/B.pkz"));
+        let path = root.join(JOURNAL_FILE);
+        let rels: Vec<String> =
+            vec!["mods/tracks/A.pkz".into(), "mods/tracks/B.pkz".into(), "mods/tracks/C.pkz".into()];
+
+        let err = park(&path, journal_for(&root), &rels).unwrap_err();
+        assert!(err.contains("B.pkz"), "{err}");
+        for name in ["A", "B", "C"] {
+            assert!(root.join(format!("mods/tracks/{name}.pkz")).is_file(), "{name} is where it was");
+        }
+        assert!(!root.join("mxbapp_disabled/tracks/A.pkz").exists(), "A came back");
+        assert!(root.join("mxbapp_disabled/tracks/B.pkz").is_file(), "the blocker is untouched");
+        assert!(!path.exists(), "no journal for a Race mode that didn't happen");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// Everything inside one folder is one volume; the check has to pass for the ordinary
+    /// install, or Race mode would never run.
+    #[test]
+    fn one_folder_is_one_volume() {
+        let root = tmp("volume");
+        touch(&root.join("mods/tracks/A.pkz"));
+        touch(&root.join("mods/bikes/B.pkz"));
+        let mods_path = root.to_string_lossy().into_owned();
+        let rels = vec!["mods/tracks/A.pkz".to_string(), "mods/bikes/B.pkz".to_string()];
+        assert_eq!(same_volume(&mods_path, &rels), Ok(()));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// `mods\tracks` junctioned onto another drive: refused, naming the folder, and nothing
+    /// is checked as "probably fine" when the drive can't be read at all.
+    #[test]
+    fn a_content_folder_on_another_drive_is_refused() {
+        let root = tmp("volume-other");
+        touch(&root.join("mods/tracks/A.pkz"));
+        touch(&root.join("mods/bikes/B.pkz"));
+        let mods_path = root.to_string_lossy().into_owned();
+        let rels = vec!["mods/bikes/B.pkz".to_string(), "mods/tracks/A.pkz".to_string()];
+
+        let tracks_elsewhere = |p: &Path| {
+            Some(if p.ends_with("tracks") { "d:" } else { "c:" }.to_string())
+        };
+        let err = same_volume_by(&mods_path, &rels, tracks_elsewhere).unwrap_err();
+        assert!(err.contains("different drive"), "{err}");
+        assert!(err.contains("tracks"), "names the folder: {err}");
+
+        let unreadable = |_: &Path| None;
+        assert!(same_volume_by(&mods_path, &rels, unreadable).is_err());
+        let _ = fs::remove_dir_all(&root);
     }
 }

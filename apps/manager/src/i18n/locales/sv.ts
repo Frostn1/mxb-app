@@ -754,6 +754,10 @@ export const sv: Translation = {
   "settings.autoRunFrostmodDesc": "Starta spelintegration i bakgrunden när {{app}} öppnas.",
   "settings.frostmodArgs": "Spelintegrationsflaggor",
   "settings.frostmodArgsDesc": "Avancerade kommandoradsalternativ för spelintegration. De tillämpar nästa gång det startar. Lämna detta tomt om inte stöd gav dig en flagga att prova.",
+  "settings.raceMode": "Tävlingsläge: ladda bara det servern behöver",
+  "settings.raceModeDesc":
+    "När du går med i en server från {{app}} läggs banor och hojar som servern inte kan använda åt sidan innan spelet startar, så det laddar mindre och du kommer in snabbare. De kommer tillbaka när spelet stängs. Förarutrustning, lackeringar och sådant du själv lagt åt sidan lämnas ifred. Anslutningar från spelets egen serverlista påverkas inte.",
+  "settings.raceModeActive": "Tävlingsläge: {{count}} mods åt sidan",
   "settings.watchModsReload": "Ladda automatiskt om katalogändringar",
   "settings.watchModsReloadDesc":
     "Ladda om spelet automatiskt när spår eller cyklar läggs till i din mods mapp – även laddas ner manuellt utanför {{app}}.",

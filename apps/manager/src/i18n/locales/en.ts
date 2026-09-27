@@ -762,6 +762,10 @@ export const en = {
   "settings.autoRunFrostmodDesc": "Start Game Integration in the background whenever {{app}} opens.",
   "settings.frostmodArgs": "Game Integration flags",
   "settings.frostmodArgsDesc": "Advanced command-line options for Game Integration. They apply the next time it starts; leave this empty unless support gave you a flag to try.",
+  "settings.raceMode": "Race mode: load only what the server needs",
+  "settings.raceModeDesc":
+    "When you join a server from {{app}}, tracks and bikes that server can't use are set aside before the game starts, so it loads less and joins faster. They come back when the game closes. Rider gear, paints and anything you parked yourself are left alone. Joins from the in-game browser aren't touched.",
+  "settings.raceModeActive": "Race mode: {{count}} mods set aside",
   "settings.watchModsReload": "Auto-reload on folder changes",
   "settings.watchModsReloadDesc":
     "Reload the game automatically when tracks or bikes are added to your mods folder — even downloaded manually outside {{app}}.",
