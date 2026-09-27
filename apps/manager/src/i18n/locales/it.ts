@@ -775,10 +775,10 @@ export const it: Translation = {
   "settings.frostmodArgs": "Flag dell'integrazione di gioco",
   "settings.frostmodArgsDesc":
     "Riga di comando extra per FrostMod, scritta come in un terminale. Vale dal prossimo avvio di FrostMod. Lascia vuoto, a meno che non ti abbiano dato un flag da provare.",
-  "settings.raceMode": "Modalità gara: carica solo ciò che serve al server",
+  "settings.raceMode": "Modalità gara automatica: carica solo ciò che serve al server",
   "settings.raceModeDesc":
     "Quando entri in un server da {{app}}, piste e moto che quel server non può usare vengono messe da parte prima dell'avvio del gioco, così carica meno ed entri prima. Tornano al loro posto quando chiudi il gioco. Equipaggiamento del pilota, livree e tutto ciò che hai messo da parte tu restano come sono. Gli ingressi dal browser del gioco non vengono toccati.",
-  "settings.raceModeActive": "Modalità gara: {{count}} mod messe da parte",
+  "settings.raceModeActive": "Modalità gara automatica: {{count}} mod messe da parte",
   "settings.watchModsReload": "Ricarica automatica alle modifiche",
   "settings.watchModsReloadDesc":
     "Ricarica il gioco automaticamente quando piste o moto vengono aggiunte alla cartella mod — anche se scaricate manualmente fuori da {{app}}.",

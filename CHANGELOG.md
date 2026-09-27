@@ -7,7 +7,7 @@
   through Azure Artifact Signing: the app, its installer and the `mxbsecure.dll` game plugin.
   It switches on once the Azure account is set up (see `docs/signing/SETUP.md`). Until then
   releases build unsigned, as before.
-- **Race mode: load only what the server needs** (Settings → Game Integration, off by
+- **Auto race mode: load only what the server needs** (Settings → Game Integration, off by
   default). When you join a server from the app and the game isn't already running, the tracks
   and packed bikes that server can't use (its track and bike classes, from the server list) are
   moved to `mxbapp_disabled` before the game starts, so it mounts less and joins faster. Rider
@@ -17,7 +17,7 @@
   paint sync leaves the server, if the game never starts, or on the next app start after a
   crash. Mods you parked yourself stay parked. Joins from the in-game browser are never
   touched, a mods folder on a different drive from `mxbapp_disabled` is refused, and a move that
-  fails part-way puts back what already moved. Settings shows "Race mode: N mods set aside"
+  fails part-way puts back what already moved. Settings shows "Auto race mode: N mods set aside"
   while it's holding anything.
 
 ### Fixed

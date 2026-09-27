@@ -780,10 +780,10 @@ export const fr: Translation = {
   "settings.frostmodArgs": "Options de l'intégration au jeu",
   "settings.frostmodArgsDesc":
     "Ligne de commande supplémentaire pour FrostMod, saisie comme dans un terminal. Prise en compte au prochain démarrage de FrostMod. Laisse vide, sauf si on t'a donné une option à tester.",
-  "settings.raceMode": "Mode course : ne charger que ce dont le serveur a besoin",
+  "settings.raceMode": "Mode course automatique : ne charger que ce dont le serveur a besoin",
   "settings.raceModeDesc":
     "Quand tu rejoins un serveur depuis {{app}}, les circuits et motos que ce serveur ne peut pas utiliser sont mis de côté avant le lancement du jeu : il charge moins et tu rejoins plus vite. Ils reviennent à la fermeture du jeu. L'équipement du pilote, les peintures et ce que tu as mis de côté toi-même ne sont pas touchés. Les connexions depuis le navigateur du jeu ne sont pas concernées.",
-  "settings.raceModeActive": "Mode course : {{count}} mods mis de côté",
+  "settings.raceModeActive": "Mode course automatique : {{count}} mods mis de côté",
   "settings.watchModsReload":
     "Rechargement auto lors des changements de dossier",
   "settings.watchModsReloadDesc":
