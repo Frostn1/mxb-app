@@ -21,6 +21,7 @@
   while it's holding anything.
 
 ### Fixed
+- With Beta updates on, a beta now finds the next beta of the same version. Every `v0.19.0-beta.N` carries bundle version 0.19.0, so "Check for updates" compared 0.19.0 with 0.19.0 and said you were up to date; it now compares the release tags.
 - Paint sync asks FrostMod to re-apply paints whenever a rider joins or rejoins the server, not only when new paint files were downloaded. A rider who rejoined wearing paints you already had stayed on the default look.
 - Settings cards use more of the window, and their button rows wrap instead of running past the card edge (About & updates' "Join the Discord" stuck out on narrow windows).
 - The server detail window is wider, and its footer wraps (Copy server link turns icon-only on a narrow window), so the star button is no longer cut off.

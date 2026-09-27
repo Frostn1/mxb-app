@@ -12,7 +12,7 @@ const REPO: &str = "Frostn1/mxb-app";
 /// Check the beta channel. `None` when nothing newer than this build is out.
 #[tauri::command]
 pub async fn check_beta_update(webview: tauri::Webview) -> Result<Option<UpdateMetadata>, String> {
-    update_channel::check(&webview, REPO, "v", true, crate::frostmod_manage::UA)
+    update_channel::check(&webview, REPO, "v", true, crate::frostmod_manage::UA, option_env!("MXB_RELEASE_TAG"))
         .await
         .map_err(|e| format!("{e:#}"))
 }

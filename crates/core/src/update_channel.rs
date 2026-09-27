@@ -44,6 +44,11 @@ pub struct UpdateMetadata {
 /// The `latest.json` of the highest-versioned published release tagged `prefix` + a version.
 /// Off the beta channel, a version with a pre-release part (`-beta.1`) doesn't count.
 fn newest_manifest<'a>(releases: &'a [Release], prefix: &str, beta: bool) -> Option<&'a str> {
+    newest_release(releases, prefix, beta).map(|(_, url)| url)
+}
+
+/// [`newest_manifest`], with the tag's version it was picked by.
+fn newest_release<'a>(releases: &'a [Release], prefix: &str, beta: bool) -> Option<(semver::Version, &'a str)> {
     releases
         .iter()
         .filter(|r| !r.draft)
@@ -56,16 +61,39 @@ fn newest_manifest<'a>(releases: &'a [Release], prefix: &str, beta: bool) -> Opt
             Some((version, manifest.browser_download_url.as_str()))
         })
         .max_by(|a, b| a.0.cmp(&b.0))
-        .map(|(_, url)| url)
+}
+
+/// Is the release tagged `newest` an update for the running build?
+///
+/// Betas of one version share its bundle version: every `v0.19.0-beta.N` is built from a
+/// `tauri.conf.json` that says `0.19.0`, so the manifests' `version` fields are all equal and
+/// the plugin's own comparison (manifest against bundle) never offers beta.2 to beta.1. The
+/// tag is where they differ, so when the running build knows its own tag (`current_tag`,
+/// baked in as `MXB_RELEASE_TAG`), tags are compared. A build without one — a local build, or
+/// an app that doesn't bake it — falls back to the plugin's comparison of bundle versions.
+fn is_update(
+    current_tag: Option<&semver::Version>,
+    newest: &semver::Version,
+    current_bundle: &semver::Version,
+    remote_bundle: &semver::Version,
+) -> bool {
+    match current_tag {
+        Some(tag) => newest > tag,
+        None => remote_bundle > current_bundle,
+    }
 }
 
 /// A build of this app in `repo` newer than the running one, or `None`.
+///
+/// `current_tag` is the release tag this build came from (`v0.19.0-beta.2`), when it has one;
+/// see [`is_update`] for why it matters.
 pub async fn check(
     webview: &tauri::Webview,
     repo: &str,
     prefix: &str,
     beta: bool,
     user_agent: &str,
+    current_tag: Option<&str>,
 ) -> anyhow::Result<Option<UpdateMetadata>> {
     let text = reqwest::Client::builder()
         .user_agent(user_agent)
@@ -78,10 +106,16 @@ pub async fn check(
         .text()
         .await?;
     let releases: Vec<Release> = serde_json::from_str(&text)?;
-    let Some(manifest) = newest_manifest(&releases, prefix, beta) else {
+    let Some((newest, manifest)) = newest_release(&releases, prefix, beta) else {
         return Ok(None);
     };
-    let updater = webview.updater_builder().endpoints(vec![manifest.parse()?])?.build()?;
+    let current_tag =
+        current_tag.and_then(|t| semver::Version::parse(t.trim().strip_prefix(prefix).unwrap_or(t.trim())).ok());
+    let updater = webview
+        .updater_builder()
+        .version_comparator(move |current, remote| is_update(current_tag.as_ref(), &newest, &current, &remote.version))
+        .endpoints(vec![manifest.parse()?])?
+        .build()?;
     let Some(update) = updater.check().await? else {
         return Ok(None);
     };
@@ -112,6 +146,28 @@ mod tests {
                 .into_iter()
                 .collect(),
         }
+    }
+
+    fn v(s: &str) -> semver::Version {
+        semver::Version::parse(s).unwrap()
+    }
+
+    /// Every beta of 0.19.0 ships bundle version 0.19.0, so only the tag can tell beta.1 that
+    /// beta.4 is newer. It must, and a build must never be offered itself or an older tag.
+    #[test]
+    fn betas_of_one_version_are_ordered_by_their_tags() {
+        let bundle = v("0.19.0");
+        assert!(is_update(Some(&v("0.19.0-beta.1")), &v("0.19.0-beta.4"), &bundle, &bundle));
+        assert!(is_update(Some(&v("0.19.0-beta.4")), &v("0.19.0"), &bundle, &bundle), "the release outranks its betas");
+        assert!(!is_update(Some(&v("0.19.0-beta.4")), &v("0.19.0-beta.4"), &bundle, &bundle));
+        assert!(!is_update(Some(&v("0.19.0")), &v("0.19.0-beta.4"), &bundle, &bundle));
+    }
+
+    /// Without a baked tag (a local build), the bundle versions decide, as the plugin would.
+    #[test]
+    fn a_build_without_a_tag_compares_bundle_versions() {
+        assert!(!is_update(None, &v("0.19.0-beta.4"), &v("0.19.0"), &v("0.19.0")));
+        assert!(is_update(None, &v("0.19.1-beta.1"), &v("0.19.0"), &v("0.19.1")));
     }
 
     #[test]
