@@ -783,6 +783,10 @@ export const de: Translation = {
   "settings.frostmodArgs": "Flags der Spielintegration",
   "settings.frostmodArgsDesc":
     "Zusätzliche Kommandozeile für FrostMod, so getippt wie im Terminal. Gilt ab dem nächsten Start von FrostMod. Lass das Feld leer, außer du hast ein Flag zum Ausprobieren bekommen.",
+  "settings.raceMode": "Automatischer Rennmodus: nur laden, was der Server braucht",
+  "settings.raceModeDesc":
+    "Wenn du über {{app}} einem Server beitrittst, werden Strecken und Bikes, die der Server nicht nutzen kann, vor dem Spielstart beiseitegelegt. So lädt das Spiel weniger und du bist schneller drin. Sie kommen zurück, sobald das Spiel geschlossen wird. Fahrerausrüstung, Lackierungen und alles, was du selbst beiseitegelegt hast, bleiben unberührt. Beitritte über den Serverbrowser im Spiel sind nicht betroffen.",
+  "settings.raceModeActive": "Automatischer Rennmodus: {{count}} Mods beiseitegelegt",
   "settings.watchModsReload": "Automatisch neu laden bei Ordneränderungen",
   "settings.watchModsReloadDesc":
     "Das Spiel automatisch neu laden, wenn Strecken oder Motorräder in deinen Mod-Ordner kommen — auch wenn sie außerhalb von {{app}} manuell heruntergeladen wurden.",

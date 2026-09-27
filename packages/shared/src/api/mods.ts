@@ -2809,6 +2809,27 @@ export function setQueueRestartGame(enabled: boolean): Promise<void> {
   return invoke<void>("set_queue_restart_game", { enabled });
 }
 
+/** Toggle Race mode: set aside what the server can't use on an app-launched join. */
+export function setRaceMode(enabled: boolean): Promise<void> {
+  return invoke<void>("set_race_mode", { enabled });
+}
+
+/** What Race mode is holding aside right now. `active` is false when nothing is. */
+export interface RaceModeStatus {
+  active: boolean;
+  count: number;
+  serverName: string;
+}
+
+export function raceModeStatus(): Promise<RaceModeStatus> {
+  return invoke<RaceModeStatus>("race_mode_status");
+}
+
+/** Fires whenever Race mode sets mods aside or puts them back. */
+export function onRaceMode(cb: (status: RaceModeStatus) => void): Promise<UnlistenFn> {
+  return listen<RaceModeStatus>("race-mode", (e) => cb(e.payload));
+}
+
 /** Extra command-line flags handed to `frostmod.exe`, exactly as typed. */
 export function setFrostmodArgs(args: string): Promise<void> {
   return invoke<void>("set_frostmod_args", { args });

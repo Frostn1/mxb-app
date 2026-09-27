@@ -776,6 +776,10 @@ export const es: Translation = {
   "settings.frostmodArgs": "Flags de la integración con el juego",
   "settings.frostmodArgsDesc":
     "Línea de comandos extra para FrostMod, escrita como en una terminal. Se aplica la próxima vez que FrostMod arranque. Déjalo vacío salvo que te hayan dado un flag para probar.",
+  "settings.raceMode": "Modo carrera automático: carga solo lo que el servidor necesita",
+  "settings.raceModeDesc":
+    "Cuando entras a un servidor desde {{app}}, las pistas y motos que ese servidor no puede usar se apartan antes de que arranque el juego, así carga menos y entras más rápido. Vuelven cuando cierras el juego. El equipo del piloto, las pinturas y lo que hayas apartado tú no se tocan. Las entradas desde el navegador del juego no se ven afectadas.",
+  "settings.raceModeActive": "Modo carrera automático: {{count}} mods apartados",
   "settings.watchModsReload": "Recarga automática al cambiar la carpeta",
   "settings.watchModsReloadDesc":
     "Recarga el juego automáticamente cuando se añaden pistas o motos a tu carpeta de mods — incluso descargadas manualmente fuera de {{app}}.",

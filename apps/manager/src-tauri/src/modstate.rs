@@ -94,7 +94,7 @@ pub(crate) fn shadow_root(mods_path: &str) -> PathBuf {
 }
 
 /// `mods/tracks/EU/RedBud.pkz` → the path it occupies when enabled.
-fn enabled_path(mods_path: &str, rel: &str) -> PathBuf {
+pub(crate) fn enabled_path(mods_path: &str, rel: &str) -> PathBuf {
     library::mods_subdir(mods_path, rel)
 }
 
@@ -332,7 +332,7 @@ fn is_kept(keys: &BTreeSet<String>, rel: &str) -> bool {
 }
 
 /// Move one mod, in whichever direction. Returns whether anything actually moved.
-fn set_one(mods_path: &str, rel: &str, enabled: bool) -> anyhow::Result<bool> {
+pub(crate) fn set_one(mods_path: &str, rel: &str, enabled: bool) -> anyhow::Result<bool> {
     let from = if enabled {
         disabled_path(mods_path, rel)
     } else {

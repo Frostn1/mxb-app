@@ -43,6 +43,10 @@ import {
   presetsListProfiles,
   setAutoRunFrostmod,
   setQueueRestartGame,
+  setRaceMode,
+  raceModeStatus,
+  onRaceMode,
+  type RaceModeStatus,
   setFrostmodArgs,
   setGamePath,
   setInstantRefresh,
@@ -548,6 +552,22 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
   const frostmodArgs = frostmodArgsDraft ?? config.frostmodArgs ?? "";
   const instantRefresh = config.instantRefresh ?? true;
   const watchModsReload = config.watchModsReload ?? true;
+  const raceMode = config.raceMode ?? false;
+  // What Race mode is holding aside right now. Read once and then kept current by the event,
+  // since the moves happen on a join and the restore on the game's exit, neither of which
+  // is anything this page did.
+  const [raceHeld, setRaceHeld] = useState<RaceModeStatus | null>(null);
+  useEffect(() => {
+    let alive = true;
+    raceModeStatus()
+      .then((s) => alive && setRaceHeld(s))
+      .catch(() => {});
+    const off = onRaceMode((s) => setRaceHeld(s));
+    return () => {
+      alive = false;
+      void off.then((f) => f());
+    };
+  }, []);
   const betaUpdates = config.betaUpdates ?? false;
   const autoUpdates = config.autoUpdates ?? true;
   const overlayEnabled = config.overlayEnabled ?? true;
@@ -946,6 +966,15 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
   const toggleInstantRefresh = async (v: boolean) => {
     try {
       await setInstantRefresh(v);
+      await reloadConfig();
+    } catch (e) {
+      toast.error(t("settings.updateFailed"), { description: String(e) });
+    }
+  };
+
+  const toggleRaceMode = async (v: boolean) => {
+    try {
+      await setRaceMode(v);
       await reloadConfig();
     } catch (e) {
       toast.error(t("settings.updateFailed"), { description: String(e) });
@@ -2499,6 +2528,21 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
                   checked={watchModsReload}
                   onChange={toggleWatchModsReload}
                 />
+
+                <ToggleRow
+                  label={t("settings.raceMode")}
+                  desc={t("settings.raceModeDesc", { app: APP_NAME || "MXB App" })}
+                  checked={raceMode}
+                  onChange={toggleRaceMode}
+                />
+                {/* Shown whenever something is held, even with the switch now off: turning
+                    it off doesn't bring a live session's mods back early, and the line is
+                    how the player knows they're still coming. */}
+                {raceHeld?.active && (
+                  <p className="-mt-1 px-3 text-[12px] text-muted-foreground">
+                    {t("settings.raceModeActive", { count: raceHeld.count })}
+                  </p>
+                )}
 
                 <div className="rounded-lg border border-border/70">
               <button

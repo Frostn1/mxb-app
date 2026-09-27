@@ -3332,6 +3332,14 @@ fn live_sync_session(app: &tauri::AppHandle, address: Option<String>) {
             } else if seen_running || started.elapsed() > LIVE_SYNC_STARTUP_GRACE {
                 log::info!("[sync] session over, stopping the live sync");
                 room.end(&app, &cfg).await;
+                // Leaving the paint room is the session ending too. The session watcher
+                // restores Race mode at the same moment; whichever gets there first does it,
+                // and the other finds no journal.
+                let handle = app.clone();
+                let _ = tauri::async_runtime::spawn_blocking(move || {
+                    racemode::restore_if_idle(&handle, "paint sync left the server")
+                })
+                .await;
                 return;
             }
 
@@ -3613,10 +3621,35 @@ async fn cp_servers(app: tauri::AppHandle) -> Result<Vec<paintsync::RegisteredSe
 ///
 /// The game reads the connect flag only at startup, so this reports `already_running`
 /// rather than trying to steer a copy that's already up.
+///
+/// Off the main thread: with Race mode on, a join scans the library and moves files before
+/// the game starts, and a synchronous command would hold the window still for all of it.
 #[tauri::command]
-fn join_server(app: tauri::AppHandle, address: String) -> Result<gameproc::LaunchOutcome, String> {
+async fn join_server(
+    app: tauri::AppHandle,
+    address: String,
+) -> Result<gameproc::LaunchOutcome, String> {
+    tauri::async_runtime::spawn_blocking(move || join_server_now(app, address))
+        .await
+        .map_err(|e| format!("join_server task failed: {e}"))?
+}
+
+/// [`join_server`]'s body, for the callers already off the main thread.
+fn join_server_now(app: tauri::AppHandle, address: String) -> Result<gameproc::LaunchOutcome, String> {
     let cfg = config::load_or_detect(&app).unwrap_or_default();
-    let outcome = gameproc::join(&cfg, &address).map_err(|e| format!("{e:#}"))?;
+    // Race mode goes first: the game mounts the mods folder as it starts, so whatever is
+    // going to step aside has to have done it by then. A no-op when it's off, and when the
+    // game is already up (which `gameproc::join` is about to report anyway).
+    racemode::before_join(&app, &cfg, &address);
+    let outcome = gameproc::join(&cfg, &address);
+    match &outcome {
+        // The session watcher restores at exit; this covers a launch that never arrives.
+        Ok(gameproc::LaunchOutcome::Launched) => racemode::watch_launch(&app),
+        // No session of ours to end, so nothing will restore it later. A game that is up
+        // (someone else started it a moment ago) keeps its files until it exits.
+        _ => racemode::restore_if_idle(&app, "the launch didn't happen"),
+    }
+    let outcome = outcome.map_err(|e| format!("{e:#}"))?;
     if matches!(outcome, gameproc::LaunchOutcome::Launched) {
         usage::track("server.join");
         publish_paints_soon(&app, &cfg, None);
@@ -3675,7 +3708,22 @@ fn select_bike_for_listed_server(
 
 /// Join from a row in the app's server list, selecting a compatible installed bike first.
 #[tauri::command]
-fn join_listed_server(
+async fn join_listed_server(
+    app: tauri::AppHandle,
+    address: String,
+    categories: Vec<String>,
+    bikes: Vec<String>,
+) -> Result<gameproc::LaunchOutcome, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        join_listed_server_now(app, address, categories, bikes)
+    })
+    .await
+    .map_err(|e| format!("join_listed_server task failed: {e}"))?
+}
+
+/// [`join_listed_server`]'s body. The bike is selected before Race mode runs, so the bike
+/// Race mode keeps as "the player's" is the one they'll actually ride in.
+pub(crate) fn join_listed_server_now(
     app: tauri::AppHandle,
     address: String,
     categories: Vec<String>,
@@ -3686,7 +3734,7 @@ fn join_listed_server(
     }
     let cfg = config::load_or_detect(&app).unwrap_or_default();
     select_bike_for_listed_server(&cfg, &categories, &bikes)?;
-    join_server(app, address)
+    join_server_now(app, address)
 }
 
 /// Close the running game, then join `address` with the copy that replaces it.
@@ -3705,7 +3753,7 @@ async fn close_and_join(
     address: String,
 ) -> Result<gameproc::LaunchOutcome, String> {
     if !gameproc::is_game_running() {
-        return join_server(app, address);
+        return join_server(app, address).await;
     }
     if !serverqueue::close_and_settle().await {
         return Err(format!(
@@ -3713,7 +3761,7 @@ async fn close_and_join(
             game::active().display
         ));
     }
-    join_server(app, address)
+    join_server(app, address).await
 }
 
 /// Close the running game, select a bike accepted by the listed server, then launch into it.
@@ -3730,7 +3778,7 @@ async fn close_and_join_listed_server(
             game::active().display
         ));
     }
-    join_listed_server(app, address, categories, bikes)
+    join_listed_server(app, address, categories, bikes).await
 }
 
 /// Wait in line for a full server; the app launches into it when a slot is ours.
@@ -5785,6 +5833,21 @@ fn set_queue_restart_game(app: tauri::AppHandle, enabled: bool) -> Result<(), St
     let mut cfg = config::load(&app).unwrap_or_default();
     cfg.queue_restart_game = enabled;
     config::save(&app, &cfg).map_err(|e| format!("{e:#}"))
+}
+
+/// Turn Race mode on or off. Turning it off doesn't strand anything: whatever the current
+/// session set aside still comes back when that session ends.
+#[tauri::command]
+fn set_race_mode(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
+    let mut cfg = config::load(&app).unwrap_or_default();
+    cfg.race_mode = enabled;
+    config::save(&app, &cfg).map_err(|e| format!("{e:#}"))
+}
+
+/// How many mods Race mode is holding aside right now, for the Settings line.
+#[tauri::command]
+fn race_mode_status(app: tauri::AppHandle) -> racemode::Status {
+    racemode::status(&app)
 }
 
 /// Extra flags for `frostmod.exe`, stored as typed. Not validated here: FrostMod ignores a
@@ -8235,6 +8298,15 @@ fn main() {
             }
             // Notice the game starting (Steam or Play button) to re-arm FrostMod for the
             // session and check the mods folder is really on disk.
+            // Crash repair: a Race mode journal still on disk means a session whose mods
+            // never came back — the app was closed or killed before the game exited. Put
+            // them back now, unless the game is up, in which case its exit does it.
+            {
+                let handle = handle.clone();
+                tauri::async_runtime::spawn_blocking(move || {
+                    racemode::restore_if_idle(&handle, "startup found a Race mode journal")
+                });
+            }
             sessionwatch::start(handle);
             // The link to MXB Coach: one overlay key for both apps.
             overlay::start_link(handle);
@@ -8462,6 +8534,8 @@ fn main() {
             set_launch_at_startup,
             set_auto_run_frostmod,
             set_queue_restart_game,
+            set_race_mode,
+            race_mode_status,
             set_frostmod_args,
             set_instant_refresh,
             overlay_toggle,
