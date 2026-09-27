@@ -83,7 +83,7 @@
   switch games.
 
 ### Changed
-- Settings → Paint sync no longer has **Publish** or **Sync** buttons. Both happen on their own when the feature is on, and the panel only shows their status.
+- Settings → Paint sync is now just the on/off switch. The **Publish**, **Sync**, **Remove synced paints** and manual GUID controls are gone: publishing, syncing and cleanup all happen on their own, and the panel only shows status.
 - Paint sync now runs by itself for the server you're on. When you join a server, from the app
   or from the game's own server list, the app tells MXB App's service where you are and gets
   the other riders' paints. It then stays connected, so riders who join or leave later are
