@@ -107,8 +107,9 @@ jobs:
           ssh-key: ${{ secrets.SIDECAR_DEPLOY_KEY }}
           path: .sidecar-src
 
-      # Build the injected secure-content DLL from the private crate. On the Windows leg, MSVC to
-      # match the game's runtime; the app injects it in-process, so no injector exe is needed.
+      # Build the secure-content DLL from the private crate. On the Windows leg, MSVC to match the
+      # game's runtime; the game loads it itself as a plugin (`mxbsecure.dlo`), so nothing is
+      # injected and no injector exe ships.
       # sync.sh (below) copies it into src/mxbsecure.dll, from where build.rs stages it into
       # resources/ for the bundler.
       - name: Build secure-content DLL (Windows)
@@ -151,10 +152,11 @@ jobs:
       # Ask the bundler for the secure-content files only on the legs that have them. Tauri's
       # `resources` glob is a hard error when it matches nothing, so keeping it in the committed
       # config broke every build without the private module. By now sync.sh has put the files in
-      # src/ and build.rs has copied them into resources/. Windows ships just the DLL (injected
-      # in-process); Linux and macOS ship the DLL + `mxbsecure-inject.exe`, the attach injector
-      # the app launches inside the Proton prefix or the Wine bottle.
-      # The `resources/mxbsecure*` glob matches whichever files the leg produced.
+      # src/ and build.rs has copied them into resources/. Windows ships the DLL alone — the game
+      # loads it as a plugin — and the injector is removed and left out of the glob by name, since
+      # the crate builds it on every leg and Defender scores an injector in the installer as
+      # malware. Linux and macOS ship the DLL + `mxbsecure-inject.exe`, the attach injector the
+      # app launches inside the Proton prefix or the Wine bottle.
       - name: Bundle the secure-content files
         if: ${{ github.repository == 'Frostn1/mxb-app' }}
         shell: bash
@@ -163,7 +165,13 @@ jobs:
           if [[ "${{ matrix.platform }}" == ubuntu* || "${{ matrix.platform }}" == macos* ]]; then
             test -f apps/manager/src-tauri/src/mxbsecure-inject.exe || { echo "::error::mxbsecure-inject.exe missing after sync.sh"; exit 1; }
           fi
-          jq '.bundle.resources = ["resources/mxbsecure*"]' apps/manager/src-tauri/tauri.conf.json > tauri.conf.patched
+          if [[ "${{ matrix.platform }}" == windows* ]]; then
+            rm -f apps/manager/src-tauri/src/mxbsecure-inject.exe apps/manager/src-tauri/resources/mxbsecure-inject.exe
+            resources='["resources/mxbsecure.dll"]'
+          else
+            resources='["resources/mxbsecure*"]'
+          fi
+          jq --argjson r "$resources" '.bundle.resources = $r' apps/manager/src-tauri/tauri.conf.json > tauri.conf.patched
           mv tauri.conf.patched apps/manager/src-tauri/tauri.conf.json
 
       # The release page should say what shipped, not only which file to download — so

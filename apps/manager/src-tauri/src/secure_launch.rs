@@ -520,9 +520,19 @@ pub fn watch(app: &AppHandle) {
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
         let mut decided_this_run = false;
+        #[cfg_attr(not(windows), allow(unused_variables, unused_mut))]
+        let mut shut_ticks: u32 = 0;
         loop {
             tokio::time::sleep(std::time::Duration::from_secs(2)).await;
             if !crate::gameproc::is_game_running() {
+                // With the game shut, keep the plugin in step with what is locked: the next
+                // start is the only moment it loads. Right after the game closes, then once a
+                // minute, since the scan walks the tracks folder and must not run every tick.
+                if decided_this_run || shut_ticks % 30 == 0 {
+                    #[cfg(windows)]
+                    sync_plugin(&app);
+                }
+                shut_ticks = shut_ticks.wrapping_add(1);
                 decided_this_run = false; // game gone: decide again for the next run
                 continue;
             }
@@ -573,12 +583,36 @@ pub fn arm(app: &AppHandle) {
         return;
     }
     write_identity(&dir);
+    #[cfg(windows)]
+    {
+        // The game loaded its plugins when it started, so there is nothing to do in it now:
+        // a plugin already in place is serving, and one written now serves from next start.
+        match plugins_dir(app).ok_or_else(|| "the game folder isn't known".to_string())
+            .and_then(|plugins| install_plugin(&plugins, &dll, &dir))
+        {
+            Ok(Plugin::Current) => log::info!("[secure] game plugin serving {} asset(s)", assets.len()),
+            Ok(Plugin::Installed) => log::info!(
+                "[secure] game plugin installed for {} asset(s); it loads when the game next starts",
+                assets.len()
+            ),
+            Err(e) => log::warn!("[secure] couldn't install the game plugin: {e}"),
+        }
+    }
+    #[cfg(not(windows))]
+    inject_and_rescan(app, &dll, &dir, assets.len());
+}
+
+/// The Wine platforms: inject into the running game, then have FrostMod rescan once the hooks
+/// are live. Windows loads the DLL as a plugin instead (see [`PLUGIN_NAME`]).
+#[cfg(not(windows))]
+fn inject_and_rescan(app: &AppHandle, dll: &std::path::Path, dir: &std::path::Path, count: usize) {
+    let dll = dll.to_path_buf();
     // Where the DLL's log is now, so we only read what this injection adds.
     let dll_log = dir.join("mxbsecure.log");
     let log_from = std::fs::metadata(&dll_log).map(|m| m.len()).unwrap_or(0);
     match inject(app, &dll) {
         Ok(()) => {
-            log::info!("[secure] injected mxbsecure.dll for {} asset(s)", assets.len());
+            log::info!("[secure] injected mxbsecure.dll for {count} asset(s)");
             // The game lists its tracks at startup, usually before the DLL is in, so a
             // locked track never shows. Once the hooks are live, have FrostMod re-run the
             // content load so the scan sees it. Off-thread: the wait can take seconds.
@@ -621,6 +655,7 @@ pub fn refresh_running(app: &AppHandle) {
 /// Wait for the DLL to finish installing its hooks. It sets up on its own thread, so
 /// `LoadLibraryW` returns first; it says when it's done in its log, past `from`. `false` on
 /// a failed install or a timeout.
+#[cfg_attr(windows, allow(dead_code))] // the Wine injection path, and its test
 fn wait_for_hooks(log: &std::path::Path, from: u64, timeout: std::time::Duration) -> bool {
     use std::io::{Read, Seek, SeekFrom};
     let deadline = std::time::Instant::now() + timeout;
@@ -645,11 +680,95 @@ fn wait_for_hooks(log: &std::path::Path, from: u64, timeout: std::time::Duration
     false
 }
 
-/// Inject `dll` into the running game.
+/// The copy of the DLL the game loads itself, from its own `plugins` folder.
+///
+/// A plugin is loaded by the game at startup, the way it loads FrostMod's session plugin, so
+/// nothing has to reach into the game's process: this app used to inject the DLL with a
+/// remote thread, which is what Windows Defender quarantined the 0.18 installers for. The DLL
+/// answers the plugin exports and reads its manifest, lease and log from the run dir that
+/// [`PLUGIN_POINTER`] beside it names.
 #[cfg(windows)]
-fn inject(_app: &AppHandle, dll: &std::path::Path) -> Result<(), String> {
-    let pid = crate::gameproc::game_pid().ok_or("the game isn't running")?;
-    win::inject_into(pid, dll)
+const PLUGIN_NAME: &str = "mxbsecure.dlo";
+
+/// One line beside the plugin: the run dir, where [`arm`] writes the manifest.
+#[cfg(windows)]
+const PLUGIN_POINTER: &str = "mxbsecure.dir";
+
+/// `<game>\plugins`, or `None` when the game folder isn't known.
+#[cfg(windows)]
+fn plugins_dir(app: &AppHandle) -> Option<PathBuf> {
+    let cfg = crate::config::load(app).ok()?;
+    let dir = cfg.install_dir();
+    (!dir.trim().is_empty()).then(|| PathBuf::from(dir).join("plugins"))
+}
+
+/// What installing the plugin came to.
+#[cfg(windows)]
+#[derive(Debug, PartialEq)]
+enum Plugin {
+    /// Already there, byte for byte: the game loaded it at startup.
+    Current,
+    /// Written now. A game already running took its plugins at startup, so this one is live
+    /// from the next start.
+    Installed,
+}
+
+/// Put the DLL in the game's `plugins` folder as [`PLUGIN_NAME`], and the run dir beside it.
+///
+/// Byte-compared like [`stage_dll`]: a running game holds its plugins open, so an unchanged
+/// copy must not be rewritten, and a changed one is only replaceable while the game is shut.
+#[cfg(windows)]
+fn install_plugin(plugins: &std::path::Path, dll: &std::path::Path, run_dir: &std::path::Path) -> Result<Plugin, String> {
+    std::fs::create_dir_all(plugins).map_err(|e| format!("creating {}: {e}", plugins.display()))?;
+    let pointer = plugins.join(PLUGIN_POINTER);
+    let want = format!("{}\n", run_dir.display());
+    if std::fs::read_to_string(&pointer).ok().as_deref() != Some(want.as_str()) {
+        std::fs::write(&pointer, &want).map_err(|e| format!("writing {}: {e}", pointer.display()))?;
+    }
+    let bytes = std::fs::read(dll).map_err(|e| format!("reading {}: {e}", dll.display()))?;
+    let dlo = plugins.join(PLUGIN_NAME);
+    if std::fs::read(&dlo).is_ok_and(|old| old == bytes) {
+        return Ok(Plugin::Current);
+    }
+    std::fs::write(&dlo, &bytes).map_err(|e| format!("writing {}: {e}", dlo.display()))?;
+    Ok(Plugin::Installed)
+}
+
+/// Take the plugin out of the game's folder: a player with nothing locked carries none of it.
+#[cfg(windows)]
+fn remove_plugin(plugins: &std::path::Path) {
+    for name in [PLUGIN_NAME, PLUGIN_POINTER] {
+        let path = plugins.join(name);
+        if path.exists() {
+            if let Err(e) = std::fs::remove_file(&path) {
+                log::warn!("[secure] couldn't remove {}: {e}", path.display());
+            }
+        }
+    }
+}
+
+/// Keep the game's `plugins` folder in step with what is locked, while the game is shut.
+///
+/// Called from [`watch`] whenever the game isn't running, so the plugin is in place before
+/// the first launch after an unlock rather than one launch late. Quiet when nothing changes.
+#[cfg(windows)]
+fn sync_plugin(app: &AppHandle) {
+    let Some(plugins) = plugins_dir(app) else { return };
+    let assets = scan_secured(app);
+    if assets.is_empty() {
+        remove_plugin(&plugins);
+        return;
+    }
+    let Some(dir) = run_dir(app) else { return };
+    let staged = stage_dll(app, &dir).and_then(|dll| {
+        write_manifest(&assets, &dir)?;
+        install_plugin(&plugins, &dll, &dir)
+    });
+    match staged {
+        Ok(Plugin::Installed) => log::info!("[secure] installed the game plugin for {} asset(s)", assets.len()),
+        Ok(Plugin::Current) => {}
+        Err(e) => log::warn!("[secure] couldn't install the game plugin: {e}"),
+    }
 }
 
 /// The injector's argv: attach to the running game by name and load `dll_win`, which is the DLL
@@ -788,74 +907,35 @@ fn inject(_app: &AppHandle, _dll: &std::path::Path) -> Result<(), String> {
     Err("injection is supported on Windows, macOS and Linux (Proton)".into())
 }
 
-#[cfg(windows)]
-mod win {
-    use std::ffi::{c_void, OsStr};
-    use std::os::windows::ffi::OsStrExt;
-    use std::ptr::null_mut;
-
-    const PROCESS_ACCESS: u32 = 0x0002 | 0x0008 | 0x0010 | 0x0020 | 0x0400; // VM ops + create thread + query
-    const MEM_COMMIT_RESERVE: u32 = 0x1000 | 0x2000;
-    const PAGE_READWRITE: u32 = 0x04;
-
-    unsafe extern "system" {
-        fn OpenProcess(access: u32, inherit: i32, pid: u32) -> *mut c_void;
-        fn GetModuleHandleW(name: *const u16) -> *mut c_void;
-        fn GetProcAddress(module: *mut c_void, name: *const i8) -> *mut c_void;
-        fn VirtualAllocEx(p: *mut c_void, addr: *mut c_void, size: usize, typ: u32, prot: u32) -> *mut c_void;
-        fn WriteProcessMemory(p: *mut c_void, addr: *mut c_void, buf: *const c_void, size: usize, wrote: *mut usize) -> i32;
-        fn CreateRemoteThread(p: *mut c_void, attr: *mut c_void, stack: usize, start: *mut c_void, param: *mut c_void, flags: u32, tid: *mut u32) -> *mut c_void;
-        fn WaitForSingleObject(h: *mut c_void, ms: u32) -> u32;
-        fn CloseHandle(h: *mut c_void) -> i32;
-        fn GetLastError() -> u32;
-    }
-
-    fn wide(s: &str) -> Vec<u16> {
-        OsStr::new(s).encode_wide().chain(std::iter::once(0)).collect()
-    }
-
-    /// Load `dll` into process `pid` via the standard `LoadLibraryW` remote thread.
-    pub fn inject_into(pid: u32, dll: &std::path::Path) -> Result<(), String> {
-        let dll_w: Vec<u16> = wide(&dll.to_string_lossy());
-        // SAFETY: a textbook remote-thread injection into a process we opened for it; every
-        // handle is closed, and the one remote allocation holds only the DLL path string.
-        unsafe {
-            let proc = OpenProcess(PROCESS_ACCESS, 0, pid);
-            if proc.is_null() {
-                return Err(format!("OpenProcess({pid}) failed: {}", GetLastError()));
-            }
-            let bytes = dll_w.len() * 2;
-            let remote = VirtualAllocEx(proc, null_mut(), bytes, MEM_COMMIT_RESERVE, PAGE_READWRITE);
-            if remote.is_null() {
-                CloseHandle(proc);
-                return Err(format!("VirtualAllocEx failed: {}", GetLastError()));
-            }
-            if WriteProcessMemory(proc, remote, dll_w.as_ptr() as *const c_void, bytes, null_mut()) == 0 {
-                CloseHandle(proc);
-                return Err(format!("WriteProcessMemory failed: {}", GetLastError()));
-            }
-            let k32 = GetModuleHandleW(wide("kernel32.dll").as_ptr());
-            let load = GetProcAddress(k32, c"LoadLibraryW".as_ptr());
-            if load.is_null() {
-                CloseHandle(proc);
-                return Err("LoadLibraryW not found".into());
-            }
-            let thread = CreateRemoteThread(proc, null_mut(), 0, load, remote, 0, null_mut());
-            if thread.is_null() {
-                CloseHandle(proc);
-                return Err(format!("CreateRemoteThread failed: {}", GetLastError()));
-            }
-            WaitForSingleObject(thread, 10_000);
-            CloseHandle(thread);
-            CloseHandle(proc);
-        }
-        Ok(())
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The game loads the plugin only at startup, so whether a copy was already in place is
+    /// the difference between "serving now" and "from the next start" — and an unchanged copy
+    /// must not be rewritten under a running game that holds it open.
+    #[cfg(windows)]
+    #[test]
+    fn the_plugin_is_written_once_and_names_the_run_dir() {
+        let root = std::env::temp_dir().join(format!("frost-plugin-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let (plugins, run) = (root.join("game").join("plugins"), root.join("run"));
+        std::fs::create_dir_all(&run).unwrap();
+        let dll = run.join("mxbsecure.dll");
+        std::fs::write(&dll, b"MZ plugin v1").unwrap();
+
+        assert_eq!(install_plugin(&plugins, &dll, &run), Ok(Plugin::Installed));
+        assert_eq!(std::fs::read(plugins.join(PLUGIN_NAME)).unwrap(), b"MZ plugin v1");
+        assert_eq!(std::fs::read_to_string(plugins.join(PLUGIN_POINTER)).unwrap().trim(), run.display().to_string());
+        assert_eq!(install_plugin(&plugins, &dll, &run), Ok(Plugin::Current));
+
+        std::fs::write(&dll, b"MZ plugin v2").unwrap();
+        assert_eq!(install_plugin(&plugins, &dll, &run), Ok(Plugin::Installed));
+
+        remove_plugin(&plugins);
+        assert!(!plugins.join(PLUGIN_NAME).exists() && !plugins.join(PLUGIN_POINTER).exists());
+        let _ = std::fs::remove_dir_all(root);
+    }
     use std::time::Duration;
 
     /// The whole macOS injection, short of Wine running it: the injector is started through the
