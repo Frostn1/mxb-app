@@ -9,6 +9,7 @@
   releases build unsigned, as before.
 
 ### Fixed
+- Paint sync asks FrostMod to re-apply paints whenever a rider joins or rejoins the server, not only when new paint files were downloaded. A rider who rejoined wearing paints you already had stayed on the default look.
 - Settings cards use more of the window, and their button rows wrap instead of running past the card edge (About & updates' "Join the Discord" stuck out on narrow windows).
 - The server detail window is wider, and its footer wraps (Copy server link turns icon-only on a narrow window), so the star button is no longer cut off.
 - Server cards breathe: "Not installed" moved off the track line to a faded badge in the picture's bottom-right corner, the track name and bike classes get the full row, and chips with no real value ("Unknown", "?") are hidden.
