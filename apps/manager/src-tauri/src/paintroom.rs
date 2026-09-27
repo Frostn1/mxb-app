@@ -677,6 +677,16 @@ impl HashIndex {
         Some(sha)
     }
 
+    /// Record a file this app just wrote, whose digest it already knows.
+    ///
+    /// Not left to [`Self::sha_of`]: a same-size paint swapped in within the filesystem's
+    /// mtime resolution has the old stamp, and the cache would keep answering the old digest.
+    pub fn record(&mut self, path: &Path, sha256: &str) {
+        let Some((size, mtime)) = stamp(path) else { return };
+        self.files.insert(path.to_string_lossy().into_owned(), Indexed { size, mtime, sha256: sha256.to_string() });
+        self.dirty = true;
+    }
+
     /// Walk every root, hashing what is new or changed and forgetting what has gone.
     pub fn refresh(&mut self, roots: &[PathBuf]) {
         let mut seen: HashSet<String> = HashSet::new();
@@ -885,7 +895,7 @@ pub fn install_picks(
             log::warn!("[room] couldn't write {}: {e}", dest.display());
             continue;
         }
-        index.sha_of(&dest);
+        index.record(&dest, &pick.sha256);
         manifest.claim(&pick.rel_dest, &pick.sha256);
         out.installed += 1;
     }
