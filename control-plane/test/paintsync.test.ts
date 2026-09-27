@@ -1,6 +1,6 @@
 /**
  * Paint sync v2 through the real router and a real SQLite: join, delta upload, the room
- * notification, leave, and the day-long expiry.
+ * notification, leave, and the week-long expiry.
  */
 
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -140,7 +140,7 @@ describe("paint sync v2", () => {
     const toldAboutBob = PAINT_ROOMS.told.filter((t) => t.except === "acc_b");
     expect(toldAboutBob.at(-1)).toMatchObject({ server: b.server, frame: { t: "joined", rider: { riderName: "Bob" } } });
 
-    // The shared download route serves the day-long copy.
+    // The shared download route serves the week-long copy.
     const got = await call(env, "GET", `/v1/paints/${redSha}`, "acc_b");
     expect(got.status).toBe(200);
     expect(new Uint8Array(await got.arrayBuffer())).toEqual(red);
@@ -164,7 +164,7 @@ describe("paint sync v2", () => {
     expect((await call(env, "PUT", `/v1/paintsync/paints/${hash}`, "acc_a", new TextEncoder().encode("other"))).status).toBe(400);
   });
 
-  it("asks for a re-upload before a stored paint expires, and sweeps it after a day", async () => {
+  it("asks for a re-upload before a stored paint expires, and sweeps it after a week", async () => {
     const { env, PAINTS } = await deployment();
     const bytes = new TextEncoder().encode("blue!");
     const hash = await sha(bytes);

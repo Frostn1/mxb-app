@@ -1594,7 +1594,7 @@ async function artifact(env: Env, key: string): Promise<Response> {
 }
 
 async function getPaint(sha256: string, env: Env): Promise<Response> {
-  // The older flow's copy first, then paint sync v2's day-long one: either is the same bytes.
+  // The older flow's copy first, then paint sync v2's week-long one: either is the same bytes.
   const object = (await env.PAINTS.get(sha256)) ?? (await env.PAINTS.get(liveKey(sha256)));
   if (!object) return json(404, { error: "no such paint" });
   // Streamed rather than buffered: no reason to hold it in the isolate on the way out.
@@ -2474,11 +2474,11 @@ async function paintsyncJoin(request: Request, account: Account, env: Env): Prom
 }
 
 /**
- * `PUT /v1/paintsync/paints/:sha` — one of the caller's own paints, stored for a day.
+ * `PUT /v1/paintsync/paints/:sha` — one of the caller's own paints, stored for a week.
  *
  * Only a hash in the caller's own look is accepted, so this is never a free file host: what
  * can be stored is bounded by what a loadout can name (`.pnt` destinations, capped slots and
- * size) and is swept a day later. The bytes are hashed here rather than trusted, for the same
+ * size) and is swept a week later. The bytes are hashed here rather than trusted, for the same
  * reason as `putPaint`. The content itself is not parsed: a paint from locked content is
  * encrypted and has no header to check (`pntthumb.ts`).
  */

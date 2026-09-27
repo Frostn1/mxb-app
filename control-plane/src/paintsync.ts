@@ -6,19 +6,19 @@
  * with theirs. It uploads only the first list and downloads only what its own disk lacks from
  * the second. A room per server (`paintroom.ts`) pushes later arrivals, so nothing polls.
  *
- * Paints uploaded this way live under `live/` in R2 for a day and are then swept. The older
+ * Paints uploaded this way live under `live/` in R2 for a week and are then swept. The older
  * flow's objects at the bucket root are left alone: shipped apps still read them.
  */
 
 /** A paint uploaded through this flow is served for this long after its last upload. */
-export const LIVE_TTL_MS = 24 * 60 * 60 * 1000;
+export const LIVE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 /**
  * Past this age a stored paint is reported as missing again, so the rider wearing it
  * re-uploads it and the clock restarts, well before the sweep would take it from under the
  * people still riding with them.
  */
-export const LIVE_REFRESH_MS = 20 * 60 * 60 * 1000;
+export const LIVE_REFRESH_MS = 6 * 24 * 60 * 60 * 1000;
 
 /** Where this flow's paints live in R2. */
 export const LIVE_PREFIX = "live/";
@@ -185,8 +185,8 @@ const SWEEP_PAGE = 1000;
 const SWEEP_PAGES = 5;
 
 /**
- * Drop this flow's paints a day after their last upload, the loadout rows that point at them,
- * and server names nobody has reported for a day.
+ * Drop this flow's paints a week after their last upload, the loadout rows that point at them,
+ * and server names nobody has reported for a week.
  *
  * The rows go with the objects so an older app reading `/v1/roster` is never handed a hash
  * that 404s — its pull stops at the first failed download. A rider still on the server sends
