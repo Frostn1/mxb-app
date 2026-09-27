@@ -1914,7 +1914,9 @@ fn rhythm_double(
         let span = pitch * 2.5;
         let placed_at = at + (room - span).max(0.0) * 0.5;
         let ramp = pitch * (0.25 + 0.34);
-        let deg = crate::trackprog::face_sweep(heights[0], ramp).to_degrees();
+        // A one-sided take-off, not a symmetric peak — `face_sweep` doubles the angle for a
+        // ramp that rises on both sides of its crest, which this shape isn't.
+        let deg = crate::trackprog::takeoff_lip_deg(heights[0], ramp);
         // Crest to crest is conservative: it reaches the whole landing face.
         let allowed = speed.carry(placed_at + ramp, deg) * 0.9;
         if pitch > allowed {
@@ -2252,7 +2254,10 @@ fn section_features(
                 // Match trackllm::rhythm, including its quarter-face landing allowance.
                 let gives = speed.carry(crest, deg);
                 let gap_allowed = (gives - faces.back - faces.face * 0.25).max(0.0) * 0.9;
-                if gap_allowed < sec.double_m.0 {
+                // `sec.double_m.0` is a crest-to-crest span, like `span` above — not a bare
+                // gap — so it has to be converted the same way before it's a fair comparison.
+                let min_gap = (sec.double_m.0 - faces.back - faces.face).max(0.0);
+                if gap_allowed < min_gap {
                     if let Some(f) = section_table(at, height, r, &sec) {
                         lay(&mut out, f);
                     }
