@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Added
+- Windows builds of MXB App, Frost Studio and MXB Coach can be code-signed as Creste LLC
+  through Azure Artifact Signing: the app, its installer and the `mxbsecure.dll` game plugin.
+  It switches on once the Azure account is set up (see `docs/signing/SETUP.md`). Until then
+  releases build unsigned, as before.
+
 ### Changed
 - Paints shared through paint sync are now kept on the control plane for a week after their last upload, instead of 24 hours. A paint is re-uploaded once it is 6 days old if its owner is still riding.
 
