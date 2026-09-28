@@ -1218,6 +1218,9 @@ export const de: Translation = {
   "serverBrowser.region.asia": "Asien",
   "serverBrowser.region.other": "Andere",
 
+  "sync.notSharing": "Teilt keine Lackierungen: {{names}}",
+  "sync.notSharingWhy":
+    "Ihr seht euch gegenseitig in Standard-Lackierungen, bis sie MXB App 0.19 oder neuer mit eingeschaltetem Paint-Sync nutzen.",
   "sync.autoNote":
     "Dein Look veröffentlicht sich selbst — jedes Bike, sobald du ihn in der App oder in der Garage des Spiels änderst. Der der anderen kommt, wenn du auf Spielen drückst.",
 

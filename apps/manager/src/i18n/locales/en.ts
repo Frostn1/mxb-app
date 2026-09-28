@@ -1188,6 +1188,9 @@ export const en = {
   "serverBrowser.region.asia": "Asia",
   "serverBrowser.region.other": "Other",
 
+  "sync.notSharing": "Not sharing paints: {{names}}",
+  "sync.notSharingWhy":
+    "They see you, and you see them, in stock paints until they run MXB App 0.19 or newer with paint sync on.",
   "sync.autoNote":
     "Your look publishes itself — every bike, whenever you change it in the app or in the game's own garage. Everyone else's arrives when you press Play.",
 

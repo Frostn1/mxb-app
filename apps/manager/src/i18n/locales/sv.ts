@@ -1178,6 +1178,9 @@ export const sv: Translation = {
   "serverBrowser.region.asia": "Asien",
   "serverBrowser.region.other": "Övriga",
 
+  "sync.notSharing": "Delar inte lacker: {{names}}",
+  "sync.notSharingWhy":
+    "Ni ser varandra i standardlacker tills de kör MXB App 0.19 eller senare med lacksynk påslagen.",
   "sync.autoNote":
     "Din look publicerar sig — varje cykel, varje gång du ändrar den i appen eller i spelets eget garage. Alla andra kommer när du trycker på Play.",
 

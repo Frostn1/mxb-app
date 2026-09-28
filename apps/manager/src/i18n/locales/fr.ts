@@ -1217,6 +1217,9 @@ export const fr: Translation = {
   "serverBrowser.region.asia": "Asie",
   "serverBrowser.region.other": "Autre",
 
+  "sync.notSharing": "Ne partagent pas leurs peintures : {{names}}",
+  "sync.notSharingWhy":
+    "Vous vous voyez mutuellement en peintures d'origine jusqu'à ce qu'ils utilisent MXB App 0.19 ou plus récent avec la synchro des peintures activée.",
   "sync.autoNote":
     "Votre look se publie tout seul — chaque moto, dès que vous le changez dans l'app ou dans le garage du jeu. Celui des autres arrive quand vous appuyez sur Jouer.",
 

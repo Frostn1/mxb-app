@@ -1212,6 +1212,9 @@ export const es: Translation = {
   "serverBrowser.region.asia": "Asia",
   "serverBrowser.region.other": "Otra",
 
+  "sync.notSharing": "No comparten pinturas: {{names}}",
+  "sync.notSharingWhy":
+    "Os veis mutuamente con pinturas de serie hasta que usen MXB App 0.19 o superior con la sincronización de pinturas activada.",
   "sync.autoNote":
     "Tu look se publica solo — cada moto, cada vez que lo cambias en la app o en el garaje del juego. El de los demás llega cuando pulsas Jugar.",
 

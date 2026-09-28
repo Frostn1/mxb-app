@@ -1212,6 +1212,9 @@ export const ptBR: Translation = {
   "serverBrowser.region.asia": "Ásia",
   "serverBrowser.region.other": "Outra",
 
+  "sync.notSharing": "Não compartilham pinturas: {{names}}",
+  "sync.notSharingWhy":
+    "Vocês se veem com pinturas de fábrica até eles usarem o MXB App 0.19 ou mais novo com a sincronização de pinturas ligada.",
   "sync.autoNote":
     "Seu visual se publica sozinho — cada moto, sempre que você muda no app ou na garagem do jogo. O dos outros chega quando você aperta Jogar.",
 
