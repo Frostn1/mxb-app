@@ -12,6 +12,20 @@ pub const UA: &str = "mxb-app";
 /// `frostmod.exe` beside an old `frostmod.dll` is a worse state than not updating.
 const BINARIES: [&str; 2] = ["frostmod.exe", "frostmod.dll"];
 
+/// What a plugin-only build needs: the dll, which the plugin is a copy of. The injector is
+/// not downloaded at all — it is the file Windows Defender quarantines, and a quarantined
+/// file we never run must not be able to fail an install or flag one for repair.
+const PLUGIN_BINARIES: [&str; 1] = ["frostmod.dll"];
+
+/// The binaries the release tagged `tag` is installed as.
+fn binaries_for(tag: &str) -> &'static [&'static str] {
+    if crate::frostmod::plugin_only(Some(tag)) {
+        &PLUGIN_BINARIES
+    } else {
+        &BINARIES
+    }
+}
+
 /// Marks a binary moved aside because something still had it open. Swept on the
 /// next install or start, by which point whatever held it has usually exited.
 const RETIRED_MARK: &str = ".in-use-";
@@ -189,8 +203,15 @@ pub fn installed_version(app: &AppHandle) -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
+/// Is FrostMod on disk in a form we can run?
+///
+/// For the injector that is `frostmod.exe`. A plugin-only build never runs the exe, so the
+/// dll is what counts there — the plugin is a copy of it. Asking for the exe regardless
+/// would let Defender quarantining the one file we no longer use read as "not installed",
+/// and take the working plugin out with it.
 pub fn is_installed(app: &AppHandle) -> bool {
     exe_path(app).exists()
+        || (plugin_only(app) && frostmod_dir(app).join("frostmod.dll").exists())
 }
 
 #[derive(Deserialize)]
@@ -245,9 +266,10 @@ fn file_matches_asset(path: &Path, asset: &Asset) -> bool {
     format!("{got:x}").eq_ignore_ascii_case(want)
 }
 
-/// Are both installed binaries actually the ones `rel` ships?
+/// Are the installed binaries actually the ones `rel` ships? Only the ones that release is
+/// installed as — see [`binaries_for`].
 fn install_matches_release(dir: &Path, rel: &Release) -> bool {
-    BINARIES.iter().all(|name| {
+    binaries_for(&rel.tag_name).iter().all(|name| {
         rel.assets
             .iter()
             .find(|a| a.name.eq_ignore_ascii_case(name))
@@ -306,6 +328,11 @@ pub async fn status(app: &AppHandle) -> FrostmodStatus {
         let sync = sync_plugin(app, &cfg.clone().unwrap_or_default());
         (sync.game_plugin, sync.session_plugin)
     } else {
+        // A rollback from a plugin-only build: `is_running` goes back to the injector, and
+        // our `.dlo` goes before the refresh below could copy this older dll over it.
+        if let Some(cfg) = &cfg {
+            leave_plugin_mode(cfg);
+        }
         // Keep a hand-installed plugin copy from going stale. Like the sweep above, this
         // rides on the status poll because that is the only thing that reaches a player who
         // never opens Settings — and unlike an update, it has to run even when we are
@@ -322,8 +349,6 @@ pub async fn status(app: &AppHandle) -> FrostmodStatus {
             .as_deref()
             .map(|game| ensure_session_plugin(&frostmod_dir(app), game, version.as_deref()))
             .unwrap_or_default();
-        // A rollback from a plugin-only build: `is_running` goes back to the injector.
-        crate::frostmod::set_plugin_mode(None);
         (game_plugin, session_plugin)
     };
 
@@ -899,6 +924,52 @@ fn game_dir_of(cfg: &crate::config::AppConfig) -> Option<PathBuf> {
         .map(PathBuf::from)
 }
 
+/// Every game folder the config knows: the active one first, then each title's saved one.
+/// Game Integration is one switch for all of them, so turning it off has to reach a plugin
+/// installed while another title was active.
+fn known_game_dirs(cfg: &crate::config::AppConfig) -> Vec<PathBuf> {
+    let mut dirs: Vec<PathBuf> = game_dir_of(cfg).into_iter().collect();
+    for paths in cfg.games.values() {
+        let gp = paths.game_path.trim();
+        if gp.is_empty() {
+            continue;
+        }
+        let dir = PathBuf::from(gp);
+        if !dirs.contains(&dir) {
+            dirs.push(dir);
+        }
+    }
+    dirs
+}
+
+/// Remove every plugin of ours — the ones with our `frostmod.dir` beside them — from every
+/// game folder we know. For Game Integration off, and for a rollback below
+/// [`crate::frostmod::PLUGIN_ONLY_MIN_VERSION`]: an older build would otherwise have its dll
+/// copied over our `.dlo` by the injector-era refresh, and load as a full plugin that ignores
+/// `frostmod.dir`, next to the injector it has just gone back to.
+///
+/// Returns what became of the one in `active`.
+fn remove_our_plugins(cfg: &crate::config::AppConfig, active: Option<&Path>) -> PluginCopy {
+    let mut result = PluginCopy::Absent;
+    for dir in known_game_dirs(cfg) {
+        if !dir_pointer_path(&dir).exists() {
+            continue;
+        }
+        let copy = remove_game_plugin(&dir);
+        if active == Some(dir.as_path()) {
+            result = copy;
+        }
+    }
+    result
+}
+
+/// Undo plugin-only mode for a FrostMod below v0.41.0: see [`remove_our_plugins`]. Cheap
+/// when there is nothing to undo — one `exists` per known game folder.
+fn leave_plugin_mode(cfg: &crate::config::AppConfig) {
+    crate::frostmod::set_plugin_mode(None);
+    let _ = remove_our_plugins(cfg, None);
+}
+
 /// What a plugin-only sync found and did, for the status report.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct PluginSync {
@@ -962,8 +1033,9 @@ pub fn sync_plugin(app: &AppHandle, cfg: &crate::config::AppConfig) -> PluginSyn
     if !cfg.auto_run_frostmod || !is_installed(app) {
         crate::frostmod::set_plugin_mode(None);
         let session_plugin = remove_session_plugin(&game_dir);
-        let game_plugin = if dir_pointer_path(&game_dir).exists() {
-            remove_game_plugin(&game_dir)
+        let ours = remove_our_plugins(cfg, Some(&game_dir));
+        let game_plugin = if ours != PluginCopy::Absent {
+            ours
         } else if game_plugin_path(&game_dir).exists() {
             PluginCopy::Unmanaged
         } else {
@@ -1115,9 +1187,9 @@ fn locked_file_error(name: &str, e: &std::io::Error) -> anyhow::Error {
 /// Move every staged binary into place, rolling back the ones already moved if any
 /// of them fails. Returns whether a displaced binary is still in use, which is the
 /// signal that the running game is on the old FrostMod until it restarts.
-fn apply_staged(dir: &Path, staging: &Path) -> anyhow::Result<bool> {
+fn apply_staged(dir: &Path, staging: &Path, names: &[&'static str]) -> anyhow::Result<bool> {
     let mut done: Vec<(&str, Option<PathBuf>)> = Vec::new();
-    for name in BINARIES {
+    for &name in names {
         match swap_in(&dir.join(name), &staging.join(name)) {
             Ok(retired) => done.push((name, retired)),
             Err(e) => {
@@ -1151,7 +1223,7 @@ fn apply_staged(dir: &Path, staging: &Path) -> anyhow::Result<bool> {
 fn release_binaries(rel: &Release) -> anyhow::Result<Vec<(&'static str, &Asset)>> {
     let mut found = Vec::new();
     let mut missing = Vec::new();
-    for want in BINARIES {
+    for &want in binaries_for(&rel.tag_name) {
         match rel.assets.iter().find(|a| a.name.eq_ignore_ascii_case(want)) {
             Some(asset) => found.push((want, asset)),
             None => missing.push(want),
@@ -1212,13 +1284,20 @@ pub async fn install(app: &AppHandle) -> anyhow::Result<InstallReport> {
         }
     }
 
-    let applied = apply_staged(&dir, &staging);
+    let applied = apply_staged(&dir, &staging, binaries_for(&rel.tag_name));
     let _ = std::fs::remove_dir_all(&staging);
     let mut needs_game_restart = applied?;
 
     // Written last, and only once both binaries are actually in place, so the version
     // we report can never describe an install that didn't happen.
     std::fs::write(version_path(app), &rel.tag_name)?;
+
+    // A plugin-only build leaves the previous release's injector behind, and nothing will
+    // ever run it again — so it goes, rather than sit there for Defender to find. The caller
+    // stopped it before installing; one that still won't delete is swept on a later start.
+    if crate::frostmod::plugin_only(Some(&rel.tag_name)) {
+        let _ = remove_or_retire(&exe_path(app));
+    }
     // Ship our curated server filter. Best-effort.
     ensure_serverfilter(app);
 
@@ -1340,6 +1419,8 @@ pub fn start(app: &AppHandle, state: &FrostmodProcess) -> anyhow::Result<bool> {
     if plugin_only(app) {
         return Ok(start_plugin(app, state));
     }
+    // Back on the injector after a plugin-only build: our plugin must not load beside it.
+    leave_plugin_mode(&crate::config::load(app).unwrap_or_default());
     start_injector(app, state)
 }
 
@@ -1934,7 +2015,7 @@ mod tests {
     fn applying_swaps_both_binaries_and_leaves_nothing_behind() {
         let (dir, staging) = installed_pair("apply");
 
-        let needs_restart = apply_staged(&dir, &staging).expect("nothing holds these files");
+        let needs_restart = apply_staged(&dir, &staging, &BINARIES).expect("nothing holds these files");
 
         for name in BINARIES {
             assert_eq!(read(dir.join(name)), "new", "{name} was replaced");
@@ -1964,7 +2045,7 @@ mod tests {
 
         let err = format!(
             "{:#}",
-            apply_staged(&dir, &staging).expect_err("a missing staged binary can't land")
+            apply_staged(&dir, &staging, &BINARIES).expect_err("a missing staged binary can't land")
         );
         assert!(err.contains("frostmod.dll"), "names the binary: {err}");
         assert!(err.contains("MX Bikes"), "says how to fix it: {err}");
@@ -2406,6 +2487,67 @@ mod plugin_only_tests {
         assert!(!dir_pointer_path(&game).exists());
         // Nothing there is nothing to do.
         assert_eq!(remove_game_plugin(&game), PluginCopy::Absent);
+    }
+
+    /// Integration off, or a rollback, reaches every game the config knows — but only the
+    /// plugins with our pointer beside them. A hand-installed `.dlo` is left alone.
+    #[test]
+    fn our_plugins_are_removed_from_every_known_game_and_only_ours() {
+        let (_, mxb) = dirs("all-mxb");
+        let (_, gpb) = dirs("all-gpb");
+        let (_, hand) = dirs("all-hand");
+        for game in [&mxb, &gpb] {
+            std::fs::write(game_plugin_path(game), b"ours").unwrap();
+            std::fs::write(dir_pointer_path(game), b"C:\\x").unwrap();
+        }
+        std::fs::write(game_plugin_path(&hand), b"hand-installed").unwrap();
+
+        let mut cfg = crate::config::AppConfig::default();
+        cfg.game_path = mxb.to_string_lossy().into_owned();
+        for (id, game) in [("gpb", &gpb), ("other", &hand)] {
+            cfg.games.insert(
+                id.into(),
+                crate::config::GamePaths {
+                    game_path: game.to_string_lossy().into_owned(),
+                    ..Default::default()
+                },
+            );
+        }
+
+        assert_eq!(remove_our_plugins(&cfg, Some(&mxb)), PluginCopy::Absent);
+        assert!(!game_plugin_path(&mxb).exists() && !dir_pointer_path(&mxb).exists());
+        assert!(
+            !game_plugin_path(&gpb).exists() && !dir_pointer_path(&gpb).exists(),
+            "the game that wasn't active is cleaned too"
+        );
+        assert_eq!(std::fs::read(game_plugin_path(&hand)).unwrap(), b"hand-installed");
+    }
+
+    /// A plugin-only release is installed as the dll alone: a quarantined or missing
+    /// `frostmod.exe` neither fails the install nor flags it for repair.
+    #[test]
+    fn a_plugin_only_release_needs_only_the_dll() {
+        assert_eq!(binaries_for("v0.41.0"), &["frostmod.dll"]);
+        assert_eq!(binaries_for("v0.40.4"), &["frostmod.exe", "frostmod.dll"]);
+
+        let (managed, _) = dirs("dll-only");
+        std::fs::write(managed.join("frostmod.dll"), b"the 0.41 dll").unwrap();
+        let rel = Release {
+            tag_name: "v0.41.0".into(),
+            assets: vec![
+                Asset {
+                    name: "frostmod.dll".into(),
+                    browser_download_url: "https://example.invalid/frostmod.dll".into(),
+                    size: 12,
+                    digest: None,
+                },
+            ],
+        };
+        assert!(release_binaries(&rel).is_ok(), "no exe in the release is fine");
+        assert!(install_matches_release(&managed, &rel), "no exe on disk is fine");
+
+        let old = Release { tag_name: "v0.40.4".into(), ..rel };
+        assert!(release_binaries(&old).is_err(), "the injector still needs both");
     }
 
     #[test]
