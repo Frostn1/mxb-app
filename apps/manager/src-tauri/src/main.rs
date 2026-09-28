@@ -1437,6 +1437,9 @@ async fn set_active_game(
             );
         }
     }
+    // A plugin-only FrostMod lives in the game's own folder, and this is a different game:
+    // put it there now, so a launch from Steam before the next status poll still has it.
+    frostmod_manage::sync_if_shut(&app);
     Ok(cfg)
 }
 
@@ -2731,6 +2734,10 @@ fn launch_game(app: tauri::AppHandle) -> Result<gameproc::LaunchOutcome, String>
     // `load_or_detect`, not `load`: a missing config file shouldn't turn Play into an
     // error when the install is sitting exactly where the detector looks.
     let cfg = config::load_or_detect(&app).unwrap_or_default();
+    // A plugin-only FrostMod is loaded by the game as it starts, so this is the last moment
+    // an update that landed during the previous session can go in. The exit poll normally
+    // got there first; a relaunch inside its fifteen seconds would not.
+    frostmod_manage::sync_if_shut(&app);
     let outcome = gameproc::launch(&cfg).map_err(|e| format!("{e:#}"))?;
     if matches!(outcome, gameproc::LaunchOutcome::Launched) {
         usage::track("game.launch");
@@ -5823,15 +5830,25 @@ fn frostmod_start(app: tauri::AppHandle, state: State<FrostmodProcess>) -> Resul
 /// Async for the same reason as `set_mods_path`: a sync command runs on the UI thread, and
 /// this one waits out the moment between the kill and the process actually going.
 #[tauri::command]
-async fn frostmod_stop(state: State<'_, FrostmodProcess>) -> Result<bool, String> {
-    Ok(frostmod_manage::stop_running(&state))
+async fn frostmod_stop(
+    app: tauri::AppHandle,
+    state: State<'_, FrostmodProcess>,
+) -> Result<bool, String> {
+    Ok(frostmod_manage::stop_running(&app, &state))
 }
 
+/// Game Integration on or off. For a plugin-only FrostMod this is also what installs or
+/// removes the plugin — there is no process for the switch to start or stop.
+///
+/// Async so the plugin copy, which touches the game folder and on Linux looks up the Proton
+/// prefix, stays off the UI thread.
 #[tauri::command]
-fn set_auto_run_frostmod(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
+async fn set_auto_run_frostmod(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
     let mut cfg = config::load(&app).unwrap_or_default();
     cfg.auto_run_frostmod = enabled;
-    config::save(&app, &cfg).map_err(|e| format!("{e:#}"))
+    config::save(&app, &cfg).map_err(|e| format!("{e:#}"))?;
+    frostmod_manage::integration_changed(&app, &cfg);
+    Ok(())
 }
 
 #[tauri::command]

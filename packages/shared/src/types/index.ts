@@ -1232,8 +1232,18 @@ export interface FrostmodStatus {
    * name and do nothing else" — no hooks, no overlay. It exists because the game only hands
    * the server name to a plugin it loaded itself, so without it the app cannot tell which
    * server anyone is on, and paint sync and voice have nothing to key on.
+   *
+   * With a plugin-only FrostMod (`pluginOnly`) the full plugin publishes the server itself,
+   * so this copy is removed and `absent` is the expected state.
    */
   sessionPlugin: PluginCopy;
+  /**
+   * The installed FrostMod (v0.41.0+) runs as a game plugin alone: the app installs
+   * `plugins\frostmod.dlo` and never starts `frostmod.exe`. FrostMod is then running
+   * whenever the game is, so there is nothing to Start or Stop — Game Integration on/off
+   * is what installs or removes it. Optional for an older backend.
+   */
+  pluginOnly?: boolean;
 }
 
 /**

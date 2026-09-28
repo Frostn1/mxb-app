@@ -3,6 +3,18 @@
 ## Unreleased
 
 ### Added
+- **FrostMod runs as a game plugin only (FrostMod v0.41.0 and newer).** MXB App now installs
+  FrostMod as `plugins\frostmod.dlo` in the game folder, with a `frostmod.dir` beside it that
+  points at MXB App's FrostMod folder, and it no longer starts `frostmod.exe`, the injector
+  Windows Defender objects to. The plugin is copied in and kept current only while the game is
+  closed; an update made during a session goes in when the game exits. The
+  `frostmod_session.dlo` copy is removed, because the plugin reports the server itself.
+  `frostmod_mods.txt`, the flag files and the server filter are still written to the FrostMod
+  folder, and the flags box turns into the same files `frostmod.exe` used to write.
+  FrostMod shows as running while the game is open with the plugin in it, and Start and Stop
+  are hidden. Turning Game Integration off removes the plugin and `frostmod.dir`. A
+  `frostmod.exe` still running from before is stopped. Older FrostMod builds work exactly as
+  before.
 - **MXB Servers, clearer:** one status per server (Online · N riders, Starting…, Offline, Unreachable (SSH)) with the detail on hover. Edit and Remove are in a ⋯ menu. The Settings page is grouped by topic, with plain labels, toggles, sliders and the defaults spelled out; advanced switches are collapsed, and session lengths and player slots are new. The admin token shows as "saved" with Replace and Remove, is tested as soon as it is saved, and a helper explains what it's for. The app now uses the mxbsecure "m" icon.
 - **MXB Servers: Config tab.** Edit a server's ghost bots (count, skill, racing, lateral spread, bikes, laps, library and harvest), `[events] collisions` and the `[native]` switches as typed fields. The app shows the diff and checks the file with the server's own binary, then backs it up, applies it and restarts. If the server isn't ready afterwards, the backup goes back. Comments and everything else in the file are kept. It works over SSH for a systemd install or today's hand-started Lightsail process, and on this PC.
 - Settings → Paint sync names the riders on your server who aren't sharing paints ("Not sharing paints: CaptiveDuck"): they need MXB App 0.19 or newer with paint sync on, and until then you see each other in stock paints.

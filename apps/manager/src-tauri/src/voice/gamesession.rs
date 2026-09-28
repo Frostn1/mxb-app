@@ -543,6 +543,22 @@ mod tests {
         assert_eq!(merged.server_name, "Hand Installed");
     }
 
+    /// Plugin-only FrostMod (v0.41.0+): the full plugin is loaded by the game, gets EventInit
+    /// itself, and writes server, track, GUID and rider into the *main* block — and there is
+    /// no session copy, so no plugin block at all. That one block is the whole session.
+    #[test]
+    fn a_plugin_only_main_block_is_the_whole_session() {
+        let mut full = injected(4);
+        full.server_name = "AMX Series".into();
+        let merged = merge(Some(full), None).expect("a session");
+        assert_eq!(merged.server_name, "AMX Series");
+        assert_eq!(merged.track_id, "practice");
+        assert_eq!(merged.guid, "guid-1");
+        assert_eq!(merged.rider_name, "Frost");
+        assert_eq!(merged.riders.len(), 4);
+        assert!(merged.on_a_server());
+    }
+
     #[test]
     fn the_layout_matches_the_one_frostmod_asserts() {
         // These four numbers are static_asserted in src/session.h. If either side moves,
