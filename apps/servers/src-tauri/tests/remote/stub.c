@@ -49,7 +49,12 @@ int main(int argc, char **argv) {
         const char *o = strstr(text, "observe = \"");
         if (o && sscanf(o, "observe = \"%63[^\"]\"", from_file) == 1) observe = from_file;
     }
-    signal(SIGINT, on_int);
+    /* No SA_RESTART: SIGINT must break a blocked accept()/pause(), as it stops the real server. */
+    struct sigaction sa;
+    memset(&sa, 0, sizeof sa);
+    sa.sa_handler = on_int;
+    sigaction(SIGINT, &sa, NULL);
+    sigaction(SIGTERM, &sa, NULL);
     if (strstr(text, "never_ready") || !observe) {
         while (!stop) pause();
         return 0;
@@ -66,9 +71,9 @@ int main(int argc, char **argv) {
         int c = accept(s, NULL, NULL);
         if (c < 0) continue;
         char buf[512];
-        (void)read(c, buf, sizeof buf);
+        if (read(c, buf, sizeof buf) < 0) { close(c); continue; }
         const char *r = "HTTP/1.1 200 OK\r\nContent-Length: 14\r\n\r\n{\"ready\":true}";
-        (void)write(c, r, strlen(r));
+        if (write(c, r, strlen(r)) < 0) { /* the client went away */ }
         close(c);
     }
     close(s);
