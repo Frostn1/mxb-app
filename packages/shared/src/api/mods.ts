@@ -3651,6 +3651,57 @@ export function probeServer(address: string): Promise<MasterServer> {
   return invoke<MasterServer>("probe_server", { address });
 }
 
+/** A server the player saved by address: only what they typed, in the order they chose. */
+export interface SavedServer {
+  /** `host:port`, normalised the way Join takes it. */
+  address: string;
+  /** The player's label; `""` means "whatever the server calls itself". */
+  name: string;
+}
+
+/**
+ * Errors the saved-server commands return as codes rather than sentences, for the tab to
+ * translate. Anything else is the address parser's own message.
+ */
+export const SAVED_SERVER_ERRORS = {
+  duplicate: "saved_server_duplicate",
+  missing: "saved_server_missing",
+  full: "saved_server_full",
+} as const;
+
+export function savedServers(): Promise<SavedServer[]> {
+  return invoke<SavedServer[]>("saved_servers");
+}
+
+/** Save a server. Resolves with the whole list as stored, the new address normalised. */
+export function addSavedServer(address: string, name: string): Promise<SavedServer[]> {
+  return invoke<SavedServer[]>("add_saved_server", { address, name });
+}
+
+export function editSavedServer(
+  address: string,
+  newAddress: string,
+  name: string,
+): Promise<SavedServer[]> {
+  return invoke<SavedServer[]>("edit_saved_server", { address, newAddress, name });
+}
+
+export function removeSavedServer(address: string): Promise<SavedServer[]> {
+  return invoke<SavedServer[]>("remove_saved_server", { address });
+}
+
+export function reorderSavedServers(order: string[]): Promise<SavedServer[]> {
+  return invoke<SavedServer[]>("reorder_saved_servers", { order });
+}
+
+/**
+ * Ask saved servers the sweep didn't carry about themselves, at once. Only saved addresses are
+ * asked; a server that doesn't answer is simply missing from the result.
+ */
+export function probeSavedServers(addresses: string[]): Promise<MasterServer[]> {
+  return invoke<MasterServer[]>("probe_saved_servers", { addresses });
+}
+
 /** `up`, `degraded`, `down`, or `unknown` when too few apps have checked to say. */
 export type MasterState = "up" | "degraded" | "down" | "unknown";
 

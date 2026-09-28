@@ -6,6 +6,13 @@
 - Settings → Paint sync names the riders on your server who aren't sharing paints ("Not sharing paints: CaptiveDuck"): they need MXB App 0.19 or newer with paint sync on, and until then you see each other in stock paints.
 - **MXB Servers (`apps/servers`), P1 of the mxbserver manager:** one window for every mxbserver with its health, session, time left, riders, build and uptime, plus a live log tail. It reaches each server over SSH, forwarding the loopback-only observe and admin ports, so nothing new faces the internet. Admin tokens live in the OS keychain. It is not released yet; run it with `bun run tauri:servers dev`.
 - `packages/mxbsecure-ui`: the mxbsecure design tokens (colours, radius, Geist Mono, dark mode) copied from mxbsecure-web, plus the wordmark and a theme hook, for apps that wear the mxbsecure brand.
+- **Saved servers.** Save any server by IP from the Online tab (the ⋯ menu, or the + beside
+  Saved) with an optional name. Saved servers sit in their own row above the list as the usual
+  server cards: rider count, ping and track when the server answers, Join, Wait in line, Copy
+  and the star, and the same detail pane. A saved server the master doesn't list is asked
+  directly, so its card stays live; one that doesn't answer shows as offline and Join still
+  works. Move, rename or remove them from the card's menu. The list is kept in the app config
+  as address, name and order only, and the port defaults to 54210 like Join.
 
 ### Changed
 - **Auto race mode moves nothing with FrostMod v0.40.0 or newer.** It hands FrostMod a list of the tracks and bikes that stay (`frostmod_racemode.txt`), and FrostMod hides the rest from the game's own scan, so their archives are never opened. Ending the session just deletes the list. With an older FrostMod it still moves the unused mods aside as before.
