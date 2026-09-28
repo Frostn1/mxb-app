@@ -17,6 +17,7 @@ import {
   SlidersHorizontal,
   MoreHorizontal,
   Clock,
+  Bookmark,
 } from "lucide-react";
 import { toast } from "sonner";
 import { invoke } from "@tauri-apps/api/core";
@@ -54,13 +55,16 @@ import {
   resolveQuickInstall,
   resetServerBrowser,
   modTypesFor,
+  probeSavedServers,
   type CatalogTrack,
   type MasterServer,
+  type SavedServer,
 } from "@frost/shared/api/mods";
 import { useConfig } from "@frost/shared/Context/Config";
 import { useInstall } from "../../Context/Install";
 import { useT, type TFunc, type TKey } from "@/i18n";
 import { useFavorites } from "@/lib/useFavorites";
+import { useSavedServers } from "@/lib/useSavedServers";
 import { useGameRunning } from "@/lib/useGameRunning";
 import { isFull, useServerQueue } from "@/lib/useServerQueue";
 import { BoundedCache } from "@/lib/boundedCache";
@@ -73,6 +77,40 @@ import ServerCard from "./ServerCard";
 import ServerRow from "./ServerRow";
 import ConnectionCheck from "./ConnectionCheck";
 import RegisterServerDialog from "./RegisterServerDialog";
+import SavedServers, { type SavedRow } from "./SavedServers";
+import SavedServerDialog, { savedServerError } from "./SavedServerDialog";
+
+/** A saved server that didn't answer: its address, the player's name for it, and Join left on.
+ *  Everything a reply would have filled in is empty rather than guessed. */
+function offlineRow(address: string, name: string): MasterServer {
+  return {
+    name,
+    address,
+    joinable: true,
+    lanAddress: "",
+    players: 0,
+    maxPlayers: 0,
+    pingMs: null,
+    passworded: false,
+    location: "",
+    rating: "",
+    track: "",
+    trackLayout: "",
+    categories: [],
+    bikes: [],
+    session: "",
+    raceLength: "",
+    conditions: "",
+    realisticWeather: false,
+    forceCockpit: false,
+    noAids: false,
+    limitedTyreSets: false,
+    hidden: "",
+  };
+}
+
+/** The key saved servers are matched on: hostnames ignore case, as the Rust side does. */
+const addrKey = (address: string) => address.toLowerCase();
 
 type ViewMode = "tiles" | "list";
 const VIEW_KEY = "mxb:serversView:v1";
@@ -230,6 +268,97 @@ const Servers = ({ link }: ServersProps) => {
   }, [hideEmpty]);
   const favs = useFavorites();
 
+  // The player's saved servers. One the sweep carries takes its row from there; one it doesn't
+  // is asked directly, and `asked` is every address the last of those probes covered — so an
+  // address in `asked` but not in `probed` is a server that didn't answer.
+  const saved = useSavedServers();
+  const [probed, setProbed] = useState<Record<string, MasterServer>>({});
+  const [asked, setAsked] = useState<Set<string>>(() => new Set());
+  const [savedDialog, setSavedDialog] = useState<{ editing: SavedServer | null } | null>(null);
+  const listed = useMemo(
+    () => new Map((servers ?? []).map((s) => [addrKey(s.address), s])),
+    [servers],
+  );
+  const unlistedKey = useMemo(
+    () =>
+      saved.list
+        .map((s) => s.address)
+        .filter((a) => !listed.has(addrKey(a)))
+        .join("\n"),
+    [saved.list, listed],
+  );
+  // Asked again whenever a sweep lands, so a saved server's numbers move at the list's pace
+  // rather than freezing at whatever it said when the tab opened.
+  useEffect(() => {
+    if (servers === null || !unlistedKey) return;
+    const addresses = unlistedKey.split("\n");
+    let live = true;
+    probeSavedServers(addresses)
+      .then((rows) => {
+        if (!live) return;
+        setProbed(Object.fromEntries(rows.map((r) => [addrKey(r.address), r])));
+        setAsked(new Set(addresses.map(addrKey)));
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [servers, unlistedKey]);
+
+  /** The sweep plus the saved servers only a direct probe found — what the track art and
+   *  identification run over, so a saved card gets the same picture a listed one would. */
+  const known = useMemo(() => {
+    if (servers === null) return null;
+    const extra = Object.values(probed).filter((s) => !listed.has(addrKey(s.address)));
+    return extra.length ? [...servers, ...extra] : servers;
+  }, [servers, probed, listed]);
+
+  const savedRows = useMemo<SavedRow[]>(
+    () =>
+      saved.list.map((entry) => {
+        const key = addrKey(entry.address);
+        const live = listed.get(key) ?? probed[key];
+        const row = live ?? offlineRow(entry.address, entry.name);
+        return {
+          saved: entry,
+          row,
+          server: live && entry.name ? { ...live, name: entry.name } : row,
+          status: live ? "online" : asked.has(key) ? "offline" : "checking",
+        };
+      }),
+    [saved.list, listed, probed, asked],
+  );
+
+  const removeSaved = useCallback(
+    (entry: SavedServer) => {
+      const before = saved.list.map((s) => s.address);
+      saved
+        .remove(entry.address)
+        .then(() =>
+          toast.success(t("savedServers.removed", { name: entry.name || entry.address }), {
+            action: {
+              label: t("savedServers.undo"),
+              // Back where it was, not at the end.
+              onClick: () =>
+                void saved
+                  .add(entry.address, entry.name)
+                  .then(() => saved.reorder(before))
+                  .catch((e: unknown) => toast.error(savedServerError(t, e))),
+            },
+          }),
+        )
+        .catch((e: unknown) => toast.error(savedServerError(t, e)));
+    },
+    [saved, t],
+  );
+
+  const moveSaved = useCallback(
+    (entry: SavedServer, by: number) => {
+      saved.move(entry.address, by).catch((e: unknown) => toast.error(savedServerError(t, e)));
+    },
+    [saved, t],
+  );
+
   const [view, setView] = useState<ViewMode>(() => {
     try {
       return localStorage.getItem(VIEW_KEY) === "tiles" ? "tiles" : "list";
@@ -260,10 +389,10 @@ const Servers = ({ link }: ServersProps) => {
   // Asked for either view now: the list's rows carry the art small, and the pane beside them
   // shows it as the hero. It was tiles-only while the list was a table of text.
   useEffect(() => {
-    if (!servers?.length) return;
+    if (!known?.length) return;
     const tracks = [
       ...new Set(
-        servers
+        known
           .map((s) => s.track)
           .filter((tr) => tr && !LIBRARY.has(tr) && !LIBRARY_PENDING.has(tr)),
       ),
@@ -286,32 +415,32 @@ const Servers = ({ link }: ServersProps) => {
       .finally(() => {
         for (const tr of tracks) LIBRARY_PENDING.delete(tr);
       });
-  }, [servers, installed]);
+  }, [known, installed]);
 
   // Identify every track in the list without waiting to be asked. Opening a server to find
   // out what it is running, and to see a picture of it, is work the list can do itself — and
   // with the answers kept on disk between runs, a settled install asks for nothing at all.
   useEffect(() => {
-    if (!servers?.length) return;
+    if (!known?.length) return;
     let live = true;
     void warmTracks(
-      servers.map((s) => ({ id: s.track, hint: s.name })),
+      known.map((s) => ({ id: s.track, hint: s.name })),
       guessServerTrack,
       () => live,
     );
     return () => {
       live = false;
     };
-  }, [servers]);
+  }, [known]);
 
   // The tracks the player lacks, from our server: what they are, their picture, the price.
   const [catalog, setCatalog] = useState<Record<string, CatalogTrack>>(() =>
     Object.fromEntries(CATALOG.entries()),
   );
   useEffect(() => {
-    if (!servers?.length) return;
+    if (!known?.length) return;
     const now = Date.now();
-    const tracks = [...new Set(servers.map((s) => s.track))].filter(
+    const tracks = [...new Set(known.map((s) => s.track))].filter(
       (tr) =>
         tr &&
         library[tr] === null &&
@@ -328,7 +457,7 @@ const Servers = ({ link }: ServersProps) => {
         setCatalog(Object.fromEntries(CATALOG.entries()));
       })
       .catch(() => {});
-  }, [servers, library]);
+  }, [known, library]);
 
   // One fetch at a time. Two overlapping ones each sign in to Steam, and the loser's
   // failure used to replace the winner's list with an error.
@@ -503,8 +632,12 @@ const Servers = ({ link }: ServersProps) => {
    *  the whole list rather than the filtered one: narrowing the search shouldn't empty the
    *  pane on whatever is being read in it. */
   const detail = useMemo(
-    () => (servers ?? []).find((s) => s.address === selected) ?? null,
-    [servers, selected],
+    () =>
+      (servers ?? []).find((s) => s.address === selected) ??
+      // A saved server the master doesn't list opens on its direct answer, or its stand-in.
+      savedRows.find((r) => r.row.address === selected)?.row ??
+      null,
+    [servers, selected, savedRows],
   );
 
   /** How many filters are narrowing the list, for the trigger that now holds them. */
@@ -899,6 +1032,10 @@ const Servers = ({ link }: ServersProps) => {
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
+            <DropdownMenuItem onSelect={() => setSavedDialog({ editing: null })}>
+              <Bookmark className="size-4" />
+              {t("savedServers.add")}
+            </DropdownMenuItem>
             <DropdownMenuItem onSelect={() => setRegisterOpen(true)}>
               <ServerCog className="size-4" />
               {t("registerServer.action")}
@@ -934,14 +1071,49 @@ const Servers = ({ link }: ServersProps) => {
         onJoined={load}
       />
       <RegisterServerDialog open={registerOpen} onOpenChange={setRegisterOpen} />
+      <SavedServerDialog
+        open={savedDialog !== null}
+        onOpenChange={(open) => !open && setSavedDialog(null)}
+        editing={savedDialog?.editing ?? null}
+        onSubmit={(address, name) => {
+          const editing = savedDialog?.editing;
+          return editing ? saved.edit(editing.address, address, name) : saved.add(address, name);
+        }}
+      />
       {/* A tile has no list beside it to put the pane next to, so from the grid it still
-          opens over the top — the same pane, in a dialog. */}
-      {view === "tiles" && (
+          opens over the top — the same pane, in a dialog. So does a saved card while the list
+          below it is empty, since there is no pane on screen for it to fill. */}
+      {(view === "tiles" || shown.length === 0) && (
         <ServerDetailDialog
           {...detailProps}
           onOpenChange={(open) => !open && setSelected(null)}
         />
       )}
+
+      <SavedServers
+        rows={savedRows}
+        cards={{
+          pictureFor,
+          library,
+          catalog,
+          installingAt,
+          favourite: favs.has,
+          paintSync,
+          joining,
+          queue,
+          onOpen: pick,
+          onJoin: join,
+          onWait: wait,
+          onInstall: installOnly,
+          onInstallJoin: installAndJoin,
+          onCopy: copy,
+          onToggleFavourite: favs.toggle,
+        }}
+        onAdd={() => setSavedDialog({ editing: null })}
+        onEdit={(entry) => setSavedDialog({ editing: entry })}
+        onRemove={removeSaved}
+        onMove={moveSaved}
+      />
 
       <div
         className={cn(

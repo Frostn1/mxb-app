@@ -712,6 +712,9 @@ fn server_row(app: &tauri::AppHandle, address: &str) -> Option<crate::WorldServe
         .into_iter()
         .find(|e| same(&e.row.address) && now.saturating_sub(e.last_seen) <= BOOK_FRESH_MS)
         .map(|e| e.row)
+        // A saved server the master doesn't list is in neither of those; the Saved row asked
+        // it directly, and that answer is as good as a sweep's.
+        .or_else(|| crate::savedservers::probed(&want, BOOK_FRESH_MS))
 }
 
 fn journal_path(app: &tauri::AppHandle) -> Option<PathBuf> {

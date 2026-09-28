@@ -5,6 +5,7 @@ import {
   Lock,
   Loader2,
   Wifi,
+  WifiOff,
   Copy,
   Star,
   Hourglass,
@@ -54,7 +55,14 @@ interface Props {
   onWait: (s: MasterServer) => void;
   onCopy: (address: string) => void;
   onToggleFavourite: (address: string) => void;
+  /** A saved server's reachability, asked of it directly. Absent for a row off the master
+   *  list, which answered by being on it. */
+  status?: SavedStatus;
+  /** Extra controls after Copy — the Saved row's edit / move / remove menu. */
+  menu?: React.ReactNode;
 }
+
+export type SavedStatus = "online" | "offline" | "checking";
 
 /**
  * One server as a tile: the track's own art, the live numbers over it, and a join button.
@@ -78,9 +86,13 @@ const ServerCard = memo(function ServerCard({
   onWait,
   onCopy,
   onToggleFavourite,
+  status,
+  menu,
 }: Props) {
   const { t, resolved } = useI18n();
   const full = isFull(s);
+  // A server that didn't answer has no rider count to show; "0/0" would read as an answer.
+  const answered = status === undefined || status === "online";
   const cat = s.categories[0];
   const stop = (e: React.MouseEvent) => e.stopPropagation();
   // The player's own copy wins; a missing track shows what it looks like, from our server.
@@ -136,15 +148,29 @@ const ServerCard = memo(function ServerCard({
           </div>
         )}
 
-        <span
-          className={cn(
-            "absolute right-1.5 top-1.5 flex items-center gap-1.5 rounded-md bg-black/70 px-2 py-1 text-[15px] font-bold tabular-nums shadow-sm backdrop-blur-[2px]",
-            s.players > 0 ? "text-white" : "text-white/70",
-          )}
-        >
-          <Users className="size-3.5" strokeWidth={2.5} />
-          {s.players}/{s.maxPlayers}
-        </span>
+        {answered ? (
+          <span
+            className={cn(
+              "absolute right-1.5 top-1.5 flex items-center gap-1.5 rounded-md bg-black/70 px-2 py-1 text-[15px] font-bold tabular-nums shadow-sm backdrop-blur-[2px]",
+              s.players > 0 ? "text-white" : "text-white/70",
+            )}
+          >
+            <Users className="size-3.5" strokeWidth={2.5} />
+            {s.players}/{s.maxPlayers}
+          </span>
+        ) : (
+          <span
+            className="absolute right-1.5 top-1.5 flex items-center gap-1.5 rounded-md bg-black/70 px-2 py-1 text-[12px] font-semibold text-white/70 shadow-sm backdrop-blur-[2px]"
+            title={status === "offline" ? t("savedServers.offlineHint") : undefined}
+          >
+            {status === "checking" ? (
+              <Loader2 className="size-3 animate-spin" />
+            ) : (
+              <WifiOff className="size-3" />
+            )}
+            {status === "checking" ? t("savedServers.checking") : t("savedServers.offline")}
+          </span>
+        )}
 
         <span className="absolute left-1.5 top-1.5 flex items-center gap-1">
           <button
@@ -329,6 +355,7 @@ const ServerCard = memo(function ServerCard({
           >
             <Copy className="size-3.5" />
           </button>
+          {menu}
         </div>
       </div>
     </div>

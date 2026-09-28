@@ -97,6 +97,7 @@ mod paintsync;
 mod racemode;
 mod ranked;
 mod reshade;
+mod savedservers;
 mod serverbook;
 mod serverfilter;
 mod serverqueue;
@@ -5675,15 +5676,7 @@ async fn register_server_address(app: tauri::AppHandle, address: String) -> Resu
 /// somebody reads the row. `GETINFO` costs one datagram and no account, so the panel asks.
 #[tauri::command]
 async fn probe_server(address: String) -> Result<WorldServer, String> {
-    #[cfg(worldnet)]
-    {
-        worldnet::probe_server(address).await
-    }
-    #[cfg(not(worldnet))]
-    {
-        let _ = address;
-        Err("The server browser isn't included in this build.".into())
-    }
+    serverwatch::probe(address).await
 }
 
 /// Is MX Bikes running? Polled by the sidebar so Play can show the live state.
@@ -8612,6 +8605,12 @@ fn main() {
             reset_server_browser,
             register_server_address,
             probe_server,
+            savedservers::saved_servers,
+            savedservers::add_saved_server,
+            savedservers::edit_saved_server,
+            savedservers::remove_saved_server,
+            savedservers::reorder_saved_servers,
+            savedservers::probe_saved_servers,
             server_riders,
             servers_with_paint_sync,
             guess_server_track,

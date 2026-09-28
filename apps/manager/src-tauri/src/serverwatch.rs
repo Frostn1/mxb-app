@@ -159,6 +159,22 @@ pub async fn master_list(app: AppHandle) -> Result<(Vec<WorldServer>, MasterOutc
     }
 }
 
+/// Ask one server about itself with `GETINFO`: one datagram, no account, no master.
+///
+/// The detail pane's live answer and the Saved row's status for a server the sweep doesn't
+/// carry. Local-only like [`master_list`], and the same plain error without it.
+pub async fn probe(address: String) -> Result<WorldServer, String> {
+    #[cfg(worldnet)]
+    {
+        crate::worldnet::probe_server(address).await
+    }
+    #[cfg(not(worldnet))]
+    {
+        let _ = address;
+        Err("The server browser isn't included in this build.".into())
+    }
+}
+
 /// What the tab asks for: the last list when it is still true, and a fresh one otherwise.
 pub async fn list(app: AppHandle) -> Result<CachedServers, String> {
     if let Some(list) = warm() {
