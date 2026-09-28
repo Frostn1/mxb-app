@@ -32,6 +32,18 @@ pub struct Server {
     /// file, with no SSH. Host, user and key are ignored.
     #[serde(default)]
     pub local: bool,
+    /// For a server on this PC: how it is started, so the app can check a config with the same
+    /// binary and restart it after a change. Written by `server-manager-local.ps1`.
+    #[serde(default)]
+    pub local_command: Option<LocalCommand>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalCommand {
+    pub exe: String,
+    pub args: Vec<String>,
+    pub cwd: String,
 }
 
 fn default_ssh_port() -> u16 {
@@ -211,6 +223,7 @@ mod tests {
             admin_port: Some(9810),
             log_path: default_log_path(),
             local: false,
+            local_command: None,
         }
     }
 

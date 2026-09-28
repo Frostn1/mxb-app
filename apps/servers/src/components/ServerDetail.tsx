@@ -3,9 +3,10 @@ import { RefreshCw } from "lucide-react";
 import { serverLogs, serverRiders, serverStatus, type ServerView } from "@/lib/api";
 import { duration, lapTime, sessionName } from "@/lib/format";
 import { usePoll } from "@/lib/usePoll";
+import { ConfigTab } from "./ConfigTab";
 import { Button, Card, ErrorLine, HealthBadge, Stat, type Health } from "./ui";
 
-type Tab = "status" | "riders" | "logs";
+type Tab = "status" | "riders" | "logs" | "config";
 
 export function ServerDetail({
   server,
@@ -47,7 +48,7 @@ export function ServerDetail({
       </header>
 
       <nav className="flex gap-1 border-b" role="tablist">
-        {(["status", "riders", "logs"] as Tab[]).map((t) => (
+        {(["status", "riders", "logs", "config"] as Tab[]).map((t) => (
           <button
             key={t}
             role="tab"
@@ -66,6 +67,7 @@ export function ServerDetail({
         {tab === "status" && <StatusTab poll={status} />}
         {tab === "riders" && <RidersTab server={server} />}
         {tab === "logs" && <LogsTab server={server} />}
+        {tab === "config" && <ConfigTab server={server} />}
       </div>
     </div>
   );

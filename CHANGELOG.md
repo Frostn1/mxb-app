@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Added
+- **MXB Servers: Config tab.** Edit a server's ghost bots (count, skill, racing, lateral spread, bikes, laps, library and harvest), `[events] collisions` and the `[native]` switches as typed fields. The app shows the diff and checks the file with the server's own binary, then backs it up, applies it and restarts. If the server isn't ready afterwards, the backup goes back. Comments and everything else in the file are kept. It works over SSH for a systemd install or today's hand-started Lightsail process, and on this PC.
 - Settings → Paint sync names the riders on your server who aren't sharing paints ("Not sharing paints: CaptiveDuck"): they need MXB App 0.19 or newer with paint sync on, and until then you see each other in stock paints.
 - **MXB Servers (`apps/servers`), P1 of the mxbserver manager:** one window for every mxbserver with its health, session, time left, riders, build and uptime, plus a live log tail. It reaches each server over SSH, forwarding the loopback-only observe and admin ports, so nothing new faces the internet. Admin tokens live in the OS keychain. It is not released yet; run it with `bun run tauri:servers dev`.
 - `packages/mxbsecure-ui`: the mxbsecure design tokens (colours, radius, Geist Mono, dark mode) copied from mxbsecure-web, plus the wordmark and a theme hook, for apps that wear the mxbsecure brand.

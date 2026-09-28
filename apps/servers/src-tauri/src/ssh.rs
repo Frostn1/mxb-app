@@ -308,6 +308,108 @@ impl Tunnels {
     }
 }
 
+/// What a remote script printed.
+pub struct ScriptOutput {
+    pub success: bool,
+    pub stdout: String,
+    pub stderr: String,
+}
+
+impl ScriptOutput {
+    /// The value of the first `@@key value` line.
+    pub fn field(&self, key: &str) -> Option<&str> {
+        let prefix = format!("@@{key} ");
+        self.stdout
+            .lines()
+            .find_map(|l| l.strip_prefix(&prefix))
+            .map(str::trim)
+    }
+
+    /// Everything that is not an `@@` line: what a person should see.
+    pub fn text(&self) -> String {
+        let out: Vec<&str> = self.stdout.lines().filter(|l| !l.starts_with("@@")).collect();
+        let mut text = out.join("\n");
+        if !self.stderr.trim().is_empty() {
+            if !text.is_empty() {
+                text.push('\n');
+            }
+            text.push_str(self.stderr.trim());
+        }
+        text
+    }
+}
+
+/// A word that is safe on a remote command line without quoting.
+fn plain_word(word: &str) -> bool {
+    !word.is_empty()
+        && word
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '/' | '=' | '-' | '_' | '.'))
+}
+
+impl Tunnels {
+    /// Run `script` on the server with bash, fed on stdin, as `bash -s -- <args>`. Every
+    /// argument must be a plain word (base64, hex, digits, command names). Blocking.
+    pub fn run_script(
+        &self,
+        server: &Server,
+        script: &str,
+        args: &[&str],
+        secs: u64,
+    ) -> Result<ScriptOutput, String> {
+        if let Some(bad) = args.iter().find(|a| !plain_word(a)) {
+            return Err(format!("refusing to send '{bad}' to the server"));
+        }
+        let mut ssh_args = base_args(server);
+        ssh_args.push("--".into());
+        ssh_args.push(destination(server));
+        ssh_args.push(format!("bash -s -- {}", args.join(" ")));
+        let mut cmd = command();
+        cmd.args(ssh_args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        let (id, child) = self.registry.spawn(cmd)?;
+        let (stdin, out, err) = match child.lock() {
+            Ok(mut c) => (c.stdin.take(), c.stdout.take(), c.stderr.take()),
+            Err(_) => (None, None, None),
+        };
+        // bash on the server reads a CR as part of each word; a CRLF checkout must not reach it.
+        let script = script.replace('\r', "");
+        let feed = std::thread::spawn(move || {
+            use std::io::Write;
+            if let Some(mut stdin) = stdin {
+                let _ = stdin.write_all(script.as_bytes());
+            }
+        });
+        let out = std::thread::spawn(move || read_all(out));
+        let err = std::thread::spawn(move || read_all(err));
+        let deadline = Instant::now() + Duration::from_secs(secs);
+        let status = loop {
+            let done = child
+                .lock()
+                .ok()
+                .and_then(|mut c| c.try_wait().ok().flatten());
+            if done.is_some() || Instant::now() > deadline {
+                break done;
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        };
+        self.registry.kill(id);
+        let _ = feed.join();
+        let stdout = String::from_utf8_lossy(&out.join().unwrap_or_default()).into_owned();
+        let stderr = String::from_utf8_lossy(&err.join().unwrap_or_default()).into_owned();
+        match status {
+            None => Err(format!("{} did not answer within {secs} s", server.host)),
+            Some(status) => Ok(ScriptOutput {
+                success: status.success(),
+                stdout,
+                stderr,
+            }),
+        }
+    }
+}
+
 fn read_all(pipe: Option<impl Read>) -> Vec<u8> {
     let mut buf = Vec::new();
     if let Some(mut pipe) = pipe {
@@ -332,6 +434,7 @@ mod tests {
             admin_port: None,
             log_path: "/opt/mxbserver/logs/mxbserver.log".into(),
             local: false,
+            local_command: None,
         }
     }
 
