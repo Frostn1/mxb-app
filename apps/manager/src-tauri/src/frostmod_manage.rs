@@ -948,10 +948,20 @@ fn known_game_dirs(cfg: &crate::config::AppConfig) -> Vec<PathBuf> {
 /// copied over our `.dlo` by the injector-era refresh, and load as a full plugin that ignores
 /// `frostmod.dir`, next to the injector it has just gone back to.
 ///
+/// Also used with `keep_active` to clear every game *but* the active one: FrostMod's folder
+/// describes one title at a time, so the plugin lives in one game at a time.
+///
 /// Returns what became of the one in `active`.
-fn remove_our_plugins(cfg: &crate::config::AppConfig, active: Option<&Path>) -> PluginCopy {
+fn remove_our_plugins(
+    cfg: &crate::config::AppConfig,
+    active: Option<&Path>,
+    keep_active: bool,
+) -> PluginCopy {
     let mut result = PluginCopy::Absent;
     for dir in known_game_dirs(cfg) {
+        if keep_active && active == Some(dir.as_path()) {
+            continue;
+        }
         if !dir_pointer_path(&dir).exists() {
             continue;
         }
@@ -967,7 +977,7 @@ fn remove_our_plugins(cfg: &crate::config::AppConfig, active: Option<&Path>) -> 
 /// when there is nothing to undo — one `exists` per known game folder.
 fn leave_plugin_mode(cfg: &crate::config::AppConfig) {
     crate::frostmod::set_plugin_mode(None);
-    let _ = remove_our_plugins(cfg, None);
+    let _ = remove_our_plugins(cfg, None, false);
 }
 
 /// What a plugin-only sync found and did, for the status report.
@@ -1024,16 +1034,17 @@ fn sync_plugin_files(
 /// Only for a FrostMod at [`crate::frostmod::PLUGIN_ONLY_MIN_VERSION`] or newer — callers
 /// check. Idempotent, so every caller can just call it.
 pub fn sync_plugin(app: &AppHandle, cfg: &crate::config::AppConfig) -> PluginSync {
-    let Some(game_dir) = game_dir_of(cfg) else {
-        crate::frostmod::set_plugin_mode(None);
-        return PluginSync::default();
-    };
-    let game_running = crate::gameproc::is_game_running();
+    let game_dir = game_dir_of(cfg);
 
     if !cfg.auto_run_frostmod || !is_installed(app) {
         crate::frostmod::set_plugin_mode(None);
+        // Every known game, even with the active one's folder unknown: the switch is off
+        // for all of them.
+        let ours = remove_our_plugins(cfg, game_dir.as_deref(), false);
+        let Some(game_dir) = game_dir else {
+            return PluginSync::default();
+        };
         let session_plugin = remove_session_plugin(&game_dir);
-        let ours = remove_our_plugins(cfg, Some(&game_dir));
         let game_plugin = if ours != PluginCopy::Absent {
             ours
         } else if game_plugin_path(&game_dir).exists() {
@@ -1043,6 +1054,17 @@ pub fn sync_plugin(app: &AppHandle, cfg: &crate::config::AppConfig) -> PluginSyn
         };
         return PluginSync { game_plugin, session_plugin };
     }
+
+    let Some(game_dir) = game_dir else {
+        crate::frostmod::set_plugin_mode(None);
+        return PluginSync::default();
+    };
+    let game_running = crate::gameproc::is_game_running();
+
+    // One game at a time, as the injector was: FrostMod's folder — `frostmod_mods.txt`, the
+    // flags — describes the active title, and a plugin left in another game would read the
+    // wrong mods tree the next time that game was launched from Steam.
+    let _ = remove_our_plugins(cfg, Some(&game_dir), true);
 
     crate::frostmod::set_plugin_mode(Some(game_plugin_path(&game_dir)));
     let dir = frostmod_dir(app);
@@ -2514,13 +2536,23 @@ mod plugin_only_tests {
             );
         }
 
-        assert_eq!(remove_our_plugins(&cfg, Some(&mxb)), PluginCopy::Absent);
+        assert_eq!(remove_our_plugins(&cfg, Some(&mxb), false), PluginCopy::Absent);
         assert!(!game_plugin_path(&mxb).exists() && !dir_pointer_path(&mxb).exists());
         assert!(
             !game_plugin_path(&gpb).exists() && !dir_pointer_path(&gpb).exists(),
             "the game that wasn't active is cleaned too"
         );
         assert_eq!(std::fs::read(game_plugin_path(&hand)).unwrap(), b"hand-installed");
+
+        // With integration on, only the active game keeps it: FrostMod's folder describes
+        // one title, and the other would read the wrong mods tree.
+        for game in [&mxb, &gpb] {
+            std::fs::write(game_plugin_path(game), b"ours").unwrap();
+            std::fs::write(dir_pointer_path(game), b"C:\\x").unwrap();
+        }
+        let _ = remove_our_plugins(&cfg, Some(&mxb), true);
+        assert!(game_plugin_path(&mxb).exists(), "the active game keeps its plugin");
+        assert!(!game_plugin_path(&gpb).exists(), "the other game's goes");
     }
 
     /// A plugin-only release is installed as the dll alone: a quarantined or missing

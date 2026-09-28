@@ -12,9 +12,11 @@
   `frostmod_mods.txt`, the flag files and the server filter are still written to the FrostMod
   folder, and the flags box turns into the same files `frostmod.exe` used to write.
   FrostMod shows as running while the game is open with the plugin in it, and Start and Stop
-  are hidden. Turning Game Integration off removes the plugin and `frostmod.dir`. A
-  `frostmod.exe` still running from before is stopped. Older FrostMod builds work exactly as
-  before.
+  are hidden. The plugin is installed only in the active game, as the injector only served
+  the active game. Turning Game Integration off removes the plugin and `frostmod.dir` from
+  every game folder the app knows. `frostmod.exe` is no longer downloaded, and a copy still
+  running from before is stopped and deleted. Going back to an older FrostMod removes the
+  plugin. Older FrostMod builds work exactly as before.
 - **MXB Servers, clearer:** one status per server (Online · N riders, Starting…, Offline, Unreachable (SSH)) with the detail on hover. Edit and Remove are in a ⋯ menu. The Settings page is grouped by topic, with plain labels, toggles, sliders and the defaults spelled out; advanced switches are collapsed, and session lengths and player slots are new. The admin token shows as "saved" with Replace and Remove, is tested as soon as it is saved, and a helper explains what it's for. The app now uses the mxbsecure "m" icon.
 - **MXB Servers: Config tab.** Edit a server's ghost bots (count, skill, racing, lateral spread, bikes, laps, library and harvest), `[events] collisions` and the `[native]` switches as typed fields. The app shows the diff and checks the file with the server's own binary, then backs it up, applies it and restarts. If the server isn't ready afterwards, the backup goes back. Comments and everything else in the file are kept. It works over SSH for a systemd install or today's hand-started Lightsail process, and on this PC.
 - Settings → Paint sync names the riders on your server who aren't sharing paints ("Not sharing paints: CaptiveDuck"): they need MXB App 0.19 or newer with paint sync on, and until then you see each other in stock paints.
