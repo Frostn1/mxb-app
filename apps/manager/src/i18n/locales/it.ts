@@ -1210,6 +1210,9 @@ export const it: Translation = {
   "serverBrowser.region.asia": "Asia",
   "serverBrowser.region.other": "Altro",
 
+  "sync.notSharing": "Non condividono le livree: {{names}}",
+  "sync.notSharingWhy":
+    "Vi vedete a vicenda con livree di serie finché non usano MXB App 0.19 o successiva con la sincronizzazione livree attiva.",
   "sync.autoNote":
     "Il tuo look si pubblica da solo — ogni moto, ogni volta che lo cambi nell'app o nel garage del gioco. Quello degli altri arriva quando premi Gioca.",
 

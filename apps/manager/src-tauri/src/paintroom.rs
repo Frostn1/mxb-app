@@ -55,6 +55,41 @@ const INDEX_REFRESH_EVERY: Duration = Duration::from_secs(60);
 /// will cover it. A control plane that answered 404 once will not grow the route mid-session.
 static ROOMS: AtomicU8 = AtomicU8::new(0);
 
+/// Who is in the room right now, by rider name, folded. `None` while not in one. Read by the
+/// Settings panel to name the riders on the grid who aren't sharing paints.
+static ROOM_RIDERS: std::sync::Mutex<Option<Vec<String>>> = std::sync::Mutex::new(None);
+
+fn fold_rider(name: &str) -> String {
+    name.trim().to_lowercase()
+}
+
+fn set_room_riders(names: Option<Vec<String>>) {
+    *ROOM_RIDERS.lock().unwrap_or_else(|e| e.into_inner()) = names;
+}
+
+/// The riders in the paint-sync room, folded; `None` when the app isn't in one.
+pub fn room_rider_names() -> Option<Vec<String>> {
+    ROOM_RIDERS.lock().unwrap_or_else(|e| e.into_inner()).clone()
+}
+
+/// The riders on the game's own grid who aren't in the paint-sync room: they can't see this
+/// player's paints and nobody here receives theirs. `me` and blank names are never listed.
+///
+/// Matched by rider name, folded, which is the one identity both sides carry: the grid from
+/// FrostMod's session block, the room from each account's rider name.
+pub fn not_sharing(grid: &[String], me: &str, room: &[String]) -> Vec<String> {
+    let me = fold_rider(me);
+    let mut out: Vec<String> = Vec::new();
+    for name in grid {
+        let f = fold_rider(name);
+        if f.is_empty() || f == me || room.contains(&f) || out.iter().any(|o| fold_rider(o) == f) {
+            continue;
+        }
+        out.push(name.trim().to_string());
+    }
+    out
+}
+
 /// The control plane answered a join with 404, so this run of the app syncs by roster.
 pub fn rooms_unavailable() -> bool {
     ROOMS.load(Ordering::SeqCst) == 2
@@ -1356,6 +1391,7 @@ impl Session {
     async fn reconcile(&mut self, app: &tauri::AppHandle, cfg: &AppConfig, token: &str, arrived: bool) {
         let now = crate::now_ms();
         let grid = std::mem::take(&mut self.grid);
+        set_room_riders(Some(grid.riders().map(|r| fold_rider(&r.rider_name)).collect()));
         let riders: Vec<&RoomRider> = grid.riders().collect();
         let outcome = match self.local(app) {
             Some(local) => Some(sync_grid(cfg, token, local, &riders, now).await),
@@ -1392,6 +1428,7 @@ impl Session {
 
     async fn leave_current(&mut self, token: &str) {
         let Some(cur) = self.current.take() else { return };
+        set_room_riders(None);
         // Dropping the room closes its socket.
         drop(cur.room);
         self.grid.clear();
@@ -1728,6 +1765,15 @@ mod tests {
         assert!(parse_event(r#"{"t":"pong"}"#).is_none());
         assert!(parse_event(r#"{"t":"something-new"}"#).is_none());
         assert!(parse_event("not json").is_none());
+    }
+
+    /// Everyone on the grid but me and the room's riders, once each, by folded name.
+    #[test]
+    fn the_grid_riders_outside_the_room_are_named() {
+        let grid = vec!["Frost".to_string(), "CaptiveDuck".into(), "  soggy ".into(), "".into(), "captiveduck".into()];
+        let room = vec!["soggy".to_string()];
+        assert_eq!(not_sharing(&grid, "frost", &room), vec!["CaptiveDuck".to_string()]);
+        assert!(not_sharing(&grid, "Frost", &["captiveduck".into(), "soggy".into()]).is_empty());
     }
 
     #[test]

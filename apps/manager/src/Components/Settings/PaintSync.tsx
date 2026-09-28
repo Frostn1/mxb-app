@@ -4,6 +4,7 @@ import { cn } from "@frost/shared/lib/utils";
 import {
   experimentalState,
   onSyncEvent,
+  paintSyncNotSharing,
   type ExperimentalState,
   type SyncEvent,
 } from "@frost/shared/api/mods";
@@ -94,6 +95,19 @@ export const PaintSync = () => {
       .catch(() => {});
   }, []);
   useEffect(refresh, [refresh]);
+
+  // Riders on the grid who aren't sharing paints. Asked while the panel is open; the answer
+  // only exists while the game is on a server and the app is in its paint-sync room.
+  const [notSharing, setNotSharing] = useState<string[]>([]);
+  useEffect(() => {
+    const ask = () =>
+      paintSyncNotSharing()
+        .then(setNotSharing)
+        .catch(() => {});
+    ask();
+    const id = window.setInterval(ask, 15_000);
+    return () => window.clearInterval(id);
+  }, []);
 
   // Follow the background work. Publishing happens off a preset apply, a launch, or the game
   // rewriting profile.ini; syncing happens when the game starts. None of it is anything the
@@ -207,6 +221,14 @@ export const PaintSync = () => {
                 </span>
               </div>
             </div>
+          )}
+
+          {notSharing.length > 0 && (
+            <StatusRow
+              tone="info"
+              title={t("sync.notSharing", { names: notSharing.join(", ") })}
+              detail={t("sync.notSharingWhy")}
+            />
           )}
 
           <p className="mt-3 text-[11.5px] text-muted-foreground">

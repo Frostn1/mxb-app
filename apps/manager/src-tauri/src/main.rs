@@ -3425,6 +3425,19 @@ fn live_session() -> Option<voice::gamesession::GameSession> {
     GAME.get_or_init(voice::gamesession::Reader::default).read()
 }
 
+/// Riders on this server's grid who aren't sharing paints, for the Settings panel. Empty when
+/// the app isn't in a paint-sync room or the game isn't on a server.
+#[tauri::command]
+fn paint_sync_not_sharing() -> Vec<String> {
+    let Some(room) = paintroom::room_rider_names() else { return Vec::new() };
+    let Some(session) = live_session() else { return Vec::new() };
+    if !session.on_a_server() {
+        return Vec::new();
+    }
+    let grid: Vec<String> = session.riders.iter().map(|r| r.name.clone()).collect();
+    paintroom::not_sharing(&grid, &session.rider_name, &room)
+}
+
 /// What the running game says this player is called, for [`identity::claim_from_game`].
 ///
 /// `None` when there is no session to read — no FrostMod, or one that has not reached
@@ -8420,6 +8433,7 @@ fn main() {
             list_games,
             get_config,
             experimental_state,
+            paint_sync_not_sharing,
             bike_preview_available,
             set_guid,
             scan_library,

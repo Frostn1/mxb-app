@@ -3443,6 +3443,12 @@ export function onSyncEvent(cb: (event: SyncEvent) => void): Promise<UnlistenFn>
   return listen<SyncEvent>("paint-sync", (e) => cb(e.payload));
 }
 
+/** Riders on this server's grid who aren't sharing paints (not on paint sync, or on an app
+ *  too old for it). Empty when not on a server or not in a paint-sync room. */
+export function paintSyncNotSharing(): Promise<string[]> {
+  return invoke<string[]>("paint_sync_not_sharing");
+}
+
 export function experimentalState(): Promise<ExperimentalState> {
   return invoke<ExperimentalState>("experimental_state");
 }
