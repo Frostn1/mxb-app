@@ -5,7 +5,7 @@
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { hashToken } from "../src/auth";
-import { LIVE_REFRESH_MS, LIVE_TTL_MS, foldName, normalizeAddress, parseServerHint, pruneLivePaints } from "../src/paintsync";
+import { LIVE_REFRESH_MS, LIVE_TTL_MS, bridgeKeys, foldName, normalizeAddress, parseServerHint, pruneLivePaints } from "../src/paintsync";
 import { d1 } from "./d1sqlite";
 
 vi.mock("cloudflare:workers", () => ({ DurableObject: class {} }));
@@ -185,6 +185,31 @@ describe("paint sync v2", () => {
     // The rows go with it, so an older app's roster never names a hash that 404s.
     const rows = await env.DB.prepare("SELECT COUNT(*) AS n FROM loadout_paints WHERE sha256 = ?").bind(hash).first<{ n: number }>();
     expect(rows?.n).toBe(0);
+  });
+
+  it("bridges stable apps (bare host:port) and paint sync v2 (addr:) on one server", async () => {
+    const { env } = await deployment();
+    // Bob is on a stable app: v1 reports presence by the bare address, with his look.
+    await call(env, "PUT", "/v1/loadouts", "acc_b", { bikes: look("Blue.pnt", "b".repeat(64)) });
+    await call(env, "PUT", "/v1/presence", "acc_b", { serverId: "203.0.113.5:54210" });
+    // Alice joins through v2 and sees him.
+    const a = (await (await call(env, "POST", "/v1/paintsync/join", "acc_a", {
+      server: { address: "203.0.113.5:54210" },
+      bikes: look("Red.pnt", "a".repeat(64)),
+    })).json()) as JoinAnswer;
+    expect(a.riders.map((r) => r.riderName)).toEqual(["Bob"]);
+    // And Bob's v1 roster, asked by the bare address, sees Alice.
+    const roster = (await (await call(env, "GET", "/v1/roster?server=203.0.113.5:54210", "acc_b")).json()) as {
+      riders: { riderName: string }[];
+    };
+    expect(roster.riders.map((r) => r.riderName)).toContain("Alice");
+  });
+
+  it("maps every key form of one server together, and nothing else", () => {
+    expect(bridgeKeys("addr:203.0.113.5:54210").sort()).toEqual(["203.0.113.5:54210", "addr:203.0.113.5:54210"]);
+    expect(bridgeKeys("203.0.113.5:54210").sort()).toEqual(["203.0.113.5:54210", "addr:203.0.113.5:54210"]);
+    expect(bridgeKeys("name:frost eu")).toEqual(["name:frost eu"]);
+    expect(bridgeKeys("srv_1")).toEqual(["srv_1"]);
   });
 
   it("only takes a server it can name", () => {

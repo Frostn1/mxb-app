@@ -5,6 +5,9 @@
 ### Changed
 - **Auto race mode moves nothing with FrostMod v0.40.0 or newer.** It hands FrostMod a list of the tracks and bikes that stay (`frostmod_racemode.txt`), and FrostMod hides the rest from the game's own scan, so their archives are never opened. Ending the session just deletes the list. With an older FrostMod it still moves the unused mods aside as before.
 
+### Fixed
+- **Stable and beta paint sync now see each other.** The stable app records a server as `host:port` and 0.19 records it as `addr:host:port`, so riders on the two never exchanged paints on the same server. The control plane now treats both as one server, in both directions, with no app update needed.
+
 ## 2026-09-27 — v0.19.1 — Auto race mode, gear refresh and beta updates that find the next beta
 
 ### Added

@@ -93,6 +93,22 @@ export async function resolveServer(hint: ServerHint, env: Env, now = Date.now()
   return seen ? `addr:${seen.address}` : `name:${nameKey}`;
 }
 
+/**
+ * Every presence key the same server can be recorded under.
+ *
+ * Paint sync v2 keys a server `addr:<host:port>`; the v1 flow in shipped stable apps keys the
+ * same server by its bare `host:port`. Without this the two never see each other on one
+ * server, even with both switched on. A key that is neither form (a registry id, a folded
+ * name) is only itself.
+ */
+export function bridgeKeys(key: string): string[] {
+  const k = key.trim();
+  const bare = k.startsWith("addr:") ? k.slice("addr:".length) : k;
+  const addr = normalizeAddress(bare);
+  if (!addr) return [k];
+  return [...new Set([k, bare, addr, `addr:${addr}`])];
+}
+
 export interface RiderPaint {
   slot: string;
   fileName: string;
@@ -122,16 +138,17 @@ export async function ridersOn(
   isRelDest: (v: unknown) => boolean,
   now = Date.now(),
 ): Promise<RiderView[]> {
+  const keys = bridgeKeys(serverKey);
   const rows = await env.DB.prepare(
     "SELECT a.id AS account_id, a.rider_name, a.guid, COALESCE(pr.joined_at, pr.updated_at) AS joined_at," +
       " MIN(p.slot) AS slot, p.file_name, p.sha256, p.size, p.rel_dest" +
       " FROM presence pr" +
       " JOIN accounts a ON a.id = pr.account_id" +
       " LEFT JOIN loadout_paints p ON p.account_id = a.id" +
-      " WHERE pr.server_id = ? AND pr.updated_at > ?" +
+      ` WHERE pr.server_id IN (${keys.map(() => "?").join(", ")}) AND pr.updated_at > ?` +
       " GROUP BY a.id, p.rel_dest, p.sha256",
   )
-    .bind(serverKey, now - presenceTtlMs)
+    .bind(...keys, now - presenceTtlMs)
     .all<{
       account_id: string;
       rider_name: string;

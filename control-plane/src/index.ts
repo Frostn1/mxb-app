@@ -94,6 +94,7 @@ import {
   parseServerHint,
   pruneLivePaints,
   publicRider,
+  bridgeKeys,
   resolveServer,
   ridersOn,
 } from "./paintsync";
@@ -2583,15 +2584,17 @@ async function roster(url: URL, account: Account, env: Env): Promise<Response> {
   //
   // MIN(slot) only picks a stable representative for a destination two slots agree on; the
   // client keys on rel_dest, not on slot.
+  // Paint sync v2 riders are present under `addr:<host:port>`; see `bridgeKeys`.
+  const keys = bridgeKeys(serverId);
   const rows = await env.DB.prepare(
     "SELECT a.rider_name, a.guid, MIN(p.slot) AS slot, p.file_name, p.sha256, p.size, p.rel_dest" +
       " FROM accounts a" +
       " JOIN presence pr ON pr.account_id = a.id" +
       " JOIN loadout_paints p ON p.account_id = a.id" +
-      " WHERE pr.server_id = ? AND pr.updated_at > ?" +
+      ` WHERE pr.server_id IN (${keys.map(() => "?").join(", ")}) AND pr.updated_at > ?` +
       " GROUP BY a.id, p.rel_dest, p.sha256",
   )
-    .bind(serverId, Date.now() - PRESENCE_TTL_MS)
+    .bind(...keys, Date.now() - PRESENCE_TTL_MS)
     .all<{
       rider_name: string;
       guid: string | null;
