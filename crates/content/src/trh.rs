@@ -342,15 +342,24 @@ fn centreline_pose_in_profile(records: &[u8], distance: f32) -> Result<Centrelin
             position.iter().all(|value| value.is_finite()),
             "D record {index} has invalid position"
         );
-        // To the next record's stated start, or level on the last one.
+        // To the next record's stated start; the last segment closes the lap onto the first.
+        let start_of =
+            |record: &[u8]| f32::from_le_bytes(record[16..20].try_into().expect("four-byte slice"));
         let next_elevation = records
             .chunks_exact(60)
             .nth(index + 1)
-            .map(|next| f32::from_le_bytes(next[16..20].try_into().expect("four-byte slice")))
+            .or_else(|| records.chunks_exact(60).next())
+            .map(start_of)
             .filter(|value| value.is_finite())
             .unwrap_or(elevation);
         let elevation = if elevation.is_finite() {
-            elevation + (next_elevation - elevation) * (along / length)
+            let (e0, e1) = (f64::from(elevation), f64::from(next_elevation));
+            let value = (e0 + (e1 - e0) * f64::from(along / length)) as f32;
+            if value.is_finite() {
+                value
+            } else {
+                elevation
+            }
         } else {
             0.0
         };
@@ -786,7 +795,7 @@ mod tests {
     }
 
     /// The pose carries the centreline's stated ground height, linear along a segment to the
-    /// next one's start, and level along the last.
+    /// next one's start, and along the last back to the first's (the lap closes).
     #[test]
     fn centreline_pose_interpolates_the_stated_elevation() {
         let mut profile = profile_record_at(0, 10.0, 0.0, 0.0, 2.0);
@@ -794,7 +803,9 @@ mod tests {
         let at = |d: f32| centreline_pose_in_profile(&profile, d).unwrap().elevation;
         assert!((at(0.0) - 2.0).abs() < 1e-5);
         assert!((at(5.0) - 4.0).abs() < 1e-5);
-        assert!((at(15.0) - 6.0).abs() < 1e-5);
+        // The last segment closes the lap back onto the first record's height.
+        assert!((at(15.0) - 4.0).abs() < 1e-5);
+        assert!((at(20.0) - 2.0).abs() < 1e-5);
     }
 
     fn trh(width: u32, height: u32, samples: usize) -> Vec<u8> {
