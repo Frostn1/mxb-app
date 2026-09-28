@@ -1,0 +1,3 @@
+@import "tailwindcss";
+/* The mxbsecure design system: tokens, fonts, dark mode (packages/mxbsecure-ui). */
+@import "@frost/mxbsecure-ui/theme.css";

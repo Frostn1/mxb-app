@@ -16,6 +16,7 @@ members = [
     "apps/manager/src-tauri",
     "apps/studio/src-tauri",
     "apps/coach/src-tauri",
+    "apps/servers/src-tauri",
 ]
 exclude = ["server-agent", ".sidecar-src"]
 
