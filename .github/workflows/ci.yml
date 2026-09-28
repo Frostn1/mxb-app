@@ -60,6 +60,19 @@ jobs:
       - name: Command census
         run: bash scripts/command-census.sh
 
+  # MXB Servers' config editing runs remote.sh on the server over SSH. This runs it for real
+  # against a bare-process layout like Lightsail's today, with a stub standing in for mxbserver.
+  servers-remote:
+    name: MXB Servers remote script
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Shellcheck
+        run: shellcheck apps/servers/src-tauri/src/remote.sh apps/servers/src-tauri/tests/remote/test.sh
+      - name: Apply, roll back and refuse against a stub server
+        run: bash apps/servers/src-tauri/tests/remote/test.sh
+
   rust:
     name: Rust (test) — ${{ matrix.platform }} — ${{ matrix.shard.name }}
     strategy:

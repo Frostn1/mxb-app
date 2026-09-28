@@ -23,6 +23,12 @@ getrandom = "0.3"
 # keyring, which forgets tokens at logout; a persistent Secret Service backend needs libdbus,
 # so it waits until Linux is a target (the bundle is Windows-only).
 keyring = { version = "3", features = ["apple-native", "windows-native", "linux-native"] }
+# Config editing: change typed fields in a server's TOML without losing its comments or
+# layout, show the change as a line diff, and move the candidate over SSH as one word.
+toml_edit = "0.22"
+similar = "2"
+base64 = "0.22"
+sha2 = "0.10"
 
 [features]
 custom-protocol = ["tauri/custom-protocol"]

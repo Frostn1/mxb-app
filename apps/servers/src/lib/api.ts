@@ -83,3 +83,51 @@ export const serverLogs = (id: string, lines: number) =>
 
 /** Tauri rejects with the command's error string. */
 export const errorText = (e: unknown) => (typeof e === "string" ? e : e instanceof Error ? e.message : String(e));
+
+// ---- Config editing ----------------------------------------------------------------------
+
+export type FieldKind =
+  | { type: "bool" }
+  | { type: "int"; min: number; max: number }
+  | { type: "float"; min: number; max: number }
+  | { type: "text" }
+  | { type: "choice"; options: string[] }
+  | { type: "racing" }
+  | { type: "bikes" };
+
+export interface ConfigField {
+  section: string;
+  key: string;
+  label: string;
+  help: string;
+  kind: FieldKind;
+}
+
+/** A field's value: null when unset in the file. */
+export type FieldValue = boolean | number | string | string[] | null;
+
+export interface ConfigState {
+  text: string;
+  sha: string;
+  path: string;
+  mode: "systemd" | "bare" | "local" | string;
+  values: Record<string, FieldValue>;
+  fields: ConfigField[];
+}
+
+export const configLoad = (id: string) => invoke<ConfigState>("config_load", { id });
+
+export const configPreview = (base: string, changes: Record<string, FieldValue>) =>
+  invoke<{ text: string; diff: string }>("config_preview", { base, changes });
+
+export const configValidate = (id: string, text: string) =>
+  invoke<{ ok: boolean; output: string }>("config_validate", { id, text });
+
+export interface ApplyResult {
+  result: "applied" | "rolled-back" | "failed" | string;
+  backup: string;
+  output: string;
+}
+
+export const configApply = (id: string, baseSha: string, text: string) =>
+  invoke<ApplyResult>("config_apply", { id, baseSha, text });

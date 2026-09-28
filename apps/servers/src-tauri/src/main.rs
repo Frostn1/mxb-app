@@ -8,6 +8,8 @@
 //! (when configured) gives `/v1/riders` with a bearer token from the OS keychain, and the log
 //! is read with `tail`. Nothing listens on the internet for this.
 
+mod config;
+mod local;
 mod ssh;
 mod store;
 
@@ -208,6 +210,157 @@ fn local_tail(path: &str, lines: u32) -> Result<Vec<String>, String> {
     Ok(all[from..].iter().map(|l| l.to_string()).collect())
 }
 
+
+// ---- Config editing -------------------------------------------------------------------------
+
+/// The server-side helper for config editing, sent over SSH on stdin each time.
+const REMOTE_SH: &str = include_str!("remote.sh");
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ConfigState {
+    text: String,
+    sha: String,
+    path: String,
+    /// "systemd", "bare" (a hand-started process) or "local" (this PC).
+    mode: String,
+    values: serde_json::Map<String, Value>,
+    fields: &'static [config::Field],
+}
+
+fn b64(text: &str) -> String {
+    use base64::Engine;
+    base64::engine::general_purpose::STANDARD.encode(text)
+}
+
+async fn blocking<T: Send + 'static>(
+    f: impl FnOnce() -> Result<T, String> + Send + 'static,
+) -> Result<T, String> {
+    tauri::async_runtime::spawn_blocking(f)
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn config_load(app: State<'_, App>, id: String) -> Result<ConfigState, String> {
+    let server = app.store.get(&id)?;
+    let (text, path, mode) = if server.local {
+        let (text, path) = blocking(move || local::read(&server)).await?;
+        (text, path.display().to_string(), "local".to_string())
+    } else {
+        let tunnels = Arc::clone(&app.tunnels);
+        let out = blocking(move || tunnels.run_script(&server, REMOTE_SH, &["read"], 30)).await?;
+        let detect_mode = out.field("mode").unwrap_or("").to_string();
+        let encoded = out
+            .field("config_b64")
+            .filter(|_| out.success)
+            .ok_or_else(|| format!("could not read the config: {}", out.text()))?;
+        use base64::Engine;
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(encoded)
+            .map_err(|e| e.to_string())?;
+        let text = String::from_utf8(bytes).map_err(|_| "the config is not UTF-8".to_string())?;
+        (text, out.field("config").unwrap_or("").to_string(), detect_mode)
+    };
+    let values = config::read(&text)?;
+    Ok(ConfigState {
+        sha: config::sha256(&text),
+        text,
+        path,
+        mode,
+        values,
+        fields: config::FIELDS,
+    })
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Preview {
+    text: String,
+    diff: String,
+}
+
+/// The file with `changes` applied, and the diff. Pure: nothing leaves this PC.
+#[tauri::command]
+fn config_preview(base: String, changes: serde_json::Map<String, Value>) -> Result<Preview, String> {
+    let text = config::apply(&base, &changes)?;
+    let diff = config::diff(&base, &text);
+    Ok(Preview { text, diff })
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Checked {
+    ok: bool,
+    output: String,
+}
+
+/// Run the candidate through the server's own parser: the server binary, once, for a second,
+/// on side ports, where the live config is.
+#[tauri::command]
+async fn config_validate(app: State<'_, App>, id: String, text: String) -> Result<Checked, String> {
+    let server = app.store.get(&id)?;
+    if server.local {
+        let (ok, output) = blocking(move || local::validate(&server, &text)).await?;
+        return Ok(Checked { ok, output });
+    }
+    let tunnels = Arc::clone(&app.tunnels);
+    let encoded = b64(&text);
+    let out = blocking(move || tunnels.run_script(&server, REMOTE_SH, &["validate", &encoded], 120)).await?;
+    Ok(Checked {
+        ok: out.field("valid") == Some("1"),
+        output: out.text(),
+    })
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ApplyResult {
+    /// "applied", "rolled-back" (not ready after the change; the backup is live again) or
+    /// "failed".
+    result: String,
+    backup: String,
+    output: String,
+}
+
+/// Back up the live config, replace it with `text` (only if the live one still hashes to
+/// `base_sha`), restart, and wait for `/readyz`; the backup goes back if it never comes.
+#[tauri::command]
+async fn config_apply(
+    app: State<'_, App>,
+    id: String,
+    base_sha: String,
+    text: String,
+) -> Result<ApplyResult, String> {
+    let server = app.store.get(&id)?;
+    if !base_sha.chars().all(|c| c.is_ascii_hexdigit()) || base_sha.len() != 64 {
+        return Err("bad config hash".into());
+    }
+    if server.local {
+        let done = blocking(move || local::apply(&server, &base_sha, &text)).await?;
+        return Ok(ApplyResult {
+            result: done.result.to_string(),
+            backup: done.backup,
+            output: done.output,
+        });
+    }
+    let tunnels = Arc::clone(&app.tunnels);
+    let encoded = b64(&text);
+    let port = server.observe_port.to_string();
+    let out = blocking(move || {
+        tunnels.run_script(&server, REMOTE_SH, &["apply", &encoded, &base_sha, &port], 300)
+    })
+    .await?;
+    match out.field("result") {
+        Some(result) => Ok(ApplyResult {
+            result: result.to_string(),
+            backup: out.field("backup").unwrap_or("").to_string(),
+            output: out.text(),
+        }),
+        None => Err(out.text()),
+    }
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_log::Builder::new().build())
@@ -232,6 +385,10 @@ fn main() {
             server_status,
             server_riders,
             server_logs,
+            config_load,
+            config_preview,
+            config_validate,
+            config_apply,
         ])
         .build(tauri::generate_context!())
         .expect("error while building MXB Servers")
