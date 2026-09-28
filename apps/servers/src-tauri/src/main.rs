@@ -162,7 +162,8 @@ async fn server_riders(app: State<'_, App>, id: String) -> Result<Value, String>
 #[tauri::command]
 async fn server_logs(app: State<'_, App>, id: String, lines: u32) -> Result<Vec<String>, String> {
     let server = app.store.get(&id)?;
-    tauri::async_runtime::spawn_blocking(move || ssh::tail(&server, lines))
+    let tunnels = Arc::clone(&app.tunnels);
+    tauri::async_runtime::spawn_blocking(move || tunnels.tail(&server, lines))
         .await
         .map_err(|e| e.to_string())?
 }
