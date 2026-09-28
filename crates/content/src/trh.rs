@@ -28,6 +28,10 @@ pub struct Beta21eTrhManifestChecks {
 pub struct CentrelinePose {
     pub position: [f32; 2],
     pub forward: [f32; 2],
+    /// Ground height the centreline states there, metres: each record's start elevation (its
+    /// fifth field), linear to the next record's along the segment. The builder's own number,
+    /// which pins a heightfield's vertical offset and axes against the centreline.
+    pub elevation: f32,
 }
 
 const MAGIC: &[u8; 4] = b"TRH\0";
@@ -278,6 +282,7 @@ fn centreline_pose_in_profile(records: &[u8], distance: f32) -> Result<Centrelin
         let flag = u32::from_le_bytes(record[0..4].try_into().expect("four-byte slice"));
         let length = scalar(4);
         let radius = scalar(8);
+        let elevation = scalar(16);
         let running = scalar(20);
         ensure!(flag <= 1, "D record {index} has invalid curve flag {flag}");
         ensure!(
@@ -337,7 +342,32 @@ fn centreline_pose_in_profile(records: &[u8], distance: f32) -> Result<Centrelin
             position.iter().all(|value| value.is_finite()),
             "D record {index} has invalid position"
         );
-        return Ok(CentrelinePose { position, forward });
+        // To the next record's stated start; the last segment closes the lap onto the first.
+        let start_of =
+            |record: &[u8]| f32::from_le_bytes(record[16..20].try_into().expect("four-byte slice"));
+        let next_elevation = records
+            .chunks_exact(60)
+            .nth(index + 1)
+            .or_else(|| records.chunks_exact(60).next())
+            .map(start_of)
+            .filter(|value| value.is_finite())
+            .unwrap_or(elevation);
+        let elevation = if elevation.is_finite() {
+            let (e0, e1) = (f64::from(elevation), f64::from(next_elevation));
+            let value = (e0 + (e1 - e0) * f64::from(along / length)) as f32;
+            if value.is_finite() {
+                value
+            } else {
+                elevation
+            }
+        } else {
+            0.0
+        };
+        return Ok(CentrelinePose {
+            position,
+            forward,
+            elevation,
+        });
     }
     bail!("main profile has no centreline records")
 }
@@ -720,10 +750,21 @@ mod tests {
     use super::*;
 
     fn profile_record(flag: u32, length: f32, radius: f32, running: f32) -> Vec<u8> {
+        profile_record_at(flag, length, radius, running, 0.0)
+    }
+
+    fn profile_record_at(
+        flag: u32,
+        length: f32,
+        radius: f32,
+        running: f32,
+        elevation: f32,
+    ) -> Vec<u8> {
         let mut record = vec![0; 60];
         record[0..4].copy_from_slice(&flag.to_le_bytes());
         record[4..8].copy_from_slice(&length.to_le_bytes());
         record[8..12].copy_from_slice(&radius.to_le_bytes());
+        record[16..20].copy_from_slice(&elevation.to_le_bytes());
         record[20..24].copy_from_slice(&running.to_le_bytes());
         for (index, value) in [1.0f32, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
             .into_iter()
@@ -751,6 +792,20 @@ mod tests {
         assert!(pose.forward[1].abs() < 0.001);
 
         assert!(centreline_pose_in_profile(&straight, 11.0).is_err());
+    }
+
+    /// The pose carries the centreline's stated ground height, linear along a segment to the
+    /// next one's start, and along the last back to the first's (the lap closes).
+    #[test]
+    fn centreline_pose_interpolates_the_stated_elevation() {
+        let mut profile = profile_record_at(0, 10.0, 0.0, 0.0, 2.0);
+        profile.extend(profile_record_at(0, 10.0, 0.0, 10.0, 6.0));
+        let at = |d: f32| centreline_pose_in_profile(&profile, d).unwrap().elevation;
+        assert!((at(0.0) - 2.0).abs() < 1e-5);
+        assert!((at(5.0) - 4.0).abs() < 1e-5);
+        // The last segment closes the lap back onto the first record's height.
+        assert!((at(15.0) - 4.0).abs() < 1e-5);
+        assert!((at(20.0) - 2.0).abs() < 1e-5);
     }
 
     fn trh(width: u32, height: u32, samples: usize) -> Vec<u8> {
