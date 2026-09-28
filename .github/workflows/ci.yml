@@ -71,9 +71,21 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
       - name: Shellcheck
-        run: shellcheck apps/servers/src-tauri/src/remote.sh apps/servers/src-tauri/tests/remote/test.sh
+        run: shellcheck apps/servers/src-tauri/src/remote.sh apps/servers/src-tauri/tests/remote/test.sh apps/servers/src-tauri/tests/remote/ssh.sh
+      # Output to a file, not the step's own pipes: run straight on them the test sometimes
+      # hangs after a restart (never under SSH, never with a file; see ssh.sh for the real path).
       - name: Apply, roll back and refuse against a stub server
-        run: bash apps/servers/src-tauri/tests/remote/test.sh
+        run: |
+          rc=0
+          bash apps/servers/src-tauri/tests/remote/test.sh > remote-test.log 2>&1 || rc=$?
+          cat remote-test.log
+          exit $rc
+      - name: The same over real SSH, as the app runs it
+        run: |
+          rc=0
+          bash apps/servers/src-tauri/tests/remote/ssh.sh > remote-ssh.log 2>&1 || rc=$?
+          cat remote-ssh.log
+          exit $rc
 
   rust:
     name: Rust (test) — ${{ matrix.platform }} — ${{ matrix.shard.name }}
