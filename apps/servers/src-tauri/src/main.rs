@@ -137,7 +137,23 @@ async fn get(
     fetch(app, server, remote, path, token).await.map_err(Miss::text)
 }
 
+/// `fetch_once`, and for a server over SSH one more try on a fresh tunnel: a request that fails
+/// on an old tunnel may just mean the SSH connection dropped, and only a new one can tell
+/// "SSH is down" from "the server isn't running".
 async fn fetch(
+    app: &App,
+    server: &Server,
+    remote: u16,
+    path: &str,
+    token: Option<&str>,
+) -> Result<(u16, String), Miss> {
+    match fetch_once(app, server, remote, path, token).await {
+        Err(Miss::NoAnswer(_)) if !server.local => fetch_once(app, server, remote, path, token).await,
+        other => other,
+    }
+}
+
+async fn fetch_once(
     app: &App,
     server: &Server,
     remote: u16,
@@ -203,10 +219,12 @@ async fn server_status(app: State<'_, App>, id: String) -> Result<StatusReport, 
         return Ok(report("offline", format!("/status answered HTTP {code}")));
     }
     let status: Value = serde_json::from_str(&body).map_err(|e| format!("/status: {e}"))?;
-    let ready = matches!(
-        fetch(&app, &server, server.observe_port, "/readyz", None).await,
-        Ok((200, _))
-    );
+    let ready = match fetch(&app, &server, server.observe_port, "/readyz", None).await {
+        Ok((200, _)) => true,
+        Ok(_) => false,
+        Err(Miss::Ssh(e)) => return Ok(report("unreachable", format!("SSH to {} failed: {e}", server.host))),
+        Err(Miss::NoAnswer(e)) => return Ok(report("offline", format!("the server stopped answering ({e})"))),
+    };
     let build = status["build_id"].as_str().unwrap_or("?").to_string();
     Ok(StatusReport {
         state: if ready { "online" } else { "starting" },

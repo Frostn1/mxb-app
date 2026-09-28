@@ -9,7 +9,8 @@ export function StatusBadge({ report, error }: { report: StatusReport | null; er
   let label = "Checking…";
   let color = "var(--muted-foreground)";
   let detail = "Waiting for the first answer";
-  if (error && !report) {
+  if (error) {
+    // The latest poll failed: never keep showing an older, happier answer.
     label = "Unreachable";
     color = "var(--destructive)";
     detail = error;
@@ -79,24 +80,40 @@ export interface MenuItem {
 export function OverflowMenu({ items, label = "More actions" }: { items: MenuItem[]; label?: string }) {
   const [open, setOpen] = useState(false);
   const box = useRef<HTMLDivElement>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
+  const list = useRef<HTMLDivElement>(null);
+  const shut = (refocus: boolean) => {
+    setOpen(false);
+    if (refocus) trigger.current?.focus();
+  };
   useEffect(() => {
     if (!open) return;
+    // Keyboard users land on the first item.
+    list.current?.querySelector<HTMLButtonElement>("[role=menuitem]")?.focus();
     const close = (e: MouseEvent) => {
       if (!box.current?.contains(e.target as Node)) setOpen(false);
     };
-    const esc = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
-    };
     document.addEventListener("mousedown", close);
-    document.addEventListener("keydown", esc);
-    return () => {
-      document.removeEventListener("mousedown", close);
-      document.removeEventListener("keydown", esc);
-    };
+    return () => document.removeEventListener("mousedown", close);
   }, [open]);
+  const onKey = (e: React.KeyboardEvent) => {
+    const buttons = [...(list.current?.querySelectorAll<HTMLButtonElement>("[role=menuitem]") ?? [])];
+    const at = buttons.indexOf(document.activeElement as HTMLButtonElement);
+    if (e.key === "Escape" || e.key === "Tab") {
+      e.preventDefault();
+      shut(true);
+    } else if (e.key === "ArrowDown") {
+      e.preventDefault();
+      buttons[(at + 1) % buttons.length]?.focus();
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      buttons[(at - 1 + buttons.length) % buttons.length]?.focus();
+    }
+  };
   return (
     <div className="relative" ref={box}>
       <button
+        ref={trigger}
         type="button"
         aria-label={label}
         aria-haspopup="menu"
@@ -110,7 +127,7 @@ export function OverflowMenu({ items, label = "More actions" }: { items: MenuIte
         <MoreHorizontal className="size-4" />
       </button>
       {open && (
-        <div role="menu" className="absolute right-0 z-20 mt-1 min-w-36 rounded-lg border bg-popover p-1 text-popover-foreground shadow-lg">
+        <div ref={list} role="menu" aria-label={label} onKeyDown={onKey} className="absolute right-0 z-20 mt-1 min-w-36 rounded-lg border bg-popover p-1 text-popover-foreground shadow-lg">
           {items.map((item) => (
             <button
               type="button"
@@ -118,7 +135,7 @@ export function OverflowMenu({ items, label = "More actions" }: { items: MenuIte
               role="menuitem"
               onClick={(e) => {
                 e.stopPropagation();
-                setOpen(false);
+                shut(true);
                 if (item.confirm && !window.confirm(item.confirm)) return;
                 item.onSelect();
               }}

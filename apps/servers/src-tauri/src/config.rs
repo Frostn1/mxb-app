@@ -182,7 +182,8 @@ pub const FIELDS: &[Field] = &[
     F::new("sessions", "race_extra_laps", "race", "Laps after the clock runs out", int(0, 10))
         .default_is("2")
         .done(),
-    F::new("sessions", "race_countdown_seconds", "race", "Start countdown", int(5, 300))
+    F::new("sessions", "race_countdown_seconds", "race", "Start countdown", int(0, 300))
+        .help("0 starts the race straight away.")
         .default_is("30 s")
         .unit("s")
         .done(),
@@ -231,10 +232,11 @@ pub const FIELDS: &[Field] = &[
         .default_is("off")
         .done(),
     F::new("native", "slot_cooldown_secs", "advanced", "Wait before reusing a freed slot", int(0, 3600))
-        .default_is("0 s")
+        .help("0 reuses a freed slot at once.")
+        .default_is("120 s")
         .unit("s")
         .done(),
-    F::new("native", "idle_timeout_secs", "advanced", "Drop a silent rider after", int(5, 3600))
+    F::new("native", "idle_timeout_secs", "advanced", "Drop a silent rider after", int(1, 3600))
         .default_is("60 s")
         .unit("s")
         .done(),

@@ -35,6 +35,9 @@ export function ServerForm({
   onCancel: () => void;
 }) {
   const [server, setServer] = useState<Server>(initial ? serverOnly(initial) : blankServer());
+  // What is saved now: the form's own saves update it, so a retry edits the same server and a
+  // token removal never writes back older fields.
+  const [stored, setStored] = useState<ServerView | null>(initial);
   const [hasToken, setHasToken] = useState(initial?.hasToken ?? false);
   const [replacing, setReplacing] = useState(!initial?.hasToken && focusToken);
   const [token, setToken] = useState("");
@@ -57,6 +60,8 @@ export function ServerForm({
     try {
       const newToken = replacing && token.trim() !== "" ? token.trim() : undefined;
       const saved = await saveServer(server, newToken);
+      setStored(saved);
+      setServer(serverOnly(saved));
       setHasToken(saved.hasToken);
       setToken("");
       setReplacing(false);
@@ -75,11 +80,11 @@ export function ServerForm({
   };
 
   const removeToken = async () => {
-    if (!initial) return;
+    if (!stored) return;
     if (!window.confirm("Remove the saved admin token from this PC? Riders stop showing until you add one again.")) return;
     try {
       // The stored server, not unsaved edits in the form.
-      await saveServer(serverOnly(initial), "");
+      setStored(await saveServer(serverOnly(stored), ""));
       setHasToken(false);
       setCheck(null);
     } catch (e) {
@@ -200,6 +205,7 @@ export function ServerForm({
               <div className="flex flex-col gap-1.5">
                 <Input
                   type="password"
+                  aria-label="Admin token"
                   autoComplete="off"
                   autoFocus={focusToken}
                   value={token}
