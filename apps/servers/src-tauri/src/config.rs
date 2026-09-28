@@ -31,55 +31,215 @@ pub enum Kind {
 pub struct Field {
     pub section: &'static str,
     pub key: &'static str,
+    /// Where the page shows it: "ghosts", "race", "events" or "advanced".
+    pub group: &'static str,
+    /// Tucked under "More settings" in its group.
+    pub advanced: bool,
     pub label: &'static str,
     pub help: &'static str,
+    /// What the server does when the setting is left out, in words.
+    pub default_text: &'static str,
+    /// Shown after numbers ("min", "%", "m", "s").
+    pub unit: &'static str,
     pub kind: Kind,
 }
 
-const fn f(section: &'static str, key: &'static str, label: &'static str, help: &'static str, kind: Kind) -> Field {
-    Field {
-        section,
-        key,
-        label,
-        help,
-        kind,
+struct F(Field);
+
+impl F {
+    const fn new(section: &'static str, key: &'static str, group: &'static str, label: &'static str, kind: Kind) -> Self {
+        F(Field {
+            section,
+            key,
+            group,
+            advanced: false,
+            label,
+            help: "",
+            default_text: "",
+            unit: "",
+            kind,
+        })
+    }
+    const fn help(mut self, help: &'static str) -> Self {
+        self.0.help = help;
+        self
+    }
+    const fn default_is(mut self, text: &'static str) -> Self {
+        self.0.default_text = text;
+        self
+    }
+    const fn unit(mut self, unit: &'static str) -> Self {
+        self.0.unit = unit;
+        self
+    }
+    const fn advanced(mut self) -> Self {
+        self.0.advanced = true;
+        self
+    }
+    const fn done(self) -> Field {
+        self.0
     }
 }
 
-/// Every field the app edits. Anything else in the file is left exactly as it is.
+const fn int(min: i64, max: i64) -> Kind {
+    Kind::Int { min, max }
+}
+const fn float(min: f64, max: f64) -> Kind {
+    Kind::Float { min, max }
+}
+
+/// Every field the app edits, in page order. Anything else in the file is left exactly as it is.
 pub const FIELDS: &[Field] = &[
-    // [ghost]
-    f("ghost", "count", "Ghost bots", "How many ghost bots ride (0 turns them off).", Kind::Int { min: 0, max: 49 }),
-    f("ghost", "name", "Name prefix", "Bots are named <prefix> 1, <prefix> 2, ...", Kind::Text),
-    f("ghost", "replay", "Recording", "The .mxgh line the bots replay, relative to the config file.", Kind::Text),
-    f("ghost", "bike", "Bike", "Every bot's bike id, or the class for random bikes.", Kind::Text),
-    f("ghost", "bikes", "Bikes", "\"random\" from the server's bike set, or a list of bike ids in turn.", Kind::Bikes),
-    f("ghost", "skill_pct", "Skill %", "Ride laps by distance at this % of their own pace (70 to 110). Unset replays by time.", Kind::Float { min: 70.0, max: 110.0 }),
-    f("ghost", "racing", "Racing", "Neutral: gaps and passing. Yield: also make way for humans on straights. Block: move into them.", Kind::Racing),
-    f("ghost", "lateral_m", "Lateral spread (m)", "Metres either side of the recorded line, on straights (0 to 10).", Kind::Float { min: 0.0, max: 10.0 }),
-    f("ghost", "speed_jitter_pct", "Pace spread (%)", "Percent either side of the recording (0 to 30).", Kind::Float { min: 0.0, max: 30.0 }),
-    f("ghost", "laps", "Laps", "Best: the fastest clean lap. All: every clean lap. Recording: all of it.", Kind::Choice { options: &["best", "all", "recording"] }),
-    f("ghost", "harvest", "Harvest folder", "Save every rider's clean laps here, per track (unset: off).", Kind::Text),
-    f("ghost", "library", "Library folder", "Replay harvested laps from here (usually the harvest folder).", Kind::Text),
-    f("ghost", "library_min_laps", "Library minimum laps", "Laps a track needs before bots use the library.", Kind::Int { min: 1, max: 1000 }),
-    f("ghost", "record", "Record to", "Write one rider's line to this .mxgh (unset: off).", Kind::Text),
-    f("ghost", "record_plate", "Record plate", "Race number to record (unset: the first rider seen).", Kind::Int { min: 0, max: 999 }),
-    // [events]
-    f("events", "collisions", "Collisions", "Log who hit whom, and count collisions per rider for the admin API.", Kind::Bool),
-    // [native]
-    f("native", "late_join_register", "Late-join register", "Earlier riders and bots join a late joiner on its first pits->track, as on a stock server.", Kind::Bool),
-    f("native", "roster_refresh_on_track", "Roster refresh (riders)", "Re-register every other rider to a rider on its first pits->track.", Kind::Bool),
-    f("native", "roster_refresh_bots", "Roster refresh (bots)", "Re-register every bot to a rider on its first pits->track.", Kind::Bool),
-    f("native", "bot_entries_on_track", "Bot entries on track", "Create bots' race entries for a joiner on its first pits->track, not in its join replay.", Kind::Bool),
-    f("native", "resend_lap_history", "Re-send lap history", "Add each rider's lap history to the runtime re-send.", Kind::Bool),
-    f("native", "relay_pit_status", "Relay pit status", "Relay a rider's pits/track status to the others.", Kind::Bool),
-    f("native", "replay_stock_order", "Stock-order join replay", "A/B: #91's stock-order join replay.", Kind::Bool),
-    f("native", "resend_k6", "Re-send kind 6", "A/B: #91's kind 6 per rider in the runtime re-send.", Kind::Bool),
-    f("native", "unlink_on_leave", "Unlink on leave", "Unlink a leaver's race number before its entry is removed.", Kind::Bool),
-    f("native", "change_pits_gate", "Pits gate for changes", "Refuse a bike/gear change while the rider is on track.", Kind::Bool),
-    f("native", "change_refuse_riding", "Refuse changes while riding", "Refuse a change while the rider is on the bike.", Kind::Bool),
-    f("native", "slot_cooldown_secs", "Slot cooldown (s)", "Seconds a freed slot waits while another is free (0: reuse at once).", Kind::Int { min: 0, max: 3600 }),
-    f("native", "idle_timeout_secs", "Idle timeout (s)", "Seconds of silence before a rider is timed out (default 60).", Kind::Int { min: 5, max: 3600 }),
+    // ---- Ghosts ------------------------------------------------------------------------------
+    F::new("ghost", "count", "ghosts", "Number of ghost riders", int(0, 49))
+        .help("Recorded riders that lap alongside the players. 0 turns them off.")
+        .default_is("0 (off)")
+        .done(),
+    F::new("ghost", "skill_pct", "ghosts", "Ghost speed", float(70.0, 110.0))
+        .help("How fast they ride compared with the recording. 100% is the recorded pace.")
+        .default_is("replay the recording exactly")
+        .unit("%")
+        .done(),
+    F::new("ghost", "racing", "ghosts", "Racing behaviour", Kind::Racing)
+        .help("Neutral keeps gaps and passes; Yield also makes room for players on straights; Block moves into them.")
+        .default_is("off")
+        .done(),
+    F::new("ghost", "lateral_m", "ghosts", "Line spread", float(0.0, 10.0))
+        .help("How far to either side of the recorded line they may ride on straights.")
+        .default_is("0 m (on the line)")
+        .unit("m")
+        .done(),
+    F::new("ghost", "bikes", "ghosts", "Bikes", Kind::Bikes)
+        .help("\"random\" picks from the server's bikes, or list bike ids to use in turn.")
+        .default_is("everyone on the same bike")
+        .done(),
+    F::new("ghost", "laps", "ghosts", "Which laps to replay", Kind::Choice { options: &["best", "all", "recording"] })
+        .help("Best: the fastest clean lap. All: every clean lap. Recording: everything, crashes included.")
+        .default_is("best")
+        .done(),
+    F::new("ghost", "speed_jitter_pct", "ghosts", "Pace variety", float(0.0, 30.0))
+        .help("Makes each ghost a little faster or slower than the next.")
+        .default_is("0% (all the same)")
+        .unit("%")
+        .advanced()
+        .done(),
+    F::new("ghost", "name", "ghosts", "Name prefix", Kind::Text)
+        .help("Ghosts are called <prefix> 1, <prefix> 2, …")
+        .default_is("Bot")
+        .advanced()
+        .done(),
+    F::new("ghost", "bike", "ghosts", "Single bike", Kind::Text)
+        .help("One bike id for every ghost, or the class random bikes come from.")
+        .default_is("the recording's bike")
+        .advanced()
+        .done(),
+    F::new("ghost", "replay", "ghosts", "Recording file", Kind::Text)
+        .help("The .mxgh line the ghosts ride, relative to the config file.")
+        .default_is("none")
+        .advanced()
+        .done(),
+    F::new("ghost", "library", "ghosts", "Lap library folder", Kind::Text)
+        .help("Ghosts ride laps collected from real riders in this folder instead of one recording.")
+        .default_is("off")
+        .advanced()
+        .done(),
+    F::new("ghost", "library_min_laps", "ghosts", "Laps needed before using the library", int(1, 1000))
+        .default_is("1")
+        .advanced()
+        .done(),
+    F::new("ghost", "harvest", "ghosts", "Collect riders' laps into", Kind::Text)
+        .help("Saves every rider's clean laps to this folder, per track, for the lap library.")
+        .default_is("off")
+        .advanced()
+        .done(),
+    F::new("ghost", "record", "ghosts", "Record a rider to", Kind::Text)
+        .help("Writes one rider's line to this .mxgh file.")
+        .default_is("off")
+        .advanced()
+        .done(),
+    F::new("ghost", "record_plate", "ghosts", "Race number to record", int(0, 999))
+        .default_is("the first rider seen")
+        .advanced()
+        .done(),
+    // ---- Race and sessions -------------------------------------------------------------------
+    F::new("sessions", "practice_minutes", "race", "Practice length", int(0, 600))
+        .help("0 keeps practice running until you move the session on.")
+        .default_is("20 min")
+        .unit("min")
+        .done(),
+    F::new("sessions", "qualifying_minutes", "race", "Qualifying length", int(1, 600))
+        .default_is("15 min")
+        .unit("min")
+        .done(),
+    F::new("sessions", "warmup_minutes", "race", "Warm-up length", int(1, 600))
+        .default_is("5 min")
+        .unit("min")
+        .done(),
+    F::new("sessions", "race_minutes", "race", "Race length", int(1, 600))
+        .default_is("20 min")
+        .unit("min")
+        .done(),
+    F::new("sessions", "race_extra_laps", "race", "Laps after the clock runs out", int(0, 10))
+        .default_is("2")
+        .done(),
+    F::new("sessions", "race_countdown_seconds", "race", "Start countdown", int(0, 300))
+        .help("0 starts the race straight away.")
+        .default_is("30 s")
+        .unit("s")
+        .done(),
+    F::new("server", "max_clients", "race", "Player slots", int(1, 50))
+        .help("How many players can join at once.")
+        .default_is("20")
+        .done(),
+    // ---- Events ------------------------------------------------------------------------------
+    F::new("events", "collisions", "events", "Track collisions", Kind::Bool)
+        .help("Logs who hit whom and counts collisions per rider.")
+        .default_is("off")
+        .done(),
+    // ---- Advanced switches (A/B tests from the protocol work) ---------------------------------
+    F::new("native", "late_join_register", "advanced", "Late joiners see earlier riders like a stock server", Kind::Bool)
+        .help("Riders already on track join a late joiner's list when it first leaves the pits.")
+        .default_is("off")
+        .done(),
+    F::new("native", "roster_refresh_on_track", "advanced", "Refresh other riders on track entry", Kind::Bool)
+        .default_is("off")
+        .done(),
+    F::new("native", "roster_refresh_bots", "advanced", "Refresh ghosts on track entry", Kind::Bool)
+        .default_is("off")
+        .done(),
+    F::new("native", "bot_entries_on_track", "advanced", "Add ghosts to standings on track entry", Kind::Bool)
+        .default_is("off")
+        .done(),
+    F::new("native", "resend_lap_history", "advanced", "Re-send lap history", Kind::Bool)
+        .default_is("off")
+        .done(),
+    F::new("native", "relay_pit_status", "advanced", "Share pit/track status between riders", Kind::Bool)
+        .default_is("off")
+        .done(),
+    F::new("native", "replay_stock_order", "advanced", "Stock-order join replay", Kind::Bool)
+        .default_is("off")
+        .done(),
+    F::new("native", "resend_k6", "advanced", "Re-send entry details per rider", Kind::Bool)
+        .default_is("off")
+        .done(),
+    F::new("native", "unlink_on_leave", "advanced", "Free a leaver's race number first", Kind::Bool)
+        .default_is("off")
+        .done(),
+    F::new("native", "change_pits_gate", "advanced", "Only allow bike changes in the pits", Kind::Bool)
+        .default_is("off")
+        .done(),
+    F::new("native", "change_refuse_riding", "advanced", "Refuse bike changes while riding", Kind::Bool)
+        .default_is("off")
+        .done(),
+    F::new("native", "slot_cooldown_secs", "advanced", "Wait before reusing a freed slot", int(0, 3600))
+        .help("0 reuses a freed slot at once.")
+        .default_is("120 s")
+        .unit("s")
+        .done(),
+    F::new("native", "idle_timeout_secs", "advanced", "Drop a silent rider after", int(1, 3600))
+        .default_is("60 s")
+        .unit("s")
+        .done(),
 ];
 
 pub fn field(section: &str, key: &str) -> Option<&'static Field> {

@@ -162,7 +162,11 @@ restart() {
     kill -0 "$PID" 2>/dev/null && { echo "old server did not stop" >&2; return 1; }
   fi
   mkdir -p "$WD/logs"
-  ( cd "$WD" && setsid nohup "$BIN" "${ARGS[@]}" >> "$WD/logs/mxbserver.log" 2>&1 < /dev/null & echo $! > "$WD/mxbserver.pid" )
+  # `exec` makes the background subshell the server itself: no bash is left holding this
+  # script's stdout (the SSH channel would never close) or standing in for the server's pid.
+  # 9>&- keeps the apply lock out of the server, or no later apply could take it.
+  ( cd "$WD" && exec setsid nohup "$BIN" "${ARGS[@]}" >> "$WD/logs/mxbserver.log" 2>&1 < /dev/null 9>&- ) &
+  echo $! > "$WD/mxbserver.pid"
   sleep 0.5
   PID="$(cat "$WD/mxbserver.pid" 2>/dev/null)"
 }

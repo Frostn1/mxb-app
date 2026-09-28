@@ -32,8 +32,12 @@ export interface Status {
   session_remaining_seconds: number | null;
 }
 
+export type ServerState = "online" | "starting" | "offline" | "unreachable";
+
 export interface StatusReport {
-  ready: boolean;
+  state: ServerState;
+  /** The detail behind the state, for a tooltip. */
+  detail: string;
   status: Status | null;
 }
 
@@ -98,8 +102,15 @@ export type FieldKind =
 export interface ConfigField {
   section: string;
   key: string;
+  /** "ghosts" | "race" | "events" | "advanced" */
+  group: string;
+  /** Under "More settings" in its group. */
+  advanced: boolean;
   label: string;
   help: string;
+  /** What the server does when it's left out. */
+  defaultText: string;
+  unit: string;
   kind: FieldKind;
 }
 
@@ -131,3 +142,5 @@ export interface ApplyResult {
 
 export const configApply = (id: string, baseSha: string, text: string) =>
   invoke<ApplyResult>("config_apply", { id, baseSha, text });
+
+export const testToken = (id: string) => invoke<{ ok: boolean; message: string }>("server_test_token", { id });

@@ -4,46 +4,34 @@ import { serverLogs, serverRiders, serverStatus, type ServerView } from "@/lib/a
 import { duration, lapTime, sessionName } from "@/lib/format";
 import { usePoll } from "@/lib/usePoll";
 import { ConfigTab } from "./ConfigTab";
-import { Button, Card, ErrorLine, HealthBadge, Stat, type Health } from "./ui";
+import { Button, Card, ErrorLine, Notice, OverflowMenu, Stat, StatusBadge, type MenuItem } from "./ui";
 
 type Tab = "status" | "riders" | "logs" | "config";
 
 export function ServerDetail({
   server,
-  onEdit,
-  onRemove,
+  menu,
+  onSetUpToken,
 }: {
   server: ServerView;
-  onEdit: () => void;
-  onRemove: () => void;
+  menu: MenuItem[];
+  onSetUpToken: () => void;
 }) {
   const [tab, setTab] = useState<Tab>("status");
   const status = usePoll(() => serverStatus(server.id), 3000, server.id);
-  const health: Health = status.data
-    ? status.error
-      ? "down"
-      : status.data.ready
-        ? "ready"
-        : "starting"
-    : status.error
-      ? "down"
-      : "unknown";
 
   return (
-    <div className="flex h-full flex-col gap-5">
-      <header className="flex flex-wrap items-center gap-4">
-        <div className="flex flex-col">
-          <h2 className="font-heading text-2xl font-extrabold tracking-tight">{server.name}</h2>
+    <div className="flex h-full flex-col gap-6">
+      <header className="flex flex-wrap items-center gap-x-5 gap-y-2">
+        <div className="flex min-w-0 flex-col">
+          <h2 className="truncate font-heading text-2xl font-extrabold tracking-tight">{server.name}</h2>
           <span className="font-mono text-xs text-muted-foreground">
             {server.local ? "this PC" : `${server.user}@${server.host}`}
           </span>
         </div>
-        <HealthBadge health={health} />
-        <div className="ml-auto flex gap-2">
-          <Button onClick={onEdit}>Edit</Button>
-          <Button variant="danger" onClick={onRemove}>
-            Remove
-          </Button>
+        <StatusBadge report={status.data} error={status.error} />
+        <div className="ml-auto">
+          <OverflowMenu items={menu} label={`Actions for ${server.name}`} />
         </div>
       </header>
 
@@ -58,14 +46,14 @@ export function ServerDetail({
               tab === t ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"
             }`}
           >
-            {t}
+            {t === "config" ? "Settings" : t}
           </button>
         ))}
       </nav>
 
       <div className="min-h-0 flex-1 overflow-auto">
-        {tab === "status" && <StatusTab poll={status} />}
-        {tab === "riders" && <RidersTab server={server} />}
+        {tab === "status" && <StatusTab server={server} poll={status} onSetUpToken={onSetUpToken} />}
+        {tab === "riders" && <RidersTab server={server} onSetUpToken={onSetUpToken} />}
         {tab === "logs" && <LogsTab server={server} />}
         {tab === "config" && <ConfigTab server={server} />}
       </div>
@@ -73,41 +61,87 @@ export function ServerDetail({
   );
 }
 
-function StatusTab({ poll }: { poll: ReturnType<typeof usePoll<Awaited<ReturnType<typeof serverStatus>>>> }) {
-  const s = poll.data?.status;
+/** What the admin token is for, and how to get one, for a server without it. */
+function TokenHelper({ server, onSetUpToken }: { server: ServerView; onSetUpToken: () => void }) {
   return (
-    <div className="flex flex-col gap-4">
-      {poll.error && <ErrorLine text={poll.error} />}
-      {s ? (
-        <Card className="grid grid-cols-2 gap-5 md:grid-cols-4">
+    <Notice>
+      <div className="flex flex-col gap-2">
+        <span className="font-medium">Set up an admin token to see who&apos;s riding</span>
+        <span className="text-muted-foreground">
+          Status and logs work without one. The token lets this app ask the server for its rider list (names, bikes,
+          laps, best laps, ping). It&apos;s a password for the server&apos;s admin API, which only listens on the
+          server itself.
+        </span>
+        <ol className="ml-4 list-decimal text-muted-foreground">
+          <li>
+            On the server, make a read-only token:{" "}
+            <span className="font-mono text-foreground">mxbserver admin token new --id you --scope read</span>
+          </li>
+          <li>
+            Add the printed entry to its tokens file, and give the config an <span className="font-mono">[admin]</span>{" "}
+            section with <span className="font-mono">listen = &quot;127.0.0.1:9810&quot;</span>, then restart it.
+          </li>
+          <li>Paste the token here. It&apos;s kept in {server.local ? "Windows Credential Manager" : "your OS keychain"}.</li>
+        </ol>
+        <div>
+          <Button variant="primary" size="sm" onClick={onSetUpToken}>
+            Set up admin token
+          </Button>
+        </div>
+      </div>
+    </Notice>
+  );
+}
+
+function StatusTab({
+  server,
+  poll,
+  onSetUpToken,
+}: {
+  server: ServerView;
+  poll: ReturnType<typeof usePoll<Awaited<ReturnType<typeof serverStatus>>>>;
+  onSetUpToken: () => void;
+}) {
+  const report = poll.data;
+  const s = report?.status;
+  const needsToken = server.adminPort == null || !server.hasToken;
+  return (
+    <div className="flex max-w-4xl flex-col gap-5">
+      {report && report.state !== "online" && (
+        <Notice tone={report.state === "starting" ? "info" : "bad"}>{report.detail}</Notice>
+      )}
+      {!report && poll.error && <ErrorLine text={poll.error} />}
+      {s && report?.state !== "offline" && (
+        <Card className="grid grid-cols-2 gap-6 md:grid-cols-4">
           <Stat label="Session" value={sessionName(s.session)} />
           <Stat
             label="Time left"
             value={s.session_remaining_seconds == null ? "—" : duration(s.session_remaining_seconds)}
           />
-          <Stat label="Riders connected" value={s.active_sessions} />
-          <Stat label="Uptime" value={duration(s.uptime_seconds)} />
+          <Stat label="Riders" value={s.active_sessions} />
+          <Stat label="Up for" value={duration(s.uptime_seconds)} />
           <Stat label="Version" value={`v${s.version}`} />
-          <Stat label="Revision" value={s.revision} />
           <Stat label="Build" value={s.build_id} />
-          <Stat label="Datagrams in / out" value={`${s.client_datagrams_total} / ${s.server_datagrams_total}`} />
+          <Stat label="Revision" value={s.revision} />
+          <Stat label="Packets in / out" value={`${s.client_datagrams_total} / ${s.server_datagrams_total}`} />
         </Card>
-      ) : (
-        !poll.error && <p className="text-sm text-muted-foreground">Connecting over SSH…</p>
       )}
+      {!report && !poll.error && (
+        <p className="text-sm text-muted-foreground">{server.local ? "Connecting…" : "Connecting over SSH…"}</p>
+      )}
+      {needsToken && <TokenHelper server={server} onSetUpToken={onSetUpToken} />}
     </div>
   );
 }
 
-function RidersTab({ server }: { server: ServerView }) {
+function RidersTab({ server, onSetUpToken }: { server: ServerView; onSetUpToken: () => void }) {
   const enabled = server.adminPort != null && server.hasToken;
   const riders = usePoll(() => (enabled ? serverRiders(server.id) : Promise.resolve([])), enabled ? 5000 : 0, `${server.id}-riders`);
   if (!enabled) {
     return (
-      <p className="max-w-lg text-sm text-muted-foreground">
-        Riders come from the server&apos;s admin API. Set its admin port and a read token under Edit
-        (<span className="font-mono">mxbserver admin token new --id you --scope read</span> on the server).
-      </p>
+      <div className="max-w-3xl">
+        <TokenHelper server={server} onSetUpToken={onSetUpToken} />
+      </div>
     );
   }
   return (

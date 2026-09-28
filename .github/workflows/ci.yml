@@ -65,6 +65,8 @@ jobs:
   servers-remote:
     name: MXB Servers remote script
     runs-on: ubuntu-latest
+    # It restarts processes; a hang must fail fast, not hold a runner for hours.
+    timeout-minutes: 10
     steps:
       - name: Checkout
         uses: actions/checkout@v4
