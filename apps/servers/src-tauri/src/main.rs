@@ -110,6 +110,23 @@ async fn local_port(app: &App, server: &Server, remote: u16) -> Result<u16, Stri
 
 /// GET `path` on one of the server's forwarded ports. A failed request drops the tunnel, so a
 /// server that went away is reconnected on the next poll.
+/// Why a request got no HTTP answer.
+enum Miss {
+    /// The SSH connection itself failed: the host is down, the key is wrong, ...
+    Ssh(String),
+    /// SSH is fine (or the server is on this PC) but nothing answered on the port.
+    NoAnswer(String),
+}
+
+impl Miss {
+    fn text(self) -> String {
+        match self {
+            Miss::Ssh(e) => format!("can't reach the server over SSH: {e}"),
+            Miss::NoAnswer(e) => format!("no answer from the server: {e}"),
+        }
+    }
+}
+
 async fn get(
     app: &App,
     server: &Server,
@@ -117,11 +134,21 @@ async fn get(
     path: &str,
     token: Option<&str>,
 ) -> Result<(u16, String), String> {
+    fetch(app, server, remote, path, token).await.map_err(Miss::text)
+}
+
+async fn fetch(
+    app: &App,
+    server: &Server,
+    remote: u16,
+    path: &str,
+    token: Option<&str>,
+) -> Result<(u16, String), Miss> {
     // A server on this PC is reached directly; any other through its SSH tunnel.
     let port = if server.local {
         remote
     } else {
-        local_port(app, server, remote).await?
+        local_port(app, server, remote).await.map_err(Miss::Ssh)?
     };
     let mut request = app.http.get(format!("http://127.0.0.1:{port}{path}"));
     if let Some(token) = token {
@@ -130,39 +157,100 @@ async fn get(
     match request.send().await {
         Ok(response) => {
             let status = response.status().as_u16();
-            let body = response.text().await.map_err(|e| e.to_string())?;
+            let body = response
+                .text()
+                .await
+                .map_err(|e| Miss::NoAnswer(e.to_string()))?;
             Ok((status, body))
         }
         Err(error) => {
             app.tunnels.reset(&server.id, remote);
-            Err(format!("no answer from the server: {error}"))
+            Err(Miss::NoAnswer(error.to_string()))
         }
     }
 }
 
+/// One word for how a server is doing, and the detail behind it.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct StatusReport {
-    ready: bool,
+    /// "online" (ready for riders), "starting" (running, not ready yet), "offline" (reached,
+    /// but the server isn't running) or "unreachable" (SSH itself failed).
+    state: &'static str,
+    detail: String,
     status: Option<Value>,
 }
 
 #[tauri::command]
 async fn server_status(app: State<'_, App>, id: String) -> Result<StatusReport, String> {
     let server = app.store.get(&id)?;
-    let (code, body) = get(&app, &server, server.observe_port, "/status", None).await?;
+    let report = |state, detail: String| StatusReport {
+        state,
+        detail,
+        status: None,
+    };
+    let (code, body) = match fetch(&app, &server, server.observe_port, "/status", None).await {
+        Ok(answer) => answer,
+        Err(Miss::Ssh(e)) => return Ok(report("unreachable", format!("SSH to {} failed: {e}", server.host))),
+        Err(Miss::NoAnswer(e)) => {
+            return Ok(report(
+                "offline",
+                format!("nothing answers on port {} ({e}); the server isn't running", server.observe_port),
+            ))
+        }
+    };
     if code != 200 {
-        return Err(format!("/status answered {code}"));
+        return Ok(report("offline", format!("/status answered HTTP {code}")));
     }
     let status: Value = serde_json::from_str(&body).map_err(|e| format!("/status: {e}"))?;
     let ready = matches!(
-        get(&app, &server, server.observe_port, "/readyz", None).await,
+        fetch(&app, &server, server.observe_port, "/readyz", None).await,
         Ok((200, _))
     );
+    let build = status["build_id"].as_str().unwrap_or("?").to_string();
     Ok(StatusReport {
-        ready,
+        state: if ready { "online" } else { "starting" },
+        detail: if ready {
+            format!("ready for riders · build {build}")
+        } else {
+            format!("running but not ready for riders yet · build {build}")
+        },
         status: Some(status),
     })
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TokenCheck {
+    ok: bool,
+    message: String,
+}
+
+/// Try the saved admin token against `/v1/server` and say plainly what happened.
+#[tauri::command]
+async fn server_test_token(app: State<'_, App>, id: String) -> Result<TokenCheck, String> {
+    let server = app.store.get(&id)?;
+    let fail = |message: String| Ok(TokenCheck { ok: false, message });
+    let Some(admin) = server.admin_port else {
+        return fail("Set the admin port first (the [admin] listen port in the server's config).".into());
+    };
+    let Some(token) = store::token(&id) else {
+        return fail("No admin token is saved for this server.".into());
+    };
+    match fetch(&app, &server, admin, "/v1/server", Some(&token)).await {
+        Ok((200, _)) => Ok(TokenCheck {
+            ok: true,
+            message: "Token works.".into(),
+        }),
+        Ok((401, _)) => fail("The server refused this token: it's mistyped, or was revoked.".into()),
+        Ok((403, _)) => fail("The token is valid but not allowed to read the server.".into()),
+        Ok((429, _)) => fail("The server is rate-limiting; try again in a few seconds.".into()),
+        Ok((code, _)) => fail(format!("The admin API answered HTTP {code}.")),
+        Err(Miss::Ssh(e)) => fail(format!("Can't reach the server over SSH: {e}")),
+        Err(Miss::NoAnswer(_)) => fail(format!(
+            "Nothing answers on admin port {admin}. The server has no [admin] section, or it listens on another port."
+        )),
+    }
 }
 
 #[tauri::command]
@@ -391,6 +479,7 @@ fn main() {
             server_status,
             server_riders,
             server_logs,
+            server_test_token,
             config_load,
             config_preview,
             config_validate,

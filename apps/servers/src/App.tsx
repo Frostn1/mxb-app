@@ -5,9 +5,12 @@ import { errorText, listServers, removeServer, type ServerView } from "@/lib/api
 import { FleetCard } from "@/components/FleetCard";
 import { ServerDetail } from "@/components/ServerDetail";
 import { ServerForm } from "@/components/ServerForm";
-import { Button, ErrorLine } from "@/components/ui";
+import { Button, ErrorLine, type MenuItem } from "@/components/ui";
 
-type View = { kind: "fleet" } | { kind: "server"; id: string } | { kind: "form"; id: string | null };
+type View =
+  | { kind: "fleet" }
+  | { kind: "server"; id: string }
+  | { kind: "form"; id: string | null; focusToken?: boolean };
 
 const themeIcons: Record<ThemeChoice, typeof Sun> = { light: Sun, dark: Moon, system: Monitor };
 const nextTheme: Record<ThemeChoice, ThemeChoice> = { system: "light", light: "dark", dark: "system" };
@@ -33,8 +36,18 @@ export default function App() {
   const selected = view.kind === "server" || view.kind === "form" ? servers.find((s) => s.id === view.id) ?? null : null;
   const ThemeIcon = themeIcons[theme];
 
+  // The ⋯ menu for a server: on its card and on its page. Remove confirms in the menu.
+  const menu = (server: ServerView): MenuItem[] => [
+    { label: "Edit", onSelect: () => setView({ kind: "form", id: server.id }) },
+    {
+      label: "Remove",
+      danger: true,
+      confirm: `Remove ${server.name} from this app? Its saved admin token is deleted from this PC too. The server itself is not touched.`,
+      onSelect: () => void remove(server),
+    },
+  ];
+
   const remove = async (server: ServerView) => {
-    if (!window.confirm(`Remove ${server.name}? Its saved admin token is deleted from the keychain too.`)) return;
     try {
       await removeServer(server.id);
       setView({ kind: "fleet" });
@@ -92,7 +105,7 @@ export default function App() {
             ) : (
               <div className="grid grid-cols-[repeat(auto-fill,minmax(18rem,1fr))] gap-4">
                 {servers.map((s) => (
-                  <FleetCard key={s.id} server={s} onOpen={() => setView({ kind: "server", id: s.id })} />
+                  <FleetCard key={s.id} server={s} menu={menu(s)} onOpen={() => setView({ kind: "server", id: s.id })} />
                 ))}
               </div>
             )}
@@ -102,14 +115,15 @@ export default function App() {
           <ServerDetail
             key={selected.id}
             server={selected}
-            onEdit={() => setView({ kind: "form", id: selected.id })}
-            onRemove={() => void remove(selected)}
+            menu={menu(selected)}
+            onSetUpToken={() => setView({ kind: "form", id: selected.id, focusToken: true })}
           />
         )}
         {view.kind === "form" && (
           <ServerForm
             key={view.id ?? "new"}
             initial={selected}
+            focusToken={view.focusToken}
             onCancel={() => setView(selected ? { kind: "server", id: selected.id } : { kind: "fleet" })}
             onSaved={(saved) => {
               void reload();
