@@ -109,6 +109,10 @@ function offlineRow(address: string, name: string): MasterServer {
   };
 }
 
+/** How often saved servers off the master list are asked again when no sweep has landed.
+ *  The app's own sweep beat, so they tick at the same pace as everything else on the tab. */
+const SAVED_PROBE_MS = 2 * 60 * 1000;
+
 /** The key saved servers are matched on: hostnames ignore case, as the Rust side does. */
 const addrKey = (address: string) => address.toLowerCase();
 
@@ -288,7 +292,15 @@ const Servers = ({ link }: ServersProps) => {
     [saved.list, listed],
   );
   // Asked again whenever a sweep lands, so a saved server's numbers move at the list's pace
-  // rather than freezing at whatever it said when the tab opened.
+  // rather than freezing at whatever it said when the tab opened — and on a beat of its own
+  // too, because a master that has stopped answering stops the sweeps, and a private server
+  // is exactly the one worth watching while it does.
+  const [probeBeat, setProbeBeat] = useState(0);
+  useEffect(() => {
+    if (!unlistedKey) return;
+    const id = window.setInterval(() => setProbeBeat((n) => n + 1), SAVED_PROBE_MS);
+    return () => window.clearInterval(id);
+  }, [unlistedKey]);
   useEffect(() => {
     if (servers === null || !unlistedKey) return;
     const addresses = unlistedKey.split("\n");
@@ -303,7 +315,7 @@ const Servers = ({ link }: ServersProps) => {
     return () => {
       live = false;
     };
-  }, [servers, unlistedKey]);
+  }, [servers, unlistedKey, probeBeat]);
 
   /** The sweep plus the saved servers only a direct probe found — what the track art and
    *  identification run over, so a saved card gets the same picture a listed one would. */
@@ -318,7 +330,8 @@ const Servers = ({ link }: ServersProps) => {
       saved.list.map((entry) => {
         const key = addrKey(entry.address);
         const live = listed.get(key) ?? probed[key];
-        const row = live ?? offlineRow(entry.address, entry.name);
+        // An unnamed server that didn't answer is known only by its address, so that is its name.
+        const row = live ?? offlineRow(entry.address, entry.name || entry.address);
         return {
           saved: entry,
           row,
