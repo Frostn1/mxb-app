@@ -27,8 +27,9 @@ observe = "127.0.0.1:$OBS"
 [ghost]
 count = 4
 EOF
-(cd "$ROOT" && setsid nohup bin/mxbserver --config config/server.toml --report 10 \
-  > logs/mxbserver.log 2>&1 < /dev/null & echo $! > mxbserver.pid)
+(cd "$ROOT" && exec setsid nohup bin/mxbserver --config config/server.toml --report 10 \
+  > logs/mxbserver.log 2>&1 < /dev/null) &
+echo $! > "$ROOT/mxbserver.pid"
 for _ in $(seq 40); do ready && break; sleep 0.25; done
 ready || fail "stub did not start"
 
@@ -63,6 +64,7 @@ grep -q "count = 4" "$backup" || fail "backup is not the old config"
 [[ "$(server_pid)" != "$old_pid" ]] || fail "server was not restarted"
 ready || fail "not ready after apply"
 tr '\0' ' ' < "/proc/$(server_pid)/cmdline" | grep -q -- "--config config/server.toml --report 10" || fail "arguments changed"
+[[ "$(cat "$ROOT/mxbserver.pid")" == "$(server_pid)" ]] || fail "the pid file does not name the server"
 
 echo "=== apply a change that never gets ready: the backup goes back"
 sha="$(sha256sum "$ROOT/config/server.toml" | cut -d' ' -f1)"
@@ -85,7 +87,7 @@ mkdir -p "$HOME/other/config"
 printf '[server]
 observe = "127.0.0.1:%s"
 ' $((OBS + 1)) > "$HOME/other/config/server.toml"
-(cd "$HOME/other" && setsid nohup "$ROOT/bin/mxbserver" --config config/server.toml > /dev/null 2>&1 < /dev/null &)
+(cd "$HOME/other" && exec setsid nohup "$ROOT/bin/mxbserver" --config config/server.toml > /dev/null 2>&1 < /dev/null) &
 sleep 1
 out="$(remote read "$OBS")"
 [[ "$(field config <<<"$out")" == "$ROOT/config/server.toml" ]] || fail "picked the wrong server: $out"
