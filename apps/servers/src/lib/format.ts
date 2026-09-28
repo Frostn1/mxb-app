@@ -18,7 +18,11 @@ export function lapTime(seconds: number | null): string {
   return `${m}:${rest.toFixed(3).padStart(6, "0")}`;
 }
 
-/** "practice" -> "Practice". */
+/** "practice" or "running(practice)" -> "Practice"; "countdown(race)" -> "Race countdown". */
 export function sessionName(stage: string): string {
-  return stage ? stage.charAt(0).toUpperCase() + stage.slice(1) : "—";
+  if (!stage) return "—";
+  const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+  const m = /^(\w+)\((\w+)\)$/.exec(stage);
+  if (!m) return cap(stage);
+  return m[1] === "running" ? cap(m[2]) : `${cap(m[2])} ${m[1]}`;
 }

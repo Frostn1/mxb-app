@@ -48,6 +48,22 @@ export function ServerForm({
       <Field label="Name">
         <Input value={server.name} onChange={(e) => set("name", e.target.value)} placeholder="Lightsail" required />
       </Field>
+      <label className="flex items-center gap-2 text-sm">
+        <input
+          type="checkbox"
+          checked={server.local}
+          onChange={(e) =>
+            setServer({
+              ...server,
+              local: e.target.checked,
+              logPath: e.target.checked ? "" : "/opt/mxbserver/logs/mxbserver.log",
+            })
+          }
+        />
+        On this PC (no SSH: its ports on 127.0.0.1, its log a local file)
+      </label>
+      {!server.local && (
+        <>
       <div className="grid grid-cols-[1fr_7rem] gap-3">
         <Field label="SSH host">
           <Input value={server.host} onChange={(e) => set("host", e.target.value)} placeholder="16.146.6.22" required />
@@ -66,6 +82,8 @@ export function ServerForm({
           placeholder="C:\Users\you\Downloads\LightsailDefaultKey.pem"
         />
       </Field>
+        </>
+      )}
       <div className="grid grid-cols-2 gap-3">
         <Field label="Observe port" hint="/status and /readyz (server.observe)">
           <Input type="number" min={1} max={65535} value={server.observePort} onChange={(e) => set("observePort", Number(e.target.value))} />
@@ -90,8 +108,11 @@ export function ServerForm({
           Remove the saved token
         </label>
       )}
-      <Field label="Log file">
-        <Input value={server.logPath} onChange={(e) => set("logPath", e.target.value)} />
+      <Field
+        label="Log file"
+        hint={server.local ? "The file the server's output goes to, e.g. C:\\dev\\MXB\\local-server\\logs\\mxbserver.log" : undefined}
+      >
+        <Input value={server.logPath} onChange={(e) => set("logPath", e.target.value)} required />
       </Field>
       {error && <ErrorLine text={error} />}
       <div className="flex gap-2">

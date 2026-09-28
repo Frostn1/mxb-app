@@ -10,6 +10,8 @@ export interface Server {
   observePort: number;
   adminPort: number | null;
   logPath: string;
+  /** On this PC: ports used directly on 127.0.0.1, the log read as a local file, no SSH. */
+  local: boolean;
 }
 
 export interface ServerView extends Server {
@@ -58,6 +60,7 @@ export const blankServer = (): Server => ({
   observePort: 9809,
   adminPort: null,
   logPath: "/opt/mxbserver/logs/mxbserver.log",
+  local: false,
 });
 
 export const listServers = () => invoke<ServerView[]>("servers_list");

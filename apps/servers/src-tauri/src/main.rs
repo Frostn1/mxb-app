@@ -11,6 +11,21 @@
 mod ssh;
 mod store;
 
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn local_tail_returns_the_last_lines() {
+        let path = std::env::temp_dir().join(format!("mxb-servers-tail-{}.log", crate::store::new_id()));
+        let text: String = (1..=50).map(|i| format!("line {i}
+")).collect();
+        std::fs::write(&path, text).unwrap();
+        let tail = super::local_tail(path.to_str().unwrap(), 3).unwrap();
+        assert_eq!(tail, ["line 48", "line 49", "line 50"]);
+        assert_eq!(super::local_tail(path.to_str().unwrap(), 500).unwrap().len(), 50);
+        std::fs::remove_file(path).unwrap();
+    }
+}
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::sync::Arc;
@@ -100,7 +115,12 @@ async fn get(
     path: &str,
     token: Option<&str>,
 ) -> Result<(u16, String), String> {
-    let port = local_port(app, server, remote).await?;
+    // A server on this PC is reached directly; any other through its SSH tunnel.
+    let port = if server.local {
+        remote
+    } else {
+        local_port(app, server, remote).await?
+    };
     let mut request = app.http.get(format!("http://127.0.0.1:{port}{path}"));
     if let Some(token) = token {
         request = request.bearer_auth(token);
@@ -162,10 +182,30 @@ async fn server_riders(app: State<'_, App>, id: String) -> Result<Value, String>
 #[tauri::command]
 async fn server_logs(app: State<'_, App>, id: String, lines: u32) -> Result<Vec<String>, String> {
     let server = app.store.get(&id)?;
+    if server.local {
+        return local_tail(&server.log_path, lines);
+    }
     let tunnels = Arc::clone(&app.tunnels);
     tauri::async_runtime::spawn_blocking(move || tunnels.tail(&server, lines))
         .await
         .map_err(|e| e.to_string())?
+}
+
+/// The last `lines` lines of a log file on this PC, reading at most its last 1 MiB.
+fn local_tail(path: &str, lines: u32) -> Result<Vec<String>, String> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut file = std::fs::File::open(path).map_err(|e| format!("{path}: {e}"))?;
+    let len = file.metadata().map_err(|e| e.to_string())?.len();
+    let start = len.saturating_sub(1 << 20);
+    file.seek(SeekFrom::Start(start)).map_err(|e| e.to_string())?;
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes).map_err(|e| e.to_string())?;
+    let text = String::from_utf8_lossy(&bytes);
+    let all: Vec<&str> = text.lines().collect();
+    // A read that starts mid-file drops its first, partial line.
+    let skip = usize::from(start > 0 && !all.is_empty());
+    let from = all.len().saturating_sub(lines as usize).max(skip);
+    Ok(all[from..].iter().map(|l| l.to_string()).collect())
 }
 
 fn main() {

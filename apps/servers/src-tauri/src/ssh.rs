@@ -331,6 +331,7 @@ mod tests {
             observe_port: 9809,
             admin_port: None,
             log_path: "/opt/mxbserver/logs/mxbserver.log".into(),
+            local: false,
         }
     }
 

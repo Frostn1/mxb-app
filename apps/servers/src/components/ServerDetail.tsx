@@ -34,7 +34,7 @@ export function ServerDetail({
         <div className="flex flex-col">
           <h2 className="font-heading text-2xl font-extrabold tracking-tight">{server.name}</h2>
           <span className="font-mono text-xs text-muted-foreground">
-            {server.user}@{server.host}
+            {server.local ? "this PC" : `${server.user}@${server.host}`}
           </span>
         </div>
         <HealthBadge health={health} />

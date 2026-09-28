@@ -28,6 +28,10 @@ pub struct Server {
     pub admin_port: Option<u16>,
     #[serde(default = "default_log_path")]
     pub log_path: String,
+    /// A server on this PC: its ports are used directly on 127.0.0.1 and the log is a local
+    /// file, with no SSH. Host, user and key are ignored.
+    #[serde(default)]
+    pub local: bool,
 }
 
 fn default_ssh_port() -> u16 {
@@ -46,6 +50,15 @@ pub fn validate(server: &Server) -> Result<(), String> {
     let name = server.name.trim();
     if name.is_empty() || name.chars().count() > 64 {
         return Err("Name must be 1 to 64 characters.".into());
+    }
+    if server.observe_port == 0 || server.admin_port == Some(0) {
+        return Err("Ports must be 1 to 65535.".into());
+    }
+    if server.local {
+        if !Path::new(&server.log_path).is_absolute() {
+            return Err(r"Log file must be a full path, like C:\mxbserver\logs\mxbserver.log".into());
+        }
+        return Ok(());
     }
     let host_ok = !server.host.is_empty()
         && server.host.len() <= 253
@@ -197,6 +210,7 @@ mod tests {
             observe_port: 9809,
             admin_port: Some(9810),
             log_path: default_log_path(),
+            local: false,
         }
     }
 
@@ -220,6 +234,20 @@ mod tests {
         }
         let s = Server { key_path: Some("-oProxyCommand=x".into()), ..server() };
         assert!(validate(&s).is_err());
+    }
+
+    #[test]
+    fn a_local_server_needs_no_ssh_fields_but_a_full_log_path() {
+        let local = Server {
+            local: true,
+            host: String::new(),
+            user: String::new(),
+            log_path: std::env::temp_dir().join("x.log").display().to_string(),
+            ..server()
+        };
+        assert_eq!(validate(&local), Ok(()));
+        let relative = Server { log_path: "logs/x.log".into(), ..local };
+        assert!(validate(&relative).is_err());
     }
 
     #[test]

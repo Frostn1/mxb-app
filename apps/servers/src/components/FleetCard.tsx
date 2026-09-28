@@ -15,7 +15,7 @@ export function FleetCard({ server, onOpen }: { server: ServerView; onOpen: () =
         <div className="flex items-start justify-between gap-3">
           <div className="flex min-w-0 flex-col">
             <span className="truncate font-heading text-lg font-extrabold tracking-tight">{server.name}</span>
-            <span className="truncate font-mono text-xs text-muted-foreground">{server.host}</span>
+            <span className="truncate font-mono text-xs text-muted-foreground">{server.local ? "this PC" : server.host}</span>
           </div>
           <HealthBadge health={health} />
         </div>
