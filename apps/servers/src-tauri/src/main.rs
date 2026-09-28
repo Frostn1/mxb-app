@@ -249,7 +249,9 @@ async fn config_load(app: State<'_, App>, id: String) -> Result<ConfigState, Str
         (text, path.display().to_string(), "local".to_string())
     } else {
         let tunnels = Arc::clone(&app.tunnels);
-        let out = blocking(move || tunnels.run_script(&server, REMOTE_SH, &["read"], 30)).await?;
+        let port = server.observe_port.to_string();
+        let out =
+            blocking(move || tunnels.run_script(&server, REMOTE_SH, &["read", &port], 30)).await?;
         let detect_mode = out.field("mode").unwrap_or("").to_string();
         let encoded = out
             .field("config_b64")
@@ -306,7 +308,11 @@ async fn config_validate(app: State<'_, App>, id: String, text: String) -> Resul
     }
     let tunnels = Arc::clone(&app.tunnels);
     let encoded = b64(&text);
-    let out = blocking(move || tunnels.run_script(&server, REMOTE_SH, &["validate", &encoded], 120)).await?;
+    let port = server.observe_port.to_string();
+    let out = blocking(move || {
+        tunnels.run_script(&server, REMOTE_SH, &["validate", &port, &encoded], 120)
+    })
+    .await?;
     Ok(Checked {
         ok: out.field("valid") == Some("1"),
         output: out.text(),
@@ -348,7 +354,7 @@ async fn config_apply(
     let encoded = b64(&text);
     let port = server.observe_port.to_string();
     let out = blocking(move || {
-        tunnels.run_script(&server, REMOTE_SH, &["apply", &encoded, &base_sha, &port], 300)
+        tunnels.run_script(&server, REMOTE_SH, &["apply", &port, &encoded, &base_sha], 300)
     })
     .await?;
     match out.field("result") {

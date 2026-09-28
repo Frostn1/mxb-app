@@ -374,7 +374,8 @@ impl Tunnels {
             Ok(mut c) => (c.stdin.take(), c.stdout.take(), c.stderr.take()),
             Err(_) => (None, None, None),
         };
-        let script = script.to_string();
+        // bash on the server reads a CR as part of each word; a CRLF checkout must not reach it.
+        let script = script.replace('\r', "");
         let feed = std::thread::spawn(move || {
             use std::io::Write;
             if let Some(mut stdin) = stdin {

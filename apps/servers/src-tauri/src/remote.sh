@@ -1,22 +1,21 @@
 #!/usr/bin/env bash
 # Config editing on a Linux mxbserver host, sent by MXB Servers over SSH on stdin:
-#   ssh host 'bash -s -- <command> [args]' < remote.sh
+#   ssh host 'bash -s -- <command> <observe port> [args]' < remote.sh
 #
 # It works with both layouts:
 #   systemd  /etc/systemd/system/mxbserver.service (deploy/opt/migrate-to-systemd.sh): the
 #            arguments are in /etc/mxbserver/mxbserver.env, the service runs as `mxbserver`,
 #            and root-owned files are written with sudo (passwordless on Lightsail's ubuntu).
-#   bare     a hand-started `bin/mxbserver` (the deploy-<sha>.sh scripts): the arguments and
-#            directory are read from the running process, and a restart is SIGINT + nohup,
-#            exactly as those scripts do.
+#   bare     a hand-started `bin/mxbserver` (the deploy-<sha>.sh scripts): the process is the
+#            one listening on the observe port, its arguments and directory are read from
+#            /proc, and a restart is SIGINT + nohup, exactly as those scripts do.
 #
 # Commands (machine-readable lines start with "@@"):
-#   detect                           @@mode, @@config, @@bin, @@user, @@sha
-#   read                             @@config_b64 <base64 of the config file>
-#   validate <b64>                   the candidate run once for 1 s on side ports; @@valid 0|1
-#   apply <b64> <sha> <observe port> back up, replace, restart, wait for /readyz; puts the
-#                                    backup back and restarts again if the server isn't ready.
-#                                    @@backup, @@result applied|rolled-back|failed
+#   read <obs>                    @@mode, @@config, @@sha, @@config_b64 <base64 of the file>
+#   validate <obs> <b64>          the candidate run once for 1 s on side ports; @@valid 0|1
+#   apply <obs> <b64> <sha>       back up, replace, restart, wait for /readyz; puts the backup
+#                                 back and restarts again if the server isn't ready.
+#                                 @@backup, @@result applied|rolled-back|failed
 set -uo pipefail
 
 say() { printf '@@%s %s\n' "$1" "$2"; }
@@ -24,6 +23,14 @@ die() { printf 'error: %s\n' "$*" >&2; exit 1; }
 
 UNIT=/etc/systemd/system/mxbserver.service
 ENV_FILE=/etc/mxbserver/mxbserver.env
+CMD="${1:-}"
+OBS="${2:-}"
+[[ "$OBS" =~ ^[0-9]{1,5}$ ]] || die "usage: read|validate|apply <observe port> [...]"
+
+# The pid of our own mxbserver listening on 127.0.0.1:$OBS, if any.
+listener() {
+  ss -Hltnp "sport = :$OBS" 2>/dev/null | grep -o 'pid=[0-9]*' | head -n1 | cut -d= -f2
+}
 
 # Fill MODE, BIN, WD, ARGS (array), RUNAS, PID.
 detect() {
@@ -45,11 +52,19 @@ detect() {
   fi
   MODE=bare
   RUNAS="$(id -un)"
-  local p exe
-  for p in $(pgrep -u "$RUNAS" -x mxbserver 2>/dev/null); do
-    exe="$(readlink -f "/proc/$p/exe" 2>/dev/null)"; exe="${exe% (deleted)}"
-    [[ "$exe" == "$HOME"/* ]] && { PID="$p"; break; }
-  done
+  PID="$(listener)"
+  if [[ -n "$PID" && "$(cat "/proc/$PID/comm" 2>/dev/null)" != mxbserver ]]; then
+    die "port $OBS is served by $(cat "/proc/$PID/comm" 2>/dev/null), not mxbserver"
+  fi
+  if [[ -z "$PID" ]]; then
+    # Down: only safe to guess when exactly one of ours exists, or none (the deploy layout).
+    local all
+    all="$(pgrep -u "$RUNAS" -x mxbserver 2>/dev/null)"
+    if [[ $(wc -w <<< "$all") -gt 1 ]]; then
+      die "nothing answers on port $OBS and several mxbserver processes run; can't tell which is this server"
+    fi
+    PID="$all"
+  fi
   if [[ -n "$PID" ]]; then
     BIN="$(readlink -f "/proc/$PID/exe")"; BIN="${BIN% (deleted)}"
     WD="$(readlink -f "/proc/$PID/cwd")"
@@ -101,18 +116,24 @@ has_admin() { # has_admin <file>: an [admin] section with a listen address
   awk '/^[[:space:]]*\[/{s=$0} s~/^[[:space:]]*\[admin\]/ && /^[[:space:]]*listen[[:space:]]*=/{f=1} END{exit !f}' "$1"
 }
 
+sha_of() { priv sha256sum "$1" | cut -d' ' -f1; }
+
 validate_file() { # run the candidate once on side ports, as the service would
-  local cand="$1" args=() i skip=0
-  for ((i = 0; i < ${#ARGS[@]}; i++)); do
-    if [[ $skip == 1 ]]; then skip=0; continue; fi
-    if [[ "${ARGS[$i]}" == --config ]]; then args+=(--config "$cand"); skip=1; continue; fi
-    args+=("${ARGS[$i]}")
-  done
+  local cand="$1" args=() i skip=0 admin=0
   # Distinct side ports: the server refuses observe and admin on one port, and :0 twice
   # counts as the same.
   local side=$((20000 + RANDOM % 20000))
+  for ((i = 0; i < ${#ARGS[@]}; i++)); do
+    if [[ $skip == 1 ]]; then skip=0; continue; fi
+    case "${ARGS[$i]}" in
+      --config) args+=(--config "$cand"); skip=1 ;;
+      # An admin listener from the command line moves off the live port too.
+      --admin) args+=(--admin "127.0.0.1:$((side + 1))"); skip=1; admin=1 ;;
+      *) args+=("${ARGS[$i]}") ;;
+    esac
+  done
   args+=(--listen 127.0.0.1:0 --observe "127.0.0.1:$side" --duration 1)
-  has_admin "$cand" && args+=(--admin "127.0.0.1:$((side + 1))")
+  [[ $admin == 0 ]] && has_admin "$cand" && args+=(--admin "127.0.0.1:$((side + 1))")
   local log rc
   log="$(mktemp)"
   ( cd "$WD" && as_owner timeout 60 "$BIN" "${args[@]}" ) > "$log" 2>&1
@@ -123,12 +144,14 @@ validate_file() { # run the candidate once on side ports, as the service would
   return "$rc"
 }
 
-ready() { curl -fsS --max-time 1 "http://127.0.0.1:$1/readyz" >/dev/null 2>&1; }
+ready() { curl -fsS --max-time 1 "http://127.0.0.1:$OBS/readyz" >/dev/null 2>&1; }
 
-wait_ready() { local i; for ((i = 0; i < 120; i++)); do ready "$1" && return 0; sleep 0.25; done; return 1; }
+wait_ready() { local i; for ((i = 0; i < 120; i++)); do ready && return 0; sleep 0.25; done; return 1; }
 
 restart() {
   if [[ "$MODE" == systemd ]]; then
+    # A crash-looping candidate can use up the unit's start limit; clear it first.
+    sudo -n systemctl reset-failed mxbserver 2>/dev/null
     sudo -n systemctl restart mxbserver || return 1
     return 0
   fi
@@ -149,32 +172,33 @@ CONFIG="$(config_path)"
 OWNER=""
 [[ "$MODE" == systemd ]] && OWNER="$RUNAS"
 
-case "${1:-}" in
-  detect)
-    say mode "$MODE"; say config "$CONFIG"; say bin "$BIN"; say user "$RUNAS"
-    say sha "$(priv sha256sum "$CONFIG" | cut -d' ' -f1)"
-    ;;
+case "$CMD" in
   read)
+    say mode "$MODE"; say config "$CONFIG"
+    say sha "$(sha_of "$CONFIG")"
     say config_b64 "$(priv cat "$CONFIG" | base64 -w0)"
-    say sha "$(priv sha256sum "$CONFIG" | cut -d' ' -f1)"
     ;;
   validate)
     cand="$(dirname "$CONFIG")/.candidate-$$.toml"
-    decode "${2:?candidate}" "$cand"
+    decode "${3:?candidate}" "$cand"
     validate_file "$cand"; rc=$?
     priv rm -f "$cand"
     say valid "$([[ $rc == 0 ]] && echo 1 || echo 0)"
     ;;
   apply)
-    b64="${2:?candidate}"; want="${3:?sha}"; obs="${4:?observe port}"
-    [[ "$obs" =~ ^[0-9]+$ ]] || die "bad observe port"
-    now="$(priv sha256sum "$CONFIG" | cut -d' ' -f1)"
-    [[ "$now" == "$want" ]] || die "the config changed on the server since it was loaded; reload and try again"
+    b64="${3:?candidate}"; want="${4:?sha}"
+    [[ "$want" =~ ^[0-9a-f]{64}$ ]] || die "bad sha"
     dir="$(dirname "$CONFIG")"
+    # One apply at a time per config, from any client.
+    exec 9> "/tmp/mxbserver-config-$(id -u).lock"
+    flock -n 9 || die "another config change is being applied to this server"
+    [[ "$(sha_of "$CONFIG")" == "$want" ]] || die "the config changed on the server since it was loaded; reload and try again"
     cand="$dir/.candidate-$$.toml"
     decode "$b64" "$cand"
     if ! validate_file "$cand"; then priv rm -f "$cand"; say result failed; die "the candidate did not pass the server's own check"; fi
-    stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+    # Again, after the check's minute: nobody edited it meanwhile.
+    if [[ "$(sha_of "$CONFIG")" != "$want" ]]; then priv rm -f "$cand"; die "the config changed on the server during the check; reload and try again"; fi
+    stamp="$(date -u +%Y%m%dT%H%M%S.%NZ)-$$"
     backup="$dir/backups/$(basename "$CONFIG").$stamp"
     priv mkdir -p "$dir/backups"
     priv cp -p "$CONFIG" "$backup" || die "backup failed; nothing changed"
@@ -182,7 +206,7 @@ case "${1:-}" in
     priv sh -c "ls -1t '$dir/backups/$(basename "$CONFIG")'.* 2>/dev/null | tail -n +21 | xargs -r rm -f"
     say backup "$backup"
     priv mv -f "$cand" "$CONFIG" || die "replace failed; the old config is still live"
-    if restart && wait_ready "$obs"; then
+    if restart && wait_ready; then
       say result applied
     else
       echo "not ready after the change; putting the backup back" >&2
@@ -192,8 +216,8 @@ case "${1:-}" in
         PID="$(cat "$WD/mxbserver.pid" 2>/dev/null)"
         kill -0 "$PID" 2>/dev/null || PID=""
       fi
-      if restart && wait_ready "$obs"; then say result rolled-back; else say result failed; fi
+      if restart && wait_ready; then say result rolled-back; else say result failed; fi
     fi
     ;;
-  *) die "usage: detect | read | validate <b64> | apply <b64> <sha> <observe port>" ;;
+  *) die "usage: read|validate|apply <observe port> [...]" ;;
 esac

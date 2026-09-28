@@ -237,7 +237,19 @@ const inputClass = "h-9 rounded-md border border-input bg-background px-3 text-s
 
 /** Keeps its own text while typing, so a trailing comma isn't eaten. */
 function BikesInput({ value, onChange }: { value: FieldValue; onChange: (v: FieldValue) => void }) {
-  const [text, setText] = useState(value === "random" ? "random" : Array.isArray(value) ? value.join(", ") : "");
+  const format = (v: FieldValue) => (v === "random" ? "random" : Array.isArray(v) ? v.join(", ") : "");
+  const parse = (t: string): FieldValue => {
+    const s = t.trim();
+    if (!s) return null;
+    if (s === "random") return "random";
+    return s.split(",").map((x) => x.trim()).filter(Boolean);
+  };
+  const [text, setText] = useState(format(value));
+  // Discard and Reload change the value from outside; show it unless the text already means it.
+  useEffect(() => {
+    setText((t) => (same(parse(t), value) ? t : format(value)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [JSON.stringify(value)]);
   return (
     <input
       className={`${inputClass} w-full font-mono`}
@@ -245,10 +257,7 @@ function BikesInput({ value, onChange }: { value: FieldValue; onChange: (v: Fiel
       value={text}
       onChange={(e) => {
         setText(e.target.value);
-        const t = e.target.value.trim();
-        if (!t) onChange(null);
-        else if (t === "random") onChange("random");
-        else onChange(t.split(",").map((s) => s.trim()).filter(Boolean));
+        onChange(parse(e.target.value));
       }}
     />
   );

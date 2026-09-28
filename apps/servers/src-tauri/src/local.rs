@@ -55,6 +55,10 @@ fn has_admin(text: &str) -> bool {
 
 /// Run the server once for a second on side ports with `candidate` as its config.
 fn check(cmd: &LocalCommand, candidate: &Path, text: &str) -> Result<(bool, String), String> {
+    // Distinct free ports: the server refuses observe and admin on one port, and
+    // `127.0.0.1:0` twice counts as the same.
+    let admin_port = format!("127.0.0.1:{}", free_port()?);
+    let mut admin = false;
     let mut args = Vec::new();
     let mut it = cmd.args.iter();
     while let Some(a) = it.next() {
@@ -62,16 +66,20 @@ fn check(cmd: &LocalCommand, candidate: &Path, text: &str) -> Result<(bool, Stri
             it.next();
             args.push("--config".to_string());
             args.push(candidate.display().to_string());
+        } else if a == "--admin" {
+            // An admin listener from the command line moves off the live port too.
+            it.next();
+            args.push("--admin".to_string());
+            args.push(admin_port.clone());
+            admin = true;
         } else {
             args.push(a.clone());
         }
     }
-    // Distinct free ports: the server refuses observe and admin on one port, and
-    // `127.0.0.1:0` twice counts as the same.
     args.extend(["--listen".to_string(), "127.0.0.1:0".to_string()]);
     args.extend(["--observe".to_string(), format!("127.0.0.1:{}", free_port()?)]);
-    if has_admin(text) {
-        args.extend(["--admin".to_string(), format!("127.0.0.1:{}", free_port()?)]);
+    if !admin && has_admin(text) {
+        args.extend(["--admin".to_string(), admin_port]);
     }
     args.extend(["--duration".to_string(), "1".to_string()]);
     let mut child = hidden(Command::new(&cmd.exe))
@@ -218,6 +226,11 @@ fn restart(server: &Server, cmd: &LocalCommand) -> Result<(), String> {
         while listener_pid(server.observe_port).is_some() && Instant::now() < deadline {
             std::thread::sleep(Duration::from_millis(200));
         }
+        // Starting beside a survivor would fail on its ports while the survivor's /readyz
+        // made it look fine.
+        if let Some(still) = listener_pid(server.observe_port) {
+            return Err(format!("the old server (pid {still}) did not stop"));
+        }
     }
     let log = fs::OpenOptions::new()
         .create(true)
@@ -234,7 +247,7 @@ fn restart(server: &Server, cmd: &LocalCommand) -> Result<(), String> {
         const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
         start.creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP);
     }
-    start
+    let child = start
         .args(&cmd.args)
         .current_dir(&cmd.cwd)
         .stdin(Stdio::null())
@@ -242,23 +255,42 @@ fn restart(server: &Server, cmd: &LocalCommand) -> Result<(), String> {
         .stderr(err)
         .spawn()
         .map_err(|e| format!("{}: {e}", cmd.exe))?;
-    if wait_ready(server.observe_port, 30) {
-        Ok(())
-    } else {
-        Err("not ready within 30 s".into())
+    if !wait_ready(server.observe_port, 30) {
+        return Err("not ready within 30 s".into());
+    }
+    // Ready, and it is the process just started that answers.
+    match listener_pid(server.observe_port) {
+        Some(pid) if pid == child.id() => Ok(()),
+        other => Err(format!(
+            "the observe port is served by pid {other:?}, not the new server ({})",
+            child.id()
+        )),
     }
 }
 
+/// One apply at a time from this app.
+static APPLYING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 pub fn apply(server: &Server, base_sha: &str, text: &str) -> Result<Applied, String> {
+    let _one = APPLYING
+        .try_lock()
+        .map_err(|_| "Another config change is being applied.".to_string())?;
     let cmd = command(server)?;
     let config = config_path(cmd)?;
-    let now = fs::read_to_string(&config).map_err(|e| format!("{}: {e}", config.display()))?;
-    if config::sha256(&now) != base_sha {
+    let unchanged = || -> Result<bool, String> {
+        let now = fs::read_to_string(&config).map_err(|e| format!("{}: {e}", config.display()))?;
+        Ok(config::sha256(&now) == base_sha)
+    };
+    if !unchanged()? {
         return Err("The config changed since it was loaded; reload and try again.".into());
     }
     let (ok, output) = validate(server, text)?;
     if !ok {
         return Err(format!("The server's own check refused it:\n{output}"));
+    }
+    // Again, after the check: nobody edited it meanwhile.
+    if !unchanged()? {
+        return Err("The config changed during the check; reload and try again.".into());
     }
     let dir = config.parent().ok_or("config has no directory")?;
     let backups = dir.join("backups");

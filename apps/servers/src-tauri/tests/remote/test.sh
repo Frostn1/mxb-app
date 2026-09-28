@@ -33,28 +33,27 @@ for _ in $(seq 40); do ready && break; sleep 0.25; done
 ready || fail "stub did not start"
 
 echo "=== detect and read"
-out="$(remote detect)"
+out="$(remote read "$OBS")"
 [[ "$(field mode <<<"$out")" == bare ]] || fail "mode: $out"
 [[ "$(field config <<<"$out")" == "$ROOT/config/server.toml" ]] || fail "config path: $out"
-out="$(remote read)"
 [[ "$(field config_b64 <<<"$out" | base64 -d)" == "$(cat "$ROOT/config/server.toml")" ]] || fail "read"
 sha="$(field sha <<<"$out")"
 
 echo "=== validate"
 good="$(sed 's/count = 4/count = 6/' "$ROOT/config/server.toml")"
-[[ "$(remote validate "$(b64 <<<"$good")" | field valid)" == 1 ]] || fail "good candidate refused"
+[[ "$(remote validate "$OBS" "$(b64 <<<"$good")" | field valid)" == 1 ]] || fail "good candidate refused"
 bad="$good
 invalid = true"
-[[ "$(remote validate "$(b64 <<<"$bad")" | field valid)" == 0 ]] || fail "bad candidate accepted"
+[[ "$(remote validate "$OBS" "$(b64 <<<"$bad")" | field valid)" == 0 ]] || fail "bad candidate accepted"
 ls "$ROOT"/config/.candidate-* 2>/dev/null && fail "candidate left behind"
 
 echo "=== apply refuses a stale hash"
-if remote apply "$(b64 <<<"$good")" "$(printf '0%.0s' {1..64})" "$OBS"; then fail "stale hash applied"; fi
+if remote apply "$OBS" "$(b64 <<<"$good")" "$(printf '0%.0s' {1..64})"; then fail "stale hash applied"; fi
 grep -q "count = 4" "$ROOT/config/server.toml" || fail "stale apply changed the file"
 
 echo "=== apply a good change: backup, replace, restart, ready"
 old_pid="$(server_pid)"
-out="$(remote apply "$(b64 <<<"$good")" "$sha" "$OBS")"
+out="$(remote apply "$OBS" "$(b64 <<<"$good")" "$sha")"
 echo "$out"
 [[ "$(field result <<<"$out")" == applied ]] || fail "not applied"
 grep -q "count = 6" "$ROOT/config/server.toml" || fail "file not replaced"
@@ -69,7 +68,7 @@ echo "=== apply a change that never gets ready: the backup goes back"
 sha="$(sha256sum "$ROOT/config/server.toml" | cut -d' ' -f1)"
 broken="$(cat "$ROOT/config/server.toml")
 # never_ready"
-out="$(remote apply "$(b64 <<<"$broken")" "$sha" "$OBS" 2>&1)" || true
+out="$(remote apply "$OBS" "$(b64 <<<"$broken")" "$sha" 2>&1)" || true
 echo "$out"
 [[ "$(field result <<<"$out")" == rolled-back ]] || fail "not rolled back"
 grep -q never_ready "$ROOT/config/server.toml" && fail "broken config still live"
@@ -78,8 +77,20 @@ ready || fail "not ready after rollback"
 echo "=== an invalid change is refused before anything happens"
 sha="$(sha256sum "$ROOT/config/server.toml" | cut -d' ' -f1)"
 pid="$(server_pid)"
-if remote apply "$(b64 <<<"$bad")" "$sha" "$OBS"; then fail "invalid config applied"; fi
+if remote apply "$OBS" "$(b64 <<<"$bad")" "$sha"; then fail "invalid config applied"; fi
 [[ "$(server_pid)" == "$pid" ]] || fail "invalid config restarted the server"
 
-kill -INT "$(server_pid)"
+echo "=== a second server of ours: the one on the observe port is the one edited"
+mkdir -p "$HOME/other/config"
+printf '[server]
+observe = "127.0.0.1:%s"
+' $((OBS + 1)) > "$HOME/other/config/server.toml"
+(cd "$HOME/other" && setsid nohup "$ROOT/bin/mxbserver" --config config/server.toml > /dev/null 2>&1 < /dev/null &)
+sleep 1
+out="$(remote read "$OBS")"
+[[ "$(field config <<<"$out")" == "$ROOT/config/server.toml" ]] || fail "picked the wrong server: $out"
+out="$(remote read $((OBS + 1)))"
+[[ "$(field config <<<"$out")" == "$HOME/other/config/server.toml" ]] || fail "second server: $out"
+
+pkill -INT -u "$(id -un)" -x mxbserver || true
 echo PASS
