@@ -4,6 +4,8 @@
 
 ### Added
 - Settings → Paint sync names the riders on your server who aren't sharing paints ("Not sharing paints: CaptiveDuck"): they need MXB App 0.19 or newer with paint sync on, and until then you see each other in stock paints.
+- **MXB Servers (`apps/servers`), P1 of the mxbserver manager:** one window for every mxbserver with its health, session, time left, riders, build and uptime, plus a live log tail. It reaches each server over SSH, forwarding the loopback-only observe and admin ports, so nothing new faces the internet. Admin tokens live in the OS keychain. It is not released yet; run it with `bun run tauri:servers dev`.
+- `packages/mxbsecure-ui`: the mxbsecure design tokens (colours, radius, Geist Mono, dark mode) copied from mxbsecure-web, plus the wordmark and a theme hook, for apps that wear the mxbsecure brand.
 
 ### Changed
 - **Auto race mode moves nothing with FrostMod v0.40.0 or newer.** It hands FrostMod a list of the tracks and bikes that stay (`frostmod_racemode.txt`), and FrostMod hides the rest from the game's own scan, so their archives are never opened. Ending the session just deletes the list. With an older FrostMod it still moves the unused mods aside as before.

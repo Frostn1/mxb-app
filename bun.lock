@@ -1,5 +1,6 @@
 {
   "lockfileVersion": 1,
+  "configVersion": 0,
   "workspaces": {
     "": {
       "name": "frost-monorepo",
@@ -15,7 +16,7 @@
     },
     "apps/coach": {
       "name": "@frost/coach",
-      "version": "0.1.19",
+      "version": "0.1.20",
       "dependencies": {
         "@frost/shared": "*",
         "@tauri-apps/api": "^2.1.1",
@@ -39,7 +40,7 @@
     },
     "apps/manager": {
       "name": "@frost/manager",
-      "version": "0.15.1",
+      "version": "0.19.1",
       "dependencies": {
         "@frost/shared": "*",
         "@radix-ui/react-alert-dialog": "^1.1.19",
@@ -85,9 +86,29 @@
         "vite": "^5.4.10",
       },
     },
+    "apps/servers": {
+      "name": "@frost/servers",
+      "version": "0.1.0",
+      "dependencies": {
+        "@frost/mxbsecure-ui": "*",
+        "@tauri-apps/api": "^2.1.1",
+        "lucide-react": "^1.24.0",
+        "react": "^18.3.1",
+        "react-dom": "^18.3.1",
+      },
+      "devDependencies": {
+        "@tailwindcss/vite": "^4.3.2",
+        "@tauri-apps/cli": "^2.1.0",
+        "@types/react": "^18.3.12",
+        "@types/react-dom": "^18.3.1",
+        "@vitejs/plugin-react": "^4.3.3",
+        "tailwindcss": "^4.3.2",
+        "vite": "^5.4.10",
+      },
+    },
     "apps/studio": {
       "name": "@frost/studio",
-      "version": "0.1.10",
+      "version": "0.6.1",
       "dependencies": {
         "@frost/shared": "*",
         "@tauri-apps/api": "^2.1.1",
@@ -109,6 +130,17 @@
         "vite": "^5.4.10",
       },
     },
+    "packages/mxbsecure-ui": {
+      "name": "@frost/mxbsecure-ui",
+      "version": "0.0.0",
+      "dependencies": {
+        "@fontsource/geist-mono": "^5.3.0",
+        "react": "^18.3.1",
+      },
+      "devDependencies": {
+        "@types/react": "^18.3.12",
+      },
+    },
     "packages/shared": {
       "name": "@frost/shared",
       "version": "0.0.0",
@@ -124,6 +156,7 @@
         "@react-three/drei": "^9.122.0",
         "@react-three/fiber": "^8.18.0",
         "@tauri-apps/api": "^2.1.1",
+        "@tauri-apps/plugin-shell": "^2",
         "class-variance-authority": "^0.7.1",
         "clsx": "^2.1.1",
         "cmdk": "^1.1.1",
@@ -255,9 +288,15 @@
 
     "@floating-ui/utils": ["@floating-ui/utils@0.2.12", "", {}, "sha512-HpCo8tmWzLVad5s2d19EhAz5zqrrQ6s69qd6moPMQvkOuSwDT1YgRfWSVuc4ennqrgv3OHppiOGMQ7oC13yIww=="],
 
+    "@fontsource/geist-mono": ["@fontsource/geist-mono@5.3.0", "", {}, "sha512-UtJ1BBBCVpMYdIcW7nEB45UAoAw5M53ZXs2t0ciPW+IokuAAIc56M8+kW5tXbRJCTpDw4XTtU7proT6NdQAHTg=="],
+
     "@frost/coach": ["@frost/coach@workspace:apps/coach"],
 
     "@frost/manager": ["@frost/manager@workspace:apps/manager"],
+
+    "@frost/mxbsecure-ui": ["@frost/mxbsecure-ui@workspace:packages/mxbsecure-ui"],
+
+    "@frost/servers": ["@frost/servers@workspace:apps/servers"],
 
     "@frost/shared": ["@frost/shared@workspace:packages/shared"],
 
@@ -1248,8 +1287,6 @@
     "rollup/@types/estree": ["@types/estree@1.0.5", "", {}, "sha512-/kYRxGDLWzHOB7q+wtSUQlFrtcdUccpfy+X+9iMBpHK8QLLhx2wIPYuS5DYtR9Wa/YlZAbIovy7qVdB1Aq6Lyw=="],
 
     "stats-gl/three": ["three@0.170.0", "", {}, "sha512-FQK+LEpYc0fBD+J8g6oSEyyNzjp+Q7Ks1C568WWaoMRLW+TkNNWmenWeGgJjV105Gd+p/2ql1ZcjYvNiPZBhuQ=="],
-
-    "tinyglobby/picomatch": ["picomatch@4.0.5", "", {}, "sha512-RvwwcruNjI1ncT5xRakeyS9Lf8lcItv34KD+aif+VH9kduAyfYBipGh12274xtenIPZ119/R9BdTBa8gAwSh0A=="],
 
     "tunnel-rat/zustand": ["zustand@4.5.7", "", { "dependencies": { "use-sync-external-store": "^1.2.2" }, "peerDependencies": { "@types/react": ">=16.8", "immer": ">=9.0.6", "react": ">=16.8" }, "optionalPeers": ["immer"] }, "sha512-CHOUy7mu3lbD6o6LJLfllpjkzhHXSBlX8B9+qPddUsIfeF5S/UZ5q0kmCsnRqT1UHFQZchNFDDzMbQsuesHWlw=="],
 

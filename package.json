@@ -5,9 +5,11 @@
   "type": "module",
   "workspaces": [
     "packages/shared",
+    "packages/mxbsecure-ui",
     "apps/manager",
     "apps/studio",
-    "apps/coach"
+    "apps/coach",
+    "apps/servers"
   ],
   "scripts": {
     "dev": "cd apps/manager && bun run dev",
@@ -22,7 +24,9 @@
     "dev:studio": "cd apps/studio && bun run dev",
     "tauri:studio": "cd apps/studio && bun run tauri",
     "dev:coach": "cd apps/coach && bun run dev",
-    "tauri:coach": "cd apps/coach && bun run tauri"
+    "tauri:coach": "cd apps/coach && bun run tauri",
+    "dev:servers": "cd apps/servers && bun run dev",
+    "tauri:servers": "cd apps/servers && bun run tauri"
   },
   "overrides": {
     "postcss": "^8.5.25"
