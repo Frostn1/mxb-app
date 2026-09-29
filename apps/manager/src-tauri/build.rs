@@ -48,6 +48,7 @@ fn main() {
 
     shop_credentials();
     release_tag();
+    secure_module();
 
     tauri_build::build()
 }
@@ -115,6 +116,18 @@ fn release_tag() {
         .filter(|v| !v.trim().is_empty())
     {
         println!("cargo::rustc-env=MXB_RELEASE_TAG={}", tag.trim());
+    }
+}
+
+/// Bake in the digest and release tag of the `mxbsecure.dll` this build downloads instead of
+/// shipping (see `secure_launch::ensure_module`). Set by the release workflow's Windows leg
+/// from the signed file; absent everywhere else, which leaves the app on a local or bundled copy.
+fn secure_module() {
+    for key in ["MXB_SECURE_DLL_SHA256", "MXB_SECURE_DLL_TAG"] {
+        println!("cargo::rerun-if-env-changed={key}");
+        if let Some(v) = std::env::var(key).ok().filter(|v| !v.trim().is_empty()) {
+            println!("cargo::rustc-env={key}={}", v.trim());
+        }
     }
 }
 

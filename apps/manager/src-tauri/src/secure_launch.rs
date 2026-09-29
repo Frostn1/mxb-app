@@ -367,7 +367,75 @@ fn source_dll(app: &AppHandle) -> Option<PathBuf> {
     }
     let exe = std::env::current_exe().ok()?;
     let p = exe.parent()?.join("mxbsecure.dll");
-    p.exists().then_some(p)
+    if p.exists() {
+        return Some(p);
+    }
+    downloaded_dll(app).filter(|p| p.exists())
+}
+
+/// The release build's `mxbsecure.dll`: its SHA-256 and the release it is attached to, baked in
+/// by the workflow. The Windows installer no longer carries the DLL at all (Defender scored
+/// the installer on it); it is fetched from that release when Game Integration is on, and
+/// only a file with exactly this digest is ever used. Absent in local and public builds.
+const MODULE_SHA256: Option<&str> = option_env!("MXB_SECURE_DLL_SHA256");
+const MODULE_TAG: Option<&str> = option_env!("MXB_SECURE_DLL_TAG");
+
+/// Where the downloaded DLL lives: named by its digest, so a new build never reuses an old file.
+fn downloaded_dll(app: &AppHandle) -> Option<PathBuf> {
+    let sha = MODULE_SHA256?;
+    Some(secure_dir(app)?.join("modules").join(format!("mxbsecure-{}.dll", &sha[..16.min(sha.len())])))
+}
+
+/// Download this build's `mxbsecure.dll` from its own GitHub release, if it isn't here yet.
+///
+/// Verified against [`MODULE_SHA256`] before it is written: the digest is part of the signed
+/// app, so a swapped release asset, a proxy, or a truncated download can never become the DLL
+/// the game loads. `Ok(None)` when this build has no downloadable module (a local build that
+/// ships the file beside itself, or one without the private module).
+#[cfg_attr(not(windows), allow(dead_code))]
+async fn ensure_module(app: &AppHandle) -> Result<Option<PathBuf>, String> {
+    let (Some(sha), Some(tag), Some(dest)) = (MODULE_SHA256, MODULE_TAG, downloaded_dll(app)) else {
+        return Ok(None);
+    };
+    if std::fs::read(&dest).is_ok_and(|b| mxb_core::plugins::sha256_hex(&b) == sha) {
+        return Ok(Some(dest));
+    }
+    let url = format!("https://github.com/Frostn1/mxb-app/releases/download/{tag}/mxbsecure.dll");
+    let client = crate::paintsync::client().map_err(|e| e.to_string())?;
+    let bytes = client
+        .get(&url)
+        .send()
+        .await
+        .and_then(|r| r.error_for_status())
+        .map_err(|e| format!("downloading the secure-content module: {e}"))?
+        .bytes()
+        .await
+        .map_err(|e| format!("downloading the secure-content module: {e}"))?;
+    if mxb_core::plugins::sha256_hex(&bytes) != sha {
+        return Err("the downloaded secure-content module isn't the one this build expects".into());
+    }
+    let dir = dest.parent().ok_or("no modules folder")?;
+    std::fs::create_dir_all(dir).map_err(|e| format!("creating {}: {e}", dir.display()))?;
+    // Older builds' copies go: they are named by a digest nothing asks for any more.
+    if let Ok(rd) = std::fs::read_dir(dir) {
+        for e in rd.flatten() {
+            if e.path() != dest {
+                let _ = std::fs::remove_file(e.path());
+            }
+        }
+    }
+    let tmp = dest.with_extension("part");
+    std::fs::write(&tmp, &bytes).map_err(|e| format!("writing {}: {e}", tmp.display()))?;
+    std::fs::rename(&tmp, &dest).map_err(|e| format!("placing {}: {e}", dest.display()))?;
+    log::info!("[secure] downloaded the secure-content module ({} bytes)", bytes.len());
+    Ok(Some(dest))
+}
+
+/// Is Game Integration on? The secure-content plugin is part of it: off means nothing of ours
+/// in the game's folder, and nothing downloaded.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn game_integration_on(app: &AppHandle) -> bool {
+    crate::config::load(app).map(|c| c.auto_run_frostmod).unwrap_or(false)
 }
 
 /// The writable directory the DLL is run from — `<app-data>/secure/`. The shipped DLL may sit
@@ -453,6 +521,18 @@ fn stage_injector(app: &AppHandle) -> Option<PathBuf> {
 fn write_manifest(assets: &[SecureAsset], dir: &std::path::Path) -> Result<(), String> {
     let mut out = String::new();
     for a in assets {
+        // `game_name` originates in the secured blob's header, and the paths can originate in a
+        // user-selected mods directory.  The plugin consumes TSV, so reject separators rather
+        // than allowing one asset to forge a second manifest record.
+        for (field, value) in [
+            ("game name", a.game_name.as_str()),
+            ("blob path", a.blob_path.as_str()),
+            ("key path", a.mxbkey_path.as_str()),
+        ] {
+            if value.contains(&['\t', '\r', '\n'][..]) {
+                return Err(format!("secure manifest {field} contains a record separator"));
+            }
+        }
         out.push_str(&format!("{}\t{}\t{}\n", a.game_name, a.blob_path, a.mxbkey_path));
     }
     std::fs::write(dir.join("manifest.tsv"), out).map_err(|e| e.to_string())
@@ -530,7 +610,7 @@ pub fn watch(app: &AppHandle) {
                 // minute, since the scan walks the tracks folder and must not run every tick.
                 if decided_this_run || shut_ticks % 30 == 0 {
                     #[cfg(windows)]
-                    sync_plugin(&app);
+                    sync_plugin(&app).await;
                 }
                 shut_ticks = shut_ticks.wrapping_add(1);
                 decided_this_run = false; // game gone: decide again for the next run
@@ -585,6 +665,10 @@ pub fn arm(app: &AppHandle) {
     write_identity(&dir);
     #[cfg(windows)]
     {
+        if !game_integration_on(app) {
+            log::info!("[secure] Game Integration is off; the secure-content plugin stays out");
+            return;
+        }
         // The game loaded its plugins when it started, so there is nothing to do in it now:
         // a plugin already in place is serving, and one written now serves from next start.
         match plugins_dir(app).ok_or_else(|| "the game folder isn't known".to_string())
@@ -629,12 +713,19 @@ fn inject_and_rescan(app: &AppHandle, dll: &std::path::Path, dir: &std::path::Pa
     }
 }
 
-/// Refresh a running game after a mid-session unlock: rewrite the manifest the DLL watches, then
-/// ask FrostMod to rescan, so a just-unlocked asset appears without a restart. A no-op unless the
-/// game is running with injection on — otherwise `arm` picks the new asset up at the next launch.
+/// Bring secure-content serving in step after a key changes.
+///
+/// A Windows game plugin is loaded only during game startup.  Waiting for the periodic watcher
+/// after an automatic unlock left a window where the key existed but `mxbsecure.dlo` had not yet
+/// been installed; launching MX Bikes in that window meant the secured track could not appear.
+/// Sync immediately while the game is shut, including downloading the digest-pinned release
+/// module when needed.  Once the game is running its already-loaded plugin instead observes the
+/// rewritten manifest and FrostMod is asked to rescan.
 #[cfg_attr(not(mxbsecure), allow(dead_code))]
-pub fn refresh_running(app: &AppHandle) {
+pub async fn refresh_after_change(app: &AppHandle) {
     if !crate::gameproc::is_game_running() {
+        #[cfg(windows)]
+        sync_plugin(app).await;
         return;
     }
     let Some(dir) = run_dir(app) else { return };
@@ -752,11 +843,19 @@ fn remove_plugin(plugins: &std::path::Path) {
 /// Called from [`watch`] whenever the game isn't running, so the plugin is in place before
 /// the first launch after an unlock rather than one launch late. Quiet when nothing changes.
 #[cfg(windows)]
-fn sync_plugin(app: &AppHandle) {
+async fn sync_plugin(app: &AppHandle) {
     let Some(plugins) = plugins_dir(app) else { return };
+    if !game_integration_on(app) {
+        remove_plugin(&plugins);
+        return;
+    }
     let assets = scan_secured(app);
     if assets.is_empty() {
         remove_plugin(&plugins);
+        return;
+    }
+    if let Err(e) = ensure_module(app).await {
+        log::warn!("[secure] {e}");
         return;
     }
     let Some(dir) = run_dir(app) else { return };
@@ -910,6 +1009,21 @@ fn inject(_app: &AppHandle, _dll: &std::path::Path) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_secured_header_cannot_inject_a_second_manifest_record() {
+        let dir = std::env::temp_dir().join(format!("frost-manifest-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let asset = SecureAsset {
+            game_name: "pinehill.pkz\nother.pkz\tother.blob\tother.key".into(),
+            blob_path: "pinehill.mxbsecure".into(),
+            mxbkey_path: "pinehill.mxbsecurekey".into(),
+        };
+
+        assert!(write_manifest(&[asset], &dir).is_err());
+        assert!(!dir.join("manifest.tsv").exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     /// The game loads the plugin only at startup, so whether a copy was already in place is
     /// the difference between "serving now" and "from the next start" — and an unchanged copy
