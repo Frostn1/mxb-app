@@ -194,11 +194,6 @@ pub fn is_installed(app: &AppHandle) -> bool {
     plugin_only(app) && frostmod_dir(app).join("frostmod.dll").exists()
 }
 
-#[allow(dead_code)]
-fn exe_path(app: &AppHandle) -> PathBuf {
-    frostmod_dir(app).join("frostmod.exe")
-}
-
 #[derive(Deserialize)]
 struct Release {
     tag_name: String,
@@ -1347,7 +1342,7 @@ fn split_args(line: &str) -> Vec<String> {
 /// Check what has to be true before starting, and work out what to tell FrostMod.
 ///
 /// `None` means FrostMod is already running and there is nothing to do.
-#[cfg(any(windows, target_os = "linux", target_os = "macos"))]
+#[cfg(any())]
 fn plan_start(app: &AppHandle) -> anyhow::Result<Option<StartPlan>> {
     if crate::frostmod::is_running() {
         return Ok(None);
@@ -1418,36 +1413,6 @@ fn start_plugin(app: &AppHandle, _state: &FrostmodProcess) -> bool {
     matches!(sync.game_plugin, PluginCopy::Current | PluginCopy::Refreshed)
 }
 
-/// Legacy injector implementation retained only while downstream builds migrate; it is
-/// deliberately excluded from every target and has no caller.
-#[cfg(any())]
-fn start_injector(app: &AppHandle, state: &FrostmodProcess) -> anyhow::Result<bool> {
-    use std::os::windows::process::CommandExt;
-    /// Don't pop a console window for the headless reloader.
-    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-
-    let Some(plan) = plan_start(app)? else { return Ok(false) };
-    let mut args: Vec<String> = vec!["--game".into(), plan.game.into()];
-    if let Some(mods) = &plan.mods_root {
-        args.extend(["--mods".into(), mods.to_string_lossy().into_owned()]);
-    }
-    args.extend(plan.extra.iter().cloned());
-    // Logged on both sides, as Linux and macOS already are. FrostMod not working is the
-    // single most reported thing about this app, and until now the Windows path — the one
-    // nearly every report comes from — said nothing at all in the log, whether it worked
-    // or not.
-    log::info!("starting FrostMod: {} {:?}", plan.exe.display(), args);
-    let child = std::process::Command::new(&plan.exe)
-        .current_dir(frostmod_dir(app))
-        .args(&args)
-        .creation_flags(CREATE_NO_WINDOW)
-        .spawn()
-        .map_err(|e| anyhow::anyhow!("Couldn't start {}: {e}", plan.exe.display()))?;
-    log::info!("FrostMod started (pid {})", child.id());
-    *state.0.lock().unwrap() = Some(child);
-    Ok(true)
-}
-
 /// Re-arm FrostMod for a game session that has just begun.
 ///
 /// FrostMod injects into one game process. When that process goes, so does the injection —
@@ -1485,58 +1450,6 @@ fn runner_log(app: &AppHandle, name: &str) -> std::process::Stdio {
         .open(&path)
         .map(std::process::Stdio::from)
         .unwrap_or_else(|_| std::process::Stdio::null())
-}
-
-/// Launch `frostmod.exe` inside the Proton prefix the game runs in.
-///
-/// Not "run the Windows binary somehow": FrostMod injects a DLL into `mxbikes.exe`, which
-/// only works from inside the same prefix — the same Wine session, sharing the same
-/// process namespace. [`crate::proton`] is what finds that prefix and the Proton build
-/// that owns it.
-#[cfg(any())]
-fn start_injector(app: &AppHandle, state: &FrostmodProcess) -> anyhow::Result<bool> {
-    let Some(plan) = plan_start(app)? else { return Ok(false) };
-
-    // A FrostMod that doesn't poll its command file can't be driven from here at all: it
-    // would inject and reload on F8, while every button in this app wrote a file nothing
-    // ever read. Better to say so than to hand over a half-working install.
-    needs_the_file_channel(app, "Linux", "Under Proton")?;
-
-    let cfg = crate::config::load(app).unwrap_or_default();
-    let runner = crate::proton::find(cfg.game(), &cfg.wine_runner)?;
-
-    let mut args: Vec<String> = vec!["--game".into(), plan.game.into()];
-    if let Some(mods) = &plan.mods_root {
-        // FrostMod is a Windows program: it takes `C:\users\…`, not the `/home/…` this
-        // side of the wall calls the same folder.
-        args.extend(["--mods".into(), crate::proton::windows_path(&runner.prefix(), mods)]);
-    }
-    args.extend(plan.extra.iter().cloned());
-
-    log::info!(
-        "starting FrostMod via {}: {} run {} {:?} (prefix {})",
-        runner.via(),
-        runner.program.display(),
-        plan.exe.display(),
-        args,
-        runner.prefix().display(),
-    );
-    let child = runner
-        .command(&plan.exe, &args)
-        .current_dir(frostmod_dir(app))
-        // FrostMod is a console program and Proton says a great deal on its way to
-        // starting one — none of which would otherwise be anywhere, since the app's own
-        // stdout goes nowhere a player can reach. It lands in FrostMod's folder, where
-        // the log collector already picks up everything that isn't one of our binaries:
-        // if injection under Proton ever fails, this is the file that says why.
-        .stdout(runner_log(app, "proton.log"))
-        .stderr(runner_log(app, "proton.log"))
-        .spawn()
-        .map_err(|e| {
-            anyhow::anyhow!("Couldn't start FrostMod through {}: {e}", runner.via())
-        })?;
-    *state.0.lock().unwrap() = Some(child);
-    Ok(true)
 }
 
 /// The one thing a FrostMod started from outside a Wine prefix has to be able to do: read
@@ -1595,53 +1508,6 @@ fn mac_launch(
         crate::winehost::plan(&runner, &prefix, exe, &args),
         runner.via().to_string(),
     ))
-}
-
-/// Launch `frostmod.exe` inside the Wine bottle the game runs in (macOS).
-///
-/// Same requirement as Proton, a different wrapper: the DLL can only be injected from
-/// inside the prefix that holds `mxbikes.exe`, so FrostMod is started through whichever of
-/// CrossOver, Whisky or Wine owns that bottle — [`crate::winehost`] answers both questions,
-/// and [`crate::gameproc::prefix_and_runner`] is where Play asks them too.
-///
-/// FrostMod itself stays in our data folder rather than being copied into the bottle: it is
-/// reached from in there as `Z:\…`, one directory both sides can name, which is also what
-/// makes the command file work.
-#[cfg(any())]
-fn start_injector(app: &AppHandle, state: &FrostmodProcess) -> anyhow::Result<bool> {
-    let Some(plan) = plan_start(app)? else { return Ok(false) };
-
-    needs_the_file_channel(app, "macOS", "Inside a Wine bottle")?;
-
-    let cfg = crate::config::load(app).unwrap_or_default();
-    let (launch, via) = mac_launch(&cfg, &plan.exe, plan.game, plan.mods_root.as_deref(), &plan.extra)?;
-    log::info!(
-        "starting FrostMod via {via}: {} {:?}",
-        launch.program.display(),
-        launch.args,
-    );
-    let mut cmd = std::process::Command::new(&launch.program);
-    cmd.args(&launch.args)
-        // FrostMod writes its log, its flag files and its command file beside itself, and
-        // resolves them from its own module path — but the working directory is what the
-        // wrapper's own output is relative to, and that output is the only account of a
-        // failed injection a player can send us.
-        .current_dir(frostmod_dir(app))
-        .stdout(runner_log(app, "wine.log"))
-        .stderr(runner_log(app, "wine.log"));
-    for (key, value) in &launch.env {
-        cmd.env(key, value);
-    }
-    let child = cmd
-        .spawn()
-        .map_err(|e| anyhow::anyhow!("Couldn't start FrostMod through {via}: {e}"))?;
-    *state.0.lock().unwrap() = Some(child);
-    Ok(true)
-}
-
-#[cfg(any())]
-fn start_injector(_app: &AppHandle, _state: &FrostmodProcess) -> anyhow::Result<bool> {
-    anyhow::bail!("FrostMod runs on Windows, Linux (Proton) and macOS (Wine)")
 }
 
 /// Kill the managed FrostMod child, if we started one.
