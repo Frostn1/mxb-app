@@ -606,6 +606,12 @@ export function getModDetail(slug: string): Promise<ModDetail> {
   return invoke<ModDetail>("get_mod_detail", { slug });
 }
 
+/** Declared byte counts from the actual download hosts. A missing value is deliberately
+ * unknown: callers must say so rather than estimating from a title or category. */
+export function getDownloadSizes(urls: string[]): Promise<Record<string, number | null>> {
+  return invoke<Record<string, number | null>>("get_download_sizes", { urls });
+}
+
 /** Retry after a refused mod page: if the session stopped showing mxb-mods.com's check (the
  *  user closed it, or left it unanswered), show it again on the next request. */
 export function resetModsVerification(): Promise<void> {

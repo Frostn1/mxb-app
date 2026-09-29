@@ -418,6 +418,13 @@ async fn get_mod_detail(app: tauri::AppHandle, slug: String) -> Result<ModDetail
     with_clearance(&app, "mod detail", || WpModsSource.detail(&slug)).await
 }
 
+/// File hosts, not the WordPress catalog, know the archive size. Kept separate from detail
+/// loading so a slow or uncooperative mirror never delays the page itself.
+#[tauri::command]
+async fn get_download_sizes(urls: Vec<String>) -> std::collections::HashMap<String, Option<u64>> {
+    mods::mxb::download_sizes(urls).await
+}
+
 // ───────────────────────────── mxbikes-shop catalog ─────────────────────────────
 //
 // Browsing only. Nothing here installs or buys — the frontend opens the product page in
@@ -8437,6 +8444,7 @@ fn main() {
             mxb_core::viewer::app_platform,
             search_mods,
             get_mod_detail,
+            get_download_sizes,
             get_mod_ratings,
             mods_verify_reset,
             get_installed_mods,

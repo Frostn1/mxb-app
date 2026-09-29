@@ -46,6 +46,9 @@ export function useModListing(modType: ModType, enabled = true) {
   const [hasMore, setHasMore] = useState(false);
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
+  // State does not update until React renders. This ref closes the tiny double-click window
+  // where two presses could both calculate the same next page and append it twice.
+  const loadingMoreRef = useRef(false);
   const [error, setError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
   const [selected, setSelected] = useState<Map<string, ModSummary>>(new Map());
@@ -64,6 +67,10 @@ export function useModListing(modType: ModType, enabled = true) {
   // what the cache is for: the grid is painted from the last answer before the request that
   // refreshes it is even sent.
   const key = listingKey([modType.id, debounced, categoryId, activeSort]);
+  const activeKey = useRef(key);
+  useEffect(() => {
+    activeKey.current = key;
+  }, [key]);
 
   // Reset the category filter (and any selection) when the mod type changes —
   // selection + quick-install resolve against the current type's folders.
@@ -165,19 +172,30 @@ export function useModListing(modType: ModType, enabled = true) {
   }, [enabled, mods]);
 
   const loadMore = useCallback(async () => {
+    if (loadingMoreRef.current || !hasMore) return;
+    loadingMoreRef.current = true;
     const next = page + 1;
     setLoadingMore(true);
     try {
       const res = await searchMods(debounced, categoryId, next, activeSort);
-      setMods((prev) => [...prev, ...res]);
+      // A filter change may happen while a page is in flight. Its first-page effect owns
+      // the new grid; an answer for the old filter must not be appended to it.
+      if (activeKey.current !== key) return;
+      // A catalog can repeat a boundary row. Stable ids make the append idempotent even if
+      // a host returns an overlapping page, and preserve the current grid while it loads.
+      setMods((prev) => {
+        const seen = new Set(prev.map((mod) => mod.id));
+        return [...prev, ...res.filter((mod) => !seen.has(mod.id))];
+      });
       setHasMore(res.length >= SEARCH_PAGE_SIZE);
       setPage(next);
     } catch (e) {
       setError(String(e));
     } finally {
+      loadingMoreRef.current = false;
       setLoadingMore(false);
     }
-  }, [debounced, categoryId, activeSort, page]);
+  }, [debounced, categoryId, activeSort, page, hasMore, key]);
 
   const reload = useCallback(() => {
     // Nothing stored is worth painting once the player has asked for it again.

@@ -532,7 +532,7 @@ export const en = {
   "modsVerify.timedOut": "The {{site}} check wasn't completed in time. Hit Retry to be shown it again.",
   "modDetail.copied": "Copied",
   "modDetail.copyLink": "Copy link",
-  "modDetail.copyLinkHint": "Copy a link that opens this mod in {{app}}",
+  "modDetail.copyLinkHint": "Copy the public page for this mod",
   "modDetail.linkCopied": "Link copied",
   "modDetail.copyLinkFailed": "Couldn't copy the link.",
   "modDetail.copy": "Copy",

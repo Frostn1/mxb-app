@@ -94,9 +94,12 @@ import {
   missingSlots,
   loadoutSummary,
   copyName,
+  pickedModel,
   type Scans,
 } from "@frost/shared/lib/presets";
 import { useGearPaints } from "@frost/shared/lib/useGearPaints";
+import { ViewerPanel } from "@frost/shared/Components/Viewer/ViewerPanel";
+import { useConfig } from "@frost/shared/Context/Config";
 import { copyText } from "../../lib/clipboard";
 import { DownloadBar, PRESET_BUNDLE_SLUG, UploadBar } from "../Share/TransferBar";
 
@@ -159,6 +162,7 @@ export default function Presets({
   onOpenSettings,
 }: PresetsProps = {}) {
   const t = useT();
+  const { bikePreview } = useConfig();
   const [profiles, setProfiles] = useState<string[]>([]);
   /** Where the backend read profiles from, and whether that folder is even there.
    *  Only used by the empty state, which is the one place it matters. */
@@ -267,15 +271,18 @@ export default function Presets({
 
   const capture = useCallback(async () => {
     if (!profile || !bike) return;
-    try {
-      setLoadout(await presetsReadLoadout(profile, bike));
-    } catch (e) {
-      toast.error(String(e).replace(/^Error:\s*/, ""));
-    }
+    return presetsReadLoadout(profile, bike);
   }, [profile, bike]);
 
   useEffect(() => {
-    void capture();
+    // A profile can have a distinct column for every bike.  More importantly, a slow read
+    // for the previous selection must never win after the rider has chosen another bike.
+    // That was the reason bike switching appeared to do nothing (or briefly switched back).
+    let cancelled = false;
+    void capture()
+      .then((next) => !cancelled && next && setLoadout(next))
+      .catch((e) => !cancelled && toast.error(String(e).replace(/^Error:\s*/, "")));
+    return () => { cancelled = true; };
   }, [capture]);
 
   const refreshSaved = useCallback(async () => {
@@ -446,6 +453,12 @@ export default function Presets({
     [scans, bike, grouped, missingFor],
   );
 
+  // Match the original Rider tab: a blank model-swap uses Stock where it is a real option,
+  // otherwise the installed active model.  This makes the preview describe the exact bike
+  // column selected above rather than whichever bike happened to load first.
+  const offersStock = (scans?.modelSwaps[bike] ?? []).some((v) => v.toLowerCase() === "stock");
+  const bikeVariant = loadout.modelSwap || (offersStock ? "Stock" : pickedModel(bike, loadout, scans));
+
   // Wait for the first scan before claiming there's nothing — otherwise the empty
   // state flashes (naming no folder) on every mount.
   const noProfiles = profilesDir !== null && profiles.length === 0 && !error;
@@ -588,7 +601,11 @@ export default function Presets({
                   </SelectContent>
                 </Select>
               </label>
-              <Button variant="outline" size="sm" onClick={() => void capture()}>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => void capture().then((next) => next && setLoadout(next)).catch((e) => toast.error(String(e).replace(/^Error:\s*/, "")))}
+              >
                 <RefreshCw className="size-3.5" />
                 Capture current
               </Button>
@@ -731,6 +748,18 @@ export default function Presets({
               </div>
             </div>
           </section>
+
+          {/* The previous Rider tab's real 3D assembly view, kept beside the editor so a
+              loadout can be checked before it is saved or applied. */}
+          <aside className="hidden w-[360px] flex-none overflow-hidden rounded-xl border border-white/[0.07] bg-card/40 xl:block">
+            <ViewerPanel
+              loadout={loadout}
+              riderOnly={!bikePreview || !bike}
+              bikeId={bikePreview && bike ? bike : undefined}
+              bikeVariant={bikeVariant}
+              className="h-full min-h-[480px]"
+            />
+          </aside>
 
           {/* Saved presets */}
           <aside className="flex w-[300px] flex-none flex-col gap-2 overflow-y-auto border-l border-white/[0.06] pl-5">
