@@ -63,9 +63,7 @@ pub fn signal_reload() -> ReloadOutcome {
 
 /// Is FrostMod's reload event there? (Can we open it?)
 ///
-/// Both halves of FrostMod create it — `frostmod.exe` as it starts, and the dll inside the
-/// game as it initialises — so on Windows this is also how a plugin-only FrostMod shows up
-/// once the game has loaded it.
+/// FrostMod's game plugin creates this event as it initialises.
 #[cfg(windows)]
 fn launcher_running() -> bool {
     let handle = open_reload_event();
@@ -95,37 +93,12 @@ pub fn signal_reload() -> ReloadOutcome {
     }
 }
 
-/// Linux: the launcher is a Windows process inside the prefix, so the process table is
-/// where we can see it — its reload event isn't reachable from this side.
-#[cfg(target_os = "linux")]
-fn launcher_running() -> bool {
-    crate::proton::running_exe("frostmod.exe")
-}
-
-/// macOS: the same answer from the same place, asked of `ps` rather than `/proc`. Under
-/// Wine the launcher is a real macOS process whose argv still names `frostmod.exe`.
-#[cfg(target_os = "macos")]
-fn launcher_running() -> bool {
-    crate::winehost::running_exe(
-        &crate::winehost::process_table(),
-        "frostmod.exe",
-        std::process::id(),
-    )
-}
-
 #[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
 pub fn signal_reload() -> ReloadOutcome {
     ReloadOutcome::Unsupported
 }
 
-#[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
-fn launcher_running() -> bool {
-    false
-}
-
-/// The plugin copy the app installed, while the installed FrostMod runs as a game plugin
-/// alone ([`PLUGIN_ONLY_MIN_VERSION`]). `None` is the injector: `frostmod.exe` is what
-/// FrostMod running means, and it is looked for as it always was.
+/// The plugin copy the app installed while FrostMod runs as a game plugin.
 ///
 /// Held here rather than asked of the app each time because `is_running` is reached from
 /// the command senders, which hold no Tauri handle — the same reason as `COMMAND_DIR`.
@@ -133,7 +106,7 @@ fn launcher_running() -> bool {
 /// game folder.
 static PLUGIN_MODE: std::sync::Mutex<Option<std::path::PathBuf>> = std::sync::Mutex::new(None);
 
-/// Switch `is_running` between the injector and the plugin. Called by `frostmod_manage`.
+/// Set the plugin copy used by `is_running`. Called by `frostmod_manage`.
 pub fn set_plugin_mode(dlo: Option<std::path::PathBuf>) {
     if let Ok(mut slot) = PLUGIN_MODE.lock() {
         *slot = dlo;
@@ -154,17 +127,9 @@ pub fn plugin_running(game_running: bool, plugin_installed: bool) -> bool {
 
 /// Is FrostMod currently running?
 ///
-/// For the injector, is `frostmod.exe` up. For a plugin-only FrostMod, is the game up with
-/// the plugin installed — see [`plugin_running`]. The launcher check still counts there:
-/// on Windows it is the dll's own reload event, and anywhere else a `frostmod.exe` that
-/// survived the switch is still a FrostMod running.
+/// FrostMod is running when the game is up with the managed plugin installed.
 pub fn is_running() -> bool {
-    match plugin_mode() {
-        Some(dlo) => {
-            plugin_running(crate::gameproc::is_game_running(), dlo.exists()) || launcher_running()
-        }
-        None => launcher_running(),
-    }
+    plugin_mode().is_some_and(|dlo| plugin_running(crate::gameproc::is_game_running(), dlo.exists()))
 }
 
 // ===========================================================================

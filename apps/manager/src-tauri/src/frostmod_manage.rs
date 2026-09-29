@@ -1,43 +1,34 @@
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
-use std::time::{Duration, Instant};
 use tauri::{AppHandle, Manager};
 
-/// FrostMod's GitHub repo — releases carry `frostmod.exe` + `frostmod.dll`.
+/// FrostMod's GitHub repo — supported releases carry `frostmod.dll`.
 const REPO: &str = "Frostn1/frostmod";
 pub const UA: &str = "mxb-app";
 
-/// The binaries a FrostMod release has to ship. Both land or neither does — a new
-/// `frostmod.exe` beside an old `frostmod.dll` is a worse state than not updating.
-const BINARIES: [&str; 2] = ["frostmod.exe", "frostmod.dll"];
-
-/// What a plugin-only build needs: the dll, which the plugin is a copy of. The injector is
-/// not downloaded at all — it is the file Windows Defender quarantines, and a quarantined
-/// file we never run must not be able to fail an install or flag one for repair.
-const PLUGIN_BINARIES: [&str; 1] = ["frostmod.dll"];
+/// The plugin is a byte-identical copy of this DLL. The legacy executable is intentionally
+/// never downloaded, launched, or used to determine installation state.
+const BINARIES: [&str; 1] = ["frostmod.dll"];
 
 /// The binaries the release tagged `tag` is installed as.
 fn binaries_for(tag: &str) -> &'static [&'static str] {
-    if crate::frostmod::plugin_only(Some(tag)) {
-        &PLUGIN_BINARIES
-    } else {
-        &BINARIES
-    }
+    let _ = tag;
+    &BINARIES
 }
 
 /// Marks a binary moved aside because something still had it open. Swept on the
 /// next install or start, by which point whatever held it has usually exited.
 const RETIRED_MARK: &str = ".in-use-";
 
-/// Managed FrostMod child process (only ever `Some` on Windows while running).
+/// Kept as Tauri state for compatibility with the old UI command surface. Plugin-mode
+/// FrostMod does not create a managed child process.
 #[derive(Default)]
-pub struct FrostmodProcess(pub Mutex<Option<std::process::Child>>);
+pub struct FrostmodProcess(pub std::sync::Mutex<Option<std::process::Child>>);
 
 #[derive(Debug, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FrostmodStatus {
-    /// Whether `frostmod.exe` is present in our managed folder.
+    /// Whether a supported FrostMod DLL is present in our managed folder.
     pub installed: bool,
     /// Installed release tag, if known.
     pub version: Option<String>,
@@ -115,19 +106,13 @@ pub enum PluginCopy {
     Unmanaged,
 }
 
-/// The folder we install FrostMod into and run it from — so also where anything it
-/// writes relative to its working directory lands (see `start`, which sets `current_dir`
-/// to it). Public for `logs`, which offers that folder up when a report needs it.
+/// The folder we install FrostMod into and where its plugin reads its managed files.
 pub fn frostmod_dir(app: &AppHandle) -> PathBuf {
     // Local app-data dir (Windows: `%LOCALAPPDATA%\com.frost.mxbikes\frostmod`).
     app.path()
         .app_local_data_dir()
         .expect("could not resolve app local data dir")
         .join("frostmod")
-}
-
-fn exe_path(app: &AppHandle) -> PathBuf {
-    frostmod_dir(app).join("frostmod.exe")
 }
 
 fn version_path(app: &AppHandle) -> PathBuf {
@@ -205,13 +190,13 @@ pub fn installed_version(app: &AppHandle) -> Option<String> {
 
 /// Is FrostMod on disk in a form we can run?
 ///
-/// For the injector that is `frostmod.exe`. A plugin-only build never runs the exe, so the
-/// dll is what counts there — the plugin is a copy of it. Asking for the exe regardless
-/// would let Defender quarantining the one file we no longer use read as "not installed",
-/// and take the working plugin out with it.
 pub fn is_installed(app: &AppHandle) -> bool {
-    exe_path(app).exists()
-        || (plugin_only(app) && frostmod_dir(app).join("frostmod.dll").exists())
+    plugin_only(app) && frostmod_dir(app).join("frostmod.dll").exists()
+}
+
+#[allow(dead_code)]
+fn exe_path(app: &AppHandle) -> PathBuf {
+    frostmod_dir(app).join("frostmod.exe")
 }
 
 #[derive(Deserialize)]
@@ -328,28 +313,10 @@ pub async fn status(app: &AppHandle) -> FrostmodStatus {
         let sync = sync_plugin(app, &cfg.clone().unwrap_or_default());
         (sync.game_plugin, sync.session_plugin)
     } else {
-        // A rollback from a plugin-only build: `is_running` goes back to the injector, and
-        // our `.dlo` goes before the refresh below could copy this older dll over it.
-        if let Some(cfg) = &cfg {
-            leave_plugin_mode(cfg);
-        }
-        // Keep a hand-installed plugin copy from going stale. Like the sweep above, this
-        // rides on the status poll because that is the only thing that reaches a player who
-        // never opens Settings — and unlike an update, it has to run even when we are
-        // already on the latest tag, which is exactly the state a stale `.dlo` survives in.
-        let game_plugin = game_dir
-            .as_deref()
-            .map(|game| refresh_game_plugin(&frostmod_dir(app), game))
-            .unwrap_or_default();
-
-        // And put our own plugin there, for the same reason it rides on the status poll: it
-        // has to reach the player who never opens Settings, and it has to run when we are
-        // already on the latest tag — a plugin copy is not something an update touches.
-        let session_plugin = game_dir
-            .as_deref()
-            .map(|game| ensure_session_plugin(&frostmod_dir(app), game, version.as_deref()))
-            .unwrap_or_default();
-        (game_plugin, session_plugin)
+        // Fail closed: this app no longer supports injector-era FrostMod. Do not copy,
+        // refresh, launch, or otherwise activate a legacy install.
+        crate::frostmod::set_plugin_mode(None);
+        (PluginCopy::Absent, PluginCopy::Absent)
     };
 
     FrostmodStatus {
@@ -1243,6 +1210,13 @@ fn apply_staged(dir: &Path, staging: &Path, names: &[&'static str]) -> anyhow::R
 /// into `version.txt` over a binary that had never been replaced — the app then
 /// reported a version it wasn't running.
 fn release_binaries(rel: &Release) -> anyhow::Result<Vec<(&'static str, &Asset)>> {
+    if !crate::frostmod::plugin_only(Some(&rel.tag_name)) {
+        anyhow::bail!(
+            "FrostMod {} is no longer supported. Update to {} or newer; MXB only supports the game-plugin installation.",
+            rel.tag_name,
+            crate::frostmod::PLUGIN_ONLY_MIN_VERSION
+        );
+    }
     let mut found = Vec::new();
     let mut missing = Vec::new();
     for &want in binaries_for(&rel.tag_name) {
@@ -1314,25 +1288,17 @@ pub async fn install(app: &AppHandle) -> anyhow::Result<InstallReport> {
     // we report can never describe an install that didn't happen.
     std::fs::write(version_path(app), &rel.tag_name)?;
 
-    // A plugin-only build leaves the previous release's injector behind, and nothing will
-    // ever run it again — so it goes, rather than sit there for Defender to find. The caller
-    // stopped it before installing; one that still won't delete is swept on a later start.
-    if crate::frostmod::plugin_only(Some(&rel.tag_name)) {
-        let _ = remove_or_retire(&exe_path(app));
-    }
     // Ship our curated server filter. Best-effort.
     ensure_serverfilter(app);
 
     // A plugin-only build is the plugin: put it in the game now rather than on the next
     // status poll. A running game keeps the copy it loaded until it closes — the new one
     // goes in on its exit (`sync_if_shut`) — so that is a restart, whatever the dll did.
-    if crate::frostmod::plugin_only(Some(&rel.tag_name)) {
-        let cfg = crate::config::load(app).unwrap_or_default();
-        let sync = sync_plugin(app, &cfg);
-        needs_game_restart |= cfg.auto_run_frostmod
-            && matches!(sync.game_plugin, PluginCopy::Locked | PluginCopy::Absent)
-            && crate::gameproc::is_game_running();
-    }
+    let cfg = crate::config::load(app).unwrap_or_default();
+    let sync = sync_plugin(app, &cfg);
+    needs_game_restart |= cfg.auto_run_frostmod
+        && matches!(sync.game_plugin, PluginCopy::Locked | PluginCopy::Absent)
+        && crate::gameproc::is_game_running();
     Ok(InstallReport {
         version: rel.tag_name,
         needs_game_restart,
@@ -1430,39 +1396,31 @@ fn plan_start(app: &AppHandle) -> anyhow::Result<Option<StartPlan>> {
     Ok(Some(StartPlan { exe, game: cfg.active_game.id(), mods_root, extra }))
 }
 
-/// Start FrostMod: the injector for builds before [`crate::frostmod::PLUGIN_ONLY_MIN_VERSION`],
-/// the plugin from it on.
-///
-/// Every start path goes through here — app launch, install, the Start button, a game
-/// switch — which is what makes it the place a `frostmod.exe` left over from before the
-/// switch is stopped. `Ok(true)` for a plugin means it is installed and current; one that
-/// has to wait for the game to close is `Ok(false)`.
+/// Ensure the supported FrostMod plugin is installed for the active game.
 pub fn start(app: &AppHandle, state: &FrostmodProcess) -> anyhow::Result<bool> {
-    if plugin_only(app) {
-        return Ok(start_plugin(app, state));
+    if !plugin_only(app) {
+        anyhow::bail!(
+            "This FrostMod version is no longer supported. Update FrostMod to {} or newer; MXB only supports the game-plugin installation.",
+            crate::frostmod::PLUGIN_ONLY_MIN_VERSION
+        );
     }
-    // Back on the injector after a plugin-only build: our plugin must not load beside it.
-    leave_plugin_mode(&crate::config::load(app).unwrap_or_default());
-    start_injector(app, state)
+    Ok(start_plugin(app, state))
 }
 
-/// The plugin-only start: retire the injector, then put the plugin in place.
-fn start_plugin(app: &AppHandle, state: &FrostmodProcess) -> bool {
-    // Ours and anyone else's: an injector still running would put a second FrostMod into the
-    // next game, and it is the process this whole mode exists to be rid of.
-    stop(state);
-    force_stop_exe();
+/// Synchronize the plugin files without starting a process.
+fn start_plugin(app: &AppHandle, _state: &FrostmodProcess) -> bool {
     let cfg = crate::config::load(app).unwrap_or_default();
     let sync = sync_plugin(app, &cfg);
     log::info!(
-        "FrostMod runs as a game plugin — not starting frostmod.exe (plugin {:?})",
+        "FrostMod runs as a game plugin (plugin {:?})",
         sync.game_plugin
     );
     matches!(sync.game_plugin, PluginCopy::Current | PluginCopy::Refreshed)
 }
 
-/// Launch `frostmod.exe` hidden as a managed child.
-#[cfg(windows)]
+/// Legacy injector implementation retained only while downstream builds migrate; it is
+/// deliberately excluded from every target and has no caller.
+#[cfg(any())]
 fn start_injector(app: &AppHandle, state: &FrostmodProcess) -> anyhow::Result<bool> {
     use std::os::windows::process::CommandExt;
     /// Don't pop a console window for the headless reloader.
@@ -1503,23 +1461,9 @@ pub fn on_game_started(app: &AppHandle, cfg: &crate::config::AppConfig) {
     if !cfg.auto_run_frostmod || !is_installed(app) {
         return;
     }
-    let state = app.state::<FrostmodProcess>();
-    // A plugin has nothing to re-arm: the game loaded it as it opened. Starting the injector
-    // here would put a second FrostMod in the game — it would stand down, but the injector
-    // is the very thing plugin-only exists to never run.
-    if plugin_only(app) {
-        stop(&state);
-        log::debug!("FrostMod is a game plugin; the game loaded it itself");
-        return;
-    }
-    match start(app, &state) {
-        Ok(true) => log::info!("FrostMod re-armed for the new game session"),
-        // Already up and holding its reload event, which is the ordinary case when the
-        // launcher outlives a game. Whether it got *into* this game is a separate
-        // question, and `frostmod::attachment` is what answers it.
-        Ok(false) => log::debug!("FrostMod was already running when the game started"),
-        Err(e) => log::warn!("couldn't start FrostMod for the new game session: {e:#}"),
-    }
+    // The game loads the plugin itself. This hook deliberately does not re-arm a process.
+    let _ = sync_plugin(app, cfg);
+    log::debug!("FrostMod is a game plugin; the game loaded it itself");
 }
 
 /// Where the wrapper's own output goes — Proton's on Linux, Wine's on macOS — appended to
@@ -1549,7 +1493,7 @@ fn runner_log(app: &AppHandle, name: &str) -> std::process::Stdio {
 /// only works from inside the same prefix — the same Wine session, sharing the same
 /// process namespace. [`crate::proton`] is what finds that prefix and the Proton build
 /// that owns it.
-#[cfg(target_os = "linux")]
+#[cfg(any())]
 fn start_injector(app: &AppHandle, state: &FrostmodProcess) -> anyhow::Result<bool> {
     let Some(plan) = plan_start(app)? else { return Ok(false) };
 
@@ -1663,7 +1607,7 @@ fn mac_launch(
 /// FrostMod itself stays in our data folder rather than being copied into the bottle: it is
 /// reached from in there as `Z:\…`, one directory both sides can name, which is also what
 /// makes the command file work.
-#[cfg(target_os = "macos")]
+#[cfg(any())]
 fn start_injector(app: &AppHandle, state: &FrostmodProcess) -> anyhow::Result<bool> {
     let Some(plan) = plan_start(app)? else { return Ok(false) };
 
@@ -1695,52 +1639,17 @@ fn start_injector(app: &AppHandle, state: &FrostmodProcess) -> anyhow::Result<bo
     Ok(true)
 }
 
-#[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
+#[cfg(any())]
 fn start_injector(_app: &AppHandle, _state: &FrostmodProcess) -> anyhow::Result<bool> {
     anyhow::bail!("FrostMod runs on Windows, Linux (Proton) and macOS (Wine)")
 }
 
 /// Kill the managed FrostMod child, if we started one.
-pub fn stop(state: &FrostmodProcess) {
-    if let Some(mut child) = state.0.lock().unwrap().take() {
-        let _ = child.kill();
-    }
+pub fn stop(_state: &FrostmodProcess) {
 }
 
-/// Force-terminate any running `frostmod.exe` (even one we didn't spawn). Best-effort.
-#[cfg(windows)]
-pub fn force_stop_exe() {
-    use std::os::windows::process::CommandExt;
-    /// Don't flash a console window for the kill.
-    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-    let _ = std::process::Command::new("taskkill")
-        .args(["/F", "/IM", "frostmod.exe"])
-        .creation_flags(CREATE_NO_WINDOW)
-        .output();
-}
-
-/// Linux: killing the managed child only reaches the Proton script we spawned, and the
-/// launcher it started inside the prefix outlives it — the status pill would keep saying
-/// "running" because, correctly, it still is. So the process table is asked for everything
-/// running `frostmod.exe`, which is that wrapper *and* the Wine process under it.
-#[cfg(target_os = "linux")]
-pub fn force_stop_exe() {
-    crate::proton::kill_exe("frostmod.exe");
-}
-
-/// macOS: the same problem as Linux — the wrapper we spawned and the Wine process it
-/// started both carry the name, and killing our child only reaches the first.
-#[cfg(target_os = "macos")]
-pub fn force_stop_exe() {
-    crate::winehost::kill_exe("frostmod.exe");
-}
-
-#[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
+/// Compatibility no-op: plugin-mode FrostMod has no separate process to terminate.
 pub fn force_stop_exe() {}
-
-/// How long to wait for a stopped FrostMod to actually go before calling it a failure.
-const STOP_TIMEOUT: Duration = Duration::from_millis(1000);
-const STOP_POLL: Duration = Duration::from_millis(50);
 
 /// Stop FrostMod however it was started, reporting whether it's actually gone.
 ///
@@ -1753,31 +1662,9 @@ const STOP_POLL: Duration = Duration::from_millis(50);
 /// outlive the call by a moment. Wait for it to go rather than report a kill we never saw
 /// land: a "FrostMod stopped" toast over a FrostMod that's still running is worse than no
 /// button at all, and the honest failure is actionable (it's elevated, or another user's).
-pub fn stop_running(app: &AppHandle, state: &FrostmodProcess) -> bool {
-    stop(state);
-    force_stop_exe();
-    // A plugin can't be stopped from outside the game — it goes when the game does, and
-    // Game Integration off is what keeps it from loading again. Waiting on `is_running`
-    // here would time out on every call made while the game is up, and report a failure
-    // for a stop that did everything a stop can do. The UI offers no Stop in this mode.
-    if plugin_only(app) {
-        log::info!(
-            "FrostMod runs as a game plugin: it stops when the game closes (turn Game \
-             Integration off to remove it)"
-        );
-        return true;
-    }
-    let deadline = Instant::now() + STOP_TIMEOUT;
-    loop {
-        if !crate::frostmod::is_running() {
-            return true;
-        }
-        if Instant::now() >= deadline {
-            log::warn!("FrostMod is still running {STOP_TIMEOUT:?} after being asked to stop");
-            return false;
-        }
-        std::thread::sleep(STOP_POLL);
-    }
+pub fn stop_running(_app: &AppHandle, _state: &FrostmodProcess) -> bool {
+    log::info!("FrostMod runs as a game plugin: it stops when the game closes (turn Game Integration off to remove it)");
+    true
 }
 
 #[cfg(test)]
@@ -2560,7 +2447,7 @@ mod plugin_only_tests {
     #[test]
     fn a_plugin_only_release_needs_only_the_dll() {
         assert_eq!(binaries_for("v0.41.0"), &["frostmod.dll"]);
-        assert_eq!(binaries_for("v0.40.4"), &["frostmod.exe", "frostmod.dll"]);
+        assert_eq!(binaries_for("v0.40.4"), &["frostmod.dll"]);
 
         let (managed, _) = dirs("dll-only");
         std::fs::write(managed.join("frostmod.dll"), b"the 0.41 dll").unwrap();
@@ -2579,7 +2466,7 @@ mod plugin_only_tests {
         assert!(install_matches_release(&managed, &rel), "no exe on disk is fine");
 
         let old = Release { tag_name: "v0.40.4".into(), ..rel };
-        assert!(release_binaries(&old).is_err(), "the injector still needs both");
+        assert!(release_binaries(&old).is_err(), "legacy releases fail closed");
     }
 
     #[test]

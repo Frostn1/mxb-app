@@ -1422,22 +1422,7 @@ async fn set_active_game(
     if cfg.watch_mods_reload {
         modwatch::start(&app, &watcher, &cfg.mods_path);
     }
-    // FrostMod reads `--game` and `--mods` once, at launch, and `start` no-ops while one
-    // is already running — so without this a switch leaves FrostMod waiting for the game
-    // we just left while the status pill still reads "running". `force_stop_exe` because
-    // the running one may not be ours to `stop`: a hand-launched frostmod.exe claims the
-    // same named event, and that is exactly how this was first reported.
-    if frostmod::is_running() {
-        frostmod_manage::stop(&frostmod_state);
-        frostmod_manage::force_stop_exe();
-        if let Err(e) = frostmod_manage::start(&app, &frostmod_state) {
-            log::warn!(
-                "could not restart FrostMod for {}: {e:#}",
-                cfg.game().display
-            );
-        }
-    }
-    // A plugin-only FrostMod lives in the game's own folder, and this is a different game:
+    // FrostMod lives in the active game's own folder:
     // put it there now, so a launch from Steam before the next status poll still has it.
     frostmod_manage::sync_if_shut(&app);
     Ok(cfg)
@@ -5734,21 +5719,13 @@ async fn frostmod_status(app: tauri::AppHandle) -> FrostmodStatus {
 #[tauri::command]
 async fn frostmod_install(
     app: tauri::AppHandle,
-    state: State<'_, FrostmodProcess>,
+    _state: State<'_, FrostmodProcess>,
 ) -> Result<InstallReport, String> {
-    let was_running = frostmod::is_running();
-    let was_installed = frostmod_manage::is_installed(&app);
-    frostmod_manage::stop(&state);
-    frostmod_manage::force_stop_exe();
-
     let report = frostmod_manage::install(&app)
         .await
         .map_err(|e| format!("{e:#}"))?;
 
     usage::track("frostmod.install");
-    if was_running || !was_installed {
-        let _ = frostmod_manage::start(&app, &state);
-    }
     Ok(report)
 }
 
