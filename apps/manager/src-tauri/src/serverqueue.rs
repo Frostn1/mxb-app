@@ -263,11 +263,11 @@ async fn run(
         if !claimed {
             if let Some((players, max)) = count {
                 if is_my_turn(players, max, place.ahead) {
-                    let mut outcome = take_turn(&app, &key, &categories, &bikes);
+                    let mut outcome = take_turn(&app, &key, &categories, &bikes).await;
                     if matches!(outcome, Ok(LaunchOutcome::AlreadyRunning))
                         && close_open_game(&app).await
                     {
-                        outcome = take_turn(&app, &key, &categories, &bikes);
+                        outcome = take_turn(&app, &key, &categories, &bikes).await;
                     }
                     match outcome {
                         Ok(LaunchOutcome::Launched) => {
@@ -297,18 +297,22 @@ async fn run(
 }
 
 /// Launch into the slot. Reports `AlreadyRunning` rather than touching an open game.
-fn take_turn(
+///
+/// On the blocking pool: with Race mode on, the join scans the library and moves files
+/// before the game starts, which is not work for a runtime thread.
+async fn take_turn(
     app: &AppHandle,
     key: &str,
     categories: &[String],
     bikes: &[String],
 ) -> Result<LaunchOutcome, String> {
-    crate::join_listed_server(
-        app.clone(),
-        key.to_string(),
-        categories.to_vec(),
-        bikes.to_vec(),
-    )
+    let (app, key) = (app.clone(), key.to_string());
+    let (categories, bikes) = (categories.to_vec(), bikes.to_vec());
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::join_listed_server_now(app, key, categories, bikes)
+    })
+    .await
+    .map_err(|e| format!("queue join task failed: {e}"))?
 }
 
 /// Close an open game so the turn can launch into the slot, if the rider turned that on.

@@ -58,7 +58,17 @@ interface InstallDialogProps {
   /** Bike **sound** mod: downloads are per-bike (not mirrors), so the picked
    * bike drives which link we grab. */
   sound?: boolean;
+  /** Declared byte count by actual download URL; null means the host did not provide one. */
+  downloadSizes?: Map<string, number | null>;
   onConfirm: (choice: InstallChoice) => void;
+}
+
+function downloadSizeLabel(bytes: number | null | undefined): string {
+  if (bytes === undefined) return "Checking size…";
+  if (bytes === null || bytes < 0) return "Size unavailable";
+  const gb = 1024 * 1024 * 1024;
+  const mb = 1024 * 1024;
+  return bytes >= gb ? `${(bytes / gb).toFixed(2)} GB` : `${(bytes / mb).toFixed(1)} MB`;
 }
 
 /** Where a ReShade preset lands, shown verbatim. Mirrors `reshade::PRESET_DIR`, under the
@@ -91,6 +101,7 @@ export default function InstallDialog({
   folderCounts,
   initialFolder,
   sound = false,
+  downloadSizes,
   onConfirm,
 }: InstallDialogProps) {
   const t = useT();
@@ -304,6 +315,9 @@ export default function InstallDialog({
         <span className="flex min-w-0 flex-1 flex-col">
           <span className="truncate text-[12.5px] font-semibold">{m.host}</span>
           <span className="text-[11px] text-muted-foreground">{note}</span>
+          <span className="text-[11px] text-muted-foreground">
+            {downloadSizeLabel(downloadSizes?.get(m.url))}
+          </span>
           {fileLabel && (
             <span className="truncate font-mono text-[10.5px] text-faint">{fileLabel}</span>
           )}
@@ -544,6 +558,11 @@ export default function InstallDialog({
             <span className="truncate">
               {t("installDialog.installToFolder", { folder: folderLabel })}
             </span>
+            {selectedMirror && (
+              <span className="ml-1.5 flex-none text-[10.5px] opacity-75">
+                · {downloadSizeLabel(downloadSizes?.get(selectedMirror.url))}
+              </span>
+            )}
           </Button>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             {t("common.cancel")}

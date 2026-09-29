@@ -532,7 +532,7 @@ export const en = {
   "modsVerify.timedOut": "The {{site}} check wasn't completed in time. Hit Retry to be shown it again.",
   "modDetail.copied": "Copied",
   "modDetail.copyLink": "Copy link",
-  "modDetail.copyLinkHint": "Copy a link that opens this mod in {{app}}",
+  "modDetail.copyLinkHint": "Copy the public page for this mod",
   "modDetail.linkCopied": "Link copied",
   "modDetail.copyLinkFailed": "Couldn't copy the link.",
   "modDetail.copy": "Copy",
@@ -580,6 +580,8 @@ export const en = {
   "settings.paintSyncOn": "Sync paints automatically",
   "settings.paintSyncOnDesc":
     "Turned off, nothing of yours is published and nobody else's paints are installed.",
+  "settings.paintSyncNeedsFrostmod":
+    "Paint sync needs Game Integration. Install it and turn on \"Start Game Integration automatically\" to use paint sync.",
   "settings.gameFolder": "Game folder",
   "settings.general": "General",
   "settings.appearance": "Appearance",
@@ -760,6 +762,10 @@ export const en = {
   "settings.autoRunFrostmodDesc": "Start Game Integration in the background whenever {{app}} opens.",
   "settings.frostmodArgs": "Game Integration flags",
   "settings.frostmodArgsDesc": "Advanced command-line options for Game Integration. They apply the next time it starts; leave this empty unless support gave you a flag to try.",
+  "settings.raceMode": "Auto race mode: load only what the server needs",
+  "settings.raceModeDesc":
+    "When you join a server from {{app}}, tracks and bikes that server can't use are set aside before the game starts, so it loads less and joins faster. They come back when the game closes. Rider gear, paints and anything you parked yourself are left alone. Joins from the in-game browser aren't touched.",
+  "settings.raceModeActive": "Auto race mode: {{count}} mods set aside",
   "settings.watchModsReload": "Auto-reload on folder changes",
   "settings.watchModsReloadDesc":
     "Reload the game automatically when tracks or bikes are added to your mods folder — even downloaded manually outside {{app}}.",
@@ -1098,6 +1104,29 @@ export const en = {
   "registerServer.submit": "Add it",
   "registerServer.done": "{{address}} is on the shared list",
   "registerServer.failed": "Couldn't add that server",
+  "savedServers.title": "Saved",
+  "savedServers.add": "Save a server by IP",
+  "savedServers.addTitle": "Save a server",
+  "savedServers.editTitle": "Edit saved server",
+  "savedServers.blurb": "Any server by IP, listed or not. {{app}} asks it directly, so its card stays live.",
+  "savedServers.address": "Address",
+  "savedServers.name": "Name (optional)",
+  "savedServers.namePlaceholder": "What the server calls itself",
+  "savedServers.save": "Save",
+  "savedServers.added": "Saved {{name}}",
+  "savedServers.duplicate": "That server is already saved.",
+  "savedServers.full": "Your saved list is full. Remove one first.",
+  "savedServers.missing": "That server isn't saved any more.",
+  "savedServers.checking": "Checking",
+  "savedServers.offline": "Offline",
+  "savedServers.offlineHint": "It didn't answer. You can still try to join.",
+  "savedServers.actions": "Saved server options",
+  "savedServers.moveUp": "Move up",
+  "savedServers.moveDown": "Move down",
+  "savedServers.edit": "Edit",
+  "savedServers.remove": "Remove",
+  "savedServers.removed": "Removed {{name}}",
+  "savedServers.undo": "Undo",
 
   "queue.banner": "#{{position}} in line for {{name}}",
   "queue.turnBanner": "Your turn: join {{name}}",
@@ -1182,6 +1211,9 @@ export const en = {
   "serverBrowser.region.asia": "Asia",
   "serverBrowser.region.other": "Other",
 
+  "sync.notSharing": "Not sharing paints: {{names}}",
+  "sync.notSharingWhy":
+    "They see you, and you see them, in stock paints until they run MXB App 0.19 or newer with paint sync on.",
   "sync.autoNote":
     "Your look publishes itself — every bike, whenever you change it in the app or in the game's own garage. Everyone else's arrives when you press Play.",
 

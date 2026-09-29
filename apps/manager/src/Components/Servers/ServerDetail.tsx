@@ -555,7 +555,9 @@ const ServerDetail = ({
                 : t("serverBrowser.queueHint")}
           </p>
         )}
-        <div className="flex items-center gap-2">
+        {/* Wraps rather than clipping: with Install, Install & join, copy and star side by side
+            the row is wider than a narrow window, and the star used to fall off the edge. */}
+        <div className="flex flex-wrap items-center gap-2">
           {/* A link, not just the address: pasted in Discord it opens MXB App on this
               server for anyone who has it, and reads as the address for anyone who
               doesn't. */}
@@ -569,9 +571,12 @@ const ServerDetail = ({
               );
             }}
             title={t("serverBrowser.copyLinkHint")}
+            aria-label={t("serverBrowser.copyLink")}
+            className="shrink-0"
           >
             <Link2 className="size-3.5" />
-            {t("serverBrowser.copyLink")}
+            {/* Icon only on a narrow window; the tooltip still says what it does. */}
+            <span className="max-[760px]:hidden">{t("serverBrowser.copyLink")}</span>
           </Button>
           {queue?.address === s.address ? (
             <Button variant="outline" className="flex-1" disabled>
@@ -584,7 +589,7 @@ const ServerDetail = ({
               {t("serverBrowser.installing")}
             </Button>
           ) : free && product ? (
-            <div className="flex flex-1 items-center gap-2">
+            <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
               <Button
                 variant="outline"
                 className="shrink-0"
@@ -685,7 +690,7 @@ export const ServerDetailDialog = ({
   ...pane
 }: ServerDetailProps & { onOpenChange: (open: boolean) => void }) => (
   <Dialog open={!!pane.server} onOpenChange={onOpenChange}>
-    <DialogContent className="max-w-[620px] gap-0 overflow-hidden p-0">
+    <DialogContent className="w-[min(720px,calc(100vw-2rem))] max-w-none gap-0 overflow-hidden p-0">
       <DialogTitle className="sr-only">{pane.server?.name ?? ""}</DialogTitle>
       <ServerDetail {...pane} className="max-h-[82vh]" />
     </DialogContent>

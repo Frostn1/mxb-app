@@ -606,6 +606,12 @@ export function getModDetail(slug: string): Promise<ModDetail> {
   return invoke<ModDetail>("get_mod_detail", { slug });
 }
 
+/** Declared byte counts from the actual download hosts. A missing value is deliberately
+ * unknown: callers must say so rather than estimating from a title or category. */
+export function getDownloadSizes(urls: string[]): Promise<Record<string, number | null>> {
+  return invoke<Record<string, number | null>>("get_download_sizes", { urls });
+}
+
 /** Retry after a refused mod page: if the session stopped showing mxb-mods.com's check (the
  *  user closed it, or left it unanswered), show it again on the next request. */
 export function resetModsVerification(): Promise<void> {
@@ -2809,6 +2815,27 @@ export function setQueueRestartGame(enabled: boolean): Promise<void> {
   return invoke<void>("set_queue_restart_game", { enabled });
 }
 
+/** Toggle Race mode: set aside what the server can't use on an app-launched join. */
+export function setRaceMode(enabled: boolean): Promise<void> {
+  return invoke<void>("set_race_mode", { enabled });
+}
+
+/** What Race mode is holding aside right now. `active` is false when nothing is. */
+export interface RaceModeStatus {
+  active: boolean;
+  count: number;
+  serverName: string;
+}
+
+export function raceModeStatus(): Promise<RaceModeStatus> {
+  return invoke<RaceModeStatus>("race_mode_status");
+}
+
+/** Fires whenever Race mode sets mods aside or puts them back. */
+export function onRaceMode(cb: (status: RaceModeStatus) => void): Promise<UnlistenFn> {
+  return listen<RaceModeStatus>("race-mode", (e) => cb(e.payload));
+}
+
 /** Extra command-line flags handed to `frostmod.exe`, exactly as typed. */
 export function setFrostmodArgs(args: string): Promise<void> {
   return invoke<void>("set_frostmod_args", { args });
@@ -2842,6 +2869,16 @@ export function setVoiceEnabled(enabled: boolean): Promise<void> {
 /** Share this rider's look with the grid, and install the grid's back. */
 export function setPaintSyncEnabled(enabled: boolean): Promise<void> {
   return invoke<void>("set_paint_sync_enabled", { enabled });
+}
+
+/** Whether paint sync can run here. It needs Game Integration installed and set to start. */
+export interface PaintSyncReadiness {
+  ready: boolean;
+  reason: "frostmodMissing" | "frostmodDisabled" | null;
+}
+
+export function paintSyncReadiness(): Promise<PaintSyncReadiness> {
+  return invoke<PaintSyncReadiness>("paint_sync_readiness");
 }
 
 /** Pick the tyre pack the 3D previews fit. `""` means "whatever the bike names". */
@@ -3412,6 +3449,12 @@ export function onSyncEvent(cb: (event: SyncEvent) => void): Promise<UnlistenFn>
   return listen<SyncEvent>("paint-sync", (e) => cb(e.payload));
 }
 
+/** Riders on this server's grid who aren't sharing paints (not on paint sync, or on an app
+ *  too old for it). Empty when not on a server or not in a paint-sync room. */
+export function paintSyncNotSharing(): Promise<string[]> {
+  return invoke<string[]>("paint_sync_not_sharing");
+}
+
 export function experimentalState(): Promise<ExperimentalState> {
   return invoke<ExperimentalState>("experimental_state");
 }
@@ -3612,6 +3655,57 @@ export function cachedMasterServers(): Promise<CachedServers> {
  */
 export function probeServer(address: string): Promise<MasterServer> {
   return invoke<MasterServer>("probe_server", { address });
+}
+
+/** A server the player saved by address: only what they typed, in the order they chose. */
+export interface SavedServer {
+  /** `host:port`, normalised the way Join takes it. */
+  address: string;
+  /** The player's label; `""` means "whatever the server calls itself". */
+  name: string;
+}
+
+/**
+ * Errors the saved-server commands return as codes rather than sentences, for the tab to
+ * translate. Anything else is the address parser's own message.
+ */
+export const SAVED_SERVER_ERRORS = {
+  duplicate: "saved_server_duplicate",
+  missing: "saved_server_missing",
+  full: "saved_server_full",
+} as const;
+
+export function savedServers(): Promise<SavedServer[]> {
+  return invoke<SavedServer[]>("saved_servers");
+}
+
+/** Save a server. Resolves with the whole list as stored, the new address normalised. */
+export function addSavedServer(address: string, name: string): Promise<SavedServer[]> {
+  return invoke<SavedServer[]>("add_saved_server", { address, name });
+}
+
+export function editSavedServer(
+  address: string,
+  newAddress: string,
+  name: string,
+): Promise<SavedServer[]> {
+  return invoke<SavedServer[]>("edit_saved_server", { address, newAddress, name });
+}
+
+export function removeSavedServer(address: string): Promise<SavedServer[]> {
+  return invoke<SavedServer[]>("remove_saved_server", { address });
+}
+
+export function reorderSavedServers(order: string[]): Promise<SavedServer[]> {
+  return invoke<SavedServer[]>("reorder_saved_servers", { order });
+}
+
+/**
+ * Ask saved servers the sweep didn't carry about themselves, at once. Only saved addresses are
+ * asked; a server that doesn't answer is simply missing from the result.
+ */
+export function probeSavedServers(addresses: string[]): Promise<MasterServer[]> {
+  return invoke<MasterServer[]>("probe_saved_servers", { addresses });
 }
 
 /** `up`, `degraded`, `down`, or `unknown` when too few apps have checked to say. */

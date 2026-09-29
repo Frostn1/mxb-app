@@ -5,6 +5,7 @@ import {
   Lock,
   Loader2,
   Wifi,
+  WifiOff,
   Copy,
   Star,
   Hourglass,
@@ -54,7 +55,14 @@ interface Props {
   onWait: (s: MasterServer) => void;
   onCopy: (address: string) => void;
   onToggleFavourite: (address: string) => void;
+  /** A saved server's reachability, asked of it directly. Absent for a row off the master
+   *  list, which answered by being on it. */
+  status?: SavedStatus;
+  /** Extra controls after Copy — the Saved row's edit / move / remove menu. */
+  menu?: React.ReactNode;
 }
+
+export type SavedStatus = "online" | "offline" | "checking";
 
 /**
  * One server as a tile: the track's own art, the live numbers over it, and a join button.
@@ -78,9 +86,13 @@ const ServerCard = memo(function ServerCard({
   onWait,
   onCopy,
   onToggleFavourite,
+  status,
+  menu,
 }: Props) {
   const { t, resolved } = useI18n();
   const full = isFull(s);
+  // A server that didn't answer has no rider count to show; "0/0" would read as an answer.
+  const answered = status === undefined || status === "online";
   const cat = s.categories[0];
   const stop = (e: React.MouseEvent) => e.stopPropagation();
   // The player's own copy wins; a missing track shows what it looks like, from our server.
@@ -136,15 +148,29 @@ const ServerCard = memo(function ServerCard({
           </div>
         )}
 
-        <span
-          className={cn(
-            "absolute right-1.5 top-1.5 flex items-center gap-1.5 rounded-md bg-black/70 px-2 py-1 text-[15px] font-bold tabular-nums shadow-sm backdrop-blur-[2px]",
-            s.players > 0 ? "text-white" : "text-white/70",
-          )}
-        >
-          <Users className="size-3.5" strokeWidth={2.5} />
-          {s.players}/{s.maxPlayers}
-        </span>
+        {answered ? (
+          <span
+            className={cn(
+              "absolute right-1.5 top-1.5 flex items-center gap-1.5 rounded-md bg-black/70 px-2 py-1 text-[15px] font-bold tabular-nums shadow-sm backdrop-blur-[2px]",
+              s.players > 0 ? "text-white" : "text-white/70",
+            )}
+          >
+            <Users className="size-3.5" strokeWidth={2.5} />
+            {s.players}/{s.maxPlayers}
+          </span>
+        ) : (
+          <span
+            className="absolute right-1.5 top-1.5 flex items-center gap-1.5 rounded-md bg-black/70 px-2 py-1 text-[12px] font-semibold text-white/70 shadow-sm backdrop-blur-[2px]"
+            title={status === "offline" ? t("savedServers.offlineHint") : undefined}
+          >
+            {status === "checking" ? (
+              <Loader2 className="size-3 animate-spin" />
+            ) : (
+              <WifiOff className="size-3" />
+            )}
+            {status === "checking" ? t("savedServers.checking") : t("savedServers.offline")}
+          </span>
+        )}
 
         <span className="absolute left-1.5 top-1.5 flex items-center gap-1">
           <button
@@ -186,22 +212,37 @@ const ServerCard = memo(function ServerCard({
           </span>
         )}
 
-        {paintSync > 0 && (
-          <span
-            className="absolute bottom-1.5 right-1.5 flex items-center gap-1 rounded-md bg-black/70 px-1.5 py-[3px] text-[12px] font-bold tabular-nums text-success shadow-sm"
-            title={t("serverBrowser.paintSyncHere", { count: paintSync })}
-          >
-            <Palette className="size-3" />
-            {paintSync}
+        {/* The fourth corner. "Not installed" is an errand, not a fault, so it sits faded on
+            the picture with the other overlays rather than squeezing the track's own line. */}
+        {(paintSync > 0 || missing) && (
+          <span className="absolute bottom-1.5 right-1.5 flex items-center gap-1">
+            {missing && (
+              <span
+                className="flex items-center gap-1 rounded-md bg-black/55 px-1.5 py-[3px] text-[11px] font-semibold uppercase tracking-wide text-white/75 shadow-sm backdrop-blur-[2px]"
+                title={t("serverBrowser.trackMissing")}
+              >
+                <Download className="size-3" />
+                {t("serverBrowser.notInstalled")}
+              </span>
+            )}
+            {paintSync > 0 && (
+              <span
+                className="flex items-center gap-1 rounded-md bg-black/70 px-1.5 py-[3px] text-[12px] font-bold tabular-nums text-success shadow-sm"
+                title={t("serverBrowser.paintSyncHere", { count: paintSync })}
+              >
+                <Palette className="size-3" />
+                {paintSync}
+              </span>
+            )}
           </span>
         )}
       </div>
 
-      <div className="flex min-h-0 flex-1 flex-col gap-1.5 px-3 py-2.5">
+      <div className="flex min-h-0 flex-1 flex-col gap-2 px-3.5 py-3">
         <span className="truncate text-[13px] font-semibold" title={s.name}>
           {s.name || t("serverBrowser.unnamed")}
         </span>
-        <div className="flex items-center gap-1.5 text-[11.5px] text-muted-foreground">
+        <div className="flex min-w-0 items-center gap-1.5 text-[11.5px] text-muted-foreground">
           <span className="truncate" title={[s.track, s.trackLayout].filter(Boolean).join(" · ")}>
             {s.track || "-"}
           </span>
@@ -211,37 +252,23 @@ const ServerCard = memo(function ServerCard({
               <span className="truncate">{cat}</span>
             </>
           )}
-          {/* A track you don't have is an errand, not a fault. It read as one while this was
-              an amber hazard sign across the picture — the tile looked broken, and the button
-              under it already says what to do about it. On the track's own line, so it says
-              which thing is missing and costs the tile no height. */}
-          {missing && (
-            <Badge
-              variant="count"
-              className="ml-auto shrink-0"
-              title={t("serverBrowser.trackMissing")}
-            >
-              <Download className="size-3" />
-              {t("serverBrowser.notInstalled")}
-            </Badge>
-          )}
         </div>
-        <div className="flex flex-wrap items-center gap-1">
+        <div className="flex flex-wrap items-center gap-1.5">
           {s.hidden && (
             <Badge variant="count" title={t("serverBrowser.hiddenBecause", { reason: s.hidden })}>
               {t("serverBrowser.filtered")}
             </Badge>
           )}
-          {s.location && s.location !== "?" && (
+          {known(s.location) && (
             <Badge variant="count" className="font-medium">
               {s.location}
             </Badge>
           )}
-          {s.session && <Badge variant="count">{s.session}</Badge>}
-          {s.conditions && s.conditions !== "?" && <Badge variant="count">{s.conditions}</Badge>}
+          {known(s.session) && <Badge variant="count">{s.session}</Badge>}
+          {known(s.conditions) && <Badge variant="count">{s.conditions}</Badge>}
         </div>
 
-        <div className="mt-auto flex items-center gap-2 pt-1.5">
+        <div className="mt-auto flex flex-wrap items-center gap-2 pt-2">
           {queuePosition !== null ? (
             <CardButton disabled>
               <Hourglass className="size-3.5" />
@@ -328,6 +355,7 @@ const ServerCard = memo(function ServerCard({
           >
             <Copy className="size-3.5" />
           </button>
+          {menu}
         </div>
       </div>
     </div>
@@ -351,5 +379,11 @@ const CardButton = ({
     )}
   />
 );
+
+/** A server field worth a chip: the master reports what it doesn't know as `?`, blank or "Unknown". */
+function known(v: string | null | undefined): v is string {
+  const t = v?.trim();
+  return !!t && t !== "?" && t.toLowerCase() !== "unknown";
+}
 
 export default ServerCard;

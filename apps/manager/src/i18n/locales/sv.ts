@@ -572,6 +572,8 @@ export const sv: Translation = {
   "settings.paintSyncOn": "Synkronisera färger automatiskt",
   "settings.paintSyncOnDesc":
     "Stängt av, inget av ditt publiceras och ingen annans färger är installerade.",
+  "settings.paintSyncNeedsFrostmod":
+    "Paint sync needs Game Integration. Install it and turn on \"Start Game Integration automatically\" to use paint sync.",
   "settings.gameFolder": "Spelkatalog",
   "settings.general": "Allmänt",
   "settings.appearance": "Utseende",
@@ -752,6 +754,10 @@ export const sv: Translation = {
   "settings.autoRunFrostmodDesc": "Starta spelintegration i bakgrunden när {{app}} öppnas.",
   "settings.frostmodArgs": "Spelintegrationsflaggor",
   "settings.frostmodArgsDesc": "Avancerade kommandoradsalternativ för spelintegration. De tillämpar nästa gång det startar. Lämna detta tomt om inte stöd gav dig en flagga att prova.",
+  "settings.raceMode": "Automatiskt tävlingsläge: ladda bara det servern behöver",
+  "settings.raceModeDesc":
+    "När du går med i en server från {{app}} läggs banor och hojar som servern inte kan använda åt sidan innan spelet startar, så det laddar mindre och du kommer in snabbare. De kommer tillbaka när spelet stängs. Förarutrustning, lackeringar och sådant du själv lagt åt sidan lämnas ifred. Anslutningar från spelets egen serverlista påverkas inte.",
+  "settings.raceModeActive": "Automatiskt tävlingsläge: {{count}} mods åt sidan",
   "settings.watchModsReload": "Ladda automatiskt om katalogändringar",
   "settings.watchModsReloadDesc":
     "Ladda om spelet automatiskt när spår eller cyklar läggs till i din mods mapp – även laddas ner manuellt utanför {{app}}.",
@@ -1088,6 +1094,29 @@ export const sv: Translation = {
   "registerServer.submit": "Lägg till",
   "registerServer.done": "{{address}} finns på den delade listan",
   "registerServer.failed": "Kunde inte lägga till den servern",
+  "savedServers.title": "Sparade",
+  "savedServers.add": "Spara en server via IP",
+  "savedServers.addTitle": "Spara en server",
+  "savedServers.editTitle": "Redigera sparad server",
+  "savedServers.blurb": "Vilken server som helst via IP, listad eller inte. {{app}} frågar den direkt, så kortet hålls aktuellt.",
+  "savedServers.address": "Adress",
+  "savedServers.name": "Namn (valfritt)",
+  "savedServers.namePlaceholder": "Vad servern kallar sig",
+  "savedServers.save": "Spara",
+  "savedServers.added": "{{name}} sparad",
+  "savedServers.duplicate": "Den servern är redan sparad.",
+  "savedServers.full": "Din lista är full. Ta bort en först.",
+  "savedServers.missing": "Den servern är inte sparad längre.",
+  "savedServers.checking": "Kollar",
+  "savedServers.offline": "Offline",
+  "savedServers.offlineHint": "Den svarade inte. Du kan ändå försöka gå med.",
+  "savedServers.actions": "Alternativ för sparad server",
+  "savedServers.moveUp": "Flytta upp",
+  "savedServers.moveDown": "Flytta ner",
+  "savedServers.edit": "Redigera",
+  "savedServers.remove": "Ta bort",
+  "savedServers.removed": "{{name}} borttagen",
+  "savedServers.undo": "Ångra",
 
   "queue.banner": "#{{position}} i rad för {{name}}",
   "queue.turnBanner": "Din tur: gå {{name}}",
@@ -1172,6 +1201,9 @@ export const sv: Translation = {
   "serverBrowser.region.asia": "Asien",
   "serverBrowser.region.other": "Övriga",
 
+  "sync.notSharing": "Delar inte lacker: {{names}}",
+  "sync.notSharingWhy":
+    "Ni ser varandra i standardlacker tills de kör MXB App 0.19 eller senare med lacksynk påslagen.",
   "sync.autoNote":
     "Din look publicerar sig — varje cykel, varje gång du ändrar den i appen eller i spelets eget garage. Alla andra kommer när du trycker på Play.",
 

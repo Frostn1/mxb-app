@@ -1,6 +1,7 @@
 name: Release
 
-# Build signed-less desktop bundles and publish them to a GitHub Release.
+# Build the desktop bundles and publish them to a GitHub Release. The Windows leg is
+# code-signed once Azure Artifact Signing is set up (docs/signing/SETUP.md), unsigned until then.
 # Triggers on any tag like `v0.1.0`. You can also run it manually from the
 # Actions tab (workflow_dispatch) to build without tagging. Releases are
 # published, not drafted (`releaseDraft: false`).
@@ -40,6 +41,15 @@ jobs:
             args: ""
 
     runs-on: ${{ matrix.platform }}
+    # The environment gives the OIDC token one stable subject for Azure to trust
+    # (repo:Frostn1/mxb-app:environment:code-signing), whatever tag started the run; a tag's own
+    # subject names that tag, which no credential can be registered for in advance. No
+    # protection rules: it exists only to name the job. See docs/signing/SETUP.md.
+    environment: code-signing
+    # id-token: the Windows leg's OIDC login for code signing (.github/actions/artifact-signing).
+    permissions:
+      contents: write
+      id-token: write
 
     steps:
       - name: Checkout
@@ -107,8 +117,9 @@ jobs:
           ssh-key: ${{ secrets.SIDECAR_DEPLOY_KEY }}
           path: .sidecar-src
 
-      # Build the injected secure-content DLL from the private crate. On the Windows leg, MSVC to
-      # match the game's runtime; the app injects it in-process, so no injector exe is needed.
+      # Build the secure-content DLL from the private crate. On the Windows leg, MSVC to match the
+      # game's runtime; the game loads it itself as a plugin (`mxbsecure.dlo`), so nothing is
+      # injected and no injector exe ships.
       # sync.sh (below) copies it into src/mxbsecure.dll, from where build.rs stages it into
       # resources/ for the bundler.
       - name: Build secure-content DLL (Windows)
@@ -148,13 +159,38 @@ jobs:
           test -f apps/manager/src-tauri/src/worldnet.rs || { echo "::error::worldnet.rs missing after sync.sh"; exit 1; }
 
 
+      # Windows code signing (Azure Artifact Signing). Skips with a notice until the secrets and
+      # variables in docs/signing/SETUP.md exist, and the build ships unsigned as before. When
+      # set up, `tauri-args` makes Tauri sign the exe and the installer as it bundles them.
+      - name: Set up Windows code signing
+        id: signing
+        if: ${{ startsWith(matrix.platform, 'windows') }}
+        uses: ./.github/actions/artifact-signing
+        with:
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          endpoint: ${{ vars.ARTIFACT_SIGNING_ENDPOINT }}
+          account: ${{ vars.ARTIFACT_SIGNING_ACCOUNT }}
+          profile: ${{ vars.ARTIFACT_SIGNING_PROFILE }}
+
+      # The secure-content DLL the game loads as a plugin (`plugins\mxbsecure.dlo`) is shipped as
+      # a resource, not a binary Tauri signs, so it's signed here, where sync.sh left it and
+      # before build.rs stages it. The app copies it byte for byte, so the plugin keeps the
+      # signature.
+      - name: Sign the secure-content DLL
+        if: ${{ github.repository == 'Frostn1/mxb-app' && startsWith(matrix.platform, 'windows') && steps.signing.outputs.enabled == 'true' }}
+        shell: pwsh
+        run: ./scripts/sign-windows.ps1 apps/manager/src-tauri/src/mxbsecure.dll
+
       # Ask the bundler for the secure-content files only on the legs that have them. Tauri's
       # `resources` glob is a hard error when it matches nothing, so keeping it in the committed
       # config broke every build without the private module. By now sync.sh has put the files in
-      # src/ and build.rs has copied them into resources/. Windows ships just the DLL (injected
-      # in-process); Linux and macOS ship the DLL + `mxbsecure-inject.exe`, the attach injector
-      # the app launches inside the Proton prefix or the Wine bottle.
-      # The `resources/mxbsecure*` glob matches whichever files the leg produced.
+      # src/ and build.rs has copied them into resources/. Windows ships the DLL alone — the game
+      # loads it as a plugin — and the injector is removed and left out of the glob by name, since
+      # the crate builds it on every leg and Defender scores an injector in the installer as
+      # malware. Linux and macOS ship the DLL + `mxbsecure-inject.exe`, the attach injector the
+      # app launches inside the Proton prefix or the Wine bottle.
       - name: Bundle the secure-content files
         if: ${{ github.repository == 'Frostn1/mxb-app' }}
         shell: bash
@@ -163,7 +199,13 @@ jobs:
           if [[ "${{ matrix.platform }}" == ubuntu* || "${{ matrix.platform }}" == macos* ]]; then
             test -f apps/manager/src-tauri/src/mxbsecure-inject.exe || { echo "::error::mxbsecure-inject.exe missing after sync.sh"; exit 1; }
           fi
-          jq '.bundle.resources = ["resources/mxbsecure*"]' apps/manager/src-tauri/tauri.conf.json > tauri.conf.patched
+          if [[ "${{ matrix.platform }}" == windows* ]]; then
+            rm -f apps/manager/src-tauri/src/mxbsecure-inject.exe apps/manager/src-tauri/resources/mxbsecure-inject.exe
+            resources='["resources/mxbsecure.dll"]'
+          else
+            resources='["resources/mxbsecure*"]'
+          fi
+          jq --argjson r "$resources" '.bundle.resources = $r' apps/manager/src-tauri/tauri.conf.json > tauri.conf.patched
           mv tauri.conf.patched apps/manager/src-tauri/tauri.conf.json
 
       # The release page should say what shipped, not only which file to download — so
@@ -237,7 +279,8 @@ jobs:
           # check — stays on the last full release until the plain tag is cut.
           # A manual `workflow_dispatch` build is never the release everyone should get.
           prerelease: ${{ github.ref_type != 'tag' || contains(github.ref_name, '-') }}
-          args: ${{ matrix.args }}
+          # The signing overlay on a signed Windows leg; empty everywhere else.
+          args: ${{ matrix.args }} ${{ steps.signing.outputs.tauri-args }}
 
   # Tauri names bundles like `MXB.App_0.1.0_x64-setup.exe`, which reads as ugly/
   # fishy. Rename the user-facing installers to `MXB-App-<ver>-<arch>.<ext>` and

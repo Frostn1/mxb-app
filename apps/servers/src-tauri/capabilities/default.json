@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "The main MXB Servers window: core only, no shell, file or network plugins",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

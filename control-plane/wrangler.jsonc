@@ -95,9 +95,16 @@
   // which is the entire lifecycle. It stores nothing: peers live on their own hibernating
   // sockets, so an idle room costs nothing and there is no state to reconcile.
   "durable_objects": {
-    "bindings": [{ "name": "VOICE_ROOMS", "class_name": "VoiceRoom" }]
+    "bindings": [
+      { "name": "VOICE_ROOMS", "class_name": "VoiceRoom" },
+      // Paint sync's rooms, keyed the same way. Sockets only, like the voice room.
+      { "name": "PAINT_ROOMS", "class_name": "PaintRoom" }
+    ]
   },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["VoiceRoom"] }],
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["VoiceRoom"] },
+    { "tag": "v2", "new_sqlite_classes": ["PaintRoom"] }
+  ],
 
   // Paints are content-addressed by SHA-256, so an upload of a paint someone else already
   // shared is a no-op and every rider on a server pulls the same object.
@@ -131,6 +138,9 @@
   "ratelimits": [
     { "name": "SIGNIN_LIMITER", "namespace_id": "1001", "simple": { "limit": 20, "period": 60 } },
     { "name": "KEY_GRANT_LIMITER", "namespace_id": "1002", "simple": { "limit": 60, "period": 60 } },
-    { "name": "TRACK_LIMITER", "namespace_id": "1003", "simple": { "limit": 10, "period": 60 } }
+    { "name": "TRACK_LIMITER", "namespace_id": "1003", "simple": { "limit": 10, "period": 60 } },
+    // Paint sync v2: a join per server change plus a heartbeat every five minutes, and one
+    // upload per paint the rider wears. 60 a minute is a whole look uploaded at once.
+    { "name": "PAINTSYNC_LIMITER", "namespace_id": "1004", "simple": { "limit": 60, "period": 60 } }
   ]
 }

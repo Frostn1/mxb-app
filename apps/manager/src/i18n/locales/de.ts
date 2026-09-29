@@ -595,6 +595,8 @@ export const de: Translation = {
   "settings.paintSyncOn": "Lackierungen automatisch synchronisieren",
   "settings.paintSyncOnDesc":
     "Ausgeschaltet wird nichts von dir veröffentlicht und keine Lackierung von anderen installiert.",
+  "settings.paintSyncNeedsFrostmod":
+    "Paint sync needs Game Integration. Install it and turn on \"Start Game Integration automatically\" to use paint sync.",
   "settings.gameFolder": "Spielordner",
   "settings.general": "Allgemein",
   "settings.appearance": "Darstellung",
@@ -781,6 +783,10 @@ export const de: Translation = {
   "settings.frostmodArgs": "Flags der Spielintegration",
   "settings.frostmodArgsDesc":
     "Zusätzliche Kommandozeile für FrostMod, so getippt wie im Terminal. Gilt ab dem nächsten Start von FrostMod. Lass das Feld leer, außer du hast ein Flag zum Ausprobieren bekommen.",
+  "settings.raceMode": "Automatischer Rennmodus: nur laden, was der Server braucht",
+  "settings.raceModeDesc":
+    "Wenn du über {{app}} einem Server beitrittst, werden Strecken und Bikes, die der Server nicht nutzen kann, vor dem Spielstart beiseitegelegt. So lädt das Spiel weniger und du bist schneller drin. Sie kommen zurück, sobald das Spiel geschlossen wird. Fahrerausrüstung, Lackierungen und alles, was du selbst beiseitegelegt hast, bleiben unberührt. Beitritte über den Serverbrowser im Spiel sind nicht betroffen.",
+  "settings.raceModeActive": "Automatischer Rennmodus: {{count}} Mods beiseitegelegt",
   "settings.watchModsReload": "Automatisch neu laden bei Ordneränderungen",
   "settings.watchModsReloadDesc":
     "Das Spiel automatisch neu laden, wenn Strecken oder Motorräder in deinen Mod-Ordner kommen — auch wenn sie außerhalb von {{app}} manuell heruntergeladen wurden.",
@@ -1128,6 +1134,29 @@ export const de: Translation = {
   "registerServer.submit": "Hinzufügen",
   "registerServer.done": "{{address}} steht auf der gemeinsamen Liste",
   "registerServer.failed": "Dieser Server konnte nicht hinzugefügt werden",
+  "savedServers.title": "Gespeichert",
+  "savedServers.add": "Server per IP speichern",
+  "savedServers.addTitle": "Server speichern",
+  "savedServers.editTitle": "Gespeicherten Server bearbeiten",
+  "savedServers.blurb": "Jeder Server per IP, ob gelistet oder nicht. {{app}} fragt ihn direkt, damit seine Karte live bleibt.",
+  "savedServers.address": "Adresse",
+  "savedServers.name": "Name (optional)",
+  "savedServers.namePlaceholder": "Wie sich der Server selbst nennt",
+  "savedServers.save": "Speichern",
+  "savedServers.added": "{{name}} gespeichert",
+  "savedServers.duplicate": "Dieser Server ist schon gespeichert.",
+  "savedServers.full": "Deine Liste ist voll. Entferne zuerst einen.",
+  "savedServers.missing": "Dieser Server ist nicht mehr gespeichert.",
+  "savedServers.checking": "Prüfe",
+  "savedServers.offline": "Offline",
+  "savedServers.offlineHint": "Er hat nicht geantwortet. Du kannst trotzdem versuchen beizutreten.",
+  "savedServers.actions": "Optionen für gespeicherten Server",
+  "savedServers.moveUp": "Nach oben",
+  "savedServers.moveDown": "Nach unten",
+  "savedServers.edit": "Bearbeiten",
+  "savedServers.remove": "Entfernen",
+  "savedServers.removed": "{{name}} entfernt",
+  "savedServers.undo": "Rückgängig",
 
   "queue.banner": "#{{position}} in der Warteschlange für {{name}}",
   "queue.turnBanner": "Du bist dran: {{name}} beitreten",
@@ -1212,6 +1241,9 @@ export const de: Translation = {
   "serverBrowser.region.asia": "Asien",
   "serverBrowser.region.other": "Andere",
 
+  "sync.notSharing": "Teilt keine Lackierungen: {{names}}",
+  "sync.notSharingWhy":
+    "Ihr seht euch gegenseitig in Standard-Lackierungen, bis sie MXB App 0.19 oder neuer mit eingeschaltetem Paint-Sync nutzen.",
   "sync.autoNote":
     "Dein Look veröffentlicht sich selbst — jedes Bike, sobald du ihn in der App oder in der Garage des Spiels änderst. Der der anderen kommt, wenn du auf Spielen drückst.",
 

@@ -136,6 +136,11 @@ pub fn is_running() -> bool {
 //       back; reselecting the same bike does not re-read the model.
 //   `swap_bike` — switch the active bike outright. NOT implemented in FrostMod
 //       yet (Stage B); it logs and ignores.
+//   `refresh_gear` — rider gear (helmet, boots, rider model) changed on disk; rebuild only
+//       the rider lists and their paints. See `GEAR_REFRESH_MIN_VERSION`.
+//   `refresh_paints` — paints or gear changed on disk; re-run the game's customization
+//       loader in-process so the look is live. Carries no bike id. See
+//       `PAINT_REFRESH_MIN_VERSION`.
 //   `reset_server_browser` — close the game's half-open master session so the next Browse
 //       starts clean. FrostMod does this by itself when it recognises the wedge; this is
 //       the button for when it declines to. Carries no bike id.
@@ -279,6 +284,55 @@ fn send_command(json: String) -> CommandOutcome {
     // Still write the command file on dev builds so the contract can be inspected.
     let _ = std::fs::write(command_file_path(), json);
     CommandOutcome::Unsupported
+}
+
+/// The oldest FrostMod that handles `refresh_paints`: v0.39.0. An older build logs the verb as
+/// unknown and drops it, which from here looks like success, so it is never sent one.
+const PAINT_REFRESH_MIN_VERSION: Option<&str> = Some("v0.39.0");
+
+/// May we send `refresh_paints` to the installed FrostMod, tagged `tag`?
+pub fn paint_refresh_supported(tag: Option<&str>) -> bool {
+    let Some(min) = PAINT_REFRESH_MIN_VERSION else { return false };
+    match (tag.and_then(version_parts), version_parts(min)) {
+        (Some(have), Some(min)) => have >= min,
+        _ => false,
+    }
+}
+
+/// Ask FrostMod to re-run the game's customization loader, so changed paints show now.
+/// Callers clear [`paint_refresh_supported`] first.
+pub fn signal_refresh_paints() -> CommandOutcome {
+    send_command(command_json("refresh_paints", ""))
+}
+
+/// The oldest FrostMod that handles `refresh_gear`: v0.39.3. An older one drops the verb as
+/// unknown, which from here looks like success, so it gets the full reload instead.
+const GEAR_REFRESH_MIN_VERSION: &str = "v0.39.3";
+
+/// May we send `refresh_gear` to the installed FrostMod, tagged `tag`?
+pub fn gear_refresh_supported(tag: Option<&str>) -> bool {
+    match (tag.and_then(version_parts), version_parts(GEAR_REFRESH_MIN_VERSION)) {
+        (Some(have), Some(min)) => have >= min,
+        _ => false,
+    }
+}
+
+/// Ask FrostMod to rebuild the rider gear lists (helmets, boots, rider models, protections
+/// and their paints). Callers clear [`gear_refresh_supported`] first.
+pub fn signal_refresh_gear() -> CommandOutcome {
+    send_command(command_json("refresh_gear", ""))
+}
+
+/// The oldest FrostMod that filters the game's content scan by `frostmod_racemode.txt`, which
+/// Auto race mode hands it instead of moving files.
+const RACE_FILTER_MIN_VERSION: &str = "v0.40.0";
+
+/// Does the installed FrostMod, tagged `tag`, read Auto race mode's allow-list?
+pub fn race_filter_supported(tag: Option<&str>) -> bool {
+    match (tag.and_then(version_parts), version_parts(RACE_FILTER_MIN_VERSION)) {
+        (Some(have), Some(min)) => have >= min,
+        _ => false,
+    }
 }
 
 /// Ask FrostMod to swap the active bike to `bike_id`.
@@ -622,6 +676,35 @@ fn not_attached_reason() -> String {
 
 #[cfg(test)]
 mod tests {
+
+    /// The allow-list is only handed to a FrostMod that reads it; an older one would ignore it
+    /// and show everything, which is why the file-moving mode stays for it.
+    #[test]
+    fn the_race_filter_needs_v0_40_0() {
+        assert!(race_filter_supported(Some("v0.40.0")));
+        assert!(!race_filter_supported(Some("v0.39.4")));
+        assert!(!race_filter_supported(None));
+    }
+
+    /// `refresh_gear` goes only to v0.39.3 and later; an older FrostMod gets the full reload.
+    #[test]
+    fn gear_refresh_waits_for_v0_39_3() {
+        assert!(gear_refresh_supported(Some("v0.39.3")));
+        assert!(gear_refresh_supported(Some("v0.40.0")));
+        assert!(!gear_refresh_supported(Some("v0.39.2")));
+        assert!(!gear_refresh_supported(None));
+    }
+
+    /// Only a FrostMod that handles `refresh_paints` is sent it: an older one drops it
+    /// silently, which would read as a refresh that happened.
+    #[test]
+    fn paint_refresh_waits_for_a_frostmod_that_has_it() {
+        assert!(paint_refresh_supported(Some("v0.39.0")));
+        assert!(paint_refresh_supported(Some("v0.40.1")));
+        assert!(!paint_refresh_supported(Some("v0.38.0")));
+        assert!(!paint_refresh_supported(None));
+    }
+
     use super::*;
 
     #[test]

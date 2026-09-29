@@ -112,6 +112,11 @@ export interface Config {
    * MXB App (e.g. a manual download dropped into the folder). Default true.
    */
   watchModsReload?: boolean;
+  /**
+   * Race mode: on a join the app launches, set aside every track and bike the server can't
+   * use before the game starts, and put them back when the session ends. Default false.
+   */
+  raceMode?: boolean;
   /** Offer beta builds through the in-app updater, not only full releases. Default false. */
   betaUpdates?: boolean;
   /** Install updates at launch or once the app sits unused, never mid-game. Default true. */

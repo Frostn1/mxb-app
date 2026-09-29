@@ -154,6 +154,13 @@ pub fn start(app: &AppHandle) {
                 // The session just wrote its trainers, and that write is where the damage
                 // gets in. Clear it now rather than on the load screen that would crash.
                 crate::trainerfix::repair_and_report(&app, &cfg);
+                // Race mode set mods aside for this session; the game is gone, so they come
+                // back now. Only what its journal lists: the player's own parked mods stay.
+                let handle = app.clone();
+                let _ = tauri::async_runtime::spawn_blocking(move || {
+                    crate::racemode::restore_if_idle(&handle, "the game exited")
+                })
+                .await;
             }
 
             tokio::time::sleep(POLL).await;

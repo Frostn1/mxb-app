@@ -50,7 +50,10 @@ export default function PartSlots({ lib }: { lib: ReturnType<typeof useBikeLibra
         </button>
       </div>
       <p className="text-[11px] text-muted-foreground">{t("bike.slotsHint")}</p>
-      <ul className="flex flex-col gap-1">
+      {/* Bottom padding, not a shorter list: the floating Build pill sits over this column's
+          bottom-right corner, and without room reserved for it a scrolled-to-the-end list's
+          last row (its own Remove button included) would sit right under it. */}
+      <ul className="flex flex-col gap-1 pb-14">
         {ROLES.map((role) => {
           const filled = slots[role] ? byId.get(slots[role]!) : undefined;
           return (

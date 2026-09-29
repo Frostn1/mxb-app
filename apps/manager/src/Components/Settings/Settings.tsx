@@ -43,6 +43,10 @@ import {
   presetsListProfiles,
   setAutoRunFrostmod,
   setQueueRestartGame,
+  setRaceMode,
+  raceModeStatus,
+  onRaceMode,
+  type RaceModeStatus,
   setFrostmodArgs,
   setGamePath,
   setInstantRefresh,
@@ -64,6 +68,8 @@ import {
   setVoiceProximity,
   setVoiceEnabled,
   setPaintSyncEnabled,
+  paintSyncReadiness,
+  type PaintSyncReadiness,
   setMxbsecureEnabled,
   contentSecureAvailable,
   mxbsecureUnlock,
@@ -546,6 +552,22 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
   const frostmodArgs = frostmodArgsDraft ?? config.frostmodArgs ?? "";
   const instantRefresh = config.instantRefresh ?? true;
   const watchModsReload = config.watchModsReload ?? true;
+  const raceMode = config.raceMode ?? false;
+  // What Race mode is holding aside right now. Read once and then kept current by the event,
+  // since the moves happen on a join and the restore on the game's exit, neither of which
+  // is anything this page did.
+  const [raceHeld, setRaceHeld] = useState<RaceModeStatus | null>(null);
+  useEffect(() => {
+    let alive = true;
+    raceModeStatus()
+      .then((s) => alive && setRaceHeld(s))
+      .catch(() => {});
+    const off = onRaceMode((s) => setRaceHeld(s));
+    return () => {
+      alive = false;
+      void off.then((f) => f());
+    };
+  }, []);
   const betaUpdates = config.betaUpdates ?? false;
   const autoUpdates = config.autoUpdates ?? true;
   const overlayEnabled = config.overlayEnabled ?? true;
@@ -555,6 +577,15 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
   const voiceEnabled = config.voiceEnabled ?? false;
   // Off unless it was turned on, matching the backend's default.
   const paintSyncEnabled = config.paintSyncEnabled ?? false;
+  // Paint sync runs through Game Integration, so the switch is only live when that is
+  // installed and set to start. Re-asked when the section opens or the FrostMod switch moves.
+  const [syncReadiness, setSyncReadiness] = useState<PaintSyncReadiness | null>(null);
+  useEffect(() => {
+    paintSyncReadiness()
+      .then(setSyncReadiness)
+      .catch(() => {});
+  }, [active, autoRunFrostmod]);
+  const paintSyncBlocked = syncReadiness?.ready === false;
   const mxbsecureEnabled = config.mxbsecureEnabled ?? true;
   const [unlocking, setUnlocking] = useState(false);
   const [repairing, setRepairing] = useState(false);
@@ -941,6 +972,15 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
     }
   };
 
+  const toggleRaceMode = async (v: boolean) => {
+    try {
+      await setRaceMode(v);
+      await reloadConfig();
+    } catch (e) {
+      toast.error(t("settings.updateFailed"), { description: String(e) });
+    }
+  };
+
   const toggleWatchModsReload = async (v: boolean) => {
     try {
       await setWatchModsReload(v);
@@ -1292,7 +1332,7 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
       </nav>
 
       <div ref={pane} className="min-h-0 flex-1 overflow-y-auto px-2 py-5">
-        <div className="flex max-w-[640px] flex-col gap-[18px]">
+        <div className="flex min-w-0 max-w-[820px] flex-col gap-[18px]">
           {/* game — which title the app is driving. Its own card, above the folders it
               scopes: everything below belongs to whatever is picked here, so it isn't a
               property of the folder setting it used to sit inside. */}
@@ -1635,9 +1675,14 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
                 paint sync is, so repeating it here would say it twice on one screen. */}
             <ToggleRow
               label={t("settings.paintSyncOn")}
-              desc={t("settings.paintSyncOnDesc")}
-              checked={paintSyncEnabled}
+              desc={
+                paintSyncBlocked
+                  ? t("settings.paintSyncNeedsFrostmod")
+                  : t("settings.paintSyncOnDesc")
+              }
+              checked={paintSyncEnabled && !paintSyncBlocked}
               onChange={togglePaintSync}
+              disabled={paintSyncBlocked}
             />
             <PaintSync />
           </Section>
@@ -2038,7 +2083,7 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
               </Select>
             </div>
 
-            <div className="flex items-center justify-between gap-4">
+            <div className="flex flex-wrap items-center justify-between gap-4">
               <span className="text-[11.5px] text-muted-foreground">
                 {t("voice.testOutputDesc")}
               </span>
@@ -2484,6 +2529,21 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
                   onChange={toggleWatchModsReload}
                 />
 
+                <ToggleRow
+                  label={t("settings.raceMode")}
+                  desc={t("settings.raceModeDesc", { app: APP_NAME || "MXB App" })}
+                  checked={raceMode}
+                  onChange={toggleRaceMode}
+                />
+                {/* Shown whenever something is held, even with the switch now off: turning
+                    it off doesn't bring a live session's mods back early, and the line is
+                    how the player knows they're still coming. */}
+                {raceHeld?.active && (
+                  <p className="-mt-1 px-3 text-[12px] text-muted-foreground">
+                    {t("settings.raceModeActive", { count: raceHeld.count })}
+                  </p>
+                )}
+
                 <div className="rounded-lg border border-border/70">
               <button
                 type="button"
@@ -2699,7 +2759,7 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
           {/* about */}
           {active === "about" && (
           <Section title={t("settings.about")}>
-            <div className="flex items-center gap-3 text-[12px] text-muted-foreground">
+            <div className="flex flex-wrap items-center gap-3 text-[12px] text-muted-foreground">
               <span>{shownVersion ? `mxb-app v${shownVersion}` : "mxb-app"}</span>
               {experimental?.prerelease && (
                 <span className="rounded-full bg-primary/15 px-2 py-0.5 text-[10.5px] font-semibold uppercase tracking-wide text-primary">
@@ -2719,7 +2779,7 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
                 Changelog
               </button>
             </div>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               <Button
                 variant="outline"
                 size="sm"
@@ -3039,7 +3099,7 @@ function Section({
   children: React.ReactNode;
 }) {
   return (
-    <div className="flex flex-col gap-3 rounded-xl bg-card p-[18px]">
+    <div className="flex min-w-0 flex-col gap-3 rounded-xl bg-card p-[18px]">
       <div className="flex items-center gap-2">
         <span className="flex-1 text-[14px] font-bold">{title}</span>
         {titleRight}

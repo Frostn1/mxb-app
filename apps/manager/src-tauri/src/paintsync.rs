@@ -215,7 +215,7 @@ pub fn local_look(cfg: &AppConfig, profile: &str) -> anyhow::Result<LocalLook> {
 /// The largest paint the control plane will store, mirrored here for the same reason as
 /// [`PUBLISHABLE_SLOTS`]: a loadout is validated whole, so one file over the limit is a rider
 /// publishing nothing at all. Skipping it costs that one paint; sending it costs the lot.
-const MAX_PAINT_BYTES: u64 = 192 * 1024 * 1024;
+pub(crate) const MAX_PAINT_BYTES: u64 = 192 * 1024 * 1024;
 
 const PUBLISHABLE_SLOTS: [&str; 9] = [
     "paint",
@@ -281,7 +281,7 @@ fn paints_of(
 
 // ── Control-plane calls ──────────────────────────────────────────────────────
 
-fn client() -> anyhow::Result<reqwest::Client> {
+pub(crate) fn client() -> anyhow::Result<reqwest::Client> {
     Ok(reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(60))
         .build()?)
@@ -729,7 +729,7 @@ pub fn remove_installed(cfg: &AppConfig) -> RemoveOutcome {
 ///
 /// Every segment is checked against what is actually on disk, so this can only ever return a
 /// path inside `mods_dir` that already passed [`safe_dest`].
-fn resolve_ignoring_case(mods_dir: &Path, rel_dest: &str) -> Option<PathBuf> {
+pub(crate) fn resolve_ignoring_case(mods_dir: &Path, rel_dest: &str) -> Option<PathBuf> {
     let mut cur = mods_dir.to_path_buf();
     for segment in rel_dest.split('/') {
         let direct = cur.join(segment);
@@ -747,7 +747,7 @@ fn resolve_ignoring_case(mods_dir: &Path, rel_dest: &str) -> Option<PathBuf> {
 
 /// Drop the folders a removal emptied. Stops two levels below the mods root, so `mods/bikes`
 /// and its siblings stay even when the last thing in them was a synced paint.
-fn prune_empty(mods_dir: &Path, from: Option<&Path>) {
+pub(crate) fn prune_empty(mods_dir: &Path, from: Option<&Path>) {
     let mut cur = from.map(Path::to_path_buf);
     while let Some(dir) = cur {
         let Ok(rel) = dir.strip_prefix(mods_dir) else { return };
@@ -770,6 +770,9 @@ fn prune_empty(mods_dir: &Path, from: Option<&Path>) {
 /// the same name for different artwork is a collision the game itself cannot express. What
 /// this decides is only that neither is installed — better than a grid that changes
 /// depending on which roster came back first.
+///
+/// The roster fallback only. A paint room knows when each rider joined, so it settles the
+/// same collision by majority instead — see [`crate::paintroom::pick_variants`].
 fn contested_destinations(wanted: &[PaintEntry]) -> std::collections::HashSet<String> {
     let mut first: std::collections::HashMap<String, String> = std::collections::HashMap::new();
     let mut contested = std::collections::HashSet::new();
@@ -795,17 +798,17 @@ fn contested_destinations(wanted: &[PaintEntry]) -> std::collections::HashSet<St
 /// pulling a roster overwrote any local paint whose name matched — including liveries the
 /// player made themselves, which is the one thing a sync must never do.
 #[derive(Debug, Default)]
-struct Manifest {
+pub(crate) struct Manifest {
     /// `rel_dest` (lowercased) → the digest this sync last wrote there.
-    installed: std::collections::HashMap<String, String>,
-    dirty: bool,
+    pub(crate) installed: std::collections::HashMap<String, String>,
+    pub(crate) dirty: bool,
 }
 
 /// Sits beside the content it describes, so moving or wiping the mods folder takes it too.
 const MANIFEST_NAME: &str = "mxbapp_synced.json";
 
 impl Manifest {
-    fn read(mods_dir: &Path) -> Self {
+    pub(crate) fn read(mods_dir: &Path) -> Self {
         let path = mods_dir.join(MANIFEST_NAME);
         let installed = std::fs::read_to_string(&path)
             .ok()
@@ -816,14 +819,14 @@ impl Manifest {
 
     /// Whether the file at `rel_dest` is one this sync put there and nobody has touched
     /// since. An edited file stops being ours — the player has made it theirs.
-    fn owns(&self, rel_dest: &str, on_disk: Option<&str>) -> bool {
+    pub(crate) fn owns(&self, rel_dest: &str, on_disk: Option<&str>) -> bool {
         match (self.installed.get(&rel_dest.to_ascii_lowercase()), on_disk) {
             (Some(recorded), Some(actual)) => recorded == actual,
             _ => false,
         }
     }
 
-    fn claim(&mut self, rel_dest: &str, sha: &str) {
+    pub(crate) fn claim(&mut self, rel_dest: &str, sha: &str) {
         let key = rel_dest.to_ascii_lowercase();
         if self.installed.get(&key).map(String::as_str) != Some(sha) {
             self.installed.insert(key, sha.to_string());
@@ -831,7 +834,14 @@ impl Manifest {
         }
     }
 
-    fn write(&self, mods_dir: &Path) {
+    /// Stop claiming `rel_dest` — its file is gone, or has just been removed.
+    pub(crate) fn forget(&mut self, rel_dest: &str) {
+        if self.installed.remove(&rel_dest.to_ascii_lowercase()).is_some() {
+            self.dirty = true;
+        }
+    }
+
+    pub(crate) fn write(&self, mods_dir: &Path) {
         if !self.dirty {
             return;
         }

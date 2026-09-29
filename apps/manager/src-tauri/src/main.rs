@@ -92,9 +92,12 @@ mod secure_launch;
 mod server_admin;
 
 pub(crate) use mxb_core::presets;
+mod paintroom;
 mod paintsync;
+mod racemode;
 mod ranked;
 mod reshade;
+mod savedservers;
 mod serverbook;
 mod serverfilter;
 mod serverqueue;
@@ -415,6 +418,13 @@ async fn get_mod_detail(app: tauri::AppHandle, slug: String) -> Result<ModDetail
     with_clearance(&app, "mod detail", || WpModsSource.detail(&slug)).await
 }
 
+/// File hosts, not the WordPress catalog, know the archive size. Kept separate from detail
+/// loading so a slow or uncooperative mirror never delays the page itself.
+#[tauri::command]
+async fn get_download_sizes(urls: Vec<String>) -> std::collections::HashMap<String, Option<u64>> {
+    mods::mxb::download_sizes(urls).await
+}
+
 // ───────────────────────────── mxbikes-shop catalog ─────────────────────────────
 //
 // Browsing only. Nothing here installs or buys — the frontend opens the product page in
@@ -544,9 +554,9 @@ struct ReshadeApplyOutcome {
 }
 
 /// Re-run the game's look loader live if instant refresh is enabled, else report it off.
-fn live_refresh(enabled: bool) -> gameproc::LiveRefresh {
+fn live_refresh(app: &tauri::AppHandle, enabled: bool) -> gameproc::LiveRefresh {
     if enabled {
-        gameproc::refresh_look()
+        gameproc::refresh_look(frostmod_manage::installed_version(app).as_deref())
     } else {
         gameproc::LiveRefresh::Disabled
     }
@@ -554,7 +564,7 @@ fn live_refresh(enabled: bool) -> gameproc::LiveRefresh {
 
 /// Shortest gap between two unattended look refreshes.
 ///
-/// Every refresh is a thread started inside the running game, and the watcher that drives
+/// Every refresh re-runs the game's loader through FrostMod, and the watcher that drives
 /// them fires without anyone asking. A painter saving repeatedly, or a sync pull landing
 /// half a grid's paints, would otherwise queue one call per event; this collapses that
 /// burst into one. Sized to outlast a save the debounce didn't already fold together,
@@ -581,13 +591,13 @@ fn live_look_cooldown_passed() -> bool {
 
 /// Can a look change reach the running game at all?
 ///
-/// Two things have to hold, and both are fixed for the life of the process. The title needs
-/// a loader offset ([`game::Caps::instant_refresh`]), and the call that uses it is Windows'
-/// alone — under Wine or Proton the game is a Windows binary but we are not the one that can
-/// start a thread in it. Asked before watching as well as before firing, so a platform that
-/// could never act on a save doesn't hold OS watch handles waiting for one.
+/// Only for a title with a known customization loader ([`game::Caps::instant_refresh`]),
+/// fixed for the life of the process. FrostMod runs that loader from inside the game
+/// (`refresh_paints`) on every platform it runs on, so this is no longer Windows-only.
+/// Asked before watching as well as before firing, so a title that could never act on a save
+/// doesn't hold OS watch handles waiting for one.
 fn can_refresh_live_look() -> bool {
-    cfg!(windows) && game::active().caps.instant_refresh
+    game::active().caps.instant_refresh
 }
 
 /// Push a look that changed on disk into the running game.
@@ -614,7 +624,7 @@ fn refresh_live_look(app: &tauri::AppHandle) {
     }
     log::info!(
         "[look] refreshing the live game: {:?}",
-        gameproc::refresh_look()
+        gameproc::refresh_look(frostmod_manage::installed_version(app).as_deref())
     );
 }
 
@@ -800,7 +810,7 @@ fn apply_model_swap_blocking(
     Ok(SwapApplyOutcome {
         content_reload,
         game_running: gameproc::is_game_running(),
-        live_refresh: live_refresh(cfg.instant_refresh),
+        live_refresh: live_refresh(&app, cfg.instant_refresh),
         model_refresh,
         paints_stuck,
     })
@@ -844,7 +854,7 @@ async fn set_model_paints(
         Ok(SwapApplyOutcome {
             content_reload,
             game_running: gameproc::is_game_running(),
-            live_refresh: live_refresh(cfg.instant_refresh),
+            live_refresh: live_refresh(&app, cfg.instant_refresh),
             model_refresh: None, // the mesh didn't change, only which liveries sit beside it
             paints_stuck,
         })
@@ -877,7 +887,7 @@ async fn apply_sound_swap(
         Ok(SwapApplyOutcome {
             content_reload,
             game_running: gameproc::is_game_running(),
-            live_refresh: live_refresh(cfg.instant_refresh),
+            live_refresh: live_refresh(&app, cfg.instant_refresh),
             model_refresh: None, // a sound swap doesn't touch the model
             paints_stuck: 0,     // nor the liveries
         })
@@ -2819,6 +2829,9 @@ async fn publish_paints(
     if cfg.cp_token.trim().is_empty() {
         return Err("Enroll with an invite code first.".into());
     }
+    if paint_sync_blocker(&app, &cfg).is_some() {
+        return Err("Paint sync needs Game Integration.".into());
+    }
     let profile = match profile.map(|p| p.trim().to_string()).filter(|p| !p.is_empty()) {
         Some(p) => p,
         None => sync_profile(&cfg).ok_or("No MX Bikes profile to publish.")?,
@@ -3041,6 +3054,41 @@ impl SyncEvent {
     }
 }
 
+/// Why paint sync can't run on this machine, or `None` when it can.
+///
+/// It needs the game integration. The server a rider picked in the game's own browser is
+/// only known through FrostMod, and so is the moment they leave it — without it, sync would
+/// publish a look and then have no idea where anyone is.
+fn paint_sync_blocker(app: &tauri::AppHandle, cfg: &AppConfig) -> Option<&'static str> {
+    if !frostmod_manage::is_installed(app) {
+        return Some("frostmodMissing");
+    }
+    if !cfg.auto_run_frostmod {
+        return Some("frostmodDisabled");
+    }
+    None
+}
+
+/// Paint sync is switched on and has what it needs to run.
+fn paint_sync_active(app: &tauri::AppHandle, cfg: &AppConfig) -> bool {
+    cfg.paint_sync_enabled && paint_sync_blocker(app, cfg).is_none()
+}
+
+/// Whether paint sync can run, and if not, why — for Settings to grey the switch out.
+#[derive(Debug, Clone, serde::Serialize)]
+struct PaintSyncReadiness {
+    ready: bool,
+    /// `frostmodMissing` | `frostmodDisabled`
+    reason: Option<&'static str>,
+}
+
+#[tauri::command]
+fn paint_sync_readiness(app: tauri::AppHandle) -> PaintSyncReadiness {
+    let cfg = config::load_or_detect(&app).unwrap_or_default();
+    let reason = paint_sync_blocker(&app, &cfg);
+    PaintSyncReadiness { ready: reason.is_none(), reason }
+}
+
 /// Publish because something outside the app changed the look on disk.
 ///
 /// The watcher runs on the notify thread with no config in hand, so this reads it and hands
@@ -3086,7 +3134,7 @@ fn emit_sync(app: &tauri::AppHandle, event: SyncEvent) {
 /// succeeded on disk, so a failure here logs and is dropped rather than surfacing as an
 /// error on the apply the player actually asked for.
 fn publish_paints_soon(app: &tauri::AppHandle, cfg: &AppConfig, profile: Option<&str>) {
-    if !cfg.paint_sync_enabled {
+    if !paint_sync_active(app, cfg) {
         return;
     }
     let generation = PUBLISH_GEN.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
@@ -3101,7 +3149,7 @@ fn publish_paints_soon(app: &tauri::AppHandle, cfg: &AppConfig, profile: Option<
         // Re-read rather than reusing the captured config: the debounce is long enough for
         // the player to have enrolled, or re-enrolled, since the change that queued this.
         let cfg = config::load_or_detect(&app).unwrap_or_default();
-        if !cfg.paint_sync_enabled {
+        if !paint_sync_active(&app, &cfg) {
             return;
         }
         let Some(profile) = profile.or_else(|| sync_profile(&cfg)) else {
@@ -3131,6 +3179,8 @@ fn publish_paints_soon(app: &tauri::AppHandle, cfg: &AppConfig, profile: Option<
                     );
                     remember_publish(&app, &o);
                     usage::track("paint.publish");
+                    // A room only hears about a new look through a join.
+                    paintroom::note_look_changed();
                 }
                 emit_sync(&app, SyncEvent::published(&o));
             }
@@ -3156,7 +3206,12 @@ fn sync_paints_soon(app: &tauri::AppHandle, address: Option<String>) {
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
         let cfg = config::load_or_detect(&app).unwrap_or_default();
-        if !cfg.paint_sync_enabled {
+        if !paint_sync_active(&app, &cfg) {
+            return;
+        }
+        // A paint room pulls on joining, and only what is missing. The roster read is for a
+        // control plane that has answered a join with 404.
+        if !paintroom::rooms_unavailable() {
             return;
         }
         emit_sync(&app, SyncEvent::phase("pulling"));
@@ -3243,6 +3298,10 @@ impl Drop for LiveSyncGuard {
 
 /// A session's worth of syncing, so a rider who arrives after you do still renders.
 ///
+/// A paint room first ([`paintroom::Session`]): join the server the rider is on, follow the
+/// room's socket, leave when they do. The roster loop below it is the fallback for a control
+/// plane that answers the join with 404.
+///
 /// The pull used to happen once, at launch. That made the whole thing lopsided: whoever
 /// joined last saw everybody, and whoever was there first never saw anyone who turned up
 /// afterwards — they had pulled before those riders existed.
@@ -3262,11 +3321,17 @@ fn live_sync_session(app: &tauri::AppHandle, address: Option<String>) {
         let mut seen_running = false;
         let mut grid = GridWatch::default();
         let mut last_pull = std::time::Instant::now();
+        let mut room = paintroom::Session::new(address.clone());
+        let mut by_roster = paintroom::rooms_unavailable();
+        // Set when the room turns out not to exist, so the roster pulls straight away rather
+        // than a heartbeat later.
+        let mut pull_now = false;
         loop {
             tokio::time::sleep(GRID_POLL).await;
 
             let cfg = config::load_or_detect(&app).unwrap_or_default();
-            if !cfg.paint_sync_enabled {
+            if !paint_sync_active(&app, &cfg) {
+                room.end(&app, &cfg).await;
                 return;
             }
             // The game is the session. Once it has been seen and then gone, so are we.
@@ -3274,7 +3339,28 @@ fn live_sync_session(app: &tauri::AppHandle, address: Option<String>) {
                 seen_running = true;
             } else if seen_running || started.elapsed() > LIVE_SYNC_STARTUP_GRACE {
                 log::info!("[sync] session over, stopping the live sync");
+                room.end(&app, &cfg).await;
+                // Leaving the paint room is the session ending too. The session watcher
+                // restores Race mode at the same moment; whichever gets there first does it,
+                // and the other finds no journal.
+                let handle = app.clone();
+                let _ = tauri::async_runtime::spawn_blocking(move || {
+                    racemode::restore_if_idle(&handle, "paint sync left the server")
+                })
+                .await;
                 return;
+            }
+
+            if !by_roster {
+                let reported = live_session().filter(|s| s.on_a_server()).map(|s| s.server_name);
+                match room.tick(&app, &cfg, reported).await {
+                    paintroom::Tick::Live => continue,
+                    paintroom::Tick::NotDeployed => {
+                        log::info!("[sync] the control plane has no paint rooms; syncing by roster");
+                        by_roster = true;
+                        pull_now = true;
+                    }
+                }
             }
 
             // Someone new on the grid is the reason to pull; the heartbeat is the fallback
@@ -3288,7 +3374,7 @@ fn live_sync_session(app: &tauri::AppHandle, address: Option<String>) {
                 }
                 None => 0,
             };
-            let due = last_pull.elapsed() >= LIVE_SYNC_EVERY;
+            let due = std::mem::take(&mut pull_now) || last_pull.elapsed() >= LIVE_SYNC_EVERY;
             if arrivals == 0 && !due {
                 continue;
             }
@@ -3345,6 +3431,19 @@ fn live_server_key() -> Option<String> {
 fn live_session() -> Option<voice::gamesession::GameSession> {
     static GAME: std::sync::OnceLock<voice::gamesession::Reader> = std::sync::OnceLock::new();
     GAME.get_or_init(voice::gamesession::Reader::default).read()
+}
+
+/// Riders on this server's grid who aren't sharing paints, for the Settings panel. Empty when
+/// the app isn't in a paint-sync room or the game isn't on a server.
+#[tauri::command]
+fn paint_sync_not_sharing() -> Vec<String> {
+    let Some(room) = paintroom::room_rider_names() else { return Vec::new() };
+    let Some(session) = live_session() else { return Vec::new() };
+    if !session.on_a_server() {
+        return Vec::new();
+    }
+    let grid: Vec<String> = session.riders.iter().map(|r| r.name.clone()).collect();
+    paintroom::not_sharing(&grid, &session.rider_name, &room)
 }
 
 /// What the running game says this player is called, for [`identity::claim_from_game`].
@@ -3508,6 +3607,9 @@ async fn pull_rosters(
 /// before a rider had published, or failed on a flaky connection.
 #[tauri::command]
 async fn sync_paints(app: tauri::AppHandle) -> Result<paintsync::PullOutcome, String> {
+    if paint_sync_blocker(&app, &config::load_or_detect(&app).unwrap_or_default()).is_some() {
+        return Err("Paint sync needs Game Integration.".into());
+    }
     emit_sync(&app, SyncEvent::phase("pulling"));
     // The one place a sweep is right: a person pressed Sync, and if they are not on a server
     // the whole registry is the only answer to "whose paints do you mean".
@@ -3540,10 +3642,35 @@ async fn cp_servers(app: tauri::AppHandle) -> Result<Vec<paintsync::RegisteredSe
 ///
 /// The game reads the connect flag only at startup, so this reports `already_running`
 /// rather than trying to steer a copy that's already up.
+///
+/// Off the main thread: with Race mode on, a join scans the library and moves files before
+/// the game starts, and a synchronous command would hold the window still for all of it.
 #[tauri::command]
-fn join_server(app: tauri::AppHandle, address: String) -> Result<gameproc::LaunchOutcome, String> {
+async fn join_server(
+    app: tauri::AppHandle,
+    address: String,
+) -> Result<gameproc::LaunchOutcome, String> {
+    tauri::async_runtime::spawn_blocking(move || join_server_now(app, address))
+        .await
+        .map_err(|e| format!("join_server task failed: {e}"))?
+}
+
+/// [`join_server`]'s body, for the callers already off the main thread.
+fn join_server_now(app: tauri::AppHandle, address: String) -> Result<gameproc::LaunchOutcome, String> {
     let cfg = config::load_or_detect(&app).unwrap_or_default();
-    let outcome = gameproc::join(&cfg, &address).map_err(|e| format!("{e:#}"))?;
+    // Race mode goes first: the game mounts the mods folder as it starts, so whatever is
+    // going to step aside has to have done it by then. A no-op when it's off, and when the
+    // game is already up (which `gameproc::join` is about to report anyway).
+    racemode::before_join(&app, &cfg, &address);
+    let outcome = gameproc::join(&cfg, &address);
+    match &outcome {
+        // The session watcher restores at exit; this covers a launch that never arrives.
+        Ok(gameproc::LaunchOutcome::Launched) => racemode::watch_launch(&app),
+        // No session of ours to end, so nothing will restore it later. A game that is up
+        // (someone else started it a moment ago) keeps its files until it exits.
+        _ => racemode::restore_if_idle(&app, "the launch didn't happen"),
+    }
+    let outcome = outcome.map_err(|e| format!("{e:#}"))?;
     if matches!(outcome, gameproc::LaunchOutcome::Launched) {
         usage::track("server.join");
         publish_paints_soon(&app, &cfg, None);
@@ -3602,7 +3729,22 @@ fn select_bike_for_listed_server(
 
 /// Join from a row in the app's server list, selecting a compatible installed bike first.
 #[tauri::command]
-fn join_listed_server(
+async fn join_listed_server(
+    app: tauri::AppHandle,
+    address: String,
+    categories: Vec<String>,
+    bikes: Vec<String>,
+) -> Result<gameproc::LaunchOutcome, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        join_listed_server_now(app, address, categories, bikes)
+    })
+    .await
+    .map_err(|e| format!("join_listed_server task failed: {e}"))?
+}
+
+/// [`join_listed_server`]'s body. The bike is selected before Race mode runs, so the bike
+/// Race mode keeps as "the player's" is the one they'll actually ride in.
+pub(crate) fn join_listed_server_now(
     app: tauri::AppHandle,
     address: String,
     categories: Vec<String>,
@@ -3613,7 +3755,7 @@ fn join_listed_server(
     }
     let cfg = config::load_or_detect(&app).unwrap_or_default();
     select_bike_for_listed_server(&cfg, &categories, &bikes)?;
-    join_server(app, address)
+    join_server_now(app, address)
 }
 
 /// Close the running game, then join `address` with the copy that replaces it.
@@ -3632,7 +3774,7 @@ async fn close_and_join(
     address: String,
 ) -> Result<gameproc::LaunchOutcome, String> {
     if !gameproc::is_game_running() {
-        return join_server(app, address);
+        return join_server(app, address).await;
     }
     if !serverqueue::close_and_settle().await {
         return Err(format!(
@@ -3640,7 +3782,7 @@ async fn close_and_join(
             game::active().display
         ));
     }
-    join_server(app, address)
+    join_server(app, address).await
 }
 
 /// Close the running game, select a bike accepted by the listed server, then launch into it.
@@ -3657,7 +3799,7 @@ async fn close_and_join_listed_server(
             game::active().display
         ));
     }
-    join_listed_server(app, address, categories, bikes)
+    join_listed_server(app, address, categories, bikes).await
 }
 
 /// Wait in line for a full server; the app launches into it when a slot is ours.
@@ -5541,15 +5683,7 @@ async fn register_server_address(app: tauri::AppHandle, address: String) -> Resu
 /// somebody reads the row. `GETINFO` costs one datagram and no account, so the panel asks.
 #[tauri::command]
 async fn probe_server(address: String) -> Result<WorldServer, String> {
-    #[cfg(worldnet)]
-    {
-        worldnet::probe_server(address).await
-    }
-    #[cfg(not(worldnet))]
-    {
-        let _ = address;
-        Err("The server browser isn't included in this build.".into())
-    }
+    serverwatch::probe(address).await
 }
 
 /// Is MX Bikes running? Polled by the sidebar so Play can show the live state.
@@ -5714,6 +5848,21 @@ fn set_queue_restart_game(app: tauri::AppHandle, enabled: bool) -> Result<(), St
     config::save(&app, &cfg).map_err(|e| format!("{e:#}"))
 }
 
+/// Turn Race mode on or off. Turning it off doesn't strand anything: whatever the current
+/// session set aside still comes back when that session ends.
+#[tauri::command]
+fn set_race_mode(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
+    let mut cfg = config::load(&app).unwrap_or_default();
+    cfg.race_mode = enabled;
+    config::save(&app, &cfg).map_err(|e| format!("{e:#}"))
+}
+
+/// How many mods Race mode is holding aside right now, for the Settings line.
+#[tauri::command]
+fn race_mode_status(app: tauri::AppHandle) -> racemode::Status {
+    racemode::status(&app)
+}
+
 /// Extra flags for `frostmod.exe`, stored as typed. Not validated here: FrostMod ignores a
 /// flag it doesn't know, so an unknown one costs nothing, while checking against a list this
 /// app carries would reject flags a newer FrostMod does understand.
@@ -5809,11 +5958,18 @@ fn set_voice_enabled(
 #[tauri::command]
 fn set_paint_sync_enabled(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
     let mut cfg = config::load(&app).unwrap_or_default();
+    if enabled && paint_sync_blocker(&app, &cfg).is_some() {
+        return Err("Paint sync needs Game Integration installed and set to start automatically.".into());
+    }
     cfg.paint_sync_enabled = enabled;
     config::save(&app, &cfg).map_err(|e| format!("{e:#}"))?;
-    // Turning it back on shouldn't wait for the next thing that happens to change a look.
+    // Turning it back on shouldn't wait for the next thing that happens to change a look —
+    // nor for the next session, when the game is already on a server.
     if enabled {
         publish_paints_soon(&app, &cfg, None);
+        if gameproc::is_game_running() {
+            live_sync_session(&app, None);
+        }
     }
     Ok(())
 }
@@ -6974,7 +7130,7 @@ fn apply_loadout_now(
     Ok(PresetApplyOutcome {
         content_reload,
         game_running: gameproc::is_game_running(),
-        live_refresh: live_refresh(cfg.instant_refresh),
+        live_refresh: live_refresh(&app, cfg.instant_refresh),
         model_refresh,
     })
 }
@@ -8155,6 +8311,15 @@ fn main() {
             }
             // Notice the game starting (Steam or Play button) to re-arm FrostMod for the
             // session and check the mods folder is really on disk.
+            // Crash repair: a Race mode journal still on disk means a session whose mods
+            // never came back — the app was closed or killed before the game exited. Put
+            // them back now, unless the game is up, in which case its exit does it.
+            {
+                let handle = handle.clone();
+                tauri::async_runtime::spawn_blocking(move || {
+                    racemode::restore_if_idle(&handle, "startup found a Race mode journal")
+                });
+            }
             sessionwatch::start(handle);
             // The link to MXB Coach: one overlay key for both apps.
             overlay::start_link(handle);
@@ -8268,6 +8433,7 @@ fn main() {
             list_games,
             get_config,
             experimental_state,
+            paint_sync_not_sharing,
             bike_preview_available,
             set_guid,
             scan_library,
@@ -8278,6 +8444,7 @@ fn main() {
             mxb_core::viewer::app_platform,
             search_mods,
             get_mod_detail,
+            get_download_sizes,
             get_mod_ratings,
             mods_verify_reset,
             get_installed_mods,
@@ -8382,6 +8549,8 @@ fn main() {
             set_launch_at_startup,
             set_auto_run_frostmod,
             set_queue_restart_game,
+            set_race_mode,
+            race_mode_status,
             set_frostmod_args,
             set_instant_refresh,
             overlay_toggle,
@@ -8398,6 +8567,7 @@ fn main() {
             set_voice_proximity,
             set_voice_enabled,
             set_paint_sync_enabled,
+            paint_sync_readiness,
             remove_synced_paints,
             set_preview_tyres,
             set_voice_input_device,
@@ -8443,6 +8613,12 @@ fn main() {
             reset_server_browser,
             register_server_address,
             probe_server,
+            savedservers::saved_servers,
+            savedservers::add_saved_server,
+            savedservers::edit_saved_server,
+            savedservers::remove_saved_server,
+            savedservers::reorder_saved_servers,
+            savedservers::probe_saved_servers,
             server_riders,
             servers_with_paint_sync,
             guess_server_track,

@@ -28,6 +28,10 @@ pub struct Beta21eTrhManifestChecks {
 pub struct CentrelinePose {
     pub position: [f32; 2],
     pub forward: [f32; 2],
+    /// Ground height the centreline states there, metres: each record's start elevation (its
+    /// fifth field), linear to the next record's along the segment. The builder's own number,
+    /// which pins a heightfield's vertical offset and axes against the centreline.
+    pub elevation: f32,
 }
 
 const MAGIC: &[u8; 4] = b"TRH\0";
@@ -214,6 +218,67 @@ pub fn beta21e_main_centreline_pose(bytes: &[u8], distance: f32) -> Result<Centr
         distance.is_finite() && distance >= 0.0,
         "centreline distance is invalid"
     );
+    let mut cursor = root_headers(bytes)?;
+    let root = cursor.take(16, "root header 0")?;
+    let headers: [f32; 3] = std::array::from_fn(|index| {
+        let offset = index * 4;
+        f32::from_le_bytes(
+            root[offset..offset + 4]
+                .try_into()
+                .expect("four-byte slice"),
+        )
+    });
+    ensure!(
+        headers.iter().all(|value| value.is_finite()),
+        "main profile header is non-finite"
+    );
+    cursor.take(24, "root header 1")?;
+    let c_count = cursor.u32("C count")?;
+    cursor.records(c_count, 52, "C records")?;
+    let d_count = cursor.u32("D count")?;
+    let records = cursor.records(d_count, 60, "D records")?;
+    centreline_pose_in_profile(records, distance)
+}
+
+/// The track's bounding box as the game loads it: `min` and `max` world X, Y, Z in metres.
+/// The client's position quantisation (core job `0x13C`) returns exactly these six floats.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TrackBox {
+    pub min: [f32; 3],
+    pub max: [f32; 3],
+}
+
+/// The box stored in a beta21e TRH: root header 1, six `f32` (min x, y, z, then max x, y, z),
+/// read verbatim by the game's `.trh` loader (`0x1F4F50`, static read 2026-09-28). The same box
+/// a server otherwise has to solve from riders' state samples.
+pub fn beta21e_track_box(bytes: &[u8]) -> Result<TrackBox> {
+    let mut cursor = root_headers(bytes)?;
+    cursor.take(16, "root header 0")?;
+    let header = cursor.take(24, "root header 1")?;
+    let value = |index: usize| {
+        f32::from_le_bytes(
+            header[index * 4..index * 4 + 4]
+                .try_into()
+                .expect("four-byte slice"),
+        )
+    };
+    let track_box = TrackBox {
+        min: [value(0), value(1), value(2)],
+        max: [value(3), value(4), value(5)],
+    };
+    ensure!(
+        (0..3).all(|axis| {
+            let (lo, hi) = (track_box.min[axis], track_box.max[axis]);
+            lo.is_finite() && hi.is_finite() && hi > lo
+        }),
+        "TRH track box is not a box: {track_box:?}"
+    );
+    Ok(track_box)
+}
+
+/// A cursor at root header 0: past the height grid, the initial metadata and the A and B
+/// lists.
+fn root_headers(bytes: &[u8]) -> Result<Cursor<'_>> {
     let terrain = descriptor(bytes).context("invalid TRH descriptor")?;
     let tails = TailChunks::discover(bytes)?;
     ensure!(
@@ -239,26 +304,7 @@ pub fn beta21e_main_centreline_pose(bytes: &[u8], distance: f32) -> Result<Centr
         let columns = cursor.u32("B columns")?;
         cursor.take(checked_product(rows, columns, "B payload")?, "B payload")?;
     }
-
-    let root = cursor.take(16, "root header 0")?;
-    let headers: [f32; 3] = std::array::from_fn(|index| {
-        let offset = index * 4;
-        f32::from_le_bytes(
-            root[offset..offset + 4]
-                .try_into()
-                .expect("four-byte slice"),
-        )
-    });
-    ensure!(
-        headers.iter().all(|value| value.is_finite()),
-        "main profile header is non-finite"
-    );
-    cursor.take(24, "root header 1")?;
-    let c_count = cursor.u32("C count")?;
-    cursor.records(c_count, 52, "C records")?;
-    let d_count = cursor.u32("D count")?;
-    let records = cursor.records(d_count, 60, "D records")?;
-    centreline_pose_in_profile(records, distance)
+    Ok(cursor)
 }
 
 fn centreline_pose_in_profile(records: &[u8], distance: f32) -> Result<CentrelinePose> {
@@ -278,6 +324,7 @@ fn centreline_pose_in_profile(records: &[u8], distance: f32) -> Result<Centrelin
         let flag = u32::from_le_bytes(record[0..4].try_into().expect("four-byte slice"));
         let length = scalar(4);
         let radius = scalar(8);
+        let elevation = scalar(16);
         let running = scalar(20);
         ensure!(flag <= 1, "D record {index} has invalid curve flag {flag}");
         ensure!(
@@ -337,7 +384,32 @@ fn centreline_pose_in_profile(records: &[u8], distance: f32) -> Result<Centrelin
             position.iter().all(|value| value.is_finite()),
             "D record {index} has invalid position"
         );
-        return Ok(CentrelinePose { position, forward });
+        // To the next record's stated start; the last segment closes the lap onto the first.
+        let start_of =
+            |record: &[u8]| f32::from_le_bytes(record[16..20].try_into().expect("four-byte slice"));
+        let next_elevation = records
+            .chunks_exact(60)
+            .nth(index + 1)
+            .or_else(|| records.chunks_exact(60).next())
+            .map(start_of)
+            .filter(|value| value.is_finite())
+            .unwrap_or(elevation);
+        let elevation = if elevation.is_finite() {
+            let (e0, e1) = (f64::from(elevation), f64::from(next_elevation));
+            let value = (e0 + (e1 - e0) * f64::from(along / length)) as f32;
+            if value.is_finite() {
+                value
+            } else {
+                elevation
+            }
+        } else {
+            0.0
+        };
+        return Ok(CentrelinePose {
+            position,
+            forward,
+            elevation,
+        });
     }
     bail!("main profile has no centreline records")
 }
@@ -720,10 +792,21 @@ mod tests {
     use super::*;
 
     fn profile_record(flag: u32, length: f32, radius: f32, running: f32) -> Vec<u8> {
+        profile_record_at(flag, length, radius, running, 0.0)
+    }
+
+    fn profile_record_at(
+        flag: u32,
+        length: f32,
+        radius: f32,
+        running: f32,
+        elevation: f32,
+    ) -> Vec<u8> {
         let mut record = vec![0; 60];
         record[0..4].copy_from_slice(&flag.to_le_bytes());
         record[4..8].copy_from_slice(&length.to_le_bytes());
         record[8..12].copy_from_slice(&radius.to_le_bytes());
+        record[16..20].copy_from_slice(&elevation.to_le_bytes());
         record[20..24].copy_from_slice(&running.to_le_bytes());
         for (index, value) in [1.0f32, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
             .into_iter()
@@ -751,6 +834,20 @@ mod tests {
         assert!(pose.forward[1].abs() < 0.001);
 
         assert!(centreline_pose_in_profile(&straight, 11.0).is_err());
+    }
+
+    /// The pose carries the centreline's stated ground height, linear along a segment to the
+    /// next one's start, and along the last back to the first's (the lap closes).
+    #[test]
+    fn centreline_pose_interpolates_the_stated_elevation() {
+        let mut profile = profile_record_at(0, 10.0, 0.0, 0.0, 2.0);
+        profile.extend(profile_record_at(0, 10.0, 0.0, 10.0, 6.0));
+        let at = |d: f32| centreline_pose_in_profile(&profile, d).unwrap().elevation;
+        assert!((at(0.0) - 2.0).abs() < 1e-5);
+        assert!((at(5.0) - 4.0).abs() < 1e-5);
+        // The last segment closes the lap back onto the first record's height.
+        assert!((at(15.0) - 4.0).abs() < 1e-5);
+        assert!((at(20.0) - 2.0).abs() < 1e-5);
     }
 
     fn trh(width: u32, height: u32, samples: usize) -> Vec<u8> {
@@ -815,6 +912,11 @@ mod tests {
     }
 
     fn manifest_trh() -> Vec<u8> {
+        manifest_trh_with_box([0.0; 6])
+    }
+
+    /// `manifest_trh` with root header 1 (the track box) set to `track_box`.
+    fn manifest_trh_with_box(track_box: [f32; 6]) -> Vec<u8> {
         let mut bytes = trh(32, 32, 32 * 32);
 
         // `trh` already supplied the first three of the six metadata words.
@@ -836,7 +938,9 @@ mod tests {
         for value in [0, 0, 0, 0xffff_ffff] {
             word(&mut bytes, value);
         }
-        bytes.extend_from_slice(&[0; 24]);
+        for value in track_box {
+            bytes.extend_from_slice(&value.to_le_bytes());
+        }
 
         word(&mut bytes, 1); // C count
         bytes.extend_from_slice(&[1; 52]);
@@ -871,6 +975,26 @@ mod tests {
         surface(&mut ext, u32::MAX, u32::MAX, &[]);
         chunk(&mut bytes, b"EXT\0", &ext);
         bytes
+    }
+
+    /// The track box is root header 1, six floats read as they are; a degenerate one is
+    /// refused rather than handed to a position codec.
+    #[test]
+    fn reads_the_track_box_from_root_header_1() {
+        let bytes = manifest_trh_with_box([-30.0, -5.0, -30.0, 330.0, 53.0, 330.0]);
+        assert_eq!(
+            beta21e_track_box(&bytes).unwrap(),
+            TrackBox {
+                min: [-30.0, -5.0, -30.0],
+                max: [330.0, 53.0, 330.0],
+            }
+        );
+        assert!(
+            beta21e_track_box(&manifest_trh()).is_err(),
+            "an all-zero box"
+        );
+        // The header walk it shares with the centreline still reads the same profile.
+        assert!(beta21e_main_centreline_pose(&bytes, 0.5).is_ok());
     }
 
     #[test]

@@ -3,6 +3,58 @@
 ## Unreleased
 
 ### Added
+- **MXB Servers, clearer:** one status per server (Online · N riders, Starting…, Offline, Unreachable (SSH)) with the detail on hover. Edit and Remove are in a ⋯ menu. The Settings page is grouped by topic, with plain labels, toggles, sliders and the defaults spelled out; advanced switches are collapsed, and session lengths and player slots are new. The admin token shows as "saved" with Replace and Remove, is tested as soon as it is saved, and a helper explains what it's for. The app now uses the mxbsecure "m" icon.
+- **MXB Servers: Config tab.** Edit a server's ghost bots (count, skill, racing, lateral spread, bikes, laps, library and harvest), `[events] collisions` and the `[native]` switches as typed fields. The app shows the diff and checks the file with the server's own binary, then backs it up, applies it and restarts. If the server isn't ready afterwards, the backup goes back. Comments and everything else in the file are kept. It works over SSH for a systemd install or today's hand-started Lightsail process, and on this PC.
+- Settings → Paint sync names the riders on your server who aren't sharing paints ("Not sharing paints: CaptiveDuck"): they need MXB App 0.19 or newer with paint sync on, and until then you see each other in stock paints.
+- **MXB Servers (`apps/servers`), P1 of the mxbserver manager:** one window for every mxbserver with its health, session, time left, riders, build and uptime, plus a live log tail. It reaches each server over SSH, forwarding the loopback-only observe and admin ports, so nothing new faces the internet. Admin tokens live in the OS keychain. It is not released yet; run it with `bun run tauri:servers dev`.
+- `packages/mxbsecure-ui`: the mxbsecure design tokens (colours, radius, Geist Mono, dark mode) copied from mxbsecure-web, plus the wordmark and a theme hook, for apps that wear the mxbsecure brand.
+- **Saved servers.** Save any server by IP from the Online tab (the ⋯ menu, or the + beside
+  Saved) with an optional name. Saved servers sit in their own row above the list as the usual
+  server cards: rider count, ping and track when the server answers, Join, Wait in line, Copy
+  and the star, and the same detail pane. A saved server the master doesn't list is asked
+  directly, so its card stays live; one that doesn't answer shows as offline and Join still
+  works. Move, rename or remove them from the card's menu. The list is kept in the app config
+  as address, name and order only, and the port defaults to 54210 like Join.
+
+### Changed
+- **Auto race mode moves nothing with FrostMod v0.40.0 or newer.** It hands FrostMod a list of the tracks and bikes that stay (`frostmod_racemode.txt`), and FrostMod hides the rest from the game's own scan, so their archives are never opened. Ending the session just deletes the list. With an older FrostMod it still moves the unused mods aside as before.
+
+## 2026-09-27 — v0.19.1 — Auto race mode, gear refresh and beta updates that find the next beta
+
+### Added
+- Windows builds of MXB App, Frost Studio and MXB Coach can be code-signed as Creste LLC
+  through Azure Artifact Signing: the app, its installer and the `mxbsecure.dll` game plugin.
+  It switches on once the Azure account is set up (see `docs/signing/SETUP.md`). Until then
+  releases build unsigned, as before.
+- **Auto race mode: load only what the server needs** (Settings → Game Integration, off by
+  default). When you join a server from the app and the game isn't already running, the tracks
+  and packed bikes that server can't use (its track and bike classes, from the server list) are
+  moved to `mxbapp_disabled` before the game starts, so it mounts less and joins faster. Rider
+  gear, paints, tyres, sounds, support packs, paint-sync paints, secured content, your selected
+  bike and anything the app can't read always stay. A journal (`race_mode.json` in the app's
+  data folder) records exactly what moved, and only that comes back: when the game exits, when
+  paint sync leaves the server, if the game never starts, or on the next app start after a
+  crash. Mods you parked yourself stay parked. Joins from the in-game browser are never
+  touched, a mods folder on a different drive from `mxbapp_disabled` is refused, and a move that
+  fails part-way puts back what already moved. Settings shows "Auto race mode: N mods set aside"
+  while it's holding anything.
+
+### Fixed
+- With Beta updates on, a beta now finds the next beta of the same version. Every `v0.19.0-beta.N` carries bundle version 0.19.0, so "Check for updates" compared 0.19.0 with 0.19.0 and said you were up to date; it now compares the release tags.
+- Paint sync asks FrostMod to re-apply paints whenever a rider joins or rejoins the server, not only when new paint files were downloaded. A rider who rejoined wearing paints you already had stayed on the default look.
+- Settings cards use more of the window, and their button rows wrap instead of running past the card edge (About & updates' "Join the Discord" stuck out on narrow windows).
+- The server detail window is wider, and its footer wraps (Copy server link turns icon-only on a narrow window), so the star button is no longer cut off.
+- Server cards breathe: "Not installed" moved off the track line to a faded badge in the picture's bottom-right corner, the track name and bike classes get the full row, and chips with no real value ("Unknown", "?") are hidden.
+- **Paints arriving mid-race no longer make the game hitch.** When paint sync (or you) put new paints into the mods folder, the folder watcher asked FrostMod for a full content reload, which rebuilds every track and bike list in the game. A change made only of paint files now asks for FrostMod's paint refresh instead, which rebuilds just the paint lists. Anything else still gets the full reload, and a FrostMod older than v0.39.0 still gets the full reload too, because that is the only way it picks paints up.
+
+### Changed
+- Installing a helmet, boots or rider model while the game runs asks FrostMod (v0.39.3 or newer) for a gear-only refresh, which rebuilds just the rider lists instead of every track and bike. Older FrostMod still gets the full reload.
+- Paints shared through paint sync are now kept on the control plane for a week after their last upload, instead of 24 hours. A paint is re-uploaded once it is 6 days old if its owner is still riding.
+
+## 2026-09-27 — v0.19.0 — Automatic paint sync, and nothing injected into the game
+
+### Added
+- **Paint sync v2 (control plane).** Joining a server now sends your paint hashes once, and the control plane answers with only the paints it still needs from you plus everyone else on that server and theirs. A room per server pushes later arrivals and departures over WebSocket, so nothing polls. Servers are keyed by address, and a name seen in the in-game browser is matched to its address. Paints shared this way are kept for 24 hours. Older apps keep using `/v1/roster` and `/v1/paints` unchanged.
 - Frost Studio has a new **Bike** tab, the start of a bike builder for modders who have parts but
   don't know Blender well. It finds the Blender you already have: installer, Steam or
   Microsoft Store, or you choose `blender.exe`. It then runs Blender in the background to
@@ -82,6 +134,22 @@
   switch games.
 
 ### Changed
+- **MXB App no longer injects anything into the game.** Windows Defender was quarantining the 0.18 installers because the app carried textbook DLL-injection code. Secured content now loads as a normal game plugin (`plugins\mxbsecure.dlo`), the same way FrostMod's session plugin does. Instant paint refresh now goes through FrostMod instead of the app starting a thread in the game. Instant paint refresh needs FrostMod v0.39.0 or newer; with an older FrostMod, a paint change shows at the next game start.
+- Settings → Paint sync is now just the on/off switch. The **Publish**, **Sync**, **Remove synced paints** and manual GUID controls are gone: publishing, syncing and cleanup all happen on their own, and the panel only shows status.
+- Paint sync now runs by itself for the server you're on. When you join a server, from the app
+  or from the game's own server list, the app tells MXB App's service where you are and gets
+  the other riders' paints. It then stays connected, so riders who join or leave later are
+  picked up within seconds, and it leaves when you leave the server or close the game. Only
+  what is missing is sent: your paints go up only if the service doesn't have them, and a paint
+  already anywhere in your mods folder is never downloaded again.
+- When two riders use the same paint file name for different paints, the one most riders on
+  the server wear is installed; on a tie, the one who joined first wins. Each version is kept in
+  the app's own data folder (never in the game's folders), so the file switches without a new
+  download when riders come and go. Your own paint files are still never replaced.
+- Paints received from other riders are removed once nobody you've ridden with has worn them
+  for 7 days, and the app's stored copies are cleaned up on the same schedule.
+- Paint sync needs Game Integration. With it turned off or not installed, the paint sync switch
+  in Settings is greyed out and says why, and nothing is synced.
 - Protected content you bought now plays offline for up to 30 days between check-ins, rather
   than forever. The app renews a signed key lease silently whenever it is online (at startup,
   after a Steam sign-in, when the game starts and every few hours while it is open), so a buyer
@@ -101,6 +169,7 @@
   It still installs and updates as "MXB Coach", so shortcuts, updates and Uninstall keep working.
 
 ### Fixed
+- **Sync paints works again.** The public server book and the paint roster share `GET /v1/roster`, and the book answered first, so every sync got a list of addresses and failed with "missing field `riders`". The book now answers only when no `?server=` is given.
 - Joining a server directly no longer brings up Steam's "additional command line options"
   prompt behind its launch splash. A Steam copy now starts through `steam.exe -applaunch`,
   found via the registry (falling back to the default install path), instead of a

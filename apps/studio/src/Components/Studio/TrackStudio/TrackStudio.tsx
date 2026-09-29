@@ -1494,7 +1494,7 @@ export default function TrackStudio() {
             ) : (
               /* Nothing picked: the track's own settings, which are the other half of what
                  this panel is for and have to live somewhere. */
-              <div className="flex-none px-4 pb-4 pt-4">
+              <div className="flex-none px-4 py-3">
                 <div className="text-[11px] font-semibold uppercase tracking-[0.09em] text-faint">
                   {t("track.trackSettings")}
                 </div>
@@ -1503,7 +1503,7 @@ export default function TrackStudio() {
                 </div>
                 {/* The name is the folder, the .pkz and what the game lists it as, so it is
                     worth being able to change before any of those are written. */}
-                <div className="mt-4 space-y-2">
+                <div className="mt-3 space-y-1.5">
                   <input
                     value={program.name}
                     onChange={(e) => void settle({ ...program, name: e.target.value })}
@@ -1529,7 +1529,7 @@ export default function TrackStudio() {
                   </div>
                 </div>
 
-                <div className="mt-4 space-y-3.5">
+                <div className="mt-3 space-y-3">
                   <PropRow
                     label={t("track.across")}
                     value={program.terrain.sizeX}
@@ -1582,11 +1582,11 @@ export default function TrackStudio() {
                       void settle({ ...program, blend: Math.max(0, v) });
                     }}
                   />
-                  <div>
+                  <div className="border-t border-border pt-2">
                     <div className="font-cond text-[10px] font-semibold uppercase tracking-[0.22em] text-faint">
                       {t("track.surface")}
                     </div>
-                    <div className="mt-2 flex border border-border">
+                    <div className="mt-1.5 flex border border-border">
                       {(["soil", "sand", "grass"] as const).map((s, i) => (
                         <button
                           key={s}
@@ -1605,10 +1605,17 @@ export default function TrackStudio() {
                     </div>
                   </div>
                   {/* And what it looks like, which the surface used to decide too. */}
-                  <GroundLook
-                    value={program.terrain.texture}
-                    onChange={(v) => settleTerrain({ texture: v })}
-                  />
+                  <div className="border-t border-border pt-2">
+                    <div className="font-cond text-[10px] font-semibold uppercase tracking-[0.22em] text-faint">
+                      {t("track.style")}
+                    </div>
+                    <div className="mt-1.5">
+                      <GroundLook
+                        value={program.terrain.texture}
+                        onChange={(v) => settleTerrain({ texture: v })}
+                      />
+                    </div>
+                  </div>
                   {/* Only a stadium discipline lines its lanes, so nothing else is asked. The
                       value falls back to `tuff`, which is what this was called before it grew
                       banners and none, so an old project still shows its own answer. */}
@@ -1617,7 +1624,7 @@ export default function TrackStudio() {
                       <div className="font-cond text-[10px] font-semibold uppercase tracking-[0.22em] text-faint">
                         {t("track.border")}
                       </div>
-                      <div className="mt-2">
+                      <div className="mt-1.5">
                         <Segmented
                           size="sm"
                           options={borders}
@@ -1636,7 +1643,7 @@ export default function TrackStudio() {
                       <div className="font-cond text-[10px] font-semibold uppercase tracking-[0.22em] text-faint">
                         {t("track.venue")}
                       </div>
-                      <div className="mt-2">
+                      <div className="mt-1.5">
                         <Segmented
                           size="sm"
                           options={venues}
@@ -1650,7 +1657,7 @@ export default function TrackStudio() {
 
                 {/* Measured, not claimed — the same figures taken of published tracks. */}
                 {preview && (
-                  <dl className="mt-5 grid grid-cols-2 gap-x-3 gap-y-1.5 border-t border-border pt-3.5 text-[12px]">
+                  <dl className="mt-3 grid grid-cols-2 gap-x-3 gap-y-1 border-t border-border pt-2 text-[12px]">
                     <Row label={t("track.measured")} value={`${preview.measuredLengthM.toFixed(0)} m`} />
                     <Row label={t("track.width")} value={`${preview.measuredWidthM.toFixed(1)} m`} />
                     <Row label={t("track.lips")} value={`${preview.lips} · ${preview.lipsPerKm.toFixed(0)}/km`} />
@@ -1663,7 +1670,7 @@ export default function TrackStudio() {
                   </dl>
                 )}
 
-                <div className="mt-5 flex flex-wrap items-center gap-3 border-t border-border pt-3.5">
+                <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-border pt-2">
                   <span className="font-cond text-[10px] font-semibold uppercase tracking-[0.22em] text-faint">
                     {t("track.startOver")}
                   </span>

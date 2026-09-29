@@ -24,7 +24,7 @@ import {
   isLiveryContext,
   isServerOnly,
   isSoundContext,
-  modLink,
+  getDownloadSizes,
   resetModsVerification,
   riderTarget,
   routesByContent,
@@ -139,6 +139,7 @@ export default function ModDetail({
   );
   const [derivedDest, setDerivedDest] = useState(false);
   const [detail, setDetail] = useState<Detail | null>(null);
+  const [downloadSizes, setDownloadSizes] = useState<Map<string, number | null>>(new Map());
   const [loadError, setLoadError] = useState<string | null>(null);
   // The raw file list — only for destination folders and their counts. The badge uses
   // the `installed` index prop, which also sees folders and paints.
@@ -165,6 +166,7 @@ export default function ModDetail({
   useEffect(() => {
     let cancelled = false;
     setDetail(null);
+    setDownloadSizes(new Map());
     setLoadError(null);
     setBlocked(null);
     setDestOptions([]);
@@ -175,6 +177,11 @@ export default function ModDetail({
       .then(async (d) => {
         if (cancelled) return;
         setDetail(d);
+        // This is intentionally separate from the page's catalog work: a slow file host
+        // cannot hold the detail view hostage. Unknown stays visibly unknown in the picker.
+        void getDownloadSizes(d.downloads.map((download) => download.url))
+          .then((sizes) => !cancelled && setDownloadSizes(new Map(Object.entries(sizes))))
+          .catch(() => !cancelled && setDownloadSizes(new Map(d.downloads.map((download) => [download.url, null]))));
         try {
           const inst = (await Promise.all(scanSubpaths(modType).map((s) => getInstalledMods(s)))).flat();
           if (cancelled) return;
@@ -322,9 +329,9 @@ export default function ModDetail({
     });
   };
 
-  /** The `mxb://` link that opens this page in someone else's copy of the app. */
+  /** Copy the source page, never the app's share/deep-link wrapper. */
   const copyLink = () => {
-    void copyText(modLink({ game: game.id, modType: modType.id, slug, category: categoryId }))
+    void copyText(detail ? detail.link : `https://${game.catalogDomain}/${slug}/`)
       .then((ok) =>
         ok
           ? toast.success(t("modDetail.linkCopied"))
@@ -333,8 +340,10 @@ export default function ModDetail({
   };
 
   const copyFailedDownload = () => {
-    if (myActive?.source.kind !== "download") return;
-    void copyText(myActive.source.url).then((ok) => {
+    // Even from an error state, "Copy link" means the public mod page — never a transient
+    // CDN URL or an app routing URL that the recipient cannot use as a reference.
+    if (!detail) return;
+    void copyText(detail.link).then((ok) => {
       if (!ok) {
         toast.error(t("modDetail.copyLinkFailed"));
         return;
@@ -437,6 +446,8 @@ export default function ModDetail({
         image={detail.images[0] ?? null}
         title={detail.title}
         meta={[t(modType.label), detail.author, detail.version]}
+        onBack={onBack}
+        backLabel={t(modType.label)}
       >
         {/* Nothing to want about a mod you already have, so the wish is offered only while
             it isn't in the library. */}
@@ -461,6 +472,10 @@ export default function ModDetail({
         <Button variant="outline" onClick={copyLink} title={t("modDetail.copyLinkHint")}>
           <Link2 className="size-3.5" />
           {t("modDetail.copyLink")}
+        </Button>
+        <Button variant="outline" onClick={() => void open(detail.link)}>
+          <ExternalLink className="size-3.5" />
+          {t("modDetail.openOnSite", { site: game.catalogDomain })}
         </Button>
         {primary && (
           <Button onClick={openInstall} disabled={busy}>
@@ -603,6 +618,7 @@ export default function ModDetail({
           folderCounts={folderCounts}
           initialFolder={initialFolder}
           sound={sound}
+          downloadSizes={downloadSizes}
           onConfirm={handleConfirm}
         />
       )}

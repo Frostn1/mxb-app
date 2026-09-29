@@ -587,6 +587,8 @@ export const it: Translation = {
   "settings.paintSyncOn": "Sincronizza le grafiche automaticamente",
   "settings.paintSyncOnDesc":
     "Se disattivato, nulla di tuo viene pubblicato e nessuna grafica altrui viene installata.",
+  "settings.paintSyncNeedsFrostmod":
+    "Paint sync needs Game Integration. Install it and turn on \"Start Game Integration automatically\" to use paint sync.",
   "settings.gameFolder": "Cartella di gioco",
   "settings.general": "Generali",
   "settings.appearance": "Aspetto",
@@ -773,6 +775,10 @@ export const it: Translation = {
   "settings.frostmodArgs": "Flag dell'integrazione di gioco",
   "settings.frostmodArgsDesc":
     "Riga di comando extra per FrostMod, scritta come in un terminale. Vale dal prossimo avvio di FrostMod. Lascia vuoto, a meno che non ti abbiano dato un flag da provare.",
+  "settings.raceMode": "Modalità gara automatica: carica solo ciò che serve al server",
+  "settings.raceModeDesc":
+    "Quando entri in un server da {{app}}, piste e moto che quel server non può usare vengono messe da parte prima dell'avvio del gioco, così carica meno ed entri prima. Tornano al loro posto quando chiudi il gioco. Equipaggiamento del pilota, livree e tutto ciò che hai messo da parte tu restano come sono. Gli ingressi dal browser del gioco non vengono toccati.",
+  "settings.raceModeActive": "Modalità gara automatica: {{count}} mod messe da parte",
   "settings.watchModsReload": "Ricarica automatica alle modifiche",
   "settings.watchModsReloadDesc":
     "Ricarica il gioco automaticamente quando piste o moto vengono aggiunte alla cartella mod — anche se scaricate manualmente fuori da {{app}}.",
@@ -1120,6 +1126,29 @@ export const it: Translation = {
   "registerServer.submit": "Aggiungi",
   "registerServer.done": "{{address}} è nell'elenco condiviso",
   "registerServer.failed": "Impossibile aggiungere quel server",
+  "savedServers.title": "Salvati",
+  "savedServers.add": "Salva un server per IP",
+  "savedServers.addTitle": "Salva un server",
+  "savedServers.editTitle": "Modifica server salvato",
+  "savedServers.blurb": "Qualsiasi server per IP, in lista o no. {{app}} lo interroga direttamente, così la sua scheda resta aggiornata.",
+  "savedServers.address": "Indirizzo",
+  "savedServers.name": "Nome (facoltativo)",
+  "savedServers.namePlaceholder": "Come si chiama il server",
+  "savedServers.save": "Salva",
+  "savedServers.added": "{{name}} salvato",
+  "savedServers.duplicate": "Quel server è già salvato.",
+  "savedServers.full": "La tua lista è piena. Rimuovine uno prima.",
+  "savedServers.missing": "Quel server non è più salvato.",
+  "savedServers.checking": "Controllo",
+  "savedServers.offline": "Offline",
+  "savedServers.offlineHint": "Non ha risposto. Puoi comunque provare a entrare.",
+  "savedServers.actions": "Opzioni del server salvato",
+  "savedServers.moveUp": "Sposta su",
+  "savedServers.moveDown": "Sposta giù",
+  "savedServers.edit": "Modifica",
+  "savedServers.remove": "Rimuovi",
+  "savedServers.removed": "{{name}} rimosso",
+  "savedServers.undo": "Annulla",
 
   "queue.banner": "#{{position}} in coda per {{name}}",
   "queue.turnBanner": "Tocca a te: entra in {{name}}",
@@ -1204,6 +1233,9 @@ export const it: Translation = {
   "serverBrowser.region.asia": "Asia",
   "serverBrowser.region.other": "Altro",
 
+  "sync.notSharing": "Non condividono le livree: {{names}}",
+  "sync.notSharingWhy":
+    "Vi vedete a vicenda con livree di serie finché non usano MXB App 0.19 o successiva con la sincronizzazione livree attiva.",
   "sync.autoNote":
     "Il tuo look si pubblica da solo — ogni moto, ogni volta che lo cambi nell'app o nel garage del gioco. Quello degli altri arriva quando premi Gioca.",
 

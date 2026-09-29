@@ -400,6 +400,7 @@ describe("what a ban actually refuses", () => {
       ["GET", "/v1/voice/room?server=srv_1"],
       ["PUT", "/v1/loadouts", { bikes: [] }],
       ["GET", "/v1/presence?server=srv_1"],
+      ["GET", "/v1/roster?server=srv_1"],
       ["PUT", "/v1/queue", { server: "srv_1" }],
       ["GET", "/v1/me/plugins"],
       ["GET", "/v1/entitlements"],
@@ -415,10 +416,8 @@ describe("what a ban actually refuses", () => {
       expect(await res.json()).toMatchObject({ error: APP_BLOCK_MESSAGE });
     }
 
-    // `GET /v1/roster` is not in the list: the public server book answers that path for
-    // everybody before the account gate is reached (the bearer paint roster below it is
-    // shadowed by it, which predates this and is not a ban's business). Publishing a look is
-    // gated, which is the half of paint sync a ban is actually about.
+    // `GET /v1/roster` without `?server=` is the public server book, answered before the
+    // account gate; the paint roster (with `?server=`) is gated like the rest.
 
     // Nothing is refused for an account that isn't banned, on any of them: the gate is about
     // who is asking, not about the routes.

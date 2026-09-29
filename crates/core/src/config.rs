@@ -35,6 +35,20 @@ pub struct ServerRef {
     pub registry_id: String,
 }
 
+/// A server the player saved by address in the Online tab.
+///
+/// Only what the player typed: the address (normalised, the same form Join takes) and the name
+/// they gave it. Everything a server says about itself — riders, track, ping — is asked of it
+/// live, so none of that is kept here to go stale. The list's order is the order shown.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct SavedServer {
+    /// `host:port`, as `gameproc::parse_server_address` normalised it.
+    pub address: String,
+    /// The player's label. Blank means "use whatever the server calls itself".
+    pub name: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct AppConfig {
@@ -109,6 +123,11 @@ pub struct AppConfig {
     /// Watch `<mods_path>/mods` and signal FrostMod to reload when tracks/bikes are
     /// added outside the app (e.g. a manual download dropped into the folder).
     pub watch_mods_reload: bool,
+    /// Race mode: on a join the app launches, set aside every track and bike the server
+    /// can't use before the game starts, and put them back when the session ends. Off by
+    /// default — it moves files in the player's mods folder, which nobody should find out
+    /// about by accident. See `racemode` in the manager.
+    pub race_mode: bool,
     /// Offer beta builds through the in-app updater, not only full releases.
     pub beta_updates: bool,
     /// Install updates on their own: at launch, or once the app has sat unused. Never while
@@ -222,6 +241,9 @@ pub struct AppConfig {
     /// token. Stored here in clear, like the rest of the config — worth knowing before
     /// adding a server whose token protects anything beyond the game process it runs.
     pub servers: Vec<ServerRef>,
+    /// Servers the player saved by `ip:port` in the Online tab, in the order they arranged
+    /// them. Not the admin list above: these are servers to join, not ones they run.
+    pub saved_servers: Vec<SavedServer>,
     /// Bearer token for this player's control-plane account, from enrolling with an invite
     /// code. Empty until they enroll.
     pub cp_token: String,
@@ -437,6 +459,7 @@ impl Default for AppConfig {
             frostmod_args: String::new(),
             instant_refresh: true,
             watch_mods_reload: true,
+            race_mode: false,
             beta_updates: false,
             auto_updates: true,
             secure_content_inject: false,
@@ -461,6 +484,7 @@ impl Default for AppConfig {
             voice_proximity: true,
             seen_version: String::new(),
             servers: Vec::new(),
+            saved_servers: Vec::new(),
             cp_token: String::new(),
             track_tools_path: String::new(),
             blender_path: String::new(),

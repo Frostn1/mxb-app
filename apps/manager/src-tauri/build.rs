@@ -54,8 +54,8 @@ fn main() {
 
 /// Stage the injected-client binaries (if present) so both a dev build and the installer can find
 /// them: `src/mxbsecure.dll` on every platform, and `src/mxbsecure-inject.exe` — the attach
-/// injector the Linux/Proton path launches inside the prefix (Windows injects in-process, so it
-/// needs no exe; the file is simply absent on the Windows leg).
+/// injector the Linux/Proton path launches inside the prefix. Windows injects nothing — the game
+/// loads the DLL as a plugin — and the release workflow drops the exe from that leg.
 ///
 /// Two destinations each: beside the built exe (a dev build reads it there), and into `resources/`,
 /// which `tauri.conf.json` globs into the packaged app — the beside-the-exe copy isn't in the

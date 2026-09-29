@@ -120,6 +120,11 @@ declare global {
     /** Rate limit on `/v1/track/generate`, per client address: the call is unauthenticated and
      *  spends our Anthropic budget. Optional so tests and a bare `wrangler dev` run without it. */
     TRACK_LIMITER?: RateLimit;
+    /** Rate limit on paint sync v2 (`/v1/paintsync/*` writes), per account. Optional so tests
+     *  and a bare `wrangler dev` run without it. */
+    PAINTSYNC_LIMITER?: RateLimit;
+    /** One paint-sync room per server key (`paintroom.ts`). Optional so tests run without it. */
+    PAINT_ROOMS?: DurableObjectNamespace;
     /** How the shop's catalogue dump is authenticated: `header:<name>`, `basic:<user>`,
      *  `bearer` or `query:<name>`. With `SHOP_CATALOG_KEY`, lets the track catalogue find sold
      *  tracks and their prices. Unset means mxb-mods.com only. */

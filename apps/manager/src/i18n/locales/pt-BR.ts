@@ -590,6 +590,8 @@ export const ptBR: Translation = {
   "settings.paintSyncOn": "Sincronizar pinturas automaticamente",
   "settings.paintSyncOnDesc":
     "Desligado, nada seu é publicado e nenhuma pintura dos outros é instalada.",
+  "settings.paintSyncNeedsFrostmod":
+    "Paint sync needs Game Integration. Install it and turn on \"Start Game Integration automatically\" to use paint sync.",
   "settings.gameFolder": "Pasta do jogo",
   "settings.general": "Geral",
   "settings.appearance": "Aparência",
@@ -776,6 +778,10 @@ export const ptBR: Translation = {
   "settings.frostmodArgs": "Flags da Integração com o Jogo",
   "settings.frostmodArgsDesc":
     "Linha de comando extra para o FrostMod, digitada como num terminal. Vale a partir da próxima vez que o FrostMod iniciar. Deixe vazio, a não ser que tenham te passado uma flag para testar.",
+  "settings.raceMode": "Modo corrida automático: carregar só o que o servidor precisa",
+  "settings.raceModeDesc":
+    "Quando você entra em um servidor pelo {{app}}, pistas e motos que esse servidor não usa são deixadas de lado antes de o jogo abrir, então ele carrega menos e você entra mais rápido. Elas voltam quando o jogo fecha. Equipamento do piloto, pinturas e o que você mesmo deixou de lado não são mexidos. Entradas pelo navegador do jogo não são afetadas.",
+  "settings.raceModeActive": "Modo corrida automático: {{count}} mods deixados de lado",
   "settings.watchModsReload": "Recarregar automaticamente ao mudar a pasta",
   "settings.watchModsReloadDesc":
     "Recarregar o jogo automaticamente quando pistas ou motos forem adicionadas à sua pasta de mods — mesmo baixadas manualmente fora do {{app}}.",
@@ -1122,6 +1128,29 @@ export const ptBR: Translation = {
   "registerServer.submit": "Adicionar",
   "registerServer.done": "{{address}} está na lista compartilhada",
   "registerServer.failed": "Não foi possível adicionar esse servidor",
+  "savedServers.title": "Salvos",
+  "savedServers.add": "Salvar um servidor por IP",
+  "savedServers.addTitle": "Salvar um servidor",
+  "savedServers.editTitle": "Editar servidor salvo",
+  "savedServers.blurb": "Qualquer servidor por IP, listado ou não. O {{app}} pergunta direto a ele, então o card fica ao vivo.",
+  "savedServers.address": "Endereço",
+  "savedServers.name": "Nome (opcional)",
+  "savedServers.namePlaceholder": "Como o servidor se chama",
+  "savedServers.save": "Salvar",
+  "savedServers.added": "{{name}} salvo",
+  "savedServers.duplicate": "Esse servidor já está salvo.",
+  "savedServers.full": "Sua lista está cheia. Remova um primeiro.",
+  "savedServers.missing": "Esse servidor não está mais salvo.",
+  "savedServers.checking": "Verificando",
+  "savedServers.offline": "Offline",
+  "savedServers.offlineHint": "Ele não respondeu. Você ainda pode tentar entrar.",
+  "savedServers.actions": "Opções do servidor salvo",
+  "savedServers.moveUp": "Mover para cima",
+  "savedServers.moveDown": "Mover para baixo",
+  "savedServers.edit": "Editar",
+  "savedServers.remove": "Remover",
+  "savedServers.removed": "{{name}} removido",
+  "savedServers.undo": "Desfazer",
 
   "queue.banner": "#{{position}} na fila de {{name}}",
   "queue.turnBanner": "Sua vez: entre em {{name}}",
@@ -1206,6 +1235,9 @@ export const ptBR: Translation = {
   "serverBrowser.region.asia": "Ásia",
   "serverBrowser.region.other": "Outra",
 
+  "sync.notSharing": "Não compartilham pinturas: {{names}}",
+  "sync.notSharingWhy":
+    "Vocês se veem com pinturas de fábrica até eles usarem o MXB App 0.19 ou mais novo com a sincronização de pinturas ligada.",
   "sync.autoNote":
     "Seu visual se publica sozinho — cada moto, sempre que você muda no app ou na garagem do jogo. O dos outros chega quando você aperta Jogar.",
 

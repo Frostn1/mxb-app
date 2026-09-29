@@ -51,6 +51,31 @@ fn client() -> anyhow::Result<&'static Client> {
         .map_err(|e| anyhow::anyhow!("{e}"))
 }
 
+/// Ask download hosts for their declared byte count without transferring the archive.  The
+/// catalog does not publish sizes, so this is deliberately a probe of the actual file host;
+/// a missing or dishonest header remains `None` rather than becoming a made-up estimate.
+pub async fn download_sizes(urls: Vec<String>) -> HashMap<String, Option<u64>> {
+    futures_util::stream::iter(urls.into_iter().map(|url| async move {
+        let size = if !(url.starts_with("https://") || url.starts_with("http://")) {
+            None
+        } else {
+            let c = client().ok();
+            let head = match c {
+                Some(c) => c.head(&url).send().await.ok(),
+                None => None,
+            };
+            head.and_then(|r| r.content_length()).or_else(|| {
+                // Some file hosts reject HEAD but correctly state a total in Content-Range.
+                // Do not fall back to a full GET: this must stay a metadata probe.
+                None
+            })
+        };
+        (url, size)
+    }))
+    .buffer_unordered(4)
+    .collect()
+    .await
+}
 
 fn build_client() -> anyhow::Result<Client> {
     use reqwest::header::{HeaderMap, HeaderValue};
@@ -70,7 +95,9 @@ fn build_client() -> anyhow::Result<Client> {
     // Jar and timeouts come from `mxb_session`. The User-Agent is set again on every request
     // (see `get`), because this client can be built before the WebView has said what its real
     // one is.
-    Ok(mxb_session::client_builder().default_headers(headers).build()?)
+    Ok(mxb_session::client_builder()
+        .default_headers(headers)
+        .build()?)
 }
 
 /// Statuses worth trying again *on the spot*: 429 is rate limiting and 503 is usually an
@@ -141,7 +168,9 @@ fn forced_to_webview() -> bool {
     static FORCED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *FORCED.get_or_init(|| {
         let on = matches!(
-            std::env::var("MXB_FORCE_WEBVIEW").unwrap_or_default().as_str(),
+            std::env::var("MXB_FORCE_WEBVIEW")
+                .unwrap_or_default()
+                .as_str(),
             "1" | "true" | "yes"
         );
         if on {
@@ -286,7 +315,11 @@ async fn into_fetched(resp: reqwest::Response) -> Fetched {
     let headers = resp
         .headers()
         .iter()
-        .filter_map(|(k, v)| v.to_str().ok().map(|v| (k.as_str().to_string(), v.to_string())))
+        .filter_map(|(k, v)| {
+            v.to_str()
+                .ok()
+                .map(|v| (k.as_str().to_string(), v.to_string()))
+        })
         .collect();
     Fetched {
         status,
@@ -323,8 +356,9 @@ fn blocked_error(status: u16, ray: Option<&str>) -> anyhow::Error {
         403 => "mxb-mods.com refused the request (403). Hit Retry to be shown its check, or \
                 open the mod on mxb-mods.com in your browser."
             .to_string(),
-        429 => "mxb-mods.com is rate-limiting us (429). Give it a minute, then hit Retry."
-            .to_string(),
+        429 => {
+            "mxb-mods.com is rate-limiting us (429). Give it a minute, then hit Retry.".to_string()
+        }
         503 => "mxb-mods.com is unavailable right now (503) — it may be behind a Cloudflare \
                 check. Try again shortly."
             .to_string(),
@@ -565,7 +599,9 @@ async fn listing_response(
         params.push(("search", q.to_string()));
     }
     let resp = get_with_retry(&url, &params).await?;
-    let total = resp.header("x-wp-total").and_then(|v| v.parse::<u32>().ok());
+    let total = resp
+        .header("x-wp-total")
+        .and_then(|v| v.parse::<u32>().ok());
     Ok((resp, total))
 }
 
@@ -803,7 +839,11 @@ fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 /// The rating plugin has no REST route; its front end reads scores from this admin-ajax
 /// action, which answers unauthenticated with `{voteCount, avgRating}`.
 async fn rating(id: u64) -> anyhow::Result<ModRating> {
-    let url = format!("{}{}", mxb_session::base(), obfstr!("/wp-admin/admin-ajax.php"));
+    let url = format!(
+        "{}{}",
+        mxb_session::base(),
+        obfstr!("/wp-admin/admin-ajax.php")
+    );
     let form = [
         ("action", "load_results".to_string()),
         ("postID", id.to_string()),
@@ -846,8 +886,16 @@ fn summary_from_post(p: &Value, category_id: u32) -> Option<ModSummary> {
         id,
         slug,
         title: decode_entities(rendered(p, "title")),
-        link: p.get("link").and_then(Value::as_str).unwrap_or("").to_string(),
-        date: p.get("date").and_then(Value::as_str).unwrap_or("").to_string(),
+        link: p
+            .get("link")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string(),
+        date: p
+            .get("date")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string(),
         image: featured_image(p),
         category_id,
         author: embedded_author(p),
@@ -942,7 +990,11 @@ fn feed_creators(xml: &str) -> Vec<(String, String)> {
         let item = item.split("</item>").next().unwrap_or_default();
         let tag = |name: &str| -> Option<String> {
             let open = format!("<{name}>");
-            let body = item.split(&open).nth(1)?.split(&format!("</{name}>")).next()?;
+            let body = item
+                .split(&open)
+                .nth(1)?
+                .split(&format!("</{name}>"))
+                .next()?;
             let body = body
                 .trim()
                 .trim_start_matches("<![CDATA[")
@@ -1002,8 +1054,14 @@ mod feed_tests {
         assert_eq!(
             got,
             vec![
-                ("https://mxb-mods.com/latrobe-speedway-rd-1/".to_string(), "S33VERSMX".to_string()),
-                ("https://mxb-mods.com/id-worx-factoryburn/".to_string(), "dryftzz".to_string()),
+                (
+                    "https://mxb-mods.com/latrobe-speedway-rd-1/".to_string(),
+                    "S33VERSMX".to_string()
+                ),
+                (
+                    "https://mxb-mods.com/id-worx-factoryburn/".to_string(),
+                    "dryftzz".to_string()
+                ),
             ],
             "an item with no creator is skipped rather than guessed at"
         );
@@ -1109,9 +1167,15 @@ fn strip_images(html: &str) -> String {
 /// (`…/track.zip/file`, `…/view`), so those are stepped over to reach the real name.
 fn url_file_name(url: &str) -> &str {
     let path = url.split(['?', '#']).next().unwrap_or(url);
-    let mut segs = path.trim_end_matches('/').rsplit('/').filter(|s| !s.is_empty());
+    let mut segs = path
+        .trim_end_matches('/')
+        .rsplit('/')
+        .filter(|s| !s.is_empty());
     let last = segs.next().unwrap_or("");
-    if ["file", "view", "download"].iter().any(|s| last.eq_ignore_ascii_case(s)) {
+    if ["file", "view", "download"]
+        .iter()
+        .any(|s| last.eq_ignore_ascii_case(s))
+    {
         segs.next().unwrap_or(last)
     } else {
         last
@@ -1146,7 +1210,10 @@ fn parse_downloads(html: &str) -> Vec<DownloadOption> {
         let is_recommended = classes
             .iter()
             .any(|c| c.eq_ignore_ascii_case("container-recommended"));
-        let href = el.select(&a_sel).next().and_then(|a| a.value().attr("href"));
+        let href = el
+            .select(&a_sel)
+            .next()
+            .and_then(|a| a.value().attr("href"));
         let Some(url) = href else { continue };
 
         // Dedicated-server builds are labelled "server" in the block — or, when the author
@@ -1222,7 +1289,10 @@ fn parse_author(html: &str) -> Option<(String, Option<String>)> {
             let name = el.text().collect::<String>();
             let name = name.trim();
             if !name.is_empty() {
-                return Some((name.to_string(), el.value().attr("href").map(str::to_string)));
+                return Some((
+                    name.to_string(),
+                    el.value().attr("href").map(str::to_string),
+                ));
             }
         }
     }
@@ -1289,7 +1359,12 @@ mod tests {
         let h = page_headers();
         assert_eq!(h.get("sec-fetch-dest").unwrap(), "document");
         assert_eq!(h.get("sec-fetch-mode").unwrap(), "navigate");
-        assert!(h.get("accept").unwrap().to_str().unwrap().starts_with("text/html"));
+        assert!(h
+            .get("accept")
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .starts_with("text/html"));
         // A continued string literal is easy to leave a newline in, and a header value with
         // one in it is rejected outright — which would fail only on the blocked user's machine.
         for (_, v) in h.iter() {
@@ -1541,7 +1616,10 @@ mod tests {
 
     #[test]
     fn decodes_title_entities() {
-        assert_eq!(decode_entities("Rock &#038; Roll &#8211; MX"), "Rock & Roll – MX");
+        assert_eq!(
+            decode_entities("Rock &#038; Roll &#8211; MX"),
+            "Rock & Roll – MX"
+        );
         // Hex entities too — flag emoji are common in track titles, and left raw they
         // fold `x1f1ee` into the "already installed" comparison key (issue #26).
         assert_eq!(
@@ -1594,10 +1672,16 @@ mod client_tests {
     #[test]
     fn retries_only_the_transient_blocks() {
         for code in [429u16, 503] {
-            assert!(worth_retrying(reqwest::StatusCode::from_u16(code).unwrap()), "{code}");
+            assert!(
+                worth_retrying(reqwest::StatusCode::from_u16(code).unwrap()),
+                "{code}"
+            );
         }
         for code in [200u16, 400, 404, 500] {
-            assert!(!worth_retrying(reqwest::StatusCode::from_u16(code).unwrap()), "{code}");
+            assert!(
+                !worth_retrying(reqwest::StatusCode::from_u16(code).unwrap()),
+                "{code}"
+            );
         }
     }
 
@@ -1681,9 +1765,7 @@ mod client_tests {
         assert!(msg.contains("Ref: 8f2a1c9d4e5b6a07"), "{msg}");
         assert!(msg.contains("403") && msg.contains("Retry"), "{msg}");
         // An absent header reads as "-" upstream; that must not reach the user as a ref.
-        assert!(!blocked_error(403, Some(""))
-            .to_string()
-            .contains("Ref:"));
+        assert!(!blocked_error(403, Some("")).to_string().contains("Ref:"));
     }
 
     fn refused(status: u16, headers: &[(&str, &str)], body: &str) -> Fetched {
@@ -1761,8 +1843,8 @@ mod client_tests {
         eprintln!("{line}");
 
         for expected in [
-            "the catalog listing",   // which call failed
-            "/wp-json/wp/v2/posts",  // which endpoint — REST and the mod page differ
+            "the catalog listing",  // which call failed
+            "/wp-json/wp/v2/posts", // which endpoint — REST and the mod page differ
             "403",
             "cf-ray=8f2a1c9d4e5b6a07-LHR", // identifies the block on Cloudflare's side
             "cf-mitigated=challenge",      // how Cloudflare decided
@@ -1772,7 +1854,10 @@ mod client_tests {
         ] {
             assert!(line.contains(expected), "missing {expected:?} in: {line}");
         }
-        assert!(!line.contains('\n'), "a log line must stay one line: {line}");
+        assert!(
+            !line.contains('\n'),
+            "a log line must stay one line: {line}"
+        );
     }
 
     /// Named markers, so the log says *why* a 200 was called a challenge.
@@ -1786,7 +1871,10 @@ mod client_tests {
             challenge_marker(r#"<div class="cf-browser-verification">"#),
             Some("cf-browser-verification")
         );
-        assert_eq!(challenge_marker("window._cf_chl_opt = {};"), Some("cf_chl_opt"));
+        assert_eq!(
+            challenge_marker("window._cf_chl_opt = {};"),
+            Some("cf_chl_opt")
+        );
         assert_eq!(challenge_marker("<h1>MXB App</h1>"), None);
     }
 
@@ -1798,7 +1886,10 @@ mod client_tests {
 
         let long = "x".repeat(900);
         let cut = snippet(&long);
-        assert!(cut.contains('…') && cut.contains("900 bytes total"), "{cut}");
+        assert!(
+            cut.contains('…') && cut.contains("900 bytes total"),
+            "{cut}"
+        );
         assert!(cut.chars().count() < 600, "still fits on a log line");
     }
 
@@ -1807,19 +1898,28 @@ mod client_tests {
     #[tokio::test]
     #[ignore]
     async fn live_search_and_detail() {
-        let mods = search("", 22, 1, ModSort::Newest).await.expect("search works");
+        let mods = search("", 22, 1, ModSort::Newest)
+            .await
+            .expect("search works");
         eprintln!("search returned {} tracks", mods.len());
         assert!(!mods.is_empty(), "the tracks category should not be empty");
 
         let d = detail(&mods[0].slug).await.expect("detail works");
         eprintln!(
             "detail '{}': {} downloads, version {:?}, by {:?} ({:?})",
-            d.title, d.downloads.len(), d.version, d.author, d.author_url
+            d.title,
+            d.downloads.len(),
+            d.version,
+            d.author,
+            d.author_url
         );
         assert!(!d.title.is_empty());
         // The byline is scraped off the rendered page, not the REST API — the site answers
         // `_embed=author` with an empty user, so nothing else would notice a theme change.
-        assert!(d.author.is_some(), "every post on the catalog carries a byline");
+        assert!(
+            d.author.is_some(),
+            "every post on the catalog carries a byline"
+        );
     }
 
     /// The ReShade Presets category the Settings card sends people to is real, populated,
@@ -1851,8 +1951,13 @@ mod client_tests {
     #[tokio::test]
     #[ignore]
     async fn live_search_sorts() {
-        let newest = search("", 22, 1, ModSort::Newest).await.expect("newest works");
-        assert!(!newest.is_empty(), "the tracks category should not be empty");
+        let newest = search("", 22, 1, ModSort::Newest)
+            .await
+            .expect("newest works");
+        assert!(
+            !newest.is_empty(),
+            "the tracks category should not be empty"
+        );
 
         // Every sort must actually move the listing. The site ignores `orderby`, so a
         // sort that quietly did nothing is the exact failure mode worth catching.
@@ -1875,7 +1980,9 @@ mod client_tests {
 
         // Oldest walks the listing backwards, so its first page really should be the
         // catalog's earliest posts — years behind whatever is on the newest page.
-        let oldest = search("", 22, 1, ModSort::Oldest).await.expect("oldest works");
+        let oldest = search("", 22, 1, ModSort::Oldest)
+            .await
+            .expect("oldest works");
         assert!(
             oldest[0].date < newest[0].date,
             "oldest ({}) should predate newest ({})",
@@ -1883,10 +1990,14 @@ mod client_tests {
             newest[0].date
         );
         // ...and it pages without repeating itself.
-        let oldest_p2 = search("", 22, 2, ModSort::Oldest).await.expect("oldest pages");
+        let oldest_p2 = search("", 22, 2, ModSort::Oldest)
+            .await
+            .expect("oldest pages");
         assert!(!oldest_p2.is_empty(), "oldest page 2 was empty");
         assert!(
-            oldest_p2.iter().all(|m| !oldest.iter().any(|o| o.id == m.id)),
+            oldest_p2
+                .iter()
+                .all(|m| !oldest.iter().any(|o| o.id == m.id)),
             "oldest page 2 repeats page 1"
         );
 
