@@ -9,6 +9,7 @@
   releases build unsigned, as before.
 
 ### Changed
+- The Windows installer no longer contains the secure-content DLL. MXB App downloads it from its own release only when Game Integration is on and you own locked content, and uses it only if its SHA-256 matches the one built into the app. Turning Game Integration off removes the plugin from the game folder.
 - Paints shared through paint sync are now kept on the control plane for a week after their last upload, instead of 24 hours. A paint is re-uploaded once it is 6 days old if its owner is still riding.
 
 ## 2026-09-27 — v0.19.0 — Automatic paint sync, and nothing injected into the game
