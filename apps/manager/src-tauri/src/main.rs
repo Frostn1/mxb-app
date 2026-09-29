@@ -1641,9 +1641,9 @@ async fn provision_and_record(
         log::warn!("[secure] couldn't record the provisioned asset: {e}");
     }
 
-    // If the game is already running, pick this up without a restart: rewrite the manifest the
-    // DLL watches and ask FrostMod to rescan.
-    secure_launch::refresh_running(app);
+    // Put the game side in step too: a running plugin gets a new manifest and rescan, while a
+    // closed game gets its plugin installed before the next launch.
+    secure_launch::refresh_after_change(app).await;
 
     Ok(SecureProvisionOutcome {
         mxbkey_path: out.to_string_lossy().to_string(),
@@ -2067,7 +2067,7 @@ pub(crate) async fn revoke_sweep(app: &tauri::AppHandle, force: bool) -> RevokeO
     if !out.names.is_empty() {
         let _ = app.emit("mxbsecure-revoked", SecureRevoked { names: out.names.clone() });
         // Rewrite the manifest without them, so a running game stops being served them.
-        secure_launch::refresh_running(app);
+        secure_launch::refresh_after_change(app).await;
     }
     out
 }
@@ -2083,7 +2083,7 @@ fn watch_lease(app: &tauri::AppHandle) {
         loop {
             if secure_launch::renew_lease(&app, false).await == mxb_core::keylease::Renewal::Blocked {
                 revoke_sweep(&app, true).await;
-                secure_launch::refresh_running(&app);
+                secure_launch::refresh_after_change(&app).await;
             }
             tokio::time::sleep(mxb_core::keylease::CHECK_EVERY).await;
         }
@@ -2188,6 +2188,10 @@ pub(crate) async fn auto_unlock_now(app: &tauri::AppHandle, force: bool) -> usiz
             // A key that is simply missing (or no longer opens) is put back from the vault
             // here, offline — only a blob with no local key at all goes on to ask the server.
             if restore_key_from_vault(app, &blob, id) {
+                // This is a newly usable asset too.  Counting only grants meant callers kept a
+                // cached "locked" Library row and the Windows plugin was not synced until its
+                // periodic watcher pass, even though the vault had just restored its key.
+                unlocked += 1;
                 continue;
             }
         }
@@ -2207,7 +2211,7 @@ pub(crate) async fn auto_unlock_now(app: &tauri::AppHandle, force: bool) -> usiz
         let _ = app.emit("mxbsecure-blocked", blocked);
     }
     if unlocked > 0 {
-        secure_launch::refresh_running(app);
+        secure_launch::refresh_after_change(app).await;
     }
     unlocked
 }
@@ -2271,7 +2275,7 @@ async fn mxbsecure_repair_keys(app: tauri::AppHandle) -> Result<SecureRepairOutc
             }
         }
         if out.restored + out.reprovisioned > 0 {
-            secure_launch::refresh_running(&app);
+            secure_launch::refresh_after_change(&app).await;
         }
         Ok(out)
     }
@@ -2322,6 +2326,7 @@ async fn mxbsecure_status(app: tauri::AppHandle) -> Result<Vec<SecureStatusItem>
         revoke_sweep(&app, false).await;
         let live = steamid::current_steam_id64();
         let mut items: Vec<SecureStatusItem> = Vec::new();
+        let mut changed = false;
         for blob_path in secure_launch::scan_blobs(&app) {
             // A file whose header won't parse is still listed (as its filename, marked
             // unreadable) rather than silently dropped — a broken drop-in shouldn't just vanish.
@@ -2341,7 +2346,12 @@ async fn mxbsecure_status(app: tauri::AppHandle) -> Result<Vec<SecureStatusItem>
             // itself a repair rather than a list of things that are mysteriously missing.
             let unlocked = live
                 .as_deref()
-                .map(|id| restore_key_from_vault(&app, &blob_path, id))
+                .map(|id| {
+                    let had_valid_key = has_valid_key(&blob_path, id);
+                    let restored = restore_key_from_vault(&app, &blob_path, id);
+                    changed |= restored && !had_valid_key;
+                    restored
+                })
                 .unwrap_or(false);
             let has_key = secure_launch::existing_key_path(&blob_path).is_some();
             items.push(SecureStatusItem {
@@ -2360,6 +2370,13 @@ async fn mxbsecure_status(app: tauri::AppHandle) -> Result<Vec<SecureStatusItem>
         }
         if items.is_empty() {
             return Ok(items);
+        }
+
+        // Reading status is also allowed to restore a vaulted key.  Do not leave that restored
+        // asset one watcher interval away from the Windows plugin, or visible in the app but
+        // absent from the game on an immediate launch.
+        if changed {
+            secure_launch::refresh_after_change(&app).await;
         }
 
         let cfg = config::load_or_detect(&app).unwrap_or_default();

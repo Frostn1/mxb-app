@@ -701,12 +701,19 @@ fn inject_and_rescan(app: &AppHandle, dll: &std::path::Path, dir: &std::path::Pa
     }
 }
 
-/// Refresh a running game after a mid-session unlock: rewrite the manifest the DLL watches, then
-/// ask FrostMod to rescan, so a just-unlocked asset appears without a restart. A no-op unless the
-/// game is running with injection on — otherwise `arm` picks the new asset up at the next launch.
+/// Bring secure-content serving in step after a key changes.
+///
+/// A Windows game plugin is loaded only during game startup.  Waiting for the periodic watcher
+/// after an automatic unlock left a window where the key existed but `mxbsecure.dlo` had not yet
+/// been installed; launching MX Bikes in that window meant the secured track could not appear.
+/// Sync immediately while the game is shut, including downloading the digest-pinned release
+/// module when needed.  Once the game is running its already-loaded plugin instead observes the
+/// rewritten manifest and FrostMod is asked to rescan.
 #[cfg_attr(not(mxbsecure), allow(dead_code))]
-pub fn refresh_running(app: &AppHandle) {
+pub async fn refresh_after_change(app: &AppHandle) {
     if !crate::gameproc::is_game_running() {
+        #[cfg(windows)]
+        sync_plugin(app).await;
         return;
     }
     let Some(dir) = run_dir(app) else { return };
