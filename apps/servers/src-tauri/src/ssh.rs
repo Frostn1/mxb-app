@@ -523,7 +523,9 @@ mod tests {
         Server {
             id: "a".into(),
             name: "x".into(),
+            kind: crate::store::ServerKind::Native,
             host: "16.146.6.22".into(),
+            agent_tls: false,
             ssh_port: 22,
             user: "ubuntu".into(),
             key_path: Some("C:/keys/k.pem".into()),

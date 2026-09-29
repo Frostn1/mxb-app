@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode } from "react";
 import { MoreHorizontal } from "lucide-react";
-import type { StatusReport } from "@/lib/api";
+import { isLegacyStatus, type StatusReport } from "@/lib/api";
 
 /** One status for a server: Online · N riders, Starting…, Offline, Unreachable (SSH), or
  *  Checking… before the first answer. Colour always comes with its words; the detail is in
@@ -16,10 +16,10 @@ export function StatusBadge({ report, error }: { report: StatusReport | null; er
     detail = error;
   } else if (report) {
     detail = report.detail;
-    const riders = report.status?.active_sessions ?? 0;
+    const riders = report.status && !isLegacyStatus(report.status) ? report.status.active_sessions : null;
     switch (report.state) {
       case "online":
-        label = `Online · ${riders} ${riders === 1 ? "rider" : "riders"}`;
+        label = riders == null ? "Online" : `Online · ${riders} ${riders === 1 ? "rider" : "riders"}`;
         color = "var(--success)";
         break;
       case "starting":
@@ -31,7 +31,7 @@ export function StatusBadge({ report, error }: { report: StatusReport | null; er
         color = "var(--muted-foreground)";
         break;
       case "unreachable":
-        label = "Unreachable (SSH)";
+        label = "Unreachable";
         color = "var(--destructive)";
         break;
     }

@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { RefreshCw } from "lucide-react";
-import { configLoad, errorText, serverLogs, serverRiders, serverSession, serverStatus, type ServerView } from "@/lib/api";
+import { configLoad, errorText, isLegacyStatus, legacyProcess, serverLogs, serverRiders, serverSession, serverStatus, type ServerView } from "@/lib/api";
 import { duration, lapTime, sessionName } from "@/lib/format";
 import { usePoll } from "@/lib/usePoll";
 import { ConfigTab } from "./ConfigTab";
+import { LegacySettings } from "./LegacySettings";
 import { TracksTab } from "./TracksTab";
 import { VersionTab } from "./VersionTab";
 import { Button, Card, ErrorLine, Notice, OverflowMenu, Stat, StatusBadge, type MenuItem } from "./ui";
@@ -21,6 +22,7 @@ export function ServerDetail({
 }) {
   const [tab, setTab] = useState<Tab>("status");
   const status = usePoll(() => serverStatus(server.id), 3000, server.id);
+  const tabs: Tab[] = server.kind === "legacy" ? ["status", "riders", "tracks", "logs", "config"] : ["status", "riders", "tracks", "version", "logs", "config"];
 
   return (
     <div className="flex h-full flex-col gap-6">
@@ -28,7 +30,8 @@ export function ServerDetail({
         <div className="flex min-w-0 flex-col">
           <h2 className="truncate font-heading text-2xl font-extrabold tracking-tight">{server.name}</h2>
           <div className="flex items-center gap-3 text-xs text-muted-foreground">
-            <span className="font-mono">{server.local ? "this PC" : `${server.user}@${server.host}`}</span>
+            <span className="font-mono">{server.local ? "this PC" : server.kind === "legacy" ? server.host : `${server.user}@${server.host}`}</span>
+            {server.kind === "legacy" && <span>Legacy connecting</span>}
             <StatusBadge report={status.data} error={status.error} />
           </div>
         </div>
@@ -38,7 +41,7 @@ export function ServerDetail({
       </header>
 
       <nav className="flex gap-1 border-b" role="tablist">
-        {(["status", "riders", "tracks", "version", "logs", "config"] as Tab[]).map((t) => (
+        {tabs.map((t) => (
           <button
             key={t}
             role="tab"
@@ -59,10 +62,14 @@ export function ServerDetail({
         {tab === "tracks" && <TracksTab server={server} />}
         {tab === "version" && <VersionTab server={server} />}
         {tab === "logs" && <LogsTab server={server} />}
-        {tab === "config" && <ConfigTab server={server} />}
+        {tab === "config" && (server.kind === "legacy" ? <LegacySettings server={server} /> : <ConfigTab server={server} />)}
       </div>
     </div>
   );
+}
+
+function AgentHelper({ onSetUpToken }: { onSetUpToken: () => void }) {
+  return <Notice><div className="flex items-center justify-between gap-4"><span>Add the token from mxb-agent&apos;s agent.json to connect.</span><Button size="sm" variant="primary" onClick={onSetUpToken}>Add token</Button></div></Notice>;
 }
 
 /** What the admin token is for, and how to get one, for a server without it. */
@@ -108,54 +115,58 @@ function StatusTab({
 }) {
   const report = poll.data;
   const s = report?.status;
-  const needsToken = server.local && (server.adminPort == null || !server.hasToken);
+  if (server.kind === "legacy" && s && isLegacyStatus(s)) {
+    return <LegacyStatusPanel server={server} status={s} detail={report?.detail ?? ""} refresh={poll.refresh} />;
+  }
+  const native = s && !isLegacyStatus(s) ? s : null;
+  const needsToken = server.kind === "legacy" ? !server.hasToken : server.local && (server.adminPort == null || !server.hasToken);
   return (
     <div className="flex flex-col gap-5">
       {report && report.state !== "online" && (
         <Notice tone={report.state === "starting" ? "info" : "bad"}>{report.detail}</Notice>
       )}
       {!report && poll.error && <ErrorLine text={poll.error} />}
-      {s && report?.state !== "offline" && (
+      {native && report?.state !== "offline" && (
         <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_15rem]">
           <Card className="flex flex-col gap-4">
             <h3 className="font-heading text-sm font-bold uppercase tracking-wide text-muted-foreground">Current session</h3>
             <div className="grid grid-cols-3 gap-5">
-              <Stat label="Stage" value={sessionName(s.session)} />
-              <Stat label="Time left" value={s.session_remaining_seconds == null ? "—" : duration(s.session_remaining_seconds)} />
-              <Stat label="Riders" value={s.active_sessions} />
+              <Stat label="Stage" value={sessionName(native.session)} />
+              <Stat label="Time left" value={native.session_remaining_seconds == null ? "—" : duration(native.session_remaining_seconds)} />
+              <Stat label="Riders" value={native.active_sessions} />
             </div>
           </Card>
           <Card className="flex flex-col gap-4">
             <h3 className="font-heading text-sm font-bold uppercase tracking-wide text-muted-foreground">Server</h3>
             <div className="grid grid-cols-3 gap-5">
-              <Stat label="Running for" value={duration(s.uptime_seconds)} />
-              <Stat label="Version" value={`v${s.version}`} />
-              <Stat label="Commit" value={s.revision} />
+              <Stat label="Running for" value={duration(native.uptime_seconds)} />
+              <Stat label="Version" value={`v${native.version}`} />
+              <Stat label="Commit" value={native.revision} />
             </div>
           </Card>
           <Card className="flex flex-col gap-4">
             <h3 className="font-heading text-sm font-bold uppercase tracking-wide text-muted-foreground">Diagnostics</h3>
-            <Stat label="Packets in / out" value={`${s.client_datagrams_total} / ${s.server_datagrams_total}`} />
-            <Stat label="Ready" value={s.ready ? "Yes" : "No"} />
+            <Stat label="Packets in / out" value={`${native.client_datagrams_total} / ${native.server_datagrams_total}`} />
+            <Stat label="Ready" value={native.ready ? "Yes" : "No"} />
           </Card>
         </div>
       )}
-      {!server.local && <SessionControls server={server} current={s?.session ?? ""} remaining={s?.session_remaining_seconds ?? null} refresh={poll.refresh} />}
+      {!server.local && native && <SessionControls server={server} current={native.session} remaining={native.session_remaining_seconds} refresh={poll.refresh} />}
       {!report && !poll.error && (
         <p className="text-sm text-muted-foreground">{server.local ? "Connecting…" : "Connecting over SSH…"}</p>
       )}
-      {needsToken && <TokenHelper server={server} onSetUpToken={onSetUpToken} />}
+      {needsToken && (server.kind === "legacy" ? <AgentHelper onSetUpToken={onSetUpToken} /> : <TokenHelper server={server} onSetUpToken={onSetUpToken} />)}
     </div>
   );
 }
 
 function RidersTab({ server, onSetUpToken }: { server: ServerView; onSetUpToken: () => void }) {
-  const enabled = !server.local || (server.adminPort != null && server.hasToken);
+  const enabled = server.kind === "legacy" ? server.hasToken : (!server.local || (server.adminPort != null && server.hasToken));
   const riders = usePoll(() => (enabled ? serverRiders(server.id) : Promise.resolve([])), enabled ? 5000 : 0, `${server.id}-riders`);
   if (!enabled) {
     return (
       <div className="max-w-3xl">
-        <TokenHelper server={server} onSetUpToken={onSetUpToken} />
+        {server.kind === "legacy" ? <AgentHelper onSetUpToken={onSetUpToken} /> : <TokenHelper server={server} onSetUpToken={onSetUpToken} />}
       </div>
     );
   }
@@ -193,6 +204,28 @@ function RidersTab({ server, onSetUpToken }: { server: ServerView; onSetUpToken:
       )}
     </div>
   );
+}
+
+function LegacyStatusPanel({ server, status, detail, refresh }: { server: ServerView; status: Extract<Awaited<ReturnType<typeof serverStatus>>["status"], { kind: "stock" }>; detail: string; refresh: () => void }) {
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const act = async (action: "start" | "stop" | "restart") => {
+    if ((action === "stop" || action === "restart") && !window.confirm(`${action === "stop" ? "Stop" : "Restart"} ${server.name}? Connected riders will be disconnected.`)) return;
+    setBusy(action); setError(null);
+    try { await legacyProcess(server.id, action); refresh(); }
+    catch (e) { setError(errorText(e)); }
+    finally { setBusy(null); }
+  };
+  return <div className="flex flex-col gap-5">
+    {!status.game.running && <Notice tone="bad">{detail}</Notice>}
+    <div className="grid gap-4 lg:grid-cols-3">
+      <Card className="space-y-4"><h3 className="font-heading text-sm font-bold uppercase tracking-wide text-muted-foreground">Official server</h3><div className="grid grid-cols-2 gap-5"><Stat label="State" value={status.game.running ? "Running" : "Stopped"} /><Stat label="Running for" value={duration(status.game.uptime_secs)} /></div></Card>
+      <Card className="space-y-4"><h3 className="font-heading text-sm font-bold uppercase tracking-wide text-muted-foreground">Event</h3><div className="grid grid-cols-2 gap-5"><Stat label="Track" value={status.server.track ?? "—"} /><Stat label="Maximum riders" value={status.server.maxClients ?? "—"} /></div></Card>
+      <Card className="space-y-4"><h3 className="font-heading text-sm font-bold uppercase tracking-wide text-muted-foreground">Process</h3><div className="grid grid-cols-2 gap-5"><Stat label="PID" value={status.game.pid ?? "—"} /><Stat label="Crash restarts" value={status.game.restarts} /></div></Card>
+    </div>
+    <Card className="flex items-center justify-between gap-4"><div><h3 className="font-heading text-base font-extrabold">Server controls</h3>{busy && <p className="text-xs text-muted-foreground">{busy === "restart" ? "Restarting…" : busy === "stop" ? "Stopping…" : "Starting…"}</p>}</div><div className="flex gap-2">{status.game.running ? <><Button disabled={!!busy} onClick={() => void act("restart")}>Restart</Button><Button variant="danger" disabled={!!busy} onClick={() => void act("stop")}>Stop</Button></> : <Button variant="primary" disabled={!!busy} onClick={() => void act("start")}>Start</Button>}</div></Card>
+    {error && <ErrorLine text={error} />}
+  </div>;
 }
 
 function SessionControls({ server, current, remaining, refresh }: { server: ServerView; current: string; remaining: number | null; refresh: () => void }) {
