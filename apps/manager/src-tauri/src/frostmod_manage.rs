@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 use tauri::{AppHandle, Manager};
 
 /// FrostMod's GitHub repo — supported releases carry `frostmod.dll`.
