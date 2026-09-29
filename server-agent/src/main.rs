@@ -108,6 +108,8 @@ fn handle(mut request: Request, shared: &Shared) {
         ("GET", "/status") => status(shared),
         ("GET", "/players") => players(shared),
         ("GET", "/tracks") => installed_tracks(shared),
+        ("POST", "/tracks/attach") => track_membership(shared, &mut request, true),
+        ("POST", "/tracks/detach") => track_membership(shared, &mut request, false),
         ("POST", "/start") => act(shared, |s| s.start()),
         ("POST", "/stop") => act(shared, |s| s.stop()),
         ("POST", "/restart") => act(shared, |s| s.restart()),
@@ -234,9 +236,125 @@ fn installed_tracks(shared: &Shared) -> Response<std::io::Cursor<Vec<u8>>> {
     drop(guard);
     let found = match cfg.kind {
         ServerKind::Stock => tracks::installed(&cfg.game_dir),
-        ServerKind::Native => tracks::native_packages(&cfg.tracks_dir()),
+        ServerKind::Native => {
+            if let Err(error) = share_existing_tracks(&cfg) {
+                return json(500, &serde_json::json!({ "error": error }));
+            }
+            tracks::native_packages(&cfg.tracks_dir())
+        }
     };
-    json(200, &serde_json::json!({ "tracks": found }))
+    let library = if cfg.kind == ServerKind::Native {
+        tracks::native_packages(&cfg.track_library_dir())
+    } else {
+        found.clone()
+    };
+    json(
+        200,
+        &serde_json::json!({ "tracks": found, "library": library }),
+    )
+}
+
+#[derive(Deserialize)]
+struct TrackMembership {
+    track: String,
+}
+
+fn track_membership(
+    shared: &Shared,
+    request: &mut Request,
+    attach: bool,
+) -> Response<std::io::Cursor<Vec<u8>>> {
+    let cfg = shared.lock().unwrap().config().clone();
+    if cfg.kind != ServerKind::Native {
+        return json(
+            409,
+            &serde_json::json!({ "error": "shared tracks require native mxbserver" }),
+        );
+    }
+    let mut body = String::new();
+    if request
+        .as_reader()
+        .take(16 * 1024)
+        .read_to_string(&mut body)
+        .is_err()
+    {
+        return json(
+            400,
+            &serde_json::json!({ "error": "couldn't read the request body" }),
+        );
+    }
+    let Ok(value) = serde_json::from_str::<TrackMembership>(&body) else {
+        return json(400, &serde_json::json!({ "error": "track is required" }));
+    };
+    let Some(filename) = safe_track_filename(&value.track) else {
+        return json(400, &serde_json::json!({ "error": "invalid track name" }));
+    };
+    if let Err(error) = share_existing_tracks(&cfg) {
+        return json(500, &serde_json::json!({ "error": error }));
+    }
+    let link = cfg.tracks_dir().join(&filename);
+    if attach {
+        let package = cfg.track_library_dir().join(&filename);
+        if !package.is_file() {
+            return json(
+                404,
+                &serde_json::json!({ "error": "track is not in this machine's library" }),
+            );
+        }
+        if link.exists() {
+            return json(
+                200,
+                &serde_json::json!({ "ok": true, "track": value.track }),
+            );
+        }
+        match link_track(&package, &link) {
+            Ok(()) => json(
+                200,
+                &serde_json::json!({ "ok": true, "track": value.track }),
+            ),
+            Err(error) => json(500, &serde_json::json!({ "error": error })),
+        }
+    } else {
+        let active = shared
+            .lock()
+            .unwrap()
+            .read_server_config()
+            .ok()
+            .and_then(|text| native::view(&text).ok());
+        if active.as_ref().is_some_and(|settings| {
+            settings.track.as_deref() == Some(value.track.as_str())
+                || settings.rotation.iter().any(|track| track == &value.track)
+        }) {
+            return json(
+                409,
+                &serde_json::json!({ "error": "remove the track from the rotation first" }),
+            );
+        }
+        match fs::symlink_metadata(&link) {
+            Ok(meta) if meta.file_type().is_symlink() => match fs::remove_file(&link) {
+                Ok(()) => json(
+                    200,
+                    &serde_json::json!({ "ok": true, "track": value.track }),
+                ),
+                Err(error) => json(
+                    500,
+                    &serde_json::json!({ "error": format!("couldn't unlink track: {error}") }),
+                ),
+            },
+            Ok(_) => json(
+                409,
+                &serde_json::json!({ "error": "this track is a local file, not a shared-library link" }),
+            ),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => json(
+                200,
+                &serde_json::json!({ "ok": true, "track": value.track }),
+            ),
+            Err(error) => json(
+                500,
+                &serde_json::json!({ "error": format!("couldn't inspect track link: {error}") }),
+            ),
+        }
+    }
 }
 
 fn capabilities(shared: &Shared) -> Response<std::io::Cursor<Vec<u8>>> {
@@ -496,6 +614,94 @@ fn safe_upload_name(name: &str, extension: &str) -> Option<String> {
     .then(|| name.to_string())
 }
 
+fn safe_track_filename(track: &str) -> Option<String> {
+    let track = track.trim();
+    if track.is_empty() || track.len() > 124 || track.contains(['/', '\\', '\n', '\r']) {
+        return None;
+    }
+    safe_upload_name(&format!("{track}.pkz"), "pkz")
+}
+
+fn file_sha256(path: &Path) -> Result<String, String> {
+    let mut file =
+        fs::File::open(path).map_err(|e| format!("couldn't read {}: {e}", path.display()))?;
+    let mut digest = Sha256::new();
+    let mut buffer = [0u8; 64 * 1024];
+    loop {
+        let read = file
+            .read(&mut buffer)
+            .map_err(|e| format!("couldn't read {}: {e}", path.display()))?;
+        if read == 0 {
+            break;
+        }
+        digest.update(&buffer[..read]);
+    }
+    Ok(format!("{:x}", digest.finalize()))
+}
+
+fn link_track(package: &Path, link: &Path) -> Result<(), String> {
+    if let Some(parent) = link.parent() {
+        fs::create_dir_all(parent).map_err(|e| format!("couldn't create tracks directory: {e}"))?;
+    }
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(package, link)
+        .map_err(|e| format!("couldn't link shared track: {e}"))?;
+    #[cfg(windows)]
+    std::os::windows::fs::symlink_file(package, link)
+        .map_err(|e| format!("couldn't link shared track: {e}"))?;
+    Ok(())
+}
+
+/// Move old per-server packages into the machine library without ever replacing a
+/// different package already used by another server.
+fn share_existing_tracks(cfg: &Config) -> Result<(), String> {
+    let tracks_dir = cfg.tracks_dir();
+    let library = cfg.track_library_dir();
+    fs::create_dir_all(&tracks_dir)
+        .map_err(|e| format!("couldn't create tracks directory: {e}"))?;
+    fs::create_dir_all(&library).map_err(|e| format!("couldn't create track library: {e}"))?;
+    for entry in fs::read_dir(&tracks_dir)
+        .map_err(|e| format!("couldn't read tracks directory: {e}"))?
+        .flatten()
+    {
+        let source = entry.path();
+        let metadata = match fs::symlink_metadata(&source) {
+            Ok(value) => value,
+            Err(_) => continue,
+        };
+        if metadata.file_type().is_symlink()
+            || !metadata.is_file()
+            || safe_upload_name(entry.file_name().to_string_lossy().as_ref(), "pkz").is_none()
+        {
+            continue;
+        }
+        let target = library.join(entry.file_name());
+        let moved = if target.exists() {
+            if file_sha256(&source)? != file_sha256(&target)? {
+                continue;
+            }
+            fs::remove_file(&source)
+                .map_err(|e| format!("couldn't migrate {}: {e}", source.display()))?;
+            false
+        } else {
+            fs::rename(&source, &target).map_err(|e| {
+                format!(
+                    "couldn't move {} into the shared library: {e}",
+                    source.display()
+                )
+            })?;
+            true
+        };
+        if let Err(error) = link_track(&target, &source) {
+            if moved {
+                let _ = fs::rename(&target, &source);
+            }
+            return Err(error);
+        }
+    }
+    Ok(())
+}
+
 fn receive(
     request: &mut Request,
     target: &Path,
@@ -596,23 +802,42 @@ fn upload_track(shared: &Shared, request: &mut Request) -> Response<std::io::Cur
             &serde_json::json!({ "error": "X-Content-SHA256 is required" }),
         );
     };
-    let target = cfg.tracks_dir().join(&filename);
+    if let Err(error) = share_existing_tracks(&cfg) {
+        return json(500, &serde_json::json!({ "error": error }));
+    }
+    let target = cfg.track_library_dir().join(&filename);
     let bytes = match receive(request, &target, MAX_TRACK_BYTES, &digest) {
         Ok(bytes) => bytes,
         Err(error) => return json(400, &serde_json::json!({ "error": error })),
     };
-    match install_staged(&target) {
-        Ok(backup) => {
-            if let Some(path) = backup {
-                let _ = fs::remove_file(path);
+    if target.exists() {
+        let staged = target.with_extension("uploading");
+        match file_sha256(&target) {
+            Ok(existing) if existing.eq_ignore_ascii_case(&digest) => {
+                let _ = fs::remove_file(staged);
             }
-            json(
-                200,
-                &serde_json::json!({ "ok": true, "track": Path::new(&filename).file_stem().and_then(|v| v.to_str()), "bytes": bytes, "sha256": digest.to_ascii_lowercase() }),
-            )
+            Ok(_) => {
+                let _ = fs::remove_file(staged);
+                return json(
+                    409,
+                    &serde_json::json!({ "error": "a different track with this file name is already in the machine library" }),
+                );
+            }
+            Err(error) => return json(500, &serde_json::json!({ "error": error })),
         }
-        Err(error) => json(500, &serde_json::json!({ "error": error })),
+    } else if let Err(error) = install_staged(&target) {
+        return json(500, &serde_json::json!({ "error": error }));
     }
+    let link = cfg.tracks_dir().join(&filename);
+    if !link.exists() {
+        if let Err(error) = link_track(&target, &link) {
+            return json(500, &serde_json::json!({ "error": error }));
+        }
+    }
+    json(
+        200,
+        &serde_json::json!({ "ok": true, "track": Path::new(&filename).file_stem().and_then(|v| v.to_str()), "bytes": bytes, "sha256": digest.to_ascii_lowercase() }),
+    )
 }
 
 fn upload_version(shared: &Shared, request: &mut Request) -> Response<std::io::Cursor<Vec<u8>>> {
@@ -692,4 +917,53 @@ fn json(code: u16, value: &serde_json::Value) -> Response<std::io::Cursor<Vec<u8
     Response::from_data(body)
         .with_status_code(code)
         .with_header(header)
+}
+
+#[cfg(all(test, unix))]
+mod shared_track_tests {
+    use super::*;
+
+    fn config(game_dir: PathBuf) -> Config {
+        Config {
+            token: "test-token".into(),
+            kind: ServerKind::Native,
+            listen: "127.0.0.1:8787".into(),
+            game_dir,
+            track_library: None,
+            ini: "dedicated.ini".into(),
+            native_config: "config/server.toml".into(),
+            native_binary: "bin/mxbserver".into(),
+            native_admin: None,
+            native_admin_token: None,
+            game_port: 54210,
+            public_url: None,
+        }
+    }
+
+    #[test]
+    fn migrating_and_unlinking_one_server_keeps_the_shared_package() {
+        let root = std::env::temp_dir().join(format!("mxb-shared-tracks-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let first = config(root.join("server-one"));
+        let second = config(root.join("server-two"));
+        fs::create_dir_all(first.tracks_dir()).unwrap();
+        fs::write(first.tracks_dir().join("RedBud.pkz"), b"package").unwrap();
+
+        share_existing_tracks(&first).unwrap();
+        let package = first.track_library_dir().join("RedBud.pkz");
+        assert_eq!(fs::read(&package).unwrap(), b"package");
+        assert!(fs::symlink_metadata(first.tracks_dir().join("RedBud.pkz"))
+            .unwrap()
+            .file_type()
+            .is_symlink());
+
+        link_track(&package, &second.tracks_dir().join("RedBud.pkz")).unwrap();
+        fs::remove_file(first.tracks_dir().join("RedBud.pkz")).unwrap();
+        assert_eq!(
+            fs::read(second.tracks_dir().join("RedBud.pkz")).unwrap(),
+            b"package"
+        );
+        assert!(package.exists());
+        let _ = fs::remove_dir_all(root);
+    }
 }

@@ -38,6 +38,15 @@ mod tests {
         );
         std::fs::remove_file(path).unwrap();
     }
+
+    #[test]
+    fn upload_names_are_made_safe_without_making_the_user_rename_them() {
+        assert_eq!(
+            super::safe_remote_filename("My Track (Final).pkz"),
+            "My_Track_Final_.pkz"
+        );
+        assert_eq!(super::safe_remote_filename("track.pkz"), "track.pkz");
+    }
 }
 
 use serde::{Deserialize, Serialize};
@@ -365,6 +374,7 @@ async fn server_riders(app: State<'_, App>, id: String) -> Result<Value, String>
 #[serde(rename_all = "camelCase")]
 struct TrackState {
     installed: Vec<String>,
+    library: Vec<String>,
     current: Option<String>,
     rotation: Vec<String>,
 }
@@ -403,9 +413,16 @@ async fn server_tracks(app: State<'_, App>, id: String) -> Result<TrackState, St
         .flatten()
         .filter_map(|v| v.as_str().map(str::to_string))
         .collect();
+    let library = body["library"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|v| v.as_str().map(str::to_string))
+        .collect();
     let server = &status["server"];
     Ok(TrackState {
         installed,
+        library,
         current: server["track"].as_str().map(str::to_string),
         rotation: server["rotation"]
             .as_array()
@@ -414,6 +431,34 @@ async fn server_tracks(app: State<'_, App>, id: String) -> Result<TrackState, St
             .filter_map(|v| v.as_str().map(str::to_string))
             .collect(),
     })
+}
+
+#[tauri::command]
+async fn server_track_membership(
+    app: State<'_, App>,
+    id: String,
+    track: String,
+    attached: bool,
+) -> Result<Value, String> {
+    let server = app.store.get(&id)?;
+    if server.local {
+        return Err("Shared track management requires a server connected over SSH.".into());
+    }
+    let tunnels = Arc::clone(&app.tunnels);
+    let port = server.observe_port.to_string();
+    let encoded = b64(track.trim());
+    let command = if attached {
+        "attach-track"
+    } else {
+        "detach-track"
+    };
+    let out =
+        blocking(move || tunnels.run_script(&server, REMOTE_SH, &[command, &port, &encoded], 30))
+            .await?;
+    if !out.success {
+        return Err(out.text());
+    }
+    serde_json::from_str(&out.stdout).map_err(|e| format!("track library: {e}"))
 }
 
 #[tauri::command]
@@ -476,9 +521,46 @@ async fn server_update_github(app: State<'_, App>, id: String) -> Result<Value, 
     }
     let tunnels = Arc::clone(&app.tunnels);
     let port = server.observe_port.to_string();
-    let out =
-        blocking(move || tunnels.run_script(&server, REMOTE_SH, &["github-update", &port], 600))
-            .await?;
+    let out = blocking(move || {
+        let gh = |args: &[&str]| -> Result<std::process::Output, String> {
+            let mut command = std::process::Command::new("gh");
+            command.args(args);
+            #[cfg(windows)]
+            {
+                use std::os::windows::process::CommandExt;
+                command.creation_flags(0x08000000);
+            }
+            command.output().map_err(|_| "GitHub CLI is not installed. Install gh and sign in once to update from the private repository.".to_string())
+        };
+        let listed = gh(&["run", "list", "--repo", "Frostn1/mxbserver", "--workflow", "mxbserver Linux", "--branch", "main", "--status", "success", "--limit", "1", "--json", "databaseId,headSha"])?;
+        if !listed.status.success() { return Err(String::from_utf8_lossy(&listed.stderr).trim().to_string()); }
+        let runs: Vec<Value> = serde_json::from_slice(&listed.stdout).map_err(|e| format!("couldn't read GitHub build metadata: {e}"))?;
+        let run = runs.first().ok_or("GitHub has no successful main build to install.")?;
+        let run_id = run["databaseId"].as_u64().ok_or("GitHub build has no run id")?.to_string();
+        let revision = run["headSha"].as_str().ok_or("GitHub build has no revision")?;
+        let version = format!("main@{}", &revision[..revision.len().min(12)]);
+        let dir = std::env::temp_dir().join(format!("mxb-servers-github-{}", store::new_id()));
+        std::fs::create_dir_all(&dir).map_err(|e| format!("couldn't create update folder: {e}"))?;
+        let dir_text = dir.to_string_lossy().to_string();
+        let downloaded = gh(&["run", "download", &run_id, "--repo", "Frostn1/mxbserver", "--name", "mxbserver-x86_64-unknown-linux-gnu-elf", "--dir", &dir_text])?;
+        if !downloaded.status.success() {
+            let _ = std::fs::remove_dir_all(&dir);
+            return Err(String::from_utf8_lossy(&downloaded.stderr).trim().to_string());
+        }
+        let binary = dir.join("mxbserver-x86_64-unknown-linux-gnu.elf");
+        let mut file = std::fs::File::open(&binary).map_err(|e| format!("GitHub artifact has no server binary: {e}"))?;
+        use sha2::Digest;
+        use std::io::Read;
+        let mut hash = sha2::Sha256::new();
+        let mut buffer = [0u8; 64 * 1024];
+        loop { let read = file.read(&mut buffer).map_err(|e| format!("couldn't read GitHub artifact: {e}"))?; if read == 0 { break; } hash.update(&buffer[..read]); }
+        let digest = format!("{:x}", hash.finalize());
+        let temporary = format!("mxb-servers-{}", store::new_id());
+        tunnels.upload(&server, &binary.to_string_lossy(), &temporary, 300)?;
+        let out = tunnels.run_script(&server, REMOTE_SH, &["agent-upload", &port, "version", &temporary, "mxbserver", &digest, &version], 360);
+        let _ = std::fs::remove_dir_all(&dir);
+        out
+    }).await?;
     if !out.success {
         return Err(out.text());
     }
@@ -546,18 +628,22 @@ async fn server_upload(
         return Err("unknown upload type".into());
     }
     let file = std::path::Path::new(&path);
-    let name = file
+    let original_name = file
         .file_name()
         .and_then(|v| v.to_str())
         .ok_or("the file has no usable name")?
         .to_string();
-    if !name
-        .chars()
-        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_'))
+    let name = if kind == "track" {
+        safe_remote_filename(&original_name)
+    } else {
+        original_name
+    };
+    if kind == "version"
+        && !name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_'))
     {
-        return Err(
-            "Rename the file using only letters, numbers, dots, dashes, and underscores.".into(),
-        );
+        return Err("The binary file name contains unsupported characters.".into());
     }
     if kind == "track" && !name.to_ascii_lowercase().ends_with(".pkz") {
         return Err("Tracks must be .pkz packages.".into());
@@ -636,6 +722,75 @@ async fn server_upload(
         return Err(out.text());
     }
     serde_json::from_str(&out.stdout).map_err(|e| format!("upload: {e}"))
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TrackUploadCheck {
+    bytes: u64,
+    server_track: bool,
+    detail: String,
+    upload_name: String,
+}
+
+fn safe_remote_filename(name: &str) -> String {
+    let mut out = String::with_capacity(name.len());
+    for c in name.chars() {
+        let safe = if c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_') {
+            c
+        } else {
+            '_'
+        };
+        if safe != '_' || !out.ends_with('_') {
+            out.push(safe);
+        }
+    }
+    let cleaned = out.trim_matches(['.', '_', '-']).to_string();
+    if cleaned.is_empty() {
+        "track.pkz".into()
+    } else {
+        cleaned
+    }
+}
+
+#[tauri::command]
+async fn inspect_track_upload(path: String) -> Result<TrackUploadCheck, String> {
+    blocking(move || {
+        let file = std::path::Path::new(&path);
+        if !file
+            .extension()
+            .and_then(|value| value.to_str())
+            .is_some_and(|value| value.eq_ignore_ascii_case("pkz"))
+        {
+            return Err("Choose a .pkz track package.".into());
+        }
+        let bytes = std::fs::metadata(file)
+            .map_err(|e| format!("could not read the selected file: {e}"))?
+            .len();
+        let upload_name = safe_remote_filename(
+            file.file_name()
+                .and_then(|value| value.to_str())
+                .unwrap_or("track.pkz"),
+        );
+        if bytes == 0 || bytes > 512 * 1024 * 1024 {
+            return Err("Track packages must be between 1 byte and 512 MiB.".into());
+        }
+        match mxb_content::TrackPackage::open(file) {
+            Ok(track) => Ok(TrackUploadCheck {
+                bytes,
+                server_track: true,
+                detail: format!("Server track package · {}", track.id),
+                upload_name,
+            }),
+            Err(error) => Ok(TrackUploadCheck {
+                bytes,
+                server_track: false,
+                detail: format!("This does not look like a server track package: {error:#}"),
+                upload_name,
+            }),
+        }
+    })
+    .await
 }
 
 #[tauri::command]
@@ -861,11 +1016,13 @@ fn main() {
             server_status,
             server_riders,
             server_tracks,
+            server_track_membership,
             server_set_track,
             server_set_rotation,
             server_update_github,
             server_session,
             server_upload,
+            inspect_track_upload,
             server_logs,
             server_test_token,
             config_load,

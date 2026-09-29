@@ -79,7 +79,8 @@ pub fn patch(text: &str, patch: &Patch, installed: &[String]) -> Result<String, 
         if !installed.iter().any(|candidate| candidate == track) {
             return Err(format!("track {track:?} is not installed on this server"));
         }
-        table(&mut doc, "track")["package"] = value(format!("tracks/{track}.pkz"));
+        // Package paths are resolved from config/server.toml, not the process cwd.
+        table(&mut doc, "track")["package"] = value(format!("../tracks/{track}.pkz"));
         changed = true;
     }
     if let Some(rotation) = &patch.rotation {
@@ -89,7 +90,7 @@ pub fn patch(text: &str, patch: &Patch, installed: &[String]) -> Result<String, 
             if !installed.iter().any(|candidate| candidate == track) {
                 return Err(format!("track {track:?} is not installed on this server"));
             }
-            array.push(format!("tracks/{track}.pkz"));
+            array.push(format!("../tracks/{track}.pkz"));
         }
         table(&mut doc, "rotation")["tracks"] = value(array);
         changed = true;
@@ -218,6 +219,8 @@ mod tests {
         assert_eq!(got.bots, 6);
         assert_eq!(got.sessions.practice_minutes, Some(0));
         assert_eq!(got.sessions.qualifying_minutes, Some(10));
+        assert!(out.contains("package = \"../tracks/new.pkz\""));
+        assert!(out.contains("tracks = [\"../tracks/third.pkz\"]"));
     }
 
     #[test]

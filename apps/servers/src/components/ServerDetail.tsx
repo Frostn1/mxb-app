@@ -1,13 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import { RefreshCw } from "lucide-react";
-import { errorText, serverLogs, serverRiders, serverSession, serverStatus, type ServerView } from "@/lib/api";
+import { configLoad, errorText, serverLogs, serverRiders, serverSession, serverStatus, type ServerView } from "@/lib/api";
 import { duration, lapTime, sessionName } from "@/lib/format";
 import { usePoll } from "@/lib/usePoll";
 import { ConfigTab } from "./ConfigTab";
 import { TracksTab } from "./TracksTab";
+import { VersionTab } from "./VersionTab";
 import { Button, Card, ErrorLine, Notice, OverflowMenu, Stat, StatusBadge, type MenuItem } from "./ui";
 
-type Tab = "status" | "riders" | "tracks" | "logs" | "config";
+type Tab = "status" | "riders" | "tracks" | "version" | "logs" | "config";
 
 export function ServerDetail({
   server,
@@ -37,7 +38,7 @@ export function ServerDetail({
       </header>
 
       <nav className="flex gap-1 border-b" role="tablist">
-        {(["status", "riders", "tracks", "logs", "config"] as Tab[]).map((t) => (
+        {(["status", "riders", "tracks", "version", "logs", "config"] as Tab[]).map((t) => (
           <button
             key={t}
             role="tab"
@@ -56,6 +57,7 @@ export function ServerDetail({
         {tab === "status" && <StatusTab server={server} poll={status} onSetUpToken={onSetUpToken} />}
         {tab === "riders" && <RidersTab server={server} onSetUpToken={onSetUpToken} />}
         {tab === "tracks" && <TracksTab server={server} />}
+        {tab === "version" && <VersionTab server={server} />}
         {tab === "logs" && <LogsTab server={server} />}
         {tab === "config" && <ConfigTab server={server} />}
       </div>
@@ -138,7 +140,7 @@ function StatusTab({
           </Card>
         </div>
       )}
-      {!server.local && <SessionControls server={server} refresh={poll.refresh} />}
+      {!server.local && <SessionControls server={server} current={s?.session ?? ""} remaining={s?.session_remaining_seconds ?? null} refresh={poll.refresh} />}
       {!report && !poll.error && (
         <p className="text-sm text-muted-foreground">{server.local ? "Connecting…" : "Connecting over SSH…"}</p>
       )}
@@ -193,21 +195,51 @@ function RidersTab({ server, onSetUpToken }: { server: ServerView; onSetUpToken:
   );
 }
 
-function SessionControls({ server, refresh }: { server: ServerView; refresh: () => void }) {
+function SessionControls({ server, current, remaining, refresh }: { server: ServerView; current: string; remaining: number | null; refresh: () => void }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const act = async (action: "jump" | "advance" | "restart", to?: "practice" | "qualifying" | "warmup" | "race") => {
+    const destination = to ? sessionName(to) : "";
+    const prompt = action === "jump"
+      ? `Switch the live server to ${destination}?`
+      : action === "advance"
+        ? "Advance the live server to its next stage?"
+        : `Restart ${sessionName(current)} from the beginning?`;
+    if (!window.confirm(prompt)) return;
     const label = to ? `Starting ${to}…` : action === "advance" ? "Advancing session…" : "Restarting session…";
     setBusy(label); setError(null);
-    try { await serverSession(server.id, action, to); refresh(); } catch (e) { setError(errorText(e)); } finally { setBusy(null); }
+    try {
+      await serverSession(server.id, action, to);
+      refresh();
+    } catch (e) {
+      const message = errorText(e);
+      if (message.includes("already running") || message.includes("countdown always runs")) refresh();
+      else setError(message);
+    } finally { setBusy(null); }
   };
+  const running = /^running\((practice|qualifying|warmup|race)\)$/.exec(current)?.[1] ?? "";
+  const countdown = /^countdown(?:\((practice|qualifying|warmup|race)\)|\s*\{\s*next:\s*(practice|qualifying|warmup|race)\s*\})$/i.exec(current);
+  const pending = (countdown?.[1] ?? countdown?.[2] ?? "").toLowerCase();
+  const locked = !!pending;
+  useEffect(() => { if (locked) setError(null); }, [locked]);
+  const config = usePoll(() => configLoad(server.id), 30_000, `${server.id}-race-config`);
+  const number = (key: string, fallback: number) => {
+    const value = config.data?.values[`sessions.${key}`];
+    return typeof value === "number" ? value : fallback;
+  };
+  const details = {
+    practice: number("practice_minutes", 20) === 0 ? "Until advanced" : `${number("practice_minutes", 20)} min`,
+    qualifying: `${number("qualifying_minutes", 15)} min`,
+    warmup: `${number("warmup_minutes", 5)} min`,
+    race: `${number("race_minutes", 20)} min + ${number("race_extra_laps", 2)} laps`,
+  } as const;
   return (
     <Card className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h3 className="font-heading text-base font-extrabold">Race control</h3>
+        <div className="flex min-w-0 items-center gap-3"><h3 className="font-heading text-base font-extrabold">Race control</h3>{busy ? <span className="truncate text-xs text-muted-foreground">{busy}</span> : locked ? <span className="truncate text-xs font-medium text-primary">{sessionName(pending)} starts in {remaining == null ? "a moment" : duration(remaining)}</span> : null}</div>
         <div className="flex gap-2">
-          <Button size="sm" variant="ghost" disabled={!!busy} onClick={() => void act("restart")}>Restart current</Button>
-          <Button size="sm" variant="primary" disabled={!!busy} onClick={() => void act("advance")}>Next stage</Button>
+          <Button size="sm" variant="ghost" disabled={!!busy || locked} title={locked ? "The countdown must finish" : undefined} onClick={() => void act("restart")}>Restart current</Button>
+          <Button size="sm" variant="primary" disabled={!!busy || locked} title={locked ? "The countdown must finish" : undefined} onClick={() => void act("advance")}>Next stage</Button>
         </div>
       </div>
       <div className="grid overflow-hidden rounded-lg border sm:grid-cols-4">
@@ -215,16 +247,20 @@ function SessionControls({ server, refresh }: { server: ServerView; refresh: () 
           <button
             key={stage}
             type="button"
-            disabled={!!busy}
+            disabled={!!busy || locked || running === stage}
             onClick={() => void act("jump", stage)}
-            className="flex items-center gap-3 border-b px-4 py-3 text-left transition hover:bg-accent disabled:opacity-50 sm:border-b-0 sm:border-r sm:last:border-r-0"
+            aria-current={running === stage || pending === stage ? "step" : undefined}
+            className={`flex items-center gap-3 border-b px-4 py-3 text-left transition disabled:cursor-default sm:border-b-0 sm:border-r sm:last:border-r-0 ${running === stage || pending === stage ? "bg-primary/10 text-primary" : "hover:bg-accent disabled:opacity-50"}`}
           >
             <span className="grid size-6 shrink-0 place-items-center rounded-full bg-secondary font-mono text-xs text-muted-foreground">{index + 1}</span>
-            <span className="text-sm font-medium capitalize">{stage === "warmup" ? "Warm-up" : stage}</span>
+            <span className="flex min-w-0 flex-1 items-center justify-between gap-2 text-sm font-medium capitalize">
+              <span className="flex flex-col"><span>{stage === "warmup" ? "Warm-up" : stage}</span><span className="text-[11px] font-normal normal-case text-muted-foreground">{details[stage]}</span></span>
+              {running === stage && <span className="rounded-full bg-primary px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-primary-foreground">Current</span>}
+              {pending === stage && <span className="rounded-full bg-primary px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-primary-foreground">Next</span>}
+            </span>
           </button>
         ))}
       </div>
-      {busy && <p className="text-sm text-muted-foreground">{busy}</p>}
       {error && <ErrorLine text={error} />}
     </Card>
   );
