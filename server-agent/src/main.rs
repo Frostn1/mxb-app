@@ -107,6 +107,7 @@ fn handle(mut request: Request, shared: &Shared) {
         ("GET", "/capabilities") => capabilities(shared),
         ("GET", "/status") => status(shared),
         ("GET", "/players") => players(shared),
+        ("GET", "/logs") => logs(shared),
         ("GET", "/tracks") => installed_tracks(shared),
         ("POST", "/tracks/attach") => track_membership(shared, &mut request, true),
         ("POST", "/tracks/detach") => track_membership(shared, &mut request, false),
@@ -226,6 +227,18 @@ fn players(shared: &Shared) -> Response<std::io::Cursor<Vec<u8>>> {
         // No log yet is a server that has not been connected to, not a failure.
         Err(_) => json(200, &serde_json::json!({ "players": [] })),
     }
+}
+
+/// A bounded tail of the stock server log. This keeps Legacy connecting useful without
+/// requiring SSH access to the Windows host or exposing an arbitrary-file endpoint.
+fn logs(shared: &Shared) -> Response<std::io::Cursor<Vec<u8>>> {
+    let guard = shared.lock().unwrap();
+    let path = guard.config().game_dir.join("log.txt");
+    drop(guard);
+    let text = fs::read_to_string(&path).unwrap_or_default();
+    let all: Vec<&str> = text.lines().collect();
+    let from = all.len().saturating_sub(500);
+    json(200, &serde_json::json!({ "lines": &all[from..] }))
 }
 
 /// The tracks this host can actually run, so the app offers a list instead of a text box

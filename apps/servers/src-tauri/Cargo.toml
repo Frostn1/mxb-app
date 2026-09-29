@@ -15,8 +15,7 @@ tauri-plugin-dialog = "2"
 log = "0.4"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-# Talks only to 127.0.0.1 through the SSH tunnels this app opens, so no TLS is needed yet;
-# rustls is kept for the direct-HTTPS transport the plan adds with server-side TLS.
+# Native servers use loopback SSH tunnels; Legacy connecting may call an HTTPS mxb-agent.
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 getrandom = "0.3"
 # Admin tokens live in the OS keychain (Windows Credential Manager, macOS Keychain);

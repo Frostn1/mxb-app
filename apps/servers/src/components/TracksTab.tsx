@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { ArrowDown, ArrowUp, GripVertical, Link2, Plus, Search, Trash2, Unlink, Upload } from "lucide-react";
-import { errorText, inspectTrackUpload, serverSetRotation, serverTrackMembership, serverTracks, serverUpload, type ServerView, type TrackState } from "@/lib/api";
+import { errorText, inspectTrackUpload, serverSetRotation, serverSetTrack, serverTrackMembership, serverTracks, serverUpload, type ServerView, type TrackState } from "@/lib/api";
 import { Button, Card, ErrorLine, Notice } from "./ui";
 
 const trackCache = new Map<string, TrackState>();
@@ -71,6 +71,30 @@ export function TracksTab({ server }: { server: ServerView }) {
       await load();
     } catch (e) { setError(errorText(e)); } finally { setBusy(null); }
   };
+
+  const selectLegacyTrack = async (track: string) => {
+    if (track === state?.current || !window.confirm(`Switch ${server.name} to ${track}? The official server will restart.`)) return;
+    setBusy(`Switching to ${track}…`); setError(null); setDone(null);
+    try { await serverSetTrack(server.id, track); setDone(`${track} selected.`); await load(); }
+    catch (e) { setError(errorText(e)); } finally { setBusy(null); }
+  };
+
+  if (server.kind === "legacy") return (
+    <div className="max-w-3xl space-y-4">
+      {error && <ErrorLine text={error} />}
+      {done && <div role="status" className="fixed right-5 top-12 z-50 rounded-lg border bg-card px-4 py-3 text-sm font-medium shadow-lg">{done}</div>}
+      <Card className="flex min-h-[24rem] flex-col gap-4">
+        <div><h3 className="font-heading text-lg font-extrabold">Installed tracks</h3><p className="text-xs text-muted-foreground">From the official server&apos;s mods folder</p></div>
+        <label className="relative"><Search className="absolute left-3 top-2.5 size-4 text-muted-foreground" /><input className="h-9 w-full rounded-md border border-input bg-background pl-9 pr-3 text-sm" placeholder="Search tracks" value={query} onChange={(e) => setQuery(e.target.value)} /></label>
+        <div className="divide-y overflow-auto">
+          {state === null && <p className="py-3 text-sm text-muted-foreground">Loading…</p>}
+          {state && installed.length === 0 && <p className="py-3 text-sm text-muted-foreground">No matching tracks.</p>}
+          {installed.map((item) => <div key={item} className="flex items-center gap-3 py-3"><span className="min-w-0 flex-1 truncate text-sm font-medium">{item}</span>{item === state?.current ? <span className="text-xs font-medium text-primary">Current</span> : <Button size="sm" disabled={!!busy} onClick={() => void selectLegacyTrack(item)}>Select</Button>}</div>)}
+        </div>
+      </Card>
+      {busy && <p className="text-sm text-muted-foreground">{busy}</p>}
+    </div>
+  );
 
   if (server.local) return <Notice>Connect this server over SSH to manage tracks and versions.</Notice>;
   return (

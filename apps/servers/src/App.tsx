@@ -63,7 +63,6 @@ export default function App() {
       <header data-tauri-drag-region className="flex h-[52px] shrink-0 select-none items-center border-b bg-window pl-5">
         <div data-tauri-drag-region className="mr-7 flex items-baseline gap-2 whitespace-nowrap">
           <span className="font-heading text-base font-extrabold tracking-[-0.05em]">MXB Servers</span>
-          <span className="text-[11px] text-muted-foreground">by <span className="font-semibold">mxbsecure</span></span>
         </div>
         <nav className="flex h-full min-w-0 items-center gap-1 overflow-hidden" aria-label="Servers">
           <button type="button" onClick={() => setView({ kind: "fleet" })} className={`h-full border-b-2 px-3 text-sm font-medium ${view.kind === "fleet" ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`}>All servers</button>
@@ -90,8 +89,7 @@ export default function App() {
             </header>
             {servers.length === 0 ? (
               <p className="max-w-md text-sm text-muted-foreground">
-                No servers yet. Add one with its SSH host, user and key; the app forwards the server&apos;s
-                observe port over SSH and shows its status here.
+                No servers yet. Add an MXB Server over SSH, or use Legacy connecting for the official dedicated server.
               </p>
             ) : (
               <div className="grid grid-cols-[repeat(auto-fill,minmax(18rem,1fr))] gap-4">

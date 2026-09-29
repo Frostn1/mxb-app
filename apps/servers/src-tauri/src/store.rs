@@ -7,13 +7,30 @@ use std::path::{Path, PathBuf};
 
 const KEYCHAIN_SERVICE: &str = "com.frost.mxbservers";
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum ServerKind {
+    Native,
+    Legacy,
+}
+
+fn default_server_kind() -> ServerKind {
+    // Existing saved servers predate this field and are all native mxbserver hosts.
+    ServerKind::Native
+}
+
 /// Where a server is and how to reach it: over SSH, forwarding its loopback-only ports.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Server {
     pub id: String,
     pub name: String,
+    #[serde(default = "default_server_kind")]
+    pub kind: ServerKind,
     pub host: String,
+    /// Legacy mxb-agent uses HTTPS when it sits behind a TLS reverse proxy.
+    #[serde(default)]
+    pub agent_tls: bool,
     #[serde(default = "default_ssh_port")]
     pub ssh_port: u16,
     pub user: String,
@@ -66,7 +83,7 @@ pub fn validate(server: &Server) -> Result<(), String> {
     if server.observe_port == 0 || server.admin_port == Some(0) {
         return Err("Ports must be 1 to 65535.".into());
     }
-    if server.local {
+    if server.local && server.kind == ServerKind::Native {
         if !Path::new(&server.log_path).is_absolute() {
             return Err(
                 r"Log file must be a full path, like C:\mxbserver\logs\mxbserver.log".into(),
@@ -74,37 +91,41 @@ pub fn validate(server: &Server) -> Result<(), String> {
         }
         return Ok(());
     }
-    let host_ok = !server.host.is_empty()
-        && server.host.len() <= 253
-        && !server.host.starts_with('-')
-        && server
-            .host
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | ':'));
+    let host_ok = server.local
+        || (!server.host.is_empty()
+            && server.host.len() <= 253
+            && !server.host.starts_with('-')
+            && server
+                .host
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | ':')));
     if !host_ok {
         return Err("Host must be a hostname or an IP address.".into());
     }
-    let user_ok = !server.user.is_empty()
-        && server.user.len() <= 32
-        && server
-            .user
-            .starts_with(|c: char| c.is_ascii_lowercase() || c == '_')
-        && server
-            .user
-            .chars()
-            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '_' | '-'));
+    let user_ok = server.kind == ServerKind::Legacy
+        || (!server.user.is_empty()
+            && server.user.len() <= 32
+            && server
+                .user
+                .starts_with(|c: char| c.is_ascii_lowercase() || c == '_')
+            && server
+                .user
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '_' | '-')));
     if !user_ok {
         return Err("User must be a Unix user name, like ubuntu.".into());
     }
-    if let Some(key) = &server.key_path {
-        if key.starts_with('-') || !Path::new(key).is_file() {
-            return Err(format!("Key file not found: {key}"));
+    if server.kind == ServerKind::Native {
+        if let Some(key) = &server.key_path {
+            if key.starts_with('-') || !Path::new(key).is_file() {
+                return Err(format!("Key file not found: {key}"));
+            }
         }
     }
     if server.ssh_port == 0 || server.observe_port == 0 || server.admin_port == Some(0) {
         return Err("Ports must be 1 to 65535.".into());
     }
-    if !safe_remote_path(&server.log_path) {
+    if server.kind == ServerKind::Native && !safe_remote_path(&server.log_path) {
         return Err("Log path must be an absolute path of letters, digits, / . _ -".into());
     }
     Ok(())
@@ -211,6 +232,11 @@ pub fn valid_token(token: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
 }
 
+pub fn valid_agent_token(token: &str) -> bool {
+    let token = token.trim();
+    !token.is_empty() && token.len() <= 512 && token.chars().all(|c| c.is_ascii_graphic())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -219,7 +245,9 @@ mod tests {
         Server {
             id: "a".into(),
             name: "Lightsail".into(),
+            kind: ServerKind::Native,
             host: "16.146.6.22".into(),
+            agent_tls: false,
             ssh_port: 22,
             user: "ubuntu".into(),
             key_path: None,
@@ -293,6 +321,14 @@ mod tests {
         assert!(!valid_token(".secretsecretsecret"));
         assert!(!valid_token("sean.short"));
         assert!(!valid_token("sean.0123456789abcdef\nx"));
+    }
+
+    #[test]
+    fn legacy_agent_tokens_are_not_forced_into_admin_token_shape() {
+        assert!(valid_agent_token("0123456789abcdef0123456789abcdef"));
+        assert!(valid_agent_token("short-but-valid"));
+        assert!(!valid_agent_token(""));
+        assert!(!valid_agent_token("0123456789abcdef\nheader"));
     }
 
     #[test]

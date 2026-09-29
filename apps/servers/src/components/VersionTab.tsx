@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { Upload } from "lucide-react";
-import { errorText, serverStatus, serverUpdateGithub, serverUpload, type ServerView } from "@/lib/api";
+import { errorText, isLegacyStatus, serverStatus, serverUpdateGithub, serverUpload, type ServerView } from "@/lib/api";
 import { Button, Card, ErrorLine, Notice } from "./ui";
 
 const versionCache = new Map<string, { version: string; revision: string }>();
@@ -14,7 +14,7 @@ export function VersionTab({ server }: { server: ServerView }) {
   const [done, setDone] = useState<string | null>(null);
   const load = useCallback(async () => {
     const report = await serverStatus(server.id);
-    if (report.status) {
+    if (report.status && !isLegacyStatus(report.status)) {
       const value = { version: report.status.version, revision: report.status.revision };
       versionCache.set(server.id, value);
       setRunning(value);

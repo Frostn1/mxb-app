@@ -3,7 +3,9 @@ import { invoke } from "@tauri-apps/api/core";
 export interface Server {
   id: string;
   name: string;
+  kind: "native" | "legacy";
   host: string;
+  agentTls: boolean;
   sshPort: number;
   user: string;
   keyPath: string | null;
@@ -19,7 +21,7 @@ export interface ServerView extends Server {
 }
 
 /** mxbserver's observe `/status` (crates/mxbserver/src/observability.rs). */
-export interface Status {
+export interface NativeStatus {
   version: string;
   revision: string;
   build_id: string;
@@ -31,6 +33,16 @@ export interface Status {
   session: string;
   session_remaining_seconds: number | null;
 }
+
+export interface LegacyStatus {
+  kind: "stock";
+  game: { running: boolean; pid: number | null; uptime_secs: number; restarts: number };
+  port: number;
+  server: { name: string | null; track: string | null; maxClients: string | null };
+}
+
+export type Status = NativeStatus | LegacyStatus;
+export const isLegacyStatus = (status: Status): status is LegacyStatus => "kind" in status && status.kind === "stock";
 
 export type ServerState = "online" | "starting" | "offline" | "unreachable";
 
@@ -52,12 +64,15 @@ export interface Rider {
   laps: number;
   best_lap_seconds: number | null;
   ping_ms: number | null;
+  guid?: string;
 }
 
 export const blankServer = (): Server => ({
   id: "",
   name: "",
+  kind: "native",
   host: "",
+  agentTls: false,
   sshPort: 22,
   user: "ubuntu",
   keyPath: null,
@@ -74,6 +89,8 @@ export const saveServer = (server: Server, token?: string) =>
   invoke<ServerView>("servers_save", { request: { server, token } });
 
 export const removeServer = (id: string) => invoke<void>("servers_remove", { id });
+export const parseLegacyPairing = (blob: string) =>
+  invoke<{ host: string; port: number; tls: boolean; token: string }>("legacy_pairing", { blob });
 
 export const serverStatus = (id: string) => invoke<StatusReport>("server_status", { id });
 
@@ -193,3 +210,9 @@ export const configApply = async (id: string, baseSha: string, text: string) => 
 };
 
 export const testToken = (id: string) => invoke<{ ok: boolean; message: string }>("server_test_token", { id });
+
+export const legacyConfig = (id: string) => invoke<LegacyStatus>("legacy_config", { id });
+export const legacyConfigSave = (id: string, name: string, track: string, maxClients: number) =>
+  invoke<Record<string, unknown>>("legacy_config_save", { id, name, track, maxClients });
+export const legacyProcess = (id: string, action: "start" | "stop" | "restart") =>
+  invoke<Record<string, unknown>>("legacy_process", { id, action });

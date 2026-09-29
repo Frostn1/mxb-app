@@ -47,13 +47,28 @@ mod tests {
         );
         assert_eq!(super::safe_remote_filename("track.pkz"), "track.pkz");
     }
+
+    #[test]
+    fn legacy_pairing_code_becomes_connection_fields() {
+        use base64::Engine;
+        let body = br#"{"url":"https://mx.example.com:9443","token":"0123456789abcdef"}"#;
+        let code = format!(
+            "mxb-agent:{}",
+            base64::engine::general_purpose::STANDARD.encode(body)
+        );
+        let parsed = super::parse_legacy_pairing(&code).unwrap();
+        assert_eq!(parsed.host, "mx.example.com");
+        assert_eq!(parsed.port, 9443);
+        assert!(parsed.tls);
+        assert_eq!(parsed.token, "0123456789abcdef");
+    }
 }
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::sync::Arc;
 use std::time::Duration;
-use store::{Server, Store};
+use store::{Server, ServerKind, Store};
 use tauri::{Manager, RunEvent, State};
 
 struct App {
@@ -69,6 +84,71 @@ struct ServerView {
     #[serde(flatten)]
     server: Server,
     has_token: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LegacyPairing {
+    host: String,
+    port: u16,
+    tls: bool,
+    token: String,
+}
+
+fn parse_legacy_pairing(blob: &str) -> Result<LegacyPairing, String> {
+    use base64::Engine;
+    let encoded = blob
+        .trim()
+        .strip_prefix("mxb-agent:")
+        .ok_or("Paste the whole mxb-agent pairing line.")?;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(encoded.trim())
+        .map_err(|_| "That pairing code is damaged.".to_string())?;
+    let value: Value =
+        serde_json::from_slice(&bytes).map_err(|_| "That pairing code is damaged.".to_string())?;
+    let raw_url = value["url"]
+        .as_str()
+        .ok_or("That pairing code has no address.")?;
+    let token = value["token"]
+        .as_str()
+        .ok_or("That pairing code has no token.")?
+        .trim();
+    if !store::valid_agent_token(token) {
+        return Err("That pairing code has an invalid token.".into());
+    }
+    let url =
+        reqwest::Url::parse(raw_url).map_err(|_| "That pairing code has an invalid address.")?;
+    let tls = match url.scheme() {
+        "http" => false,
+        "https" => true,
+        _ => return Err("The agent address must use HTTP or HTTPS.".into()),
+    };
+    if url.username() != ""
+        || url.password().is_some()
+        || url.query().is_some()
+        || url.fragment().is_some()
+        || !matches!(url.path(), "" | "/")
+    {
+        return Err(
+            "The agent address must not contain credentials, a path, query, or fragment.".into(),
+        );
+    }
+    Ok(LegacyPairing {
+        host: url
+            .host_str()
+            .ok_or("The agent address has no host.")?
+            .to_string(),
+        port: url
+            .port_or_known_default()
+            .ok_or("The agent address has no port.")?,
+        tls,
+        token: token.to_string(),
+    })
+}
+
+#[tauri::command]
+fn legacy_pairing(blob: String) -> Result<LegacyPairing, String> {
+    parse_legacy_pairing(&blob)
 }
 
 fn view(server: Server) -> ServerView {
@@ -92,6 +172,9 @@ struct SaveRequest {
 #[tauri::command]
 fn servers_save(app: State<'_, App>, request: SaveRequest) -> Result<ServerView, String> {
     let mut server = request.server;
+    let previous_kind = (!server.id.is_empty())
+        .then(|| app.store.get(&server.id).ok().map(|saved| saved.kind))
+        .flatten();
     server.name = server.name.trim().to_string();
     server.host = server.host.trim().to_string();
     server.key_path = server
@@ -103,9 +186,20 @@ fn servers_save(app: State<'_, App>, request: SaveRequest) -> Result<ServerView,
     }
     store::validate(&server)?;
     match request.token.as_deref().map(str::trim) {
+        None if previous_kind.is_some_and(|kind| kind != server.kind) => {
+            store::clear_token(&server.id)
+        }
         None => {}
         Some("") => store::clear_token(&server.id),
-        Some(token) if store::valid_token(token) => store::set_token(&server.id, token)?,
+        Some(token)
+            if (server.kind == ServerKind::Native && store::valid_token(token))
+                || (server.kind == ServerKind::Legacy && store::valid_agent_token(token)) =>
+        {
+            store::set_token(&server.id, token)?
+        }
+        Some(_) if server.kind == ServerKind::Legacy => {
+            return Err("That doesn't look like an mxb-agent token.".into())
+        }
         Some(_) => return Err("That doesn't look like an admin token (id.secret).".into()),
     }
     app.store.upsert(server.clone())?;
@@ -211,6 +305,55 @@ async fn fetch_once(
     }
 }
 
+/// Call the authenticated mxb-agent used by Legacy connecting. Unlike native SSH servers,
+/// this is a direct agent connection and therefore works with the official Windows host.
+async fn legacy_request(
+    app: &App,
+    server: &Server,
+    method: reqwest::Method,
+    path: &str,
+    body: Option<&Value>,
+) -> Result<(u16, String), String> {
+    let token = store::token(&server.id).ok_or("No mxb-agent token is saved for this server.")?;
+    let host = if server.local {
+        "127.0.0.1"
+    } else {
+        server.host.as_str()
+    };
+    let scheme = if server.agent_tls { "https" } else { "http" };
+    let host = if host.contains(':') {
+        format!("[{host}]")
+    } else {
+        host.to_string()
+    };
+    let url = format!("{scheme}://{host}:{}{}", server.observe_port, path);
+    let mut request = app.http.request(method, url).bearer_auth(token);
+    if let Some(body) = body {
+        request = request
+            .header(reqwest::header::CONTENT_TYPE, "application/json")
+            .body(body.to_string());
+    }
+    let response = request
+        .send()
+        .await
+        .map_err(|e| format!("can't reach mxb-agent: {e}"))?;
+    let status = response.status().as_u16();
+    let text = response.text().await.map_err(|e| e.to_string())?;
+    Ok((status, text))
+}
+
+fn json_answer(code: u16, body: &str, label: &str) -> Result<Value, String> {
+    let value: Value = serde_json::from_str(body).map_err(|e| format!("{label}: {e}"))?;
+    if (200..300).contains(&code) {
+        Ok(value)
+    } else {
+        Err(value["error"]
+            .as_str()
+            .map(str::to_string)
+            .unwrap_or_else(|| format!("{label} answered HTTP {code}")))
+    }
+}
+
 /// One word for how a server is doing, and the detail behind it.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -230,6 +373,31 @@ async fn server_status(app: State<'_, App>, id: String) -> Result<StatusReport, 
         detail,
         status: None,
     };
+    if server.kind == ServerKind::Legacy {
+        let (code, body) =
+            match legacy_request(&app, &server, reqwest::Method::GET, "/status", None).await {
+                Ok(answer) => answer,
+                Err(error) => return Ok(report("unreachable", error)),
+            };
+        if code != 200 {
+            return Ok(report(
+                "unreachable",
+                format!("mxb-agent answered HTTP {code}"),
+            ));
+        }
+        let status: Value =
+            serde_json::from_str(&body).map_err(|e| format!("legacy status: {e}"))?;
+        let running = status["game"]["running"].as_bool().unwrap_or(false);
+        return Ok(StatusReport {
+            state: if running { "online" } else { "offline" },
+            detail: if running {
+                "Official dedicated server is running.".into()
+            } else {
+                "mxb-agent is connected; the dedicated server is stopped.".into()
+            },
+            status: Some(status),
+        });
+    }
     if !server.local {
         let tunnels = Arc::clone(&app.tunnels);
         let port = server.observe_port.to_string();
@@ -320,6 +488,19 @@ struct TokenCheck {
 async fn server_test_token(app: State<'_, App>, id: String) -> Result<TokenCheck, String> {
     let server = app.store.get(&id)?;
     let fail = |message: String| Ok(TokenCheck { ok: false, message });
+    if server.kind == ServerKind::Legacy {
+        return match legacy_request(&app, &server, reqwest::Method::GET, "/capabilities", None)
+            .await
+        {
+            Ok((200, _)) => Ok(TokenCheck {
+                ok: true,
+                message: "mxb-agent connected.".into(),
+            }),
+            Ok((401, _)) => fail("mxb-agent refused this token.".into()),
+            Ok((code, _)) => fail(format!("mxb-agent answered HTTP {code}.")),
+            Err(error) => fail(error),
+        };
+    }
     let Some(admin) = server.admin_port else {
         return fail(
             "Set the admin port first (the [admin] listen port in the server's config).".into(),
@@ -347,6 +528,25 @@ async fn server_test_token(app: State<'_, App>, id: String) -> Result<TokenCheck
 #[tauri::command]
 async fn server_riders(app: State<'_, App>, id: String) -> Result<Value, String> {
     let server = app.store.get(&id)?;
+    if server.kind == ServerKind::Legacy {
+        let (code, body) =
+            legacy_request(&app, &server, reqwest::Method::GET, "/players", None).await?;
+        let value = json_answer(code, &body, "legacy riders")?;
+        let riders = value["players"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(|player| {
+                serde_json::json!({
+                    "connection_id": player["id"], "entity_id": null,
+                    "name": player["name"], "bike": null, "state": "connected",
+                    "connected_seconds": 0, "laps": 0, "best_lap_seconds": null,
+                    "ping_ms": null, "guid": player["guid"]
+                })
+            })
+            .collect::<Vec<_>>();
+        return Ok(serde_json::json!({ "riders": riders }));
+    }
     if !server.local {
         let tunnels = Arc::clone(&app.tunnels);
         let port = server.observe_port.to_string();
@@ -382,6 +582,26 @@ struct TrackState {
 #[tauri::command]
 async fn server_tracks(app: State<'_, App>, id: String) -> Result<TrackState, String> {
     let server = app.store.get(&id)?;
+    if server.kind == ServerKind::Legacy {
+        let (tracks_code, tracks_body) =
+            legacy_request(&app, &server, reqwest::Method::GET, "/tracks", None).await?;
+        let tracks = json_answer(tracks_code, &tracks_body, "legacy tracks")?;
+        let (status_code, status_body) =
+            legacy_request(&app, &server, reqwest::Method::GET, "/status", None).await?;
+        let status = json_answer(status_code, &status_body, "legacy status")?;
+        let installed = tracks["tracks"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|v| v.as_str().map(str::to_string))
+            .collect::<Vec<_>>();
+        return Ok(TrackState {
+            library: installed.clone(),
+            installed,
+            current: status["server"]["track"].as_str().map(str::to_string),
+            rotation: Vec::new(),
+        });
+    }
     if server.local {
         return Err("Track management for a server on this PC is not wired yet.".into());
     }
@@ -441,6 +661,12 @@ async fn server_track_membership(
     attached: bool,
 ) -> Result<Value, String> {
     let server = app.store.get(&id)?;
+    if server.kind == ServerKind::Legacy {
+        return Err(
+            "Legacy connecting uses the tracks installed in the official server's mods folder."
+                .into(),
+        );
+    }
     if server.local {
         return Err("Shared track management requires a server connected over SSH.".into());
     }
@@ -464,6 +690,18 @@ async fn server_track_membership(
 #[tauri::command]
 async fn server_set_track(app: State<'_, App>, id: String, track: String) -> Result<Value, String> {
     let server = app.store.get(&id)?;
+    if server.kind == ServerKind::Legacy {
+        let payload = serde_json::json!({ "track": track.trim() });
+        let (code, body) = legacy_request(
+            &app,
+            &server,
+            reqwest::Method::PUT,
+            "/config",
+            Some(&payload),
+        )
+        .await?;
+        return json_answer(code, &body, "select track");
+    }
     if server.local {
         return Err("Track selection for a server on this PC is not wired yet.".into());
     }
@@ -487,6 +725,12 @@ async fn server_set_rotation(
     tracks: Vec<String>,
 ) -> Result<Value, String> {
     let server = app.store.get(&id)?;
+    if server.kind == ServerKind::Legacy {
+        return Err(
+            "The official dedicated server has no live track rotation. Select one track at a time."
+                .into(),
+        );
+    }
     if server.local {
         return Err("Track rotation for a server on this PC is not wired yet.".into());
     }
@@ -516,6 +760,9 @@ async fn server_set_rotation(
 #[tauri::command]
 async fn server_update_github(app: State<'_, App>, id: String) -> Result<Value, String> {
     let server = app.store.get(&id)?;
+    if server.kind == ServerKind::Legacy {
+        return Err("GitHub updates are only for mxbserver.".into());
+    }
     if server.local {
         return Err("GitHub updates require a server connected over SSH.".into());
     }
@@ -575,6 +822,9 @@ async fn server_session(
     to: Option<String>,
 ) -> Result<Value, String> {
     let server = app.store.get(&id)?;
+    if server.kind == ServerKind::Legacy {
+        return Err("The official dedicated server does not expose live session controls through mxb-agent.".into());
+    }
     if server.local {
         return Err("Live session control for a server on this PC is not wired yet.".into());
     }
@@ -621,6 +871,9 @@ async fn server_upload(
     version: Option<String>,
 ) -> Result<Value, String> {
     let server = app.store.get(&id)?;
+    if server.kind == ServerKind::Legacy {
+        return Err("Legacy connecting uses tracks and game versions already installed on the official server host.".into());
+    }
     if server.local {
         return Err("Uploads for a server on this PC are not wired yet.".into());
     }
@@ -796,6 +1049,22 @@ async fn inspect_track_upload(path: String) -> Result<TrackUploadCheck, String> 
 #[tauri::command]
 async fn server_logs(app: State<'_, App>, id: String, lines: u32) -> Result<Vec<String>, String> {
     let server = app.store.get(&id)?;
+    if server.kind == ServerKind::Legacy {
+        let (code, body) =
+            legacy_request(&app, &server, reqwest::Method::GET, "/logs", None).await?;
+        let value = json_answer(code, &body, "legacy logs")?;
+        return Ok(value["lines"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|line| line.as_str().map(str::to_string))
+            .rev()
+            .take(lines.min(500) as usize)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .collect());
+    }
     if server.local {
         return local_tail(&server.log_path, lines);
     }
@@ -803,6 +1072,62 @@ async fn server_logs(app: State<'_, App>, id: String, lines: u32) -> Result<Vec<
     tauri::async_runtime::spawn_blocking(move || tunnels.tail(&server, lines))
         .await
         .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn legacy_config(app: State<'_, App>, id: String) -> Result<Value, String> {
+    let server = app.store.get(&id)?;
+    if server.kind != ServerKind::Legacy {
+        return Err("This server does not use Legacy connecting.".into());
+    }
+    let (code, body) = legacy_request(&app, &server, reqwest::Method::GET, "/status", None).await?;
+    json_answer(code, &body, "legacy settings")
+}
+
+#[tauri::command]
+async fn legacy_config_save(
+    app: State<'_, App>,
+    id: String,
+    name: String,
+    track: String,
+    max_clients: u32,
+) -> Result<Value, String> {
+    let server = app.store.get(&id)?;
+    if server.kind != ServerKind::Legacy {
+        return Err("This server does not use Legacy connecting.".into());
+    }
+    let name = name.trim();
+    let track = track.trim();
+    if name.is_empty()
+        || name.len() > 100
+        || track.is_empty()
+        || max_clients == 0
+        || max_clients > 50
+    {
+        return Err("Enter a server name, an installed track, and 1–50 riders.".into());
+    }
+    let payload = serde_json::json!({ "name": name, "track": track, "maxClients": max_clients });
+    let (code, body) = legacy_request(
+        &app,
+        &server,
+        reqwest::Method::PUT,
+        "/config",
+        Some(&payload),
+    )
+    .await?;
+    json_answer(code, &body, "save legacy settings")
+}
+
+#[tauri::command]
+async fn legacy_process(app: State<'_, App>, id: String, action: String) -> Result<Value, String> {
+    let server = app.store.get(&id)?;
+    if server.kind != ServerKind::Legacy || !matches!(action.as_str(), "start" | "stop" | "restart")
+    {
+        return Err("Unknown Legacy connecting action.".into());
+    }
+    let path = format!("/{action}");
+    let (code, body) = legacy_request(&app, &server, reqwest::Method::POST, &path, None).await?;
+    json_answer(code, &body, "legacy process control")
 }
 
 /// The last `lines` lines of a log file on this PC, reading at most its last 1 MiB.
@@ -999,7 +1324,7 @@ fn main() {
             let dir = app.path().app_data_dir()?;
             let http = reqwest::Client::builder()
                 .timeout(Duration::from_secs(5))
-                // Only ever our own tunnels on 127.0.0.1; never an OS proxy.
+                // Server connections are explicit; never leak their credentials to an OS proxy.
                 .no_proxy()
                 .build()?;
             app.manage(App {
@@ -1013,6 +1338,7 @@ fn main() {
             servers_list,
             servers_save,
             servers_remove,
+            legacy_pairing,
             server_status,
             server_riders,
             server_tracks,
@@ -1025,6 +1351,9 @@ fn main() {
             inspect_track_upload,
             server_logs,
             server_test_token,
+            legacy_config,
+            legacy_config_save,
+            legacy_process,
             config_load,
             config_preview,
             config_validate,

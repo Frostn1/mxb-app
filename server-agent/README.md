@@ -76,6 +76,7 @@ Every endpoint except `/health` requires `Authorization: Bearer <token>`.
 | GET | `/capabilities` | API version, server kind, supported actions and upload limits. |
 | GET | `/status` | Game process state plus name/track/maxClients from the `.ini`. |
 | GET | `/players` | Who is connected, with the GUID that identifies them, read from the server's log. |
+| GET | `/logs` | Last 500 lines of the stock server log. |
 | GET | `/tracks` | Track names this host has installed — the only values `PUT /config` will usefully accept. |
 | POST | `/start` | Start the game if it isn't up. Idempotent. |
 | POST | `/stop` | Stop it. Idempotent, and suppresses the crash watcher. |
