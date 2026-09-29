@@ -5,9 +5,10 @@ The Windows builds of **MXB App**, **Frost Studio** and **MXB Coach** are signed
 service, new names). All three are built by this repo's release workflows, so everything below
 is set up once, here.
 
-Until every value in [step 7](#7-add-the-github-secrets-and-variables) exists, the release
-workflows log *"Windows code signing skipped"* and build unsigned, exactly as today. Nothing
-fails, so this can be done at your own pace.
+Until every value in [step 7](#7-add-the-github-secrets-and-variables) exists, a manually
+dispatched test build logs *"Windows code signing skipped"* and remains unsigned. A tag-triggered
+release in `Frostn1/mxb-app` fails before publishing instead: a release must never accidentally
+ship unsigned.
 
 **What gets signed:** each app's exe, its NSIS installer and uninstaller (Tauri signs these as it
 bundles, through `bundle.windows.signCommand`), and `mxbsecure.dll`, the secure-content DLL the game loads as a plugin (`plugins\mxbsecure.dlo`).
@@ -167,7 +168,7 @@ Secrets can also go on the `code-signing` environment instead of the repo. Eithe
 ## 8. Check it
 
 1. Run **Release** (MXB App) from the Actions tab with *Run workflow* on a branch. That's a
-   throwaway build, published as a pre-release.
+   throwaway build, published as a pre-release. Confirm the signature before creating any tag.
 2. In the Windows leg, the *Set up Windows code signing* step should print *Artifact Signing
    ready*, and the build log should show `sign-windows: signed …` lines for the exe,
    `mxbsecure.dll` and the installer.
