@@ -869,7 +869,13 @@ async function assetExists(assetId: string, env: Env): Promise<boolean> {
  * CORS headers for an allowed origin; always `Vary: Origin`, since the answer depends on it.
  * Credentials are allowed so the sign-in cookie rides along from the site.
  */
-export function cors(response: Response, origin: string | null, preflight = false, methods = "GET, POST, PATCH, DELETE, OPTIONS"): Response {
+export function cors(
+  response: Response,
+  origin: string | null,
+  preflight = false,
+  methods = "GET, POST, PATCH, DELETE, OPTIONS",
+  headers = "Authorization, Content-Type",
+): Response {
   const out = new Response(response.body, response);
   out.headers.append("Vary", "Origin");
   if (origin) {
@@ -877,7 +883,7 @@ export function cors(response: Response, origin: string | null, preflight = fals
     out.headers.set("Access-Control-Allow-Credentials", "true");
     if (preflight) {
       out.headers.set("Access-Control-Allow-Methods", methods);
-      out.headers.set("Access-Control-Allow-Headers", "Authorization, Content-Type");
+      out.headers.set("Access-Control-Allow-Headers", headers);
       out.headers.set("Access-Control-Max-Age", "600");
     }
   }
