@@ -69,7 +69,7 @@
     // Who may use the FBX -> EDF converter on mxbsecure.com, besides the admins, who always
     // may: SteamID64s, comma or space separated. Empty means the admins alone. A list here
     // rather than a table so that granting it is a reviewable diff, like the admin list above.
-    "MXB_CONVERTER_STEAM_IDS": "76561199650233712,76561199807040854"
+    "MXB_CONVERTER_STEAM_IDS": "76561199650233712,76561199807040854,76561198798423111"
   },
 
   // The idle reaper. Every five minutes it asks each running server who is connected and
