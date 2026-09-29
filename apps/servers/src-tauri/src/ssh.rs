@@ -35,7 +35,12 @@ fn base_args(server: &Server) -> Vec<String> {
         "StrictHostKeyChecking=accept-new".into(),
     ];
     if let Some(key) = &server.key_path {
-        args.extend(["-i".into(), key.clone(), "-o".into(), "IdentitiesOnly=yes".into()]);
+        args.extend([
+            "-i".into(),
+            key.clone(),
+            "-o".into(),
+            "IdentitiesOnly=yes".into(),
+        ]);
     }
     args
 }
@@ -54,6 +59,48 @@ fn command() -> Command {
     }
     cmd.stdin(Stdio::null());
     cmd
+}
+
+fn scp_command() -> Command {
+    let mut cmd = Command::new("scp");
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    cmd.stdin(Stdio::null());
+    cmd
+}
+
+fn scp_args(server: &Server, local: &str, remote_name: &str) -> Option<Vec<String>> {
+    if !plain_word(remote_name) || remote_name.contains('.') {
+        return None;
+    }
+    let mut args = vec![
+        "-P".into(),
+        server.ssh_port.to_string(),
+        "-o".into(),
+        "BatchMode=yes".into(),
+        "-o".into(),
+        "ConnectTimeout=10".into(),
+        "-o".into(),
+        "StrictHostKeyChecking=accept-new".into(),
+    ];
+    if let Some(key) = &server.key_path {
+        args.extend([
+            "-i".into(),
+            key.clone(),
+            "-o".into(),
+            "IdentitiesOnly=yes".into(),
+        ]);
+    }
+    args.extend([
+        "--".into(),
+        local.into(),
+        format!("{}:/tmp/{remote_name}", destination(server)),
+    ]);
+    Some(args)
 }
 
 /// The arguments of a tunnel from `local` to the server's loopback `remote` port.
@@ -110,7 +157,11 @@ impl Registry {
 
     /// Kill and reap one process, and forget it.
     fn kill(&self, id: u64) {
-        let child = self.children.lock().ok().and_then(|mut all| all.remove(&id));
+        let child = self
+            .children
+            .lock()
+            .ok()
+            .and_then(|mut all| all.remove(&id));
         if let Some(child) = child {
             if let Ok(mut child) = child.lock() {
                 let _ = child.kill();
@@ -180,6 +231,48 @@ fn free_port() -> Result<u16, String> {
 }
 
 impl Tunnels {
+    /// Copy one local file to a random, checked name in the server's /tmp directory.
+    pub fn upload(
+        &self,
+        server: &Server,
+        local: &str,
+        remote_name: &str,
+        secs: u64,
+    ) -> Result<(), String> {
+        let args = scp_args(server, local, remote_name).ok_or("unsafe upload destination")?;
+        let mut cmd = scp_command();
+        cmd.args(args).stdout(Stdio::null()).stderr(Stdio::piped());
+        let (id, child) = self.registry.spawn(cmd)?;
+        let deadline = Instant::now() + Duration::from_secs(secs);
+        loop {
+            let status = child
+                .lock()
+                .ok()
+                .and_then(|mut c| c.try_wait().ok().flatten());
+            if let Some(status) = status {
+                let mut why = String::new();
+                if let Ok(mut child) = child.lock() {
+                    if let Some(mut err) = child.stderr.take() {
+                        let _ = err.read_to_string(&mut why);
+                    }
+                }
+                self.registry.kill(id);
+                return if status.success() {
+                    Ok(())
+                } else if why.trim().is_empty() {
+                    Err(format!("scp exited ({status})"))
+                } else {
+                    Err(why.trim().into())
+                };
+            }
+            if Instant::now() > deadline {
+                self.registry.kill(id);
+                return Err(format!("upload to {} timed out", server.host));
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+    }
+
     fn slot(&self, key: &Key) -> Result<Slot, String> {
         let mut slots = self.slots.lock().map_err(|_| "tunnel lock poisoned")?;
         Ok(Arc::clone(slots.entry(key.clone()).or_default()))
@@ -327,7 +420,11 @@ impl ScriptOutput {
 
     /// Everything that is not an `@@` line: what a person should see.
     pub fn text(&self) -> String {
-        let out: Vec<&str> = self.stdout.lines().filter(|l| !l.starts_with("@@")).collect();
+        let out: Vec<&str> = self
+            .stdout
+            .lines()
+            .filter(|l| !l.starts_with("@@"))
+            .collect();
         let mut text = out.join("\n");
         if !self.stderr.trim().is_empty() {
             if !text.is_empty() {

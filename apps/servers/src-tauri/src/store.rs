@@ -68,7 +68,9 @@ pub fn validate(server: &Server) -> Result<(), String> {
     }
     if server.local {
         if !Path::new(&server.log_path).is_absolute() {
-            return Err(r"Log file must be a full path, like C:\mxbserver\logs\mxbserver.log".into());
+            return Err(
+                r"Log file must be a full path, like C:\mxbserver\logs\mxbserver.log".into(),
+            );
         }
         return Ok(());
     }
@@ -84,7 +86,9 @@ pub fn validate(server: &Server) -> Result<(), String> {
     }
     let user_ok = !server.user.is_empty()
         && server.user.len() <= 32
-        && server.user.starts_with(|c: char| c.is_ascii_lowercase() || c == '_')
+        && server
+            .user
+            .starts_with(|c: char| c.is_ascii_lowercase() || c == '_')
         && server
             .user
             .chars()
@@ -235,17 +239,33 @@ mod tests {
     #[test]
     fn nothing_can_become_an_ssh_option_or_shell_syntax() {
         for host in ["-oProxyCommand=x", "a b", "a;b", "a$(x)", ""] {
-            let s = Server { host: host.into(), ..server() };
+            let s = Server {
+                host: host.into(),
+                ..server()
+            };
             assert!(validate(&s).is_err(), "{host}");
         }
         for user in ["-l", "Root", "a b", "a;b", ""] {
-            let s = Server { user: user.into(), ..server() };
+            let s = Server {
+                user: user.into(),
+                ..server()
+            };
             assert!(validate(&s).is_err(), "{user}");
         }
-        for path in ["logs/x", "/a b", "/a;rm", "/a/../etc/shadow", "/$(x)", "/a'b"] {
+        for path in [
+            "logs/x",
+            "/a b",
+            "/a;rm",
+            "/a/../etc/shadow",
+            "/$(x)",
+            "/a'b",
+        ] {
             assert!(!safe_remote_path(path), "{path}");
         }
-        let s = Server { key_path: Some("-oProxyCommand=x".into()), ..server() };
+        let s = Server {
+            key_path: Some("-oProxyCommand=x".into()),
+            ..server()
+        };
         assert!(validate(&s).is_err());
     }
 
@@ -259,7 +279,10 @@ mod tests {
             ..server()
         };
         assert_eq!(validate(&local), Ok(()));
-        let relative = Server { log_path: "logs/x.log".into(), ..local };
+        let relative = Server {
+            log_path: "logs/x.log".into(),
+            ..local
+        };
         assert!(validate(&relative).is_err());
     }
 
@@ -277,7 +300,12 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("mxb-servers-{}", new_id()));
         let store = Store::new(dir.clone());
         store.upsert(server()).unwrap();
-        store.upsert(Server { name: "Renamed".into(), ..server() }).unwrap();
+        store
+            .upsert(Server {
+                name: "Renamed".into(),
+                ..server()
+            })
+            .unwrap();
         assert_eq!(store.load().len(), 1);
         assert_eq!(store.get("a").unwrap().name, "Renamed");
         let text = fs::read_to_string(dir.join("servers.json")).unwrap();

@@ -12,26 +12,15 @@ import {
   type FieldValue,
   type ServerView,
 } from "@/lib/api";
-import { Button, Card, ErrorLine, Notice, Toggle } from "./ui";
+import { Button, ErrorLine, Notice, Toggle } from "./ui";
 
 /** The page's topics, in order. */
-const GROUPS: { id: string; title: string; blurb: string; collapsed?: boolean }[] = [
-  { id: "ghosts", title: "Ghost riders", blurb: "Recorded riders that lap alongside the players." },
-  { id: "race", title: "Race and sessions", blurb: "Session lengths and how many players can join." },
-  { id: "events", title: "Events", blurb: "What the server keeps track of." },
-  {
-    id: "advanced",
-    title: "Advanced switches",
-    blurb: "Experiments from the protocol work. Leave them off unless you're testing one.",
-    collapsed: true,
-  },
-];
-
-const restartText: Record<string, string> = {
-  systemd: "the server restarts (systemd)",
-  bare: "the server restarts, the same way the deploy scripts restart it",
-  local: "the server on this PC restarts",
-};
+const GROUPS = [
+  { id: "ghosts", title: "Bots" },
+  { id: "race", title: "Race format" },
+  { id: "events", title: "Event logging" },
+  { id: "advanced", title: "Advanced" },
+] as const;
 
 type Step =
   | { kind: "edit" }
@@ -48,6 +37,8 @@ export function ConfigTab({ server }: { server: ServerView }) {
   const [step, setStep] = useState<Step>({ kind: "edit" });
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [activeGroup, setActiveGroup] = useState<(typeof GROUPS)[number]["id"]>("ghosts");
+  const [query, setQuery] = useState("");
 
   const load = useCallback(async () => {
     setBusy("Reading the server's settings…");
@@ -75,6 +66,16 @@ export function ConfigTab({ server }: { server: ServerView }) {
     return out;
   }, [values, state]);
   const changed = Object.keys(changes).length;
+  const matches = useCallback((f: ConfigField) => {
+    const q = query.trim().toLowerCase();
+    return !q || `${f.label} ${f.help}`.toLowerCase().includes(q);
+  }, [query]);
+
+  useEffect(() => {
+    if (!state || !query || state.fields.some((f) => f.group === activeGroup && matches(f))) return;
+    const first = GROUPS.find((g) => state.fields.some((f) => f.group === g.id && matches(f)));
+    if (first) setActiveGroup(first.id);
+  }, [activeGroup, matches, query, state]);
 
   const review = async () => {
     if (!state) return;
@@ -123,16 +124,43 @@ export function ConfigTab({ server }: { server: ServerView }) {
   const setValue = (f: ConfigField, v: FieldValue) => setValues({ ...values, [`${f.section}.${f.key}`]: v });
 
   return (
-    <div className="flex max-w-3xl flex-col gap-6 pb-4">
+    <div className="flex h-full min-h-0 flex-col gap-4">
       {error && <ErrorLine text={error} />}
 
       {step.kind === "edit" && (
         <>
-          {GROUPS.map((g) => {
-            const fields = state.fields.filter((f) => f.group === g.id);
-            if (fields.length === 0) return null;
-            return (
-              <Group key={g.id} title={g.title} blurb={g.blurb} collapsed={g.collapsed}>
+          <div className="grid min-h-0 flex-1 gap-6 md:grid-cols-[13rem_minmax(0,1fr)]">
+            <div className="flex min-h-0 flex-col gap-3">
+              <input className="h-9 rounded-md border border-input bg-card px-3 text-sm outline-none focus:border-ring" placeholder="Search settings" value={query} onChange={(e) => setQuery(e.target.value)} />
+              <nav className="flex gap-1 overflow-x-auto md:flex-col md:overflow-visible" aria-label="Settings categories">
+              {GROUPS.map((g) => {
+                const changedHere = state.fields.filter((f) => f.group === g.id && `${f.section}.${f.key}` in changes).length;
+                const found = state.fields.filter((f) => f.group === g.id && matches(f)).length;
+                return (
+                  <button
+                    key={g.id}
+                    type="button"
+                    onClick={() => setActiveGroup(g.id)}
+                    aria-current={activeGroup === g.id ? "page" : undefined}
+                    className={`flex shrink-0 items-center justify-between gap-3 rounded-md px-3 py-2 text-left text-sm font-medium ${
+                      activeGroup === g.id ? "bg-accent text-foreground" : "text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+                    }`}
+                  >
+                    <span>{g.title}</span>
+                    <span className="flex items-center gap-1.5">
+                      {query && <span className="text-xs text-muted-foreground">{found}</span>}
+                      {changedHere > 0 && <span className="rounded-full bg-primary px-1.5 text-xs text-primary-foreground">{changedHere}</span>}
+                    </span>
+                  </button>
+                );
+              })}
+              </nav>
+            </div>
+            {GROUPS.filter((g) => g.id === activeGroup).map((g) => {
+              const fields = state.fields.filter((f) => f.group === g.id && matches(f));
+              return (
+                <Group key={g.id} title={g.title}>
+                {fields.length === 0 && <p className="py-4 text-sm text-muted-foreground">No matching settings.</p>}
                 <FieldList fields={fields.filter((f) => !f.advanced)} values={values} changes={changes} onChange={setValue} />
                 {fields.some((f) => f.advanced) && (
                   <Disclosure title="More settings">
@@ -140,21 +168,15 @@ export function ConfigTab({ server }: { server: ServerView }) {
                   </Disclosure>
                 )}
               </Group>
-            );
-          })}
-          <p className="text-xs text-muted-foreground">
-            Settings file: <span className="font-mono">{state.path}</span>. Applying changes means{" "}
-            {restartText[state.mode] ?? "a restart"}.
-          </p>
-          <div className="sticky bottom-0 flex items-center gap-3 border-t bg-background py-3">
+              );
+            })}
+          </div>
+          <div className="flex shrink-0 items-center gap-3 border-t bg-background py-3">
             <Button variant="primary" disabled={!changed || !!busy} onClick={() => void review()}>
-              {changed ? `Review ${changed} change${changed === 1 ? "" : "s"}` : "No changes"}
+              {changed ? `Save ${changed} change${changed === 1 ? "" : "s"}` : "Saved"}
             </Button>
             <Button disabled={!changed || !!busy} onClick={() => setValues(state.values)}>
-              Discard
-            </Button>
-            <Button variant="ghost" disabled={!!busy} onClick={() => void load()}>
-              Reload
+              Reset changes
             </Button>
             {busy && <span className="text-sm text-muted-foreground">{busy}</span>}
           </div>
@@ -216,19 +238,12 @@ export function ConfigTab({ server }: { server: ServerView }) {
   );
 }
 
-function Group({ title, blurb, collapsed = false, children }: { title: string; blurb: string; collapsed?: boolean; children: ReactNode }) {
-  const [open, setOpen] = useState(!collapsed);
+function Group({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <Card className="flex flex-col gap-2 p-6">
-      <button type="button" className="flex items-start gap-2 text-left" onClick={() => setOpen(!open)} aria-expanded={open}>
-        {open ? <ChevronDown className="mt-1 size-4 shrink-0" /> : <ChevronRight className="mt-1 size-4 shrink-0" />}
-        <span className="flex flex-col">
-          <span className="font-heading text-lg font-extrabold tracking-tight">{title}</span>
-          <span className="text-sm text-muted-foreground">{blurb}</span>
-        </span>
-      </button>
-      {open && <div className="mt-3 flex flex-col">{children}</div>}
-    </Card>
+    <section className="min-h-0 overflow-y-auto pr-6">
+      <h3 className="font-heading text-lg font-extrabold tracking-tight">{title}</h3>
+      <div className="mt-3 flex flex-col">{children}</div>
+    </section>
   );
 }
 

@@ -210,7 +210,7 @@ export function ErrorLine({ text }: { text: string }) {
 export function Notice({ tone = "info", children }: { tone?: "info" | "ok" | "bad"; children: ReactNode }) {
   const color = tone === "ok" ? "var(--success)" : tone === "bad" ? "var(--destructive)" : "var(--primary)";
   return (
-    <div className="rounded-lg border-l-4 bg-muted px-4 py-3 text-sm" style={{ borderLeftColor: color }}>
+    <div className="rounded-lg border bg-muted px-4 py-3 text-sm" style={{ borderColor: `color-mix(in srgb, ${color} 28%, transparent)` }}>
       {children}
     </div>
   );
