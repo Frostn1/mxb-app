@@ -521,6 +521,18 @@ fn stage_injector(app: &AppHandle) -> Option<PathBuf> {
 fn write_manifest(assets: &[SecureAsset], dir: &std::path::Path) -> Result<(), String> {
     let mut out = String::new();
     for a in assets {
+        // `game_name` originates in the secured blob's header, and the paths can originate in a
+        // user-selected mods directory.  The plugin consumes TSV, so reject separators rather
+        // than allowing one asset to forge a second manifest record.
+        for (field, value) in [
+            ("game name", a.game_name.as_str()),
+            ("blob path", a.blob_path.as_str()),
+            ("key path", a.mxbkey_path.as_str()),
+        ] {
+            if value.contains(&['\t', '\r', '\n'][..]) {
+                return Err(format!("secure manifest {field} contains a record separator"));
+            }
+        }
         out.push_str(&format!("{}\t{}\t{}\n", a.game_name, a.blob_path, a.mxbkey_path));
     }
     std::fs::write(dir.join("manifest.tsv"), out).map_err(|e| e.to_string())
@@ -997,6 +1009,21 @@ fn inject(_app: &AppHandle, _dll: &std::path::Path) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_secured_header_cannot_inject_a_second_manifest_record() {
+        let dir = std::env::temp_dir().join(format!("frost-manifest-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let asset = SecureAsset {
+            game_name: "pinehill.pkz\nother.pkz\tother.blob\tother.key".into(),
+            blob_path: "pinehill.mxbsecure".into(),
+            mxbkey_path: "pinehill.mxbsecurekey".into(),
+        };
+
+        assert!(write_manifest(&[asset], &dir).is_err());
+        assert!(!dir.join("manifest.tsv").exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     /// The game loads the plugin only at startup, so whether a copy was already in place is
     /// the difference between "serving now" and "from the next start" — and an unchanged copy
