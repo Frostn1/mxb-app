@@ -120,8 +120,8 @@ jobs:
       # What shipped, for the release page. Reads this tag's section of CHANGELOG.md,
       # headed `## <date> — Frost's Studio v…`, so the Studio's v0.4.0 can't come out
       # reading the MXB App's. Falls back to the download guidance alone with no section.
-      # Windows code signing (Azure Artifact Signing). Skips with a notice until the secrets and
-      # variables in docs/signing/SETUP.md exist, and the build ships unsigned as before.
+      # Windows code signing (Azure Artifact Signing). An ad-hoc dispatch can remain unsigned,
+      # but a canonical tag must fail rather than publish an unsigned Studio release.
       - name: Set up Windows code signing
         id: signing
         if: ${{ startsWith(matrix.platform, 'windows') }}
@@ -133,6 +133,7 @@ jobs:
           endpoint: ${{ vars.ARTIFACT_SIGNING_ENDPOINT }}
           account: ${{ vars.ARTIFACT_SIGNING_ACCOUNT }}
           profile: ${{ vars.ARTIFACT_SIGNING_PROFILE }}
+          required: ${{ github.repository == 'Frostn1/mxb-app' && github.ref_type == 'tag' }}
 
       - name: Compose release notes
         id: notes
