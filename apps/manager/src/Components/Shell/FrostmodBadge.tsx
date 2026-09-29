@@ -104,16 +104,20 @@ export default function FrostmodBadge() {
               >
                 <RefreshCw className="size-3.5" /> {t("frostmod.reloadGame")}
               </button>
-              <button
-                onClick={stop}
-                className="flex cursor-default items-center gap-2 px-1.5 py-1.5 text-left text-[11.5px] text-muted-foreground transition-colors hover:bg-foreground/[0.05] hover:text-foreground"
-              >
-                <Square className="size-3.5" /> {t("frostmod.stop")}
-              </button>
+              {/* A plugin goes when the game does; there is no process to stop. */}
+              {!status?.pluginOnly && (
+                <button
+                  onClick={stop}
+                  className="flex cursor-default items-center gap-2 px-1.5 py-1.5 text-left text-[11.5px] text-muted-foreground transition-colors hover:bg-foreground/[0.05] hover:text-foreground"
+                >
+                  <Square className="size-3.5" /> {t("frostmod.stop")}
+                </button>
+              )}
             </>
           ) : (
-            // Nothing to start until the player has explicitly installed it.
-            status?.installed && (
+            // Nothing to start until the player has explicitly installed it — and nothing
+            // to start at all for a plugin, which the game loads as it opens.
+            status?.installed && !status.pluginOnly && (
               <button
                 onClick={start}
                 className="flex cursor-default items-center gap-2 px-1.5 py-1.5 text-left text-[11.5px] text-primary transition-colors hover:bg-foreground/[0.05] hover:brightness-110"

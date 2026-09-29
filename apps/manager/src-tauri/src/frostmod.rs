@@ -61,9 +61,11 @@ pub fn signal_reload() -> ReloadOutcome {
     }
 }
 
-/// Is FrostMod currently running? (Can we open its reload event?)
+/// Is FrostMod's reload event there? (Can we open it?)
+///
+/// FrostMod's game plugin creates this event as it initialises.
 #[cfg(windows)]
-pub fn is_running() -> bool {
+fn launcher_running() -> bool {
     let handle = open_reload_event();
     if handle.is_null() {
         return false;
@@ -91,32 +93,43 @@ pub fn signal_reload() -> ReloadOutcome {
     }
 }
 
-/// Linux: the launcher is a Windows process inside the prefix, so the process table is
-/// where we can see it — its reload event isn't reachable from this side.
-#[cfg(target_os = "linux")]
-pub fn is_running() -> bool {
-    crate::proton::running_exe("frostmod.exe")
-}
-
-/// macOS: the same answer from the same place, asked of `ps` rather than `/proc`. Under
-/// Wine the launcher is a real macOS process whose argv still names `frostmod.exe`.
-#[cfg(target_os = "macos")]
-pub fn is_running() -> bool {
-    crate::winehost::running_exe(
-        &crate::winehost::process_table(),
-        "frostmod.exe",
-        std::process::id(),
-    )
-}
-
 #[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
 pub fn signal_reload() -> ReloadOutcome {
     ReloadOutcome::Unsupported
 }
 
-#[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
+/// The plugin copy the app installed while FrostMod runs as a game plugin.
+///
+/// Held here rather than asked of the app each time because `is_running` is reached from
+/// the command senders, which hold no Tauri handle — the same reason as `COMMAND_DIR`.
+/// Kept current by `frostmod_manage::sync_plugin`, which is what knows the version and the
+/// game folder.
+static PLUGIN_MODE: std::sync::Mutex<Option<std::path::PathBuf>> = std::sync::Mutex::new(None);
+
+/// Set the plugin copy used by `is_running`. Called by `frostmod_manage`.
+pub fn set_plugin_mode(dlo: Option<std::path::PathBuf>) {
+    if let Ok(mut slot) = PLUGIN_MODE.lock() {
+        *slot = dlo;
+    }
+}
+
+/// The installed plugin copy, when FrostMod runs as a plugin alone.
+pub fn plugin_mode() -> Option<std::path::PathBuf> {
+    PLUGIN_MODE.lock().ok().and_then(|slot| slot.clone())
+}
+
+/// Is a plugin-only FrostMod active? It is whenever the game is up with the plugin in its
+/// `plugins` folder: the game loads every `.dlo` there at startup, and there is no process
+/// of FrostMod's own to look for. Pure so the rule is testable without a game.
+pub fn plugin_running(game_running: bool, plugin_installed: bool) -> bool {
+    game_running && plugin_installed
+}
+
+/// Is FrostMod currently running?
+///
+/// FrostMod is running when the game is up with the managed plugin installed.
 pub fn is_running() -> bool {
-    false
+    plugin_mode().is_some_and(|dlo| plugin_running(crate::gameproc::is_game_running(), dlo.exists()))
 }
 
 // ===========================================================================
@@ -478,6 +491,27 @@ pub fn session_plugin_is_safe(tag: Option<&str>) -> bool {
     }
 }
 
+/// The first FrostMod that runs as a PiBoSo game plugin alone, with nothing injected.
+///
+/// From here on the app installs `frostmod.dll` as `<game>\plugins\frostmod.dlo`, points it
+/// at our FrostMod folder with `frostmod.dir`, and never starts `frostmod.exe` — the injector
+/// is what Windows Defender objects to, and a plugin needs none. v0.41.0 is the build that
+/// reads `frostmod.dir` (without it the plugin would keep its log, flags and command file in
+/// the game's `plugins` folder, where the app looks for none of them) and that publishes the
+/// server name in its main session block, which retires `frostmod_session.dlo`.
+///
+/// Below it, and for a tag we can't read, everything stays as it was: an older plugin would
+/// not find its files, and one next to the injected copy would install the same hooks twice.
+pub const PLUGIN_ONLY_MIN_VERSION: &str = "v0.41.0";
+
+/// Does the FrostMod tagged `tag` run as a game plugin alone?
+pub fn plugin_only(tag: Option<&str>) -> bool {
+    match (tag.and_then(version_parts), version_parts(PLUGIN_ONLY_MIN_VERSION)) {
+        (Some(have), Some(min)) => have >= min,
+        _ => false,
+    }
+}
+
 /// The oldest FrostMod that is safe to run against GP Bikes.
 ///
 /// Same shape as [`MODEL_REFRESH_MIN_VERSION`], and the same kind of reason. FrostMod
@@ -570,11 +604,22 @@ impl Attachment {
     }
 }
 
-/// Is this module path FrostMod's injected DLL?
+/// The plugin copy a plugin-only FrostMod runs as ([`PLUGIN_ONLY_MIN_VERSION`]). The game
+/// loads it by that name from its `plugins` folder, so that is the name in its module list.
+const PLUGIN_DLO: &str = "frostmod.dlo";
+
+/// Is this module path FrostMod — the injected DLL, or the full plugin copy?
+///
+/// The plugin copy counts because it *is* FrostMod, loaded by the game rather than pushed in:
+/// without it every plugin-only session would read as "not attached" fifteen seconds in.
+/// `frostmod_session.dlo` does not: it only publishes the server name, and a game with just
+/// that in it has none of what the pill is promising.
 fn is_injected_dll(path: &str) -> bool {
     path.rsplit(['\\', '/'])
         .next()
-        .is_some_and(|name| name.eq_ignore_ascii_case(INJECTED_DLL))
+        .is_some_and(|name| {
+            name.eq_ignore_ascii_case(INJECTED_DLL) || name.eq_ignore_ascii_case(PLUGIN_DLO)
+        })
 }
 
 /// Decide how long a game has been sitting there without FrostMod in it.
@@ -612,6 +657,13 @@ pub fn attachment() -> Attachment {
             Attachment::plain(AttachState::GameNotRunning)
         }
         GameModules::Unavailable => {
+            forget_the_wait();
+            Attachment::plain(AttachState::Unknown)
+        }
+        // A plugin is loaded by the game itself, so a game we can't look inside is no barrier
+        // to it — only to our looking. "Blocked" would tell the rider to change something
+        // that isn't wrong; "can't say" is the truth.
+        GameModules::Denied if plugin_mode().is_some() => {
             forget_the_wait();
             Attachment::plain(AttachState::Unknown)
         }
@@ -667,6 +719,15 @@ fn blocked_reason() -> String {
 /// The game is readable, FrostMod is not in it, and the grace period is up.
 fn not_attached_reason() -> String {
     let game = crate::game::active().display;
+    // As a plugin there is nothing to stop and start: the game loads it as it opens, so a
+    // game that was already open when the plugin went in is the whole explanation.
+    if plugin_mode().is_some() {
+        return format!(
+            "FrostMod is installed as a {game} plugin but isn't in this session — no in-game \
+             pill, no live reloads, no model swaps. The game loads it as it starts, so close \
+             {game} and start it again."
+        );
+    }
     format!(
         "FrostMod is running but hasn't got into {game} — no in-game pill, no live reloads, \
          no model swaps. Stop FrostMod and start it again; if it keeps happening, close \
@@ -909,6 +970,41 @@ mod tests {
         ] {
             assert!(!is_injected_dll(path), "should not be FrostMod's DLL: {path}");
         }
+    }
+
+    /// A plugin-only FrostMod is in the game as `plugins\frostmod.dlo`, and that is attached.
+    /// The session-only copy is not: it publishes the server name and nothing else.
+    #[test]
+    fn the_plugin_copy_counts_as_attached_and_the_session_copy_does_not() {
+        assert!(is_injected_dll(r"C:\Steam\steamapps\common\MX Bikes\plugins\frostmod.dlo"));
+        assert!(is_injected_dll(r"C:\Games\MX Bikes\plugins\FrostMod.DLO"));
+        assert!(!is_injected_dll(r"C:\Games\MX Bikes\plugins\frostmod_session.dlo"));
+        assert!(!is_injected_dll(r"C:\Games\MX Bikes\plugins\frostmod.dlo.disabled"));
+    }
+
+    /// v0.41.0 is the first build that reads `frostmod.dir` and publishes the server in its
+    /// main block; anything older, or a tag we can't read, keeps the injector.
+    #[test]
+    fn plugin_only_starts_at_v0_41_0() {
+        assert!(plugin_only(Some("v0.41.0")));
+        assert!(plugin_only(Some("v0.41.1")));
+        assert!(plugin_only(Some("v1.0.0")));
+        assert!(plugin_only(Some("0.41.0")));
+        assert!(!plugin_only(Some("v0.40.4")));
+        // Numeric, not lexical: "v0.5.0" sorts above "v0.41.0" as a string.
+        assert!(!plugin_only(Some("v0.5.0")));
+        assert!(!plugin_only(Some("nightly")));
+        assert!(!plugin_only(None));
+    }
+
+    /// A plugin has no process of its own: it is running exactly when the game is, with the
+    /// plugin in its `plugins` folder to load.
+    #[test]
+    fn a_plugin_runs_when_the_game_does_and_the_plugin_is_there() {
+        assert!(plugin_running(true, true));
+        assert!(!plugin_running(true, false), "the game is up without it");
+        assert!(!plugin_running(false, true), "installed, but nothing has loaded it");
+        assert!(!plugin_running(false, false));
     }
 
     /// FrostMod injects a moment *after* the game process appears, so the first look is

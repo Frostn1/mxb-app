@@ -1422,21 +1422,9 @@ async fn set_active_game(
     if cfg.watch_mods_reload {
         modwatch::start(&app, &watcher, &cfg.mods_path);
     }
-    // FrostMod reads `--game` and `--mods` once, at launch, and `start` no-ops while one
-    // is already running — so without this a switch leaves FrostMod waiting for the game
-    // we just left while the status pill still reads "running". `force_stop_exe` because
-    // the running one may not be ours to `stop`: a hand-launched frostmod.exe claims the
-    // same named event, and that is exactly how this was first reported.
-    if frostmod::is_running() {
-        frostmod_manage::stop(&frostmod_state);
-        frostmod_manage::force_stop_exe();
-        if let Err(e) = frostmod_manage::start(&app, &frostmod_state) {
-            log::warn!(
-                "could not restart FrostMod for {}: {e:#}",
-                cfg.game().display
-            );
-        }
-    }
+    // FrostMod lives in the active game's own folder:
+    // put it there now, so a launch from Steam before the next status poll still has it.
+    frostmod_manage::sync_if_shut(&app);
     Ok(cfg)
 }
 
@@ -2731,6 +2719,10 @@ fn launch_game(app: tauri::AppHandle) -> Result<gameproc::LaunchOutcome, String>
     // `load_or_detect`, not `load`: a missing config file shouldn't turn Play into an
     // error when the install is sitting exactly where the detector looks.
     let cfg = config::load_or_detect(&app).unwrap_or_default();
+    // A plugin-only FrostMod is loaded by the game as it starts, so this is the last moment
+    // an update that landed during the previous session can go in. The exit poll normally
+    // got there first; a relaunch inside its fifteen seconds would not.
+    frostmod_manage::sync_if_shut(&app);
     let outcome = gameproc::launch(&cfg).map_err(|e| format!("{e:#}"))?;
     if matches!(outcome, gameproc::LaunchOutcome::Launched) {
         usage::track("game.launch");
@@ -5727,21 +5719,13 @@ async fn frostmod_status(app: tauri::AppHandle) -> FrostmodStatus {
 #[tauri::command]
 async fn frostmod_install(
     app: tauri::AppHandle,
-    state: State<'_, FrostmodProcess>,
+    _state: State<'_, FrostmodProcess>,
 ) -> Result<InstallReport, String> {
-    let was_running = frostmod::is_running();
-    let was_installed = frostmod_manage::is_installed(&app);
-    frostmod_manage::stop(&state);
-    frostmod_manage::force_stop_exe();
-
     let report = frostmod_manage::install(&app)
         .await
         .map_err(|e| format!("{e:#}"))?;
 
     usage::track("frostmod.install");
-    if was_running || !was_installed {
-        let _ = frostmod_manage::start(&app, &state);
-    }
     Ok(report)
 }
 
@@ -5823,15 +5807,25 @@ fn frostmod_start(app: tauri::AppHandle, state: State<FrostmodProcess>) -> Resul
 /// Async for the same reason as `set_mods_path`: a sync command runs on the UI thread, and
 /// this one waits out the moment between the kill and the process actually going.
 #[tauri::command]
-async fn frostmod_stop(state: State<'_, FrostmodProcess>) -> Result<bool, String> {
-    Ok(frostmod_manage::stop_running(&state))
+async fn frostmod_stop(
+    app: tauri::AppHandle,
+    state: State<'_, FrostmodProcess>,
+) -> Result<bool, String> {
+    Ok(frostmod_manage::stop_running(&app, &state))
 }
 
+/// Game Integration on or off. For a plugin-only FrostMod this is also what installs or
+/// removes the plugin — there is no process for the switch to start or stop.
+///
+/// Async so the plugin copy, which touches the game folder and on Linux looks up the Proton
+/// prefix, stays off the UI thread.
 #[tauri::command]
-fn set_auto_run_frostmod(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
+async fn set_auto_run_frostmod(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
     let mut cfg = config::load(&app).unwrap_or_default();
     cfg.auto_run_frostmod = enabled;
-    config::save(&app, &cfg).map_err(|e| format!("{e:#}"))
+    config::save(&app, &cfg).map_err(|e| format!("{e:#}"))?;
+    frostmod_manage::integration_changed(&app, &cfg);
+    Ok(())
 }
 
 #[tauri::command]

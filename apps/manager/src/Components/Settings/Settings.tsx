@@ -2594,7 +2594,9 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
                   on `installed` left the one case that needs it most (something running
                   that we didn't put there) with no button at all. Start still needs an
                   install to start. */}
-              {integrationChoice === "enabled" && running ? (
+              {/* Neither for a plugin-only FrostMod: the game loads it and unloads it, and
+                  the integration switch below is what installs or removes it. */}
+              {status?.pluginOnly ? null : integrationChoice === "enabled" && running ? (
                 <Button variant="outline" size="sm" onClick={stop}>
                   <Square className="size-3.5" /> {t("frostmod.stop")}
                 </Button>
