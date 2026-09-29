@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { RefreshCw } from "lucide-react";
-import { serverLogs, serverRiders, serverStatus, type ServerView } from "@/lib/api";
+import { errorText, serverLogs, serverRiders, serverSession, serverStatus, type ServerView } from "@/lib/api";
 import { duration, lapTime, sessionName } from "@/lib/format";
 import { usePoll } from "@/lib/usePoll";
 import { ConfigTab } from "./ConfigTab";
+import { TracksTab } from "./TracksTab";
 import { Button, Card, ErrorLine, Notice, OverflowMenu, Stat, StatusBadge, type MenuItem } from "./ui";
 
-type Tab = "status" | "riders" | "logs" | "config";
+type Tab = "status" | "riders" | "tracks" | "logs" | "config";
 
 export function ServerDetail({
   server,
@@ -22,21 +23,21 @@ export function ServerDetail({
 
   return (
     <div className="flex h-full flex-col gap-6">
-      <header className="flex flex-wrap items-center gap-x-5 gap-y-2">
+      <header className="flex flex-wrap items-end gap-x-5 gap-y-2">
         <div className="flex min-w-0 flex-col">
           <h2 className="truncate font-heading text-2xl font-extrabold tracking-tight">{server.name}</h2>
-          <span className="font-mono text-xs text-muted-foreground">
-            {server.local ? "this PC" : `${server.user}@${server.host}`}
-          </span>
+          <div className="flex items-center gap-3 text-xs text-muted-foreground">
+            <span className="font-mono">{server.local ? "this PC" : `${server.user}@${server.host}`}</span>
+            <StatusBadge report={status.data} error={status.error} />
+          </div>
         </div>
-        <StatusBadge report={status.data} error={status.error} />
         <div className="ml-auto">
           <OverflowMenu items={menu} label={`Actions for ${server.name}`} />
         </div>
       </header>
 
       <nav className="flex gap-1 border-b" role="tablist">
-        {(["status", "riders", "logs", "config"] as Tab[]).map((t) => (
+        {(["status", "riders", "tracks", "logs", "config"] as Tab[]).map((t) => (
           <button
             key={t}
             role="tab"
@@ -51,9 +52,10 @@ export function ServerDetail({
         ))}
       </nav>
 
-      <div className="min-h-0 flex-1 overflow-auto">
+      <div className={`min-h-0 flex-1 ${tab === "config" ? "overflow-hidden" : "overflow-auto"}`}>
         {tab === "status" && <StatusTab server={server} poll={status} onSetUpToken={onSetUpToken} />}
         {tab === "riders" && <RidersTab server={server} onSetUpToken={onSetUpToken} />}
+        {tab === "tracks" && <TracksTab server={server} />}
         {tab === "logs" && <LogsTab server={server} />}
         {tab === "config" && <ConfigTab server={server} />}
       </div>
@@ -104,28 +106,39 @@ function StatusTab({
 }) {
   const report = poll.data;
   const s = report?.status;
-  const needsToken = server.adminPort == null || !server.hasToken;
+  const needsToken = server.local && (server.adminPort == null || !server.hasToken);
   return (
-    <div className="flex max-w-4xl flex-col gap-5">
+    <div className="flex flex-col gap-5">
       {report && report.state !== "online" && (
         <Notice tone={report.state === "starting" ? "info" : "bad"}>{report.detail}</Notice>
       )}
       {!report && poll.error && <ErrorLine text={poll.error} />}
       {s && report?.state !== "offline" && (
-        <Card className="grid grid-cols-2 gap-6 md:grid-cols-4">
-          <Stat label="Session" value={sessionName(s.session)} />
-          <Stat
-            label="Time left"
-            value={s.session_remaining_seconds == null ? "—" : duration(s.session_remaining_seconds)}
-          />
-          <Stat label="Riders" value={s.active_sessions} />
-          <Stat label="Up for" value={duration(s.uptime_seconds)} />
-          <Stat label="Version" value={`v${s.version}`} />
-          <Stat label="Build" value={s.build_id} />
-          <Stat label="Revision" value={s.revision} />
-          <Stat label="Packets in / out" value={`${s.client_datagrams_total} / ${s.server_datagrams_total}`} />
-        </Card>
+        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_15rem]">
+          <Card className="flex flex-col gap-4">
+            <h3 className="font-heading text-sm font-bold uppercase tracking-wide text-muted-foreground">Current session</h3>
+            <div className="grid grid-cols-3 gap-5">
+              <Stat label="Stage" value={sessionName(s.session)} />
+              <Stat label="Time left" value={s.session_remaining_seconds == null ? "—" : duration(s.session_remaining_seconds)} />
+              <Stat label="Riders" value={s.active_sessions} />
+            </div>
+          </Card>
+          <Card className="flex flex-col gap-4">
+            <h3 className="font-heading text-sm font-bold uppercase tracking-wide text-muted-foreground">Server</h3>
+            <div className="grid grid-cols-3 gap-5">
+              <Stat label="Running for" value={duration(s.uptime_seconds)} />
+              <Stat label="Version" value={`v${s.version}`} />
+              <Stat label="Commit" value={s.revision} />
+            </div>
+          </Card>
+          <Card className="flex flex-col gap-4">
+            <h3 className="font-heading text-sm font-bold uppercase tracking-wide text-muted-foreground">Diagnostics</h3>
+            <Stat label="Packets in / out" value={`${s.client_datagrams_total} / ${s.server_datagrams_total}`} />
+            <Stat label="Ready" value={s.ready ? "Yes" : "No"} />
+          </Card>
+        </div>
       )}
+      {!server.local && <SessionControls server={server} refresh={poll.refresh} />}
       {!report && !poll.error && (
         <p className="text-sm text-muted-foreground">{server.local ? "Connecting…" : "Connecting over SSH…"}</p>
       )}
@@ -135,7 +148,7 @@ function StatusTab({
 }
 
 function RidersTab({ server, onSetUpToken }: { server: ServerView; onSetUpToken: () => void }) {
-  const enabled = server.adminPort != null && server.hasToken;
+  const enabled = !server.local || (server.adminPort != null && server.hasToken);
   const riders = usePoll(() => (enabled ? serverRiders(server.id) : Promise.resolve([])), enabled ? 5000 : 0, `${server.id}-riders`);
   if (!enabled) {
     return (
@@ -177,6 +190,43 @@ function RidersTab({ server, onSetUpToken }: { server: ServerView; onSetUpToken:
         </table>
       )}
     </div>
+  );
+}
+
+function SessionControls({ server, refresh }: { server: ServerView; refresh: () => void }) {
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const act = async (action: "jump" | "advance" | "restart", to?: "practice" | "qualifying" | "warmup" | "race") => {
+    const label = to ? `Starting ${to}…` : action === "advance" ? "Advancing session…" : "Restarting session…";
+    setBusy(label); setError(null);
+    try { await serverSession(server.id, action, to); refresh(); } catch (e) { setError(errorText(e)); } finally { setBusy(null); }
+  };
+  return (
+    <Card className="flex flex-col gap-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h3 className="font-heading text-base font-extrabold">Race control</h3>
+        <div className="flex gap-2">
+          <Button size="sm" variant="ghost" disabled={!!busy} onClick={() => void act("restart")}>Restart current</Button>
+          <Button size="sm" variant="primary" disabled={!!busy} onClick={() => void act("advance")}>Next stage</Button>
+        </div>
+      </div>
+      <div className="grid overflow-hidden rounded-lg border sm:grid-cols-4">
+        {(["practice", "qualifying", "warmup", "race"] as const).map((stage, index) => (
+          <button
+            key={stage}
+            type="button"
+            disabled={!!busy}
+            onClick={() => void act("jump", stage)}
+            className="flex items-center gap-3 border-b px-4 py-3 text-left transition hover:bg-accent disabled:opacity-50 sm:border-b-0 sm:border-r sm:last:border-r-0"
+          >
+            <span className="grid size-6 shrink-0 place-items-center rounded-full bg-secondary font-mono text-xs text-muted-foreground">{index + 1}</span>
+            <span className="text-sm font-medium capitalize">{stage === "warmup" ? "Warm-up" : stage}</span>
+          </button>
+        ))}
+      </div>
+      {busy && <p className="text-sm text-muted-foreground">{busy}</p>}
+      {error && <ErrorLine text={error} />}
+    </Card>
   );
 }
 

@@ -16,6 +16,14 @@
 #   apply <obs> <b64> <sha>       back up, replace, restart, wait for /readyz; puts the backup
 #                                 back and restarts again if the server isn't ready.
 #                                 @@backup, @@result applied|rolled-back|failed
+#   riders <obs>                  read the private native admin API using the host's agent config
+#   observe <obs>                 read /status and /readyz directly on the host
+#   session <obs> <action> [to]   advance/restart, or jump to practice/qualifying/warmup/race
+#   tracks <obs>                  list track packages through the loopback host agent
+#   set-track <obs> <name-b64>    select a track and restart through the loopback host agent
+#   set-rotation <obs> <json-b64> select the current track and ordered rotation, then restart
+#   github-update <obs>           download the latest official release and install it
+#   agent-upload <obs> <kind> <tmp> <name> <sha> [version]
 set -uo pipefail
 
 say() { printf '@@%s %s\n' "$1" "$2"; }
@@ -171,6 +179,41 @@ restart() {
   PID="$(cat "$WD/mxbserver.pid" 2>/dev/null)"
 }
 
+agent_config() {
+  local p
+  for p in "$WD/config/agent.json" "$WD/agent.json" /etc/mxbserver/agent.json; do
+    if [[ -r "$p" ]]; then echo "$p"; return; fi
+  done
+  die "the mxb-agent config was not found beside this server"
+}
+
+json_value() { # json_value <file> <key>
+  python3 -c 'import json,sys; v=json.load(open(sys.argv[1])).get(sys.argv[2]); print(v if v is not None else "")' "$1" "$2"
+}
+
+admin_call() { # admin_call <method> <path> <json-body>
+  local cfg addr token
+  cfg="$(agent_config)"
+  addr="$(json_value "$cfg" native_admin)"
+  token="$(json_value "$cfg" native_admin_token)"
+  [[ "$addr" =~ ^127\.0\.0\.1:[0-9]{1,5}$ ]] || die "the agent has no loopback native admin address"
+  [[ -n "$token" ]] || die "the agent has no native admin credential"
+  curl --fail-with-body -sS --max-time 8 -X "$1" -H "Authorization: Bearer $token" \
+    -H 'Content-Type: application/json' --data "$3" "http://$addr$2"
+}
+
+agent_call() { # agent_call <method> <path> [json-body]
+  local cfg listen token
+  cfg="$(agent_config)"
+  listen="$(json_value "$cfg" listen)"
+  token="$(json_value "$cfg" token)"
+  [[ "$listen" =~ ^(127\.0\.0\.1|0\.0\.0\.0):[0-9]{1,5}$ ]] || die "the agent does not use a local address"
+  listen="127.0.0.1:${listen##*:}"
+  [[ -n "$token" ]] || die "the agent has no control credential"
+  curl --fail-with-body -sS --max-time 300 -X "$1" -H "Authorization: Bearer $token" \
+    -H 'Content-Type: application/json' --data "${3:-}" "http://$listen$2"
+}
+
 detect
 CONFIG="$(config_path)"
 OWNER=""
@@ -223,5 +266,77 @@ case "$CMD" in
       if restart && wait_ready; then say result rolled-back; else say result failed; fi
     fi
     ;;
-  *) die "usage: read|validate|apply <observe port> [...]" ;;
+  riders)
+    admin_call GET /v1/riders ''
+    ;;
+  observe)
+    status="$(curl -fsS --max-time 4 "http://127.0.0.1:$OBS/status")" || die "nothing answers on observe port $OBS"
+    say ready "$(curl -fsS --max-time 2 "http://127.0.0.1:$OBS/readyz" >/dev/null 2>&1 && echo 1 || echo 0)"
+    say status_b64 "$(printf '%s' "$status" | base64 -w0)"
+    ;;
+  session)
+    action="${3:-}"; to="${4:-}"
+    case "$action" in
+      advance) admin_call POST /v1/session/advance '{}' ;;
+      restart) admin_call POST /v1/session/restart '{}' ;;
+      jump)
+        [[ "$to" =~ ^(practice|qualifying|warmup|race)$ ]] || die "unknown session"
+        admin_call POST /v1/session/jump "{\"to\":\"$to\"}"
+        ;;
+      *) die "unknown session action" ;;
+    esac
+    ;;
+  tracks)
+    agent_call GET /tracks
+    ;;
+  track-state)
+    agent_call GET /status
+    ;;
+  set-track)
+    track="$(printf '%s' "${3:?track}" | base64 -d)" || die "track is not base64"
+    [[ -n "$track" && "$track" != *$'\n'* && "$track" != *$'\r'* ]] || die "bad track name"
+    body="$(python3 -c 'import json,sys; print(json.dumps({"track":sys.argv[1]}))' "$track")"
+    agent_call PUT /config "$body"
+    ;;
+  set-rotation)
+    body="$(printf '%s' "${3:?rotation}" | base64 -d)" || die "rotation is not base64"
+    python3 -c 'import json,sys; d=json.loads(sys.argv[1]); assert isinstance(d.get("track"),str); assert isinstance(d.get("rotation"),list)' "$body" || die "bad rotation"
+    agent_call PUT /config "$body"
+    ;;
+  github-update)
+    dir="$(mktemp -d)"; trap 'rm -rf "$dir"' EXIT
+    asset=mxbserver-x86_64-unknown-linux-gnu.elf
+    base=https://github.com/Frostn1/mxbserver/releases/latest/download
+    curl -fLSs --max-time 180 -o "$dir/$asset" "$base/$asset" || die "could not download the latest release"
+    curl -fLSs --max-time 30 -o "$dir/SHA256SUMS" "$base/SHA256SUMS" || die "could not download its checksum"
+    curl -fLSs --max-time 30 -o "$dir/VERSION" "$base/VERSION" || die "could not download its version"
+    want="$(awk -v f="$asset" '$2==f || $2=="*"f {print $1}' "$dir/SHA256SUMS" | head -n1)"
+    [[ "$want" =~ ^[0-9a-f]{64}$ ]] || die "the release has no binary checksum"
+    [[ "$(sha256sum "$dir/$asset" | cut -d' ' -f1)" == "$want" ]] || die "the release checksum does not match"
+    version="$(tr -d '\r\n' < "$dir/VERSION")"
+    [[ -n "$version" && ${#version} -le 120 ]] || die "the release has no usable version"
+    cfg="$(agent_config)"; listen="$(json_value "$cfg" listen)"; token="$(json_value "$cfg" token)"
+    [[ "$listen" =~ ^(127\.0\.0\.1|0\.0\.0\.0):[0-9]{1,5}$ ]] || die "the agent does not use a local address"
+    listen="127.0.0.1:${listen##*:}"
+    curl --fail-with-body -sS --max-time 300 -X PUT -H "Authorization: Bearer $token" \
+      -H "X-Content-SHA256: $want" -H "X-Version: $version" --data-binary "@$dir/$asset" "http://$listen/version"
+    ;;
+  agent-upload)
+    kind="${3:-}"; tmp="${4:-}"; name="${5:-}"; want="${6:-}"; version="${7:-}"
+    [[ "$kind" =~ ^(track|version)$ ]] || die "bad upload kind"
+    [[ "$tmp" =~ ^mxb-servers-[A-Za-z0-9_-]+$ ]] || die "bad temporary upload name"
+    [[ "$name" =~ ^[A-Za-z0-9._-]+$ ]] || die "bad upload filename"
+    [[ "$want" =~ ^[0-9a-f]{64}$ ]] || die "bad upload hash"
+    file="/tmp/$tmp"
+    [[ -f "$file" ]] || die "the uploaded file is missing"
+    [[ "$(sha256sum "$file" | cut -d' ' -f1)" == "$want" ]] || die "the upload changed in transit"
+    cfg="$(agent_config)"; listen="$(json_value "$cfg" listen)"; token="$(json_value "$cfg" token)"
+    [[ "$listen" =~ ^(127\.0\.0\.1|0\.0\.0\.0):[0-9]{1,5}$ ]] || die "the agent does not use a local address"
+    listen="127.0.0.1:${listen##*:}"
+    headers=(-H "Authorization: Bearer $token" -H "X-Content-SHA256: $want")
+    if [[ "$kind" == track ]]; then path=/tracks; headers+=(-H "X-Filename: $name"); else path=/version; headers+=(-H "X-Version: $version"); fi
+    curl --fail-with-body -sS --max-time 300 -X PUT "${headers[@]}" --data-binary "@$file" "http://$listen$path"
+    rc=$?; rm -f "$file"; exit "$rc"
+    ;;
+  *) die "usage: read|validate|apply|observe|riders|session|tracks|track-state|set-track|set-rotation|github-update|agent-upload <observe port> [...]" ;;
 esac

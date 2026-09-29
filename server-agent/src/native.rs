@@ -2,12 +2,13 @@
 //! It uses `toml_edit` so comments and every field outside this allow-list survive a change.
 
 use serde::{Deserialize, Serialize};
-use toml_edit::{value, DocumentMut, Item, Table};
+use toml_edit::{value, Array, DocumentMut, Item, Table};
 
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Patch {
     pub track: Option<String>,
+    pub rotation: Option<Vec<String>>,
     pub bots: Option<u32>,
     pub sessions: Option<SessionsPatch>,
 }
@@ -28,6 +29,7 @@ pub struct SessionsPatch {
 pub struct View {
     pub name: Option<String>,
     pub track: Option<String>,
+    pub rotation: Vec<String>,
     pub bots: u64,
     pub max_clients: Option<u64>,
     pub sessions: SessionsView,
@@ -78,6 +80,18 @@ pub fn patch(text: &str, patch: &Patch, installed: &[String]) -> Result<String, 
             return Err(format!("track {track:?} is not installed on this server"));
         }
         table(&mut doc, "track")["package"] = value(format!("tracks/{track}.pkz"));
+        changed = true;
+    }
+    if let Some(rotation) = &patch.rotation {
+        let mut array = Array::new();
+        for track in rotation {
+            let track = plain_track(track)?;
+            if !installed.iter().any(|candidate| candidate == track) {
+                return Err(format!("track {track:?} is not installed on this server"));
+            }
+            array.push(format!("tracks/{track}.pkz"));
+        }
+        table(&mut doc, "rotation")["tracks"] = value(array);
         changed = true;
     }
     if let Some(bots) = patch.bots {
@@ -145,6 +159,20 @@ pub fn view(text: &str) -> Result<View, String> {
                 .to_str()
                 .map(str::to_owned)
         }),
+        rotation: doc
+            .get("rotation")
+            .and_then(|v| v.get("tracks"))
+            .and_then(Item::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|v| v.as_str())
+            .filter_map(|p| {
+                std::path::Path::new(p)
+                    .file_stem()?
+                    .to_str()
+                    .map(str::to_owned)
+            })
+            .collect(),
         bots: integer(&doc, "ghost", "count").unwrap_or(0),
         // Native server default; carrying it in the view keeps bot validation honest when
         // the operator left the key out of an otherwise valid config.
@@ -172,6 +200,7 @@ mod tests {
             CONFIG,
             &Patch {
                 track: Some("new".into()),
+                rotation: Some(vec!["third".into()]),
                 bots: Some(6),
                 sessions: Some(SessionsPatch {
                     practice_minutes: Some(0),
@@ -179,12 +208,13 @@ mod tests {
                     ..Default::default()
                 }),
             },
-            &["new".into()],
+            &["new".into(), "third".into()],
         )
         .unwrap();
         assert!(out.contains("# keep me"));
         let got = view(&out).unwrap();
         assert_eq!(got.track.as_deref(), Some("new"));
+        assert_eq!(got.rotation, ["third"]);
         assert_eq!(got.bots, 6);
         assert_eq!(got.sessions.practice_minutes, Some(0));
         assert_eq!(got.sessions.qualifying_minutes, Some(10));

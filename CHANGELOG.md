@@ -3,6 +3,14 @@
 ## Unreleased
 
 ### Added
+- **MXB Servers can run a remote server from one native window.** The Lightsail connection now
+  uses SSH for status, riders, installed tracks and private control credentials, so a remote
+  server no longer asks the operator to paste an admin token. A dedicated Tracks tab uploads
+  `.pkz` packages, selects the active track and safely deploys another `mxbserver` binary with
+  rollback. Status adds live Practice, Qualifying, Warm-up, Race, next-stage and restart-stage
+  controls. Settings use category navigation with clearer bot and compatibility descriptions;
+  session, server identity and diagnostics are separated instead of forming one long stat list,
+  and the shell now carries the MXB App-style product hierarchy.
 - **FrostMod runs as a game plugin only (FrostMod v0.41.0 and newer).** MXB App now installs
   FrostMod as `plugins\frostmod.dlo` in the game folder, with a `frostmod.dir` beside it that
   points at MXB App's FrostMod folder, and it no longer starts `frostmod.exe`, the injector

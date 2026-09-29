@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
 import { Monitor, Moon, Plus, Server as ServerIcon, Sun } from "lucide-react";
-import { Logo, useTheme, type ThemeChoice } from "@frost/mxbsecure-ui";
+import { useTheme, type ThemeChoice } from "@frost/mxbsecure-ui";
 import { errorText, listServers, removeServer, type ServerView } from "@/lib/api";
 import { FleetCard } from "@/components/FleetCard";
 import { ServerDetail } from "@/components/ServerDetail";
 import { ServerForm } from "@/components/ServerForm";
 import { Button, ErrorLine, type MenuItem } from "@/components/ui";
+import { WindowControls } from "@/components/WindowControls";
 
 type View =
   | { kind: "fleet" }
@@ -58,45 +59,35 @@ export default function App() {
   };
 
   return (
-    <div className="flex h-screen">
-      <aside className="flex w-60 shrink-0 flex-col gap-1 border-r bg-muted/50 p-3">
-        <div className="flex items-baseline gap-1.5 px-2 py-3">
-          <Logo className="text-lg" />
-          <span className="text-sm text-muted-foreground">servers</span>
+    <div className="flex h-screen flex-col overflow-hidden bg-background text-foreground">
+      <header data-tauri-drag-region className="flex h-[52px] shrink-0 select-none items-center border-b bg-window pl-5">
+        <div data-tauri-drag-region className="mr-7 flex items-baseline gap-2 whitespace-nowrap">
+          <span className="font-heading text-base font-extrabold tracking-[-0.05em]">MXB Servers</span>
+          <span className="text-[11px] text-muted-foreground">by <span className="font-semibold">mxbsecure</span></span>
         </div>
-        <button
-          onClick={() => setView({ kind: "fleet" })}
-          className={`rounded-md px-2 py-1.5 text-left text-sm font-medium ${view.kind === "fleet" ? "bg-accent" : "hover:bg-accent"}`}
-        >
-          All servers
-        </button>
-        {servers.map((s) => (
-          <button
-            key={s.id}
-            onClick={() => setView({ kind: "server", id: s.id })}
-            className={`flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm ${
-              selected?.id === s.id && view.kind === "server" ? "bg-accent" : "hover:bg-accent"
-            }`}
-          >
-            <ServerIcon className="size-4 text-muted-foreground" />
-            <span className="truncate">{s.name}</span>
-          </button>
-        ))}
-        <div className="mt-auto flex items-center gap-2">
-          <Button variant="primary" className="flex-1" onClick={() => setView({ kind: "form", id: null })}>
-            <Plus className="size-4" /> Add server
-          </Button>
-          <Button onClick={() => setTheme(nextTheme[theme])} aria-label={`Theme: ${theme}`} title={`Theme: ${theme}`}>
-            <ThemeIcon className="size-4" />
-          </Button>
-        </div>
-      </aside>
+        <nav className="flex h-full min-w-0 items-center gap-1 overflow-hidden" aria-label="Servers">
+          <button type="button" onClick={() => setView({ kind: "fleet" })} className={`h-full border-b-2 px-3 text-sm font-medium ${view.kind === "fleet" ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`}>All servers</button>
+          {servers.map((s) => (
+            <button key={s.id} type="button" onClick={() => setView({ kind: "server", id: s.id })} className={`flex h-full max-w-48 items-center gap-2 border-b-2 px-3 text-sm ${selected?.id === s.id && view.kind === "server" ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`}>
+              <ServerIcon className="size-3.5 shrink-0" /><span className="truncate">{s.name}</span>
+            </button>
+          ))}
+        </nav>
+        <div data-tauri-drag-region className="min-w-4 flex-1" />
+        <Button variant="primary" className="mr-2 shrink-0" onClick={() => setView({ kind: "form", id: null })}><Plus className="size-4" /> Add server</Button>
+        <button type="button" onClick={() => setTheme(nextTheme[theme])} aria-label={`Theme: ${theme}`} title={`Theme: ${theme}`} className="grid size-9 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-accent"><ThemeIcon className="size-4" /></button>
+        <div className="ml-2 h-5 border-l" />
+        <WindowControls />
+      </header>
 
-      <main className="min-w-0 flex-1 overflow-auto p-8">
+      <main className="min-h-0 min-w-0 flex-1 overflow-auto px-7 py-6 lg:px-9">
         {error && <ErrorLine text={error} />}
         {view.kind === "fleet" && (
           <div className="flex flex-col gap-6">
-            <h1 className="font-heading text-2xl font-extrabold tracking-tight">All servers</h1>
+            <header className="flex flex-col gap-1">
+              <h1 className="font-heading text-2xl font-extrabold tracking-tight">All servers</h1>
+              <p className="text-sm text-muted-foreground">Status, sessions, tracks, riders, and updates.</p>
+            </header>
             {servers.length === 0 ? (
               <p className="max-w-md text-sm text-muted-foreground">
                 No servers yet. Add one with its SSH host, user and key; the app forwards the server&apos;s

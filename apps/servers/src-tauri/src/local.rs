@@ -77,7 +77,10 @@ fn check(cmd: &LocalCommand, candidate: &Path, text: &str) -> Result<(bool, Stri
         }
     }
     args.extend(["--listen".to_string(), "127.0.0.1:0".to_string()]);
-    args.extend(["--observe".to_string(), format!("127.0.0.1:{}", free_port()?)]);
+    args.extend([
+        "--observe".to_string(),
+        format!("127.0.0.1:{}", free_port()?),
+    ]);
     if !admin && has_admin(text) {
         args.extend(["--admin".to_string(), admin_port]);
     }
@@ -118,7 +121,11 @@ fn check(cmd: &LocalCommand, candidate: &Path, text: &str) -> Result<(bool, Stri
         }
         std::thread::sleep(Duration::from_millis(100));
     };
-    let text = format!("{}{}", err.join().unwrap_or_default(), out.join().unwrap_or_default());
+    let text = format!(
+        "{}{}",
+        err.join().unwrap_or_default(),
+        out.join().unwrap_or_default()
+    );
     Ok((ok, head_and_tail(&text)))
 }
 
@@ -200,12 +207,14 @@ fn listener_pid(port: u16) -> Option<u32> {
         .output()
         .ok()?;
     let want = format!("127.0.0.1:{port}");
-    String::from_utf8_lossy(&out.stdout).lines().find_map(|line| {
-        let cols: Vec<&str> = line.split_whitespace().collect();
-        (cols.len() == 5 && cols[1] == want && cols[3] == "LISTENING")
-            .then(|| cols[4].parse().ok())
-            .flatten()
-    })
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .find_map(|line| {
+            let cols: Vec<&str> = line.split_whitespace().collect();
+            (cols.len() == 5 && cols[1] == want && cols[3] == "LISTENING")
+                .then(|| cols[4].parse().ok())
+                .flatten()
+        })
 }
 
 #[cfg(not(windows))]
@@ -307,7 +316,8 @@ pub fn apply(server: &Server, base_sha: &str, text: &str) -> Result<Applied, Str
     fs::copy(&config, &backup).map_err(|e| format!("backup failed, nothing changed: {e}"))?;
     let tmp = candidate_path(&config);
     fs::write(&tmp, text).map_err(|e| e.to_string())?;
-    fs::rename(&tmp, &config).map_err(|e| format!("replace failed, the old config is still live: {e}"))?;
+    fs::rename(&tmp, &config)
+        .map_err(|e| format!("replace failed, the old config is still live: {e}"))?;
     let backup_text = backup.display().to_string();
     match restart(server, cmd) {
         Ok(()) => Ok(Applied {
@@ -316,8 +326,13 @@ pub fn apply(server: &Server, base_sha: &str, text: &str) -> Result<Applied, Str
             output,
         }),
         Err(why) => {
-            fs::copy(&backup, &config).map_err(|e| format!("{why}; restoring the backup failed too: {e}"))?;
-            let result = if restart(server, cmd).is_ok() { "rolled-back" } else { "failed" };
+            fs::copy(&backup, &config)
+                .map_err(|e| format!("{why}; restoring the backup failed too: {e}"))?;
+            let result = if restart(server, cmd).is_ok() {
+                "rolled-back"
+            } else {
+                "failed"
+            };
             Ok(Applied {
                 result,
                 backup: backup_text,
@@ -335,11 +350,22 @@ mod tests {
     fn the_config_path_comes_from_the_start_command() {
         let cmd = LocalCommand {
             exe: "mxbserver.exe".into(),
-            args: vec!["--config".into(), "server.toml".into(), "--report".into(), "10".into()],
+            args: vec![
+                "--config".into(),
+                "server.toml".into(),
+                "--report".into(),
+                "10".into(),
+            ],
             cwd: std::env::temp_dir().display().to_string(),
         };
-        assert_eq!(config_path(&cmd).unwrap(), std::env::temp_dir().join("server.toml"));
-        let none = LocalCommand { args: vec![], ..cmd };
+        assert_eq!(
+            config_path(&cmd).unwrap(),
+            std::env::temp_dir().join("server.toml")
+        );
+        let none = LocalCommand {
+            args: vec![],
+            ..cmd
+        };
         assert!(config_path(&none).is_err());
     }
 
@@ -349,8 +375,12 @@ mod tests {
     #[ignore]
     fn local_apply_end_to_end() {
         let list = std::env::var("APPDATA").unwrap() + "\\com.frost.mxbservers\\servers.json";
-        let servers: Vec<Server> = serde_json::from_str(&fs::read_to_string(list).unwrap()).unwrap();
-        let server = servers.into_iter().find(|s| s.local).expect("a local server");
+        let servers: Vec<Server> =
+            serde_json::from_str(&fs::read_to_string(list).unwrap()).unwrap();
+        let server = servers
+            .into_iter()
+            .find(|s| s.local)
+            .expect("a local server");
         let (text, _) = read(&server).unwrap();
         let sha = config::sha256(&text);
         let mut changes = serde_json::Map::new();
@@ -360,7 +390,10 @@ mod tests {
         // A config the server refuses never reaches the file.
         let broken = format!("{new}\n[native]\nbot_status = \"not a number\"\n");
         assert!(apply(&server, &sha, &broken).is_err());
-        assert_eq!(fs::read_to_string(config_path(command(&server).unwrap()).unwrap()).unwrap(), text);
+        assert_eq!(
+            fs::read_to_string(config_path(command(&server).unwrap()).unwrap()).unwrap(),
+            text
+        );
 
         let done = apply(&server, &sha, &new).unwrap();
         assert_eq!(done.result, "applied", "{}", done.output);

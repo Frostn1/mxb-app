@@ -17,13 +17,25 @@ mod store;
 mod tests {
     #[test]
     fn local_tail_returns_the_last_lines() {
-        let path = std::env::temp_dir().join(format!("mxb-servers-tail-{}.log", crate::store::new_id()));
-        let text: String = (1..=50).map(|i| format!("line {i}
-")).collect();
+        let path =
+            std::env::temp_dir().join(format!("mxb-servers-tail-{}.log", crate::store::new_id()));
+        let text: String = (1..=50)
+            .map(|i| {
+                format!(
+                    "line {i}
+"
+                )
+            })
+            .collect();
         std::fs::write(&path, text).unwrap();
         let tail = super::local_tail(path.to_str().unwrap(), 3).unwrap();
         assert_eq!(tail, ["line 48", "line 49", "line 50"]);
-        assert_eq!(super::local_tail(path.to_str().unwrap(), 500).unwrap().len(), 50);
+        assert_eq!(
+            super::local_tail(path.to_str().unwrap(), 500)
+                .unwrap()
+                .len(),
+            50
+        );
         std::fs::remove_file(path).unwrap();
     }
 }
@@ -104,8 +116,8 @@ async fn local_port(app: &App, server: &Server, remote: u16) -> Result<u16, Stri
     // Opening a tunnel waits on ssh, so it runs on the blocking pool.
     let tunnels = Arc::clone(&app.tunnels);
     tauri::async_runtime::spawn_blocking(move || tunnels.port(&server, remote))
-    .await
-    .map_err(|e| e.to_string())?
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 /// GET `path` on one of the server's forwarded ports. A failed request drops the tunnel, so a
@@ -134,7 +146,9 @@ async fn get(
     path: &str,
     token: Option<&str>,
 ) -> Result<(u16, String), String> {
-    fetch(app, server, remote, path, token).await.map_err(Miss::text)
+    fetch(app, server, remote, path, token)
+        .await
+        .map_err(Miss::text)
 }
 
 /// `fetch_once`, and for a server over SSH one more try on a fresh tunnel: a request that fails
@@ -148,7 +162,9 @@ async fn fetch(
     token: Option<&str>,
 ) -> Result<(u16, String), Miss> {
     match fetch_once(app, server, remote, path, token).await {
-        Err(Miss::NoAnswer(_)) if !server.local => fetch_once(app, server, remote, path, token).await,
+        Err(Miss::NoAnswer(_)) if !server.local => {
+            fetch_once(app, server, remote, path, token).await
+        }
         other => other,
     }
 }
@@ -205,13 +221,49 @@ async fn server_status(app: State<'_, App>, id: String) -> Result<StatusReport, 
         detail,
         status: None,
     };
+    if !server.local {
+        let tunnels = Arc::clone(&app.tunnels);
+        let port = server.observe_port.to_string();
+        let out = blocking(move || tunnels.run_script(&server, REMOTE_SH, &["observe", &port], 20))
+            .await?;
+        if !out.success {
+            return Ok(report("offline", out.text()));
+        }
+        let encoded = out
+            .field("status_b64")
+            .ok_or("the server returned no status")?;
+        use base64::Engine;
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(encoded)
+            .map_err(|e| e.to_string())?;
+        let status: Value = serde_json::from_slice(&bytes).map_err(|e| format!("/status: {e}"))?;
+        let ready = out.field("ready") == Some("1");
+        let build = status["build_id"].as_str().unwrap_or("?");
+        return Ok(StatusReport {
+            state: if ready { "online" } else { "starting" },
+            detail: if ready {
+                format!("ready for riders · build {build}")
+            } else {
+                format!("running but not ready for riders yet · build {build}")
+            },
+            status: Some(status),
+        });
+    }
     let (code, body) = match fetch(&app, &server, server.observe_port, "/status", None).await {
         Ok(answer) => answer,
-        Err(Miss::Ssh(e)) => return Ok(report("unreachable", format!("SSH to {} failed: {e}", server.host))),
+        Err(Miss::Ssh(e)) => {
+            return Ok(report(
+                "unreachable",
+                format!("SSH to {} failed: {e}", server.host),
+            ))
+        }
         Err(Miss::NoAnswer(e)) => {
             return Ok(report(
                 "offline",
-                format!("nothing answers on port {} ({e}); the server isn't running", server.observe_port),
+                format!(
+                    "nothing answers on port {} ({e}); the server isn't running",
+                    server.observe_port
+                ),
             ))
         }
     };
@@ -222,8 +274,18 @@ async fn server_status(app: State<'_, App>, id: String) -> Result<StatusReport, 
     let ready = match fetch(&app, &server, server.observe_port, "/readyz", None).await {
         Ok((200, _)) => true,
         Ok(_) => false,
-        Err(Miss::Ssh(e)) => return Ok(report("unreachable", format!("SSH to {} failed: {e}", server.host))),
-        Err(Miss::NoAnswer(e)) => return Ok(report("offline", format!("the server stopped answering ({e})"))),
+        Err(Miss::Ssh(e)) => {
+            return Ok(report(
+                "unreachable",
+                format!("SSH to {} failed: {e}", server.host),
+            ))
+        }
+        Err(Miss::NoAnswer(e)) => {
+            return Ok(report(
+                "offline",
+                format!("the server stopped answering ({e})"),
+            ))
+        }
     };
     let build = status["build_id"].as_str().unwrap_or("?").to_string();
     Ok(StatusReport {
@@ -250,7 +312,9 @@ async fn server_test_token(app: State<'_, App>, id: String) -> Result<TokenCheck
     let server = app.store.get(&id)?;
     let fail = |message: String| Ok(TokenCheck { ok: false, message });
     let Some(admin) = server.admin_port else {
-        return fail("Set the admin port first (the [admin] listen port in the server's config).".into());
+        return fail(
+            "Set the admin port first (the [admin] listen port in the server's config).".into(),
+        );
     };
     let Some(token) = store::token(&id) else {
         return fail("No admin token is saved for this server.".into());
@@ -274,6 +338,16 @@ async fn server_test_token(app: State<'_, App>, id: String) -> Result<TokenCheck
 #[tauri::command]
 async fn server_riders(app: State<'_, App>, id: String) -> Result<Value, String> {
     let server = app.store.get(&id)?;
+    if !server.local {
+        let tunnels = Arc::clone(&app.tunnels);
+        let port = server.observe_port.to_string();
+        let out = blocking(move || tunnels.run_script(&server, REMOTE_SH, &["riders", &port], 30))
+            .await?;
+        if !out.success {
+            return Err(out.text());
+        }
+        return serde_json::from_str(&out.stdout).map_err(|e| format!("rider list: {e}"));
+    }
     let admin = server
         .admin_port
         .ok_or("No admin port set for this server.")?;
@@ -285,6 +359,283 @@ async fn server_riders(app: State<'_, App>, id: String) -> Result<Value, String>
         429 => Err("Rate limited by the server; try again in a moment.".into()),
         other => Err(format!("/v1/riders answered {other}")),
     }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TrackState {
+    installed: Vec<String>,
+    current: Option<String>,
+    rotation: Vec<String>,
+}
+
+#[tauri::command]
+async fn server_tracks(app: State<'_, App>, id: String) -> Result<TrackState, String> {
+    let server = app.store.get(&id)?;
+    if server.local {
+        return Err("Track management for a server on this PC is not wired yet.".into());
+    }
+    let tunnels = Arc::clone(&app.tunnels);
+    let state_tunnels = Arc::clone(&app.tunnels);
+    let state_server = server.clone();
+    let port = server.observe_port.to_string();
+    let state_port = port.clone();
+    let (out, state) = blocking(move || {
+        let out = tunnels.run_script(&server, REMOTE_SH, &["tracks", &port], 30)?;
+        let state = state_tunnels.run_script(
+            &state_server,
+            REMOTE_SH,
+            &["track-state", &state_port],
+            30,
+        )?;
+        Ok((out, state))
+    })
+    .await?;
+    if !out.success || !state.success {
+        return Err(format!("{}{}", out.text(), state.text()));
+    }
+    let body: Value = serde_json::from_str(&out.stdout).map_err(|e| format!("track list: {e}"))?;
+    let status: Value =
+        serde_json::from_str(&state.stdout).map_err(|e| format!("track state: {e}"))?;
+    let installed = body["tracks"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|v| v.as_str().map(str::to_string))
+        .collect();
+    let server = &status["server"];
+    Ok(TrackState {
+        installed,
+        current: server["track"].as_str().map(str::to_string),
+        rotation: server["rotation"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|v| v.as_str().map(str::to_string))
+            .collect(),
+    })
+}
+
+#[tauri::command]
+async fn server_set_track(app: State<'_, App>, id: String, track: String) -> Result<Value, String> {
+    let server = app.store.get(&id)?;
+    if server.local {
+        return Err("Track selection for a server on this PC is not wired yet.".into());
+    }
+    let tunnels = Arc::clone(&app.tunnels);
+    let port = server.observe_port.to_string();
+    let encoded = b64(track.trim());
+    let out = blocking(move || {
+        tunnels.run_script(&server, REMOTE_SH, &["set-track", &port, &encoded], 180)
+    })
+    .await?;
+    if !out.success {
+        return Err(out.text());
+    }
+    serde_json::from_str(&out.stdout).map_err(|e| format!("set track: {e}"))
+}
+
+#[tauri::command]
+async fn server_set_rotation(
+    app: State<'_, App>,
+    id: String,
+    tracks: Vec<String>,
+) -> Result<Value, String> {
+    let server = app.store.get(&id)?;
+    if server.local {
+        return Err("Track rotation for a server on this PC is not wired yet.".into());
+    }
+    let mut tracks = tracks
+        .into_iter()
+        .map(|track| track.trim().to_string())
+        .filter(|track| !track.is_empty())
+        .collect::<Vec<_>>();
+    if tracks.is_empty() {
+        return Err("Add at least one track.".into());
+    }
+    let current = tracks.remove(0);
+    let payload = serde_json::json!({ "track": current, "rotation": tracks });
+    let encoded = b64(&payload.to_string());
+    let tunnels = Arc::clone(&app.tunnels);
+    let port = server.observe_port.to_string();
+    let out = blocking(move || {
+        tunnels.run_script(&server, REMOTE_SH, &["set-rotation", &port, &encoded], 180)
+    })
+    .await?;
+    if !out.success {
+        return Err(out.text());
+    }
+    serde_json::from_str(&out.stdout).map_err(|e| format!("set rotation: {e}"))
+}
+
+#[tauri::command]
+async fn server_update_github(app: State<'_, App>, id: String) -> Result<Value, String> {
+    let server = app.store.get(&id)?;
+    if server.local {
+        return Err("GitHub updates require a server connected over SSH.".into());
+    }
+    let tunnels = Arc::clone(&app.tunnels);
+    let port = server.observe_port.to_string();
+    let out =
+        blocking(move || tunnels.run_script(&server, REMOTE_SH, &["github-update", &port], 600))
+            .await?;
+    if !out.success {
+        return Err(out.text());
+    }
+    serde_json::from_str(&out.stdout).map_err(|e| format!("GitHub update: {e}"))
+}
+
+#[tauri::command]
+async fn server_session(
+    app: State<'_, App>,
+    id: String,
+    action: String,
+    to: Option<String>,
+) -> Result<Value, String> {
+    let server = app.store.get(&id)?;
+    if server.local {
+        return Err("Live session control for a server on this PC is not wired yet.".into());
+    }
+    if !matches!(action.as_str(), "jump" | "advance" | "restart") {
+        return Err("unknown session action".into());
+    }
+    let destination = to.unwrap_or_default();
+    if action == "jump"
+        && !matches!(
+            destination.as_str(),
+            "practice" | "qualifying" | "warmup" | "race"
+        )
+    {
+        return Err("unknown session".into());
+    }
+    let tunnels = Arc::clone(&app.tunnels);
+    let port = server.observe_port.to_string();
+    let out = blocking(move || {
+        let args = if action == "jump" {
+            vec![
+                "session",
+                port.as_str(),
+                action.as_str(),
+                destination.as_str(),
+            ]
+        } else {
+            vec!["session", port.as_str(), action.as_str()]
+        };
+        tunnels.run_script(&server, REMOTE_SH, &args, 30)
+    })
+    .await?;
+    if !out.success {
+        return Err(out.text());
+    }
+    serde_json::from_str(&out.stdout).map_err(|e| format!("session control: {e}"))
+}
+
+#[tauri::command]
+async fn server_upload(
+    app: State<'_, App>,
+    id: String,
+    kind: String,
+    path: String,
+    version: Option<String>,
+) -> Result<Value, String> {
+    let server = app.store.get(&id)?;
+    if server.local {
+        return Err("Uploads for a server on this PC are not wired yet.".into());
+    }
+    if !matches!(kind.as_str(), "track" | "version") {
+        return Err("unknown upload type".into());
+    }
+    let file = std::path::Path::new(&path);
+    let name = file
+        .file_name()
+        .and_then(|v| v.to_str())
+        .ok_or("the file has no usable name")?
+        .to_string();
+    if !name
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_'))
+    {
+        return Err(
+            "Rename the file using only letters, numbers, dots, dashes, and underscores.".into(),
+        );
+    }
+    if kind == "track" && !name.to_ascii_lowercase().ends_with(".pkz") {
+        return Err("Tracks must be .pkz packages.".into());
+    }
+    let version = version.unwrap_or_default();
+    if kind == "version"
+        && (version.trim().is_empty()
+            || version.len() > 80
+            || !version
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_' | '+')))
+    {
+        return Err(
+            "Use a short version label with letters, numbers, dots, dashes, underscores, or +."
+                .into(),
+        );
+    }
+    let maximum = if kind == "track" {
+        512 * 1024 * 1024
+    } else {
+        128 * 1024 * 1024
+    };
+    let digest = blocking({
+        let path = path.clone();
+        move || {
+            use sha2::Digest;
+            use std::io::Read;
+            let mut file =
+                std::fs::File::open(&path).map_err(|e| format!("could not read {path}: {e}"))?;
+            let size = file.metadata().map_err(|e| e.to_string())?.len();
+            if size == 0 || size > maximum {
+                return Err(format!(
+                    "the file must be between 1 byte and {} MiB",
+                    maximum / 1024 / 1024
+                ));
+            }
+            let mut hash = sha2::Sha256::new();
+            let mut buffer = [0u8; 64 * 1024];
+            loop {
+                let read = file
+                    .read(&mut buffer)
+                    .map_err(|e| format!("could not read {path}: {e}"))?;
+                if read == 0 {
+                    break;
+                }
+                hash.update(&buffer[..read]);
+            }
+            Ok(format!("{:x}", hash.finalize()))
+        }
+    })
+    .await?;
+    let temporary = format!("mxb-servers-{}", store::new_id());
+    let tunnels = Arc::clone(&app.tunnels);
+    let upload_server = server.clone();
+    let upload_path = path.clone();
+    let upload_name = temporary.clone();
+    blocking(move || tunnels.upload(&upload_server, &upload_path, &upload_name, 300)).await?;
+    let tunnels = Arc::clone(&app.tunnels);
+    let port = server.observe_port.to_string();
+    let out = blocking(move || {
+        let mut args = vec![
+            "agent-upload",
+            port.as_str(),
+            kind.as_str(),
+            temporary.as_str(),
+            name.as_str(),
+            digest.as_str(),
+        ];
+        if kind == "version" {
+            args.push(version.as_str());
+        }
+        tunnels.run_script(&server, REMOTE_SH, &args, 360)
+    })
+    .await?;
+    if !out.success {
+        return Err(out.text());
+    }
+    serde_json::from_str(&out.stdout).map_err(|e| format!("upload: {e}"))
 }
 
 #[tauri::command]
@@ -305,7 +656,8 @@ fn local_tail(path: &str, lines: u32) -> Result<Vec<String>, String> {
     let mut file = std::fs::File::open(path).map_err(|e| format!("{path}: {e}"))?;
     let len = file.metadata().map_err(|e| e.to_string())?.len();
     let start = len.saturating_sub(1 << 20);
-    file.seek(SeekFrom::Start(start)).map_err(|e| e.to_string())?;
+    file.seek(SeekFrom::Start(start))
+        .map_err(|e| e.to_string())?;
     let mut bytes = Vec::new();
     file.read_to_end(&mut bytes).map_err(|e| e.to_string())?;
     let text = String::from_utf8_lossy(&bytes);
@@ -315,7 +667,6 @@ fn local_tail(path: &str, lines: u32) -> Result<Vec<String>, String> {
     let from = all.len().saturating_sub(lines as usize).max(skip);
     Ok(all[from..].iter().map(|l| l.to_string()).collect())
 }
-
 
 // ---- Config editing -------------------------------------------------------------------------
 
@@ -368,7 +719,11 @@ async fn config_load(app: State<'_, App>, id: String) -> Result<ConfigState, Str
             .decode(encoded)
             .map_err(|e| e.to_string())?;
         let text = String::from_utf8(bytes).map_err(|_| "the config is not UTF-8".to_string())?;
-        (text, out.field("config").unwrap_or("").to_string(), detect_mode)
+        (
+            text,
+            out.field("config").unwrap_or("").to_string(),
+            detect_mode,
+        )
     };
     let values = config::read(&text)?;
     Ok(ConfigState {
@@ -390,7 +745,10 @@ struct Preview {
 
 /// The file with `changes` applied, and the diff. Pure: nothing leaves this PC.
 #[tauri::command]
-fn config_preview(base: String, changes: serde_json::Map<String, Value>) -> Result<Preview, String> {
+fn config_preview(
+    base: String,
+    changes: serde_json::Map<String, Value>,
+) -> Result<Preview, String> {
     let text = config::apply(&base, &changes)?;
     let diff = config::diff(&base, &text);
     Ok(Preview { text, diff })
@@ -460,7 +818,12 @@ async fn config_apply(
     let encoded = b64(&text);
     let port = server.observe_port.to_string();
     let out = blocking(move || {
-        tunnels.run_script(&server, REMOTE_SH, &["apply", &port, &encoded, &base_sha], 300)
+        tunnels.run_script(
+            &server,
+            REMOTE_SH,
+            &["apply", &port, &encoded, &base_sha],
+            300,
+        )
     })
     .await?;
     match out.field("result") {
@@ -476,6 +839,7 @@ async fn config_apply(
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_log::Builder::new().build())
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let dir = app.path().app_data_dir()?;
             let http = reqwest::Client::builder()
@@ -496,6 +860,12 @@ fn main() {
             servers_remove,
             server_status,
             server_riders,
+            server_tracks,
+            server_set_track,
+            server_set_rotation,
+            server_update_github,
+            server_session,
+            server_upload,
             server_logs,
             server_test_token,
             config_load,

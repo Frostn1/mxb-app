@@ -1,3 +1,31 @@
 @import "tailwindcss";
 /* The mxbsecure design system: tokens, fonts, dark mode (packages/mxbsecure-ui). */
 @import "@frost/mxbsecure-ui/theme.css";
+
+/* Match MXB App's neutral three-surface shell: chrome, page, then white cards. Blue is
+   reserved for selection and primary actions. */
+@theme inline {
+  --color-window: var(--window);
+}
+
+:root {
+  --window: #e9e9ec;
+  --background: #f5f5f7;
+  --card: #ffffff;
+  --muted: #ececef;
+  --accent: rgb(0 113 227 / 0.12);
+  --accent-foreground: #0060c0;
+  --border: rgb(0 0 0 / 0.13);
+  --input: rgb(0 0 0 / 0.18);
+}
+
+.dark {
+  --window: #000000;
+  --background: #09090b;
+  --card: #1c1c1e;
+  --muted: #1c1c1e;
+  --accent: rgb(10 132 255 / 0.16);
+  --accent-foreground: #2997ff;
+  --border: rgb(255 255 255 / 0.12);
+  --input: rgb(255 255 255 / 0.16);
+}

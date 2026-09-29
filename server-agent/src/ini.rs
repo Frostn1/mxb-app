@@ -14,17 +14,32 @@ pub struct Key {
     pub name: &'static str,
 }
 
-pub const TRACK: Key = Key { section: "event", name: "track" };
-pub const NAME: Key = Key { section: "connection", name: "name" };
-pub const MAX_CLIENT: Key = Key { section: "connection", name: "maxclient" };
+pub const TRACK: Key = Key {
+    section: "event",
+    name: "track",
+};
+pub const NAME: Key = Key {
+    section: "connection",
+    name: "name",
+};
+pub const MAX_CLIENT: Key = Key {
+    section: "connection",
+    name: "maxclient",
+};
 
 // Not reachable from the API yet — they're here as the vocabulary of keys this module is
 // known to handle correctly, and the tests exercise them as the two awkward cases: a key
 // whose value is legitimately empty, and one that is absent from a section that exists.
 #[allow(dead_code)]
-pub const TRACK_LAYOUT: Key = Key { section: "event", name: "track_layout" };
+pub const TRACK_LAYOUT: Key = Key {
+    section: "event",
+    name: "track_layout",
+};
 #[allow(dead_code)]
-pub const PASSWORD: Key = Key { section: "connection", name: "password" };
+pub const PASSWORD: Key = Key {
+    section: "connection",
+    name: "password",
+};
 
 /// The value of `key`, or `None` when the section or the key is absent.
 ///
@@ -155,7 +170,11 @@ mod tests {
         assert_eq!(get(&out, NAME).as_deref(), Some("Frost Test EU"));
         assert_eq!(get(&out, MAX_CLIENT).as_deref(), Some("20"));
         assert!(out.contains("[live]"), "later sections must survive");
-        assert_eq!(out.matches("track =").count(), 1, "must not duplicate the key");
+        assert_eq!(
+            out.matches("track =").count(),
+            1,
+            "must not duplicate the key"
+        );
     }
 
     #[test]

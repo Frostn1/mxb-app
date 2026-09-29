@@ -85,6 +85,29 @@ export async function serverRiders(id: string): Promise<Rider[]> {
 export const serverLogs = (id: string, lines: number) =>
   invoke<string[]>("server_logs", { id, lines });
 
+export interface TrackState {
+  installed: string[];
+  current: string | null;
+  rotation: string[];
+}
+
+export const serverTracks = (id: string) => invoke<TrackState>("server_tracks", { id });
+
+export const serverSetTrack = (id: string, track: string) =>
+  invoke<Record<string, unknown>>("server_set_track", { id, track });
+
+export const serverSetRotation = (id: string, tracks: string[]) =>
+  invoke<Record<string, unknown>>("server_set_rotation", { id, tracks });
+
+export const serverUpdateGithub = (id: string) =>
+  invoke<Record<string, unknown>>("server_update_github", { id });
+
+export const serverSession = (id: string, action: "jump" | "advance" | "restart", to?: "practice" | "qualifying" | "warmup" | "race") =>
+  invoke<Record<string, unknown>>("server_session", { id, action, to });
+
+export const serverUpload = (id: string, kind: "track" | "version", path: string, version?: string) =>
+  invoke<Record<string, unknown>>("server_upload", { id, kind, path, version });
+
 /** Tauri rejects with the command's error string. */
 export const errorText = (e: unknown) => (typeof e === "string" ? e : e instanceof Error ? e.message : String(e));
 

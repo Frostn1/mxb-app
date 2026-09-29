@@ -3,5 +3,14 @@
   "identifier": "default",
   "description": "The main MXB Servers window: core only, no shell, file or network plugins",
   "windows": ["main"],
-  "permissions": ["core:default"]
+  "permissions": [
+    "core:default",
+    "core:window:allow-start-dragging",
+    "core:window:allow-minimize",
+    "core:window:allow-maximize",
+    "core:window:allow-unmaximize",
+    "core:window:allow-toggle-maximize",
+    "core:window:allow-close",
+    "dialog:allow-open"
+  ]
 }
