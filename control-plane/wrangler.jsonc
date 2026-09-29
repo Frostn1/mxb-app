@@ -52,7 +52,7 @@
     "MXB_ADMIN_STEAM_IDS": "76561198174305985",
     // Exact public HTTPS names the admin server manager may call. Empty keeps connection
     // disabled until an operator deliberately adds the reverse-proxied agent host here.
-    "MXB_SERVER_AGENT_HOSTS": "",
+    "MXB_SERVER_AGENT_HOSTS": "16-146-6-22.sslip.io",
     // Require a Valve-confirmed Steam sign-in before any app in the lineup will run. On:
     // MXB App, Studio and Coach show a "Sign in with Steam" wall at startup, every install
     // becomes a proven identity, and a ban has no fresh-account escape. This shuts out anyone
