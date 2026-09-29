@@ -87,11 +87,15 @@ export const serverLogs = (id: string, lines: number) =>
 
 export interface TrackState {
   installed: string[];
+  library: string[];
   current: string | null;
   rotation: string[];
 }
 
 export const serverTracks = (id: string) => invoke<TrackState>("server_tracks", { id });
+
+export const serverTrackMembership = (id: string, track: string, attached: boolean) =>
+  invoke<Record<string, unknown>>("server_track_membership", { id, track, attached });
 
 export const serverSetTrack = (id: string, track: string) =>
   invoke<Record<string, unknown>>("server_set_track", { id, track });
@@ -107,6 +111,9 @@ export const serverSession = (id: string, action: "jump" | "advance" | "restart"
 
 export const serverUpload = (id: string, kind: "track" | "version", path: string, version?: string) =>
   invoke<Record<string, unknown>>("server_upload", { id, kind, path, version });
+
+export const inspectTrackUpload = (path: string) =>
+  invoke<{ bytes: number; serverTrack: boolean; detail: string; uploadName: string }>("inspect_track_upload", { path });
 
 /** Tauri rejects with the command's error string. */
 export const errorText = (e: unknown) => (typeof e === "string" ? e : e instanceof Error ? e.message : String(e));
@@ -149,7 +156,23 @@ export interface ConfigState {
   fields: ConfigField[];
 }
 
-export const configLoad = (id: string) => invoke<ConfigState>("config_load", { id });
+const configCache = new Map<string, { value: ConfigState; at: number }>();
+const configLoads = new Map<string, Promise<ConfigState>>();
+const CONFIG_CACHE_MS = 5 * 60_000;
+
+export const peekConfig = (id: string) => configCache.get(id)?.value ?? null;
+
+export const configLoad = (id: string, fresh = false): Promise<ConfigState> => {
+  const cached = configCache.get(id);
+  if (!fresh && cached && Date.now() - cached.at < CONFIG_CACHE_MS) return Promise.resolve(cached.value);
+  const pending = configLoads.get(id);
+  if (pending) return pending;
+  const request = invoke<ConfigState>("config_load", { id })
+    .then((value) => { configCache.set(id, { value, at: Date.now() }); return value; })
+    .finally(() => configLoads.delete(id));
+  configLoads.set(id, request);
+  return request;
+};
 
 export const configPreview = (base: string, changes: Record<string, FieldValue>) =>
   invoke<{ text: string; diff: string }>("config_preview", { base, changes });
@@ -163,7 +186,10 @@ export interface ApplyResult {
   output: string;
 }
 
-export const configApply = (id: string, baseSha: string, text: string) =>
-  invoke<ApplyResult>("config_apply", { id, baseSha, text });
+export const configApply = async (id: string, baseSha: string, text: string) => {
+  const result = await invoke<ApplyResult>("config_apply", { id, baseSha, text });
+  configCache.delete(id);
+  return result;
+};
 
 export const testToken = (id: string) => invoke<{ ok: boolean; message: string }>("server_test_token", { id });

@@ -27,6 +27,10 @@ pub struct Config {
     pub listen: String,
     /// The MX Bikes install directory holding `mxbikes.exe` and the server `.ini`.
     pub game_dir: PathBuf,
+    /// Machine-wide native track store. Servers on the same host link packages from here.
+    /// Omitted keeps it beside the individual server directories.
+    #[serde(default)]
+    pub track_library: Option<PathBuf>,
     /// Server config filename, relative to `game_dir`.
     #[serde(default = "default_ini")]
     pub ini: String,
@@ -134,6 +138,15 @@ impl Config {
             ServerKind::Stock => self.game_dir.join("mods").join("tracks"),
             ServerKind::Native => self.game_dir.join("tracks"),
         }
+    }
+
+    pub fn track_library_dir(&self) -> PathBuf {
+        self.track_library.clone().unwrap_or_else(|| {
+            self.game_dir
+                .parent()
+                .unwrap_or(&self.game_dir)
+                .join("mxbserver-track-library")
+        })
     }
 
     pub fn version_path(&self) -> PathBuf {

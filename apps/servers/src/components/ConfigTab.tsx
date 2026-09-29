@@ -6,6 +6,7 @@ import {
   configPreview,
   configValidate,
   errorText,
+  peekConfig,
   type ApplyResult,
   type ConfigField,
   type ConfigState,
@@ -32,8 +33,9 @@ const same = (a: FieldValue, b: FieldValue) => JSON.stringify(a) === JSON.string
 /** The server's settings as a form: change, review, apply. Applying checks the file with the
  *  server's own binary, backs it up, restarts, and puts the backup back if it isn't ready. */
 export function ConfigTab({ server }: { server: ServerView }) {
-  const [state, setState] = useState<ConfigState | null>(null);
-  const [values, setValues] = useState<Record<string, FieldValue>>({});
+  const cached = peekConfig(server.id);
+  const [state, setState] = useState<ConfigState | null>(cached);
+  const [values, setValues] = useState<Record<string, FieldValue>>(cached?.values ?? {});
   const [step, setStep] = useState<Step>({ kind: "edit" });
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -41,7 +43,7 @@ export function ConfigTab({ server }: { server: ServerView }) {
   const [query, setQuery] = useState("");
 
   const load = useCallback(async () => {
-    setBusy("Reading the server's settings…");
+    if (!peekConfig(server.id)) setBusy("Reading settings…");
     setError(null);
     try {
       const s = await configLoad(server.id);
@@ -171,14 +173,14 @@ export function ConfigTab({ server }: { server: ServerView }) {
               );
             })}
           </div>
-          <div className="flex shrink-0 items-center gap-3 border-t bg-background py-3">
-            <Button variant="primary" disabled={!changed || !!busy} onClick={() => void review()}>
-              {changed ? `Save ${changed} change${changed === 1 ? "" : "s"}` : "Saved"}
-            </Button>
+          <div className="flex shrink-0 items-center justify-end gap-3 border-t bg-background py-3">
+            {busy && <span className="mr-auto text-sm text-muted-foreground">{busy}</span>}
             <Button disabled={!changed || !!busy} onClick={() => setValues(state.values)}>
               Reset changes
             </Button>
-            {busy && <span className="text-sm text-muted-foreground">{busy}</span>}
+            <Button variant="primary" disabled={!changed || !!busy} onClick={() => void review()}>
+              {changed ? `Save ${changed} change${changed === 1 ? "" : "s"}` : "Saved"}
+            </Button>
           </div>
         </>
       )}

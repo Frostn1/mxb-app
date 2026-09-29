@@ -23,6 +23,8 @@ export function sessionName(stage: string): string {
   if (!stage) return "—";
   const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
   const m = /^(\w+)\((\w+)\)$/.exec(stage);
+  const countdown = /^countdown\s*\{\s*next:\s*(\w+)\s*\}$/i.exec(stage);
+  if (countdown) return `${cap(countdown[1])} countdown`;
   if (!m) return cap(stage);
   return m[1] === "running" ? cap(m[2]) : `${cap(m[2])} ${m[1]}`;
 }
