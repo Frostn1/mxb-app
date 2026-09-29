@@ -53,7 +53,7 @@ export function ServerForm({
 
   const set = <K extends keyof Server>(key: K, value: Server[K]) => setServer({ ...server, [key]: value });
   const port = (text: string) => (text.trim() === "" ? null : Number(text));
-  const usePairing = async () => {
+  const applyPairing = async () => {
     setError(null);
     try {
       const parsed = await parseLegacyPairing(pairing);
@@ -205,7 +205,7 @@ export function ServerForm({
       {!server.local && server.kind === "legacy" && (
         <Section title="mxb-agent" hint="The official dedicated server is controlled by mxb-agent on its host.">
           <Field label="Pairing code" hint="Paste the mxb-agent: line printed when the agent starts.">
-            <div className="flex gap-2"><Input value={pairing} onChange={(e) => setPairing(e.target.value)} placeholder="mxb-agent:…" /><Button type="button" disabled={!pairing.trim()} onClick={() => void usePairing()}>Use code</Button></div>
+            <div className="flex gap-2"><Input value={pairing} onChange={(e) => setPairing(e.target.value)} placeholder="mxb-agent:…" /><Button type="button" disabled={!pairing.trim()} onClick={() => void applyPairing()}>Use code</Button></div>
           </Field>
           <div className="grid grid-cols-[1fr_7rem] gap-3">
             <Field label="Host">

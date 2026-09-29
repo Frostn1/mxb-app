@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { errorText, legacyConfig, legacyConfigSave, serverTracks, type LegacyStatus, type ServerView } from "@/lib/api";
 import { Button, Card, ErrorLine, Field, Input } from "./ui";
 
@@ -10,7 +10,8 @@ export function LegacySettings({ server }: { server: ServerView }) {
   const [track, setTrack] = useState(saved?.status.server.track ?? "");
   const [maxClients, setMaxClients] = useState(Number(saved?.status.server.maxClients ?? 20));
   const [tracks, setTracks] = useState(saved?.tracks ?? []);
-  const [baseline, setBaseline] = useState("");
+  const [baseline, setBaseline] = useState(() => saved ? JSON.stringify({ name: saved.status.server.name ?? "", track: saved.status.server.track ?? "", maxClients: Number(saved.status.server.maxClients ?? 20) }) : "");
+  const loadedInitially = useRef(saved != null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState(false);
@@ -29,7 +30,7 @@ export function LegacySettings({ server }: { server: ServerView }) {
     setBaseline(JSON.stringify(values));
   }, [server.id]);
 
-  useEffect(() => { if (!saved) void load().catch((e) => setError(errorText(e))); else setBaseline(JSON.stringify({ name, track, maxClients })); }, [load]);
+  useEffect(() => { if (!loadedInitially.current) void load().catch((e) => setError(errorText(e))); }, [load]);
   useEffect(() => { if (!done) return; const timer = window.setTimeout(() => setDone(false), 3000); return () => clearTimeout(timer); }, [done]);
 
   const changed = baseline !== "" && baseline !== JSON.stringify({ name, track, maxClients });
