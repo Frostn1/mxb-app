@@ -25,9 +25,31 @@ const MAX_DEPTH: usize = 3;
 
 pub fn installed(game_dir: &Path) -> Vec<String> {
     let root = game_dir.join("mods").join("tracks");
+    installed_in(&root)
+}
+
+pub fn installed_in(root: &Path) -> Vec<String> {
     // A `BTreeSet` sorts, and dedupes a host holding one track both packaged and extracted.
     let mut out = BTreeSet::new();
-    walk(&root, 0, &mut out);
+    walk(root, 0, &mut out);
+    out.into_iter().collect()
+}
+
+/// Native manager packages are deliberately flat: the selected name maps exactly to
+/// `tracks/<name>.pkz`, so a dropdown value can never become a caller-controlled path.
+pub fn native_packages(root: &Path) -> Vec<String> {
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return Vec::new();
+    };
+    let mut out = BTreeSet::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_file() && has_ext(&path, "pkz") {
+            if let Some(name) = clean_name(&path) {
+                out.insert(name);
+            }
+        }
+    }
     out.into_iter().collect()
 }
 
@@ -95,7 +117,8 @@ mod tests {
     use super::*;
 
     fn tmp(name: &str) -> std::path::PathBuf {
-        let p = std::env::temp_dir().join(format!("mxb-agent-tracks-{name}-{}", std::process::id()));
+        let p =
+            std::env::temp_dir().join(format!("mxb-agent-tracks-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&p);
         p
     }
@@ -187,6 +210,15 @@ mod tests {
         touch(&root.join("mods/tracks/bad=key.pkz"));
 
         assert_eq!(installed(&root), vec!["ok".to_string()]);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn native_packages_are_flat_and_map_back_to_one_safe_path() {
+        let root = tmp("native-flat");
+        touch(&root.join("RedBud.pkz"));
+        touch(&root.join("category/Southwick.pkz"));
+        assert_eq!(native_packages(&root), vec!["RedBud".to_string()]);
         let _ = std::fs::remove_dir_all(&root);
     }
 }

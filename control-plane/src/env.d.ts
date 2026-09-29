@@ -11,7 +11,7 @@
  * provisioning endpoints answer 503 rather than crashing on a missing key.
  */
 declare global {
-  interface Env {
+interface Env {
     /** IAM key scoped to launching and managing `mxb:managed` instances in one region. */
     AWS_ACCESS_KEY_ID?: string;
     AWS_SECRET_ACCESS_KEY?: string;
@@ -88,6 +88,9 @@ declare global {
      *  a reviewable diff. Unset means nobody is an admin; `ADMIN_KEY` still opens the rendered
      *  `/admin` pages on this host either way. */
     MXB_ADMIN_STEAM_IDS?: string;
+    /** Public HTTPS hostnames the admin server manager may call, comma or space separated.
+     * Empty is fail-closed. Exact names only; the browser never receives their URLs or tokens. */
+    MXB_SERVER_AGENT_HOSTS?: string;
     /** Signs mxbsecure.com's Steam sign-in state and session cookies. A secret; rotating it
      *  signs everyone out. Unset means the site has no sign-in. */
     MXB_WEB_SESSION_KEY?: string;

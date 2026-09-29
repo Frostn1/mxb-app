@@ -1,13 +1,27 @@
 //! The agent's own settings, read from `agent.json` beside the binary.
 
 use serde::Deserialize;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum ServerKind {
+    Stock,
+    Native,
+}
+
+fn default_kind() -> ServerKind {
+    ServerKind::Stock
+}
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Config {
     /// Bearer token the app must present. No default — an agent that listens without one
     /// would hand process control to anyone who portscans the box.
     pub token: String,
+    /// Which server is supervised. Omitted keeps the original stock-Windows behaviour.
+    #[serde(default = "default_kind")]
+    pub kind: ServerKind,
     /// Where the HTTP API listens.
     #[serde(default = "default_listen")]
     pub listen: String,
@@ -16,6 +30,17 @@ pub struct Config {
     /// Server config filename, relative to `game_dir`.
     #[serde(default = "default_ini")]
     pub ini: String,
+    /// Native server config, relative to `game_dir`.
+    #[serde(default = "default_native_config")]
+    pub native_config: String,
+    /// Native server binary, relative to `game_dir`.
+    #[serde(default = "default_native_binary")]
+    pub native_binary: String,
+    /// Loopback admin listener and its control token. Required for native session actions.
+    #[serde(default)]
+    pub native_admin: Option<String>,
+    #[serde(default)]
+    pub native_admin_token: Option<String>,
     /// UDP port passed to `-dedicated`.
     #[serde(default = "default_game_port")]
     pub game_port: u16,
@@ -32,6 +57,16 @@ fn default_listen() -> String {
 fn default_ini() -> String {
     "dedicated.ini".to_string()
 }
+fn default_native_config() -> String {
+    "server.toml".to_string()
+}
+fn default_native_binary() -> String {
+    if cfg!(windows) {
+        "mxbserver.exe".to_string()
+    } else {
+        "mxbserver".to_string()
+    }
+}
 fn default_game_port() -> u16 {
     54210
 }
@@ -46,6 +81,33 @@ impl Config {
         if cfg.token.trim().is_empty() {
             return Err(format!("{}: \"token\" must not be empty", path.display()));
         }
+        if cfg.kind == ServerKind::Native {
+            let safe_relative = |value: &str| {
+                !value.trim().is_empty()
+                    && !Path::new(value).is_absolute()
+                    && Path::new(value)
+                        .components()
+                        .all(|part| matches!(part, Component::Normal(_)))
+            };
+            if !safe_relative(&cfg.native_config) {
+                return Err(format!(
+                    "{}: native_config must be a relative file name",
+                    path.display()
+                ));
+            }
+            if !safe_relative(&cfg.native_binary) {
+                return Err(format!(
+                    "{}: native_binary must be a relative file name",
+                    path.display()
+                ));
+            }
+            if cfg.native_admin.is_some() != cfg.native_admin_token.is_some() {
+                return Err(format!(
+                    "{}: native_admin and native_admin_token must be set together",
+                    path.display()
+                ));
+            }
+        }
         Ok(cfg)
     }
 
@@ -54,7 +116,29 @@ impl Config {
     }
 
     pub fn exe_path(&self) -> PathBuf {
-        self.game_dir.join("mxbikes.exe")
+        match self.kind {
+            ServerKind::Stock => self.game_dir.join("mxbikes.exe"),
+            ServerKind::Native => self.game_dir.join(&self.native_binary),
+        }
+    }
+
+    pub fn server_config_path(&self) -> PathBuf {
+        match self.kind {
+            ServerKind::Stock => self.ini_path(),
+            ServerKind::Native => self.game_dir.join(&self.native_config),
+        }
+    }
+
+    pub fn tracks_dir(&self) -> PathBuf {
+        match self.kind {
+            ServerKind::Stock => self.game_dir.join("mods").join("tracks"),
+            ServerKind::Native => self.game_dir.join("tracks"),
+        }
+    }
+
+    pub fn version_path(&self) -> PathBuf {
+        self.game_dir
+            .join(format!("{}.version", self.native_binary))
     }
 }
 
@@ -77,7 +161,9 @@ pub fn token_matches(expected: &str, presented: &str) -> bool {
 
 /// The token out of an `Authorization: Bearer …` header value.
 pub fn bearer(header_value: &str) -> Option<&str> {
-    let rest = header_value.strip_prefix("Bearer ").or_else(|| header_value.strip_prefix("bearer "))?;
+    let rest = header_value
+        .strip_prefix("Bearer ")
+        .or_else(|| header_value.strip_prefix("bearer "))?;
     let rest = rest.trim();
     (!rest.is_empty()).then_some(rest)
 }
@@ -105,5 +191,17 @@ mod tests {
         assert_eq!(bearer("Basic abc123"), None);
         assert_eq!(bearer("Bearer "), None);
         assert_eq!(bearer("abc123"), None);
+    }
+
+    #[test]
+    fn native_paths_cannot_escape_the_game_directory() {
+        let dir = std::env::temp_dir().join(format!("mxb-agent-config-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("agent.json");
+        std::fs::write(&path, r#"{"token":"abcdefghijklmnopqrstuvwxyz123456","kind":"native","game_dir":".","native_binary":"../mxbserver"}"#).unwrap();
+        assert!(Config::load(&path)
+            .unwrap_err()
+            .contains("relative file name"));
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

@@ -5,7 +5,7 @@
 //! detection without polling the process table, so a crashed server can be brought back
 //! automatically, and "restart" is not a race between a kill and someone else's respawn.
 
-use crate::config::Config;
+use crate::config::{Config, ServerKind};
 use serde::Serialize;
 use std::process::{Child, Command};
 use std::time::Instant;
@@ -32,7 +32,13 @@ pub struct Status {
 
 impl Supervisor {
     pub fn new(cfg: Config) -> Self {
-        Self { cfg, child: None, started_at: None, restarts: 0, stopping: false }
+        Self {
+            cfg,
+            child: None,
+            started_at: None,
+            restarts: 0,
+            stopping: false,
+        }
     }
 
     pub fn config(&self) -> &Config {
@@ -48,16 +54,24 @@ impl Supervisor {
         if !exe.is_file() {
             return Err(format!("{} not found", exe.display()));
         }
-        let child = Command::new(&exe)
-            .current_dir(&self.cfg.game_dir)
-            .args([
-                "-dedicated",
-                &self.cfg.game_port.to_string(),
-                "-set",
-                "params",
-                &self.cfg.ini,
-                "-log",
-            ])
+        let mut command = Command::new(&exe);
+        command.current_dir(&self.cfg.game_dir);
+        match self.cfg.kind {
+            ServerKind::Stock => {
+                command.args([
+                    "-dedicated",
+                    &self.cfg.game_port.to_string(),
+                    "-set",
+                    "params",
+                    &self.cfg.ini,
+                    "-log",
+                ]);
+            }
+            ServerKind::Native => {
+                command.args(["--config", &self.cfg.native_config]);
+            }
+        }
+        let child = command
             .spawn()
             .map_err(|e| format!("couldn't start {}: {e}", exe.display()))?;
         self.child = Some(child);
@@ -124,7 +138,11 @@ impl Supervisor {
         let running = self.is_alive();
         Status {
             running,
-            pid: if running { self.child.as_ref().map(|c| c.id()) } else { None },
+            pid: if running {
+                self.child.as_ref().map(|c| c.id())
+            } else {
+                None
+            },
             uptime_secs: if running {
                 self.started_at.map(|t| t.elapsed().as_secs()).unwrap_or(0)
             } else {
@@ -142,6 +160,35 @@ impl Supervisor {
     pub fn write_ini(&self, text: &str) -> Result<(), String> {
         let path = self.cfg.ini_path();
         std::fs::write(&path, text).map_err(|e| format!("couldn't write {}: {e}", path.display()))
+    }
+
+    pub fn read_server_config(&self) -> Result<String, String> {
+        let path = self.cfg.server_config_path();
+        std::fs::read_to_string(&path).map_err(|e| format!("couldn't read {}: {e}", path.display()))
+    }
+
+    pub fn write_server_config(&self, text: &str) -> Result<(), String> {
+        let path = self.cfg.server_config_path();
+        let temporary = path.with_extension("tmp");
+        let backup = path.with_extension("previous");
+        std::fs::write(&temporary, text)
+            .map_err(|e| format!("couldn't write {}: {e}", temporary.display()))?;
+        let existed = path.exists();
+        if existed {
+            let _ = std::fs::remove_file(&backup);
+            std::fs::rename(&path, &backup)
+                .map_err(|e| format!("couldn't back up {}: {e}", path.display()))?;
+        }
+        if let Err(error) = std::fs::rename(&temporary, &path) {
+            if existed {
+                let _ = std::fs::rename(&backup, &path);
+            }
+            return Err(format!("couldn't replace {}: {error}", path.display()));
+        }
+        if existed {
+            let _ = std::fs::remove_file(backup);
+        }
+        Ok(())
     }
 }
 
