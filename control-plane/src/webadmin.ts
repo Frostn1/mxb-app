@@ -60,7 +60,7 @@ import {
   connect as connectServer,
   detail as serverDetail,
   inventory as serverInventory,
-  upload as serverUpload,
+  logs as serverLogs,
 } from "./servermanager";
 
 export function isWebAdminPath(path: string): boolean {
@@ -110,6 +110,11 @@ export async function webAdminRoutes(
     const detail = path.match(/^\/v1\/web\/admin\/servers\/([0-9a-f-]{36})$/i);
     if (detail) {
       const result = await serverDetail(env, detail[1], fetchImpl);
+      return said(result.status, result.body);
+    }
+    const logs = path.match(/^\/v1\/web\/admin\/servers\/([0-9a-f-]{36})\/logs$/i);
+    if (logs) {
+      const result = await serverLogs(env, logs[1], fetchImpl);
       return said(result.status, result.body);
     }
     switch (path) {
@@ -219,17 +224,6 @@ export async function webAdminRoutes(
   }
 
   if (request.method === "POST" && path.startsWith("/v1/web/admin/servers")) {
-    const upload = path.match(/^\/v1\/web\/admin\/servers\/([0-9a-f-]{36})\/upload\/(track|version)$/i);
-    if (upload) {
-      const type = (request.headers.get("Content-Type") ?? "").split(";")[0].trim().toLowerCase();
-      if (!origin || type !== "application/octet-stream") {
-        return said(403, { error: "that upload didn't come from mxbsecure.com" });
-      }
-      const result = await serverUpload(env, upload[1], upload[2].toLowerCase() as "track" | "version", request, fetchImpl);
-      console.log(JSON.stringify({ msg: "managed server upload", server: upload[1], kind: upload[2].toLowerCase(), admin: session.steamId, status: result.status }));
-      return said(result.status, result.body);
-    }
-
     const refused = refuseCrossSiteWrite(request, env);
     if (refused) return cors(refused, origin);
     let body: Record<string, unknown>;
