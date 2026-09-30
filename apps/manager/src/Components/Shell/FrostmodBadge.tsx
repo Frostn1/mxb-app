@@ -1,45 +1,49 @@
-import { Play, RefreshCw, Square, Zap } from "lucide-react";
+import { RefreshCw, Zap } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@frost/shared/lib/utils";
 import { useConfig } from "@frost/shared/Context/Config";
 import { useFrostmod } from "../../Context/FrostmodContext";
 import { useT } from "@/i18n";
-import { ATTACH_PROBLEM } from "@frost/shared/types";
 import { Popover, PopoverContent, PopoverTrigger } from "@frost/shared/Components/ui/popover";
 
 /**
- * FrostMod's state, and the way to start or stop it, in the rail.
+ * The game-loaded FrostMod plugin's connection state in the rail.
  *
  * The old sidebar carried this as a pill on every screen, and the rail that replaced it
- * didn't take it along — so the only Start/Stop left was four screens deep in Settings, and
- * the tour step that points at `[data-tour="frostmod"]` had nothing to point at.
+ * didn't take it along, and the tour step that points at `[data-tour="frostmod"]` had
+ * nothing to point at.
  *
  * It has to be visible from everywhere for the same reason the track build badge does: what
  * it reports changes while you are somewhere else. A dot alone would be a status light, so
- * the panel behind it carries the two actions the sidebar had — reload the game, and stop.
+ * the panel behind it explains the state and offers Reload only while the plugin is active.
  */
 export default function FrostmodBadge() {
   const t = useT();
   const { game } = useConfig();
-  const { integrationChoice, running, attachment, reload, status, start, stop } = useFrostmod();
+  const { integrationChoice, attachment, reload, status } = useFrostmod();
 
   // FrostMod is a compiled MX Bikes plugin — there is nothing to report, start or reload
   // for a title it wasn't built for.
   if (!game.caps.frostmod || integrationChoice !== "enabled") return null;
 
-  // Up, but not reaching the game — see `frostmod::attachment`. Reported plainly rather than
-  // as "Running", which is exactly as far as a player could get in working out why nothing
-  // was happening in game.
-  const attachProblem =
-    attachment !== null && ATTACH_PROBLEM.includes(attachment.state);
-
-  const label = attachProblem
-    ? t("frostmod.notInGame")
-    : running === null
-      ? t("frostmod.checking")
-      : running
+  // The plugin's handshake is the authority. `running` is intentionally absent here: it
+  // describes the retired launcher/injector process and is normally false in plugin-only mode.
+  const pluginActive = attachment?.state === "attached";
+  const pluginProblem = attachment?.state === "not_attached" || attachment?.state === "blocked";
+  const checking = status === null || attachment === null;
+  const label = checking
+    ? t("frostmod.checking")
+    : !status.installed
+      ? t("frostmod.notInstalled")
+      : pluginActive
         ? t("frostmod.running")
-        : t("frostmod.notRunning");
+        : attachment.state === "game_not_running"
+          ? t("frostmod.notInGame")
+          : attachment.state === "attaching"
+            ? t("frostmod.connecting")
+            : pluginProblem
+              ? t("frostmod.pluginNotConnected")
+              : t("frostmod.checkUnavailable");
 
   const onReload = async () => {
     const outcome = await reload();
@@ -52,7 +56,7 @@ export default function FrostmodBadge() {
       <PopoverTrigger asChild>
         <button
           data-tour="frostmod"
-          title={attachProblem ? (attachment?.reason ?? label) : label}
+          title={pluginProblem && attachment?.reason ? attachment.reason : label}
           aria-label={label}
           className="relative flex cursor-default items-center justify-center rounded-lg px-1.5 py-2.5 text-muted-foreground transition-colors hover:bg-foreground/[0.05] hover:text-foreground"
         >
@@ -60,11 +64,11 @@ export default function FrostmodBadge() {
           <span
             className={cn(
               "absolute bottom-1.5 right-1 size-[6px] rounded-full ring-2 ring-window",
-              running === null
+              checking
                 ? "bg-muted-foreground"
-                : attachProblem
+                : pluginProblem
                   ? "bg-warning"
-                  : running
+                  : pluginActive
                     ? "bg-success"
                     : "bg-muted-foreground/50",
             )}
@@ -77,11 +81,11 @@ export default function FrostmodBadge() {
           <span
             className={cn(
               "size-[7px] flex-none rounded-full",
-              running === null
+              checking
                 ? "bg-muted-foreground"
-                : attachProblem
+                : pluginProblem
                   ? "bg-warning"
-                  : running
+                  : pluginActive
                     ? "bg-success"
                     : "bg-muted-foreground/50",
             )}
@@ -89,42 +93,20 @@ export default function FrostmodBadge() {
           <span className="truncate text-[12px] font-bold">{label}</span>
         </div>
 
-        {attachProblem && attachment?.reason && (
+        {pluginProblem && attachment?.reason && (
           <p className="border-b border-white/[0.07] px-3.5 py-2 text-[11px] text-muted-foreground">
             {attachment.reason}
           </p>
         )}
 
         <div className="flex flex-col gap-1 p-2">
-          {running ? (
-            <>
-              <button
-                onClick={onReload}
-                className="flex cursor-default items-center gap-2 px-1.5 py-1.5 text-left text-[11.5px] text-muted-foreground transition-colors hover:bg-foreground/[0.05] hover:text-foreground"
-              >
-                <RefreshCw className="size-3.5" /> {t("frostmod.reloadGame")}
-              </button>
-              {/* A plugin goes when the game does; there is no process to stop. */}
-              {!status?.pluginOnly && (
-                <button
-                  onClick={stop}
-                  className="flex cursor-default items-center gap-2 px-1.5 py-1.5 text-left text-[11.5px] text-muted-foreground transition-colors hover:bg-foreground/[0.05] hover:text-foreground"
-                >
-                  <Square className="size-3.5" /> {t("frostmod.stop")}
-                </button>
-              )}
-            </>
-          ) : (
-            // Nothing to start until the player has explicitly installed it — and nothing
-            // to start at all for a plugin, which the game loads as it opens.
-            status?.installed && !status.pluginOnly && (
-              <button
-                onClick={start}
-                className="flex cursor-default items-center gap-2 px-1.5 py-1.5 text-left text-[11.5px] text-primary transition-colors hover:bg-foreground/[0.05] hover:brightness-110"
-              >
-                <Play className="size-3.5" /> {t("frostmod.start")}
-              </button>
-            )
+          {pluginActive && (
+            <button
+              onClick={onReload}
+              className="flex cursor-default items-center gap-2 px-1.5 py-1.5 text-left text-[11.5px] text-muted-foreground transition-colors hover:bg-foreground/[0.05] hover:text-foreground"
+            >
+              <RefreshCw className="size-3.5" /> {t("frostmod.reloadGame")}
+            </button>
           )}
         </div>
       </PopoverContent>
