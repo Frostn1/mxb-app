@@ -246,7 +246,7 @@ function SessionControls({ server, current, remaining, refresh }: { server: Serv
       refresh();
     } catch (e) {
       const message = errorText(e);
-      if (message.includes("already running") || message.includes("countdown always runs")) refresh();
+      if (message.includes("already running") || message.includes("countdown always runs") || message.includes("race runs until it is over")) refresh();
       else setError(message);
     } finally { setBusy(null); }
   };
@@ -254,7 +254,9 @@ function SessionControls({ server, current, remaining, refresh }: { server: Serv
   const countdown = /^countdown(?:\((practice|qualifying|warmup|race)\)|\s*\{\s*next:\s*(practice|qualifying|warmup|race)\s*\})$/i.exec(current);
   const pending = (countdown?.[1] ?? countdown?.[2] ?? "").toLowerCase();
   const locked = !!pending;
-  useEffect(() => { if (locked) setError(null); }, [locked]);
+  const raceLocked = running === "race";
+  const controlsLocked = locked || raceLocked;
+  useEffect(() => { if (controlsLocked) setError(null); }, [controlsLocked]);
   const config = usePoll(() => configLoad(server.id), 30_000, `${server.id}-race-config`);
   const number = (key: string, fallback: number) => {
     const value = config.data?.values[`sessions.${key}`];
@@ -269,10 +271,10 @@ function SessionControls({ server, current, remaining, refresh }: { server: Serv
   return (
     <Card className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex min-w-0 items-center gap-3"><h3 className="font-heading text-base font-extrabold">Race control</h3>{busy ? <span className="truncate text-xs text-muted-foreground">{busy}</span> : locked ? <span className="truncate text-xs font-medium text-primary">{sessionName(pending)} starts in {remaining == null ? "a moment" : duration(remaining)}</span> : null}</div>
+        <div className="flex min-w-0 items-center gap-3"><h3 className="font-heading text-base font-extrabold">Race control</h3>{busy ? <span className="truncate text-xs text-muted-foreground">{busy}</span> : locked ? <span className="truncate text-xs font-medium text-primary">{sessionName(pending)} starts in {remaining == null ? "a moment" : duration(remaining)}</span> : raceLocked ? <span className="truncate text-xs text-muted-foreground">The race must finish before changing sessions</span> : null}</div>
         <div className="flex gap-2">
-          <Button size="sm" variant="ghost" disabled={!!busy || locked} title={locked ? "The countdown must finish" : undefined} onClick={() => void act("restart")}>Restart current</Button>
-          <Button size="sm" variant="primary" disabled={!!busy || locked} title={locked ? "The countdown must finish" : undefined} onClick={() => void act("advance")}>Next stage</Button>
+          <Button size="sm" variant="ghost" disabled={!!busy || controlsLocked} title={raceLocked ? "The race must finish" : locked ? "The countdown must finish" : undefined} onClick={() => void act("restart")}>Restart current</Button>
+          <Button size="sm" variant="primary" disabled={!!busy || controlsLocked} title={raceLocked ? "The race must finish" : locked ? "The countdown must finish" : undefined} onClick={() => void act("advance")}>Next stage</Button>
         </div>
       </div>
       <div className="grid overflow-hidden rounded-lg border sm:grid-cols-4">
@@ -280,7 +282,7 @@ function SessionControls({ server, current, remaining, refresh }: { server: Serv
           <button
             key={stage}
             type="button"
-            disabled={!!busy || locked || running === stage}
+            disabled={!!busy || controlsLocked || running === stage}
             onClick={() => void act("jump", stage)}
             aria-current={running === stage || pending === stage ? "step" : undefined}
             className={`flex items-center gap-3 border-b px-4 py-3 text-left transition disabled:cursor-default sm:border-b-0 sm:border-r sm:last:border-r-0 ${running === stage || pending === stage ? "bg-primary/10 text-primary" : "hover:bg-accent disabled:opacity-50"}`}

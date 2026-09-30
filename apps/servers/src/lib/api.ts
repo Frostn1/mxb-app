@@ -132,8 +132,18 @@ export const serverUpload = (id: string, kind: "track" | "version", path: string
 export const inspectTrackUpload = (path: string) =>
   invoke<{ bytes: number; serverTrack: boolean; detail: string; uploadName: string }>("inspect_track_upload", { path });
 
-/** Tauri rejects with the command's error string. */
-export const errorText = (e: unknown) => (typeof e === "string" ? e : e instanceof Error ? e.message : String(e));
+/** Tauri rejects with the command's error string. Prefer the server's useful message over shell noise. */
+export const errorText = (e: unknown) => {
+  const text = typeof e === "string" ? e : e instanceof Error ? e.message : String(e);
+  const json = text.match(/\{[^\r\n]*"message"\s*:\s*"(?:\\.|[^"])*"[^\r\n]*\}/)?.[0];
+  if (!json) return text;
+  try {
+    const body = JSON.parse(json) as { message?: unknown };
+    return typeof body.message === "string" ? body.message : text;
+  } catch {
+    return text;
+  }
+};
 
 // ---- Config editing ----------------------------------------------------------------------
 
