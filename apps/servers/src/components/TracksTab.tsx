@@ -71,6 +71,21 @@ export function TracksTab({ server }: { server: ServerView }) {
       await load();
     } catch (e) { setError(errorText(e)); } finally { setBusy(null); }
   };
+  const switchTrack = async (mode: "next" | "random") => {
+    if (!state?.current || state.rotation.length === 0) return;
+    const selected = mode === "next"
+      ? state.rotation[0]
+      : state.rotation[Math.floor(Math.random() * state.rotation.length)];
+    const nextQueue = [selected, ...state.rotation.filter((track) => track !== selected), state.current];
+    const label = mode === "next" ? `Play ${selected} next?` : `Switch to the randomly selected track ${selected}?`;
+    if (!window.confirm(`${label} ${server.name} will restart and connected riders will be disconnected.`)) return;
+    setBusy(mode === "next" ? "Loading next track…" : "Loading random track…"); setError(null); setDone(null);
+    try {
+      await serverSetRotation(server.id, nextQueue);
+      setDone(`${selected} is now playing.`);
+      await load();
+    } catch (e) { setError(errorText(e)); } finally { setBusy(null); }
+  };
 
   const selectLegacyTrack = async (track: string) => {
     if (track === state?.current || !window.confirm(`Switch ${server.name} to ${track}? The official server will restart.`)) return;
@@ -118,7 +133,7 @@ export function TracksTab({ server }: { server: ServerView }) {
         </Card>
 
         <Card className="flex min-h-[26rem] flex-col gap-4">
-          <div className="flex flex-wrap items-center justify-between gap-3"><div><h3 className="font-heading text-lg font-extrabold">Track rotation</h3><p className="text-xs text-muted-foreground">Drag to reorder.</p></div><div className="flex gap-2"><Button size="sm" disabled={!changed || !!busy} onClick={() => setQueue(savedQueue)}>Reset</Button><Button size="sm" variant="primary" disabled={!changed || !queue.length || !!busy} onClick={() => void save()}>Save rotation</Button></div></div>
+          <div className="flex flex-wrap items-center justify-between gap-3"><div><h3 className="font-heading text-lg font-extrabold">Track rotation</h3><p className="text-xs text-muted-foreground">Drag to reorder.</p></div><div className="flex flex-wrap justify-end gap-2"><Button size="sm" disabled={!!busy || changed || !state?.rotation.length} title={changed ? "Save or reset your rotation changes first" : undefined} onClick={() => void switchTrack("next")}>Next track</Button><Button size="sm" disabled={!!busy || changed || !state?.rotation.length} title={changed ? "Save or reset your rotation changes first" : undefined} onClick={() => void switchTrack("random")}>Random track</Button><Button size="sm" disabled={!changed || !!busy} onClick={() => setQueue(savedQueue)}>Reset</Button><Button size="sm" variant="primary" disabled={!changed || !queue.length || !!busy} onClick={() => void save()}>Save rotation</Button></div></div>
           <div
             className="-mx-4 -mb-4 min-h-0 flex-1 overflow-auto border-t p-8"
             style={{ backgroundImage: "radial-gradient(circle, color-mix(in srgb, var(--muted-foreground) 25%, transparent) 1px, transparent 1px)", backgroundSize: "20px 20px" }}
