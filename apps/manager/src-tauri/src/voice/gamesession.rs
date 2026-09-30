@@ -224,7 +224,7 @@ fn merge(injected: Option<GameSession>, plugin: Option<GameSession>) -> Option<G
 /// part of a cheap operation.
 #[derive(Default)]
 pub struct Reader {
-    /// The injected `frostmod.dll`'s block: the grid, and nothing about the server.
+    /// FrostMod's full runtime block: plugin-only on current releases, legacy injection on old ones.
     #[cfg(windows)]
     view: Mutex<Option<MappedBlock>>,
     /// The session plugin's block: the server, and nothing about the grid.
@@ -248,12 +248,11 @@ impl Reader {
         )
     }
 
-    /// Whether the game-loaded session plugin is actively publishing its handshake.
-    /// This deliberately ignores the injector block: plugin-only loading is the supported
-    /// integration, and an injected DLL being absent says nothing about its health.
+    /// Whether the full game-loaded FrostMod plugin is actively publishing its handshake.
+    /// This reads the runtime contract itself and deliberately ignores process and module lists.
     #[cfg(windows)]
     pub fn plugin_connected(&self) -> bool {
-        let sequence = Self::read_sequence(&self.plugin_view, MappedBlock::PLUGIN_NAME);
+        let sequence = Self::read_sequence(&self.view, MappedBlock::NAME);
         self.plugin_heartbeat
             .lock()
             .is_ok_and(|mut heartbeat| heartbeat_live(&mut heartbeat, sequence, Instant::now()))
@@ -634,6 +633,22 @@ mod tests {
         hand_installed.server_name = "Hand Installed".into();
         let merged = merge(Some(hand_installed), Some(from_plugin("AMX Series"))).expect("a session");
         assert_eq!(merged.server_name, "Hand Installed");
+    }
+
+    /// Plugin-only FrostMod (v0.41.0+): the full plugin is loaded by the game, gets EventInit
+    /// itself, and writes server, track, GUID and rider into the *main* block — and there is
+    /// no session copy, so no plugin block at all. That one block is the whole session.
+    #[test]
+    fn a_plugin_only_main_block_is_the_whole_session() {
+        let mut full = injected(4);
+        full.server_name = "AMX Series".into();
+        let merged = merge(Some(full), None).expect("a session");
+        assert_eq!(merged.server_name, "AMX Series");
+        assert_eq!(merged.track_id, "practice");
+        assert_eq!(merged.guid, "guid-1");
+        assert_eq!(merged.rider_name, "Frost");
+        assert_eq!(merged.riders.len(), 4);
+        assert!(merged.on_a_server());
     }
 
     #[test]

@@ -3856,6 +3856,7 @@ dependencies = [
  "getrandom 0.3.4",
  "keyring",
  "log",
+ "mxb-content",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
@@ -3863,6 +3864,7 @@ dependencies = [
  "similar",
  "tauri",
  "tauri-build",
+ "tauri-plugin-dialog",
  "tauri-plugin-log",
  "toml_edit 0.22.27",
 ]

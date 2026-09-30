@@ -330,3 +330,14 @@ jobs:
       - name: Run tests
         working-directory: ./server-agent
         run: cargo test --locked
+
+      - name: Build Linux release
+        working-directory: ./server-agent
+        run: cargo build --release --locked
+
+      - name: Upload Linux release
+        uses: actions/upload-artifact@v4
+        with:
+          name: mxb-agent-linux-x86_64
+          path: server-agent/target/release/mxb-agent
+          if-no-files-found: error

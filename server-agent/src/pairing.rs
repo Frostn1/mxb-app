@@ -27,7 +27,10 @@ pub struct Pairing {
 impl Pairing {
     pub fn encode(&self) -> String {
         let json = serde_json::to_vec(self).unwrap_or_default();
-        format!("{PREFIX}{}", base64::engine::general_purpose::STANDARD.encode(json))
+        format!(
+            "{PREFIX}{}",
+            base64::engine::general_purpose::STANDARD.encode(json)
+        )
     }
 
     pub fn decode(blob: &str) -> Result<Self, String> {
@@ -38,8 +41,8 @@ impl Pairing {
         let bytes = base64::engine::general_purpose::STANDARD
             .decode(body.trim())
             .map_err(|_| "that pairing code is damaged".to_string())?;
-        let pairing: Pairing =
-            serde_json::from_slice(&bytes).map_err(|_| "that pairing code is damaged".to_string())?;
+        let pairing: Pairing = serde_json::from_slice(&bytes)
+            .map_err(|_| "that pairing code is damaged".to_string())?;
         if pairing.url.trim().is_empty() || pairing.token.trim().is_empty() {
             return Err("that pairing code is incomplete".into());
         }
@@ -75,7 +78,9 @@ pub fn public_url(listen: &str, configured: Option<&str>) -> String {
 /// lookup, and without waiting on a host that may be firewalled off.
 fn primary_ip() -> Option<IpAddr> {
     let socket = UdpSocket::bind("0.0.0.0:0").ok()?;
-    socket.connect("198.51.100.1:80".parse::<SocketAddr>().ok()?).ok()?;
+    socket
+        .connect("198.51.100.1:80".parse::<SocketAddr>().ok()?)
+        .ok()?;
     socket.local_addr().ok().map(|a| a.ip())
 }
 
@@ -84,7 +89,10 @@ mod tests {
     use super::*;
 
     fn sample() -> Pairing {
-        Pairing { url: "http://203.0.113.10:8787".into(), token: "s3cret-token".into() }
+        Pairing {
+            url: "http://203.0.113.10:8787".into(),
+            token: "s3cret-token".into(),
+        }
     }
 
     #[test]
@@ -116,7 +124,10 @@ mod tests {
 
     #[test]
     fn refuses_a_blob_missing_half_of_itself() {
-        let empty_token = Pairing { url: "http://x:1".into(), token: String::new() };
+        let empty_token = Pairing {
+            url: "http://x:1".into(),
+            token: String::new(),
+        };
         assert!(Pairing::decode(&empty_token.encode()).is_err());
     }
 
@@ -128,12 +139,18 @@ mod tests {
             "https://mx.example.com"
         );
         // A trailing slash would double the separator when a path is appended.
-        assert_eq!(public_url("0.0.0.0:8787", Some("http://host:9/")), "http://host:9");
+        assert_eq!(
+            public_url("0.0.0.0:8787", Some("http://host:9/")),
+            "http://host:9"
+        );
     }
 
     #[test]
     fn keeps_an_explicit_bind_host_and_its_port() {
-        assert_eq!(public_url("203.0.113.10:9000", None), "http://203.0.113.10:9000");
+        assert_eq!(
+            public_url("203.0.113.10:9000", None),
+            "http://203.0.113.10:9000"
+        );
     }
 
     #[test]

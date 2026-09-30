@@ -38,6 +38,10 @@ inputs:
   profile:
     description: Certificate profile name (Public Trust).
     required: false
+  required:
+    description: Fail instead of producing an unsigned build when signing is not configured.
+    required: false
+    default: 'false'
 
 outputs:
   enabled:
@@ -60,6 +64,7 @@ runs:
         ENDPOINT: ${{ inputs.endpoint }}
         ACCOUNT: ${{ inputs.account }}
         PROFILE: ${{ inputs.profile }}
+        REQUIRED: ${{ inputs.required }}
       run: |
         missing=()
         [ -n "$CLIENT" ] || missing+=(AZURE_CLIENT_ID)
@@ -69,6 +74,10 @@ runs:
         [ -n "$ACCOUNT" ] || missing+=(ARTIFACT_SIGNING_ACCOUNT)
         [ -n "$PROFILE" ] || missing+=(ARTIFACT_SIGNING_PROFILE)
         if [ "${#missing[@]}" -gt 0 ]; then
+          if [ "$REQUIRED" = 'true' ]; then
+            echo "::error title=Windows code signing is required::A release tag cannot publish unsigned. Configure: ${missing[*]}. See docs/signing/SETUP.md."
+            exit 1
+          fi
           echo "::notice title=Windows code signing skipped::Not configured (missing: ${missing[*]}). This build is unsigned. See docs/signing/SETUP.md."
           echo "enabled=false" >> "$GITHUB_OUTPUT"
         else

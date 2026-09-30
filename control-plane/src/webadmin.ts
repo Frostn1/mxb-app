@@ -55,6 +55,13 @@ import {
 } from "./survey";
 import { collectStats, windowApp, windowDays } from "./usage";
 import { webSession } from "./websession";
+import {
+  action as serverAction,
+  connect as connectServer,
+  detail as serverDetail,
+  inventory as serverInventory,
+  upload as serverUpload,
+} from "./servermanager";
 
 export function isWebAdminPath(path: string): boolean {
   return path.startsWith("/v1/web/admin/");
@@ -96,6 +103,15 @@ export async function webAdminRoutes(
 
   const path = url.pathname;
   if (request.method === "GET") {
+    if (path === "/v1/web/admin/servers") {
+      const result = await serverInventory(env);
+      return said(result.status, result.body);
+    }
+    const detail = path.match(/^\/v1\/web\/admin\/servers\/([0-9a-f-]{36})$/i);
+    if (detail) {
+      const result = await serverDetail(env, detail[1], fetchImpl);
+      return said(result.status, result.body);
+    }
     switch (path) {
       // The Steam split rides along rather than living behind its own route: it is one query,
       // it is read on the same tab, and a second round trip would let the page draw a version
@@ -200,6 +216,40 @@ export async function webAdminRoutes(
       case "/v1/web/admin/bans":
         return said(200, { bans: await listBans(env) });
     }
+  }
+
+  if (request.method === "POST" && path.startsWith("/v1/web/admin/servers")) {
+    const upload = path.match(/^\/v1\/web\/admin\/servers\/([0-9a-f-]{36})\/upload\/(track|version)$/i);
+    if (upload) {
+      const type = (request.headers.get("Content-Type") ?? "").split(";")[0].trim().toLowerCase();
+      if (!origin || type !== "application/octet-stream") {
+        return said(403, { error: "that upload didn't come from mxbsecure.com" });
+      }
+      const result = await serverUpload(env, upload[1], upload[2].toLowerCase() as "track" | "version", request, fetchImpl);
+      console.log(JSON.stringify({ msg: "managed server upload", server: upload[1], kind: upload[2].toLowerCase(), admin: session.steamId, status: result.status }));
+      return said(result.status, result.body);
+    }
+
+    const refused = refuseCrossSiteWrite(request, env);
+    if (refused) return cors(refused, origin);
+    let body: Record<string, unknown>;
+    try {
+      body = (await request.json()) as Record<string, unknown>;
+    } catch {
+      return said(400, { error: "that was not JSON" });
+    }
+    if (path === "/v1/web/admin/servers/connect") {
+      const result = await connectServer(env, body, fetchImpl);
+      console.log(JSON.stringify({ msg: "managed server connect", admin: session.steamId, status: result.status, server: (result.body as { id?: unknown }).id ?? null }));
+      return said(result.status, result.body);
+    }
+    const action = path.match(/^\/v1\/web\/admin\/servers\/([0-9a-f-]{36})\/action$/i);
+    if (action) {
+      const result = await serverAction(env, action[1], body, fetchImpl);
+      console.log(JSON.stringify({ msg: "managed server action", server: action[1], action: String(body.action ?? ""), admin: session.steamId, status: result.status }));
+      return said(result.status, result.body);
+    }
+    return said(404, { error: "no such server-manager endpoint" });
   }
 
   // The one write here. A rule takes effect on the next report from every install, so it is

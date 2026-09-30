@@ -98,6 +98,7 @@ import { useShare } from "../../Context/Share";
 import { cachedScan, dropScans, putScan } from "./scanCache";
 import { useFavorites } from "../../lib/useFavorites";
 import { brandOf } from "./bikeBrand";
+import { refreshAfterAutoUnlock } from "../../lib/secureAutoUnlock";
 import { useOwned } from "../../lib/useOwned";
 import { useWishlist } from "../../lib/useWishlist";
 import { OwnedGrid, WishlistGrid } from "./Yours";
@@ -839,8 +840,19 @@ export default function Library({
   // digging into Settings. Throttled server-side, so re-entering the Library is cheap.
   useEffect(() => {
     if (!viewActive) return;
-    void mxbsecureAutoUnlock().catch(() => {});
-  }, [viewActive, modType]);
+    let alive = true;
+    void refreshAfterAutoUnlock(mxbsecureAutoUnlock, async () => {
+      if (!alive) return;
+      // The key file is enough for the backend scan to switch this entry from locked to
+      // unlocked, but its cached result predates the automatic grant. Replace that stale result
+      // immediately instead of making Restore keys (or a second visit) look necessary.
+      dropScans();
+      await load({ quiet: true });
+    }).catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [viewActive, modType, load]);
 
   // Model swaps, for the bikes tab only — one scan of the whole tree, indexed by bike
   // folder. Installing a mod or editing the folder changes what's swappable, so it rides

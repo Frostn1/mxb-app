@@ -769,6 +769,31 @@ describe("the dashboards on the site", () => {
     expect(Array.isArray(stats.daily)).toBe(true);
   });
 
+  it("connects a managed server only through the admin and same-site gates", async () => {
+    const env = await deployment({ ...ADMINS, MXB_SERVER_AGENT_HOSTS: "agent.example.com" });
+    const frost = await cookieFor(CREATOR);
+    const body = {
+      label: "OVH race host", provider: "ovh-vps", region: "us-west",
+      gameEndpoint: "203.0.113.40:54210", agentUrl: "https://agent.example.com",
+      agentToken: "secret-control-token-with-32-characters", revision: "v0.1.1",
+      method: "systemd", gamePort: 54210,
+    };
+    const agent = vi.fn(async () => new Response(JSON.stringify({ apiVersion: 1, kind: "native" }), {
+      headers: { "Content-Type": "application/json" },
+    })) as unknown as typeof fetch;
+
+    expect((await web(env, req("GET", "/v1/web/admin/servers", { cookie: frost }))).status).toBe(200);
+    expect((await web(env, req("POST", "/v1/web/admin/servers/connect", { cookie: frost, body, origin: "https://evil.example" }), agent)).status).toBe(403);
+    expect((await web(env, req("POST", "/v1/web/admin/servers/connect", { cookie: await cookieFor(OTHER), body }), agent)).status).toBe(403);
+    const connected = await web(env, req("POST", "/v1/web/admin/servers/connect", { cookie: frost, body }), agent);
+    expect(connected.status).toBe(201);
+    const listed = await web(env, req("GET", "/v1/web/admin/servers", { cookie: frost }));
+    const payload = await listed.text();
+    expect(payload).toContain("OVH race host");
+    expect(payload).not.toContain("agent.example.com");
+    expect(payload).not.toContain("secret-control-token");
+  });
+
   it("serves the diagnostics views the rendered pages serve", async () => {
     const env = await deployment(ADMINS);
     const frost = await cookieFor(CREATOR);

@@ -303,7 +303,9 @@ export function FrostmodProvider({ children }: { children: ReactNode }) {
     // used by the backend, then stop an already-running integration for this session.
     try {
       await setAutoRunFrostmod(false);
-      if (running) await stop();
+      // A plugin-only FrostMod has no process to stop: switching the integration off has
+      // just removed the plugin, and the running game lets go of it when it closes.
+      if (running && !status?.pluginOnly) await stop();
       rememberIntegrationChoice("app-only");
       recordActivity({
         title: t("activity.integrationAppOnly"),
@@ -313,7 +315,7 @@ export function FrostmodProvider({ children }: { children: ReactNode }) {
     } catch (e) {
       toast.error(t("frostmod.stopFailed"), { description: String(e) });
     }
-  }, [rememberIntegrationChoice, running, stop, t]);
+  }, [rememberIntegrationChoice, running, status?.pluginOnly, stop, t]);
 
   const enableIntegration = useCallback(async () => {
     rememberIntegrationChoice("enabled");

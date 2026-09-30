@@ -1,0 +1,177 @@
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { open } from "@tauri-apps/plugin-dialog";
+import { ArrowDown, ArrowUp, GripVertical, Link2, Plus, Search, Trash2, Unlink, Upload } from "lucide-react";
+import { errorText, inspectTrackUpload, serverSetRotation, serverSetTrack, serverTrackMembership, serverTracks, serverUpload, type ServerView, type TrackState } from "@/lib/api";
+import { Button, Card, ErrorLine, Notice } from "./ui";
+
+const trackCache = new Map<string, TrackState>();
+
+export function TracksTab({ server }: { server: ServerView }) {
+  const cached = trackCache.get(server.id) ?? null;
+  const [state, setState] = useState<TrackState | null>(cached);
+  const [queue, setQueue] = useState<string[]>(cached ? [...(cached.current ? [cached.current] : []), ...cached.rotation] : []);
+  const [query, setQuery] = useState("");
+  const [dragged, setDragged] = useState<number | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [done, setDone] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setError(null);
+    try {
+      const tracks = await serverTracks(server.id);
+      trackCache.set(server.id, tracks);
+      setState(tracks);
+      setQueue([...(tracks.current ? [tracks.current] : []), ...tracks.rotation]);
+    } catch (e) { setError(errorText(e)); }
+  }, [server.id]);
+  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    if (!done) return;
+    const timer = window.setTimeout(() => setDone(null), 3000);
+    return () => window.clearTimeout(timer);
+  }, [done]);
+
+  const available = useMemo(() => Array.from(new Set([...(state?.library ?? []), ...(state?.installed ?? [])])).sort(), [state]);
+  const installed = useMemo(() => available.filter((track) => track.toLowerCase().includes(query.toLowerCase())), [available, query]);
+  const savedQueue = [...(state?.current ? [state.current] : []), ...(state?.rotation ?? [])];
+  const changed = !!state && JSON.stringify(queue) !== JSON.stringify(savedQueue);
+  const move = (from: number, to: number) => {
+    if (to < 0 || to >= queue.length || from === to) return;
+    setQueue((old) => { const next = [...old]; const [item] = next.splice(from, 1); next.splice(to, 0, item); return next; });
+  };
+  const save = async () => {
+    if (!queue.length || !window.confirm(`Save this track order? ${server.name} will restart.`)) return;
+    setBusy("Saving rotation…"); setError(null); setDone(null);
+    try { await serverSetRotation(server.id, queue); setDone("Track rotation saved."); await load(); }
+    catch (e) { setError(errorText(e)); } finally { setBusy(null); }
+  };
+  const upload = async () => {
+    const path = await open({ multiple: false, directory: false, filters: [{ name: "MXB track package", extensions: ["pkz"] }] });
+    if (!path) return;
+    setBusy("Checking track…"); setError(null); setDone(null);
+    let check;
+    try { check = await inspectTrackUpload(path); }
+    catch (e) { setBusy(null); setError(errorText(e)); return; }
+    const size = check.bytes >= 1024 * 1024 ? `${(check.bytes / 1024 / 1024).toFixed(1)} MiB` : `${Math.ceil(check.bytes / 1024)} KiB`;
+    const question = check.serverTrack
+      ? `Upload ${check.uploadName} (${size}) to this machine and add it to ${server.name}?`
+      : `${check.detail}\n\nIt will be stored as ${check.uploadName} (${size}). It may be a full client track and use unnecessary server storage. Upload it anyway?`;
+    if (!window.confirm(question)) { setBusy(null); return; }
+    setBusy("Uploading track…"); setError(null); setDone(null);
+    try { await serverUpload(server.id, "track", path); setDone("Track installed."); await load(); }
+    catch (e) { setError(errorText(e)); } finally { setBusy(null); }
+  };
+  const membership = async (track: string, attached: boolean) => {
+    if (!attached && !window.confirm(`Remove ${track} from ${server.name}? The shared file stays available to other servers on this machine.`)) return;
+    setBusy(attached ? `Adding ${track}…` : `Removing ${track}…`); setError(null); setDone(null);
+    try {
+      await serverTrackMembership(server.id, track, attached);
+      setDone(attached ? `${track} added to this server.` : `${track} removed from this server.`);
+      await load();
+    } catch (e) { setError(errorText(e)); } finally { setBusy(null); }
+  };
+  const switchTrack = async (mode: "next" | "random") => {
+    if (!state?.current || state.rotation.length === 0) return;
+    const selected = mode === "next"
+      ? state.rotation[0]
+      : state.rotation[Math.floor(Math.random() * state.rotation.length)];
+    const nextQueue = [selected, ...state.rotation.filter((track) => track !== selected), state.current];
+    const label = mode === "next" ? `Play ${selected} next?` : `Switch to the randomly selected track ${selected}?`;
+    if (!window.confirm(`${label} ${server.name} will restart and connected riders will be disconnected.`)) return;
+    setBusy(mode === "next" ? "Loading next track…" : "Loading random track…"); setError(null); setDone(null);
+    try {
+      await serverSetRotation(server.id, nextQueue);
+      setDone(`${selected} is now playing.`);
+      await load();
+    } catch (e) { setError(errorText(e)); } finally { setBusy(null); }
+  };
+
+  const selectLegacyTrack = async (track: string) => {
+    if (track === state?.current || !window.confirm(`Switch ${server.name} to ${track}? The official server will restart.`)) return;
+    setBusy(`Switching to ${track}…`); setError(null); setDone(null);
+    try { await serverSetTrack(server.id, track); setDone(`${track} selected.`); await load(); }
+    catch (e) { setError(errorText(e)); } finally { setBusy(null); }
+  };
+
+  if (server.kind === "legacy") return (
+    <div className="max-w-3xl space-y-4">
+      {error && <ErrorLine text={error} />}
+      {done && <div role="status" className="fixed right-5 top-12 z-50 rounded-lg border bg-card px-4 py-3 text-sm font-medium shadow-lg">{done}</div>}
+      <Card className="flex min-h-[24rem] flex-col gap-4">
+        <div><h3 className="font-heading text-lg font-extrabold">Installed tracks</h3><p className="text-xs text-muted-foreground">From the official server&apos;s mods folder</p></div>
+        <label className="relative"><Search className="absolute left-3 top-2.5 size-4 text-muted-foreground" /><input className="h-9 w-full rounded-md border border-input bg-background pl-9 pr-3 text-sm" placeholder="Search tracks" value={query} onChange={(e) => setQuery(e.target.value)} /></label>
+        <div className="divide-y overflow-auto">
+          {state === null && <p className="py-3 text-sm text-muted-foreground">Loading…</p>}
+          {state && installed.length === 0 && <p className="py-3 text-sm text-muted-foreground">No matching tracks.</p>}
+          {installed.map((item) => <div key={item} className="flex items-center gap-3 py-3"><span className="min-w-0 flex-1 truncate text-sm font-medium">{item}</span>{item === state?.current ? <span className="text-xs font-medium text-primary">Current</span> : <Button size="sm" disabled={!!busy} onClick={() => void selectLegacyTrack(item)}>Select</Button>}</div>)}
+        </div>
+      </Card>
+      {busy && <p className="text-sm text-muted-foreground">{busy}</p>}
+    </div>
+  );
+
+  if (server.local) return <Notice>Connect this server over SSH to manage tracks and versions.</Notice>;
+  return (
+    <div className="flex flex-col gap-5">
+      {error && <ErrorLine text={error} />}
+      {done && <div role="status" className="fixed right-5 top-12 z-50 rounded-lg border bg-card px-4 py-3 text-sm font-medium shadow-lg">{done}</div>}
+      <div className="grid gap-5 lg:grid-cols-[minmax(16rem,0.75fr)_minmax(24rem,1.25fr)]">
+        <Card className="flex min-h-[30rem] flex-col gap-4 overflow-hidden">
+          <div className="flex items-center justify-between gap-3"><div><h3 className="font-heading text-lg font-extrabold">Track library</h3><p className="text-xs text-muted-foreground">Shared on this machine</p></div><Button size="sm" onClick={() => void upload()} disabled={!!busy}><Upload className="size-3.5" /> Upload</Button></div>
+          {busy?.includes("track") && <div className="h-1.5 overflow-hidden rounded-full bg-secondary" role="progressbar" aria-label={busy}><div className="upload-progress-bar h-full w-2/5 rounded-full bg-primary" /></div>}
+          <label className="relative"><Search className="absolute left-3 top-2.5 size-4 text-muted-foreground" /><input className="h-9 w-full rounded-md border border-input bg-background pl-9 pr-3 text-sm outline-none focus:border-ring" placeholder="Search tracks" value={query} onChange={(e) => setQuery(e.target.value)} /></label>
+          <div className="flex min-h-0 flex-1 flex-col divide-y overflow-auto">
+            {state === null && <p className="py-3 text-sm text-muted-foreground">Loading…</p>}
+            {state && installed.length === 0 && <p className="py-3 text-sm text-muted-foreground">No matching tracks.</p>}
+            {installed.map((track) => {
+              const attached = state?.installed.includes(track) ?? false;
+              const inUse = savedQueue.includes(track);
+              return <div key={track} className="flex items-center gap-2 py-2.5"><span className="min-w-0 flex-1 truncate text-sm font-medium">{track}</span><span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{attached ? "On server" : "On machine"}</span>{attached ? <><button type="button" title="Add to rotation" onClick={() => setQueue((q) => [...q, track])} className="grid size-8 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"><Plus className="size-4" /></button><button type="button" title={inUse ? "Remove it from the rotation first" : "Remove from this server"} disabled={inUse || !!busy} onClick={() => void membership(track, false)} className="grid size-8 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-destructive disabled:opacity-25"><Unlink className="size-4" /></button></> : <button type="button" title="Add to this server" disabled={!!busy} onClick={() => void membership(track, true)} className="grid size-8 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"><Link2 className="size-4" /></button>}</div>;
+            })}
+          </div>
+        </Card>
+
+        <Card className="flex min-h-[26rem] flex-col gap-4">
+          <div className="flex flex-wrap items-center justify-between gap-3"><div><h3 className="font-heading text-lg font-extrabold">Track rotation</h3><p className="text-xs text-muted-foreground">Drag to reorder.</p></div><div className="flex flex-wrap justify-end gap-2"><Button size="sm" disabled={!!busy || changed || !state?.rotation.length} title={changed ? "Save or reset your rotation changes first" : undefined} onClick={() => void switchTrack("next")}>Next track</Button><Button size="sm" disabled={!!busy || changed || !state?.rotation.length} title={changed ? "Save or reset your rotation changes first" : undefined} onClick={() => void switchTrack("random")}>Random track</Button><Button size="sm" disabled={!changed || !!busy} onClick={() => setQueue(savedQueue)}>Reset</Button><Button size="sm" variant="primary" disabled={!changed || !queue.length || !!busy} onClick={() => void save()}>Save rotation</Button></div></div>
+          <div
+            className="-mx-4 -mb-4 min-h-0 flex-1 overflow-auto border-t p-8"
+            style={{ backgroundImage: "radial-gradient(circle, color-mix(in srgb, var(--muted-foreground) 25%, transparent) 1px, transparent 1px)", backgroundSize: "20px 20px" }}
+          >
+            {queue.length === 0 && <div className="grid h-full min-h-64 place-items-center"><button type="button" className="rounded-xl border border-dashed bg-card px-8 py-6 text-sm text-muted-foreground" onClick={() => document.querySelector<HTMLInputElement>('input[placeholder="Search tracks"]')?.focus()}>Choose a track to start the flow</button></div>}
+            <div className="flex min-w-max items-center py-12">
+              {queue.map((track, index) => (
+                <div key={`${track}-${index}`} className="flex items-center">
+                  {index > 0 && <div className="relative h-0.5 w-14 bg-border"><span className="absolute -right-1 -top-[3px] size-2 rotate-45 border-r-2 border-t-2 border-border" /></div>}
+                  <div
+                    draggable
+                    onDragStart={() => setDragged(index)}
+                    onDragOver={(e) => e.preventDefault()}
+                    onDrop={() => { if (dragged != null) move(dragged, index); setDragged(null); }}
+                    className={`group relative w-52 rounded-xl border bg-card shadow-sm transition hover:border-primary/60 hover:shadow-md ${index === 0 ? "border-primary/60 ring-2 ring-primary/10" : ""} ${dragged === index ? "opacity-40" : ""}`}
+                  >
+                    <div className="flex items-center gap-2 border-b px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                      <GripVertical className="size-3.5 cursor-grab" />
+                      <span>{index === 0 ? "Start here" : index === 1 ? "Up next" : `Step ${index + 1}`}</span>
+                      <span className={`ml-auto size-2 rounded-full ${index === 0 ? "bg-primary" : "bg-muted-foreground/35"}`} />
+                    </div>
+                    <div className="px-4 py-4">
+                      <div className="truncate font-heading text-sm font-bold" title={track}>{track}</div>
+                      <div className="mt-1 text-xs text-muted-foreground">MX Bikes track</div>
+                    </div>
+                    <div className="flex items-center justify-end gap-0.5 border-t px-2 py-1.5 opacity-60 transition group-hover:opacity-100 group-focus-within:opacity-100">
+                      <button aria-label={`Move ${track} earlier`} title="Move earlier" disabled={index === 0} onClick={() => move(index, index - 1)} className="grid size-7 place-items-center rounded text-muted-foreground hover:bg-accent disabled:opacity-20"><ArrowUp className="size-3.5 -rotate-90" /></button>
+                      <button aria-label={`Move ${track} later`} title="Move later" disabled={index === queue.length - 1} onClick={() => move(index, index + 1)} className="grid size-7 place-items-center rounded text-muted-foreground hover:bg-accent disabled:opacity-20"><ArrowDown className="size-3.5 -rotate-90" /></button>
+                      <button aria-label={`Remove ${track}`} title="Remove" onClick={() => setQueue((q) => q.filter((_, i) => i !== index))} className="grid size-7 place-items-center rounded text-muted-foreground hover:bg-accent hover:text-destructive"><Trash2 className="size-3.5" /></button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </Card>
+      </div>
+      {busy && <p className="text-sm text-muted-foreground">{busy}</p>}
+    </div>
+  );
+}

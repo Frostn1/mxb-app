@@ -1429,21 +1429,9 @@ async fn set_active_game(
     if cfg.watch_mods_reload {
         modwatch::start(&app, &watcher, &cfg.mods_path);
     }
-    // FrostMod reads `--game` and `--mods` once, at launch, and `start` no-ops while one
-    // is already running — so without this a switch leaves FrostMod waiting for the game
-    // we just left while the status pill still reads "running". `force_stop_exe` because
-    // the running one may not be ours to `stop`: a hand-launched frostmod.exe claims the
-    // same named event, and that is exactly how this was first reported.
-    if frostmod::is_running() {
-        frostmod_manage::stop(&frostmod_state);
-        frostmod_manage::force_stop_exe();
-        if let Err(e) = frostmod_manage::start(&app, &frostmod_state) {
-            log::warn!(
-                "could not restart FrostMod for {}: {e:#}",
-                cfg.game().display
-            );
-        }
-    }
+    // FrostMod lives in the active game's own folder:
+    // put it there now, so a launch from Steam before the next status poll still has it.
+    frostmod_manage::sync_if_shut(&app);
     Ok(cfg)
 }
 
@@ -1660,9 +1648,9 @@ async fn provision_and_record(
         log::warn!("[secure] couldn't record the provisioned asset: {e}");
     }
 
-    // If the game is already running, pick this up without a restart: rewrite the manifest the
-    // DLL watches and ask FrostMod to rescan.
-    secure_launch::refresh_running(app);
+    // Put the game side in step too: a running plugin gets a new manifest and rescan, while a
+    // closed game gets its plugin installed before the next launch.
+    secure_launch::refresh_after_change(app).await;
 
     Ok(SecureProvisionOutcome {
         mxbkey_path: out.to_string_lossy().to_string(),
@@ -2086,7 +2074,7 @@ pub(crate) async fn revoke_sweep(app: &tauri::AppHandle, force: bool) -> RevokeO
     if !out.names.is_empty() {
         let _ = app.emit("mxbsecure-revoked", SecureRevoked { names: out.names.clone() });
         // Rewrite the manifest without them, so a running game stops being served them.
-        secure_launch::refresh_running(app);
+        secure_launch::refresh_after_change(app).await;
     }
     out
 }
@@ -2102,7 +2090,7 @@ fn watch_lease(app: &tauri::AppHandle) {
         loop {
             if secure_launch::renew_lease(&app, false).await == mxb_core::keylease::Renewal::Blocked {
                 revoke_sweep(&app, true).await;
-                secure_launch::refresh_running(&app);
+                secure_launch::refresh_after_change(&app).await;
             }
             tokio::time::sleep(mxb_core::keylease::CHECK_EVERY).await;
         }
@@ -2207,6 +2195,10 @@ pub(crate) async fn auto_unlock_now(app: &tauri::AppHandle, force: bool) -> usiz
             // A key that is simply missing (or no longer opens) is put back from the vault
             // here, offline — only a blob with no local key at all goes on to ask the server.
             if restore_key_from_vault(app, &blob, id) {
+                // This is a newly usable asset too.  Counting only grants meant callers kept a
+                // cached "locked" Library row and the Windows plugin was not synced until its
+                // periodic watcher pass, even though the vault had just restored its key.
+                unlocked += 1;
                 continue;
             }
         }
@@ -2226,7 +2218,7 @@ pub(crate) async fn auto_unlock_now(app: &tauri::AppHandle, force: bool) -> usiz
         let _ = app.emit("mxbsecure-blocked", blocked);
     }
     if unlocked > 0 {
-        secure_launch::refresh_running(app);
+        secure_launch::refresh_after_change(app).await;
     }
     unlocked
 }
@@ -2290,7 +2282,7 @@ async fn mxbsecure_repair_keys(app: tauri::AppHandle) -> Result<SecureRepairOutc
             }
         }
         if out.restored + out.reprovisioned > 0 {
-            secure_launch::refresh_running(&app);
+            secure_launch::refresh_after_change(&app).await;
         }
         Ok(out)
     }
@@ -2341,6 +2333,7 @@ async fn mxbsecure_status(app: tauri::AppHandle) -> Result<Vec<SecureStatusItem>
         revoke_sweep(&app, false).await;
         let live = steamid::current_steam_id64();
         let mut items: Vec<SecureStatusItem> = Vec::new();
+        let mut changed = false;
         for blob_path in secure_launch::scan_blobs(&app) {
             // A file whose header won't parse is still listed (as its filename, marked
             // unreadable) rather than silently dropped — a broken drop-in shouldn't just vanish.
@@ -2360,7 +2353,12 @@ async fn mxbsecure_status(app: tauri::AppHandle) -> Result<Vec<SecureStatusItem>
             // itself a repair rather than a list of things that are mysteriously missing.
             let unlocked = live
                 .as_deref()
-                .map(|id| restore_key_from_vault(&app, &blob_path, id))
+                .map(|id| {
+                    let had_valid_key = has_valid_key(&blob_path, id);
+                    let restored = restore_key_from_vault(&app, &blob_path, id);
+                    changed |= restored && !had_valid_key;
+                    restored
+                })
                 .unwrap_or(false);
             let has_key = secure_launch::existing_key_path(&blob_path).is_some();
             items.push(SecureStatusItem {
@@ -2379,6 +2377,13 @@ async fn mxbsecure_status(app: tauri::AppHandle) -> Result<Vec<SecureStatusItem>
         }
         if items.is_empty() {
             return Ok(items);
+        }
+
+        // Reading status is also allowed to restore a vaulted key.  Do not leave that restored
+        // asset one watcher interval away from the Windows plugin, or visible in the app but
+        // absent from the game on an immediate launch.
+        if changed {
+            secure_launch::refresh_after_change(&app).await;
         }
 
         let cfg = config::load_or_detect(&app).unwrap_or_default();
@@ -2738,6 +2743,10 @@ fn launch_game(app: tauri::AppHandle) -> Result<gameproc::LaunchOutcome, String>
     // `load_or_detect`, not `load`: a missing config file shouldn't turn Play into an
     // error when the install is sitting exactly where the detector looks.
     let cfg = config::load_or_detect(&app).unwrap_or_default();
+    // A plugin-only FrostMod is loaded by the game as it starts, so this is the last moment
+    // an update that landed during the previous session can go in. The exit poll normally
+    // got there first; a relaunch inside its fifteen seconds would not.
+    frostmod_manage::sync_if_shut(&app);
     let outcome = gameproc::launch(&cfg).map_err(|e| format!("{e:#}"))?;
     if matches!(outcome, gameproc::LaunchOutcome::Launched) {
         usage::track("game.launch");
@@ -5734,21 +5743,13 @@ async fn frostmod_status(app: tauri::AppHandle) -> FrostmodStatus {
 #[tauri::command]
 async fn frostmod_install(
     app: tauri::AppHandle,
-    state: State<'_, FrostmodProcess>,
+    _state: State<'_, FrostmodProcess>,
 ) -> Result<InstallReport, String> {
-    let was_running = frostmod::is_running();
-    let was_installed = frostmod_manage::is_installed(&app);
-    frostmod_manage::stop(&state);
-    frostmod_manage::force_stop_exe();
-
     let report = frostmod_manage::install(&app)
         .await
         .map_err(|e| format!("{e:#}"))?;
 
     usage::track("frostmod.install");
-    if was_running || !was_installed {
-        let _ = frostmod_manage::start(&app, &state);
-    }
     Ok(report)
 }
 
@@ -5830,15 +5831,25 @@ fn frostmod_start(app: tauri::AppHandle, state: State<FrostmodProcess>) -> Resul
 /// Async for the same reason as `set_mods_path`: a sync command runs on the UI thread, and
 /// this one waits out the moment between the kill and the process actually going.
 #[tauri::command]
-async fn frostmod_stop(state: State<'_, FrostmodProcess>) -> Result<bool, String> {
-    Ok(frostmod_manage::stop_running(&state))
+async fn frostmod_stop(
+    app: tauri::AppHandle,
+    state: State<'_, FrostmodProcess>,
+) -> Result<bool, String> {
+    Ok(frostmod_manage::stop_running(&app, &state))
 }
 
+/// Game Integration on or off. For a plugin-only FrostMod this is also what installs or
+/// removes the plugin — there is no process for the switch to start or stop.
+///
+/// Async so the plugin copy, which touches the game folder and on Linux looks up the Proton
+/// prefix, stays off the UI thread.
 #[tauri::command]
-fn set_auto_run_frostmod(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
+async fn set_auto_run_frostmod(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
     let mut cfg = config::load(&app).unwrap_or_default();
     cfg.auto_run_frostmod = enabled;
-    config::save(&app, &cfg).map_err(|e| format!("{e:#}"))
+    config::save(&app, &cfg).map_err(|e| format!("{e:#}"))?;
+    frostmod_manage::integration_changed(&app, &cfg);
+    Ok(())
 }
 
 #[tauri::command]

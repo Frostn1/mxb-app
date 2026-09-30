@@ -62,7 +62,11 @@ fn parse_connection(line: &str) -> Option<Player> {
     if guid == "-" {
         return None;
     }
-    Some(Player { id, name: name.to_string(), guid: guid.to_string() })
+    Some(Player {
+        id,
+        name: name.to_string(),
+        guid: guid.to_string(),
+    })
 }
 
 /// `Disconnection: 3` / `Drop (Connection Timeout): 3` — both free the slot.
@@ -83,7 +87,11 @@ mod tests {
         let players = connected("Connection: 3 Frost GUID: abc123 - 1.2.3.4");
         assert_eq!(
             players,
-            vec![Player { id: 3, name: "Frost".into(), guid: "abc123".into() }]
+            vec![Player {
+                id: 3,
+                name: "Frost".into(),
+                guid: "abc123".into()
+            }]
         );
     }
 
@@ -113,7 +121,8 @@ mod tests {
     #[test]
     fn a_reused_slot_takes_the_newer_rider() {
         // Connection ids are slots; the server hands them out again after a disconnect.
-        let log = "Connection: 1 Old GUID: g1 - x\nDisconnection: 1\nConnection: 1 New GUID: g2 - x";
+        let log =
+            "Connection: 1 Old GUID: g1 - x\nDisconnection: 1\nConnection: 1 New GUID: g2 - x";
         let players = connected(log);
         assert_eq!(players.len(), 1);
         assert_eq!(players[0].name, "New");

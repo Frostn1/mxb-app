@@ -74,7 +74,13 @@ export async function webRoutes(
       isWebAdminPath(path))
   ) {
     if (request.headers.get("Origin") && !origin) return cors(json(403, { error: "origin not allowed" }), null);
-    return cors(new Response(null, { status: 204 }), origin, true, "GET, POST, OPTIONS");
+    return cors(
+      new Response(null, { status: 204 }),
+      origin,
+      true,
+      "GET, POST, OPTIONS",
+      "Content-Type, X-Content-SHA256, X-Filename, X-Version",
+    );
   }
 
   // Each return asks Steam, and a login state costs nothing to mint: a ceiling per address keeps

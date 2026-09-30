@@ -15,11 +15,19 @@ use toml_edit::{value, Array, DocumentMut, Item};
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum Kind {
     Bool,
-    Int { min: i64, max: i64 },
-    Float { min: f64, max: f64 },
+    Int {
+        min: i64,
+        max: i64,
+    },
+    Float {
+        min: f64,
+        max: f64,
+    },
     Text,
     /// One of these words.
-    Choice { options: &'static [&'static str] },
+    Choice {
+        options: &'static [&'static str],
+    },
     /// `[ghost] racing`: off, or a mode (`true` in the file means "yield").
     Racing,
     /// `[ghost] bikes`: `"random"` or a list of bike ids.
@@ -47,7 +55,13 @@ pub struct Field {
 struct F(Field);
 
 impl F {
-    const fn new(section: &'static str, key: &'static str, group: &'static str, label: &'static str, kind: Kind) -> Self {
+    const fn new(
+        section: &'static str,
+        key: &'static str,
+        group: &'static str,
+        label: &'static str,
+        kind: Kind,
+    ) -> Self {
         F(Field {
             section,
             key,
@@ -91,21 +105,21 @@ const fn float(min: f64, max: f64) -> Kind {
 /// Every field the app edits, in page order. Anything else in the file is left exactly as it is.
 pub const FIELDS: &[Field] = &[
     // ---- Ghosts ------------------------------------------------------------------------------
-    F::new("ghost", "count", "ghosts", "Number of ghost riders", int(0, 49))
-        .help("Recorded riders that lap alongside the players. 0 turns them off.")
+    F::new("ghost", "count", "ghosts", "Number of bots", int(0, 49))
+        .help("Computer-controlled riders based on recorded laps. Set this to 0 for no bots.")
         .default_is("0 (off)")
         .done(),
-    F::new("ghost", "skill_pct", "ghosts", "Ghost speed", float(70.0, 110.0))
-        .help("How fast they ride compared with the recording. 100% is the recorded pace.")
+    F::new("ghost", "skill_pct", "ghosts", "Bot pace", float(70.0, 110.0))
+        .help("100% follows the recorded lap's pace; lower is slower and higher is faster.")
         .default_is("replay the recording exactly")
         .unit("%")
         .done(),
     F::new("ghost", "racing", "ghosts", "Racing behaviour", Kind::Racing)
-        .help("Neutral keeps gaps and passes; Yield also makes room for players on straights; Block moves into them.")
+        .help("Neutral races normally. Yield moves aside for players. Block defends its line aggressively.")
         .default_is("off")
         .done(),
     F::new("ghost", "lateral_m", "ghosts", "Line spread", float(0.0, 10.0))
-        .help("How far to either side of the recorded line they may ride on straights.")
+        .help("How far bots may move left or right from the recorded line. More space helps passing and yielding.")
         .default_is("0 m (on the line)")
         .unit("m")
         .done(),
@@ -198,37 +212,47 @@ pub const FIELDS: &[Field] = &[
         .done(),
     // ---- Advanced switches (A/B tests from the protocol work) ---------------------------------
     F::new("native", "late_join_register", "advanced", "Late joiners see earlier riders like a stock server", Kind::Bool)
-        .help("Riders already on track join a late joiner's list when it first leaves the pits.")
+        .help("Compatibility option: send the existing rider list when a new player leaves the pits.")
         .default_is("off")
         .done(),
     F::new("native", "roster_refresh_on_track", "advanced", "Refresh other riders on track entry", Kind::Bool)
+        .help("Re-send the human rider list when a player enters the track. Useful only for join-sync testing.")
         .default_is("off")
         .done(),
     F::new("native", "roster_refresh_bots", "advanced", "Refresh ghosts on track entry", Kind::Bool)
+        .help("Re-send the bot list when a player enters the track. Useful only for join-sync testing.")
         .default_is("off")
         .done(),
     F::new("native", "bot_entries_on_track", "advanced", "Add ghosts to standings on track entry", Kind::Bool)
+        .help("Wait until a player enters the track before adding bots to their standings.")
         .default_is("off")
         .done(),
     F::new("native", "resend_lap_history", "advanced", "Re-send lap history", Kind::Bool)
+        .help("Send known lap results again after a roster refresh for compatibility testing.")
         .default_is("off")
         .done(),
     F::new("native", "relay_pit_status", "advanced", "Share pit/track status between riders", Kind::Bool)
+        .help("Tell each player when another rider enters or leaves the track.")
         .default_is("off")
         .done(),
     F::new("native", "replay_stock_order", "advanced", "Stock-order join replay", Kind::Bool)
+        .help("Reproduce the stock server's join-message order for compatibility testing.")
         .default_is("off")
         .done(),
     F::new("native", "resend_k6", "advanced", "Re-send entry details per rider", Kind::Bool)
+        .help("Repeat low-level rider entry data. Leave off unless diagnosing a join problem.")
         .default_is("off")
         .done(),
     F::new("native", "unlink_on_leave", "advanced", "Free a leaver's race number first", Kind::Bool)
+        .help("Release a disconnected rider's number before announcing that they left.")
         .default_is("off")
         .done(),
     F::new("native", "change_pits_gate", "advanced", "Only allow bike changes in the pits", Kind::Bool)
+        .help("Reject bike or setup changes unless the rider is currently in the pits.")
         .default_is("off")
         .done(),
     F::new("native", "change_refuse_riding", "advanced", "Refuse bike changes while riding", Kind::Bool)
+        .help("Reject bike or setup changes while the rider is actively on track.")
         .default_is("off")
         .done(),
     F::new("native", "slot_cooldown_secs", "advanced", "Wait before reusing a freed slot", int(0, 3600))
@@ -237,6 +261,7 @@ pub const FIELDS: &[Field] = &[
         .unit("s")
         .done(),
     F::new("native", "idle_timeout_secs", "advanced", "Drop a silent rider after", int(1, 3600))
+        .help("Disconnect a client that stops sending packets for this long.")
         .default_is("60 s")
         .unit("s")
         .done(),
@@ -272,7 +297,11 @@ pub fn read(text: &str) -> Result<serde_json::Map<String, Value>, String> {
                 } else if let Some(s) = v.as_str() {
                     json!(s)
                 } else if let Some(a) = v.as_array() {
-                    Value::Array(a.iter().filter_map(|x| x.as_str().map(|s| json!(s))).collect())
+                    Value::Array(
+                        a.iter()
+                            .filter_map(|x| x.as_str().map(|s| json!(s)))
+                            .collect(),
+                    )
                 } else {
                     Value::Null
                 }
@@ -318,14 +347,25 @@ fn to_item(field: &Field, v: &Value) -> Result<Option<Item>, String> {
         Kind::Choice { options } => {
             let s = v.as_str().ok_or_else(bad)?;
             if !options.contains(&s) {
-                return Err(format!("{} must be one of {}", field.label, options.join(", ")));
+                return Err(format!(
+                    "{} must be one of {}",
+                    field.label,
+                    options.join(", ")
+                ));
             }
             value(s)
         }
         Kind::Racing => match v {
             Value::Bool(false) => value(false),
-            Value::String(s) if ["neutral", "yield", "block"].contains(&s.as_str()) => value(s.as_str()),
-            _ => return Err(format!("{} must be off, neutral, yield or block", field.label)),
+            Value::String(s) if ["neutral", "yield", "block"].contains(&s.as_str()) => {
+                value(s.as_str())
+            }
+            _ => {
+                return Err(format!(
+                    "{} must be off, neutral, yield or block",
+                    field.label
+                ))
+            }
         },
         Kind::Bikes => match v {
             Value::String(s) if s == "random" => value("random"),
@@ -335,7 +375,9 @@ fn to_item(field: &Field, v: &Value) -> Result<Option<Item>, String> {
                     let id = id.as_str().ok_or_else(bad)?.trim();
                     let ok = !id.is_empty()
                         && id.len() <= 128
-                        && id.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.'));
+                        && id
+                            .chars()
+                            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.'));
                     if !ok {
                         return Err(format!("{}: '{id}' is not a bike id", field.label));
                     }
@@ -346,7 +388,12 @@ fn to_item(field: &Field, v: &Value) -> Result<Option<Item>, String> {
                 }
                 value(array)
             }
-            _ => return Err(format!("{} must be \"random\" or a list of bike ids", field.label)),
+            _ => {
+                return Err(format!(
+                    "{} must be \"random\" or a list of bike ids",
+                    field.label
+                ))
+            }
         },
     };
     Ok(Some(item))
@@ -426,7 +473,10 @@ late_join_register = false
 ";
 
     fn changes(pairs: &[(&str, Value)]) -> serde_json::Map<String, Value> {
-        pairs.iter().map(|(k, v)| (k.to_string(), v.clone())).collect()
+        pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.clone()))
+            .collect()
     }
 
     #[test]
@@ -447,7 +497,10 @@ late_join_register = false
                 ("ghost.racing", json!("neutral")),
                 ("ghost.replay", Value::Null),
                 ("events.collisions", json!(true)),
-                ("ghost.bikes", json!(["MX2OEM_2023_KTM_250_SX-F", "MX2OEM_2025_Fantic_XXF_250"])),
+                (
+                    "ghost.bikes",
+                    json!(["MX2OEM_2023_KTM_250_SX-F", "MX2OEM_2025_Fantic_XXF_250"]),
+                ),
             ]),
         )
         .unwrap();
@@ -458,7 +511,10 @@ late_join_register = false
         assert!(!out.contains("replay"));
         assert!(out.contains("[events]\ncollisions = true"));
         let back = read(&out).unwrap();
-        assert_eq!(back["ghost.bikes"], json!(["MX2OEM_2023_KTM_250_SX-F", "MX2OEM_2025_Fantic_XXF_250"]));
+        assert_eq!(
+            back["ghost.bikes"],
+            json!(["MX2OEM_2023_KTM_250_SX-F", "MX2OEM_2025_Fantic_XXF_250"])
+        );
         assert_eq!(back["native.late_join_register"], json!(false));
     }
 

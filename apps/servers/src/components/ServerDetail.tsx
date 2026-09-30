@@ -1,12 +1,15 @@
 import { useEffect, useRef, useState } from "react";
 import { RefreshCw } from "lucide-react";
-import { serverLogs, serverRiders, serverStatus, type ServerView } from "@/lib/api";
+import { configLoad, errorText, isLegacyStatus, legacyProcess, serverLogs, serverRiders, serverSession, serverStatus, type ServerView } from "@/lib/api";
 import { duration, lapTime, sessionName } from "@/lib/format";
 import { usePoll } from "@/lib/usePoll";
 import { ConfigTab } from "./ConfigTab";
+import { LegacySettings } from "./LegacySettings";
+import { TracksTab } from "./TracksTab";
+import { VersionTab } from "./VersionTab";
 import { Button, Card, ErrorLine, Notice, OverflowMenu, Stat, StatusBadge, type MenuItem } from "./ui";
 
-type Tab = "status" | "riders" | "logs" | "config";
+type Tab = "status" | "riders" | "tracks" | "version" | "logs" | "config";
 
 export function ServerDetail({
   server,
@@ -19,24 +22,26 @@ export function ServerDetail({
 }) {
   const [tab, setTab] = useState<Tab>("status");
   const status = usePoll(() => serverStatus(server.id), 3000, server.id);
+  const tabs: Tab[] = server.kind === "legacy" ? ["status", "riders", "tracks", "logs", "config"] : ["status", "riders", "tracks", "version", "logs", "config"];
 
   return (
     <div className="flex h-full flex-col gap-6">
-      <header className="flex flex-wrap items-center gap-x-5 gap-y-2">
+      <header className="flex flex-wrap items-end gap-x-5 gap-y-2">
         <div className="flex min-w-0 flex-col">
           <h2 className="truncate font-heading text-2xl font-extrabold tracking-tight">{server.name}</h2>
-          <span className="font-mono text-xs text-muted-foreground">
-            {server.local ? "this PC" : `${server.user}@${server.host}`}
-          </span>
+          <div className="flex items-center gap-3 text-xs text-muted-foreground">
+            <span className="font-mono">{server.local ? "this PC" : server.kind === "legacy" ? server.host : `${server.user}@${server.host}`}</span>
+            {server.kind === "legacy" && <span>Legacy connecting</span>}
+            <StatusBadge report={status.data} error={status.error} />
+          </div>
         </div>
-        <StatusBadge report={status.data} error={status.error} />
         <div className="ml-auto">
           <OverflowMenu items={menu} label={`Actions for ${server.name}`} />
         </div>
       </header>
 
       <nav className="flex gap-1 border-b" role="tablist">
-        {(["status", "riders", "logs", "config"] as Tab[]).map((t) => (
+        {tabs.map((t) => (
           <button
             key={t}
             role="tab"
@@ -51,14 +56,20 @@ export function ServerDetail({
         ))}
       </nav>
 
-      <div className="min-h-0 flex-1 overflow-auto">
+      <div className={`min-h-0 flex-1 ${tab === "config" ? "overflow-hidden" : "overflow-auto"}`}>
         {tab === "status" && <StatusTab server={server} poll={status} onSetUpToken={onSetUpToken} />}
         {tab === "riders" && <RidersTab server={server} onSetUpToken={onSetUpToken} />}
+        {tab === "tracks" && <TracksTab server={server} />}
+        {tab === "version" && <VersionTab server={server} />}
         {tab === "logs" && <LogsTab server={server} />}
-        {tab === "config" && <ConfigTab server={server} />}
+        {tab === "config" && (server.kind === "legacy" ? <LegacySettings server={server} /> : <ConfigTab server={server} />)}
       </div>
     </div>
   );
+}
+
+function AgentHelper({ onSetUpToken }: { onSetUpToken: () => void }) {
+  return <Notice><div className="flex items-center justify-between gap-4"><span>Add the token from mxb-agent&apos;s agent.json to connect.</span><Button size="sm" variant="primary" onClick={onSetUpToken}>Add token</Button></div></Notice>;
 }
 
 /** What the admin token is for, and how to get one, for a server without it. */
@@ -104,43 +115,58 @@ function StatusTab({
 }) {
   const report = poll.data;
   const s = report?.status;
-  const needsToken = server.adminPort == null || !server.hasToken;
+  if (server.kind === "legacy" && s && isLegacyStatus(s)) {
+    return <LegacyStatusPanel server={server} status={s} detail={report?.detail ?? ""} refresh={poll.refresh} />;
+  }
+  const native = s && !isLegacyStatus(s) ? s : null;
+  const needsToken = server.kind === "legacy" ? !server.hasToken : server.local && (server.adminPort == null || !server.hasToken);
   return (
-    <div className="flex max-w-4xl flex-col gap-5">
+    <div className="flex flex-col gap-5">
       {report && report.state !== "online" && (
         <Notice tone={report.state === "starting" ? "info" : "bad"}>{report.detail}</Notice>
       )}
       {!report && poll.error && <ErrorLine text={poll.error} />}
-      {s && report?.state !== "offline" && (
-        <Card className="grid grid-cols-2 gap-6 md:grid-cols-4">
-          <Stat label="Session" value={sessionName(s.session)} />
-          <Stat
-            label="Time left"
-            value={s.session_remaining_seconds == null ? "—" : duration(s.session_remaining_seconds)}
-          />
-          <Stat label="Riders" value={s.active_sessions} />
-          <Stat label="Up for" value={duration(s.uptime_seconds)} />
-          <Stat label="Version" value={`v${s.version}`} />
-          <Stat label="Build" value={s.build_id} />
-          <Stat label="Revision" value={s.revision} />
-          <Stat label="Packets in / out" value={`${s.client_datagrams_total} / ${s.server_datagrams_total}`} />
-        </Card>
+      {native && report?.state !== "offline" && (
+        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_15rem]">
+          <Card className="flex flex-col gap-4">
+            <h3 className="font-heading text-sm font-bold uppercase tracking-wide text-muted-foreground">Current session</h3>
+            <div className="grid grid-cols-3 gap-5">
+              <Stat label="Stage" value={sessionName(native.session)} />
+              <Stat label="Time left" value={native.session_remaining_seconds == null ? "—" : duration(native.session_remaining_seconds)} />
+              <Stat label="Riders" value={native.active_sessions} />
+            </div>
+          </Card>
+          <Card className="flex flex-col gap-4">
+            <h3 className="font-heading text-sm font-bold uppercase tracking-wide text-muted-foreground">Server</h3>
+            <div className="grid grid-cols-3 gap-5">
+              <Stat label="Running for" value={duration(native.uptime_seconds)} />
+              <Stat label="Version" value={`v${native.version}`} />
+              <Stat label="Commit" value={native.revision} />
+            </div>
+          </Card>
+          <Card className="flex flex-col gap-4">
+            <h3 className="font-heading text-sm font-bold uppercase tracking-wide text-muted-foreground">Diagnostics</h3>
+            <Stat label="Packets in / out" value={`${native.client_datagrams_total} / ${native.server_datagrams_total}`} />
+            <Stat label="Ready" value={native.ready ? "Yes" : "No"} />
+          </Card>
+        </div>
       )}
+      {!server.local && native && <SessionControls server={server} current={native.session} remaining={native.session_remaining_seconds} refresh={poll.refresh} />}
       {!report && !poll.error && (
         <p className="text-sm text-muted-foreground">{server.local ? "Connecting…" : "Connecting over SSH…"}</p>
       )}
-      {needsToken && <TokenHelper server={server} onSetUpToken={onSetUpToken} />}
+      {needsToken && (server.kind === "legacy" ? <AgentHelper onSetUpToken={onSetUpToken} /> : <TokenHelper server={server} onSetUpToken={onSetUpToken} />)}
     </div>
   );
 }
 
 function RidersTab({ server, onSetUpToken }: { server: ServerView; onSetUpToken: () => void }) {
-  const enabled = server.adminPort != null && server.hasToken;
+  const enabled = server.kind === "legacy" ? server.hasToken : (!server.local || (server.adminPort != null && server.hasToken));
   const riders = usePoll(() => (enabled ? serverRiders(server.id) : Promise.resolve([])), enabled ? 5000 : 0, `${server.id}-riders`);
   if (!enabled) {
     return (
       <div className="max-w-3xl">
-        <TokenHelper server={server} onSetUpToken={onSetUpToken} />
+        {server.kind === "legacy" ? <AgentHelper onSetUpToken={onSetUpToken} /> : <TokenHelper server={server} onSetUpToken={onSetUpToken} />}
       </div>
     );
   }
@@ -177,6 +203,101 @@ function RidersTab({ server, onSetUpToken }: { server: ServerView; onSetUpToken:
         </table>
       )}
     </div>
+  );
+}
+
+function LegacyStatusPanel({ server, status, detail, refresh }: { server: ServerView; status: Extract<Awaited<ReturnType<typeof serverStatus>>["status"], { kind: "stock" }>; detail: string; refresh: () => void }) {
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const act = async (action: "start" | "stop" | "restart") => {
+    if ((action === "stop" || action === "restart") && !window.confirm(`${action === "stop" ? "Stop" : "Restart"} ${server.name}? Connected riders will be disconnected.`)) return;
+    setBusy(action); setError(null);
+    try { await legacyProcess(server.id, action); refresh(); }
+    catch (e) { setError(errorText(e)); }
+    finally { setBusy(null); }
+  };
+  return <div className="flex flex-col gap-5">
+    {!status.game.running && <Notice tone="bad">{detail}</Notice>}
+    <div className="grid gap-4 lg:grid-cols-3">
+      <Card className="space-y-4"><h3 className="font-heading text-sm font-bold uppercase tracking-wide text-muted-foreground">Official server</h3><div className="grid grid-cols-2 gap-5"><Stat label="State" value={status.game.running ? "Running" : "Stopped"} /><Stat label="Running for" value={duration(status.game.uptime_secs)} /></div></Card>
+      <Card className="space-y-4"><h3 className="font-heading text-sm font-bold uppercase tracking-wide text-muted-foreground">Event</h3><div className="grid grid-cols-2 gap-5"><Stat label="Track" value={status.server.track ?? "—"} /><Stat label="Maximum riders" value={status.server.maxClients ?? "—"} /></div></Card>
+      <Card className="space-y-4"><h3 className="font-heading text-sm font-bold uppercase tracking-wide text-muted-foreground">Process</h3><div className="grid grid-cols-2 gap-5"><Stat label="PID" value={status.game.pid ?? "—"} /><Stat label="Crash restarts" value={status.game.restarts} /></div></Card>
+    </div>
+    <Card className="flex items-center justify-between gap-4"><div><h3 className="font-heading text-base font-extrabold">Server controls</h3>{busy && <p className="text-xs text-muted-foreground">{busy === "restart" ? "Restarting…" : busy === "stop" ? "Stopping…" : "Starting…"}</p>}</div><div className="flex gap-2">{status.game.running ? <><Button disabled={!!busy} onClick={() => void act("restart")}>Restart</Button><Button variant="danger" disabled={!!busy} onClick={() => void act("stop")}>Stop</Button></> : <Button variant="primary" disabled={!!busy} onClick={() => void act("start")}>Start</Button>}</div></Card>
+    {error && <ErrorLine text={error} />}
+  </div>;
+}
+
+function SessionControls({ server, current, remaining, refresh }: { server: ServerView; current: string; remaining: number | null; refresh: () => void }) {
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const act = async (action: "jump" | "advance" | "restart", to?: "practice" | "qualifying" | "warmup" | "race") => {
+    const destination = to ? sessionName(to) : "";
+    const prompt = action === "jump"
+      ? `Switch the live server to ${destination}?`
+      : action === "advance"
+        ? "Advance the live server to its next stage?"
+        : `Restart ${sessionName(current)} from the beginning?`;
+    if (!window.confirm(prompt)) return;
+    const label = to ? `Starting ${to}…` : action === "advance" ? "Advancing session…" : "Restarting session…";
+    setBusy(label); setError(null);
+    try {
+      await serverSession(server.id, action, to);
+      refresh();
+    } catch (e) {
+      const message = errorText(e);
+      if (message.includes("already running") || message.includes("countdown always runs") || message.includes("race runs until it is over")) refresh();
+      else setError(message);
+    } finally { setBusy(null); }
+  };
+  const running = /^running\((practice|qualifying|warmup|race)\)$/.exec(current)?.[1] ?? "";
+  const countdown = /^countdown(?:\((practice|qualifying|warmup|race)\)|\s*\{\s*next:\s*(practice|qualifying|warmup|race)\s*\})$/i.exec(current);
+  const pending = (countdown?.[1] ?? countdown?.[2] ?? "").toLowerCase();
+  const locked = !!pending;
+  const raceLocked = running === "race";
+  const controlsLocked = locked || raceLocked;
+  useEffect(() => { if (controlsLocked) setError(null); }, [controlsLocked]);
+  const config = usePoll(() => configLoad(server.id), 30_000, `${server.id}-race-config`);
+  const number = (key: string, fallback: number) => {
+    const value = config.data?.values[`sessions.${key}`];
+    return typeof value === "number" ? value : fallback;
+  };
+  const details = {
+    practice: number("practice_minutes", 20) === 0 ? "Until advanced" : `${number("practice_minutes", 20)} min`,
+    qualifying: `${number("qualifying_minutes", 15)} min`,
+    warmup: `${number("warmup_minutes", 5)} min`,
+    race: `${number("race_minutes", 20)} min + ${number("race_extra_laps", 2)} laps`,
+  } as const;
+  return (
+    <Card className="flex flex-col gap-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-3"><h3 className="font-heading text-base font-extrabold">Race control</h3>{busy ? <span className="truncate text-xs text-muted-foreground">{busy}</span> : locked ? <span className="truncate text-xs font-medium text-primary">{sessionName(pending)} starts in {remaining == null ? "a moment" : duration(remaining)}</span> : raceLocked ? <span className="truncate text-xs text-muted-foreground">The race must finish before changing sessions</span> : null}</div>
+        <div className="flex gap-2">
+          <Button size="sm" variant="ghost" disabled={!!busy || controlsLocked} title={raceLocked ? "The race must finish" : locked ? "The countdown must finish" : undefined} onClick={() => void act("restart")}>Restart current</Button>
+          <Button size="sm" variant="primary" disabled={!!busy || controlsLocked} title={raceLocked ? "The race must finish" : locked ? "The countdown must finish" : undefined} onClick={() => void act("advance")}>Next stage</Button>
+        </div>
+      </div>
+      <div className="grid overflow-hidden rounded-lg border sm:grid-cols-4">
+        {(["practice", "qualifying", "warmup", "race"] as const).map((stage, index) => (
+          <button
+            key={stage}
+            type="button"
+            disabled={!!busy || controlsLocked || running === stage}
+            onClick={() => void act("jump", stage)}
+            aria-current={running === stage || pending === stage ? "step" : undefined}
+            className={`flex items-center gap-3 border-b px-4 py-3 text-left transition disabled:cursor-default sm:border-b-0 sm:border-r sm:last:border-r-0 ${running === stage || pending === stage ? "bg-primary/10 text-primary" : "hover:bg-accent disabled:opacity-50"}`}
+          >
+            <span className="grid size-6 shrink-0 place-items-center rounded-full bg-secondary font-mono text-xs text-muted-foreground">{index + 1}</span>
+            <span className="flex min-w-0 flex-1 items-center justify-between gap-2 text-sm font-medium capitalize">
+              <span className="flex flex-col"><span>{stage === "warmup" ? "Warm-up" : stage}</span><span className="text-[11px] font-normal normal-case text-muted-foreground">{details[stage]}</span></span>
+              {running === stage && <span className="rounded-full bg-primary px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-primary-foreground">Current</span>}
+              {pending === stage && <span className="rounded-full bg-primary px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-primary-foreground">Next</span>}
+            </span>
+          </button>
+        ))}
+      </div>
+      {error && <ErrorLine text={error} />}
+    </Card>
   );
 }
 

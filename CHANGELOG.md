@@ -3,6 +3,28 @@
 ## Unreleased
 
 ### Added
+- **MXB Servers can run a remote server from one native window.** The Lightsail connection now
+  uses SSH for status, riders, installed tracks and private control credentials, so a remote
+  server no longer asks the operator to paste an admin token. A dedicated Tracks tab uploads
+  `.pkz` packages, selects the active track and safely deploys another `mxbserver` binary with
+  rollback. Status adds live Practice, Qualifying, Warm-up, Race, next-stage and restart-stage
+  controls. Settings use category navigation with clearer bot and compatibility descriptions;
+  session, server identity and diagnostics are separated instead of forming one long stat list,
+  and the shell now carries the MXB App-style product hierarchy.
+- **FrostMod runs as a game plugin only (FrostMod v0.41.0 and newer).** MXB App now installs
+  FrostMod as `plugins\frostmod.dlo` in the game folder, with a `frostmod.dir` beside it that
+  points at MXB App's FrostMod folder, and it no longer starts `frostmod.exe`, the injector
+  Windows Defender objects to. The plugin is copied in and kept current only while the game is
+  closed; an update made during a session goes in when the game exits. The
+  `frostmod_session.dlo` copy is removed, because the plugin reports the server itself.
+  `frostmod_mods.txt`, the flag files and the server filter are still written to the FrostMod
+  folder, and the flags box turns into the same files `frostmod.exe` used to write.
+  FrostMod shows as running while the game is open with the plugin in it, and Start and Stop
+  are hidden. The plugin is installed only in the active game, as the injector only served
+  the active game. Turning Game Integration off removes the plugin and `frostmod.dir` from
+  every game folder the app knows. `frostmod.exe` is no longer downloaded, and a copy still
+  running from before is stopped and deleted. Going back to an older FrostMod removes the
+  plugin. Older FrostMod builds work exactly as before.
 - **MXB Servers, clearer:** one status per server (Online · N riders, Starting…, Offline, Unreachable (SSH)) with the detail on hover. Edit and Remove are in a ⋯ menu. The Settings page is grouped by topic, with plain labels, toggles, sliders and the defaults spelled out; advanced switches are collapsed, and session lengths and player slots are new. The admin token shows as "saved" with Replace and Remove, is tested as soon as it is saved, and a helper explains what it's for. The app now uses the mxbsecure "m" icon.
 - **MXB Servers: Config tab.** Edit a server's ghost bots (count, skill, racing, lateral spread, bikes, laps, library and harvest), `[events] collisions` and the `[native]` switches as typed fields. The app shows the diff and checks the file with the server's own binary, then backs it up, applies it and restarts. If the server isn't ready afterwards, the backup goes back. Comments and everything else in the file are kept. It works over SSH for a systemd install or today's hand-started Lightsail process, and on this PC.
 - Settings → Paint sync names the riders on your server who aren't sharing paints ("Not sharing paints: CaptiveDuck"): they need MXB App 0.19 or newer with paint sync on, and until then you see each other in stock paints.
@@ -49,6 +71,7 @@
 
 ### Changed
 - Installing a helmet, boots or rider model while the game runs asks FrostMod (v0.39.3 or newer) for a gear-only refresh, which rebuilds just the rider lists instead of every track and bike. Older FrostMod still gets the full reload.
+- The Windows installer no longer contains the secure-content DLL. MXB App downloads it from its own release only when Game Integration is on and you own locked content, and uses it only if its SHA-256 matches the one built into the app. Turning Game Integration off removes the plugin from the game folder.
 - Paints shared through paint sync are now kept on the control plane for a week after their last upload, instead of 24 hours. A paint is re-uploaded once it is 6 days old if its owner is still riding.
 
 ## 2026-09-27 — v0.19.0 — Automatic paint sync, and nothing injected into the game

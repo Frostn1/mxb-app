@@ -50,6 +50,9 @@
     // reads everybody's numbers, so granting it should be a diff. `ADMIN_KEY` still opens the
     // rendered /admin pages on this host either way.
     "MXB_ADMIN_STEAM_IDS": "76561198174305985",
+    // Exact public HTTPS names the admin server manager may call. Empty keeps connection
+    // disabled until an operator deliberately adds the reverse-proxied agent host here.
+    "MXB_SERVER_AGENT_HOSTS": "16-146-6-22.sslip.io",
     // Require a Valve-confirmed Steam sign-in before any app in the lineup will run. On:
     // MXB App, Studio and Coach show a "Sign in with Steam" wall at startup, every install
     // becomes a proven identity, and a ban has no fresh-account escape. This shuts out anyone
@@ -66,7 +69,7 @@
     // Who may use the FBX -> EDF converter on mxbsecure.com, besides the admins, who always
     // may: SteamID64s, comma or space separated. Empty means the admins alone. A list here
     // rather than a table so that granting it is a reviewable diff, like the admin list above.
-    "MXB_CONVERTER_STEAM_IDS": ""
+    "MXB_CONVERTER_STEAM_IDS": "76561199650233712,76561199807040854,76561198798423111,76561198937606502"
   },
 
   // The idle reaper. Every five minutes it asks each running server who is connected and

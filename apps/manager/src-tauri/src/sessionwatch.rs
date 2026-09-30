@@ -75,6 +75,9 @@ pub fn start(app: &AppHandle) {
         }
 
         let mut was_running = false;
+        // The first pass counts as "the game just went": a plugin-only FrostMod updated
+        // while the app was shut gets its plugin in before the first launch.
+        let mut first_pass = true;
         // A handle on the current session, held so how it ended is still readable once the
         // process is gone.
         let mut session: Option<gameproc::GameSession> = None;
@@ -86,6 +89,20 @@ pub fn start(app: &AppHandle) {
 
             let running = gameproc::is_game_running();
             let started = running && !was_running;
+            let stopped = !running && (was_running || first_pass);
+            first_pass = false;
+            if stopped {
+                // A plugin-only FrostMod can only be replaced while the game is shut, and the
+                // next launch is what loads it — so the moment the game goes is when an
+                // update that landed during the session, or a removed session copy the game
+                // was still holding, gets finished. Off the runtime: it is file copies, and
+                // on Linux a look for the Proton prefix.
+                let handle = app.clone();
+                let _ = tauri::async_runtime::spawn_blocking(move || {
+                    crate::frostmod_manage::sync_if_shut(&handle)
+                })
+                .await;
+            }
             if running != was_running {
                 // Publish the transition: the mods watcher holds its reloads while a session
                 // is young, because that is when the game is walking the whole content tree.
