@@ -177,7 +177,7 @@ export async function connect(
   if (!label || !provider || !PROVIDERS.has(provider) || !region || !serverUrl || !adminToken || !revision || !method || !METHODS.has(method)) {
     return { status: 400, body: { error: "the server connection details are incomplete" } };
   }
-  if (adminToken.length < 20) return { status: 400, body: { error: "the admin token must be at least 20 characters" } };
+  if (adminToken.length < 32) return { status: 400, body: { error: "the admin token must be at least 32 characters" } };
   if (!Number.isInteger(gamePort) || gamePort < 1 || gamePort > 65535) {
     return { status: 400, body: { error: "gamePort must be between 1 and 65535" } };
   }

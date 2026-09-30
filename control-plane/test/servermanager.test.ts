@@ -33,6 +33,16 @@ describe("admin server manager", () => {
     expect(mock).not.toHaveBeenCalled();
   });
 
+  it("refuses an admin token shorter than 32 characters", async () => {
+    const mock = vi.fn(async () => reply({ version: "0.1.1", revision: "abc" })) as unknown as typeof fetch;
+    const short = await connect(env(), { ...connection, adminToken: "ops.short" }, mock);
+    expect(short.status).toBe(400);
+    expect(mock).not.toHaveBeenCalled();
+    // mxbserver's own generated tokens (`<id>.<64-hex-char secret>`) always clear this bar.
+    const long = await connect(env(), { ...connection, adminToken: `ops.${"a".repeat(64)}` }, mock);
+    expect(long.status).toBe(201);
+  });
+
   it("probes, stores and lists without ever returning the admin credential", async () => {
     const e = env();
     const mock = vi.fn(async () => reply({ version: "0.1.1", revision: "abc" }));
