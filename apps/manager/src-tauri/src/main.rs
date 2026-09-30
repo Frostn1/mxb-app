@@ -1731,6 +1731,9 @@ async fn unlock_one(
     app: &tauri::AppHandle,
     blob_path: &str,
 ) -> Result<SecureProvisionOutcome, String> {
+    // The DLL must be there before anything below seals or unseals a key (the vault restore
+    // just past this, and `provision_and_record`'s seal) — see `ensure_secure_dll`.
+    secure_launch::ensure_secure_dll(app).await;
     // Stream the file once for its header (the asset id) and its SHA-256 — the hash is sent to the
     // grant so the key is released only for this exact file. Streaming keeps a ~200 MB blob out of
     // memory.
@@ -2156,6 +2159,9 @@ pub(crate) async fn auto_unlock_now(app: &tauri::AppHandle, force: bool) -> usiz
         }
         *last = Some(std::time::Instant::now());
     }
+    // The DLL before anything else here seals or unseals a key — `has_valid_key` and
+    // `restore_key_from_vault` just below, and `unlock_one`'s own seal further down.
+    secure_launch::ensure_secure_dll(app).await;
     // The key lease first: the DLL unseals nothing without a fresh one, and these are the moments
     // it can need renewing — a sign-in that changed the Steam account, a game about to start. A
     // block drops the lease, and forces the sweep below so the keys go with it.
@@ -2245,6 +2251,8 @@ struct SecureRepairOutcome {
 async fn mxbsecure_repair_keys(app: tauri::AppHandle) -> Result<SecureRepairOutcome, String> {
     #[cfg(mxbsecure)]
     {
+        // The DLL before any of the seals/unseals below (vault restores, re-provisioning).
+        secure_launch::ensure_secure_dll(&app).await;
         // Take back revoked keys before putting any back: restoring from the vault would
         // otherwise "repair" content the buyer is no longer entitled to.
         let taken_back = revoke_sweep(&app, true).await;
@@ -2320,6 +2328,8 @@ struct SecureStatusItem {
 async fn mxbsecure_status(app: tauri::AppHandle) -> Result<Vec<SecureStatusItem>, String> {
     #[cfg(mxbsecure)]
     {
+        // The DLL before the vault-restore below can unseal anything.
+        secure_launch::ensure_secure_dll(&app).await;
         // Opening the Secured-content view is one of the moments the answer can change, so it
         // is a revocation check as well as a repair — otherwise the view would restore a key
         // from the vault and report "Unlocked" for content the buyer no longer has.
