@@ -88,6 +88,7 @@ import {
 } from "./roster";
 import { VoiceRoom } from "./voiceroom";
 import { PaintRoom } from "./paintroom";
+import { ingestResults, leaderboard as ratingLeaderboard, myRatings } from "./rating";
 import {
   liveKey,
   missingPaints,
@@ -228,6 +229,26 @@ async function route(request: Request, env: Env): Promise<Response> {
   if (method === "GET" && path === "/v1/tracks") return getTracks(url, env);
   const art = /^\/v1\/tracks\/art\/([^/]{1,200})$/.exec(path);
   if (art && method === "GET") return trackArt(decodeURIComponent(art[1]), env);
+
+  // Pushed by a managed server, authenticated by its own per-server rating bearer token
+  // (`rating.ts`'s `ingestResults`) — not an account, so it belongs above the account gate
+  // like every other non-account credential on this route.
+  if (method === "POST" && path === "/v1/rating/ingest") {
+    const result = await ingestResults(request, env);
+    return json(result.status, result.body);
+  }
+
+  // The public leaderboard: no bans, no RD/volatility, no GUIDs. Nothing here is secret, so
+  // it stays above the account gate the way `/v1/servers` and `/v1/tracks` do.
+  if (method === "GET" && path === "/v1/rating/leaderboard") {
+    const result = await ratingLeaderboard(
+      env,
+      url.searchParams.get("class") ?? "",
+      Number(url.searchParams.get("limit") ?? "50"),
+      false,
+    );
+    return json(result.status, result.body);
+  }
 
   // A provisioned box announcing itself. Authenticated by the agent token in its own row,
   // not by an account bearer — the machine holds no account and has no way to be given one.
@@ -432,6 +453,12 @@ async function route(request: Request, env: Env): Promise<Response> {
   if (method === "GET" && path === "/v1/me") return me(account, env);
   if (method === "PUT" && path === "/v1/me/guid") return putGuid(request, account, env);
   if (method === "PUT" && path === "/v1/me/name") return putName(request, account, env);
+
+  // The signed-in rider's own GUID-linked ratings, every class — never another rider's.
+  if (method === "GET" && path === "/v1/rating/me") {
+    const result = await myRatings(env, account.guid);
+    return json(result.status, result.body);
+  }
 
   // "Delete everything you have about me", self-served. Deliberately reachable by a banned
   // account and by a self-enrolled one: the right does not depend on being in good standing,
