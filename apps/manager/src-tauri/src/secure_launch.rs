@@ -475,6 +475,39 @@ fn stage_dll(app: &AppHandle, run_dir: &std::path::Path) -> Result<PathBuf, Stri
     Ok(dst)
 }
 
+/// Make sure this session's `mxbsecure.dll` is downloaded and staged before any DPAPI seal or
+/// unseal call reaches `mxb_core::mxbsecure::device` — the DLL is the only place the Windows
+/// machine layer and its entropy secret live (see the module doc there).
+///
+/// The periodic `watch` loop ([`sync_plugin`]) keeps the staged copy in step while the game is
+/// shut, but that is a background pass on a timer: a fresh install's first unlock, or one that
+/// lands between passes, can race it and call seal/unseal before the DLL has ever been fetched.
+/// `device::api()` only caches a *hit*, never a miss, so a seal/unseal that ran too early doesn't
+/// wedge anything — but it does fail the way DPAPI itself failing always meant: a refused seal in
+/// release, or a machine-bound key that won't open. Call this first from every path that seals or
+/// unseals a key (manual unlock, auto-unlock), not only from the game-launch arm/sync path.
+///
+/// Best-effort and quiet on its own: a failure here is logged, and the caller's own seal/unseal
+/// still runs and reports in its usual way (there's nothing better to do — the debug-only
+/// identity envelope and the non-Windows machine layers don't need a DLL at all).
+#[cfg_attr(not(windows), allow(dead_code, unused_variables))]
+pub async fn ensure_secure_dll(app: &AppHandle) {
+    #[cfg(windows)]
+    {
+        if let Err(e) = ensure_module(app).await {
+            log::warn!("[secure] couldn't fetch mxbsecure.dll before a seal/unseal: {e}");
+            return;
+        }
+        let Some(dir) = run_dir(app) else {
+            log::warn!("[secure] no writable run dir to stage mxbsecure.dll before a seal/unseal");
+            return;
+        };
+        if let Err(e) = stage_dll(app, &dir) {
+            log::warn!("[secure] couldn't stage mxbsecure.dll before a seal/unseal: {e}");
+        }
+    }
+}
+
 /// Where the shipped `mxbsecure-inject.exe` is found (the Wine platforms — Linux/Proton and
 /// macOS), same priority as the DLL: an explicit override, the Tauri resource dir, then beside
 /// the app's executable. The release build cross-builds it once with mingw and both bundles
