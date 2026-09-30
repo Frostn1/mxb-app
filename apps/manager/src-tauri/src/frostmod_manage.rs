@@ -1757,32 +1757,37 @@ mod tests {
     #[test]
     fn a_release_missing_a_binary_installs_nothing() {
         // Skipping the missing one and installing the rest is what used to stamp a new
-        // tag into version.txt over a binary that had never been replaced.
+        // tag into version.txt over a binary that had never been replaced. The tag must be
+        // plugin-only-supported (v0.41.0+) or `release_binaries` bails on that check first,
+        // before it ever gets to asking what the release's assets are.
         let rel = Release {
-            tag_name: "v0.9.9".into(),
-            assets: vec![asset("frostmod.exe"), asset("Release.zip")],
+            tag_name: "v0.41.0".into(),
+            assets: vec![asset("Release.zip")],
         };
-        let err = format!("{:#}", release_binaries(&rel).expect_err("half a pair is no pair"));
+        let err = format!("{:#}", release_binaries(&rel).expect_err("no dll is no release"));
         assert!(err.contains("frostmod.dll"), "names what's missing: {err}");
-        assert!(err.contains("v0.9.9"), "names the release: {err}");
+        assert!(err.contains("v0.41.0"), "names the release: {err}");
     }
 
     #[test]
     fn a_complete_release_yields_both_download_urls() {
-        // Real releases carry more than the two binaries, and have shipped mixed case.
+        // Real releases carry more than the one binary we manage, and have shipped mixed
+        // case. Plugin-only FrostMod (v0.41.0+) installs only `frostmod.dll` — the injector
+        // `frostmod.exe` is intentionally never downloaded — so "both download urls" is the
+        // one url for the one binary `release_binaries` looks for.
         let rel = Release {
-            tag_name: "v0.9.9".into(),
+            tag_name: "v0.41.0".into(),
             assets: vec![
                 asset("FrostServer.zip"),
                 asset("FrostMod.DLL"),
                 asset("frostmod.exe"),
             ],
         };
-        let found = release_binaries(&rel).expect("both binaries are there");
+        let found = release_binaries(&rel).expect("the dll is there");
         let names: Vec<&str> = found.iter().map(|(n, _)| *n).collect();
-        assert_eq!(names, vec!["frostmod.exe", "frostmod.dll"]);
+        assert_eq!(names, vec!["frostmod.dll"]);
         assert!(
-            found[1].1.browser_download_url.ends_with("FrostMod.DLL"),
+            found[0].1.browser_download_url.ends_with("FrostMod.DLL"),
             "keeps the asset's own url"
         );
     }
@@ -1810,8 +1815,8 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// The bug this whole path exists for: a failure on the second binary used to
-    /// leave a new exe beside an old dll.
+    /// The bug this whole path exists for: a binary that can't land used to leave the
+    /// managed folder without a usable copy at all.
     #[test]
     fn a_binary_that_cant_land_puts_the_earlier_one_back() {
         let (dir, staging) = installed_pair("rollback");
@@ -1829,11 +1834,6 @@ mod tests {
         for name in BINARIES {
             assert_eq!(read(dir.join(name)), "old", "{name} is back as it was");
         }
-        assert_eq!(
-            read(staging.join("frostmod.exe")),
-            "new",
-            "the new exe went back to staging"
-        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }
