@@ -1,5 +1,12 @@
 import { isPublicAgentUrl } from "./validate";
 
+/**
+ * Proxies the web admin panel straight to a connected mxbserver's own admin API
+ * (crates/mxbserver/src/admin) over HTTPS. There is no agent in front of it any more —
+ * mxb-agent is a dead project — so every route here is one of mxbserver's own `/v1/*` paths,
+ * called with the bearer token stored for that row.
+ */
+
 export interface ManagerResult {
   status: number;
   body: unknown;
@@ -12,17 +19,19 @@ interface ManagedRow {
   region: string;
   lifecycle: "running" | "planned" | "retired" | "unknown";
   game_endpoint: string | null;
-  agent_url: string;
-  agent_token: string;
+  server_url: string;
+  admin_token: string;
   deployment_revision: string;
   deployment_method: "docker-compose" | "systemd";
   game_port: number;
 }
 
-const MAX_AGENT_JSON = 256 * 1024;
+const MAX_ADMIN_JSON = 256 * 1024;
 const PROVIDERS = new Set(["aws-lightsail", "ovh-vps"]);
 const METHODS = new Set(["docker-compose", "systemd"]);
-const ACTIONS = new Set(["start", "stop", "restart"]);
+// mxbserver's own admin routes (crates/mxbserver/src/admin/mod.rs). Kept as an allowlist so a
+// stored row can never be used to call anything else on the box.
+const CONTROL_ACTIONS = new Set(["restart", "config_validate", "config_write", "session"]);
 
 function text(value: unknown, maximum: number): string | null {
   if (typeof value !== "string") return null;
@@ -31,10 +40,10 @@ function text(value: unknown, maximum: number): string | null {
   return clean;
 }
 
-function allowedAgent(url: string, env: Env): boolean {
+function allowedServer(url: string, env: Env): boolean {
   if (!isPublicAgentUrl(url)) return false;
   const parsed = new URL(url);
-  // The bearer controls a process and software installation, so it may not cross plaintext.
+  // The bearer controls the game process and its config file, so it may not cross plaintext.
   if (parsed.protocol !== "https:") return false;
   const allowed = new Set(
     (env.MXB_SERVER_AGENT_HOSTS ?? "")
@@ -47,7 +56,7 @@ function allowedAgent(url: string, env: Env): boolean {
 
 async function row(env: Env, id: string): Promise<ManagedRow | null> {
   return env.DB.prepare(
-    `SELECT id, label, provider, region, lifecycle, game_endpoint, agent_url, agent_token,
+    `SELECT id, label, provider, region, lifecycle, game_endpoint, server_url, admin_token,
             deployment_revision, deployment_method, game_port
        FROM managed_servers WHERE id = ?`,
   )
@@ -57,7 +66,7 @@ async function row(env: Env, id: string): Promise<ManagedRow | null> {
 
 async function limitedJson(response: Response): Promise<unknown> {
   const announced = Number(response.headers.get("Content-Length") ?? "0");
-  if (announced > MAX_AGENT_JSON) throw new Error("agent response was too large");
+  if (announced > MAX_ADMIN_JSON) throw new Error("mxbserver's response was too large");
   if (!response.body) return {};
   const reader = response.body.getReader();
   const chunks: Uint8Array[] = [];
@@ -66,9 +75,9 @@ async function limitedJson(response: Response): Promise<unknown> {
     const next = await reader.read();
     if (next.done) break;
     size += next.value.byteLength;
-    if (size > MAX_AGENT_JSON) {
+    if (size > MAX_ADMIN_JSON) {
       await reader.cancel();
-      throw new Error("agent response was too large");
+      throw new Error("mxbserver's response was too large");
     }
     chunks.push(next.value);
   }
@@ -82,6 +91,7 @@ async function limitedJson(response: Response): Promise<unknown> {
   return decoded ? JSON.parse(decoded) : {};
 }
 
+/** `path` is one of mxbserver's own `/v1/*` admin routes. */
 async function call(
   env: Env,
   server: ManagedRow,
@@ -89,24 +99,24 @@ async function call(
   init: RequestInit,
   fetchImpl: typeof fetch,
 ): Promise<ManagerResult> {
-  if (!allowedAgent(server.agent_url, env)) {
-    return { status: 502, body: { error: "the stored server agent host is no longer allowlisted" } };
+  if (!allowedServer(server.server_url, env)) {
+    return { status: 502, body: { error: "the stored server host is no longer allowlisted" } };
   }
   let response: Response;
   try {
-    response = await fetchImpl(`${server.agent_url}${path}`, {
+    response = await fetchImpl(`${server.server_url}${path}`, {
       ...init,
       redirect: "manual",
       headers: {
-        Authorization: `Bearer ${server.agent_token}`,
+        Authorization: `Bearer ${server.admin_token}`,
         ...(init.headers ?? {}),
       },
     });
   } catch {
-    return { status: 502, body: { error: "couldn't reach that server agent" } };
+    return { status: 502, body: { error: "couldn't reach that server's admin API" } };
   }
   if (response.status >= 300 && response.status < 400) {
-    return { status: 502, body: { error: "the server agent tried to redirect the request" } };
+    return { status: 502, body: { error: "the server tried to redirect the request" } };
   }
   try {
     const body = await limitedJson(response);
@@ -114,10 +124,10 @@ async function call(
       ? { status: 200, body }
       : {
           status: response.status >= 400 && response.status < 600 ? response.status : 502,
-          body: { error: (body as { error?: unknown })?.error ?? "the server agent refused the request" },
+          body: { error: (body as { message?: unknown; error?: unknown })?.message ?? (body as { error?: unknown })?.error ?? "the server refused the request" },
         };
   } catch {
-    return { status: 502, body: { error: "the server agent returned an unreadable response" } };
+    return { status: 502, body: { error: "the server returned an unreadable response" } };
   }
 }
 
@@ -126,7 +136,7 @@ export async function inventory(env: Env): Promise<ManagerResult> {
     `SELECT id, label, provider, region, lifecycle, game_endpoint, deployment_revision,
             deployment_method, game_port
        FROM managed_servers ORDER BY label COLLATE NOCASE, id`,
-  ).all<Omit<ManagedRow, "agent_url" | "agent_token">>();
+  ).all<Omit<ManagedRow, "server_url" | "admin_token">>();
   return {
     status: 200,
     body: {
@@ -159,63 +169,61 @@ export async function connect(
   const provider = text(input.provider, 30);
   const region = text(input.region, 80);
   const gameEndpoint = input.gameEndpoint === undefined || input.gameEndpoint === "" ? null : text(input.gameEndpoint, 180);
-  const agentUrl = text(input.agentUrl, 256)?.replace(/\/$/, "") ?? null;
-  const agentToken = text(input.agentToken, 512);
+  const serverUrl = text(input.serverUrl, 256)?.replace(/\/$/, "") ?? null;
+  const adminToken = text(input.adminToken, 512);
   const revision = text(input.revision, 120);
   const method = text(input.method, 30);
   const gamePort = Number(input.gamePort);
-  if (!label || !provider || !PROVIDERS.has(provider) || !region || !agentUrl || !agentToken || !revision || !method || !METHODS.has(method)) {
+  if (!label || !provider || !PROVIDERS.has(provider) || !region || !serverUrl || !adminToken || !revision || !method || !METHODS.has(method)) {
     return { status: 400, body: { error: "the server connection details are incomplete" } };
   }
-  if (agentToken.length < 32) return { status: 400, body: { error: "the agent token must be at least 32 characters" } };
+  if (adminToken.length < 20) return { status: 400, body: { error: "the admin token must be at least 20 characters" } };
   if (!Number.isInteger(gamePort) || gamePort < 1 || gamePort > 65535) {
     return { status: 400, body: { error: "gamePort must be between 1 and 65535" } };
   }
   if (input.gameEndpoint !== undefined && input.gameEndpoint !== "" && !gameEndpoint) {
     return { status: 400, body: { error: "gameEndpoint is invalid" } };
   }
-  if (!allowedAgent(agentUrl, env)) {
-    return { status: 400, body: { error: "that HTTPS agent host is not in MXB_SERVER_AGENT_HOSTS" } };
+  if (!allowedServer(serverUrl, env)) {
+    return { status: 400, body: { error: "that HTTPS host is not in MXB_SERVER_AGENT_HOSTS" } };
   }
   const probe = await call(
     env,
-    { id: "probe", label, provider: provider as ManagedRow["provider"], region, lifecycle: "unknown", game_endpoint: gameEndpoint, agent_url: agentUrl, agent_token: agentToken, deployment_revision: revision, deployment_method: method as ManagedRow["deployment_method"], game_port: gamePort },
-    "/capabilities",
+    { id: "probe", label, provider: provider as ManagedRow["provider"], region, lifecycle: "unknown", game_endpoint: gameEndpoint, server_url: serverUrl, admin_token: adminToken, deployment_revision: revision, deployment_method: method as ManagedRow["deployment_method"], game_port: gamePort },
+    "/v1/version",
     { method: "GET" },
     fetchImpl,
   );
   if (probe.status !== 200) return probe;
-  const capabilities = probe.body as { apiVersion?: unknown; kind?: unknown };
-  if (capabilities.apiVersion !== 1 || !["native", "stock"].includes(String(capabilities.kind))) {
-    return { status: 409, body: { error: "that endpoint is not a compatible mxb-agent" } };
+  const version = probe.body as { version?: unknown; revision?: unknown; build_id?: unknown };
+  if (typeof version.version !== "string" || typeof version.revision !== "string") {
+    return { status: 409, body: { error: "that endpoint did not answer like an mxbserver admin API" } };
   }
   const id = crypto.randomUUID();
   const now = Date.now();
   try {
     await env.DB.prepare(
       `INSERT INTO managed_servers
-         (id, label, provider, region, lifecycle, game_endpoint, agent_url, agent_token,
+         (id, label, provider, region, lifecycle, game_endpoint, server_url, admin_token,
           deployment_revision, deployment_method, game_port, created_at, updated_at)
        VALUES (?, ?, ?, ?, 'running', ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
-      .bind(id, label, provider, region, gameEndpoint, agentUrl, agentToken, revision, method, gamePort, now, now)
+      .bind(id, label, provider, region, gameEndpoint, serverUrl, adminToken, revision, method, gamePort, now, now)
       .run();
   } catch {
-    return { status: 409, body: { error: "that server agent is already connected" } };
+    return { status: 409, body: { error: "that server is already connected" } };
   }
-  return { status: 201, body: { ok: true, id, capabilities } };
+  return { status: 201, body: { ok: true, id, version } };
 }
 
 export async function detail(env: Env, id: string, fetchImpl: typeof fetch = fetch): Promise<ManagerResult> {
   const server = await row(env, id);
   if (!server) return { status: 404, body: { error: "no such managed server" } };
-  const [capabilities, status, tracks] = await Promise.all([
-    call(env, server, "/capabilities", { method: "GET" }, fetchImpl),
-    call(env, server, "/status", { method: "GET" }, fetchImpl),
-    call(env, server, "/tracks", { method: "GET" }, fetchImpl),
-  ]);
-  const failed = [capabilities, status, tracks].find((result) => result.status !== 200);
-  if (failed) return failed;
+  const status = await call(env, server, "/v1/server", { method: "GET" }, fetchImpl);
+  if (status.status !== 200) return status;
+  const body = status.body as { mode?: unknown; session?: unknown };
+  const native = body.mode === "native" && body.session !== "relay";
+  const session = native ? await call(env, server, "/v1/session", { method: "GET" }, fetchImpl) : null;
   return {
     status: 200,
     body: {
@@ -225,13 +233,15 @@ export async function detail(env: Env, id: string, fetchImpl: typeof fetch = fet
       region: server.region,
       gameEndpoint: server.game_endpoint,
       deployment: { revision: server.deployment_revision, method: server.deployment_method, gamePort: server.game_port },
-      capabilities: capabilities.body,
       status: status.body,
-      tracks: (tracks.body as { tracks?: unknown }).tracks ?? [],
+      session: session && session.status === 200 ? session.body : null,
     },
   };
 }
 
+/** `input.action` is one of `restart`, `config_validate`, `config_write` or `session` (whose
+ * `input.session.action` picks the `/v1/session/*` route). Everything else is refused before it
+ * reaches the network. */
 export async function action(
   env: Env,
   id: string,
@@ -241,48 +251,40 @@ export async function action(
   const server = await row(env, id);
   if (!server) return { status: 404, body: { error: "no such managed server" } };
   const name = text(input.action, 30);
-  if (!name) return { status: 400, body: { error: "action is required" } };
-  if (ACTIONS.has(name)) return call(env, server, `/${name}`, { method: "POST" }, fetchImpl);
-  if (name === "config") {
-    const patch = input.patch;
-    if (!patch || typeof patch !== "object" || Array.isArray(patch)) return { status: 400, body: { error: "config needs a patch" } };
-    return call(env, server, "/config", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(patch) }, fetchImpl);
+  if (!name || !CONTROL_ACTIONS.has(name)) return { status: 400, body: { error: "unsupported server action" } };
+  if (name === "restart") {
+    const drainSeconds = Number.isInteger(input.drainSeconds) ? (input.drainSeconds as number) : 0;
+    if (drainSeconds < 0 || drainSeconds > 3_600) return { status: 400, body: { error: "drainSeconds must be 0-3600" } };
+    return call(env, server, "/v1/restart", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ drain_seconds: drainSeconds, reason: text(input.reason, 200) ?? "" }) }, fetchImpl);
   }
-  if (name === "session") {
-    const session = input.session;
-    if (!session || typeof session !== "object" || Array.isArray(session)) return { status: 400, body: { error: "session needs an action" } };
-    return call(env, server, "/session", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(session) }, fetchImpl);
+  if (name === "config_validate") {
+    return call(env, server, "/v1/config/validate", { method: "POST" }, fetchImpl);
   }
-  return { status: 400, body: { error: "unsupported server action" } };
+  if (name === "config_write") {
+    const content = typeof input.content === "string" ? input.content : "";
+    if (!content.trim() || content.length > 16_000) return { status: 400, body: { error: "content is required" } };
+    const drainSeconds = Number.isInteger(input.drainSeconds) ? (input.drainSeconds as number) : 0;
+    return call(env, server, "/v1/config/write", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ content, drain_seconds: drainSeconds }) }, fetchImpl);
+  }
+  // session
+  const session = input.session;
+  if (!session || typeof session !== "object" || Array.isArray(session)) return { status: 400, body: { error: "session needs an action" } };
+  const step = text((session as Record<string, unknown>).action, 20);
+  const routes: Record<string, string> = {
+    advance: "/v1/session/advance",
+    restart: "/v1/session/restart",
+    jump: "/v1/session/jump",
+    next: "/v1/session/next",
+    rotate: "/v1/session/rotate",
+  };
+  const path = step ? routes[step] : undefined;
+  if (!path) return { status: 400, body: { error: "session.action must be advance, restart, jump, next or rotate" } };
+  const { action: _drop, ...rest } = session as Record<string, unknown>;
+  return call(env, server, path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(rest) }, fetchImpl);
 }
 
-export async function upload(
-  env: Env,
-  id: string,
-  kind: "track" | "version",
-  request: Request,
-  fetchImpl: typeof fetch = fetch,
-): Promise<ManagerResult> {
+export async function logs(env: Env, id: string, fetchImpl: typeof fetch = fetch): Promise<ManagerResult> {
   const server = await row(env, id);
   if (!server) return { status: 404, body: { error: "no such managed server" } };
-  if (!request.body) return { status: 400, body: { error: "upload body is required" } };
-  const digest = request.headers.get("X-Content-SHA256") ?? "";
-  if (!/^[a-f0-9]{64}$/i.test(digest)) return { status: 400, body: { error: "X-Content-SHA256 is required" } };
-  const headers: Record<string, string> = { "Content-Type": "application/octet-stream", "X-Content-SHA256": digest };
-  if (kind === "track") {
-    const filename = request.headers.get("X-Filename") ?? "";
-    if (!/^[^\\/\r\n]{1,128}\.pkz$/i.test(filename) || filename.startsWith(".")) return { status: 400, body: { error: "X-Filename must be a plain .pkz file name" } };
-    headers["X-Filename"] = filename;
-  } else {
-    const version = request.headers.get("X-Version") ?? "";
-    if (!version || version.length > 80 || /[\r\n]/.test(version)) return { status: 400, body: { error: "X-Version is required" } };
-    headers["X-Version"] = version;
-  }
-  const result = await call(env, server, kind === "track" ? "/tracks" : "/version", { method: "PUT", headers, body: request.body }, fetchImpl);
-  if (kind === "version" && result.status === 200) {
-    await env.DB.prepare("UPDATE managed_servers SET deployment_revision = ?, updated_at = ? WHERE id = ?")
-      .bind(headers["X-Version"], Date.now(), id)
-      .run();
-  }
-  return result;
+  return call(env, server, "/v1/logs", { method: "GET" }, fetchImpl);
 }
