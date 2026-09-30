@@ -3856,6 +3856,7 @@ dependencies = [
  "getrandom 0.3.4",
  "keyring",
  "log",
+ "minisign-verify",
  "mxb-content",
  "reqwest 0.12.28",
  "serde",

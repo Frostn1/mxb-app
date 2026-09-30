@@ -132,6 +132,8 @@ fn handle(mut request: Request, shared: &Shared) {
         }
         ("PUT", "/tracks") => upload_track(shared, &mut request),
         ("PUT", "/version") => upload_version(shared, &mut request),
+        ("POST", "/version/commit") => commit_version(shared),
+        ("POST", "/version/rollback") => rollback_version(shared),
         ("GET", "/config") => read_config(shared),
         ("PUT", "/config") => {
             let mut body = String::new();
@@ -381,6 +383,7 @@ fn capabilities(shared: &Shared) -> Response<std::io::Cursor<Vec<u8>>> {
                 "start": true, "stop": true, "restart": true, "trackSelect": true,
                 "trackUpload": cfg.kind == ServerKind::Native,
                 "versionUpload": cfg.kind == ServerKind::Native,
+                "versionTransaction": cfg.kind == ServerKind::Native,
                 "bots": cfg.kind == ServerKind::Native,
                 "sessions": cfg.kind == ServerKind::Native && cfg.native_admin.is_some()
             },
@@ -794,6 +797,48 @@ fn install_staged(target: &Path) -> Result<Option<PathBuf>, String> {
     Ok(had_previous.then_some(backup))
 }
 
+fn suffixed(path: &Path, suffix: &str) -> PathBuf {
+    let mut name = path.as_os_str().to_os_string();
+    name.push(suffix);
+    PathBuf::from(name)
+}
+
+fn version_files(cfg: &Config) -> (PathBuf, PathBuf, PathBuf, PathBuf, PathBuf) {
+    let target = cfg.exe_path();
+    let backup = target.with_extension("previous");
+    let marker = cfg.version_path();
+    let marker_backup = suffixed(&marker, ".previous");
+    let pending = suffixed(&marker, ".pending");
+    (target, backup, marker, marker_backup, pending)
+}
+
+fn restore_previous(guard: &mut Supervisor) -> Result<(), String> {
+    let cfg = guard.config().clone();
+    let (target, backup, marker, marker_backup, pending) = version_files(&cfg);
+    if !pending.exists() {
+        return Err("there is no pending server update to roll back".into());
+    }
+    let _ = guard.stop();
+    if target.exists() {
+        fs::remove_file(&target).map_err(|e| format!("couldn't remove the failed version: {e}"))?;
+    }
+    if backup.exists() {
+        fs::rename(&backup, &target)
+            .map_err(|e| format!("couldn't restore the previous server binary: {e}"))?;
+    } else {
+        return Err("the previous server binary is unavailable".into());
+    }
+    if marker_backup.exists() {
+        let _ = fs::remove_file(&marker);
+        fs::rename(&marker_backup, &marker)
+            .map_err(|e| format!("couldn't restore the previous version marker: {e}"))?;
+    } else {
+        let _ = fs::remove_file(&marker);
+    }
+    let _ = fs::remove_file(&pending);
+    guard.start()
+}
+
 fn upload_track(shared: &Shared, request: &mut Request) -> Response<std::io::Cursor<Vec<u8>>> {
     let cfg = shared.lock().unwrap().config().clone();
     if cfg.kind != ServerKind::Native {
@@ -872,7 +917,13 @@ fn upload_version(shared: &Shared, request: &mut Request) -> Response<std::io::C
     if version.is_empty() || version.len() > 80 || version.contains(['\n', '\r']) {
         return json(400, &serde_json::json!({ "error": "X-Version is invalid" }));
     }
-    let target = cfg.exe_path();
+    let (target, backup_path, marker, marker_backup, pending) = version_files(&cfg);
+    if pending.exists() || backup_path.exists() {
+        return json(
+            409,
+            &serde_json::json!({ "error": "another server update is still awaiting commit or rollback" }),
+        );
+    }
     let bytes = match receive(request, &target, MAX_BINARY_BYTES, &digest) {
         Ok(bytes) => bytes,
         Err(error) => return json(400, &serde_json::json!({ "error": error })),
@@ -881,13 +932,39 @@ fn upload_version(shared: &Shared, request: &mut Request) -> Response<std::io::C
     if let Err(error) = guard.stop() {
         return json(500, &serde_json::json!({ "error": error }));
     }
+    if marker.exists() {
+        if let Err(error) = fs::rename(&marker, &marker_backup) {
+            let _ = guard.start();
+            return json(
+                500,
+                &serde_json::json!({ "error": format!("couldn't preserve the current version marker: {error}") }),
+            );
+        }
+    }
     let backup = match install_staged(&target) {
         Ok(backup) => backup,
         Err(error) => {
+            if marker_backup.exists() {
+                let _ = fs::rename(&marker_backup, &marker);
+            }
             let _ = guard.start();
             return json(500, &serde_json::json!({ "error": error }));
         }
     };
+    if let Err(error) = fs::write(&pending, b"pending\n") {
+        let _ = fs::remove_file(&target);
+        if let Some(ref old) = backup {
+            let _ = fs::rename(old, &target);
+        }
+        if marker_backup.exists() {
+            let _ = fs::rename(&marker_backup, &marker);
+        }
+        let _ = guard.start();
+        return json(
+            500,
+            &serde_json::json!({ "error": format!("couldn't record the pending update: {error}") }),
+        );
+    }
     let start_error = match guard.start() {
         Err(error) => Some(error),
         Ok(()) => {
@@ -898,29 +975,71 @@ fn upload_version(shared: &Shared, request: &mut Request) -> Response<std::io::C
         }
     };
     if let Some(error) = start_error {
-        let _ = fs::remove_file(&target);
-        if let Some(ref old) = backup {
-            let _ = fs::rename(old, &target);
-        }
-        let rollback = guard.start().is_ok();
+        let rollback = restore_previous(&mut guard).is_ok();
         return json(
             500,
             &serde_json::json!({ "error": format!("new version failed to start: {error}"), "rolledBack": rollback }),
         );
     }
-    if let Some(old) = backup {
-        let _ = fs::remove_file(old);
-    }
-    if let Err(error) = fs::write(cfg.version_path(), format!("{version}\n")) {
+    if let Err(error) = fs::write(&marker, format!("{version}\n")) {
+        let rollback = restore_previous(&mut guard).is_ok();
         return json(
             500,
-            &serde_json::json!({ "error": format!("server updated, but version marker failed: {error}") }),
+            &serde_json::json!({ "error": format!("the version marker could not be written: {error}"), "rolledBack": rollback }),
         );
     }
     json(
         200,
-        &serde_json::json!({ "ok": true, "version": version, "bytes": bytes, "sha256": digest.to_ascii_lowercase(), "game": guard.status() }),
+        &serde_json::json!({ "ok": true, "pending": true, "version": version, "bytes": bytes, "sha256": digest.to_ascii_lowercase(), "game": guard.status() }),
     )
+}
+
+fn commit_version(shared: &Shared) -> Response<std::io::Cursor<Vec<u8>>> {
+    let cfg = shared.lock().unwrap().config().clone();
+    if cfg.kind != ServerKind::Native {
+        return json(
+            409,
+            &serde_json::json!({ "error": "version updates require native mxbserver" }),
+        );
+    }
+    let (_, backup, _, marker_backup, pending) = version_files(&cfg);
+    if !pending.exists() {
+        return json(
+            409,
+            &serde_json::json!({ "error": "there is no pending server update to commit" }),
+        );
+    }
+    for path in [&backup, &marker_backup, &pending] {
+        if let Err(error) = fs::remove_file(path) {
+            if error.kind() != std::io::ErrorKind::NotFound {
+                return json(
+                    500,
+                    &serde_json::json!({ "error": format!("couldn't finish the update: {error}") }),
+                );
+            }
+        }
+    }
+    json(200, &serde_json::json!({ "ok": true, "committed": true }))
+}
+
+fn rollback_version(shared: &Shared) -> Response<std::io::Cursor<Vec<u8>>> {
+    let mut guard = shared.lock().unwrap();
+    if guard.config().kind != ServerKind::Native {
+        return json(
+            409,
+            &serde_json::json!({ "error": "version updates require native mxbserver" }),
+        );
+    }
+    match restore_previous(&mut guard) {
+        Ok(()) => json(
+            200,
+            &serde_json::json!({ "ok": true, "rolledBack": true, "game": guard.status() }),
+        ),
+        Err(error) => json(
+            500,
+            &serde_json::json!({ "error": error, "rolledBack": false }),
+        ),
+    }
 }
 
 fn json(code: u16, value: &serde_json::Value) -> Response<std::io::Cursor<Vec<u8>>> {

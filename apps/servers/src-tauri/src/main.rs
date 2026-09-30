@@ -10,6 +10,7 @@
 
 mod config;
 mod local;
+mod release;
 mod ssh;
 mod store;
 
@@ -758,60 +759,215 @@ async fn server_set_rotation(
 }
 
 #[tauri::command]
-async fn server_update_github(app: State<'_, App>, id: String) -> Result<Value, String> {
+async fn server_release_preview(
+    channel: String,
+    tag: Option<String>,
+) -> Result<release::ReleasePreview, String> {
+    let client = release::client()?;
+    Ok(release::download(&client, &channel, tag.as_deref())
+        .await?
+        .preview)
+}
+
+fn status_from_observe(out: &ssh::ScriptOutput) -> Result<Value, String> {
+    let encoded = out
+        .field("status_b64")
+        .ok_or("the server returned no status")?;
+    use base64::Engine;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(encoded)
+        .map_err(|e| format!("bad status encoding: {e}"))?;
+    serde_json::from_slice(&bytes).map_err(|e| format!("bad server status: {e}"))
+}
+
+fn version_identity(status: &Value) -> Result<Value, String> {
+    let field = |name| {
+        status[name]
+            .as_str()
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+            .ok_or_else(|| format!("the server status has no {name}"))
+    };
+    Ok(serde_json::json!({
+        "version": field("version")?,
+        "revision": field("revision")?,
+        "build_id": field("build_id")?,
+    }))
+}
+
+fn rollback_release(
+    tunnels: &ssh::Tunnels,
+    server: &Server,
+    port: &str,
+    previous: &Value,
+    failure: String,
+) -> String {
+    let rolled_back =
+        match tunnels.run_script(server, REMOTE_SH, &["agent-version-rollback", port], 60) {
+            Ok(output) => output,
+            Err(error) => return format!("{failure}. Rollback could not be started: {error}"),
+        };
+    if !rolled_back.success {
+        return format!("{failure}. Rollback also failed: {}", rolled_back.text());
+    }
+    let rollback_check = match tunnels.run_script(
+        server,
+        REMOTE_SH,
+        &["verify-version", port, &b64(&previous.to_string())],
+        45,
+    ) {
+        Ok(output) => output,
+        Err(error) => {
+            return format!(
+            "{failure}. The previous binary was restored, but verification could not run: {error}"
+        )
+        }
+    };
+    if rollback_check.success {
+        format!("{failure}. The previous version was restored and verified.")
+    } else {
+        format!(
+            "{failure}. The previous binary was restored, but verification failed: {}",
+            rollback_check.text()
+        )
+    }
+}
+
+#[tauri::command]
+async fn server_release_install(
+    app: State<'_, App>,
+    id: String,
+    expected: release::ReleasePreview,
+) -> Result<Value, String> {
     let server = app.store.get(&id)?;
     if server.kind == ServerKind::Legacy {
-        return Err("GitHub updates are only for mxbserver.".into());
+        return Err(
+            "Public mxbserver releases cannot be installed on an official dedicated server.".into(),
+        );
     }
     if server.local {
-        return Err("GitHub updates require a server connected over SSH.".into());
+        return Err("Release installation currently requires a server connected over SSH.".into());
     }
+
+    // Confirmation binds the install to the exact GitHub release and asset objects previewed
+    // by the user. Re-download and re-verify everything so a changed release cannot slip in.
+    let client = release::client()?;
+    let verified = release::download(&client, "tag", Some(&expected.tag)).await?;
+    if verified.preview != expected {
+        return Err(
+            "The release changed after it was previewed. Review it again before installing.".into(),
+        );
+    }
+
+    let local = std::env::temp_dir().join(format!("mxb-servers-release-{}", store::new_id()));
+    std::fs::write(&local, &verified.binary)
+        .map_err(|e| format!("couldn't stage the verified server binary: {e}"))?;
     let tunnels = Arc::clone(&app.tunnels);
-    let port = server.observe_port.to_string();
-    let out = blocking(move || {
-        let gh = |args: &[&str]| -> Result<std::process::Output, String> {
-            let mut command = std::process::Command::new("gh");
-            command.args(args);
-            #[cfg(windows)]
-            {
-                use std::os::windows::process::CommandExt;
-                command.creation_flags(0x08000000);
-            }
-            command.output().map_err(|_| "GitHub CLI is not installed. Install gh and sign in once to update from the private repository.".to_string())
-        };
-        let listed = gh(&["run", "list", "--repo", "Frostn1/mxbserver", "--workflow", "mxbserver Linux", "--branch", "main", "--status", "success", "--limit", "1", "--json", "databaseId,headSha"])?;
-        if !listed.status.success() { return Err(String::from_utf8_lossy(&listed.stderr).trim().to_string()); }
-        let runs: Vec<Value> = serde_json::from_slice(&listed.stdout).map_err(|e| format!("couldn't read GitHub build metadata: {e}"))?;
-        let run = runs.first().ok_or("GitHub has no successful main build to install.")?;
-        let run_id = run["databaseId"].as_u64().ok_or("GitHub build has no run id")?.to_string();
-        let revision = run["headSha"].as_str().ok_or("GitHub build has no revision")?;
-        let version = format!("main@{}", &revision[..revision.len().min(12)]);
-        let dir = std::env::temp_dir().join(format!("mxb-servers-github-{}", store::new_id()));
-        std::fs::create_dir_all(&dir).map_err(|e| format!("couldn't create update folder: {e}"))?;
-        let dir_text = dir.to_string_lossy().to_string();
-        let downloaded = gh(&["run", "download", &run_id, "--repo", "Frostn1/mxbserver", "--name", "mxbserver-x86_64-unknown-linux-gnu-elf", "--dir", &dir_text])?;
-        if !downloaded.status.success() {
-            let _ = std::fs::remove_dir_all(&dir);
-            return Err(String::from_utf8_lossy(&downloaded.stderr).trim().to_string());
+    let staged = local.clone();
+    let result = blocking(move || {
+        let port = server.observe_port.to_string();
+        let before = tunnels.run_script(&server, REMOTE_SH, &["observe", &port], 20)?;
+        if !before.success {
+            return Err(format!(
+                "Couldn't read the current server before updating: {}",
+                before.text()
+            ));
         }
-        let binary = dir.join("mxbserver-x86_64-unknown-linux-gnu.elf");
-        let mut file = std::fs::File::open(&binary).map_err(|e| format!("GitHub artifact has no server binary: {e}"))?;
-        use sha2::Digest;
-        use std::io::Read;
-        let mut hash = sha2::Sha256::new();
-        let mut buffer = [0u8; 64 * 1024];
-        loop { let read = file.read(&mut buffer).map_err(|e| format!("couldn't read GitHub artifact: {e}"))?; if read == 0 { break; } hash.update(&buffer[..read]); }
-        let digest = format!("{:x}", hash.finalize());
-        let temporary = format!("mxb-servers-{}", store::new_id());
-        tunnels.upload(&server, &binary.to_string_lossy(), &temporary, 300)?;
-        let out = tunnels.run_script(&server, REMOTE_SH, &["agent-upload", &port, "version", &temporary, "mxbserver", &digest, &version], 360);
-        let _ = std::fs::remove_dir_all(&dir);
-        out
-    }).await?;
-    if !out.success {
-        return Err(out.text());
-    }
-    serde_json::from_str(&out.stdout).map_err(|e| format!("GitHub update: {e}"))
+        let previous = version_identity(&status_from_observe(&before)?)?;
+        let remote_name = format!("mxb-servers-{}", store::new_id());
+        tunnels.upload(&server, &staged.to_string_lossy(), &remote_name, 300)?;
+        let uploaded = match tunnels.run_script(
+            &server,
+            REMOTE_SH,
+            &[
+                "agent-upload",
+                &port,
+                "version",
+                &remote_name,
+                release::ELF_ASSET,
+                &verified.binary_sha256,
+                &verified.preview.tag,
+            ],
+            360,
+        ) {
+            Ok(output) => output,
+            Err(error) => {
+                return Err(rollback_release(
+                    &tunnels,
+                    &server,
+                    &port,
+                    &previous,
+                    format!("The upload connection failed: {error}"),
+                ))
+            }
+        };
+        if !uploaded.success {
+            return Err(rollback_release(
+                &tunnels,
+                &server,
+                &port,
+                &previous,
+                format!("The verified binary was not installed: {}", uploaded.text()),
+            ));
+        }
+        let wanted = serde_json::json!({
+            "version": verified.preview.version,
+            "revision": verified.preview.revision,
+            "build_id": verified.preview.build_id,
+        });
+        let checked = match tunnels.run_script(
+            &server,
+            REMOTE_SH,
+            &["verify-version", &port, &b64(&wanted.to_string())],
+            45,
+        ) {
+            Ok(output) => output,
+            Err(error) => {
+                return Err(rollback_release(
+                    &tunnels,
+                    &server,
+                    &port,
+                    &previous,
+                    format!("Runtime verification could not run: {error}"),
+                ))
+            }
+        };
+        if checked.success {
+            let committed = match tunnels.run_script(
+                &server,
+                REMOTE_SH,
+                &["agent-version-commit", &port],
+                30,
+            ) {
+                Ok(output) => output,
+                Err(error) => {
+                    return Err(rollback_release(
+                        &tunnels,
+                        &server,
+                        &port,
+                        &previous,
+                        format!("The update could not be committed: {error}"),
+                    ))
+                }
+            };
+            if committed.success {
+                return serde_json::from_str(&uploaded.stdout)
+                    .map_err(|e| format!("update response: {e}"));
+            }
+        }
+
+        let failure = if checked.success {
+            "the update could not be committed".to_string()
+        } else {
+            checked.text()
+        };
+        Err(rollback_release(
+            &tunnels, &server, &port, &previous, failure,
+        ))
+    })
+    .await;
+    let _ = std::fs::remove_file(local);
+    result?
 }
 
 #[tauri::command]
@@ -956,6 +1112,8 @@ async fn server_upload(
     blocking(move || tunnels.upload(&upload_server, &upload_path, &upload_name, 300)).await?;
     let tunnels = Arc::clone(&app.tunnels);
     let port = server.observe_port.to_string();
+    let version_upload = kind == "version";
+    let commit_server = server.clone();
     let out = blocking(move || {
         let mut args = vec![
             "agent-upload",
@@ -965,7 +1123,7 @@ async fn server_upload(
             name.as_str(),
             digest.as_str(),
         ];
-        if kind == "version" {
+        if version_upload {
             args.push(version.as_str());
         }
         tunnels.run_script(&server, REMOTE_SH, &args, 360)
@@ -973,6 +1131,25 @@ async fn server_upload(
     .await?;
     if !out.success {
         return Err(out.text());
+    }
+    if version_upload {
+        let tunnels = Arc::clone(&app.tunnels);
+        let port = commit_server.observe_port.to_string();
+        let committed = blocking(move || {
+            tunnels.run_script(
+                &commit_server,
+                REMOTE_SH,
+                &["agent-version-commit", &port],
+                30,
+            )
+        })
+        .await?;
+        if !committed.success {
+            return Err(format!(
+                "The binary started, but the update could not be committed: {}",
+                committed.text()
+            ));
+        }
     }
     serde_json::from_str(&out.stdout).map_err(|e| format!("upload: {e}"))
 }
@@ -1345,7 +1522,8 @@ fn main() {
             server_track_membership,
             server_set_track,
             server_set_rotation,
-            server_update_github,
+            server_release_preview,
+            server_release_install,
             server_session,
             server_upload,
             inspect_track_upload,

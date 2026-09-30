@@ -120,8 +120,23 @@ export const serverSetTrack = (id: string, track: string) =>
 export const serverSetRotation = (id: string, tracks: string[]) =>
   invoke<Record<string, unknown>>("server_set_rotation", { id, tracks });
 
-export const serverUpdateGithub = (id: string) =>
-  invoke<Record<string, unknown>>("server_update_github", { id });
+export interface ReleasePreview {
+  tag: string;
+  name: string;
+  prerelease: boolean;
+  version: string;
+  revision: string;
+  buildId: string;
+  sourceRevision: string;
+  publishedAt: string;
+  fingerprint: string;
+}
+
+export const serverReleasePreview = (channel: "stable" | "prerelease" | "tag", tag?: string) =>
+  invoke<ReleasePreview>("server_release_preview", { channel, tag });
+
+export const serverReleaseInstall = (id: string, expected: ReleasePreview) =>
+  invoke<Record<string, unknown>>("server_release_install", { id, expected });
 
 export const serverSession = (id: string, action: "jump" | "advance" | "restart", to?: "practice" | "qualifying" | "warmup" | "race") =>
   invoke<Record<string, unknown>>("server_session", { id, action, to });

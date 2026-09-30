@@ -25,6 +25,9 @@
 #   set-track <obs> <name-b64>    select a track and restart through the loopback host agent
 #   set-rotation <obs> <json-b64> select the current track and ordered rotation, then restart
 #   agent-upload <obs> <kind> <tmp> <name> <sha> [version]
+#   verify-version <obs> <json-b64> wait for ready and exact version/revision/build metadata
+#   agent-version-commit <obs>     discard the previous binary after verification
+#   agent-version-rollback <obs>   restore the previous binary and restart it
 set -uo pipefail
 
 say() { printf '@@%s %s\n' "$1" "$2"; }
@@ -333,5 +336,29 @@ case "$CMD" in
     curl --fail-with-body -sS --max-time 300 -X PUT "${headers[@]}" --data-binary "@$file" "http://$listen$path"
     rc=$?; rm -f "$file"; exit "$rc"
     ;;
-  *) die "usage: read|validate|apply|observe|riders|session|tracks|attach-track|detach-track|track-state|set-track|set-rotation|agent-upload <observe port> [...]" ;;
+  verify-version)
+    expected="$(printf '%s' "${3:?expected metadata}" | base64 -d)" || die "expected metadata is not base64"
+    python3 -c 'import json,sys; d=json.loads(sys.argv[1]); assert all(isinstance(d.get(k),str) and d[k] for k in ("version","revision","build_id"))' "$expected" || die "bad expected version metadata"
+    last=""
+    for ((i = 0; i < 120; i++)); do
+      if curl -fsS --max-time 1 "http://127.0.0.1:$OBS/readyz" >/dev/null 2>&1; then
+        last="$(curl -fsS --max-time 2 "http://127.0.0.1:$OBS/status" 2>/dev/null || true)"
+        if python3 -c 'import json,sys; actual=json.loads(sys.argv[1]); expected=json.loads(sys.argv[2]); raise SystemExit(0 if all(str(actual.get(k,"")) == expected[k] for k in ("version","revision","build_id")) else 1)' "$last" "$expected"; then
+          say result verified
+          say status_b64 "$(printf '%s' "$last" | base64 -w0)"
+          exit 0
+        fi
+      fi
+      sleep 0.25
+    done
+    [[ -n "$last" ]] && say status_b64 "$(printf '%s' "$last" | base64 -w0)"
+    die "the server did not become ready with the expected version, revision, and build"
+    ;;
+  agent-version-commit)
+    agent_call POST /version/commit '{}'
+    ;;
+  agent-version-rollback)
+    agent_call POST /version/rollback '{}'
+    ;;
+  *) die "usage: read|validate|apply|observe|riders|session|tracks|attach-track|detach-track|track-state|set-track|set-rotation|agent-upload|verify-version|agent-version-commit|agent-version-rollback <observe port> [...]" ;;
 esac

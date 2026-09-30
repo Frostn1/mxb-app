@@ -29,6 +29,7 @@ toml_edit = "0.22"
 similar = "2"
 base64 = "0.22"
 sha2 = "0.10"
+minisign-verify = "0.2"
 mxb-content = { path = "../../../crates/content" }
 
 [features]
