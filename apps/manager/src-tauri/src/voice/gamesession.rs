@@ -22,6 +22,7 @@
 
 #[cfg(windows)]
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 /// Must match `frostmod::session::kVersion`.
 const VERSION: u32 = 1;
@@ -42,6 +43,32 @@ const OFF_GUID: usize = 176;
 const OFF_RIDER_NAME: usize = 280;
 const OFF_RACE_NUM: usize = 384;
 const OFF_RIDER_COUNT: usize = 388;
+
+/// The plugin writes every frame. Keep the last good sequence alive for a short window so
+/// one busy poll never flashes the integration Off, while a dead/stuck writer still expires.
+pub const PLUGIN_HEARTBEAT_GRACE: Duration = Duration::from_secs(15);
+
+#[derive(Default)]
+struct Heartbeat {
+    sequence: Option<u32>,
+    last_change: Option<Instant>,
+}
+
+fn heartbeat_live(heartbeat: &mut Heartbeat, sequence: Option<u32>, now: Instant) -> bool {
+    let Some(sequence) = sequence else {
+        heartbeat.sequence = None;
+        heartbeat.last_change = None;
+        return false;
+    };
+    if heartbeat.sequence != Some(sequence) {
+        heartbeat.sequence = Some(sequence);
+        heartbeat.last_change = Some(now);
+        return true;
+    }
+    heartbeat
+        .last_change
+        .is_some_and(|changed| now.duration_since(changed) < PLUGIN_HEARTBEAT_GRACE)
+}
 
 /// One rider on the grid, as the game reports them.
 #[derive(Debug, Clone, PartialEq)]
@@ -203,6 +230,8 @@ pub struct Reader {
     /// The session plugin's block: the server, and nothing about the grid.
     #[cfg(windows)]
     plugin_view: Mutex<Option<MappedBlock>>,
+    #[cfg(windows)]
+    plugin_heartbeat: Mutex<Heartbeat>,
 }
 
 impl Reader {
@@ -217,6 +246,22 @@ impl Reader {
             Self::read_one(&self.view, MappedBlock::NAME),
             Self::read_one(&self.plugin_view, MappedBlock::PLUGIN_NAME),
         )
+    }
+
+    /// Whether the game-loaded session plugin is actively publishing its handshake.
+    /// This deliberately ignores the injector block: plugin-only loading is the supported
+    /// integration, and an injected DLL being absent says nothing about its health.
+    #[cfg(windows)]
+    pub fn plugin_connected(&self) -> bool {
+        let sequence = Self::read_sequence(&self.plugin_view, MappedBlock::PLUGIN_NAME);
+        self.plugin_heartbeat
+            .lock()
+            .is_ok_and(|mut heartbeat| heartbeat_live(&mut heartbeat, sequence, Instant::now()))
+    }
+
+    #[cfg(not(windows))]
+    pub fn plugin_connected(&self) -> bool {
+        false
     }
 
     /// One block, opened if it isn't already, and read under its seqlock.
@@ -245,6 +290,23 @@ impl Reader {
         // catching. Drop the mapping so a FrostMod that restarts with a new one is found.
         *guard = None;
         None
+    }
+
+    #[cfg(windows)]
+    fn read_sequence(slot: &Mutex<Option<MappedBlock>>, name: &'static [u8]) -> Option<u32> {
+        let mut guard = slot.lock().ok()?;
+        if guard.is_none() {
+            *guard = MappedBlock::open(name);
+        }
+        let mapped = guard.as_ref()?;
+        let copy = mapped.copy();
+        let sequence = sequence(&copy)?;
+        if sequence & 1 == 0 && decode(&copy).is_some() {
+            Some(sequence)
+        } else {
+            *guard = None;
+            None
+        }
     }
 
     /// No block outside Windows: the game only runs there, and under Proton the app is a
@@ -349,6 +411,37 @@ impl Drop for MappedBlock {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn plugin_handshake_is_live_without_an_injector_signal() {
+        let now = Instant::now();
+        let mut heartbeat = Heartbeat::default();
+        assert!(heartbeat_live(&mut heartbeat, Some(2), now));
+        // Nothing about the injected block participates: the plugin's own even sequence is
+        // the authoritative handshake and turns integration on by itself.
+        assert!(heartbeat_live(
+            &mut heartbeat,
+            Some(2),
+            now + PLUGIN_HEARTBEAT_GRACE - Duration::from_millis(1)
+        ));
+    }
+
+    #[test]
+    fn stale_plugin_heartbeat_turns_integration_off() {
+        let now = Instant::now();
+        let mut heartbeat = Heartbeat::default();
+        assert!(heartbeat_live(&mut heartbeat, Some(8), now));
+        assert!(!heartbeat_live(
+            &mut heartbeat,
+            Some(8),
+            now + PLUGIN_HEARTBEAT_GRACE
+        ));
+        assert!(heartbeat_live(
+            &mut heartbeat,
+            Some(10),
+            now + PLUGIN_HEARTBEAT_GRACE
+        ));
+    }
 
     /// Build a block the way `src/session.h` lays one out. Written by hand rather than by
     /// mirroring a Rust struct: the point is to check this decoder against the C layout,

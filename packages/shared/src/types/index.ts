@@ -1061,13 +1061,11 @@ export interface FrostmodReload {
   mods?: string[];
 }
 
-/** Whether FrostMod's DLL is actually inside the running game. Mirrors
+/** Whether FrostMod's game plugin is actively publishing its handshake. Mirrors
  *  `frostmod::AttachState`.
  *
- *  `running` (the pill's usual source) only says the launcher process is up. These two
- *  answers come apart when the game runs at a higher integrity level than the app: the
- *  injector can't open a process above it, so FrostMod is running and simply never gets
- *  in — which used to look like the app lying about it. */
+ *  This is deliberately independent of the old launcher/injector process. Plugin-only
+ *  loading is active when its shared-memory sequence is advancing, even with no injector. */
 export type AttachState =
   | "game_not_running"
   | "attached"

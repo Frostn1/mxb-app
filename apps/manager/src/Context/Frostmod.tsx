@@ -143,7 +143,7 @@ export function FrostmodProvider({ children }: { children: ReactNode }) {
       const key = `${a.state}:${a.reason}`;
       if (warnedFor.current === key) return;
       warnedFor.current = key;
-      toast.warning(t("frostmod.notInGame"), {
+      toast.warning(t("frostmod.pluginNotConnected"), {
         description: a.reason,
         duration: 12000,
       });
