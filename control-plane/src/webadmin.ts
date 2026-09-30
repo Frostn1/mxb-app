@@ -41,6 +41,7 @@ import {
 } from "./plugins";
 import { batchCodes, keyQuery, licenseQuery } from "./pluginspage";
 import { paintThumb } from "./pntthumb";
+import { adminRiderLookup, issueRatingToken, leaderboard as ratingLeaderboard } from "./rating";
 import { isSteamId64 } from "./steam";
 import { steamAdoption } from "./steamstats";
 import {
@@ -220,6 +221,26 @@ export async function webAdminRoutes(
 
       case "/v1/web/admin/bans":
         return said(200, { bans: await listBans(env) });
+
+      // Admin sees everything the public leaderboard hides: banned riders included, so a
+      // flagged/banned rider's numbers stay reviewable instead of just disappearing.
+      case "/v1/web/admin/rating/leaderboard": {
+        const result = await ratingLeaderboard(
+          env,
+          url.searchParams.get("class") ?? "",
+          Number(url.searchParams.get("limit") ?? "50"),
+          true,
+        );
+        return said(result.status, result.body);
+      }
+    }
+
+    // The raw GUID row: every class, RD/volatility, ban status. Never exposed off the admin
+    // surface.
+    const riderLookup = path.match(/^\/v1\/web\/admin\/rating\/riders\/([A-Za-z0-9._:-]{4,100})$/);
+    if (riderLookup) {
+      const result = await adminRiderLookup(env, decodeURIComponent(riderLookup[1]));
+      return said(result.status, result.body);
     }
   }
 
@@ -241,6 +262,14 @@ export async function webAdminRoutes(
     if (action) {
       const result = await serverAction(env, action[1], body, fetchImpl);
       console.log(JSON.stringify({ msg: "managed server action", server: action[1], action: String(body.action ?? ""), admin: session.steamId, status: result.status }));
+      return said(result.status, result.body);
+    }
+    // Issues/rotates the per-server *rating* bearer token — separate from the admin token
+    // above, and shown exactly once, same rule as an account token (`auth.ts`).
+    const ratingToken = path.match(/^\/v1\/web\/admin\/servers\/([0-9a-f-]{36})\/rating-token$/i);
+    if (ratingToken) {
+      const result = await issueRatingToken(env, ratingToken[1]);
+      console.log(JSON.stringify({ msg: "managed server rating token issued", server: ratingToken[1], admin: session.steamId, status: result.status }));
       return said(result.status, result.body);
     }
     return said(404, { error: "no such server-manager endpoint" });
