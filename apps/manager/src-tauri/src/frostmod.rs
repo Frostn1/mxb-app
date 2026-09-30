@@ -541,48 +541,35 @@ pub fn supported_for_game(game: crate::game::Game, tag: Option<&str>) -> bool {
 }
 
 // ===========================================================================
-// Did it actually get in?
+// Is the game-loaded plugin connected?
 //
-// `is_running` answers "is FrostMod up?", which everything so far has treated as "is
-// FrostMod working?". They come apart in one important case: the game running at a higher
-// integrity level than the app. FrostMod is launched by us, so it inherits our level, and
-// an injector cannot open a process above it — the DLL never goes in, the pill in the game
-// never appears, and the app cheerfully reports FrostMod as running the whole time.
-//
-// So ask the game instead. A DLL that is in the process is in its module list however it
-// got there, and the walk that reads that list is refused by exactly the same barrier that
-// refuses the injection — which makes "we can't look" not a gap in the answer but the
-// answer itself.
+// The integration now runs only as a game plugin. Its dedicated shared-memory session
+// block is the handshake: if its sequence is advancing, the plugin is loaded and active.
+// The old module-list check looked for an injected `frostmod.dll`, which correctly does not
+// exist in plugin-only mode and therefore left the badge permanently Off.
 // ===========================================================================
 
-/// The DLL FrostMod injects. Matched by file name: wherever it was loaded from, its being
-/// in the game's module list is what "attached" means.
-const INJECTED_DLL: &str = "frostmod.dll";
-
-/// How long to give an injection before calling it a failure.
-///
-/// FrostMod polls for the game and injects when it sees it, so there is always a window
-/// where the game is up and the DLL legitimately isn't in yet. Complaining inside that
-/// window would fire a warning on every single launch.
-const ATTACH_GRACE: std::time::Duration = std::time::Duration::from_secs(15);
+/// How long to give the game-loaded plugin to publish its first handshake.
+const ATTACH_GRACE: std::time::Duration =
+    crate::voice::gamesession::PLUGIN_HEARTBEAT_GRACE;
 
 /// When we first saw a game with no FrostMod in it, for [`ATTACH_GRACE`]. Cleared whenever
 /// the answer is anything else, so each game session gets its own grace period.
 static WAITING_SINCE: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
 
-/// Whether FrostMod's DLL is inside the running game.
+/// Whether the full FrostMod plugin is connected to the running game.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AttachState {
     /// No game running, so nothing to be attached to.
     GameNotRunning,
-    /// `frostmod.dll` is in the game.
+    /// The game-loaded plugin's heartbeat is current.
     Attached,
-    /// The game is up, the DLL isn't in yet, and it hasn't been long enough to worry.
+    /// The game is up, the plugin isn't connected yet, and startup grace remains.
     Attaching,
-    /// The game is up, FrostMod's DLL is not in it, and it has had time to be.
+    /// The game is up, but the plugin handshake is absent or stale.
     NotAttached,
-    /// Windows won't let us see inside the game — and won't let FrostMod in either.
+    /// Kept for wire compatibility with older frontends; plugin mode does not use it.
     Blocked,
     /// This platform can't answer the question.
     Unknown,
@@ -604,24 +591,6 @@ impl Attachment {
     }
 }
 
-/// The plugin copy a plugin-only FrostMod runs as ([`PLUGIN_ONLY_MIN_VERSION`]). The game
-/// loads it by that name from its `plugins` folder, so that is the name in its module list.
-const PLUGIN_DLO: &str = "frostmod.dlo";
-
-/// Is this module path FrostMod — the injected DLL, or the full plugin copy?
-///
-/// The plugin copy counts because it *is* FrostMod, loaded by the game rather than pushed in:
-/// without it every plugin-only session would read as "not attached" fifteen seconds in.
-/// `frostmod_session.dlo` does not: it only publishes the server name, and a game with just
-/// that in it has none of what the pill is promising.
-fn is_injected_dll(path: &str) -> bool {
-    path.rsplit(['\\', '/'])
-        .next()
-        .is_some_and(|name| {
-            name.eq_ignore_ascii_case(INJECTED_DLL) || name.eq_ignore_ascii_case(PLUGIN_DLO)
-        })
-}
-
 /// Decide how long a game has been sitting there without FrostMod in it.
 ///
 /// Split from [`attachment`] so the grace period is testable without a game: `now` is the
@@ -641,6 +610,8 @@ fn waiting_verdict(
 /// Is FrostMod actually in the game — and if not, why not?
 pub fn attachment() -> Attachment {
     use crate::gameproc::GameModules;
+    static PLUGIN: std::sync::OnceLock<crate::voice::gamesession::Reader> =
+        std::sync::OnceLock::new();
 
     // Every answer but "the game is up and FrostMod isn't in it yet" ends the wait, so a
     // later session that comes back around to that state gets a fresh grace period rather
@@ -660,22 +631,15 @@ pub fn attachment() -> Attachment {
             forget_the_wait();
             Attachment::plain(AttachState::Unknown)
         }
-        // A plugin is loaded by the game itself, so a game we can't look inside is no barrier
-        // to it — only to our looking. "Blocked" would tell the rider to change something
-        // that isn't wrong; "can't say" is the truth.
-        GameModules::Denied if plugin_mode().is_some() => {
-            forget_the_wait();
-            Attachment::plain(AttachState::Unknown)
-        }
-        GameModules::Denied => {
-            forget_the_wait();
-            Attachment { state: AttachState::Blocked, reason: blocked_reason() }
-        }
-        GameModules::Loaded(paths) if paths.iter().any(|p| is_injected_dll(p)) => {
+        GameModules::Denied | GameModules::Loaded(_)
+            if PLUGIN
+                .get_or_init(crate::voice::gamesession::Reader::default)
+                .plugin_connected() =>
+        {
             forget_the_wait();
             Attachment::plain(AttachState::Attached)
         }
-        GameModules::Loaded(_) => {
+        GameModules::Denied | GameModules::Loaded(_) => {
             let now = std::time::Instant::now();
             let state = match WAITING_SINCE.lock() {
                 Ok(mut slot) => waiting_verdict(&mut slot, now),
@@ -691,32 +655,7 @@ pub fn attachment() -> Attachment {
     }
 }
 
-/// What to tell someone whose game we aren't allowed to look inside.
-///
-/// Both ways out are offered because either genuinely works, and which one is right isn't
-/// ours to decide — running the game unelevated is the better habit, running the app
-/// elevated is the quicker fix.
-fn blocked_reason() -> String {
-    let game = crate::game::active().display;
-    match crate::gameproc::we_are_elevated() {
-        // The ordinary case, and the one worth naming outright.
-        Some(false) => format!(
-            "{game} is running as administrator and MXB App isn't, so FrostMod can't get \
-             into it — no in-game pill, no live reloads, no model swaps. Close {game} and \
-             start it without administrator, or run MXB App as administrator too, then \
-             launch the game again."
-        ),
-        // We are the elevated one, or Windows wouldn't say. Either way "run as admin" is
-        // no longer advice we can give straight-faced, so describe the shape of the fix.
-        _ => format!(
-            "Windows won't let MXB App see inside {game}, so FrostMod can't get into it \
-             either — no in-game pill, no live reloads, no model swaps. {game} and MXB App \
-             have to run at the same level: either both as administrator, or neither."
-        ),
-    }
-}
-
-/// The game is readable, FrostMod is not in it, and the grace period is up.
+/// The game is running but the plugin never began, or stopped, publishing its handshake.
 fn not_attached_reason() -> String {
     let game = crate::game::active().display;
     // As a plugin there is nothing to stop and start: the game loads it as it opens, so a
@@ -729,9 +668,8 @@ fn not_attached_reason() -> String {
         );
     }
     format!(
-        "FrostMod is running but hasn't got into {game} — no in-game pill, no live reloads, \
-         no model swaps. Stop FrostMod and start it again; if it keeps happening, close \
-         {game} first so FrostMod is up before the game is."
+        "{game} is running, but its Game Integration plugin is not connected. Restart the \
+         game so it can load the plugin; if this continues, repair Game Integration in Settings."
     )
 }
 
@@ -943,45 +881,6 @@ mod tests {
         );
     }
 
-    /// Module lists come back as full paths, in whatever case the loader recorded — and on
-    /// Linux the same DLL is reached through a `/proc` mapping with forward slashes.
-    #[test]
-    fn the_injected_dll_is_recognised_wherever_it_was_loaded_from() {
-        for path in [
-            r"C:\Users\me\AppData\Local\com.frost.mxbikes\frostmod\frostmod.dll",
-            r"C:\Users\me\AppData\Local\com.frost.mxbikes\frostmod\FrostMod.DLL",
-            "/home/me/.steam/steamapps/compatdata/pfx/drive_c/frostmod/frostmod.dll",
-            "frostmod.dll",
-        ] {
-            assert!(is_injected_dll(path), "should be FrostMod's DLL: {path}");
-        }
-    }
-
-    /// The near-misses that must not read as an attached FrostMod — the launcher is a
-    /// sibling of the DLL in the same folder, and it is the thing that is always running.
-    #[test]
-    fn nothing_else_counts_as_attached() {
-        for path in [
-            r"C:\frostmod\frostmod.exe",
-            r"C:\Program Files\MX Bikes\mxbikes.exe",
-            r"C:\frostmod\frostmod.dll.bak",
-            r"C:\frostmod\notfrostmod.dll",
-            "",
-        ] {
-            assert!(!is_injected_dll(path), "should not be FrostMod's DLL: {path}");
-        }
-    }
-
-    /// A plugin-only FrostMod is in the game as `plugins\frostmod.dlo`, and that is attached.
-    /// The session-only copy is not: it publishes the server name and nothing else.
-    #[test]
-    fn the_plugin_copy_counts_as_attached_and_the_session_copy_does_not() {
-        assert!(is_injected_dll(r"C:\Steam\steamapps\common\MX Bikes\plugins\frostmod.dlo"));
-        assert!(is_injected_dll(r"C:\Games\MX Bikes\plugins\FrostMod.DLO"));
-        assert!(!is_injected_dll(r"C:\Games\MX Bikes\plugins\frostmod_session.dlo"));
-        assert!(!is_injected_dll(r"C:\Games\MX Bikes\plugins\frostmod.dlo.disabled"));
-    }
-
     /// v0.41.0 is the first build that reads `frostmod.dir` and publishes the server in its
     /// main block; anything older, or a tag we can't read, keeps the injector.
     #[test]
@@ -1007,10 +906,10 @@ mod tests {
         assert!(!plugin_running(false, false));
     }
 
-    /// FrostMod injects a moment *after* the game process appears, so the first look is
-    /// always a miss. Warning then would fire on every launch the app ever saw.
+    /// The game can appear before its plugin has published the first handshake. Warning in
+    /// that normal startup window would flash Off on every launch.
     #[test]
-    fn a_game_that_just_started_is_given_time_to_be_injected() {
+    fn a_game_that_just_started_is_given_time_for_the_plugin() {
         let start = std::time::Instant::now();
         let mut first_seen = None;
         assert_eq!(waiting_verdict(&mut first_seen, start), AttachState::Attaching);
@@ -1024,7 +923,7 @@ mod tests {
     /// Past the grace period it is no longer "any moment now", and saying so is the whole
     /// point — this is the state the player is currently left to work out for themselves.
     #[test]
-    fn a_game_that_never_got_injected_is_reported() {
+    fn a_game_whose_plugin_never_connected_is_reported() {
         let start = std::time::Instant::now();
         let mut first_seen = None;
         waiting_verdict(&mut first_seen, start);

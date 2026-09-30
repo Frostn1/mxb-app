@@ -18,14 +18,11 @@ export interface FrostmodContextValue {
   useAppOnly: () => Promise<void>;
   /** Ask again when a protected mod or integration-only feature is first needed. */
   requestIntegrationConsent: () => void;
-  /** Whether FrostMod is currently running (polled). `null` until first probe. */
+  /** Legacy launcher-process state used only by remaining management actions. */
   running: boolean | null;
   /**
-   * Whether FrostMod's DLL actually made it into the running game (polled alongside
-   * {@link running}). `null` until the first probe.
-   *
-   * Worth having next to `running`, not instead of it: `running` is what the Start/Stop
-   * buttons act on, while this is what says whether any of it is reaching the game.
+   * Authoritative game-plugin connection state, from its heartbeat/handshake. `null` until
+   * the first probe. The shell indicator uses this instead of the legacy launcher state.
    */
   attachment: Attachment | null;
   /** Install/version snapshot (`null` until first fetched). */
