@@ -32,6 +32,7 @@ use crate::config::AppConfig;
 use crate::paintsync::{
     self, control_plane, safe_dest, sha256_bytes, BikeLoadout, Manifest, PaintEntry, PullOutcome,
 };
+use crate::voice::gamesession;
 
 /// How often presence is refreshed: a ping on the socket, or a fresh join when the socket is
 /// down. Half the control plane's ten-minute presence window, so one lost beat is survivable.
@@ -1022,22 +1023,32 @@ impl Local {
     }
 }
 
-/// Bring this machine in line with the grid: fetch the variants it lacks, install the picks,
-/// and clean up what nobody wears any more.
+/// The minimum spacing between two paint downloads in one grid pass.
+///
+/// A new joiner can bring a dozen missing paints at once; fetched back to back they are a
+/// burst on the control plane and on the player's own connection while a race might be
+/// loading assets of its own. Downloading is never gated on pits or session state — unlike
+/// applying, it costs nothing on the game's own thread — but it is paced so it never behaves
+/// like a download manager set loose. See [`apply_grid`] for the gated half.
+const DOWNLOAD_SPACING: Duration = Duration::from_millis(200);
+
+/// Fetch every paint the grid wears that this machine lacks, into the store — never into the
+/// mods folder. Safe to run any time, on any thread, whatever the player is doing in game:
+/// nothing written here is where FrostMod looks, so it changes nothing the game can see.
 ///
 /// Every variant worn in the room is fetched, not only the ones picked, so a rider leaving
-/// swaps a file without a download. The exception is a destination held by the player's own
-/// file, which nothing will ever be installed over.
-pub async fn sync_grid(
+/// swaps a file without a download later. Paced by [`DOWNLOAD_SPACING`] and done one at a
+/// time, lowest priority, so a burst of joiners is a trickle here, not a spike.
+pub async fn download_grid(
     cfg: &AppConfig,
     token: &str,
     local: &mut Local,
     riders: &[&RoomRider],
     now: u64,
-) -> PullOutcome {
+) -> usize {
     let mods_dir = crate::library::mods_root(&cfg.mods_path);
     let roots = mods_roots(cfg);
-    let mut manifest = Manifest::read(&mods_dir);
+    let manifest = Manifest::read(&mods_dir);
 
     let mut wanted: Vec<String> = Vec::new();
     let mut seen: HashSet<String> = HashSet::new();
@@ -1047,6 +1058,8 @@ pub async fn sync_grid(
             if !valid_sha(&sha) || paint.size > paintsync::MAX_PAINT_BYTES {
                 continue;
             }
+            // Deduped by hash: an unchanged paint another rider already wore is never
+            // re-requested, whatever destination it lands on.
             local.store.mark_used(&sha, now);
             let Some(dest) = safe_dest(&mods_dir, &paint.rel_dest) else { continue };
             if dest.is_file() {
@@ -1069,16 +1082,24 @@ pub async fn sync_grid(
         need.retain(|s| lacking(local, s));
     }
 
-    let mut rejected = 0usize;
+    let mut fetched = 0usize;
     if !need.is_empty() {
         if let Ok(http) = paintsync::client() {
+            let mut first = true;
             for sha in &need {
+                // One at a time, spaced out: a bandwidth cap in everything but name, and it
+                // keeps a dozen-paint join from landing as one burst of requests.
+                if !first {
+                    tokio::time::sleep(DOWNLOAD_SPACING).await;
+                }
+                first = false;
                 match fetch_paint(&http, token, sha).await {
                     Ok(Some(bytes)) => {
                         // Verified inside `put`: unchecked bytes never reach the store.
                         if let Err(e) = local.store.put(sha, &bytes) {
                             log::warn!("[room] {e:#}");
-                            rejected += 1;
+                        } else {
+                            fetched += 1;
                         }
                     }
                     Ok(None) => log::debug!("[room] {sha} has expired from the store; skipping"),
@@ -1087,11 +1108,25 @@ pub async fn sync_grid(
             }
         }
     }
+    local.save();
+    fetched
+}
+
+/// Put the grid's picked paints on disk where FrostMod will load them, and clean up what
+/// nobody wears any more.
+///
+/// This is the half that costs frame time: writing into the mods folder is what the next
+/// [`crate::frostmod::signal_reload`] makes FrostMod decode and apply, on its render thread.
+/// The caller — [`Session::reconcile`] — only calls this while the *local* rider is parked in
+/// the pits and not mid-race; everything this function needs must already be in the store,
+/// which is why downloading ([`download_grid`]) is a separate, ungated step.
+pub fn apply_grid(cfg: &AppConfig, local: &mut Local, riders: &[&RoomRider], now: u64) -> PullOutcome {
+    let mods_dir = crate::library::mods_root(&cfg.mods_path);
+    let mut manifest = Manifest::read(&mods_dir);
 
     let picks = pick_variants(riders.iter().copied());
     let mut out = install_picks(&mods_dir, &picks, &mut local.store, &mut local.index, &mut manifest);
     out.riders = riders.len();
-    out.rejected += rejected;
     out.conflicted = contested(riders);
 
     let removed = cleanup_received(&mods_dir, &mut local.store, &mut local.index, &mut manifest, now);
@@ -1138,6 +1173,14 @@ pub struct Session {
     current: Option<Current>,
     grid: Grid,
     local: Option<Local>,
+    /// Reads FrostMod's session block, to know whether the *local* rider is parked in the
+    /// pits or out on the grid. Held open across ticks: re-opening the mapping every pass is
+    /// the one thing this reader was built to avoid.
+    session_reader: gamesession::Reader,
+    /// A grid change arrived while the local rider was on track or mid-race, so nothing was
+    /// installed yet. Retried every tick until [`Self::local_ready_to_apply`] allows it —
+    /// this rider's own next pits visit, or the session ending.
+    pending_apply: bool,
 }
 
 impl Session {
@@ -1146,6 +1189,27 @@ impl Session {
         let launched_to =
             launched_to.map(|a| crate::gameproc::parse_server_address(&a).unwrap_or(a));
         Session { launched_to, ..Default::default() }
+    }
+
+    /// Whether the *local* rider is somewhere applying a paint won't cost a frame that
+    /// matters: parked in the pits, not on the grid at all, or the block can't be read (no
+    /// FrostMod, or not in an online session — nothing to protect either way).
+    ///
+    /// Only this rider's own state ever gates the apply. Waiting on the sender or another
+    /// rider to also be in the pits would mean it almost never fires — riders don't coordinate
+    /// pit stops with each other, and the paint they sent has nothing to do with where *they*
+    /// are once it has reached the control plane.
+    ///
+    /// `race_num` is the closest signal FrostMod's session block gives us to "on the grid":
+    /// it is `-1` until the rider has a car placed on the track, pits included, and something
+    /// else once they do. That is conservative rather than exact — it can't yet tell a rider
+    /// idling in the pit box from one on an out-lap — but conservative is the right direction
+    /// here: it only ever *delays* an apply, never applies one mid-corner.
+    fn local_ready_to_apply(&self) -> bool {
+        match self.session_reader.read() {
+            Some(session) if session.on_a_server() => session.race_num_for_room() == 0,
+            _ => true,
+        }
     }
 
     /// Where the rider is, from what we launched and what FrostMod reports.
@@ -1268,7 +1332,10 @@ impl Session {
             cur.retry_at = Instant::now() + cur.backoff;
             cur.backoff = (cur.backoff * 2).min(HEARTBEAT);
         }
-        if changed {
+        if changed || (self.pending_apply && self.local_ready_to_apply()) {
+            // Either the grid moved, or an earlier apply was queued because the local rider
+            // was on track and this tick finds them back in the pits — either way there is
+            // an apply to try now.
             self.reconcile(app, cfg, &token, arrived).await;
         } else if arrived {
             crate::refresh_live_look(app);
@@ -1386,20 +1453,50 @@ impl Session {
         }
     }
 
-    /// Bring the grid's paints onto disk, then have FrostMod apply them: after anything was
-    /// installed, and whenever `arrived` says a rider just came onto the server.
+    /// Download the grid's paints — always, off the gate, off any thread the game cares
+    /// about — then, only while the local rider can afford it, put them on disk and have
+    /// FrostMod apply them.
+    ///
+    /// The download half runs every time this is called, whatever the local rider is doing:
+    /// it never touches the mods folder, so it never costs FrostMod a frame. The apply half
+    /// — the one FrostMod actually renders — runs only when [`Self::local_ready_to_apply`]
+    /// says the local rider is in the pits and not mid-race; otherwise it is queued
+    /// (`pending_apply`) and retried on a later tick, including the heartbeat, until it can
+    /// go through. `arrived` still refreshes the on-screen roster immediately either way —
+    /// that costs nothing on the game's side, it's this app's own UI.
     async fn reconcile(&mut self, app: &tauri::AppHandle, cfg: &AppConfig, token: &str, arrived: bool) {
         let now = crate::now_ms();
         let grid = std::mem::take(&mut self.grid);
         set_room_riders(Some(grid.riders().map(|r| fold_rider(&r.rider_name)).collect()));
         let riders: Vec<&RoomRider> = grid.riders().collect();
-        let outcome = match self.local(app) {
-            Some(local) => Some(sync_grid(cfg, token, local, &riders, now).await),
-            None => None,
+
+        let Some(local) = self.local(app) else {
+            drop(riders);
+            self.grid = grid;
+            return;
         };
+        download_grid(cfg, token, local, &riders, now).await;
+
+        if !self.local_ready_to_apply() {
+            drop(riders);
+            self.grid = grid;
+            self.pending_apply = true;
+            log::debug!("[room] paints downloaded; apply deferred until the local rider is in the pits");
+            if arrived {
+                crate::refresh_live_look(app);
+            }
+            return;
+        }
+        self.pending_apply = false;
+
+        let Some(local) = self.local.as_mut() else {
+            drop(riders);
+            self.grid = grid;
+            return;
+        };
+        let out = apply_grid(cfg, local, &riders, now);
         drop(riders);
         self.grid = grid;
-        let Some(out) = outcome else { return };
 
         log::info!(
             "[room] {} riders, {} paints installed, {} already held, {} kept as yours, {} contested",
@@ -1479,6 +1576,15 @@ mod tests {
     }
 
     const RED: &str = "bikes/KTM450/paints/Red.pnt";
+
+    #[test]
+    fn a_fresh_session_is_ready_to_apply() {
+        // No FrostMod block to read (no game running, or a non-Windows dev build): there is
+        // nothing on the local rider's screen an apply could disrupt, so it is never queued.
+        let session = Session::new(None);
+        assert!(session.local_ready_to_apply());
+        assert!(!session.pending_apply);
+    }
 
     #[test]
     fn the_variant_most_riders_wear_wins() {
@@ -1860,7 +1966,10 @@ mod paint_room_live {
 
         let cfg = AppConfig { mods_path: root.to_string_lossy().into_owned(), ..Default::default() };
         let mut local = Local::open(root.join("store"));
-        let out = sync_grid(&cfg, &bob, &mut local, &riders, crate::now_ms()).await;
+        let now = crate::now_ms();
+        let fetched = download_grid(&cfg, &bob, &mut local, &riders, now).await;
+        assert_eq!(fetched, 1, "the missing paint should have been downloaded into the store");
+        let out = apply_grid(&cfg, &mut local, &riders, now);
         assert_eq!(out.installed, 1, "{out:?}");
         assert_eq!(std::fs::read(root.join("mods").join(rel)).unwrap(), bytes);
 
