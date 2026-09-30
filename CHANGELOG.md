@@ -33,6 +33,16 @@
 ### Changed
 - **Auto race mode moves nothing with FrostMod v0.40.0 or newer.** It hands FrostMod a list of the tracks and bikes that stay (`frostmod_racemode.txt`), and FrostMod hides the rest from the game's own scan, so their archives are never opened. Ending the session just deletes the list. With an older FrostMod it still moves the unused mods aside as before.
 
+## 2026-09-29 — v0.19.2-beta.1 — Secured tracks in direct-connect multiplayer
+
+### Fixed
+- Secured `.mxbsecure` tracks are available during startup direct connect, so joining a server
+  with the same track no longer reports a track mismatch. The game plugin waits briefly for
+  secure content, rebuilds the track list on the verified MX Bikes beta21e executable, and
+  serves the track archive from memory. Unknown game builds skip the internal rebuild.
+- Secured archive reads report the plaintext stream's EOF and error status. Plugin shutdown
+  restores its file hooks before unload, avoiding a dangling-hook crash.
+
 ## 2026-09-27 — v0.19.1 — Auto race mode, gear refresh and beta updates that find the next beta
 
 ### Added
