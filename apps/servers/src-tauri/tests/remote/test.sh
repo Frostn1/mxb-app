@@ -82,6 +82,44 @@ pid="$(server_pid)"
 if remote apply "$OBS" "$(b64 <<<"$bad")" "$sha"; then fail "invalid config applied"; fi
 [[ "$(server_pid)" == "$pid" ]] || fail "invalid config restarted the server"
 
+echo "=== admin-addr: the default, then the config's [admin] listen"
+[[ "$(remote admin-addr "$OBS" | field admin)" == 127.0.0.1:9810 ]] || fail "default admin address"
+printf '\n[admin]\nlisten = "127.0.0.1:9815" # the admin API\n' >> "$ROOT/config/server.toml"
+[[ "$(remote admin-addr "$OBS" | field admin)" == 127.0.0.1:9815 ]] || fail "admin address from the config"
+
+echo "=== tracks: list the .pkz files beside the configured package, install one"
+printf '\n[track]\npackage = "tracks/a.pkz"\n' >> "$ROOT/config/server.toml"
+mkdir -p "$ROOT/config/tracks"
+touch "$ROOT/config/tracks/a.pkz" "$ROOT/config/tracks/b.pkz" "$ROOT/config/tracks/notes.txt"
+out="$(remote tracks "$OBS")"
+[[ "$(field dir <<<"$out")" == "$ROOT/config/tracks" ]] || fail "track dir: $out"
+[[ "$(field tracks_b64 <<<"$out" | base64 -d | tr '\n' ' ')" == "a.pkz b.pkz " ]] || fail "track list: $out"
+printf 'pkz' > /tmp/mxb-servers-test
+out="$(remote install-track "$OBS" mxb-servers-test c.pkz "$(sha256sum /tmp/mxb-servers-test | cut -d' ' -f1)")"
+[[ "$(field installed <<<"$out")" == c.pkz ]] || fail "install-track: $out"
+[[ -f "$ROOT/config/tracks/c.pkz" ]] || fail "track not installed"
+printf 'pkz' > /tmp/mxb-servers-test
+if remote install-track "$OBS" mxb-servers-test d.pkz "$(printf '0%.0s' {1..64})"; then fail "track with a wrong hash installed"; fi
+rm -f /tmp/mxb-servers-test
+
+echo "=== logs: the log file of a bare server"
+remote logs "$OBS" 5 | grep -q "stub server" || fail "logs"
+
+echo "=== service restart: the server comes back with the same arguments"
+old_pid="$(server_pid)"
+[[ "$(remote service "$OBS" restart | field result)" == restarted ]] || fail "service restart"
+[[ "$(server_pid)" != "$old_pid" ]] || fail "service restart kept the old process"
+ready || fail "not ready after service restart"
+
+echo "=== install-version: new binary in, restart, previous kept"
+cp "$ROOT/bin/mxbserver" /tmp/mxb-servers-bin
+out="$(remote install-version "$OBS" mxb-servers-bin mxbserver "$(sha256sum /tmp/mxb-servers-bin | cut -d' ' -f1)" v-test)"
+[[ "$(field result <<<"$out")" == installed ]] || fail "install-version: $out"
+[[ "$(field version <<<"$out")" == v-test ]] || fail "version label: $out"
+[[ -f "$ROOT/bin/mxbserver.previous" ]] || fail "no previous binary kept"
+ready || fail "not ready after install-version"
+rm -f /tmp/mxb-servers-bin
+
 echo "=== a second server of ours: the one on the observe port is the one edited"
 mkdir -p "$HOME/other/config"
 printf '[server]

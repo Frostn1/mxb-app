@@ -1,11 +1,16 @@
 #!/usr/bin/env bash
-# Config editing on a Linux mxbserver host, sent by MXB Servers over SSH on stdin:
+# Host-side helpers for a Linux mxbserver, sent by MXB Servers over SSH on stdin:
 #   ssh host 'bash -s -- <command> <observe port> [args]' < remote.sh
 #
+# There is no mxb-agent: the server is the `mxbserver` systemd unit (or a hand-started
+# `bin/mxbserver`), and live control goes through mxbserver's own admin API, which the app
+# reaches over an SSH tunnel with the token the user saved. This script only does what needs
+# the host itself: reading and replacing the config file, systemctl, journalctl, track files.
+#
 # It works with both layouts:
-#   systemd  /etc/systemd/system/mxbserver.service (deploy/opt/migrate-to-systemd.sh): the
-#            arguments are in /etc/mxbserver/mxbserver.env, the service runs as `mxbserver`,
-#            and root-owned files are written with sudo (passwordless on Lightsail's ubuntu).
+#   systemd  the `mxbserver` unit: the arguments come from the unit's ExecStart (or
+#            /etc/mxbserver/mxbserver.env), root-owned files are written with sudo
+#            (passwordless on Lightsail's ubuntu).
 #   bare     a hand-started `bin/mxbserver` (the deploy-<sha>.sh scripts): the process is the
 #            one listening on the observe port, its arguments and directory are read from
 #            /proc, and a restart is SIGINT + nohup, exactly as those scripts do.
@@ -16,15 +21,15 @@
 #   apply <obs> <b64> <sha>       back up, replace, restart, wait for /readyz; puts the backup
 #                                 back and restarts again if the server isn't ready.
 #                                 @@backup, @@result applied|rolled-back|failed
-#   riders <obs>                  read the private native admin API using the host's agent config
+#   admin-addr <obs>              @@admin <listen> from the config's [admin] listen (or the
+#                                 --admin flag), else the default 127.0.0.1:9810
 #   observe <obs>                 read /status and /readyz directly on the host
-#   session <obs> <action> [to]   advance/restart, or jump to practice/qualifying/warmup/race
-#   tracks <obs>                  list track packages through the loopback host agent
-#   attach-track <obs> <name-b64> link a machine-library track into this server
-#   detach-track <obs> <name-b64> unlink it from this server without deleting the package
-#   set-track <obs> <name-b64>    select a track and restart through the loopback host agent
-#   set-rotation <obs> <json-b64> select the current track and ordered rotation, then restart
-#   agent-upload <obs> <kind> <tmp> <name> <sha> [version]
+#   logs <obs> <lines>            journalctl -u mxbserver (the log file for a bare server)
+#   service <obs> restart         systemctl restart mxbserver, wait for /readyz; @@result
+#   tracks <obs>                  @@dir, @@tracks_b64: the .pkz files beside the track package
+#   install-track <obs> <tmp> <name> <sha>      move an uploaded .pkz into the track folder
+#   install-version <obs> <tmp> <name> <sha> <version>
+#                                 replace the server binary, restart, roll back if not ready
 set -uo pipefail
 
 say() { printf '@@%s %s\n' "$1" "$2"; }
@@ -34,7 +39,7 @@ UNIT=/etc/systemd/system/mxbserver.service
 ENV_FILE=/etc/mxbserver/mxbserver.env
 CMD="${1:-}"
 OBS="${2:-}"
-[[ "$OBS" =~ ^[0-9]{1,5}$ ]] || die "usage: read|validate|apply <observe port> [...]"
+[[ "$OBS" =~ ^[0-9]{1,5}$ ]] || die "usage: <command> <observe port> [...]"
 
 # The pid of our own mxbserver listening on 127.0.0.1:$OBS, if any.
 listener() {
@@ -44,17 +49,29 @@ listener() {
 # Fill MODE, BIN, WD, ARGS (array), RUNAS, PID.
 detect() {
   PID=""
-  if [[ -f "$UNIT" ]]; then
+  local unit_text
+  unit_text="$(systemctl cat mxbserver 2>/dev/null)"
+  if [[ -n "$unit_text" || -f "$UNIT" ]]; then
     MODE=systemd
     WD="$(systemctl show -p WorkingDirectory --value mxbserver 2>/dev/null)"
     [[ -n "$WD" ]] || WD=/opt/mxbserver
-    BIN="$(sed -n 's#^ExecStart=\([^ ]*\).*#\1#p' "$UNIT" | head -n1)"
+    local exec_line
+    exec_line="$(sed -n 's#^ExecStart=[-@+!]*##p' <<< "$unit_text" | head -n1)"
+    BIN="${exec_line%% *}"
     RUNAS="$(systemctl show -p User --value mxbserver 2>/dev/null)"
     [[ -n "$RUNAS" ]] || RUNAS=root
-    local line
+    local line word
     line="$(sudo -n sed -n 's/^MXBSERVER_ARGS=//p' "$ENV_FILE" 2>/dev/null | head -n1)"
     line="${line%\"}"; line="${line#\"}"
     read -r -a ARGS <<< "$line"
+    if [[ ${#ARGS[@]} -eq 0 ]]; then
+      # No env file: the arguments written straight into ExecStart.
+      ARGS=()
+      # shellcheck disable=SC2086 # the unit's own words, split on spaces
+      for word in ${exec_line#"$BIN"}; do
+        [[ "$word" == \$* ]] || ARGS+=("$word")
+      done
+    fi
     PID="$(systemctl show -p MainPID --value mxbserver 2>/dev/null)"
     [[ "$PID" == 0 ]] && PID=""
     return
@@ -100,9 +117,10 @@ config_path() {
       return
     fi
   done
+  # The deploy layout, when the arguments could not be read.
+  if priv test -r "$WD/config/server.toml" 2>/dev/null; then echo "$WD/config/server.toml"; return; fi
   die "the server's arguments have no --config"
 }
-
 as_owner() { # run a command as the service user (systemd) or ourselves (bare)
   if [[ "$MODE" == systemd && "$RUNAS" != "$(id -un)" ]]; then sudo -n -u "$RUNAS" "$@"; else "$@"; fi
 }
@@ -180,48 +198,43 @@ restart() {
   PID="$(cat "$WD/mxbserver.pid" 2>/dev/null)"
 }
 
-agent_config() {
-  local p pid live=""
-  pid="$(pgrep -o -x mxb-agent 2>/dev/null || true)"
-  [[ -n "$pid" ]] && live="$(tr '\0' '\n' < "/proc/$pid/cmdline" 2>/dev/null | sed -n '2p')"
-  for p in "$live" "${WD:-}/config/agent.json" "${WD:-}/agent.json" /etc/mxbserver/agent.json; do
-    [[ -n "$p" ]] || continue
-    if [[ -r "$p" ]]; then echo "$p"; return; fi
+
+# toml_get <section> <key>: the quoted string value of `key` under `[section]`, or nothing.
+toml_get() {
+  priv cat "$CONFIG" 2>/dev/null | awk -v sec="$1" -v key="$2" '
+    /^[[:space:]]*\[/ { s = $0; gsub(/[[:space:]]/, "", s); cur = s; next }
+    cur == "[" sec "]" && $0 ~ "^[[:space:]]*" key "[[:space:]]*=" {
+      sub(/^[^=]*=[[:space:]]*/, ""); sub(/[[:space:]]*(#.*)?$/, ""); gsub(/^"|"$/, ""); print; exit
+    }'
+}
+
+# The folder holding the track packages: beside the configured [track] package.
+track_dir() {
+  local pkg
+  pkg="$(toml_get track package)"
+  [[ -n "$pkg" ]] || die "the config has no [track] package"
+  [[ "$pkg" == /* ]] || pkg="$(dirname "$CONFIG")/$pkg"
+  dirname "$pkg"
+}
+
+# admin_listen: the admin API's address, from --admin or the config, else the default.
+admin_listen() {
+  local i listen
+  for ((i = 0; i < ${#ARGS[@]}; i++)); do
+    [[ "${ARGS[$i]}" == --admin ]] && { echo "${ARGS[$((i + 1))]:-}"; return; }
   done
-  die "the mxb-agent config was not found beside this server"
-}
-
-json_value() { # json_value <file> <key>
-  python3 -c 'import json,sys; v=json.load(open(sys.argv[1])).get(sys.argv[2]); print(v if v is not None else "")' "$1" "$2"
-}
-
-admin_call() { # admin_call <method> <path> <json-body>
-  local cfg addr token
-  cfg="$(agent_config)"
-  addr="$(json_value "$cfg" native_admin)"
-  token="$(json_value "$cfg" native_admin_token)"
-  [[ "$addr" =~ ^127\.0\.0\.1:[0-9]{1,5}$ ]] || die "the agent has no loopback native admin address"
-  [[ -n "$token" ]] || die "the agent has no native admin credential"
-  curl --fail-with-body -sS --max-time 8 -X "$1" -H "Authorization: Bearer $token" \
-    -H 'Content-Type: application/json' --data "$3" "http://$addr$2"
-}
-
-agent_call() { # agent_call <method> <path> [json-body]
-  local cfg listen token
-  cfg="$(agent_config)"
-  listen="$(json_value "$cfg" listen)"
-  token="$(json_value "$cfg" token)"
-  [[ "$listen" =~ ^(127\.0\.0\.1|0\.0\.0\.0):[0-9]{1,5}$ ]] || die "the agent does not use a local address"
-  listen="127.0.0.1:${listen##*:}"
-  [[ -n "$token" ]] || die "the agent has no control credential"
-  curl --fail-with-body -sS --max-time 300 -X "$1" -H "Authorization: Bearer $token" \
-    -H 'Content-Type: application/json' --data "${3:-}" "http://$listen$2"
+  listen="$(toml_get admin listen)"
+  echo "${listen:-127.0.0.1:9810}"
 }
 
 OWNER=""
-if [[ "$CMD" =~ ^(read|validate|apply)$ ]]; then
+if [[ "$CMD" =~ ^(read|validate|apply|admin-addr|tracks|install-track|install-version|logs|service)$ ]]; then
   detect
-  CONFIG="$(config_path)"
+  if [[ "$CMD" =~ ^(logs|service)$ ]]; then
+    CONFIG=""
+  else
+    CONFIG="$(config_path)"
+  fi
   [[ "$MODE" == systemd ]] && OWNER="$RUNAS"
 fi
 
@@ -272,66 +285,67 @@ case "$CMD" in
       if restart && wait_ready; then say result rolled-back; else say result failed; fi
     fi
     ;;
-  riders)
-    admin_call GET /v1/riders ''
+  admin-addr)
+    say admin "$(admin_listen)"
     ;;
   observe)
     status="$(curl -fsS --max-time 4 "http://127.0.0.1:$OBS/status")" || die "nothing answers on observe port $OBS"
     say ready "$(curl -fsS --max-time 2 "http://127.0.0.1:$OBS/readyz" >/dev/null 2>&1 && echo 1 || echo 0)"
     say status_b64 "$(printf '%s' "$status" | base64 -w0)"
     ;;
-  session)
-    action="${3:-}"; to="${4:-}"
-    case "$action" in
-      advance) admin_call POST /v1/session/advance '{}' ;;
-      restart) admin_call POST /v1/session/restart '{}' ;;
-      jump)
-        [[ "$to" =~ ^(practice|qualifying|warmup|race)$ ]] || die "unknown session"
-        admin_call POST /v1/session/jump "{\"to\":\"$to\"}"
-        ;;
-      *) die "unknown session action" ;;
-    esac
+  logs)
+    n="${3:-200}"
+    [[ "$n" =~ ^[0-9]{1,4}$ ]] || die "bad line count"
+    if [[ "$MODE" == systemd ]]; then
+      journalctl -u mxbserver -n "$n" --no-pager -o cat 2>/dev/null || sudo -n journalctl -u mxbserver -n "$n" --no-pager -o cat
+    else
+      tail -n "$n" "$WD/logs/mxbserver.log"
+    fi
+    ;;
+  service)
+    [[ "${3:-}" == restart ]] || die "unknown service action"
+    if restart && wait_ready; then say result restarted; else say result failed; die "the server did not come back after the restart"; fi
     ;;
   tracks)
-    agent_call GET /tracks
+    dir="$(track_dir)"
+    say dir "$dir"
+    say tracks_b64 "$(priv find "$dir" -maxdepth 1 -type f -iname '*.pkz' -printf '%f\n' 2>/dev/null | sort | base64 -w0)"
     ;;
-  attach-track|detach-track)
-    track="$(printf '%s' "${3:?track}" | base64 -d)" || die "track is not base64"
-    [[ -n "$track" && "$track" != *$'\n'* && "$track" != *$'\r'* ]] || die "bad track name"
-    body="$(python3 -c 'import json,sys; print(json.dumps({"track":sys.argv[1]}))' "$track")"
-    if [[ "$CMD" == attach-track ]]; then endpoint=/tracks/attach; else endpoint=/tracks/detach; fi
-    agent_call POST "$endpoint" "$body"
-    ;;
-  track-state)
-    agent_call GET /status
-    ;;
-  set-track)
-    track="$(printf '%s' "${3:?track}" | base64 -d)" || die "track is not base64"
-    [[ -n "$track" && "$track" != *$'\n'* && "$track" != *$'\r'* ]] || die "bad track name"
-    body="$(python3 -c 'import json,sys; print(json.dumps({"track":sys.argv[1]}))' "$track")"
-    agent_call PUT /config "$body"
-    ;;
-  set-rotation)
-    body="$(printf '%s' "${3:?rotation}" | base64 -d)" || die "rotation is not base64"
-    python3 -c 'import json,sys; d=json.loads(sys.argv[1]); assert isinstance(d.get("track"),str); assert isinstance(d.get("rotation"),list)' "$body" || die "bad rotation"
-    agent_call PUT /config "$body"
-    ;;
-  agent-upload)
-    kind="${3:-}"; tmp="${4:-}"; name="${5:-}"; want="${6:-}"; version="${7:-}"
-    [[ "$kind" =~ ^(track|version)$ ]] || die "bad upload kind"
+  install-track)
+    tmp="${3:-}"; name="${4:-}"; want="${5:-}"
     [[ "$tmp" =~ ^mxb-servers-[A-Za-z0-9_-]+$ ]] || die "bad temporary upload name"
-    [[ "$name" =~ ^[A-Za-z0-9._-]+$ ]] || die "bad upload filename"
+    [[ "$name" =~ ^[A-Za-z0-9._-]+\.[Pp][Kk][Zz]$ && "$name" != .* ]] || die "bad track filename"
     [[ "$want" =~ ^[0-9a-f]{64}$ ]] || die "bad upload hash"
     file="/tmp/$tmp"
     [[ -f "$file" ]] || die "the uploaded file is missing"
     [[ "$(sha256sum "$file" | cut -d' ' -f1)" == "$want" ]] || die "the upload changed in transit"
-    cfg="$(agent_config)"; listen="$(json_value "$cfg" listen)"; token="$(json_value "$cfg" token)"
-    [[ "$listen" =~ ^(127\.0\.0\.1|0\.0\.0\.0):[0-9]{1,5}$ ]] || die "the agent does not use a local address"
-    listen="127.0.0.1:${listen##*:}"
-    headers=(-H "Authorization: Bearer $token" -H "X-Content-SHA256: $want")
-    if [[ "$kind" == track ]]; then path=/tracks; headers+=(-H "X-Filename: $name"); else path=/version; headers+=(-H "X-Version: $version"); fi
-    curl --fail-with-body -sS --max-time 300 -X PUT "${headers[@]}" --data-binary "@$file" "http://$listen$path"
-    rc=$?; rm -f "$file"; exit "$rc"
+    dir="$(track_dir)"
+    owner=()
+    [[ -n "$OWNER" ]] && owner=(-o "$OWNER")
+    priv install -m 0644 "${owner[@]}" "$file" "$dir/$name" || die "cannot write $dir/$name"
+    rm -f "$file"
+    say installed "$name"
     ;;
-  *) die "usage: read|validate|apply|observe|riders|session|tracks|attach-track|detach-track|track-state|set-track|set-rotation|agent-upload <observe port> [...]" ;;
+  install-version)
+    tmp="${3:-}"; want="${5:-}"; version="${6:-}"  # ${4:-} is the file name, unused here
+    [[ "$tmp" =~ ^mxb-servers-[A-Za-z0-9_-]+$ ]] || die "bad temporary upload name"
+    [[ "$want" =~ ^[0-9a-f]{64}$ ]] || die "bad upload hash"
+    file="/tmp/$tmp"
+    [[ -f "$file" ]] || die "the uploaded file is missing"
+    [[ "$(sha256sum "$file" | cut -d' ' -f1)" == "$want" ]] || die "the upload changed in transit"
+    [[ -n "$BIN" && -f "$BIN" ]] || die "cannot find the server binary to replace"
+    old="$BIN.previous"
+    priv cp -p "$BIN" "$old" || die "backup of the current binary failed; nothing changed"
+    priv install -m 0755 "$file" "$BIN.new" || die "cannot write $BIN.new"
+    rm -f "$file"
+    priv mv -f "$BIN.new" "$BIN" || die "replace failed; the old binary is still live"
+    if restart && wait_ready; then
+      say result installed; say version "$version"
+    else
+      echo "not ready with the new binary; putting the old one back" >&2
+      priv cp -p "$old" "$BIN"
+      if restart && wait_ready; then say result rolled-back; else say result failed; fi
+    fi
+    ;;
+  *) die "usage: read|validate|apply|admin-addr|observe|logs|service|tracks|install-track|install-version <observe port> [...]" ;;
 esac

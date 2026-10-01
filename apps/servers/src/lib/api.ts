@@ -111,9 +111,6 @@ export interface TrackState {
 
 export const serverTracks = (id: string) => invoke<TrackState>("server_tracks", { id });
 
-export const serverTrackMembership = (id: string, track: string, attached: boolean) =>
-  invoke<Record<string, unknown>>("server_track_membership", { id, track, attached });
-
 export const serverSetTrack = (id: string, track: string) =>
   invoke<Record<string, unknown>>("server_set_track", { id, track });
 
@@ -123,7 +120,7 @@ export const serverSetRotation = (id: string, tracks: string[]) =>
 export const serverUpdateGithub = (id: string) =>
   invoke<Record<string, unknown>>("server_update_github", { id });
 
-export const serverSession = (id: string, action: "jump" | "advance" | "restart", to?: "practice" | "qualifying" | "warmup" | "race") =>
+export const serverSession = (id: string, action: "jump" | "advance" | "restart" | "rotate", to?: "practice" | "qualifying" | "warmup" | "race") =>
   invoke<Record<string, unknown>>("server_session", { id, action, to });
 
 export const serverUpload = (id: string, kind: "track" | "version", path: string, version?: string) =>
@@ -226,3 +223,7 @@ export const legacyConfigSave = (id: string, name: string, track: string, maxCli
   invoke<Record<string, unknown>>("legacy_config_save", { id, name, track, maxClients });
 export const legacyProcess = (id: string, action: "start" | "stop" | "restart") =>
   invoke<Record<string, unknown>>("legacy_process", { id, action });
+
+/** `systemctl restart mxbserver` on the server's host, waiting until it answers again. */
+export const serverRestartService = (id: string) =>
+  invoke<Record<string, unknown>>("server_restart_service", { id });

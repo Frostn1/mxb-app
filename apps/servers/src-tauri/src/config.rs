@@ -446,6 +446,66 @@ pub fn diff(old: &str, new: &str) -> String {
         .to_string()
 }
 
+/// The configured `[track] package` and `[rotation] tracks` of a server's config.
+pub fn tracks(text: &str) -> Result<(Option<String>, Vec<String>), String> {
+    let doc = parse(text)?;
+    let package = doc
+        .get("track")
+        .and_then(|t| t.get("package"))
+        .and_then(Item::as_str)
+        .map(str::to_string);
+    let rotation = doc
+        .get("rotation")
+        .and_then(|t| t.get("tracks"))
+        .and_then(Item::as_array)
+        .map(|a| {
+            a.iter()
+                .filter_map(|v| v.as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default();
+    Ok((package, rotation))
+}
+
+/// `text` with `[track] package` set and `[rotation] tracks` replaced (removed when empty);
+/// everything else, comments included, is untouched.
+pub fn set_tracks(text: &str, package: &str, rotation: &[String]) -> Result<String, String> {
+    let mut doc = parse(text)?;
+    if !doc.contains_table("track") {
+        if doc.contains_key("track") {
+            return Err("[track] is not a table in this file".into());
+        }
+        doc["track"] = toml_edit::table();
+    }
+    let old = doc["track"]
+        .get("package")
+        .and_then(Item::as_value)
+        .map(|v| v.decor().clone());
+    let mut item = toml_edit::value(package);
+    if let (Some(decor), Item::Value(new)) = (old, &mut item) {
+        *new.decor_mut() = decor;
+    }
+    doc["track"]["package"] = item;
+    if rotation.is_empty() {
+        if let Some(table) = doc.get_mut("rotation").and_then(Item::as_table_like_mut) {
+            table.remove("tracks");
+        }
+    } else {
+        if !doc.contains_table("rotation") {
+            if doc.contains_key("rotation") {
+                return Err("[rotation] is not a table in this file".into());
+            }
+            doc["rotation"] = toml_edit::table();
+        }
+        let mut array = toml_edit::Array::new();
+        for track in rotation {
+            array.push(track.as_str());
+        }
+        doc["rotation"]["tracks"] = toml_edit::value(array);
+    }
+    Ok(doc.to_string())
+}
+
 pub fn sha256(text: &str) -> String {
     use sha2::{Digest, Sha256};
     Sha256::digest(text.as_bytes())
@@ -542,5 +602,35 @@ late_join_register = false
         assert!(d.contains("+count = 2 # four bots"));
         assert!(!d.contains("+[server]"));
         assert_eq!(diff(FILE, FILE), "");
+    }
+}
+
+#[cfg(test)]
+mod track_tests {
+    use super::*;
+
+    const FILE: &str =
+        "[server]\nname = \"x\"\n\n[track]\n# the event track\npackage = \"tracks/a.pkz\" # now\n";
+
+    #[test]
+    fn tracks_are_read_and_replaced_keeping_comments() {
+        assert_eq!(tracks(FILE).unwrap(), (Some("tracks/a.pkz".into()), vec![]));
+        let out = set_tracks(
+            FILE,
+            "tracks/b.pkz",
+            &["tracks/c.pkz".into(), "tracks/a.pkz".into()],
+        )
+        .unwrap();
+        assert!(out.contains("# the event track"));
+        assert!(out.contains("package = \"tracks/b.pkz\" # now"));
+        assert_eq!(
+            tracks(&out).unwrap(),
+            (
+                Some("tracks/b.pkz".into()),
+                vec!["tracks/c.pkz".into(), "tracks/a.pkz".into()]
+            )
+        );
+        let back = set_tracks(&out, "tracks/b.pkz", &[]).unwrap();
+        assert_eq!(tracks(&back).unwrap().1, Vec::<String>::new());
     }
 }

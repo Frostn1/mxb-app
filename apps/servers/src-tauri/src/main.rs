@@ -3,10 +3,11 @@
 
 //! MXB Servers: one window for every mxbserver — health, build, session, riders and logs.
 //!
-//! P1 of the server-manager plan (`handoffs/server-manager.md`). Each server is reached over
-//! SSH: its observe port gives `/readyz` and `/status` with no credentials, its admin port
-//! (when configured) gives `/v1/riders` with a bearer token from the OS keychain, and the log
-//! is read with `tail`. Nothing listens on the internet for this.
+//! Each server is reached over SSH: its observe port gives `/readyz` and `/status` with no credentials, and its admin API
+//! (the `[admin] listen` of its config, default 127.0.0.1:9810) takes riders and session
+//! controls with a bearer token from the OS keychain. Config, `systemctl` and `journalctl -u
+//! mxbserver` go through `remote.sh` over SSH. There is no mxb-agent. Nothing listens on the
+//! internet for this.
 
 mod config;
 mod local;
@@ -15,6 +16,37 @@ mod store;
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_admin_port_comes_from_the_listen_address() {
+        assert_eq!(super::parse_admin_listen("127.0.0.1:9810"), Some(9810));
+        assert_eq!(super::parse_admin_listen("[::1]:9811\n"), Some(9811));
+        assert_eq!(super::parse_admin_listen("127.0.0.1"), None);
+        assert_eq!(super::parse_admin_listen("127.0.0.1:0"), None);
+    }
+
+    #[test]
+    fn admin_errors_name_the_token_problem() {
+        assert!(super::admin_error(401, "", true).contains("refused the admin token"));
+        assert!(super::admin_error(403, "", true).contains("read scope"));
+        assert!(super::admin_error(403, "", false).contains("isn't allowed"));
+        let refusal = r#"{"error":"refused","message":"the race runs until it is over"}"#;
+        assert_eq!(
+            super::admin_error(409, refusal, true),
+            "the race runs until it is over"
+        );
+        assert_eq!(
+            super::admin_error(500, "", true),
+            "The admin API answered HTTP 500."
+        );
+    }
+
+    #[test]
+    fn a_track_name_is_the_last_path_part() {
+        assert_eq!(super::track_name("tracks/smokey.pkz"), "smokey.pkz");
+        assert_eq!(super::track_name(r"C:\tracks\a.pkz"), "a.pkz");
+        assert_eq!(super::track_name("a.pkz"), "a.pkz");
+    }
+
     #[test]
     fn local_tail_returns_the_last_lines() {
         let path =
@@ -75,6 +107,8 @@ struct App {
     store: Store,
     tunnels: Arc<ssh::Tunnels>,
     http: reqwest::Client,
+    /// Admin API ports found in each SSH server's config, by server id.
+    admin_ports: std::sync::Mutex<std::collections::HashMap<String, u16>>,
 }
 
 /// A server as the UI sees it: the stored fields and whether a token is in the keychain.
@@ -204,12 +238,17 @@ fn servers_save(app: State<'_, App>, request: SaveRequest) -> Result<ServerView,
     }
     app.store.upsert(server.clone())?;
     app.tunnels.close_server(&server.id);
+    app.admin_ports
+        .lock()
+        .ok()
+        .map(|mut p| p.remove(&server.id));
     Ok(view(server))
 }
 
 #[tauri::command]
 fn servers_remove(app: State<'_, App>, id: String) -> Result<(), String> {
     app.tunnels.close_server(&id);
+    app.admin_ports.lock().ok().map(|mut p| p.remove(&id));
     store::clear_token(&id);
     app.store.remove(&id)
 }
@@ -223,8 +262,6 @@ async fn local_port(app: &App, server: &Server, remote: u16) -> Result<u16, Stri
         .map_err(|e| e.to_string())?
 }
 
-/// GET `path` on one of the server's forwarded ports. A failed request drops the tunnel, so a
-/// server that went away is reconnected on the next poll.
 /// Why a request got no HTTP answer.
 enum Miss {
     /// The SSH connection itself failed: the host is down, the key is wrong, ...
@@ -242,21 +279,6 @@ impl Miss {
     }
 }
 
-async fn get(
-    app: &App,
-    server: &Server,
-    remote: u16,
-    path: &str,
-    token: Option<&str>,
-) -> Result<(u16, String), String> {
-    fetch(app, server, remote, path, token)
-        .await
-        .map_err(Miss::text)
-}
-
-/// `fetch_once`, and for a server over SSH one more try on a fresh tunnel: a request that fails
-/// on an old tunnel may just mean the SSH connection dropped, and only a new one can tell
-/// "SSH is down" from "the server isn't running".
 async fn fetch(
     app: &App,
     server: &Server,
@@ -264,30 +286,61 @@ async fn fetch(
     path: &str,
     token: Option<&str>,
 ) -> Result<(u16, String), Miss> {
-    match fetch_once(app, server, remote, path, token).await {
-        Err(Miss::NoAnswer(_)) if !server.local => {
-            fetch_once(app, server, remote, path, token).await
-        }
-        other => other,
-    }
+    send(app, server, remote, reqwest::Method::GET, path, token, None).await
 }
 
-async fn fetch_once(
+/// `send_once`, and for a server over SSH one more try on a fresh tunnel: a request that fails
+/// on an old tunnel may just mean the SSH connection dropped, and only a new one can tell
+/// "SSH is down" from "the server isn't running". A request that changes something is retried
+/// only when it never connected, so it can't be done twice.
+async fn send(
     app: &App,
     server: &Server,
     remote: u16,
+    method: reqwest::Method,
     path: &str,
     token: Option<&str>,
+    body: Option<&Value>,
 ) -> Result<(u16, String), Miss> {
+    match send_once(app, server, remote, &method, path, token, body).await {
+        Err((Miss::NoAnswer(_), false)) if !server.local => {
+            send_once(app, server, remote, &method, path, token, body)
+                .await
+                .map_err(|(miss, _)| miss)
+        }
+        other => other.map_err(|(miss, _)| miss),
+    }
+}
+
+/// One request. The error says whether the request may have reached the server (so a request
+/// that changes something must not be repeated).
+async fn send_once(
+    app: &App,
+    server: &Server,
+    remote: u16,
+    method: &reqwest::Method,
+    path: &str,
+    token: Option<&str>,
+    body: Option<&Value>,
+) -> Result<(u16, String), (Miss, bool)> {
     // A server on this PC is reached directly; any other through its SSH tunnel.
     let port = if server.local {
         remote
     } else {
-        local_port(app, server, remote).await.map_err(Miss::Ssh)?
+        local_port(app, server, remote)
+            .await
+            .map_err(|e| (Miss::Ssh(e), false))?
     };
-    let mut request = app.http.get(format!("http://127.0.0.1:{port}{path}"));
+    let mut request = app
+        .http
+        .request(method.clone(), format!("http://127.0.0.1:{port}{path}"));
     if let Some(token) = token {
         request = request.bearer_auth(token);
+    }
+    if let Some(body) = body {
+        request = request
+            .header("Content-Type", "application/json")
+            .body(body.to_string());
     }
     match request.send().await {
         Ok(response) => {
@@ -295,12 +348,14 @@ async fn fetch_once(
             let body = response
                 .text()
                 .await
-                .map_err(|e| Miss::NoAnswer(e.to_string()))?;
+                .map_err(|e| (Miss::NoAnswer(e.to_string()), true))?;
             Ok((status, body))
         }
         Err(error) => {
             app.tunnels.reset(&server.id, remote);
-            Err(Miss::NoAnswer(error.to_string()))
+            // Past the connect step a change may already have been made: don't repeat it.
+            let sent = *method != reqwest::Method::GET && !error.is_connect();
+            Err((Miss::NoAnswer(error.to_string()), sent))
         }
     }
 }
@@ -483,7 +538,99 @@ struct TokenCheck {
     message: String,
 }
 
-/// Try the saved admin token against `/v1/server` and say plainly what happened.
+/// The admin API's loopback port for `server`: the one saved with it, else the port of the
+/// `[admin] listen` in the server's config (read over SSH once, then remembered), else mxbserver's
+/// default, 9810.
+async fn admin_port(app: &App, server: &Server) -> Result<u16, String> {
+    if let Some(port) = server.admin_port {
+        return Ok(port);
+    }
+    if server.local {
+        return Err(
+            "Set the admin port first (the [admin] listen port in the server's config).".into(),
+        );
+    }
+    if let Some(port) = app
+        .admin_ports
+        .lock()
+        .ok()
+        .and_then(|ports| ports.get(&server.id).copied())
+    {
+        return Ok(port);
+    }
+    let tunnels = Arc::clone(&app.tunnels);
+    let remote = server.clone();
+    let observe = server.observe_port.to_string();
+    let out =
+        blocking(move || tunnels.run_script(&remote, REMOTE_SH, &["admin-addr", &observe], 30))
+            .await?;
+    if !out.success {
+        return Err(out.text());
+    }
+    let port = parse_admin_listen(out.field("admin").unwrap_or(""))
+        .ok_or("The server's [admin] listen address is not host:port.")?;
+    if let Ok(mut ports) = app.admin_ports.lock() {
+        ports.insert(server.id.clone(), port);
+    }
+    Ok(port)
+}
+
+/// The port of an `[admin] listen` value such as `127.0.0.1:9810` or `[::1]:9810`.
+fn parse_admin_listen(listen: &str) -> Option<u16> {
+    let port = listen.trim().rsplit_once(':')?.1.parse::<u16>().ok()?;
+    (port != 0).then_some(port)
+}
+
+const NO_TOKEN: &str = "No admin token is saved for this server. On the server run `mxbserver admin token new --id app --scope control`, add the printed entry to its tokens file, and save the token in this server's settings.";
+
+/// One sentence for a non-2xx answer of the admin API. `control` says the call needs the
+/// `control` scope, which is what a 403 then means.
+fn admin_error(code: u16, body: &str, control: bool) -> String {
+    let detail = serde_json::from_str::<Value>(body)
+        .ok()
+        .and_then(|v| v["message"].as_str().map(str::to_string))
+        .filter(|m| !m.is_empty());
+    match code {
+        401 => "The server refused the admin token: it's mistyped, or was revoked. Save a fresh one in this server's settings.".into(),
+        403 if control => "This admin token only has read scope, so it can't control the server. Create a control token (`mxbserver admin token new --id app --scope control`), add it to the server's tokens file, and save it in this server's settings.".into(),
+        403 => "The admin token is valid but isn't allowed to do that.".into(),
+        429 => "The server is rate-limiting the admin API; try again in a few seconds.".into(),
+        _ => detail.unwrap_or_else(|| format!("The admin API answered HTTP {code}.")),
+    }
+}
+
+/// Call mxbserver's own admin API with the token saved for this server, through the SSH tunnel
+/// (or straight to loopback for a server on this PC). `control` marks a call that needs the
+/// `control` scope. Returns the JSON answer.
+async fn admin_call(
+    app: &App,
+    server: &Server,
+    method: reqwest::Method,
+    path: &str,
+    body: Option<&Value>,
+    control: bool,
+) -> Result<Value, String> {
+    let token = store::token(&server.id).ok_or(NO_TOKEN)?;
+    let port = admin_port(app, server).await?;
+    let (code, text) = send(app, server, port, method, path, Some(&token), body)
+        .await
+        .map_err(|miss| match miss {
+            Miss::NoAnswer(_) => format!(
+                "Nothing answers on admin port {port}. Is mxbserver running, with an [admin] section in its config (default 127.0.0.1:9810)?"
+            ),
+            other => other.text(),
+        })?;
+    if !(200..300).contains(&code) {
+        return Err(admin_error(code, &text, control));
+    }
+    if text.trim().is_empty() {
+        return Ok(Value::Null);
+    }
+    serde_json::from_str(&text).map_err(|e| format!("{path}: {e}"))
+}
+
+/// Try the saved admin token against `/v1/server` and say plainly what happened. A dry-run
+/// config reload (changes nothing) tells whether it also has the `control` scope.
 #[tauri::command]
 async fn server_test_token(app: State<'_, App>, id: String) -> Result<TokenCheck, String> {
     let server = app.store.get(&id)?;
@@ -501,27 +648,37 @@ async fn server_test_token(app: State<'_, App>, id: String) -> Result<TokenCheck
             Err(error) => fail(error),
         };
     }
-    let Some(admin) = server.admin_port else {
-        return fail(
-            "Set the admin port first (the [admin] listen port in the server's config).".into(),
-        );
-    };
-    let Some(token) = store::token(&id) else {
-        return fail("No admin token is saved for this server.".into());
-    };
-    match fetch(&app, &server, admin, "/v1/server", Some(&token)).await {
-        Ok((200, _)) => Ok(TokenCheck {
+    if let Err(error) = admin_call(
+        &app,
+        &server,
+        reqwest::Method::GET,
+        "/v1/server",
+        None,
+        false,
+    )
+    .await
+    {
+        return fail(error);
+    }
+    let dry_run = serde_json::json!({ "dry_run": true });
+    match admin_call(
+        &app,
+        &server,
+        reqwest::Method::POST,
+        "/v1/config/reload",
+        Some(&dry_run),
+        true,
+    )
+    .await
+    {
+        Err(error) if error.contains("read scope") => Ok(TokenCheck {
             ok: true,
-            message: "Token works.".into(),
+            message: "Token works, but it is read-only: race and session controls need a control-scope token.".into(),
         }),
-        Ok((401, _)) => fail("The server refused this token: it's mistyped, or was revoked.".into()),
-        Ok((403, _)) => fail("The token is valid but not allowed to read the server.".into()),
-        Ok((429, _)) => fail("The server is rate-limiting; try again in a few seconds.".into()),
-        Ok((code, _)) => fail(format!("The admin API answered HTTP {code}.")),
-        Err(Miss::Ssh(e)) => fail(format!("Can't reach the server over SSH: {e}")),
-        Err(Miss::NoAnswer(_)) => fail(format!(
-            "Nothing answers on admin port {admin}. The server has no [admin] section, or it listens on another port."
-        )),
+        _ => Ok(TokenCheck {
+            ok: true,
+            message: "Token works, with control scope.".into(),
+        }),
     }
 }
 
@@ -547,27 +704,15 @@ async fn server_riders(app: State<'_, App>, id: String) -> Result<Value, String>
             .collect::<Vec<_>>();
         return Ok(serde_json::json!({ "riders": riders }));
     }
-    if !server.local {
-        let tunnels = Arc::clone(&app.tunnels);
-        let port = server.observe_port.to_string();
-        let out = blocking(move || tunnels.run_script(&server, REMOTE_SH, &["riders", &port], 30))
-            .await?;
-        if !out.success {
-            return Err(out.text());
-        }
-        return serde_json::from_str(&out.stdout).map_err(|e| format!("rider list: {e}"));
-    }
-    let admin = server
-        .admin_port
-        .ok_or("No admin port set for this server.")?;
-    let token = store::token(&id).ok_or("No admin token saved for this server.")?;
-    let (code, body) = get(&app, &server, admin, "/v1/riders", Some(&token)).await?;
-    match code {
-        200 => serde_json::from_str(&body).map_err(|e| format!("/v1/riders: {e}")),
-        401 => Err("The server refused the admin token.".into()),
-        429 => Err("Rate limited by the server; try again in a moment.".into()),
-        other => Err(format!("/v1/riders answered {other}")),
-    }
+    admin_call(
+        &app,
+        &server,
+        reqwest::Method::GET,
+        "/v1/riders",
+        None,
+        false,
+    )
+    .await
 }
 
 #[derive(Serialize)]
@@ -577,6 +722,26 @@ struct TrackState {
     library: Vec<String>,
     current: Option<String>,
     rotation: Vec<String>,
+}
+
+/// The file name of a track path from the config (`tracks/smokey.pkz` -> `smokey.pkz`).
+fn track_name(path: &str) -> String {
+    path.rsplit(['/', '\\']).next().unwrap_or(path).to_string()
+}
+
+/// The config text out of a `read` run of remote.sh, with its hash.
+fn read_config(out: &ssh::ScriptOutput) -> Result<(String, String), String> {
+    use base64::Engine;
+    let encoded = out
+        .field("config_b64")
+        .filter(|_| out.success)
+        .ok_or_else(|| format!("could not read the config: {}", out.text()))?;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(encoded)
+        .map_err(|e| e.to_string())?;
+    let text = String::from_utf8(bytes).map_err(|_| "the config is not UTF-8".to_string())?;
+    let sha = out.field("sha").unwrap_or("").to_string();
+    Ok((text, sha))
 }
 
 #[tauri::command]
@@ -606,85 +771,86 @@ async fn server_tracks(app: State<'_, App>, id: String) -> Result<TrackState, St
         return Err("Track management for a server on this PC is not wired yet.".into());
     }
     let tunnels = Arc::clone(&app.tunnels);
-    let state_tunnels = Arc::clone(&app.tunnels);
-    let state_server = server.clone();
     let port = server.observe_port.to_string();
-    let state_port = port.clone();
-    let (out, state) = blocking(move || {
-        let out = tunnels.run_script(&server, REMOTE_SH, &["tracks", &port], 30)?;
-        let state = state_tunnels.run_script(
-            &state_server,
-            REMOTE_SH,
-            &["track-state", &state_port],
-            30,
-        )?;
-        Ok((out, state))
+    let (config, listing) = blocking(move || {
+        let config = tunnels.run_script(&server, REMOTE_SH, &["read", &port], 30)?;
+        let listing = tunnels.run_script(&server, REMOTE_SH, &["tracks", &port], 30)?;
+        Ok((config, listing))
     })
     .await?;
-    if !out.success || !state.success {
-        return Err(format!("{}{}", out.text(), state.text()));
+    if !listing.success {
+        return Err(listing.text());
     }
-    let body: Value = serde_json::from_str(&out.stdout).map_err(|e| format!("track list: {e}"))?;
-    let status: Value =
-        serde_json::from_str(&state.stdout).map_err(|e| format!("track state: {e}"))?;
-    let installed = body["tracks"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(|v| v.as_str().map(str::to_string))
+    let (text, _) = read_config(&config)?;
+    let (package, rotation) = config::tracks(&text)?;
+    use base64::Engine;
+    let names = listing
+        .field("tracks_b64")
+        .map(|b| {
+            base64::engine::general_purpose::STANDARD
+                .decode(b)
+                .unwrap_or_default()
+        })
+        .map(|b| String::from_utf8_lossy(&b).into_owned())
+        .unwrap_or_default();
+    let installed: Vec<String> = names
+        .lines()
+        .map(str::trim)
+        .filter(|n| !n.is_empty())
+        .map(str::to_string)
         .collect();
-    let library = body["library"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(|v| v.as_str().map(str::to_string))
-        .collect();
-    let server = &status["server"];
     Ok(TrackState {
+        library: installed.clone(),
         installed,
-        library,
-        current: server["track"].as_str().map(str::to_string),
-        rotation: server["rotation"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .filter_map(|v| v.as_str().map(str::to_string))
-            .collect(),
+        current: package.as_deref().map(track_name),
+        rotation: rotation.iter().map(|t| track_name(t)).collect(),
     })
 }
 
-#[tauri::command]
-async fn server_track_membership(
-    app: State<'_, App>,
-    id: String,
-    track: String,
-    attached: bool,
+/// Rewrite the server's `[track] package` (and the `[rotation] tracks` when given) in its
+/// config over SSH, and apply it: the host validates it, restarts the service with systemctl,
+/// and puts the old file back if the server doesn't come up.
+async fn apply_tracks(
+    app: &App,
+    server: Server,
+    current: &str,
+    rotation: Option<Vec<String>>,
 ) -> Result<Value, String> {
-    let server = app.store.get(&id)?;
-    if server.kind == ServerKind::Legacy {
-        return Err(
-            "Legacy connecting uses the tracks installed in the official server's mods folder."
-                .into(),
-        );
-    }
-    if server.local {
-        return Err("Shared track management requires a server connected over SSH.".into());
+    let bad =
+        |name: &str| name.is_empty() || name == ".." || name.contains(['/', '\\', '"', '\n', '\r']);
+    if bad(current) || rotation.iter().flatten().any(|name| bad(name)) {
+        return Err("Track names must be plain file names.".into());
     }
     let tunnels = Arc::clone(&app.tunnels);
     let port = server.observe_port.to_string();
-    let encoded = b64(track.trim());
-    let command = if attached {
-        "attach-track"
-    } else {
-        "detach-track"
-    };
-    let out =
-        blocking(move || tunnels.run_script(&server, REMOTE_SH, &[command, &port, &encoded], 30))
-            .await?;
-    if !out.success {
-        return Err(out.text());
+    let current = current.to_string();
+    let out = blocking(move || {
+        let config = tunnels.run_script(&server, REMOTE_SH, &["read", &port], 30)?;
+        let (text, sha) = read_config(&config)?;
+        let (package, old_rotation) = config::tracks(&text)?;
+        // New tracks sit beside the current package, written the way the config writes it.
+        let prefix = package
+            .as_deref()
+            .and_then(|p| p.rsplit_once('/'))
+            .map(|(dir, _)| format!("{dir}/"))
+            .unwrap_or_default();
+        let rotation = match rotation {
+            Some(names) => names.iter().map(|n| format!("{prefix}{n}")).collect(),
+            None => old_rotation,
+        };
+        let edited = config::set_tracks(&text, &format!("{prefix}{current}"), &rotation)?;
+        let encoded = b64(&edited);
+        tunnels.run_script(&server, REMOTE_SH, &["apply", &port, &encoded, &sha], 300)
+    })
+    .await?;
+    match out.field("result") {
+        Some("applied") => Ok(serde_json::json!({ "result": "applied" })),
+        Some("rolled-back") => Err(format!(
+            "The server did not come back with that track, so the old config is live again. {}",
+            out.text()
+        )),
+        _ => Err(out.text()),
     }
-    serde_json::from_str(&out.stdout).map_err(|e| format!("track library: {e}"))
 }
 
 #[tauri::command]
@@ -705,17 +871,7 @@ async fn server_set_track(app: State<'_, App>, id: String, track: String) -> Res
     if server.local {
         return Err("Track selection for a server on this PC is not wired yet.".into());
     }
-    let tunnels = Arc::clone(&app.tunnels);
-    let port = server.observe_port.to_string();
-    let encoded = b64(track.trim());
-    let out = blocking(move || {
-        tunnels.run_script(&server, REMOTE_SH, &["set-track", &port, &encoded], 180)
-    })
-    .await?;
-    if !out.success {
-        return Err(out.text());
-    }
-    serde_json::from_str(&out.stdout).map_err(|e| format!("set track: {e}"))
+    apply_tracks(&app, server, track.trim(), None).await
 }
 
 #[tauri::command]
@@ -743,18 +899,48 @@ async fn server_set_rotation(
         return Err("Add at least one track.".into());
     }
     let current = tracks.remove(0);
-    let payload = serde_json::json!({ "track": current, "rotation": tracks });
-    let encoded = b64(&payload.to_string());
+    apply_tracks(&app, server, &current, Some(tracks)).await
+}
+
+/// Replace the server binary on the host (sha-checked upload, then `systemctl restart`; the old
+/// binary is put back if the new one doesn't come up).
+async fn install_version(
+    app: &App,
+    server: Server,
+    temporary: String,
+    name: String,
+    digest: String,
+    version: String,
+) -> Result<Value, String> {
     let tunnels = Arc::clone(&app.tunnels);
     let port = server.observe_port.to_string();
     let out = blocking(move || {
-        tunnels.run_script(&server, REMOTE_SH, &["set-rotation", &port, &encoded], 180)
+        tunnels.run_script(
+            &server,
+            REMOTE_SH,
+            &[
+                "install-version",
+                &port,
+                &temporary,
+                &name,
+                &digest,
+                &version,
+            ],
+            360,
+        )
     })
     .await?;
-    if !out.success {
-        return Err(out.text());
+    match out.field("result") {
+        Some("installed") => Ok(serde_json::json!({
+            "result": "installed",
+            "version": out.field("version").unwrap_or("")
+        })),
+        Some("rolled-back") => Err(format!(
+            "The new server build did not start, so the old one is running again. {}",
+            out.text()
+        )),
+        _ => Err(out.text()),
     }
-    serde_json::from_str(&out.stdout).map_err(|e| format!("set rotation: {e}"))
 }
 
 #[tauri::command]
@@ -767,8 +953,8 @@ async fn server_update_github(app: State<'_, App>, id: String) -> Result<Value, 
         return Err("GitHub updates require a server connected over SSH.".into());
     }
     let tunnels = Arc::clone(&app.tunnels);
-    let port = server.observe_port.to_string();
-    let out = blocking(move || {
+    let upload_server = server.clone();
+    let (temporary, digest, version) = blocking(move || {
         let gh = |args: &[&str]| -> Result<std::process::Output, String> {
             let mut command = std::process::Command::new("gh");
             command.args(args);
@@ -803,17 +989,17 @@ async fn server_update_github(app: State<'_, App>, id: String) -> Result<Value, 
         loop { let read = file.read(&mut buffer).map_err(|e| format!("couldn't read GitHub artifact: {e}"))?; if read == 0 { break; } hash.update(&buffer[..read]); }
         let digest = format!("{:x}", hash.finalize());
         let temporary = format!("mxb-servers-{}", store::new_id());
-        tunnels.upload(&server, &binary.to_string_lossy(), &temporary, 300)?;
-        let out = tunnels.run_script(&server, REMOTE_SH, &["agent-upload", &port, "version", &temporary, "mxbserver", &digest, &version], 360);
+        let uploaded = tunnels.upload(&upload_server, &binary.to_string_lossy(), &temporary, 300);
         let _ = std::fs::remove_dir_all(&dir);
-        out
+        uploaded?;
+        Ok((temporary, digest, version))
     }).await?;
-    if !out.success {
-        return Err(out.text());
-    }
-    serde_json::from_str(&out.stdout).map_err(|e| format!("GitHub update: {e}"))
+    install_version(&app, server, temporary, "mxbserver".into(), digest, version).await
 }
 
+/// Live session control through mxbserver's admin API: jump to practice, qualifying, warm-up or
+/// the race, end the current stage (`advance`), restart it, or `rotate` to the next track.
+/// Needs a control-scope token.
 #[tauri::command]
 async fn server_session(
     app: State<'_, App>,
@@ -823,43 +1009,57 @@ async fn server_session(
 ) -> Result<Value, String> {
     let server = app.store.get(&id)?;
     if server.kind == ServerKind::Legacy {
-        return Err("The official dedicated server does not expose live session controls through mxb-agent.".into());
+        return Err("The official dedicated server does not expose live session controls.".into());
+    }
+    let (path, body) = match action.as_str() {
+        "jump" => {
+            let destination = to.unwrap_or_default();
+            if !matches!(
+                destination.as_str(),
+                "practice" | "qualifying" | "warmup" | "race"
+            ) {
+                return Err("unknown session".into());
+            }
+            ("/v1/session/jump", serde_json::json!({ "to": destination }))
+        }
+        "advance" => ("/v1/session/advance", serde_json::json!({})),
+        "restart" => ("/v1/session/restart", serde_json::json!({})),
+        "rotate" => ("/v1/session/rotate", serde_json::json!({})),
+        _ => return Err("unknown session action".into()),
+    };
+    admin_call(
+        &app,
+        &server,
+        reqwest::Method::POST,
+        path,
+        Some(&body),
+        true,
+    )
+    .await
+}
+
+/// Restart the mxbserver service on its host with systemctl (SIGINT + relaunch for a hand-started
+/// server) and wait until it answers again.
+#[tauri::command]
+async fn server_restart_service(app: State<'_, App>, id: String) -> Result<Value, String> {
+    let server = app.store.get(&id)?;
+    if server.kind == ServerKind::Legacy {
+        return Err("Use the Restart button of the official server's controls.".into());
     }
     if server.local {
-        return Err("Live session control for a server on this PC is not wired yet.".into());
-    }
-    if !matches!(action.as_str(), "jump" | "advance" | "restart") {
-        return Err("unknown session action".into());
-    }
-    let destination = to.unwrap_or_default();
-    if action == "jump"
-        && !matches!(
-            destination.as_str(),
-            "practice" | "qualifying" | "warmup" | "race"
-        )
-    {
-        return Err("unknown session".into());
+        return Err("Restart a server on this PC from its own window.".into());
     }
     let tunnels = Arc::clone(&app.tunnels);
     let port = server.observe_port.to_string();
     let out = blocking(move || {
-        let args = if action == "jump" {
-            vec![
-                "session",
-                port.as_str(),
-                action.as_str(),
-                destination.as_str(),
-            ]
-        } else {
-            vec!["session", port.as_str(), action.as_str()]
-        };
-        tunnels.run_script(&server, REMOTE_SH, &args, 30)
+        tunnels.run_script(&server, REMOTE_SH, &["service", &port, "restart"], 120)
     })
     .await?;
-    if !out.success {
-        return Err(out.text());
+    if out.field("result") == Some("restarted") {
+        Ok(serde_json::json!({ "result": "restarted" }))
+    } else {
+        Err(out.text())
     }
-    serde_json::from_str(&out.stdout).map_err(|e| format!("session control: {e}"))
 }
 
 #[tauri::command]
@@ -954,27 +1154,25 @@ async fn server_upload(
     let upload_path = path.clone();
     let upload_name = temporary.clone();
     blocking(move || tunnels.upload(&upload_server, &upload_path, &upload_name, 300)).await?;
+    if kind == "version" {
+        return install_version(&app, server, temporary, name, digest, version).await;
+    }
     let tunnels = Arc::clone(&app.tunnels);
     let port = server.observe_port.to_string();
     let out = blocking(move || {
-        let mut args = vec![
-            "agent-upload",
-            port.as_str(),
-            kind.as_str(),
-            temporary.as_str(),
-            name.as_str(),
-            digest.as_str(),
-        ];
-        if kind == "version" {
-            args.push(version.as_str());
-        }
-        tunnels.run_script(&server, REMOTE_SH, &args, 360)
+        tunnels.run_script(
+            &server,
+            REMOTE_SH,
+            &["install-track", &port, &temporary, &name, &digest],
+            120,
+        )
     })
     .await?;
-    if !out.success {
-        return Err(out.text());
+    if out.field("installed").is_some() {
+        Ok(serde_json::json!({ "installed": out.field("installed") }))
+    } else {
+        Err(out.text())
     }
-    serde_json::from_str(&out.stdout).map_err(|e| format!("upload: {e}"))
 }
 
 #[derive(Serialize)]
@@ -1069,9 +1267,16 @@ async fn server_logs(app: State<'_, App>, id: String, lines: u32) -> Result<Vec<
         return local_tail(&server.log_path, lines);
     }
     let tunnels = Arc::clone(&app.tunnels);
-    tauri::async_runtime::spawn_blocking(move || tunnels.tail(&server, lines))
-        .await
-        .map_err(|e| e.to_string())?
+    let port = server.observe_port.to_string();
+    let count = lines.clamp(1, 2000).to_string();
+    // `journalctl -u mxbserver`, run on the host by the helper script.
+    let out =
+        blocking(move || tunnels.run_script(&server, REMOTE_SH, &["logs", &port, &count], 30))
+            .await?;
+    if !out.success {
+        return Err(out.text());
+    }
+    Ok(out.stdout.lines().map(str::to_string).collect())
 }
 
 #[tauri::command]
@@ -1331,6 +1536,7 @@ fn main() {
                 store: Store::new(dir),
                 tunnels: Arc::default(),
                 http,
+                admin_ports: Default::default(),
             });
             Ok(())
         })
@@ -1342,11 +1548,11 @@ fn main() {
             server_status,
             server_riders,
             server_tracks,
-            server_track_membership,
             server_set_track,
             server_set_rotation,
             server_update_github,
             server_session,
+            server_restart_service,
             server_upload,
             inspect_track_upload,
             server_logs,
