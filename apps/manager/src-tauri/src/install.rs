@@ -11,7 +11,7 @@ use std::io::{Read, Write};
 // `has_ext`, `is_junk` and `sanitize` are filename predicates every binary needs, so they
 // live in `mxb_core::names` and are re-exported here — this module's own call sites, and
 // the two hundred others across the app, were written against `install::`.
-pub use mxb_core::names::{has_ext, is_junk, sanitize, staging_dir};
+pub use mxb_core::names::{has_ext, is_junk, sanitize, staging_dir, staging_dir_near};
 
 use std::path::{Component, Path, PathBuf};
 use std::time::Duration;
@@ -206,7 +206,7 @@ pub async fn download_and_place(
     subpath: &str,
     dest_folder: &str,
 ) -> anyhow::Result<Placed> {
-    let work = staging_dir("dl");
+    let work = staging_dir_near(&cfg.mods_path, "dl");
     std::fs::create_dir_all(&work)?;
 
     // A failed or cancelled download used to leave its staging directory behind — every
@@ -238,7 +238,7 @@ async fn download_folder_and_place(
     subpath: &str,
     dest_folder: &str,
 ) -> anyhow::Result<Placed> {
-    let work = staging_dir("dl");
+    let work = staging_dir_near(&cfg.mods_path, "dl");
     let root = work.join(STAGED_DIR).join(sanitize(name));
     std::fs::create_dir_all(&root)?;
 
@@ -514,7 +514,7 @@ async fn download_mega_and_place(
     subpath: &str,
     dest_folder: &str,
 ) -> anyhow::Result<Placed> {
-    let work = staging_dir("dl");
+    let work = staging_dir_near(&cfg.mods_path, "dl");
     std::fs::create_dir_all(&work)?;
 
     let archive = match download_mega(app, client, slug, url, &work).await {
@@ -645,7 +645,7 @@ pub fn import_file(
         anyhow::bail!("this download is sorted by what it holds; drop it on the app to review it");
     }
 
-    let work = staging_dir("import");
+    let work = staging_dir_near(&cfg.mods_path, "import");
     let _ = std::fs::remove_dir_all(&work);
     let extracted = work.join(STAGED_DIR);
     std::fs::create_dir_all(&extracted)?;

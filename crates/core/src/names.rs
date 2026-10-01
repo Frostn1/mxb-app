@@ -73,13 +73,40 @@ pub fn sanitize(name: &str) -> String {
 /// Shared because both binaries stage work: the manager while installing, the studio while
 /// packing a paint or building a track.
 pub fn staging_dir(tag: &str) -> std::path::PathBuf {
+    std::env::temp_dir().join(unique_staging_name(tag))
+}
+
+/// A per-attempt staging directory name nobody else is using (see [`staging_dir`]).
+fn unique_staging_name(tag: &str) -> String {
     static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let n = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let stamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_nanos())
         .unwrap_or(0);
-    std::env::temp_dir().join(format!("frost-{tag}-{}-{stamp:x}-{n}", std::process::id()))
+    format!("frost-{tag}-{}-{stamp:x}-{n}", std::process::id())
+}
+
+/// Like [`staging_dir`], but rooted on the same volume as `mods_path` when it can be — so a
+/// download is fetched and extracted on the drive it will live on, not on the system drive.
+///
+/// This is what keeps an install off C: when the mods folder is on another disk: placement from
+/// here into the mods folder is a same-volume move, and the install never needs free space on C:
+/// just to reach a mods folder on D:/A:/… (which surfaced as `os error 112`, disk full, on a full
+/// system drive). Staging lives in a `.frost-staging` folder beside `mods/`, never inside it, so
+/// the game and the library scan never see it.
+///
+/// Falls back to [`staging_dir`] (the system temp dir) when `mods_path` is empty or its volume
+/// cannot be staged on (unwritable, missing) — correctness never depends on the drive being free.
+pub fn staging_dir_near(mods_path: &str, tag: &str) -> std::path::PathBuf {
+    let mods_path = mods_path.trim();
+    if !mods_path.is_empty() {
+        let base = Path::new(mods_path).join(".frost-staging");
+        if std::fs::create_dir_all(&base).is_ok() {
+            return base.join(unique_staging_name(tag));
+        }
+    }
+    staging_dir(tag)
 }
 
 /// those too, but only this check actually protects a disk, so it does not trust it.
@@ -147,4 +174,39 @@ pub fn sanitize_asset_id(name: &str) -> String {
         .collect();
     let trimmed = cleaned.trim_matches('_');
     if trimmed.is_empty() { "asset".to_string() } else { trimmed.to_string() }
+}
+
+#[cfg(test)]
+mod staging_tests {
+    use super::*;
+
+    #[test]
+    fn stages_on_the_mods_volume_not_system_temp() {
+        // A mods folder on some drive: staging must land under it (same volume), never in C: temp.
+        let mods = std::env::temp_dir().join(format!("frost-modsroot-{}", std::process::id()));
+        std::fs::create_dir_all(&mods).unwrap();
+        let mods_str = mods.to_string_lossy().to_string();
+
+        let work = staging_dir_near(&mods_str, "dl");
+        assert!(
+            work.starts_with(mods.join(".frost-staging")),
+            "staging should sit beside mods/ on the mods volume: {work:?}"
+        );
+        // Beside mods/, never inside it (the game and library scan read mods/).
+        assert!(!work.starts_with(mods.join("mods")));
+        let _ = std::fs::remove_dir_all(&mods);
+    }
+
+    #[test]
+    fn falls_back_to_temp_when_no_mods_path() {
+        let work = staging_dir_near("   ", "dl");
+        assert!(work.starts_with(std::env::temp_dir()), "empty mods path -> system temp: {work:?}");
+    }
+
+    #[test]
+    fn each_attempt_is_its_own_dir() {
+        let a = staging_dir_near("", "dl");
+        let b = staging_dir_near("", "dl");
+        assert_ne!(a, b, "a second install would wipe the first one's files");
+    }
 }
