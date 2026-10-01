@@ -155,7 +155,7 @@ export default function LiveCues({
 }
 
 /** Whether the recorder says the cues out loud, and how loud. Applies as it changes. */
-function SpokenCues() {
+export function SpokenCues() {
   const t = useT();
   const [voice, setVoice] = useState<Voice | null>(null);
   const [volume, setVolume] = useState(80);
@@ -175,7 +175,7 @@ function SpokenCues() {
       .catch((e) => toast.error(String(e)));
   };
   return (
-    <div className="space-y-2 border-t border-border pt-3">
+    <div className="space-y-2 border-t border-border pt-3 first:border-t-0 first:pt-0">
       <div className="flex items-center justify-between gap-4">
         <div>
           <div className="text-[13px] font-semibold">{t("cues.voice")}</div>

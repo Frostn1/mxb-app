@@ -29,6 +29,8 @@ import {
   type CoachStatus,
 } from "@/api/coach";
 import Page, { Label } from "../Page";
+import HudPanel from "../Review/HudPanel";
+import { SpokenCues } from "../Review/LiveCues";
 
 /** The folder a file sits in. */
 const folderOf = (path: string) => path.replace(/[\\/][^\\/]*$/, "");
@@ -243,6 +245,15 @@ export default function Settings() {
       <div className="mt-8">
         <Label>{t("overlay.section")}</Label>
         <Overlay />
+      </div>
+
+      {/* The same panel the in-game tab shows, reading and writing the same hud.ini and
+          voice.ini, so every HUD option is here as well. */}
+      <div className="mt-8">
+        <HudPanel />
+        <div className="mt-3 border border-border bg-card px-4 py-3">
+          <SpokenCues />
+        </div>
       </div>
 
       <div className="mt-8">
