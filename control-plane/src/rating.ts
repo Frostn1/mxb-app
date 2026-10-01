@@ -15,6 +15,13 @@
  *  - bots/spectators: excluded everywhere, never raters and never ratees.
  *  - idempotent by (server, event, race) id: a re-push of the same race is a no-op, not a
  *    double count.
+ *  - app-verified only: a rider is rated only if their GUID is bound to an account
+ *    (`accounts.guid`, set via the MXB App's claim_guid path). A null or unclaimed GUID is
+ *    stored raw and never rated.
+ *  - order independent: ratings are a pure function of the stored races. Every ingest replays
+ *    the class's rated races in (occurred_at, id) order, so a race that arrives late lands in
+ *    its true chronological place instead of being applied last.
+ *  - rate limited per server (`INGEST_LIMITER`), 429 on excess.
  */
 
 import { hashToken, newToken, bearer } from "./auth";
@@ -81,7 +88,8 @@ async function serverForRatingToken(env: Env, token: string): Promise<{ id: stri
 // ---------------------------------------------------------------------------------------------
 
 interface PushedRider {
-  guid: string;
+  /** Null when the server could not report one, or reported something that is not a GUID. */
+  guid: string | null;
   name: string;
   raceNum: number | null;
   class: string;
@@ -131,7 +139,6 @@ function parsePush(body: unknown): PushedRace | { error: string } {
   for (const raw of b.riders) {
     if (typeof raw !== "object" || raw === null) return { error: "each rider must be an object" };
     const r = raw as Record<string, unknown>;
-    if (!isGuidLike(r.guid)) return { error: "every rider needs a valid guid" };
     const name = typeof r.name === "string" ? r.name.trim().slice(0, 64) : "";
     const riderClass = normalizeClass(r.class) ?? cls;
     const lapsCompleted = Number(r.lapsCompleted);
@@ -139,7 +146,9 @@ function parsePush(body: unknown): PushedRace | { error: string } {
     if (!Number.isFinite(lapsCompleted) || lapsCompleted < 0) return { error: "lapsCompleted must be a non-negative number" };
     if (!Number.isFinite(raceLaps) || raceLaps <= 0) return { error: "raceLaps must be a positive number" };
     riders.push({
-      guid: (r.guid as string).trim(),
+      // Null/missing/malformed GUIDs are accepted (stored raw, never rated); only a verified
+      // account-bound GUID is ever rated, which `recomputeClass` decides.
+      guid: isGuidLike(r.guid) ? r.guid.trim() : null,
       name: name || "unknown",
       raceNum: Number.isFinite(Number(r.raceNum)) ? Number(r.raceNum) : null,
       class: riderClass,
@@ -172,6 +181,12 @@ export async function ingestResults(request: Request, env: Env): Promise<IngestR
   const server = await serverForRatingToken(env, token);
   if (!server) return { status: 401, body: { error: "unknown or revoked rating token" } };
 
+  // Per server, after authentication so an unauthenticated flood can't spend a real server's
+  // budget. Optional binding so tests and a bare `wrangler dev` run without it.
+  if (env.INGEST_LIMITER && !(await env.INGEST_LIMITER.limit({ key: server.id })).success) {
+    return { status: 429, body: { error: "too many result pushes; slow down" } };
+  }
+
   let raw: unknown;
   try {
     raw = await request.json();
@@ -191,29 +206,12 @@ export async function ingestResults(request: Request, env: Env): Promise<IngestR
   const already = await env.DB.prepare("SELECT id FROM ingested_races WHERE id = ?").bind(rowId).first();
   if (already) return { status: 200, body: { ok: true, id: rowId, alreadyIngested: true } };
 
-  // Who's human (never a bot/spectator) — bots never count as raters or ratees, full stop.
-  const humans = parsed.riders.filter((r) => !r.isBot);
-  const humanCount = humans.length;
+  const humanCount = parsed.riders.filter((r) => !r.isBot).length;
   const raceRated = humanCount >= MIN_HUMAN_RIDERS;
-
-  // Of the humans, who cleared the 50%-laps floor: that's who's eligible to be ranked and
-  // rated for this race. A DNF/DSQ still counts if they made it past the floor — a retirement
-  // after real mileage is real signal (design §1) — but a lap-1 crash or disconnect isn't.
-  const eligible = humans.filter((r) => r.raceLaps > 0 && r.lapsCompleted / r.raceLaps >= MIN_LAP_FRACTION);
-
-  // Finish order, best to worst: classified riders by position, then DNF/DSQ riders by laps
-  // completed (more laps = finished more of the race = ranked better among non-finishers).
-  const classified = eligible
-    .filter((r) => r.classified && !r.dnf && !r.dsq)
-    .sort((a, b) => (a.position ?? Number.MAX_SAFE_INTEGER) - (b.position ?? Number.MAX_SAFE_INTEGER));
-  const retired = eligible
-    .filter((r) => !(r.classified && !r.dnf && !r.dsq))
-    .sort((a, b) => b.lapsCompleted - a.lapsCompleted);
-  const order = [...classified, ...retired];
-
   const now = Date.now();
 
   // Store the raw race + every raw rider row first, whether or not the race ends up rated.
+  // `counted` starts at 0; `recomputeClass` below is the only thing that decides it.
   const insertRace = env.DB.prepare(
     `INSERT INTO ingested_races
        (id, server_id, event_id, race_id, track, class, session, occurred_at, human_count, rated, created_at)
@@ -232,14 +230,12 @@ export async function ingestResults(request: Request, env: Env): Promise<IngestR
     now,
   );
 
-  const rankOf = new Map(order.map((r, i) => [r.guid, i]));
-  const resultInserts = parsed.riders.map((r) => {
-    const counted = raceRated && rankOf.has(r.guid);
-    return env.DB.prepare(
+  const resultInserts = parsed.riders.map((r) =>
+    env.DB.prepare(
       `INSERT INTO race_results
          (race_row_id, guid, name, race_num, class, position, classified, dnf, dsq,
           laps_completed, race_laps, is_bot, counted, rank_order)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL)`,
     ).bind(
       rowId,
       r.guid,
@@ -253,68 +249,151 @@ export async function ingestResults(request: Request, env: Env): Promise<IngestR
       r.lapsCompleted,
       r.raceLaps,
       r.isBot ? 1 : 0,
-      counted ? 1 : 0,
-      counted ? rankOf.get(r.guid)! : null,
-    );
-  });
+    ),
+  );
 
-  await env.DB.batch([insertRace, ...resultInserts]);
+  try {
+    await env.DB.batch([insertRace, ...resultInserts]);
+  } catch (err) {
+    // Two pushes of the same race racing past the check above: the loser is a re-push.
+    if (String(err).includes("UNIQUE")) {
+      return { status: 200, body: { ok: true, id: rowId, alreadyIngested: true } };
+    }
+    throw err;
+  }
 
-  if (!raceRated || order.length === 0) {
+  if (!raceRated) {
     return { status: 201, body: { ok: true, id: rowId, rated: false, humanCount } };
   }
 
-  // Load each counted rider's current per-class rating (or the new-rider default), run one
-  // Glicko-2 period for the race, and persist the after-state plus a history row per rider —
-  // in the ingestion order the request gave us, deterministically.
-  const before = new Map<string, Glicko>();
-  for (const r of order) {
-    const existing = await env.DB.prepare(
-      "SELECT rating, rd, volatility FROM rider_ratings WHERE guid = ? AND class = ?",
-    )
-      .bind(r.guid, parsed.class)
-      .first<{ rating: number; rd: number; volatility: number }>();
-    before.set(r.guid, existing ? { rating: existing.rating, rd: existing.rd, volatility: existing.volatility } : DEFAULT_GLICKO);
+  const ratedRiders = await recomputeClass(env, parsed.class, rowId);
+  return { status: 201, body: { ok: true, id: rowId, rated: ratedRiders > 0, humanCount, ratedRiders } };
+}
+
+interface ReplayRow {
+  id: number;
+  race_row_id: string;
+  occurred_at: number;
+  guid: string | null;
+  verified: number;
+  classified: number;
+  dnf: number;
+  dsq: number;
+  position: number | null;
+  laps_completed: number;
+  race_laps: number;
+  counted: number;
+  rank_order: number | null;
+}
+
+/**
+ * Rebuilds one class's ratings from the stored races, in (occurred_at, id) order. Because the
+ * result is a pure function of what is stored, the order races *arrived* in cannot matter: a
+ * late race is replayed in its true chronological slot, and re-running changes nothing.
+ *
+ * Who counts is decided here, from raw rows: human, race has 4+ humans (`rated`), a GUID
+ * bound to an account (`accounts.guid`, the claim_guid path; evaluated at replay time, so a
+ * rider who claims their GUID later is picked up on the class's next ingest), and at least
+ * half the race's laps. Returns how many riders were rated in `focusRaceId` (0 if none).
+ */
+export async function recomputeClass(env: Env, klass: string, focusRaceId?: string): Promise<number> {
+  const rows = await env.DB.prepare(
+    `SELECT rr.id AS id, rr.race_row_id AS race_row_id, ir.occurred_at AS occurred_at, rr.guid AS guid,
+            (a.id IS NOT NULL) AS verified, rr.classified AS classified, rr.dnf AS dnf, rr.dsq AS dsq,
+            rr.position AS position, rr.laps_completed AS laps_completed, rr.race_laps AS race_laps,
+            rr.counted AS counted, rr.rank_order AS rank_order
+       FROM race_results rr
+       JOIN ingested_races ir ON ir.id = rr.race_row_id
+       LEFT JOIN accounts a ON rr.guid IS NOT NULL AND a.guid = rr.guid
+      WHERE ir.class = ? AND ir.rated = 1 AND rr.is_bot = 0
+      ORDER BY ir.occurred_at, ir.id, rr.id`,
+  )
+    .bind(klass)
+    .all<ReplayRow>();
+
+  const races: ReplayRow[][] = [];
+  for (const row of rows.results) {
+    const last = races[races.length - 1];
+    if (last && last[0].race_row_id === row.race_row_id) last.push(row);
+    else races.push([row]);
   }
 
-  const after = applyRace(
-    order.map((r) => ({ guid: r.guid, before: before.get(r.guid)! })),
-    GLICKO_TAU,
-  );
+  const state = new Map<string, Glicko>();
+  const meta = new Map<string, { races: number; lastRaceAt: number }>();
+  const history: { guid: string; raceRowId: string; before: Glicko; after: Glicko; at: number }[] = [];
+  const wanted = new Map<number, number | null>(); // result row id -> rank_order (null = not counted)
+  let focusRated = 0;
 
-  const writes = [];
-  for (const r of order) {
-    const preState = before.get(r.guid)!;
-    const postState = after.get(r.guid)!;
+  for (const race of races) {
+    const seen = new Set<string>();
+    const eligible = race.filter((r) => {
+      if (!r.guid || !r.verified || seen.has(r.guid)) return false;
+      if (!(r.race_laps > 0 && r.laps_completed / r.race_laps >= MIN_LAP_FRACTION)) return false;
+      seen.add(r.guid);
+      return true;
+    });
+    // Finish order, best to worst: classified riders by position, then DNF/DSQ riders by laps
+    // completed. Ties break on the stored row id so the order is total and repeatable.
+    const finished = (r: ReplayRow) => r.classified === 1 && r.dnf === 0 && r.dsq === 0;
+    const order = [
+      ...eligible
+        .filter(finished)
+        .sort((a, b) => (a.position ?? Number.MAX_SAFE_INTEGER) - (b.position ?? Number.MAX_SAFE_INTEGER) || a.id - b.id),
+      ...eligible.filter((r) => !finished(r)).sort((a, b) => b.laps_completed - a.laps_completed || a.id - b.id),
+    ];
+    for (const r of race) wanted.set(r.id, null);
+    if (order.length < 2) continue; // a lone verified rider has no one to be compared with
+
+    const before = new Map(order.map((r) => [r.guid!, state.get(r.guid!) ?? DEFAULT_GLICKO]));
+    const after = applyRace(
+      order.map((r) => ({ guid: r.guid!, before: before.get(r.guid!)! })),
+      GLICKO_TAU,
+    );
+    order.forEach((r, i) => {
+      const g = r.guid!;
+      wanted.set(r.id, i);
+      state.set(g, after.get(g)!);
+      const m = meta.get(g) ?? { races: 0, lastRaceAt: 0 };
+      meta.set(g, { races: m.races + 1, lastRaceAt: r.occurred_at });
+      history.push({ guid: g, raceRowId: r.race_row_id, before: before.get(g)!, after: after.get(g)!, at: r.occurred_at });
+    });
+    if (race[0].race_row_id === focusRaceId) focusRated = order.length;
+  }
+
+  const now = Date.now();
+  const writes = [
+    env.DB.prepare("DELETE FROM rating_history WHERE class = ?").bind(klass),
+    env.DB.prepare("DELETE FROM rider_ratings WHERE class = ?").bind(klass),
+  ];
+  for (const [guid, g] of state) {
+    const m = meta.get(guid)!;
     writes.push(
       env.DB.prepare(
         `INSERT INTO rider_ratings (guid, class, rating, rd, volatility, races, last_race_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, 1, ?, ?)
-         ON CONFLICT (guid, class) DO UPDATE SET
-           rating = excluded.rating, rd = excluded.rd, volatility = excluded.volatility,
-           races = races + 1, last_race_at = excluded.last_race_at, updated_at = excluded.updated_at`,
-      ).bind(r.guid, parsed.class, postState.rating, postState.rd, postState.volatility, parsed.timestamp, now),
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).bind(guid, klass, g.rating, g.rd, g.volatility, m.races, m.lastRaceAt, now),
     );
+  }
+  for (const h of history) {
     writes.push(
       env.DB.prepare(
         `INSERT INTO rating_history (guid, class, race_row_id, rating_before, rd_before, rating_after, rd_after, delta, created_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      ).bind(
-        r.guid,
-        parsed.class,
-        rowId,
-        preState.rating,
-        preState.rd,
-        postState.rating,
-        postState.rd,
-        postState.rating - preState.rating,
-        now,
-      ),
+      ).bind(h.guid, klass, h.raceRowId, h.before.rating, h.before.rd, h.after.rating, h.after.rd, h.after.rating - h.before.rating, h.at),
     );
   }
+  // Only touch result rows whose counted/rank changed (usually just the new race's).
+  for (const row of rows.results) {
+    const rank = wanted.get(row.id) ?? null;
+    const counted = rank === null ? 0 : 1;
+    if (counted !== row.counted || rank !== row.rank_order) {
+      writes.push(
+        env.DB.prepare("UPDATE race_results SET counted = ?, rank_order = ? WHERE id = ?").bind(counted, rank, row.id),
+      );
+    }
+  }
   await env.DB.batch(writes);
-
-  return { status: 201, body: { ok: true, id: rowId, rated: true, humanCount, ratedRiders: order.length } };
+  return focusRated;
 }
 
 // ---------------------------------------------------------------------------------------------

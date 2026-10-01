@@ -144,6 +144,9 @@
     { "name": "TRACK_LIMITER", "namespace_id": "1003", "simple": { "limit": 10, "period": 60 } },
     // Paint sync v2: a join per server change plus a heartbeat every five minutes, and one
     // upload per paint the rider wears. 60 a minute is a whole look uploaded at once.
-    { "name": "PAINTSYNC_LIMITER", "namespace_id": "1004", "simple": { "limit": 60, "period": 60 } }
+    { "name": "PAINTSYNC_LIMITER", "namespace_id": "1004", "simple": { "limit": 60, "period": 60 } },
+    // Rating ingest: one push per finished race per managed server, so 30 a minute is far past
+    // honest use (a pusher replaying a backlog just gets 429 and retries).
+    { "name": "INGEST_LIMITER", "namespace_id": "1005", "simple": { "limit": 30, "period": 60 } }
   ]
 }
