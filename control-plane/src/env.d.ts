@@ -126,6 +126,9 @@ interface Env {
     /** Rate limit on paint sync v2 (`/v1/paintsync/*` writes), per account. Optional so tests
      *  and a bare `wrangler dev` run without it. */
     PAINTSYNC_LIMITER?: RateLimit;
+    /** Rate limit on `/v1/rating/ingest`, per managed server (after token auth). Optional so
+     *  tests and a bare `wrangler dev` run without it. */
+    INGEST_LIMITER?: RateLimit;
     /** One paint-sync room per server key (`paintroom.ts`). Optional so tests run without it. */
     PAINT_ROOMS?: DurableObjectNamespace;
     /** How the shop's catalogue dump is authenticated: `header:<name>`, `basic:<user>`,
