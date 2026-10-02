@@ -48,9 +48,17 @@ jobs:
           Copy-Item "$env:SystemRoot\System32\whoami.exe" $exe
           $cfg = Get-Content (Join-Path $env:RUNNER_TEMP 'artifact-signing\tauri.signing.json') -Raw | ConvertFrom-Json
           $c = $cfg.bundle.windows.signCommand
-          $args2 = @($c.args | ForEach-Object { $_ -replace '%1', $exe })
-          & $c.cmd @args2
-          if ($LASTEXITCODE -ne 0) { throw "signing exited $LASTEXITCODE" }
+          # Start the process the way Tauri (Rust's Command) does: one argv, each argument
+          # quoted by the runtime, %1 replaced by the path.
+          $psi = [System.Diagnostics.ProcessStartInfo]::new((Get-Command $c.cmd).Source)
+          foreach ($a in $c.args) { $psi.ArgumentList.Add(($a -replace '%1', $exe)) }
+          $psi.RedirectStandardOutput = $true
+          $psi.RedirectStandardError = $true
+          $p = [System.Diagnostics.Process]::Start($psi)
+          $stdout = $p.StandardOutput.ReadToEnd(); $stderr = $p.StandardError.ReadToEnd()
+          $p.WaitForExit()
+          Write-Host $stdout $stderr
+          if ($p.ExitCode -ne 0) { throw "signing exited $($p.ExitCode)" }
 
       - name: Show signing log
         if: ${{ always() }}
