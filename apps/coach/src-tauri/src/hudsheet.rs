@@ -14,6 +14,10 @@
 //! - `TRRN`: per point, the track's own ground height at five offsets across the line, half a
 //!   metre apart, right to left, NaN off the grid; only when the laps sit steadily on this
 //!   terrain (`ground::measure`). The recorder lays its line on it instead of the centreline.
+//! - `AIRH`: per point, the bike's height (world y, m), its height above the track's own ground
+//!   at the line's centre (NaN without the terrain), and the share of the lap's samples from that
+//!   point to the next that were airborne, 0..1, so the recorder can call the jumps: where to
+//!   take off, where the lap landed, and how many faces it cleared (FrostMod v0.44.1).
 
 use crate::analysis::{Review, Trace, STEP_M};
 
@@ -136,6 +140,23 @@ pub fn write_with(track_len: f32, fast: &Trace, parts: &[Part], flags: u32, terr
     }
     chunk(&mut b, b"REFY", &refy);
 
+    // AIRH: where the lap was in the air. Airborne is a share over the samples a point stands
+    // for, so a thinned sheet still sees a short hop between two of its points.
+    let mut airh = (points.len() as u32).to_le_bytes().to_vec();
+    for (j, &i) in taken.iter().enumerate() {
+        let p = &fast.pts[i];
+        let end = taken.get(j + 1).copied().unwrap_or(i + 1).max(i + 1).min(n);
+        let share = fast.pts[i..end].iter().filter(|q| q.air).count() as f32 / (end - i) as f32;
+        let above = terrain
+            .and_then(|t| crate::ground::height_at(t.width, t.height, t.metres_per_sample, t.heights, p.x, p.z))
+            .map_or(f32::NAN, |g| p.y - g);
+        let y = if p.y.is_finite() { p.y } else { f32::NAN };
+        for v in [y, above, share] {
+            airh.extend_from_slice(&v.to_le_bytes());
+        }
+    }
+    chunk(&mut b, b"AIRH", &airh);
+
     // TRRN: the ground across the line, left being the direction of travel turned a quarter
     // anticlockwise seen from above (x east, z north).
     if let Some(t) = terrain {
@@ -203,7 +224,11 @@ mod tests {
         // Then REFY: three heights.
         assert_eq!(&b[147..151], b"REFY");
         assert_eq!((u32_at(151), u32_at(155)), (4 + 3 * 4, 3));
-        assert_eq!(b.len(), 159 + 3 * 4, "no TRRN without terrain");
+        // Then AIRH: three points, height, height above the ground (unknown here), airborne.
+        assert_eq!(&b[171..175], b"AIRH");
+        assert_eq!((u32_at(175), u32_at(179)), (4 + 3 * 12, 3));
+        assert!(f32_at(187).is_nan(), "no terrain, no height above it");
+        assert_eq!(b.len(), 183 + 3 * 12, "no TRRN without terrain");
     }
 
     #[test]
@@ -232,12 +257,88 @@ mod tests {
     }
 
     #[test]
+    fn the_air_rides_along_so_the_recorder_can_call_the_jumps() {
+        // Flat ground at 2 m; the bike rides 0.6 m up, then four points in the air.
+        let heights = vec![2.0f32; 100];
+        let t = Terrain { width: 10, height: 10, metres_per_sample: 1.0, heights: &heights };
+        let fast = Trace {
+            pts: (0..8)
+                .map(|i| {
+                    let air = (2..6).contains(&i);
+                    Point { t: i as f32 * 0.1, x: 1.0 + i as f32, z: 5.0, y: if air { 4.0 } else { 2.6 }, air, ..Point::default() }
+                })
+                .collect(),
+        };
+        let b = write_with(8.0, &fast, &[], 0, Some(&t));
+        let at = b.windows(4).position(|w| w == b"AIRH").expect("an AIRH chunk");
+        let u32_at = |i: usize| u32::from_le_bytes(b[i..i + 4].try_into().unwrap());
+        let f32_at = |i: usize| f32::from_le_bytes(b[i..i + 4].try_into().unwrap());
+        assert_eq!((u32_at(at + 4), u32_at(at + 8)), (4 + 8 * 12, 8));
+        let row = |j: usize| (0..3).map(|k| f32_at(at + 12 + j * 12 + k * 4)).collect::<Vec<_>>();
+        let near = |a: Vec<f32>, b: [f32; 3]| a.iter().zip(b).all(|(x, y)| (x - y).abs() < 1e-5);
+        assert!(near(row(0), [2.6, 0.6, 0.0]), "{:?}", row(0));
+        assert!(near(row(3), [4.0, 2.0, 1.0]), "{:?}", row(3));
+        // A long lap thinned to the plugin's points keeps a hop between two of them.
+        let long = Trace {
+            pts: (0..4001).map(|i| Point { t: i as f32 * 0.05, x: i as f32, air: i == 1, ..Point::default() }).collect(),
+        };
+        let b = write(4001.0, &long, &[], 0);
+        let at = b.windows(4).position(|w| w == b"AIRH").unwrap();
+        let first = f32::from_le_bytes(b[at + 20..at + 24].try_into().unwrap());
+        assert!(first > 0.0 && first < 1.0, "{first}");
+    }
+
+    #[test]
     fn a_long_lap_is_thinned_to_what_the_plugin_reads_and_keeps_its_end() {
         let b = write(5000.0, &lap(5001), &[], 0);
         let n = u32::from_le_bytes(b[12..16].try_into().unwrap()) as usize;
         assert!(n <= MAX_POINTS, "{n}");
         let last = 16 + (n - 1) * 16;
         assert_eq!(f32::from_le_bytes(b[last..last + 4].try_into().unwrap()), 1.0);
+    }
+
+    /// Not a check: writes the sheet Coach would write for the fastest whole lap of a track in a
+    /// folder of recordings, with the track's terrain, for FrostMod's offline previews.
+    /// `MXBC_DIR` (the sessions folder), `MXBC_TRACK` (part of the track id), `MXB_TRACK_ARCHIVE`
+    /// (its .pkz) and `HUD_OUT`; `GRID_OUT` also dumps the terrain grid. `cargo test -p mxb-coach -- --ignored write_a_sheet`.
+    #[test]
+    #[ignore]
+    fn write_a_sheet_from_recorded_sessions() {
+        let var = |k: &str| std::env::var(k).unwrap_or_else(|_| panic!("set {k}"));
+        let (dir, needle, archive, out) = (var("MXBC_DIR"), var("MXBC_TRACK"), var("MXB_TRACK_ARCHIVE"), var("HUD_OUT"));
+        let mut best: Option<(i32, Trace, f32)> = None;
+        for e in std::fs::read_dir(&dir).unwrap().flatten() {
+            let Ok(rec) = crate::coach::load(&e.path().to_string_lossy()) else { continue };
+            if !rec.event.track_id.contains(&needle) {
+                continue;
+            }
+            for lap in rec.laps().iter().filter(|l| l.whole && l.time_ms > 0) {
+                if best.as_ref().is_some_and(|b| b.0 <= lap.time_ms) {
+                    continue;
+                }
+                if let Some(tr) = Trace::new(lap, rec.event.track_length) {
+                    best = Some((lap.time_ms, tr, rec.event.track_length));
+                }
+            }
+        }
+        let (ms, fast, len) = best.expect("no whole lap of that track");
+        let m = mxb_core::track::decode_master(std::path::Path::new(&archive)).unwrap();
+        let t = Terrain { width: m.info.width as usize, height: m.info.height as usize, metres_per_sample: m.info.metres_per_sample, heights: &m.heights };
+        // Coach only writes the terrain when the lap sits steadily on it; say whether this one does.
+        let grounded: Vec<[f32; 3]> = fast.pts.iter().filter(|p| !p.air).map(|p| [p.x, p.y, p.z]).collect();
+        let fit = crate::ground::measure(t.width, t.height, t.metres_per_sample, t.heights, &grounded);
+        std::fs::write(&out, write_with(len, &fast, &[], 0, Some(&t))).unwrap();
+        println!("{out}: lap {ms} ms, {} points, lift {:?} spread {:.2}", fast.pts.len(), fit.lift, fit.spread);
+        // And the grid itself, for a 3D preview: u32 width, u32 height, f32 metres a sample, heights.
+        if let Ok(grid) = std::env::var("GRID_OUT") {
+            let mut g = (t.width as u32).to_le_bytes().to_vec();
+            g.extend_from_slice(&(t.height as u32).to_le_bytes());
+            g.extend_from_slice(&t.metres_per_sample.to_le_bytes());
+            for h in t.heights {
+                g.extend_from_slice(&h.to_le_bytes());
+            }
+            std::fs::write(grid, g).unwrap();
+        }
     }
 
     #[test]
