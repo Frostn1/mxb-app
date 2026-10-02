@@ -91,6 +91,7 @@ import { PaintRoom } from "./paintroom";
 import { ingestResults, leaderboard as ratingLeaderboard, myRatings } from "./rating";
 import {
   liveKey,
+  mayFetchPaint,
   missingPaints,
   parseServerHint,
   pruneLivePaints,
@@ -540,7 +541,7 @@ async function route(request: Request, env: Env): Promise<Response> {
   const openPaint = /^\/v1\/paints\/([0-9a-f]{64})$/.exec(path);
   if (openPaint) {
     if (method === "PUT") return putPaint(request, openPaint[1], env);
-    if (method === "GET") return getPaint(openPaint[1], env);
+    if (method === "GET") return getPaint(openPaint[1], account, env);
   }
 
   // Everything past here needs an invite. The gate is the *position* rather than a check
@@ -1620,7 +1621,19 @@ async function artifact(env: Env, key: string): Promise<Response> {
   });
 }
 
-async function getPaint(sha256: string, env: Env): Promise<Response> {
+/**
+ * Serve a paint blob, to the people allowed it (`mayFetchPaint`).
+ *
+ * Everyone else gets the same 404 as a hash that does not exist, so the endpoint cannot be
+ * used to probe for hashes. `PAINT_AUTHZ_MODE=log` is the rollback lever: it serves as before
+ * and logs what would have been refused; `off` skips the check. Unset means enforced.
+ */
+async function getPaint(sha256: string, account: Account, env: Env): Promise<Response> {
+  const mode = env.PAINT_AUTHZ_MODE;
+  if (mode !== "off" && !(await mayFetchPaint(sha256, account, env))) {
+    if (mode === "log") console.warn(JSON.stringify({ msg: "paint fetch would be refused", sha256 }));
+    else return json(404, { error: "no such paint" });
+  }
   // The older flow's copy first, then paint sync v2's week-long one: either is the same bytes.
   const object = (await env.PAINTS.get(sha256)) ?? (await env.PAINTS.get(liveKey(sha256)));
   if (!object) return json(404, { error: "no such paint" });
@@ -1628,8 +1641,10 @@ async function getPaint(sha256: string, env: Env): Promise<Response> {
   return new Response(object.body, {
     headers: {
       "content-type": "application/octet-stream",
-      // Immutable by construction — the name is the hash of the content.
-      "cache-control": "public, max-age=31536000, immutable",
+      // Not `public`: whether a caller may have these bytes depends on who they are, so a
+      // shared cache must never replay them to someone else. The name is still the hash of
+      // the content, so the copy in the caller's own cache never goes stale.
+      "cache-control": "private, max-age=31536000, immutable",
       etag: sha256,
     },
   });

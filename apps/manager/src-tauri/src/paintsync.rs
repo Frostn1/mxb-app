@@ -641,11 +641,20 @@ pub async fn pull(
             }
         }
 
-        let bytes = http
+        let resp = http
             .get(format!("{}/v1/paints/{}", control_plane(), paint.sha256))
             .bearer_auth(token)
             .send()
-            .await?
+            .await?;
+        // A 404 is ordinary: the control plane only serves a paint to someone on the same
+        // server as its owner (or the owner, or a grantee), and answers 404 to everyone else.
+        // A roster read for a server this rider is not on (the registry sweep) lands here, and
+        // so does a paint that has expired. Skip it rather than failing the rest of the sync.
+        if resp.status() == reqwest::StatusCode::NOT_FOUND {
+            log::debug!("[sync] {} isn't available to us; skipping", paint.sha256);
+            continue;
+        }
+        let bytes = resp
             .error_for_status()
             .inspect_err(crate::gate::note_error)?
             .bytes()

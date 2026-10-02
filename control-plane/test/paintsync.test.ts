@@ -5,7 +5,7 @@
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { hashToken } from "../src/auth";
-import { LIVE_REFRESH_MS, LIVE_TTL_MS, foldName, normalizeAddress, parseServerHint, pruneLivePaints } from "../src/paintsync";
+import { LIVE_REFRESH_MS, PAINT_ACCESS_TTL_MS, LIVE_TTL_MS, foldName, normalizeAddress, parseServerHint, pruneLivePaints } from "../src/paintsync";
 import { d1 } from "./d1sqlite";
 
 vi.mock("cloudflare:workers", () => ({ DurableObject: class {} }));
@@ -62,7 +62,7 @@ async function deployment() {
   const DB = d1();
   const PAINTS = bucket();
   const PAINT_ROOMS = rooms();
-  for (const [id, name] of [["acc_a", "Alice"], ["acc_b", "Bob"]] as const) {
+  for (const [id, name] of [["acc_a", "Alice"], ["acc_b", "Bob"], ["acc_c", "Carol"]] as const) {
     await DB.prepare("INSERT INTO accounts (id, rider_name, token_hash, created_at) VALUES (?, ?, ?, ?)")
       .bind(id, name, await hashToken(`${id}-token`), Date.now())
       .run();
@@ -185,6 +185,81 @@ describe("paint sync v2", () => {
     // The rows go with it, so an older app's roster never names a hash that 404s.
     const rows = await env.DB.prepare("SELECT COUNT(*) AS n FROM loadout_paints WHERE sha256 = ?").bind(hash).first<{ n: number }>();
     expect(rows?.n).toBe(0);
+  });
+
+  describe("paint downloads are authorised", () => {
+    const addr = { address: "203.0.113.9:54210" };
+    async function setup() {
+      const d = await deployment();
+      const bytes = new TextEncoder().encode("secret livery");
+      const hash = await sha(bytes);
+      await call(d.env, "POST", "/v1/paintsync/join", "acc_a", { server: addr, bikes: look("Mine.pnt", hash) });
+      await call(d.env, "PUT", `/v1/paintsync/paints/${hash}`, "acc_a", bytes);
+      return { ...d, bytes, hash };
+    }
+    const get = (env: Env, who: string, hash: string) => call(env, "GET", `/v1/paints/${hash}`, who);
+
+    it("serves the owner", async () => {
+      const { env, hash, bytes } = await setup();
+      const res = await get(env, "acc_a", hash);
+      expect(res.status).toBe(200);
+      expect(new Uint8Array(await res.arrayBuffer())).toEqual(bytes);
+      expect(res.headers.get("cache-control")).not.toContain("public");
+    });
+
+    it("serves a rider on the same server, and 404s a stranger with the hash", async () => {
+      const { env, hash } = await setup();
+      expect((await get(env, "acc_c", hash)).status).toBe(404);
+      await call(env, "POST", "/v1/paintsync/join", "acc_b", { server: addr });
+      expect((await get(env, "acc_b", hash)).status).toBe(200);
+      // Present somewhere else: still a stranger to this paint.
+      await call(env, "POST", "/v1/paintsync/join", "acc_c", { server: { address: "198.51.100.1:54210" } });
+      const res = await get(env, "acc_c", hash);
+      expect(res.status).toBe(404);
+      // Indistinguishable from a hash nobody stored.
+      const none = await get(env, "acc_c", "0".repeat(64));
+      expect(none.status).toBe(404);
+      expect(await res.json()).toEqual(await none.json());
+    });
+
+    it("stops serving a roommate whose membership has expired", async () => {
+      const { env, hash } = await setup();
+      await call(env, "POST", "/v1/paintsync/join", "acc_b", { server: addr });
+      expect((await get(env, "acc_b", hash)).status).toBe(200);
+      await env.DB.prepare("UPDATE presence SET updated_at = ? WHERE account_id = 'acc_b'")
+        .bind(Date.now() - PAINT_ACCESS_TTL_MS - 1000)
+        .run();
+      expect((await get(env, "acc_b", hash)).status).toBe(404);
+    });
+
+    it("stops serving once the owner has left the server", async () => {
+      const { env, hash } = await setup();
+      await call(env, "POST", "/v1/paintsync/join", "acc_b", { server: addr });
+      await call(env, "POST", "/v1/paintsync/leave", "acc_a", { server: "addr:203.0.113.9:54210" });
+      expect((await get(env, "acc_b", hash)).status).toBe(404);
+    });
+
+    it("serves an explicit grantee, by account or GUID, until the share expires", async () => {
+      const { env, hash } = await setup();
+      const share = (kind: string, who: string, exp: number | null) =>
+        env.DB.prepare(
+          "INSERT INTO paint_shares (sha256, owner_account_id, grantee_kind, grantee, created_at, expires_at) VALUES (?, 'acc_a', ?, ?, ?, ?)",
+        ).bind(hash, kind, who, Date.now(), exp).run();
+      await share("account", "acc_c", null);
+      expect((await get(env, "acc_c", hash)).status).toBe(200);
+      await env.DB.prepare("DELETE FROM paint_shares").run();
+      await env.DB.prepare("UPDATE accounts SET guid = 'guid-b' WHERE id = 'acc_b'").run();
+      await share("guid", "guid-b", Date.now() - 1);
+      expect((await get(env, "acc_b", hash)).status).toBe(404);
+      await env.DB.prepare("DELETE FROM paint_shares").run();
+      await share("guid", "guid-b", null);
+      expect((await get(env, "acc_b", hash)).status).toBe(200);
+    });
+
+    it("PAINT_AUTHZ_MODE=off restores the old open behaviour", async () => {
+      const { env, hash } = await setup();
+      expect((await get({ ...env, PAINT_AUTHZ_MODE: "off" } as Env, "acc_c", hash)).status).toBe(200);
+    });
   });
 
   it("only takes a server it can name", () => {

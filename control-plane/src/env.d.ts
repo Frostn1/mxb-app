@@ -12,6 +12,8 @@
  */
 declare global {
 interface Env {
+    /** Paint download authorisation: unset = enforced, `log` = serve but log what would be refused, `off` = unchecked. A rollback lever, not a setting. */
+    PAINT_AUTHZ_MODE?: string;
     /** IAM key scoped to launching and managing `mxb:managed` instances in one region. */
     AWS_ACCESS_KEY_ID?: string;
     AWS_SECRET_ACCESS_KEY?: string;
