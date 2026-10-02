@@ -349,12 +349,22 @@ pub fn record_asset(app: &AppHandle, asset: SecureAsset) -> Result<(), String> {
 /// Tauri resource dir (a packaged build bundles it there), then beside the app's own
 /// executable (a dev build's `build.rs` copies it there). The build places it, so there is
 /// nothing to configure.
+///
+/// A build pinned to a downloaded DLL ([`MODULE_SHA256`], the Windows release) uses that copy
+/// and nothing else. Its installer carries no DLL, so one in the resource dir or beside the exe
+/// is a leftover from an older install (0.19.0 bundled one, and an update never deletes it).
+/// Picking that up staged a DLL with no host guard, and MXB App's own process loads the staged
+/// copy for its seal/unseal calls: the old `DllMain` started its hook thread inside the app,
+/// which then died without a word a few seconds after launch.
 fn source_dll(app: &AppHandle) -> Option<PathBuf> {
     if let Ok(p) = std::env::var("MXB_SECURE_DLL") {
         let p = PathBuf::from(p);
         if p.exists() {
             return Some(p);
         }
+    }
+    if MODULE_SHA256.is_some() {
+        return downloaded_dll(app).filter(|p| p.exists());
     }
     if let Ok(res) = app.path().resource_dir() {
         // The bundler places `resources/*.dll` under `<resource_dir>/resources/`; also accept
@@ -371,6 +381,56 @@ fn source_dll(app: &AppHandle) -> Option<PathBuf> {
         return Some(p);
     }
     downloaded_dll(app).filter(|p| p.exists())
+}
+
+/// Every `mxbsecure.dll` this process could end up loading or staging that isn't this build's
+/// pinned one: beside the exe and in the resource dir (leftovers of an installer that bundled
+/// it), and the copy staged in `<app-data>/secure/`. The seal/unseal layer loads the first
+/// `mxbsecure.dll` it finds in exactly these places, so a stale one there is loaded into MXB
+/// App itself.
+fn dll_copies(app: &AppHandle) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    if let Ok(res) = app.path().resource_dir() {
+        out.push(res.join("resources").join("mxbsecure.dll"));
+        out.push(res.join("mxbsecure.dll"));
+    }
+    if let Some(dir) = std::env::current_exe().ok().and_then(|e| e.parent().map(|p| p.to_path_buf())) {
+        out.push(dir.join("resources").join("mxbsecure.dll"));
+        out.push(dir.join("mxbsecure.dll"));
+    }
+    if let Some(secure) = secure_dir(app) {
+        out.push(secure.join("mxbsecure.dll"));
+    }
+    out.sort();
+    out.dedup();
+    out
+}
+
+/// Delete each of `paths` that exists and isn't the DLL with digest `pinned`. Returns what was
+/// removed. A copy that can't be removed is logged and left; nothing here is fatal.
+fn purge_stale_dlls_in(paths: &[PathBuf], pinned: &str) -> Vec<PathBuf> {
+    let mut removed = Vec::new();
+    for path in paths {
+        let Ok(bytes) = std::fs::read(path) else { continue };
+        if mxb_core::plugins::sha256_hex(&bytes).eq_ignore_ascii_case(pinned) {
+            continue;
+        }
+        match std::fs::remove_file(path) {
+            Ok(()) => removed.push(path.clone()),
+            Err(e) => log::warn!("[secure] couldn't remove the stale {}: {e}", path.display()),
+        }
+    }
+    removed
+}
+
+/// Clear out every `mxbsecure.dll` that isn't this build's pinned one, before anything in the
+/// app can seal or unseal a key (which loads the DLL in-process). Call once, first thing in
+/// `setup`. A no-op in builds without a pinned DLL (local, public, Linux and macOS).
+pub fn purge_stale_dlls(app: &AppHandle) {
+    let Some(pinned) = MODULE_SHA256 else { return };
+    for path in purge_stale_dlls_in(&dll_copies(app), pinned) {
+        log::info!("[secure] removed a stale mxbsecure.dll left by an older install: {}", path.display());
+    }
 }
 
 /// The release build's `mxbsecure.dll`: its SHA-256 and the release it is attached to, baked in
@@ -1042,6 +1102,39 @@ fn inject(_app: &AppHandle, _dll: &std::path::Path) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The 0.19.2-beta.2/3 "app won't open" bug: an install updated from 0.19.0 still had that
+    /// build's `resources\mxbsecure.dll` (and the copy staged from it). The app loads the DLL
+    /// into itself for seal/unseal, and the old one's `DllMain` started its hook thread there,
+    /// killing the app silently seconds after launch. Every copy that isn't the pinned DLL goes;
+    /// the pinned one, wherever it sits, stays.
+    #[test]
+    fn stale_dll_copies_are_removed_and_the_pinned_one_is_kept() {
+        let dir = std::env::temp_dir().join(format!("frost-stale-dll-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let resources = dir.join("MXB App").join("resources");
+        let secure = dir.join("com.frost.mxbikes").join("secure");
+        std::fs::create_dir_all(&resources).unwrap();
+        std::fs::create_dir_all(&secure).unwrap();
+
+        let pinned_bytes = b"the DLL this build pins".to_vec();
+        let pinned = mxb_core::plugins::sha256_hex(&pinned_bytes);
+        let old_resource = resources.join("mxbsecure.dll");
+        let old_staged = secure.join("mxbsecure.dll");
+        let good_staged = secure.join("mxbsecure-good.dll");
+        let missing = dir.join("mxbsecure.dll");
+        std::fs::write(&old_resource, b"0.19.0's DLL, no host guard").unwrap();
+        std::fs::write(&old_staged, b"0.19.0's DLL, no host guard").unwrap();
+        std::fs::write(&good_staged, &pinned_bytes).unwrap();
+
+        let paths = [old_resource.clone(), old_staged.clone(), good_staged.clone(), missing];
+        let removed = purge_stale_dlls_in(&paths, &pinned.to_uppercase());
+        assert_eq!(removed, vec![old_resource.clone(), old_staged.clone()]);
+        assert!(!old_resource.exists() && !old_staged.exists(), "nothing stale is left to load");
+        assert!(good_staged.exists(), "the pinned DLL is never touched");
+        assert!(purge_stale_dlls_in(&paths, &pinned).is_empty(), "a second pass has nothing to do");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn a_secured_header_cannot_inject_a_second_manifest_record() {

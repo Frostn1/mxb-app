@@ -29,6 +29,7 @@ mod fileinfo;
 mod gameproc;
 mod viewonly;
 mod gamecache;
+mod crashlog;
 mod hub_clearance;
 mod hub_session;
 mod identity;
@@ -7960,6 +7961,10 @@ fn drag_drop_enabled() -> bool {
 }
 
 fn main() {
+    // A release build aborts on panic and has no console: without this, a panic or a native
+    // crash anywhere ends the app with nothing in its log (0.19.2-beta.2/3 died that way).
+    crashlog::install();
+
     // Before anything else: in a release build, refuse to run under a debugger. A live
     // debugger attached to the process defeats the static hardening the release profile
     // pays for (stripped symbols, fat LTO, no debug info), so this is the runtime half of
@@ -8083,6 +8088,9 @@ fn main() {
         .manage(voice::session::Session::default())
         .setup(|app| {
             log::info!("MXB App {} starting", env!("CARGO_PKG_VERSION"));
+            // Before anything can seal or unseal a key, which loads `mxbsecure.dll` into this
+            // process: an older install's DLL left beside the exe killed the app on start.
+            secure_launch::purge_stale_dlls(app.handle());
 
             // Before anything else, and before a window exists to flash: if a previous run was
             // told this installation is blocked, refuse now — instantly, and without needing the
