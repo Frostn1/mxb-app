@@ -153,7 +153,10 @@ pub fn is_running() -> bool {
 //       the rider lists and their paints. See `GEAR_REFRESH_MIN_VERSION`.
 //   `refresh_paints` — paints or gear changed on disk; re-run the game's customization
 //       loader in-process so the look is live. Carries no bike id. See
-//       `PAINT_REFRESH_MIN_VERSION`.
+//       `PAINT_REFRESH_MIN_VERSION`. Since v0.43.0 it waits while the player rides.
+//   `paints_staged` — paint sync put other riders' paints on disk. FrostMod refreshes once
+//       on the join's loading screen, or later in the pits, never while riding, and repaints
+//       only riders missing a paint. See `PAINTS_STAGED_MIN_VERSION`.
 //   `reset_server_browser` — close the game's half-open master session so the next Browse
 //       starts clean. FrostMod does this by itself when it recognises the wedge; this is
 //       the button for when it declines to. Carries no bike id.
@@ -316,6 +319,26 @@ pub fn paint_refresh_supported(tag: Option<&str>) -> bool {
 /// Callers clear [`paint_refresh_supported`] first.
 pub fn signal_refresh_paints() -> CommandOutcome {
     send_command(command_json("refresh_paints", ""))
+}
+
+/// The oldest FrostMod that handles `paints_staged` and gates every paint refresh on the
+/// player's phase (loading screen, pits, menus: yes; riding: never): v0.43.0. An older one
+/// would drop the verb as unknown, and its `refresh_paints` runs on track, so paint sync sends
+/// it nothing while on a server.
+const PAINTS_STAGED_MIN_VERSION: &str = "v0.43.0";
+
+/// May paint sync hand the installed FrostMod, tagged `tag`, `paints_staged`?
+pub fn paints_staged_supported(tag: Option<&str>) -> bool {
+    match (tag.and_then(version_parts), version_parts(PAINTS_STAGED_MIN_VERSION)) {
+        (Some(have), Some(min)) => have >= min,
+        _ => false,
+    }
+}
+
+/// Tell FrostMod that paint sync has put paints on disk. FrostMod picks the moment to load
+/// them. Callers clear [`paints_staged_supported`] first.
+pub fn signal_paints_staged() -> CommandOutcome {
+    send_command(command_json("paints_staged", ""))
 }
 
 /// The oldest FrostMod that handles `refresh_gear`: v0.39.3. An older one drops the verb as
@@ -702,6 +725,10 @@ mod tests {
         assert!(paint_refresh_supported(Some("v0.40.1")));
         assert!(!paint_refresh_supported(Some("v0.38.0")));
         assert!(!paint_refresh_supported(None));
+        assert!(paints_staged_supported(Some("v0.43.0")));
+        assert!(paints_staged_supported(Some("v1.0.0")));
+        assert!(!paints_staged_supported(Some("v0.42.1")));
+        assert!(!paints_staged_supported(None));
     }
 
     use super::*;

@@ -3273,6 +3273,11 @@ const LIVE_SYNC_EVERY: std::time::Duration = std::time::Duration::from_secs(180)
 /// seconds is the gap between a rider appearing on track and their paint being fetched.
 const GRID_POLL: std::time::Duration = std::time::Duration::from_secs(5);
 
+/// How often to look while the rider is on the way into a server and its paint room hasn't
+/// answered yet. The paints have to be on disk while the game is still loading in: FrostMod
+/// refreshes once on that loading screen, and anything later waits for the pits.
+const JOIN_POLL: std::time::Duration = std::time::Duration::from_secs(1);
+
 /// How long to wait for the game to show up before giving up on a session.
 ///
 /// MX Bikes takes a while to appear in the process list, and on a platform where we cannot
@@ -3338,8 +3343,15 @@ fn live_sync_session(app: &tauri::AppHandle, address: Option<String>) {
         // Set when the room turns out not to exist, so the roster pulls straight away rather
         // than a heartbeat later.
         let mut pull_now = false;
+        let mut first = true;
         loop {
-            tokio::time::sleep(GRID_POLL).await;
+            // The first pass goes at once: an app-launched join knows the server before the
+            // game has booted, and paints on disk by then need no refresh at all. After that,
+            // fast until the room for where the rider is has answered.
+            if !std::mem::take(&mut first) {
+                let joining = !by_roster && !room.settled();
+                tokio::time::sleep(if joining { JOIN_POLL } else { GRID_POLL }).await;
+            }
 
             let cfg = config::load_or_detect(&app).unwrap_or_default();
             if !paint_sync_active(&app, &cfg) {
@@ -3399,13 +3411,9 @@ fn live_sync_session(app: &tauri::AppHandle, address: Option<String>) {
                 // Only say so when something actually arrived: an unchanged grid is the
                 // common case and does not need announcing every 45 seconds.
                 Ok(o) if o.installed > 0 => {
+                    // Staged; pull_rosters told FrostMod, which loads them in the pits.
                     log::info!("[sync] {} new paints mid-session", o.installed);
                     emit_sync(&app, SyncEvent::pulled(&o));
-                    // The files are on disk but the game read its grid when it built it.
-                    // Same loader call a save on disk gets, for the same reason: a rider
-                    // who is already out there shouldn't have to rejoin to stop seeing
-                    // default liveries.
-                    refresh_live_look(&app);
                 }
                 Ok(_) => {}
                 Err(e) => log::debug!("[sync] live pull failed: {e}"),
@@ -3601,15 +3609,12 @@ async fn pull_rosters(
     if let Err(e) = config::save(app, &cfg) {
         log::warn!("[sync] couldn't record the pull: {e:#}");
     }
-    // Anything newly on disk is invisible to a running game until the loader re-reads the
-    // mods folder — but only *newly*. This used to fire on every pull, and a pull that
-    // installed nothing is the overwhelmingly common one: the grid is unchanged, everyone's
-    // paints are already here, and there is nothing for the game to re-read. Asking it to
-    // rescan the mods folder anyway, every time a rider joined, is work done to a process
-    // that is mid-race.
-    if outcome.installed > 0 {
-        let _ = frostmod::signal_reload();
-    }
+    // Anything newly on disk is invisible to a running game until FrostMod refreshes its
+    // paint lists - the game never rescans them by itself. That used to be a full content
+    // reload right here, mid-race. Now FrostMod is told the paints are staged and picks the
+    // moment: the join's loading screen, or the pits.
+    let on_server = live_session().map(|s| s.on_a_server()).unwrap_or(true);
+    paintroom::signal_staged(app, outcome.installed, on_server);
     Ok(outcome)
 }
 
