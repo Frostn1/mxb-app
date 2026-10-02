@@ -11,6 +11,8 @@
 //! - `DRIV`: per point, speed m/s, throttle 0..1 and brake 0..1 (the harder of the two), so the
 //!   recorder colours its line on the track by where the lap braked (FrostMod v0.43.2).
 //! - `REFY`: per point, the reference lap's own height (the bike's y).
+//! - `GEAR`: per point, the gear the reference lap was in, one byte each (0 = neutral or unknown), so
+//!   the recorder can hint a shift where the rider is in another gear (FrostMod `coachgear.h`).
 //! - `TRRN`: per point, the track's own ground height at five offsets across the line, half a
 //!   metre apart, right to left, NaN off the grid; only when the laps sit steadily on this
 //!   terrain (`ground::measure`). The recorder lays its line on it instead of the centreline.
@@ -136,6 +138,12 @@ pub fn write_with(track_len: f32, fast: &Trace, parts: &[Part], flags: u32, terr
     }
     chunk(&mut b, b"REFY", &refy);
 
+    // GEAR: the gear the reference lap was in at each point, a byte each; 0 where the gear is
+    // neutral, unknown or out of range. A plugin that predates the tag skips it by its length.
+    let mut gear = (points.len() as u32).to_le_bytes().to_vec();
+    gear.extend(taken.iter().map(|&i| u8::try_from(fast.pts[i].gear).ok().filter(|g| *g <= 9).unwrap_or(0)));
+    chunk(&mut b, b"GEAR", &gear);
+
     // TRRN: the ground across the line, left being the direction of travel turned a quarter
     // anticlockwise seen from above (x east, z north).
     if let Some(t) = terrain {
@@ -203,7 +211,23 @@ mod tests {
         // Then REFY: three heights.
         assert_eq!(&b[147..151], b"REFY");
         assert_eq!((u32_at(151), u32_at(155)), (4 + 3 * 4, 3));
-        assert_eq!(b.len(), 159 + 3 * 4, "no TRRN without terrain");
+        // Then GEAR: three bytes, 0 where the lap had no gear.
+        assert_eq!(&b[171..175], b"GEAR");
+        assert_eq!((u32_at(175), u32_at(179)), (4 + 3, 3));
+        assert_eq!(&b[183..186], &[0, 0, 0]);
+        assert_eq!(b.len(), 186, "no TRRN without terrain");
+    }
+
+    #[test]
+    fn the_gear_of_each_point_rides_along() {
+        let fast = Trace {
+            pts: [2, 3, 0, -1, 40].iter().enumerate().map(|(i, &g)| Point { t: i as f32, x: i as f32, gear: g, ..Point::default() }).collect(),
+        };
+        let b = write(5.0, &fast, &[], 0);
+        let at = b.windows(4).position(|w| w == b"GEAR").expect("a GEAR chunk");
+        let n = u32::from_le_bytes(b[at + 8..at + 12].try_into().unwrap()) as usize;
+        assert_eq!(n, 5);
+        assert_eq!(&b[at + 12..at + 12 + n], &[2, 3, 0, 0, 0], "neutral, negative and absurd gears read as unknown");
     }
 
     #[test]
