@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 2026-10-02 — v0.19.2-beta.2 — Paint sync on join, separate hotkeys, locked-down paint downloads
+
+### Fixed
+- **MXB App and MXB Coach no longer share one overlay hotkey.** Each app keeps its own, and your
+  current bind is copied into both.
+- Paint downloads are allowed only for a paint's wearer, riders on the same server, or someone it
+  is shared with.
+
 ### Added
 - **MXB Servers can run a remote server from one native window.** The Lightsail connection now
   uses SSH for status, riders, installed tracks and private control credentials, so a remote
