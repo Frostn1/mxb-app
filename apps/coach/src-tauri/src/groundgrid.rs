@@ -9,8 +9,14 @@
 //! 0xFFFF where the height isn't known. The grid and the telemetry share the game's world frame
 //! (`ground.rs`); the recorder checks that once from the rider's own samples and logs it.
 //!
-//! A locked (`.mxbsecure`) track can't be read here, so it gets no file, and the recorder falls
-//! back to snapping the line to what the game draws.
+//! A secured (`.mxbsecure`) track gets no file, whether or not a key is installed for it: secured
+//! content is never written to disk in a usable form, and a terrain grid is exactly that. The
+//! plugin falls back to snapping the line to what the game draws. (Simplest safe option: skip,
+//! rather than a memory-only channel.) Any `.ground` an earlier build left for one is swept away
+//! on start.
+//!
+//! Grids are also made ahead of any session: on start, and when `mods/tracks` changes, for every
+//! unsecured track that has none (or whose file is older than the track's), one at a time.
 
 use std::collections::HashSet;
 use std::fs;
@@ -123,14 +129,28 @@ pub fn ensure_for(app: &AppHandle, session: &Path) {
 fn build(app: &AppHandle, track: &str) -> Result<PathBuf, String> {
     let cfg = load_config(app);
     let src = mxb_core::tracksource::resolve(&cfg, track).ok_or("the track isn't in the mods folder")?;
-    if src.locked {
-        return Err("the track is locked (.mxbsecure), so its terrain can't be read; the recorder snaps the line to what the game draws".into());
+    build_from(app, &cfg, track, &src)
+}
+
+/// Whether a track's terrain must never reach disk: locked, or secured with or without a key.
+fn withheld(src: &mxb_core::tracksource::TrackSource) -> bool {
+    src.locked || mxb_core::securesource::is_secured(Path::new(&src.path))
+}
+
+fn build_from(
+    app: &AppHandle,
+    cfg: &mxb_core::config::AppConfig,
+    track: &str,
+    src: &mxb_core::tracksource::TrackSource,
+) -> Result<PathBuf, String> {
+    if withheld(src) {
+        return Err("the track is secured (.mxbsecure), so its terrain is never written out; the recorder snaps the line to what the game draws".into());
     }
     let master = mxb_core::track::load_master(app, &src.path, src.prefix.as_deref()).map_err(|e| e.to_string())?;
     let i = &master.info;
     let bytes = write(i.width as usize, i.height as usize, i.metres_per_sample, &master.heights)
         .ok_or("the terrain is empty or too large")?;
-    let dir = sheets_dir(&cfg).ok_or("the game's user folder wasn't found")?;
+    let dir = sheets_dir(cfg).ok_or("the game's user folder wasn't found")?;
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let file = dir.join(file_name(track));
     let tmp = dir.join(format!("{}.tmp", file_name(track)));
@@ -141,6 +161,81 @@ fn build(app: &AppHandle, track: &str) -> Result<PathBuf, String> {
     }
     fs::rename(&tmp, &file).map_err(|e| e.to_string())?;
     Ok(file)
+}
+
+/// Removes `.ground` files in `dir` whose track is in `secured` (compared by letters and digits,
+/// as `tracksource::key`). Returns how many went.
+fn sweep_dir(dir: &Path, secured: &HashSet<String>) -> usize {
+    let Ok(rd) = fs::read_dir(dir) else { return 0 };
+    let mut n = 0;
+    for e in rd.flatten() {
+        let p = e.path();
+        if p.extension().and_then(|x| x.to_str()).is_none_or(|x| !x.eq_ignore_ascii_case("ground")) {
+            continue;
+        }
+        let stem = p.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+        if secured.contains(&mxb_core::tracksource::key(&stem)) && fs::remove_file(&p).is_ok() {
+            n += 1;
+        }
+    }
+    n
+}
+
+/// Whether `file` is missing or older than the track at `pkz`.
+fn stale(file: &Path, pkz: &Path) -> bool {
+    let m = |p: &Path| fs::metadata(p).and_then(|m| m.modified()).ok();
+    match (m(file), m(pkz)) {
+        (None, _) => true,
+        (Some(f), Some(t)) => f < t,
+        _ => false,
+    }
+}
+
+static BUSY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// Between tracks, so a large library doesn't hold the disk and a core for a minute.
+const THROTTLE: std::time::Duration = std::time::Duration::from_millis(750);
+
+/// In the background: removes grids left for secured tracks, then makes one for every unsecured
+/// installed track that lacks a current one. Safe to call often; a run already going wins.
+pub fn prepare_all(app: &AppHandle) {
+    if BUSY.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        return;
+    }
+    let app = app.clone();
+    std::thread::spawn(move || {
+        run_all(&app);
+        BUSY.store(false, std::sync::atomic::Ordering::SeqCst);
+    });
+}
+
+fn run_all(app: &AppHandle) {
+    let cfg = load_config(app);
+    let Some(dir) = sheets_dir(&cfg) else { return };
+    let entries = mxb_core::library::scan_library(&cfg.mods_path, "mods/tracks", &[], cfg.game()).unwrap_or_default();
+    let secured: HashSet<String> = entries
+        .iter()
+        .filter(|e| e.secured || mxb_core::securesource::is_secured(Path::new(&e.path)))
+        .map(|e| mxb_core::tracksource::key(&mxb_core::library::strip_ext(&e.name)))
+        .collect();
+    let gone = sweep_dir(&dir, &secured);
+    if gone > 0 {
+        log::info!("removed {gone} track ground file(s) of secured tracks");
+    }
+    for e in entries {
+        if e.secured || e.locked || mxb_core::securesource::is_secured(Path::new(&e.path)) {
+            continue;
+        }
+        let id = mxb_core::track::folder_name(Path::new(&e.path)).unwrap_or_else(|| mxb_core::library::strip_ext(&e.name));
+        if !stale(&dir.join(file_name(&id)), Path::new(&e.path)) {
+            continue;
+        }
+        let Some(src) = mxb_core::tracksource::resolve(&cfg, &id) else { continue };
+        match build_from(app, &cfg, &id, &src) {
+            Ok(p) => log::info!("track ground for {id} written to {}", p.display()),
+            Err(why) => log::info!("no track ground for {id}: {why}"),
+        }
+        std::thread::sleep(THROTTLE);
+    }
 }
 
 #[cfg(test)]
@@ -198,6 +293,45 @@ mod tests {
         fs::write(&path, &b).unwrap();
         assert_eq!(track_of(&path).as_deref(), Some("Ridgedale"));
         assert_eq!(file_name("Steezy Mx - SMX - Ridgedale"), "Steezy_Mx_-_SMX_-_Ridgedale.ground");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_secured_track_is_withheld_with_or_without_a_key_and_its_old_ground_is_swept() {
+        let src = |path: &str| mxb_core::tracksource::TrackSource {
+            path: path.into(),
+            prefix: None,
+            name: "x".into(),
+            stock: false,
+            locked: false, // a key is installed: not "locked"
+        };
+        assert!(withheld(&src("C:/mods/tracks/755 Compound.mxbsecure")));
+        assert!(!withheld(&src("C:/mods/tracks/Ridgedale.pkz")));
+
+        let dir = std::env::temp_dir().join(format!("coach-gg-sweep-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        for f in ["755_Compound.ground", "Ridgedale.ground", "755_Compound.cue"] {
+            fs::write(dir.join(f), b"x").unwrap();
+        }
+        let secured: HashSet<String> = [mxb_core::tracksource::key("755 Compound")].into();
+        assert_eq!(sweep_dir(&dir, &secured), 1);
+        assert!(!dir.join("755_Compound.ground").exists());
+        assert!(dir.join("Ridgedale.ground").exists() && dir.join("755_Compound.cue").exists());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_new_track_without_a_ground_is_due_and_a_current_one_is_not() {
+        let dir = std::env::temp_dir().join(format!("coach-gg-stale-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let pkz = dir.join("t.pkz");
+        fs::write(&pkz, b"z").unwrap();
+        let ground = dir.join("t.ground");
+        assert!(stale(&ground, &pkz));
+        fs::write(&ground, b"g").unwrap();
+        assert!(!stale(&ground, &pkz));
         let _ = fs::remove_dir_all(&dir);
     }
 }
