@@ -173,6 +173,7 @@ pub struct AppConfig {
     /// changing it in one changed it in the other; each app now has its own. `None` is a
     /// config from before the split: [`migrate`] copies `overlay_hotkey` in, so nobody loses
     /// the combo they had. Blank means the default, as for `overlay_hotkey`.
+    #[serde(default = "unmigrated_coach_hotkey")]
     pub coach_overlay_hotkey: Option<String>,
     /// Which tyre pack the 3D previews put a bike on. **Blank means "the one the bike's own
     /// `gfx.cfg` names"**, which is what the game itself would fit.
@@ -412,6 +413,12 @@ pub struct SurveyState {
 /// Ctrl+Shift+X is free in MX Bikes — its bindings are single keys and gamepad inputs —
 /// and isn't claimed by Windows or by the apps that sit alongside a race: Discord,
 /// Steam (Shift+Tab) and GeForce Experience (Alt+Z, Alt+F*).
+/// A config file with no `coachOverlayHotkey` is from before the split, whatever `Default`
+/// says for a brand-new one: serde's struct default would otherwise hide that.
+fn unmigrated_coach_hotkey() -> Option<String> {
+    None
+}
+
 pub const DEFAULT_OVERLAY_HOTKEY: &str = "CommandOrControl+Shift+X";
 
 /// Bumped whenever the executable's path changes, so a login item written for the old one is
@@ -475,9 +482,7 @@ impl Default for AppConfig {
             mxbmrp3_dismissed: false,
             overlay_enabled: true,
             overlay_hotkey: DEFAULT_OVERLAY_HOTKEY.to_string(),
-            // `None` until migrated: serde fills a missing field from this default, so
-            // `Some` here would hide that an old config never had its combo copied.
-            coach_overlay_hotkey: None,
+            coach_overlay_hotkey: Some(DEFAULT_OVERLAY_HOTKEY.to_string()),
             preview_tyres: String::new(),
             voice_enabled: false,
             paint_sync_rev: PAINT_SYNC_REV,
