@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 2026-10-02 — v0.19.2-beta.3 — View-only and locked paints
+
+Everything in v0.19.2-beta.2 (paint sync on join, separate MXB App and Coach hotkeys, paint
+downloads only for the wearer, riders on the same server or a share), plus view-only and locked
+paints below.
+
 ### Added
 - **View-only and locked paints** (Settings → Paint sync). Mark any of your paints *View-only*: 
   riders on your server still see it, but their MXB App keeps it in a session-only store, deletes 
