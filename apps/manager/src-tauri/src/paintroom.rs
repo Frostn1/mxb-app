@@ -493,11 +493,19 @@ fn look_of(rider: &RoomRider) -> Vec<(String, String)> {
     look
 }
 
+/// View-only paints are pulled until the memory-only version lands: whatever the control plane
+/// sends, one is never stored, so it can never reach disk. Its rider shows stock.
+fn without_view_only(mut rider: RoomRider) -> RoomRider {
+    rider.paints.retain(|p| !p.view_only);
+    rider
+}
+
 impl Grid {
     /// Start over from a join's answer. Returns whether anything differs.
     pub fn replace(&mut self, riders: Vec<RoomRider>) -> bool {
         let mut next: HashMap<String, RoomRider> = HashMap::new();
         for rider in riders {
+            let rider = without_view_only(rider);
             next.insert(rider.key(), rider);
         }
         let changed = next.len() != self.riders.len()
@@ -508,6 +516,7 @@ impl Grid {
 
     /// Someone arrived, or changed their look. Returns whether anything differs.
     pub fn joined(&mut self, rider: RoomRider) -> bool {
+        let rider = without_view_only(rider);
         let key = rider.key();
         let changed = self.riders.get(&key).map(look_of) != Some(look_of(&rider));
         self.riders.insert(key, rider);
@@ -1836,6 +1845,18 @@ mod tests {
         assert!(!session_dir.exists(), "session store gone");
         assert!(local.store.has(&plain));
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A view-only paint a server sends anyway never enters the grid, so it is never written.
+    #[test]
+    fn grid_drops_view_only_paints() {
+        let mut vo = paint(RED, &sha(1));
+        vo.view_only = true;
+        let mut grid = Grid::default();
+        grid.replace(vec![rider("Ann", 1, vec![vo.clone(), paint("bikes/K/paints/Blue.pnt", &sha(2))])]);
+        assert_eq!(grid.riders().next().unwrap().paints.len(), 1);
+        grid.joined(rider("Bob", 2, vec![vo]));
+        assert!(grid.riders().find(|r| r.rider_name == "Bob").unwrap().paints.is_empty());
     }
 
     /// A rider whose app predates view-only paints sends no flag, so nothing is session-only.

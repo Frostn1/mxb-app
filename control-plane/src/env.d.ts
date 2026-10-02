@@ -12,6 +12,8 @@
  */
 declare global {
 interface Env {
+    /** View-only and locked paints: `on` delivers and accepts them; anything else (unset) pulls them. */
+    VIEW_ONLY_MODE?: string;
     /** Paint download authorisation: unset = enforced, `log` = serve but log what would be refused, `off` = unchecked. A rollback lever, not a setting. */
     PAINT_AUTHZ_MODE?: string;
     /** IAM key scoped to launching and managing `mxb:managed` instances in one region. */

@@ -24,6 +24,11 @@ import { isRelDest, isSha256 } from "./validate";
 /** What the app says on a join when it can honour view-only paints. */
 export const VIEW_ONLY_CAP = "viewOnly";
 
+/** Whether view-only/locked paints are live. Off unless `VIEW_ONLY_MODE` is exactly "on". */
+export function viewOnlyOn(env: { VIEW_ONLY_MODE?: string }): boolean {
+  return env.VIEW_ONLY_MODE === "on";
+}
+
 /** Team list cap per paint. A team, not a guest list. */
 export const MAX_TEAM = 32;
 
@@ -187,7 +192,7 @@ export async function listPolicies(account: PolicyAccount, env: Env): Promise<Re
   }
   return {
     status: 200,
-    body: { canLock: verifiedGuid(account) !== null, paints: [...out.values()] },
+    body: { canLock: verifiedGuid(account) !== null, viewOnlyAvailable: viewOnlyOn(env), paints: [...out.values()] },
   };
 }
 
@@ -209,6 +214,9 @@ export async function putPolicy(request: Request, sha256: string, account: Polic
   }
   const policy = parsePolicy(raw);
   if (typeof policy === "string") return { status: 400, body: { error: policy } };
+  if (!viewOnlyOn(env) && (policy.viewOnly || policy.locked)) {
+    return { status: 409, body: { error: "view_only_unavailable" } };
+  }
 
   const worn = await env.DB.prepare(
     "SELECT rel_dest, bike_id FROM loadout_paints WHERE account_id = ? AND sha256 = ? ORDER BY slot = 'paint' DESC LIMIT 1",

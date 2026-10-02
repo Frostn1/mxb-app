@@ -61,7 +61,7 @@ async function signingKey(): Promise<{ pkcs8: string; publicKey: Uint8Array }> {
   return { pkcs8: b64url(pkcs8), publicKey };
 }
 
-async function deployment() {
+async function deployment(mode: string | undefined = "on") {
   const DB = d1();
   const key = await signingKey();
   const accounts: [string, string, string | null][] = [
@@ -84,7 +84,7 @@ async function deployment() {
     .bind(now, now, await hashToken("server-token"), now)
     .run();
   const PAINT_ROOMS = rooms();
-  const env = { DB, PAINTS: bucket(), PAINT_ROOMS, MXB_PAINTLOCK_SIGNING_KEY: key.pkcs8 } as unknown as Env;
+  const env = { DB, PAINTS: bucket(), PAINT_ROOMS, MXB_PAINTLOCK_SIGNING_KEY: key.pkcs8, VIEW_ONLY_MODE: mode } as unknown as Env;
   return { env, PAINT_ROOMS, publicKey: key.publicKey };
 }
 
@@ -215,6 +215,54 @@ describe("view-only paints reach only apps that honour them", () => {
     expect(frame).toContain('"viewOnly":true');
     expect(JSON.parse(legacyFrame(frame)).rider.paints).toEqual([]);
     expect(legacyFrame('{"t":"left","riderName":"Alice"}')).toBe('{"t":"left","riderName":"Alice"}');
+  });
+});
+
+describe("VIEW_ONLY_MODE off (the default) pulls view-only and locked paints", () => {
+  for (const mode of [undefined, "off"]) {
+    it(`refuses the policy and delivers nothing restricted (mode ${mode})`, async () => {
+      const { env } = await deployment("on");
+      await aliceWears(env);
+      // Set while on, as if left over from before the pull.
+      expect((await setPolicy(env, "acc_a", { viewOnly: true, locked: true })).status).toBe(200);
+      (env as unknown as { VIEW_ONLY_MODE?: string }).VIEW_ONLY_MODE = mode;
+
+      const refused = await setPolicy(env, "acc_a", { viewOnly: true, locked: false });
+      expect(refused.status).toBe(409);
+      expect(await refused.json()).toEqual({ error: "view_only_unavailable" });
+      expect((await setPolicy(env, "acc_a", { viewOnly: false, locked: true })).status).toBe(409);
+
+      // Whatever capability the app sends, the restricted paint is not delivered.
+      for (const caps of [["viewOnly"], undefined]) {
+        const j = (await (await call(env, "POST", "/v1/paintsync/join", "acc_b", { server: SERVER, caps })).json()) as Joined;
+        expect(j.riders.find((r) => r.riderName === "Alice")!.paints).toEqual([]);
+      }
+
+      // Existing rows untouched, and the app is told it is unavailable.
+      const list = (await (await call(env, "GET", "/v1/paints/policies", "acc_a")).json()) as {
+        viewOnlyAvailable: boolean;
+        paints: { viewOnly: boolean; locked: boolean }[];
+      };
+      expect(list.viewOnlyAvailable).toBe(false);
+      expect(list.paints[0]).toMatchObject({ viewOnly: true, locked: true });
+
+      // Turning it back on restores them.
+      (env as unknown as { VIEW_ONLY_MODE?: string }).VIEW_ONLY_MODE = "on";
+      const back = (await (await call(env, "POST", "/v1/paintsync/join", "acc_c", { server: SERVER, caps: ["viewOnly"] })).json()) as Joined;
+      expect(back.riders.find((r) => r.riderName === "Alice")!.paints).toEqual([expect.objectContaining({ viewOnly: true })]);
+    });
+  }
+
+  it("still allows clearing a policy, and a locked-only paint is also withheld from the roster", async () => {
+    const { env } = await deployment("on");
+    await aliceWears(env);
+    await setPolicy(env, "acc_a", { viewOnly: false, locked: true });
+    (env as unknown as { VIEW_ONLY_MODE?: string }).VIEW_ONLY_MODE = "off";
+    const roster = (await (await call(env, "GET", "/v1/roster?server=addr:203.0.113.9:54210", "acc_c")).json()) as {
+      riders: { riderName: string }[];
+    };
+    expect(roster.riders.find((r) => r.riderName === "Alice")).toBeUndefined();
+    expect((await setPolicy(env, "acc_a", { viewOnly: false, locked: false })).status).toBe(200);
   });
 });
 

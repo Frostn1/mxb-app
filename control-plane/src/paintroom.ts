@@ -7,6 +7,7 @@
  */
 
 import { DurableObject } from "cloudflare:workers";
+import { viewOnlyOn } from "./paintpolicy";
 
 interface Member {
   accountId: string;
@@ -49,7 +50,7 @@ export class PaintRoom extends DurableObject<Env> {
         const m = ws.deserializeAttachment() as Member | null;
         if (m?.accountId === accountId) continue;
         try {
-          ws.send(m?.viewOnly ? frame : (legacy ??= legacyFrame(frame)));
+          ws.send(m?.viewOnly && viewOnlyOn(this.env) ? frame : (legacy ??= legacyFrame(frame)));
         } catch {
           // A socket closing as we speak; its own close handler tidies up.
         }

@@ -260,6 +260,10 @@ pub struct TeamEntry {
 pub struct OwnPaints {
     /// Steam sign-in proved this rider's GUID, which a lock needs.
     pub can_lock: bool,
+    /// The control plane has view-only/locked paints switched on. Absent (an older control plane)
+    /// is read as off: the app shows no controls.
+    #[serde(default)]
+    pub view_only_available: bool,
     pub paints: Vec<OwnPaint>,
 }
 

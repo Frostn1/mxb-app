@@ -89,7 +89,7 @@ import {
 import { VoiceRoom } from "./voiceroom";
 import { PaintRoom } from "./paintroom";
 import { ingestResults, leaderboard as ratingLeaderboard, myRatings, serverForRatingToken } from "./rating";
-import { listPolicies, lockKey, minisignPublicKey, putPolicy, signedLocks, wantsViewOnly } from "./paintpolicy";
+import { viewOnlyOn, listPolicies, lockKey, minisignPublicKey, putPolicy, signedLocks, wantsViewOnly } from "./paintpolicy";
 import {
   liveKey,
   mayFetchPaint,
@@ -2672,7 +2672,7 @@ async function roster(url: URL, account: Account, env: Env): Promise<Response> {
       " JOIN loadout_paints p ON p.account_id = a.id" +
       " WHERE pr.server_id = ? AND pr.updated_at > ?" +
       // The apps on this route predate view-only paints and would keep them.
-      " AND NOT EXISTS (SELECT 1 FROM paint_policies pp WHERE pp.owner_account_id = a.id AND pp.sha256 = p.sha256 AND pp.view_only = 1)" +
+      " AND NOT EXISTS (SELECT 1 FROM paint_policies pp WHERE pp.owner_account_id = a.id AND pp.sha256 = p.sha256 AND (pp.view_only = 1" + (viewOnlyOn(env) ? "" : " OR pp.locked = 1") + "))" +
       " GROUP BY a.id, p.rel_dest, p.sha256",
   )
     .bind(serverId, Date.now() - PRESENCE_TTL_MS)
