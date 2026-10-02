@@ -200,6 +200,14 @@ jobs:
           # The signing overlay on a signed Windows leg; empty everywhere else.
           args: ${{ matrix.args }} ${{ steps.signing.outputs.tauri-args }}
 
+      # Tauri hides the signing command's output when it fails; sign-windows.ps1 keeps a transcript.
+      - name: Show Windows signing log
+        if: ${{ failure() && startsWith(matrix.platform, 'windows') }}
+        shell: pwsh
+        run: |
+          $log = Join-Path $env:RUNNER_TEMP 'sign-windows.log'
+          if (Test-Path $log) { Get-Content $log } else { Write-Host 'no sign-windows.log (the signing script never ran)' }
+
   # Installs from 0.1.3 to 0.1.17 shipped an updater that looks for `coach-v` releases in
   # *this* repo, and nothing can change that in a binary already on someone's machine. So
   # every release also gets a release here under its original `coach-v` tag, carrying only

@@ -20,6 +20,12 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+# Tauri runs this as its signCommand and shows none of its output when it fails (only
+# "failed to run pwsh"), so keep a transcript the workflow can print afterwards.
+if ($env:RUNNER_TEMP) {
+  try { Start-Transcript -Path (Join-Path $env:RUNNER_TEMP 'sign-windows.log') -Append | Out-Null } catch { }
+}
+
 if ($env:ARTIFACT_SIGNING -ne '1') {
   Write-Host "sign-windows: signing not configured; leaving unsigned: $($Files -join ', ')"
   exit 0
@@ -42,13 +48,13 @@ foreach ($file in $Files) {
   # One retry: the service or the timestamp server occasionally drops a request, and a whole
   # release shouldn't fail over it.
   $signed = $false
-  for ($attempt = 1; $attempt -le 2 -and -not $signed; $attempt++) {
+  for ($attempt = 1; $attempt -le 3 -and -not $signed; $attempt++) {
     & $env:ARTIFACT_SIGNING_SIGNTOOL sign /v /fd SHA256 /tr $timestamp /td SHA256 `
       /dlib $env:ARTIFACT_SIGNING_DLIB /dmdf $env:ARTIFACT_SIGNING_METADATA $file
     $signed = $LASTEXITCODE -eq 0
-    if (-not $signed -and $attempt -lt 2) {
-      Write-Host "sign-windows: signing $file failed (exit $LASTEXITCODE); retrying in 10 s"
-      Start-Sleep -Seconds 10
+    if (-not $signed -and $attempt -lt 3) {
+      Write-Host "sign-windows: signing $file failed (exit $LASTEXITCODE); retrying in 15 s"
+      Start-Sleep -Seconds 15
     }
   }
   if (-not $signed) {

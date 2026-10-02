@@ -1,0 +1,60 @@
+name: Windows signing check
+
+# Dry run of the Windows signing path the releases use: the artifact-signing action, then the
+# same command Tauri's signCommand overlay runs, on a file whose name has a space in it
+# ("MXB Coach.exe"). Runs when the signing files change, or by hand.
+
+on:
+  pull_request:
+    paths:
+      - ".github/actions/artifact-signing/**"
+      - ".github/workflows/sign-check.yml"
+      - "scripts/sign-windows.ps1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sign:
+    # Forks have no Azure account; skip rather than fail.
+    if: ${{ github.repository == 'Frostn1/mxb-app' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    runs-on: windows-latest
+    environment: code-signing
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Windows code signing
+        id: signing
+        uses: ./.github/actions/artifact-signing
+        with:
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          endpoint: ${{ vars.ARTIFACT_SIGNING_ENDPOINT }}
+          account: ${{ vars.ARTIFACT_SIGNING_ACCOUNT }}
+          profile: ${{ vars.ARTIFACT_SIGNING_PROFILE }}
+          required: "true"
+
+      - name: Sign a file named like the Coach exe, as Tauri does
+        shell: pwsh
+        run: |
+          $dir = Join-Path $env:RUNNER_TEMP 'release dir'
+          New-Item -ItemType Directory -Force $dir | Out-Null
+          $exe = Join-Path $dir 'MXB Coach.exe'
+          Copy-Item "$env:SystemRoot\System32\whoami.exe" $exe
+          $cfg = Get-Content (Join-Path $env:RUNNER_TEMP 'artifact-signing\tauri.signing.json') -Raw | ConvertFrom-Json
+          $c = $cfg.bundle.windows.signCommand
+          $args2 = @($c.args | ForEach-Object { $_ -replace '%1', $exe })
+          & $c.cmd @args2
+          if ($LASTEXITCODE -ne 0) { throw "signing exited $LASTEXITCODE" }
+
+      - name: Show signing log
+        if: ${{ always() }}
+        shell: pwsh
+        run: |
+          $log = Join-Path $env:RUNNER_TEMP 'sign-windows.log'
+          if (Test-Path $log) { Get-Content $log }
