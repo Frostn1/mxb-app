@@ -10,6 +10,8 @@
  * flow's objects at the bucket root are left alone: shipped apps still read them.
  */
 
+import { PRESENCE_TTL_MS } from "./validate";
+
 /** A paint uploaded through this flow is served for this long after its last upload. */
 export const LIVE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -216,4 +218,46 @@ export async function pruneLivePaints(env: Env, now = Date.now()): Promise<void>
   } catch (err) {
     console.error(JSON.stringify({ msg: "paint sweep failed", error: String(err) }));
   }
+}
+
+/** A paint is fetchable by someone on the same server as its owner for this long after their last heartbeat. */
+export const PAINT_ACCESS_TTL_MS = PRESENCE_TTL_MS;
+
+/**
+ * Whether `account` may download the paint with this digest.
+ *
+ *   (a) they wear it themselves (it is in their own look), or
+ *   (b) they are present on a server (heartbeat within `ttlMs`) where a rider who wears it is
+ *       also present, or
+ *   (c) it is explicitly shared with their account or their GUID (`paint_shares`; team lists
+ *       will be another `grantee_kind`).
+ *
+ * Knowing a hash is not a capability. The caller answers 404 on false, never 403, so a hash
+ * cannot be probed for existence.
+ */
+export async function mayFetchPaint(
+  sha256: string,
+  account: { id: string; guid: string | null },
+  env: Env,
+  ttlMs = PAINT_ACCESS_TTL_MS,
+  now = Date.now(),
+): Promise<boolean> {
+  const since = now - ttlMs;
+  const hit = await env.DB.prepare(
+    "SELECT 1 AS ok FROM loadout_paints WHERE account_id = ?1 AND sha256 = ?2" +
+      " UNION ALL" +
+      " SELECT 1 FROM presence me" +
+      " JOIN presence o ON o.server_id = me.server_id AND o.updated_at > ?3" +
+      " JOIN loadout_paints p ON p.account_id = o.account_id AND p.sha256 = ?2" +
+      " WHERE me.account_id = ?1 AND me.updated_at > ?3" +
+      " UNION ALL" +
+      " SELECT 1 FROM paint_shares s WHERE s.sha256 = ?2" +
+      " AND (s.expires_at IS NULL OR s.expires_at > ?4)" +
+      " AND ((s.grantee_kind = 'account' AND s.grantee = ?1)" +
+      " OR (s.grantee_kind = 'guid' AND ?5 IS NOT NULL AND s.grantee = ?5))" +
+      " LIMIT 1",
+  )
+    .bind(account.id, sha256, since, now, account.guid)
+    .first<{ ok: number }>();
+  return !!hit;
 }
