@@ -21,6 +21,9 @@ pub(crate) const HUD_NEEDS: &str = "0.23";
 /// the choice of voice. Coach writes them either way: an older recorder ignores what it doesn't
 /// know, so nothing breaks by setting them early — the rider is just told they need 0.24.
 pub(crate) const EXTRAS_NEED: &str = "0.24";
+/// The first recorder that paints the line to take on the track itself (FrostMod v0.42.0,
+/// `ground` in hud.ini). An older one only draws the trail inside the map.
+pub(crate) const GROUND_NEEDS: &str = "0.42";
 
 /// The HUD parts, in the order the overlay lists them: key, label, whether the plugin draws it
 /// when the file doesn't say, and the recorder it needs.
@@ -36,6 +39,9 @@ pub const HUD_PARTS: &[Part] = &[
     Part { key: "map", label: "Track map with ghost and cues", default_on: true, needs: HUD_NEEDS },
     Part { key: "susp", label: "Suspension bars", default_on: false, needs: EXTRAS_NEED },
     Part { key: "trail", label: "Blue trail of the line to take", default_on: false, needs: EXTRAS_NEED },
+    // Follows the trail until the rider sets it on its own: the plugin reads a missing `ground`
+    // as whatever `trail` says, and `hud_of` reports it the same way.
+    Part { key: "ground", label: "Blue line on the track", default_on: false, needs: GROUND_NEEDS },
     Part { key: "setup", label: "Setup card (when stopped)", default_on: true, needs: HUD_NEEDS },
 ];
 
@@ -173,7 +179,13 @@ fn hud_of(path: &Path, mxbmrp3: bool, pre_extras: bool) -> Hud {
                 // itself when MXBMRP3 is there to draw one. Reporting that as "on" is what
                 // made the switch look broken: the rider turned on a map that was already on,
                 // and none appeared.
-                let default = if p.key == "map" { !mxbmrp3 } else { p.default_on };
+                let default = match p.key {
+                    "map" => !mxbmrp3,
+                    // The line on the track follows the trail when the file doesn't name it,
+                    // as the plugin does.
+                    "ground" => ini::on(ini::get(&pairs, "trail"), false),
+                    _ => p.default_on,
+                };
                 HudPart { key: p.key, label: p.label, on: ini::on(ini::get(&pairs, p.key), default), needs: p.needs }
             })
             .collect(),
@@ -312,6 +324,27 @@ mod tests {
         assert_eq!(part(&hud, "susp").needs, EXTRAS_NEED);
         assert_eq!(part(&hud, "trail").needs, EXTRAS_NEED);
         assert_eq!(part(&hud, "cue").needs, HUD_NEEDS);
+    }
+
+    /// The line on the track is its own switch, but until the rider sets it, it follows the
+    /// trail - which is what the plugin does with a hud.ini that has no `ground` key.
+    #[test]
+    fn the_line_on_the_track_follows_the_trail_until_set() {
+        let none = hud_of(Path::new("/nowhere/hud.ini"), false, false);
+        assert!(!part(&none, "ground").on, "off with the trail off");
+        assert_eq!(part(&none, "ground").needs, GROUND_NEEDS);
+        assert_eq!(part(&none, "ground").label, "Blue line on the track");
+
+        let dir = std::env::temp_dir().join(format!("coach-ground-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let path = dir.join("hud.ini");
+        ini::write(&path, "hud", &[("trail", "1".into())]).unwrap();
+        assert!(part(&hud_of(&path, false, false), "ground").on, "the trail on brings it with it");
+        ini::write(&path, "hud", &[("trail", "1".into()), ("ground", "0".into())]).unwrap();
+        assert!(!part(&hud_of(&path, false, false), "ground").on, "unless it is switched off itself");
+        ini::write(&path, "hud", &[("trail", "0".into()), ("ground", "1".into())]).unwrap();
+        assert!(part(&hud_of(&path, false, false), "ground").on, "and it can be on without the trail");
+        let _ = fs::remove_dir_all(&dir);
     }
 
     /// The reported map state has to be the one the rider will actually get, or the switch
