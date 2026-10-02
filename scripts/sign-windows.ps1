@@ -37,6 +37,28 @@ foreach ($name in @('ARTIFACT_SIGNING_SIGNTOOL', 'ARTIFACT_SIGNING_DLIB', 'ARTIF
   }
 }
 
+# The Azure login done before the build used a GitHub OIDC assertion that expires within minutes
+# (AADSTS700024), long before a release build reaches signing. Log in again with a fresh token.
+function Connect-AzureFresh {
+  if (-not ($env:ACTIONS_ID_TOKEN_REQUEST_URL -and $env:ACTIONS_ID_TOKEN_REQUEST_TOKEN -and
+      $env:AZURE_CLIENT_ID -and $env:AZURE_TENANT_ID)) {
+    Write-Host 'sign-windows: no OIDC request env (or Azure ids); keeping the existing az session'
+    return
+  }
+  $uri = $env:ACTIONS_ID_TOKEN_REQUEST_URL + '&audience=' + [uri]::EscapeDataString('api://AzureADTokenExchange')
+  $resp = Invoke-RestMethod -Uri $uri -Headers @{ Authorization = "Bearer $env:ACTIONS_ID_TOKEN_REQUEST_TOKEN" }
+  $token = $resp.value
+  if (-not $token) { throw 'sign-windows: GitHub returned no OIDC token' }
+  Write-Host "::add-mask::$token"
+  $o = & az login --service-principal -u $env:AZURE_CLIENT_ID --tenant $env:AZURE_TENANT_ID --federated-token $token --allow-no-subscriptions 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) { throw "sign-windows: az login failed: $o" }
+  if ($env:AZURE_SUBSCRIPTION_ID) {
+    & az account set --subscription $env:AZURE_SUBSCRIPTION_ID 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'sign-windows: az account set failed' }
+  }
+  Write-Host 'sign-windows: refreshed Azure login with a fresh OIDC token'
+}
+
 # Artifact Signing's certificates last three days, so every signature is timestamped with
 # Microsoft's RFC 3161 service, which keeps it valid after the certificate expires.
 $timestamp = 'http://timestamp.acs.microsoft.com'
@@ -49,6 +71,7 @@ foreach ($file in $Files) {
   # release shouldn't fail over it.
   $signed = $false
   for ($attempt = 1; $attempt -le 3 -and -not $signed; $attempt++) {
+    Connect-AzureFresh
     # Arguments as an array, so a path with a space stays one argument. Output is captured and
     # printed: Tauri shows nothing of this script's output when it fails.
     $signArgs = @('sign', '/v', '/debug', '/fd', 'SHA256', '/tr', $timestamp, '/td', 'SHA256',

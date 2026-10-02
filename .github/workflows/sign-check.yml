@@ -39,6 +39,12 @@ jobs:
           profile: ${{ vars.ARTIFACT_SIGNING_PROFILE }}
           required: "true"
 
+      # Simulates a long release build: the login's OIDC assertion is expired by the time
+      # signing runs, as in the Coach release. sign-windows.ps1 must log in again.
+      - name: Wait 11 minutes (assertion expiry)
+        shell: pwsh
+        run: Start-Sleep -Seconds 660
+
       - name: Sign a file named like the Coach exe, as Tauri does
         shell: pwsh
         run: |
