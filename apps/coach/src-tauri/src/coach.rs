@@ -389,6 +389,11 @@ pub fn watch_sessions(app: &AppHandle) {
     let handle = app.clone();
     mxb_core::paintwatch::watch_folders(&state.0, "session watcher", &dirs, SESSION_DEBOUNCE, move |paths| {
         log::info!("session watcher: {} file(s) changed", paths.len());
+        // The track's own ground for the recorder's line, the moment a track is seen ridden:
+        // no lap needed (groundgrid.rs). Once per track per run.
+        for p in paths.iter().filter(|p| p.to_ascii_lowercase().ends_with(".mxbc")) {
+            crate::groundgrid::ensure_for(&handle, Path::new(p));
+        }
         let _ = handle.emit(SESSIONS_CHANGED, ());
     });
 }
