@@ -196,7 +196,8 @@ jobs:
           releaseDraft: false
           # A suffixed tag is a beta of the version it names. Unlike before the move, a plain
           # tag is a real release here: `releases/latest` in mxb-coach is the coach's own.
-          prerelease: ${{ github.ref_type != 'tag' || contains(github.ref_name, '-') }}
+          # The `coach-` prefix itself holds a '-', so check the tag without it (coach-v0.1.22 → v0.1.22).
+          prerelease: ${{ github.ref_type != 'tag' || contains(steps.tag.outputs.name, '-') }}
           # The signing overlay on a signed Windows leg; empty everywhere else.
           args: ${{ matrix.args }} ${{ steps.signing.outputs.tauri-args }}
 
