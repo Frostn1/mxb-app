@@ -20,6 +20,12 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+# Tauri runs this as its signCommand and shows none of its output when it fails (only
+# "failed to run pwsh"), so keep a transcript the workflow can print afterwards.
+if ($env:RUNNER_TEMP) {
+  try { Start-Transcript -Path (Join-Path $env:RUNNER_TEMP 'sign-windows.log') -Append | Out-Null } catch { }
+}
+
 if ($env:ARTIFACT_SIGNING -ne '1') {
   Write-Host "sign-windows: signing not configured; leaving unsigned: $($Files -join ', ')"
   exit 0
