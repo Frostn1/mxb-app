@@ -60,7 +60,7 @@ fn bind<R: Runtime>(app: &AppHandle<R>, cfg: &config::AppConfig) -> Result<(), S
 
 /// Current overlay settings plus what the game is doing right now.
 pub fn state<R: Runtime>(app: &AppHandle<R>, cfg: &config::AppConfig) -> OverlayState {
-    core::state(cfg, core::peer(app))
+    core::state(cfg, App::Manager, core::peer(app))
 }
 
 /// Start this app's end of the link to MXB Coach, and dial it if it's already up.

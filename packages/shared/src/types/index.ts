@@ -147,6 +147,8 @@ export interface Config {
   overlayEnabled?: boolean;
   /** Overlay toggle combo in Tauri accelerator syntax, e.g. `"CommandOrControl+Shift+X"`. */
   overlayHotkey?: string;
+  /** MXB Coach's own overlay combo, independent of `overlayHotkey` (MXB App's). */
+  coachOverlayHotkey?: string;
   /** Which tyre pack the 3D previews fit a bike with. **Blank means the pack the bike's own
    *  `gfx.cfg` names**, which is what the game would fit. Substituting the name is all it
    *  takes to see a bike on another pack — nothing on disk is touched. */

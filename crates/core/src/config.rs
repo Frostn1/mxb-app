@@ -169,6 +169,11 @@ pub struct AppConfig {
     /// The combo that toggles the overlay, in Tauri accelerator syntax
     /// (`"CommandOrControl+Shift+X"`). Blank falls back to [`DEFAULT_OVERLAY_HOTKEY`].
     pub overlay_hotkey: String,
+    /// MXB Coach's own overlay combo. Coach and MXB App used to share `overlay_hotkey`, so
+    /// changing it in one changed it in the other; each app now has its own. `None` is a
+    /// config from before the split: [`migrate`] copies `overlay_hotkey` in, so nobody loses
+    /// the combo they had. Blank means the default, as for `overlay_hotkey`.
+    pub coach_overlay_hotkey: Option<String>,
     /// Which tyre pack the 3D previews put a bike on. **Blank means "the one the bike's own
     /// `gfx.cfg` names"**, which is what the game itself would fit.
     ///
@@ -470,6 +475,7 @@ impl Default for AppConfig {
             mxbmrp3_dismissed: false,
             overlay_enabled: true,
             overlay_hotkey: DEFAULT_OVERLAY_HOTKEY.to_string(),
+            coach_overlay_hotkey: Some(DEFAULT_OVERLAY_HOTKEY.to_string()),
             preview_tyres: String::new(),
             voice_enabled: false,
             paint_sync_rev: PAINT_SYNC_REV,
@@ -573,6 +579,12 @@ pub fn migrate(cfg: &mut AppConfig) -> bool {
             cfg.overlay_hotkey.trim(),
         );
         cfg.overlay_hotkey = DEFAULT_OVERLAY_HOTKEY.to_string();
+        changed = true;
+    }
+    // The split described on `coach_overlay_hotkey`: both apps start from the one combo they
+    // shared, then go their own ways.
+    if cfg.coach_overlay_hotkey.is_none() {
+        cfg.coach_overlay_hotkey = Some(cfg.overlay_hotkey.clone());
         changed = true;
     }
     // Pre-multi-game configs have folders but no `games` map. Seed the active game's
@@ -1000,6 +1012,30 @@ pub fn save(app: &AppHandle, cfg: &AppConfig) -> anyhow::Result<()> {
     std::fs::rename(&tmp, &path)?;
     crate::game::set_active(cfg.active_game);
     Ok(())
+}
+
+/// Write `coachOverlayHotkey` into an existing `config.json` that lacks it, copying the
+/// shared `overlayHotkey`, so Coach holds its own copy before MXB App ever changes theirs.
+/// Coach doesn't own the config, so this patches the one key and never creates the file.
+pub fn seed_coach_hotkey(app: &AppHandle) -> anyhow::Result<()> {
+    seed_coach_hotkey_at(&config_path(app))
+}
+
+fn seed_coach_hotkey_at(path: &Path) -> anyhow::Result<()> {
+    let Ok(bytes) = std::fs::read(path) else {
+        return Ok(());
+    };
+    let doc: serde_json::Value = serde_json::from_slice(&bytes)?;
+    if doc.get("coachOverlayHotkey").is_some() {
+        return Ok(());
+    }
+    let combo = doc
+        .get("overlayHotkey")
+        .and_then(|v| v.as_str())
+        .unwrap_or(DEFAULT_OVERLAY_HOTKEY);
+    let mut keys = serde_json::Map::new();
+    keys.insert("coachOverlayHotkey".into(), serde_json::json!(combo));
+    patch_file(path, keys)
 }
 
 /// Set single keys in `config.json`, leaving every other field as it is, the ones this
@@ -2293,6 +2329,60 @@ mod tests {
             "and the move is written down rather than redone"
         );
         assert_eq!(cfg.overlay_hotkey, DEFAULT_OVERLAY_HOTKEY);
+    }
+
+    /// Coach and MXB App shared one combo; the split must hand both the one they had.
+    #[test]
+    fn the_shared_hotkey_is_copied_to_coach_on_migration() {
+        let mut cfg: AppConfig = serde_json::from_str(r#"{"overlayHotkey":"Alt+F1"}"#).unwrap();
+        assert_eq!(cfg.coach_overlay_hotkey, None);
+        assert!(migrate(&mut cfg), "and the copy is written down");
+        assert_eq!(cfg.coach_overlay_hotkey.as_deref(), Some("Alt+F1"));
+        assert_eq!(cfg.overlay_hotkey, "Alt+F1");
+        assert!(!migrate(&mut cfg), "once");
+    }
+
+    #[test]
+    fn a_coach_hotkey_already_chosen_is_not_overwritten_by_migration() {
+        let mut cfg: AppConfig =
+            serde_json::from_str(r#"{"overlayHotkey":"Alt+F1","coachOverlayHotkey":"Alt+F2"}"#).unwrap();
+        migrate(&mut cfg);
+        assert_eq!(cfg.coach_overlay_hotkey.as_deref(), Some("Alt+F2"));
+    }
+
+    /// Coach seeds its own key into a config it doesn't own, from the shared one, once.
+    #[test]
+    fn coach_seeds_its_own_hotkey_from_the_shared_one_once() {
+        let dir = std::env::temp_dir().join(format!("mxb-seed-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.json");
+        std::fs::write(&path, r#"{"overlayHotkey":"Alt+F1","someFutureField":1}"#).unwrap();
+        seed_coach_hotkey_at(&path).unwrap();
+        let v: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        assert_eq!(v["coachOverlayHotkey"], "Alt+F1");
+        assert_eq!(v["overlayHotkey"], "Alt+F1");
+        assert_eq!(v["someFutureField"], 1);
+        std::fs::write(&path, r#"{"overlayHotkey":"Alt+F3","coachOverlayHotkey":"Alt+F2"}"#).unwrap();
+        seed_coach_hotkey_at(&path).unwrap();
+        let v: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        assert_eq!(v["coachOverlayHotkey"], "Alt+F2", "a chosen key is never reseeded");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The bug: Coach's patch wrote the one shared key, so it moved MXB App's too.
+    #[test]
+    fn patching_the_coach_hotkey_on_disk_leaves_the_app_hotkey_unchanged() {
+        let dir = std::env::temp_dir().join(format!("mxb-patch-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.json");
+        std::fs::write(&path, r#"{"overlayHotkey":"Alt+F1","coachOverlayHotkey":"Alt+F1"}"#).unwrap();
+        let mut keys = serde_json::Map::new();
+        keys.insert("coachOverlayHotkey".into(), serde_json::json!("Alt+F2"));
+        patch_file(&path, keys).unwrap();
+        let cfg: AppConfig = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        assert_eq!(cfg.coach_overlay_hotkey.as_deref(), Some("Alt+F2"));
+        assert_eq!(cfg.overlay_hotkey, "Alt+F1");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

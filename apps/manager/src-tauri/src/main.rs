@@ -6041,7 +6041,12 @@ fn set_voice_ptt_hotkey(app: tauri::AppHandle, hotkey: String) -> Result<(), Str
         let _ = overlay::register(&app, &previous);
         return Err(e);
     }
-    config::save(&app, &cfg).map_err(|e| format!("{e:#}"))
+    config::save(&app, &cfg).map_err(|e| format!("{e:#}"))?;
+    // Coach keeps its own combo; tell it ours changed so it re-checks whether they collide.
+    if let Some(link) = mxb_core::overlay::link(&app) {
+        link.send(&mxb_core::overlaylink::Msg::Rebind { error: None });
+    }
+    Ok(())
 }
 
 /// Switch between push-to-talk and toggle. Rebinds, since the two modes differ only in

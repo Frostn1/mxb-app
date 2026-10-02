@@ -1,8 +1,9 @@
 //! MXB Coach's in-game overlay: tips, setup, live cues and the HUD over the game.
 //!
-//! Alone, Coach holds the overlay hotkey. Beside MXB App it registers none: MXB App holds the
-//! one key for both, and the two overlays hand the screen to each other over
-//! [`mxb_core::overlaylink`]. The window and its rules are core's.
+//! Coach has its own overlay hotkey (`coachOverlayHotkey`), independent of MXB App's. Alone, or
+//! beside an MXB App on a different combo, Coach holds its key. Only when both apps are set to
+//! the same combo does MXB App hold it for both, and the two overlays hand the screen to each
+//! other over [`mxb_core::overlaylink`]. The window and its rules are core's.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
@@ -44,6 +45,10 @@ fn deferred() -> Option<&'static str> {
 
 /// Who should hold the key right now.
 fn decide(app: &AppHandle) -> Option<&'static str> {
+    decide_with(app, &config::load(app).unwrap_or_default())
+}
+
+fn decide_with(app: &AppHandle, cfg: &config::AppConfig) -> Option<&'static str> {
     let Some(link) = core::link(app) else {
         // Coach's own link never started — a firewall or AV blocking the loopback listener
         // is the usual cause. Without it there is no way to tell a current MXB App from one
@@ -56,7 +61,8 @@ fn decide(app: &AppHandle) -> Option<&'static str> {
         return None;
     };
     if link.peer().is_some() {
-        return Some("linked");
+        // Different combos: each app holds its own and nothing is shared.
+        return core::hotkeys_shared(cfg).then_some("linked");
     }
     if let Some(p) = link.mismatch() {
         return Some(if p.proto > overlaylink::PROTO { "updateCoach" } else { "updateManager" });
@@ -98,6 +104,10 @@ fn apply(app: &AppHandle, next: Option<&'static str>, force: bool) -> Result<(),
 
 /// Start the link and the watch for MXB App.
 pub fn start(app: &AppHandle) {
+    // Hold a copy of the combo the two apps used to share before MXB App can change theirs.
+    if let Err(e) = config::seed_coach_hotkey(app) {
+        log::warn!("coach overlay hotkey not seeded: {e:#}");
+    }
     if let Some(dir) = config::data_dir(app).map(|d| d.join("overlay")) {
         let handle = app.clone();
         let version = app.package_info().version.to_string();
@@ -130,8 +140,8 @@ pub fn stop(app: &AppHandle) {
 fn on_link(app: &AppHandle, link: &Link, event: Event) {
     match &event {
         Event::Up(_) => {
-            // Let go first, then tell MXB App it can bind.
-            let _ = apply(app, Some("linked"), false);
+            // Let go first (when sharing a combo), then tell MXB App it can bind.
+            let _ = apply(app, decide(app), false);
             link.send(&Msg::Rebind { error: None });
         }
         Event::Down => {
@@ -145,6 +155,8 @@ fn on_link(app: &AppHandle, link: &Link, event: Event) {
             if let Ok(mut e) = PEER_ERROR.lock() {
                 *e = error.clone();
             }
+            // MXB App changed its key: whether the two share one may have changed.
+            let _ = apply(app, decide(app), true);
         }
         _ => {}
     }
@@ -189,7 +201,7 @@ pub fn overlay_hide(app: AppHandle) -> Result<(), String> {
 #[tauri::command]
 pub fn overlay_state(app: AppHandle) -> OverlayState {
     let cfg = config::load(&app).unwrap_or_default();
-    let mut state = core::state(&cfg, core::peer(&app));
+    let mut state = core::state(&cfg, App::Coach, core::peer(&app));
     let why = deferred();
     state.deferred = why.map(str::to_string);
     // No link means no sharing with MXB App, whatever else is true. Coach keeps the key in
@@ -217,22 +229,31 @@ pub fn set_overlay_enabled(app: AppHandle, enabled: bool) -> Result<(), String> 
 #[tauri::command]
 pub fn set_overlay_hotkey(app: AppHandle, hotkey: String) -> Result<(), String> {
     core::parse_hotkey(&hotkey)?;
-    if deferred().is_none() {
-        let previous = config::load(&app).unwrap_or_default();
-        let mut cfg = previous.clone();
-        cfg.overlay_hotkey = hotkey.clone();
+    let previous = config::load(&app).unwrap_or_default();
+    let mut cfg = previous.clone();
+    cfg.coach_overlay_hotkey = Some(hotkey.clone());
+    // Only Coach's own key is written: MXB App's `overlayHotkey` is never touched here.
+    if decide_with(&app, &cfg).is_none() {
         if cfg.overlay_enabled {
             let _ = app.global_shortcut().unregister_all();
             if let Err(e) = core::bind_toggle(&app, &SPEC, &cfg) {
                 let _ = app.global_shortcut().unregister_all();
-                let _ = core::bind_toggle(&app, &SPEC, &previous);
+                let _ = apply(&app, decide(&app), true);
                 return Err(e);
             }
             core::record_hotkey_result(&Ok(()));
         }
-        return patch(&app, "overlayHotkey", serde_json::json!(hotkey));
+        if let Ok(mut d) = DEFERRED.lock() {
+            *d = None;
+        }
+        patch(&app, "coachOverlayHotkey", serde_json::json!(hotkey))?;
+        // MXB App may have been holding the combo for both; it can bind its own now.
+        if let Some(link) = core::link(&app) {
+            link.send(&Msg::Rebind { error: None });
+        }
+        return Ok(());
     }
-    patch(&app, "overlayHotkey", serde_json::json!(hotkey))?;
+    patch(&app, "coachOverlayHotkey", serde_json::json!(hotkey))?;
     rebind(&app)
 }
 
