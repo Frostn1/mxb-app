@@ -1251,6 +1251,26 @@ export const de: Translation = {
   "sync.autoNote":
     "Dein Look veröffentlicht sich selbst — jedes Bike, sobald du ihn in der App oder in der Garage des Spiels änderst. Der der anderen kommt, wenn du auf Spielen drückst.",
 
+  "viewOnly.title": "Nur-ansehen- und gesperrte Lackierungen",
+  "viewOnly.desc": "Lege fest, wer deine Lackierungen behalten oder fahren darf. Fahrer auf deinem Server sehen sie so oder so.",
+  "viewOnly.honest": "Ehrliche Grenzen: Nur-ansehen lässt die Apps anderer Fahrer deine Lackierung löschen, wenn ihr Spiel schließt, und hält sie aus ihrer Bibliothek, ihren Exporten und Freigaben heraus. Das stoppt gelegentliches Kopieren, aber niemanden, der die Datei kopiert, während das Spiel läuft, oder sie vom Bildschirm abgreift. Eine Sperre gilt nur auf MXB-Servern mit eingeschalteten Lackierungssperren; anderswo kann eine kopierte Lackierung weiter gefahren werden.",
+  "viewOnly.empty": "Deine Lackierungen erscheinen hier, sobald dein Look veröffentlicht ist.",
+  "viewOnly.viewOnly": "Nur ansehen",
+  "viewOnly.viewOnlyHint": "Andere auf dem Server sehen sie, behalten sie aber nicht.",
+  "viewOnly.locked": "Gesperrt",
+  "viewOnly.lockedHint": "Nur du und dein Team können damit fahren.",
+  "viewOnly.needsSteam": "Zum Sperren brauchst du die Steam-Anmeldung, damit ein Server erkennt, dass deine GUID wirklich deine ist.",
+  "viewOnly.notLockable": "Nur Bike-Lackierungen lassen sich sperren: Ein Server sieht, welche Bike-Lackierung du fährst, nicht deine Ausrüstung.",
+  "viewOnly.team": "Team",
+  "viewOnly.teamPlaceholder": "Fahrername oder GUID (FF…)",
+  "viewOnly.add": "Hinzufügen",
+  "viewOnly.save": "Speichern",
+  "viewOnly.saved": "Gespeichert",
+  "viewOnly.saveFailed": "Speichern fehlgeschlagen: {{error}}",
+  "viewOnly.loadFailed": "Deine Lackierungen konnten nicht geladen werden: {{error}}",
+  "viewOnly.notWorn": "Nicht in deinem aktuellen Look",
+  "viewOnly.remove": "Entfernen",
+
   // ── Vom ersten Durchlauf übersehene Strings (mehrzeiliges JSX) ─────────────
   "libraryDetail.noEmbedded": "Für dieses Element wurden keine eingebetteten Details gefunden.",
   "modDetail.downloadFromHost": "Von {{host}} herunterladen",

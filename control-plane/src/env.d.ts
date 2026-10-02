@@ -46,6 +46,11 @@ interface Env {
      *  out (`lease.ts`); without it that route answers 503 and the DLL, built without the public
      *  half, does not ask for one. */
     MXB_VERDICT_SIGNING_KEY?: string;
+    /** Ed25519 private key (PKCS#8 DER, base64 or base64url) that signs the paint lock list
+     *  mxbserver fetches (`GET /v1/servers/paint-locks`, `paintpolicy.ts`). Its own pair: a server
+     *  operator pins the public half (`GET /v1/paint-locks/pubkey`, minisign format) in
+     *  `[paints] pubkey_file`. Without it that route answers 503 and servers keep their last list. */
+    MXB_PAINTLOCK_SIGNING_KEY?: string;
     /** Keys the device hash the apps report (`X-MXB-Device`) before it is stored, so a row in
      *  `device_links` is useless without it (`devices.ts`). Any long random string. Without it
      *  device linking is off: nothing is recorded and bans do not follow the machine — never an

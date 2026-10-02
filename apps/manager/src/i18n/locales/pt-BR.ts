@@ -1245,6 +1245,26 @@ export const ptBR: Translation = {
   "sync.autoNote":
     "Seu visual se publica sozinho — cada moto, sempre que você muda no app ou na garagem do jogo. O dos outros chega quando você aperta Jogar.",
 
+  "viewOnly.title": "Pinturas só para ver e bloqueadas",
+  "viewOnly.desc": "Escolha quem pode ficar com cada pintura sua ou correr com ela. Os pilotos do seu servidor continuam vendo de qualquer jeito.",
+  "viewOnly.honest": "Limites honestos: só para ver faz os apps dos outros pilotos apagarem sua pintura quando o jogo fecha e a deixa fora da biblioteca, das exportações e dos compartilhamentos deles. Isso impede a cópia casual, não quem copia o arquivo com o jogo aberto ou captura a pintura da tela. Um bloqueio só vale em servidores MXB com os bloqueios de pintura ligados; em qualquer outro, uma pintura copiada ainda pode ser usada.",
+  "viewOnly.empty": "Suas pinturas aparecem aqui depois que seu visual for publicado.",
+  "viewOnly.viewOnly": "Só para ver",
+  "viewOnly.viewOnlyHint": "Os outros no servidor veem, mas não ficam com ela.",
+  "viewOnly.locked": "Bloqueada",
+  "viewOnly.lockedHint": "Só você e sua equipe podem correr com ela.",
+  "viewOnly.needsSteam": "Bloquear exige login com a Steam, para o servidor saber que seu GUID é mesmo seu.",
+  "viewOnly.notLockable": "Só pinturas de moto podem ser bloqueadas: o servidor vê qual pintura de moto você usa, não seu equipamento.",
+  "viewOnly.team": "Equipe",
+  "viewOnly.teamPlaceholder": "Nome do piloto ou GUID (FF…)",
+  "viewOnly.add": "Adicionar",
+  "viewOnly.save": "Salvar",
+  "viewOnly.saved": "Salvo",
+  "viewOnly.saveFailed": "Não foi possível salvar: {{error}}",
+  "viewOnly.loadFailed": "Não foi possível carregar suas pinturas: {{error}}",
+  "viewOnly.notWorn": "Não está no seu visual atual",
+  "viewOnly.remove": "Remover",
+
   // ── Textos que a primeira varredura não pegou (JSX em várias linhas) ──────
   "libraryDetail.noEmbedded": "Nenhum detalhe embutido foi encontrado para este item.",
   "modDetail.downloadFromHost": "Baixar de {{host}}",

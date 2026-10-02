@@ -201,7 +201,9 @@ pub async fn join(
     server: &ServerRef,
     bikes: Option<&[BikeLoadout]>,
 ) -> anyhow::Result<JoinReply> {
-    let mut body = serde_json::json!({ "server": server });
+    // `viewOnly`: this app installs view-only paints for the session only and deletes them
+    // when the game exits (`viewonly.rs`). Without it the control plane never sends one.
+    let mut body = serde_json::json!({ "server": server, "caps": ["viewOnly"] });
     if let Some(bikes) = bikes {
         body["bikes"] = serde_json::to_value(bikes)?;
     }
@@ -541,6 +543,9 @@ impl Grid {
 pub struct Pick {
     pub rel_dest: String,
     pub sha256: String,
+    /// The variant's owner made it view-only: it comes from the session store and is journaled
+    /// for deletion when the game exits.
+    pub view_only: bool,
 }
 
 /// For every destination anyone wears, the variant to install there.
@@ -555,6 +560,7 @@ pub fn pick_variants<'a>(riders: impl IntoIterator<Item = &'a RoomRider>) -> Vec
         rel_dest: String,
         riders: HashSet<String>,
         earliest: u64,
+        view_only: bool,
     }
     let mut by_dest: HashMap<String, HashMap<String, Variant>> = HashMap::new();
     for rider in riders {
@@ -569,7 +575,10 @@ pub fn pick_variants<'a>(riders: impl IntoIterator<Item = &'a RoomRider>) -> Vec
                     rel_dest: paint.rel_dest.clone(),
                     riders: HashSet::new(),
                     earliest: u64::MAX,
+                    view_only: false,
                 });
+            // Any owner of these bytes asking for view-only is enough: the bytes are the same.
+            variant.view_only |= paint.view_only;
             variant.riders.insert(key.clone());
             variant.earliest = variant.earliest.min(rider.joined_at);
         }
@@ -587,11 +596,21 @@ pub fn pick_variants<'a>(riders: impl IntoIterator<Item = &'a RoomRider>) -> Vec
                         // Same count, same instant: any fixed order beats a hash map's.
                         .then(sha_b.cmp(sha_a))
                 })
-                .map(|(sha, v)| Pick { rel_dest: v.rel_dest, sha256: sha })
+                .map(|(sha, v)| Pick { rel_dest: v.rel_dest, sha256: sha, view_only: v.view_only })
         })
         .collect();
     picks.sort_by(|a, b| a.rel_dest.cmp(&b.rel_dest));
     picks
+}
+
+/// Every hash some owner on the grid made view-only.
+fn view_only_hashes(riders: &[&RoomRider]) -> HashSet<String> {
+    riders
+        .iter()
+        .flat_map(|r| r.paints.iter())
+        .filter(|p| p.view_only)
+        .map(|p| p.sha256.to_ascii_lowercase())
+        .collect()
 }
 
 /// How many destinations more than one variant wants.
@@ -784,6 +803,16 @@ impl PaintStore {
     }
 
     /// Keep `bytes` as `sha`, refusing them unless they hash to it.
+    /// Drop a stored variant. For a hash that turned out to be view-only: those never stay here.
+    pub fn remove(&mut self, sha: &str) {
+        if let Some(path) = self.path(sha).filter(|p| p.is_file()) {
+            let _ = std::fs::remove_file(path);
+        }
+        if self.used.remove(sha).is_some() {
+            self.dirty = true;
+        }
+    }
+
     pub fn put(&mut self, sha: &str, bytes: &[u8]) -> anyhow::Result<()> {
         let Some(dest) = self.path(sha) else { anyhow::bail!("{sha:?} is not a paint hash") };
         if sha256_bytes(bytes) != sha {
@@ -994,18 +1023,27 @@ pub fn cleanup_received(
 /// The store and the index, opened once per session.
 pub struct Local {
     pub store: PaintStore,
+    /// View-only paints, for this game session only. Emptied when the game exits
+    /// ([`crate::viewonly::sweep`]); never the week-long `store`.
+    pub session: PaintStore,
     pub index: HashIndex,
     index_path: PathBuf,
     indexed_at: Option<Instant>,
 }
 
 impl Local {
-    /// `dir` is the store's folder; the index sits beside the paints in it.
+    /// `dir` is the store's folder; the index sits beside the paints in it, and the session
+    /// store beside the folder ([`crate::viewonly::SESSION_STORE`]).
     pub fn open(dir: PathBuf) -> Self {
         let index_path = dir.join("index.json");
+        let session = dir
+            .parent()
+            .map(crate::viewonly::session_dir)
+            .unwrap_or_else(|| dir.join(crate::viewonly::SESSION_STORE));
         Local {
             index: HashIndex::load(&index_path),
             store: PaintStore::open(dir),
+            session: PaintStore::open(session),
             index_path,
             indexed_at: None,
         }
@@ -1022,6 +1060,11 @@ impl Local {
     fn save(&mut self) {
         self.store.save();
         self.index.save(&self.index_path);
+    }
+
+    /// The stored bytes for `sha`, from either store.
+    fn has(&self, sha: &str) -> bool {
+        self.store.has(sha) || self.session.has(sha)
     }
 }
 
@@ -1054,6 +1097,7 @@ pub async fn download_grid(
 
     let mut wanted: Vec<String> = Vec::new();
     let mut seen: HashSet<String> = HashSet::new();
+    let view_only = view_only_hashes(riders);
     for rider in riders {
         for paint in &rider.paints {
             let sha = paint.sha256.to_ascii_lowercase();
@@ -1061,8 +1105,11 @@ pub async fn download_grid(
                 continue;
             }
             // Deduped by hash: an unchanged paint another rider already wore is never
-            // re-requested, whatever destination it lands on.
-            local.store.mark_used(&sha, now);
+            // re-requested, whatever destination it lands on. A view-only paint is not
+            // remembered for the week either: it goes when the game does.
+            if !view_only.contains(&sha) {
+                local.store.mark_used(&sha, now);
+            }
             let Some(dest) = safe_dest(&mods_dir, &paint.rel_dest) else { continue };
             if dest.is_file() {
                 let held = local.index.sha_of(&dest);
@@ -1076,7 +1123,7 @@ pub async fn download_grid(
         }
     }
 
-    let lacking = |local: &Local, sha: &String| !local.store.has(sha) && local.index.find(sha).is_none();
+    let lacking = |local: &Local, sha: &String| !local.has(sha) && local.index.find(sha).is_none();
     let mut need: Vec<String> = wanted.iter().filter(|s| lacking(local, s)).cloned().collect();
     if !need.is_empty() {
         // The player may have the paint already, somewhere the index hasn't looked yet.
@@ -1097,8 +1144,10 @@ pub async fn download_grid(
                 first = false;
                 match fetch_paint(&http, token, sha).await {
                     Ok(Some(bytes)) => {
-                        // Verified inside `put`: unchecked bytes never reach the store.
-                        if let Err(e) = local.store.put(sha, &bytes) {
+                        // Verified inside `put`: unchecked bytes never reach the store. A
+                        // view-only paint goes to the session store, emptied at game exit.
+                        let store = if view_only.contains(sha) { &mut local.session } else { &mut local.store };
+                        if let Err(e) = store.put(sha, &bytes) {
                             log::warn!("[room] {e:#}");
                         } else {
                             fetched += 1;
@@ -1125,11 +1174,39 @@ pub async fn download_grid(
 pub fn apply_grid(cfg: &AppConfig, local: &mut Local, riders: &[&RoomRider], now: u64) -> PullOutcome {
     let mods_dir = crate::library::mods_root(&cfg.mods_path);
     let mut manifest = Manifest::read(&mods_dir);
+    let mut journal = crate::viewonly::Journal::read(&mods_dir);
 
     let picks = pick_variants(riders.iter().copied());
+    let (session_picks, picks): (Vec<Pick>, Vec<Pick>) = picks.into_iter().partition(|p| p.view_only);
     let mut out = install_picks(&mods_dir, &picks, &mut local.store, &mut local.index, &mut manifest);
+    // View-only paints install the same way, but from (and back into) the session store, and
+    // each one is journaled so the game's exit takes it away again.
+    let session_out = install_picks(&mods_dir, &session_picks, &mut local.session, &mut local.index, &mut manifest);
+    for pick in &session_picks {
+        if let Some(dest) = safe_dest(&mods_dir, &pick.rel_dest) {
+            if local.index.sha_of(&dest).as_deref() == Some(pick.sha256.as_str()) {
+                journal.claim(&pick.rel_dest, &pick.sha256);
+            }
+        }
+    }
+    // A destination that now holds an ordinary variant is no longer a view-only file.
+    for pick in &picks {
+        journal.forget(&pick.rel_dest);
+    }
+    // Swapping a view-only variant out keeps its bytes in whichever store the swap used; they
+    // must never be the week-long one.
+    for sha in view_only_hashes(riders) {
+        if local.store.has(&sha) {
+            local.store.remove(&sha);
+        }
+    }
+    out.installed += session_out.installed;
+    out.already_had += session_out.already_had;
+    out.rejected += session_out.rejected;
+    out.kept_yours += session_out.kept_yours;
     out.riders = riders.len();
     out.conflicted = contested(riders);
+    journal.write(&mods_dir);
 
     let removed = cleanup_received(&mods_dir, &mut local.store, &mut local.index, &mut manifest, now);
     let pruned = local.store.prune(now);
@@ -1607,6 +1684,7 @@ mod tests {
             sha256: sha.into(),
             size: 1,
             rel_dest: rel_dest.into(),
+            view_only: false,
         }
     }
 
@@ -1660,7 +1738,7 @@ mod tests {
             rider("Bob", 2, vec![paint(RED, &b)]),
             rider("Cat", 3, vec![paint(RED, &b)]),
         ];
-        assert_eq!(pick_variants(&riders), vec![Pick { rel_dest: RED.into(), sha256: b }]);
+        assert_eq!(pick_variants(&riders), vec![Pick { rel_dest: RED.into(), sha256: b, view_only: false }]);
     }
 
     #[test]
@@ -1715,7 +1793,66 @@ mod tests {
     }
 
     fn pick(sha: &str) -> Vec<Pick> {
-        vec![Pick { rel_dest: RED.into(), sha256: sha.into() }]
+        vec![Pick { rel_dest: RED.into(), sha256: sha.into(), view_only: false }]
+    }
+
+    /// A view-only paint goes from the session store into the game's folder, is journaled,
+    /// never lands in the week-long store, and is gone once the game exits.
+    #[test]
+    fn view_only_paints_are_session_only() {
+        let (mods, store_dir) = scratch("viewonly");
+        let root = mods.parent().unwrap().to_path_buf();
+        let cfg = AppConfig { mods_path: root.to_string_lossy().into_owned(), ..Default::default() };
+        let (vo_bytes, plain_bytes) = (b"Ann's view-only red".to_vec(), b"Bob's shared blue".to_vec());
+        let (vo, plain) = (sha256_bytes(&vo_bytes), sha256_bytes(&plain_bytes));
+        const BLUE: &str = "bikes/KTM450/paints/Blue.pnt";
+
+        let mut local = Local::open(store_dir.clone());
+        // What `download_grid` does with each: view-only to the session store.
+        local.session.put(&vo, &vo_bytes).unwrap();
+        local.store.put(&plain, &plain_bytes).unwrap();
+        let mut ann_paint = paint(RED, &vo);
+        ann_paint.view_only = true;
+        let ann = rider("Ann", 1, vec![ann_paint]);
+        let bob = rider("Bob", 2, vec![paint(BLUE, &plain)]);
+        let riders = vec![&ann, &bob];
+
+        let out = apply_grid(&cfg, &mut local, &riders, 1);
+        assert_eq!(out.installed, 2, "{out:?}");
+        assert_eq!(std::fs::read(mods.join(RED)).unwrap(), vo_bytes, "the game can list it this session");
+        assert!(!local.store.has(&vo), "never in the week-long store");
+        assert!(local.session.has(&vo));
+        let journal = crate::viewonly::Journal::read(&mods);
+        assert!(journal.holds(RED, &vo));
+        assert!(!journal.holds(BLUE, &plain), "an ordinary synced paint is not journaled");
+        let session_dir = crate::viewonly::session_dir(&root);
+        assert!(session_dir.join(format!("{vo}.pnt")).is_file(), "the session store is the dedicated folder");
+
+        // The game exits (or the app starts after a crash).
+        let swept = crate::viewonly::sweep(&mods, Some(&session_dir));
+        assert_eq!(swept.removed, 1);
+        assert!(!mods.join(RED).exists(), "view-only paint gone");
+        assert!(mods.join(BLUE).exists(), "ordinary synced paint stays");
+        assert!(!session_dir.exists(), "session store gone");
+        assert!(local.store.has(&plain));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A rider whose app predates view-only paints sends no flag, so nothing is session-only.
+    #[test]
+    fn view_only_rides_on_the_join_and_defaults_off() {
+        let entry: PaintEntry = serde_json::from_str(
+            r#"{"slot":"paint","fileName":"Red.pnt","sha256":"ab","size":1,"relDest":"bikes/K/paints/Red.pnt"}"#,
+        )
+        .unwrap();
+        assert!(!entry.view_only);
+        let flagged: PaintEntry = serde_json::from_str(
+            r#"{"slot":"paint","fileName":"Red.pnt","sha256":"ab","size":1,"relDest":"bikes/K/paints/Red.pnt","viewOnly":true}"#,
+        )
+        .unwrap();
+        assert!(flagged.view_only);
+        // Never sent: a rider's own look carries no flag.
+        assert!(!serde_json::to_string(&entry).unwrap().contains("viewOnly"));
     }
 
     #[test]
@@ -1792,7 +1929,7 @@ mod tests {
         let (mods, store_dir) = scratch("escape");
         let mut store = PaintStore::open(store_dir);
         let (mut index, mut manifest) = (HashIndex::default(), Manifest::default());
-        let picks = vec![Pick { rel_dest: "../../evil.pnt".into(), sha256: sha(1) }];
+        let picks = vec![Pick { rel_dest: "../../evil.pnt".into(), sha256: sha(1), view_only: false }];
         let out = install_picks(&mods, &picks, &mut store, &mut index, &mut manifest);
         assert_eq!(out.rejected, 1);
     }
@@ -2015,6 +2152,7 @@ mod paint_room_live {
                 sha256: sha.clone(),
                 size: bytes.len() as u64,
                 rel_dest: rel.into(),
+                view_only: false,
             }],
         }];
 

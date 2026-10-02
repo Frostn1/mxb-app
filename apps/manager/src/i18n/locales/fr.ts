@@ -1250,6 +1250,26 @@ export const fr: Translation = {
   "sync.autoNote":
     "Votre look se publie tout seul — chaque moto, dès que vous le changez dans l'app ou dans le garage du jeu. Celui des autres arrive quand vous appuyez sur Jouer.",
 
+  "viewOnly.title": "Peintures en lecture seule et verrouillées",
+  "viewOnly.desc": "Choisissez qui peut garder ou rouler avec chacune de vos peintures. Les pilotes de votre serveur les voient dans tous les cas.",
+  "viewOnly.honest": "Limites honnêtes : la lecture seule fait supprimer votre peinture par les apps des autres pilotes à la fermeture de leur jeu, et la tient hors de leur bibliothèque, de leurs exports et de leurs partages. Cela arrête la copie occasionnelle, pas quelqu'un qui copie le fichier pendant que le jeu tourne ou qui la capture à l'écran. Un verrou n'est appliqué que sur les serveurs MXB où les verrous de peinture sont activés ; ailleurs, une peinture copiée peut toujours être utilisée.",
+  "viewOnly.empty": "Vos peintures apparaissent ici une fois votre look publié.",
+  "viewOnly.viewOnly": "Lecture seule",
+  "viewOnly.viewOnlyHint": "Les autres sur le serveur la voient mais ne la gardent pas.",
+  "viewOnly.locked": "Verrouillée",
+  "viewOnly.lockedHint": "Seuls vous et votre équipe pouvez rouler avec.",
+  "viewOnly.needsSteam": "Verrouiller demande la connexion Steam, pour qu'un serveur sache que votre GUID est bien le vôtre.",
+  "viewOnly.notLockable": "Seules les peintures de moto peuvent être verrouillées : un serveur voit la peinture de moto que vous utilisez, pas votre équipement.",
+  "viewOnly.team": "Équipe",
+  "viewOnly.teamPlaceholder": "Nom de pilote ou GUID (FF…)",
+  "viewOnly.add": "Ajouter",
+  "viewOnly.save": "Enregistrer",
+  "viewOnly.saved": "Enregistré",
+  "viewOnly.saveFailed": "Échec de l'enregistrement : {{error}}",
+  "viewOnly.loadFailed": "Impossible de charger vos peintures : {{error}}",
+  "viewOnly.notWorn": "Pas dans votre look actuel",
+  "viewOnly.remove": "Retirer",
+
   // ── Chaînes manquées par le premier balayage (JSX multi-lignes) ────────────
   "libraryDetail.noEmbedded": "Aucun détail intégré n'a été trouvé pour cet élément.",
   "modDetail.downloadFromHost": "Télécharger depuis {{host}}",

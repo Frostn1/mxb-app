@@ -76,7 +76,7 @@ export async function issueRatingToken(env: Env, serverId: string): Promise<Rati
   return { status: 200, body: { ok: true, serverId, token, issuedAt: now } };
 }
 
-async function serverForRatingToken(env: Env, token: string): Promise<{ id: string } | null> {
+export async function serverForRatingToken(env: Env, token: string): Promise<{ id: string } | null> {
   const hash = await hashToken(token);
   return env.DB.prepare("SELECT id FROM managed_servers WHERE rating_token_hash = ?")
     .bind(hash)

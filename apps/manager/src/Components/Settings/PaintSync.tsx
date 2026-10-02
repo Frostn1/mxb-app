@@ -9,6 +9,7 @@ import {
   type SyncEvent,
 } from "@frost/shared/api/mods";
 import { useT, type TFunc, type TKey } from "@/i18n";
+import ViewOnlyPaints from "./ViewOnlyPaints";
 
 /** `1723459200000` -> `2 minutes ago`, `0` -> null. */
 function ago(t: TFunc<TKey>, at: number): string | null {
@@ -234,6 +235,8 @@ export const PaintSync = () => {
           <p className="mt-3 text-[11.5px] text-muted-foreground">
             {t("sync.autoNote")}
           </p>
+
+          <ViewOnlyPaints />
         </>
       ) : (
         // No account yet, which on a fresh install is simply "nothing has run".

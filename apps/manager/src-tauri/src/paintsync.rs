@@ -76,6 +76,10 @@ pub struct PaintEntry {
     pub size: u64,
     /// Destination relative to `<MX Bikes>/mods`, forward slashes.
     pub rel_dest: String,
+    /// The owner made it view-only: installed for the session, deleted when the game exits,
+    /// never kept (`viewonly.rs`). Only ever read off another rider; never sent.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub view_only: bool,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -309,6 +313,7 @@ fn paints_of(
             sha256: sha,
             size: asset.size,
             rel_dest: asset.rel_dest.clone(),
+            view_only: false,
         });
     }
     out
@@ -1010,6 +1015,7 @@ mod tests {
             sha256: sha.into(),
             size: 1,
             rel_dest: rel_dest.into(),
+            view_only: false,
         }
     }
 

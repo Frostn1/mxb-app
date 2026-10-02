@@ -88,7 +88,8 @@ import {
 } from "./roster";
 import { VoiceRoom } from "./voiceroom";
 import { PaintRoom } from "./paintroom";
-import { ingestResults, leaderboard as ratingLeaderboard, myRatings } from "./rating";
+import { ingestResults, leaderboard as ratingLeaderboard, myRatings, serverForRatingToken } from "./rating";
+import { listPolicies, lockKey, minisignPublicKey, putPolicy, signedLocks, wantsViewOnly } from "./paintpolicy";
 import {
   liveKey,
   mayFetchPaint,
@@ -98,6 +99,7 @@ import {
   publicRider,
   resolveServer,
   ridersOn,
+  withoutViewOnly,
 } from "./paintsync";
 
 interface Account {
@@ -249,6 +251,22 @@ async function route(request: Request, env: Env): Promise<Response> {
       false,
     );
     return json(result.status, result.body);
+  }
+
+  // The signed list of locked paints, for a managed mxbserver with `[paints] enforce_locks`.
+  // Authenticated by the server's own rating token, like the push above; the public key that
+  // checks the signature is public by nature.
+  if (method === "GET" && path === "/v1/servers/paint-locks") {
+    const token = bearer(request.headers.get("Authorization"));
+    const server = token ? await serverForRatingToken(env, token) : null;
+    if (!server) return json(401, { error: "a per-server rating bearer token is required" });
+    const result = await signedLocks(server.id, env);
+    return json(result.status, result.body);
+  }
+  if (method === "GET" && path === "/v1/paint-locks/pubkey") {
+    const k = await lockKey(env);
+    if (!k) return json(404, { error: "paint lock signing is not configured" });
+    return new Response(minisignPublicKey(k), { headers: { "content-type": "text/plain; charset=utf-8" } });
   }
 
   // A provisioned box announcing itself. Authenticated by the agent token in its own row,
@@ -537,6 +555,17 @@ async function route(request: Request, env: Env): Promise<Response> {
   if (method === "PUT" && path === "/v1/queue") return putQueue(request, account.id, env);
   if (method === "DELETE" && path === "/v1/queue") return leaveQueue(account.id, env);
   if (method === "GET" && path === "/v1/queue/counts") return queueCounts(url, env);
+
+  // View-only and locked paints (`paintpolicy.ts`): the owner's own settings for their paints.
+  if (method === "GET" && path === "/v1/paints/policies") {
+    const result = await listPolicies(account, env);
+    return json(result.status, result.body);
+  }
+  const policyPath = /^\/v1\/paints\/([0-9a-f]{64})\/policy$/.exec(path);
+  if (policyPath && method === "PUT") {
+    const result = await putPolicy(request, policyPath[1]!, account, env);
+    return json(result.status, result.body);
+  }
 
   const openPaint = /^\/v1\/paints\/([0-9a-f]{64})$/.exec(path);
   if (openPaint) {
@@ -2488,8 +2517,11 @@ async function notifyRoom(serverKey: string, accountId: string, frame: unknown, 
 async function paintsyncJoin(request: Request, account: Account, env: Env): Promise<Response> {
   const limited = await paintsyncLimited(account, env);
   if (limited) return limited;
-  const body = (await readJson(request)) as { server?: unknown; bikes?: unknown } | null;
+  const body = (await readJson(request)) as { server?: unknown; bikes?: unknown; caps?: unknown } | null;
   if (!body) return json(400, { error: "expected a JSON body" });
+  // An app that can honour view-only paints says so. Anyone else is never sent one: it would
+  // keep the file, which is the one thing the owner asked it not to do.
+  const viewOnly = wantsViewOnly(body.caps);
   const hint = parseServerHint(body.server);
   if (typeof hint === "string") return json(400, { error: hint });
 
@@ -2510,8 +2542,10 @@ async function paintsyncJoin(request: Request, account: Account, env: Env): Prom
   return json(200, {
     server,
     missing,
-    riders: everyone.filter((r) => r.accountId !== account.id).map(publicRider),
-    room: `/v1/paintsync/room?server=${encodeURIComponent(server)}`,
+    riders: everyone
+      .filter((r) => r.accountId !== account.id)
+      .map((r) => publicRider(viewOnly ? r : withoutViewOnly(r))),
+    room: `/v1/paintsync/room?server=${encodeURIComponent(server)}${viewOnly ? "&caps=viewOnly" : ""}`,
   });
 }
 
@@ -2576,7 +2610,13 @@ async function paintsyncRoom(request: Request, url: URL, account: Account, env: 
   if (!env.PAINT_ROOMS) return json(503, { error: "paint rooms are not configured" });
   const room = env.PAINT_ROOMS.get(env.PAINT_ROOMS.idFromName(key));
   return room.fetch("https://paint.room/", {
-    headers: { Upgrade: "websocket", "X-Account-Id": account.id, "X-Server-Key": key },
+    headers: {
+      Upgrade: "websocket",
+      "X-Account-Id": account.id,
+      "X-Server-Key": key,
+      // Which members may be told about view-only paints (`PaintRoom` strips them for the rest).
+      "X-View-Only": url.searchParams.get("caps") === "viewOnly" ? "1" : "0",
+    },
   });
 }
 
@@ -2631,6 +2671,8 @@ async function roster(url: URL, account: Account, env: Env): Promise<Response> {
       " JOIN presence pr ON pr.account_id = a.id" +
       " JOIN loadout_paints p ON p.account_id = a.id" +
       " WHERE pr.server_id = ? AND pr.updated_at > ?" +
+      // The apps on this route predate view-only paints and would keep them.
+      " AND NOT EXISTS (SELECT 1 FROM paint_policies pp WHERE pp.owner_account_id = a.id AND pp.sha256 = p.sha256 AND pp.view_only = 1)" +
       " GROUP BY a.id, p.rel_dest, p.sha256",
   )
     .bind(serverId, Date.now() - PRESENCE_TTL_MS)

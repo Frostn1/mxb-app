@@ -3,6 +3,18 @@
 ## Unreleased
 
 ### Added
+- **View-only and locked paints** (Settings → Paint sync). Mark any of your paints *View-only*: 
+  riders on your server still see it, but their MXB App keeps it in a session-only store, deletes 
+  it when their game exits (and at the next app start after a crash), and never offers it in the 
+  library, an export, a share or their own published look. Apps older than this one are never 
+  sent a view-only paint. Mark a bike paint *Locked* (needs Steam sign-in) and add a team by rider 
+  name or GUID: MXB servers with `[paints] enforce_locks` show anyone else wearing it in stock 
+  paint. Honest limits: this stops casual copying, not someone who copies the file while the game 
+  is running or captures it from the GPU, and a lock means nothing on a stock server. Any synced 
+  paint from another rider is now left out of the library, preset bundles and shares. Control 
+  plane: `paint_policies` (migration 0051, additive), `GET /v1/paints/policies`, 
+  `PUT /v1/paints/:sha/policy`, and the signed `GET /v1/servers/paint-locks` for servers 
+  (`MXB_PAINTLOCK_SIGNING_KEY`; public key at `GET /v1/paint-locks/pubkey`).
 - **MXB Servers can run a remote server from one native window.** The Lightsail connection now
   uses SSH for status, riders, installed tracks and private control credentials, so a remote
   server no longer asks the operator to paste an admin token. A dedicated Tracks tab uploads

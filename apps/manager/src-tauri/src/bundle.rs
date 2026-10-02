@@ -166,15 +166,17 @@ struct Libraries {
 }
 
 impl Libraries {
+    /// Paint sync's files are left out ([`crate::viewonly::SyncedSet`]): another rider's
+    /// paint is never resolved into a bundle, a share or this rider's published look, even when
+    /// the game let them pick it in the garage.
     fn scan(cfg: &AppConfig) -> Self {
-        Libraries {
-            bikes: library::scan_library(&cfg.mods_path, "mods/bikes", &[], cfg.game())
-                .unwrap_or_default(),
-            rider: library::scan_library(&cfg.mods_path, "mods/rider", &[], cfg.game())
-                .unwrap_or_default(),
-            tyres: library::scan_library(&cfg.mods_path, "mods/tyres", &[], cfg.game())
-                .unwrap_or_default(),
-        }
+        let synced = crate::viewonly::SyncedSet::read(&library::mods_root(&cfg.mods_path));
+        let scan = |sub: &str| {
+            let mut v = library::scan_library(&cfg.mods_path, sub, &[], cfg.game()).unwrap_or_default();
+            v.retain(|e| !synced.has_path(&e.path));
+            v
+        };
+        Libraries { bikes: scan("mods/bikes"), rider: scan("mods/rider"), tyres: scan("mods/tyres") }
     }
 }
 
@@ -435,6 +437,9 @@ pub async fn create(
     for a in &plan.assets {
         entries.extend(entries_under(&format!("mods/{}", a.rel_dest), Path::new(&a.abs_path)));
     }
+    // A model folder can hold paints paint sync put there; those are never packed.
+    let synced = crate::viewonly::SyncedSet::read(&library::mods_root(&cfg.mods_path));
+    entries.retain(|e| !synced.has_path(&e.src.to_string_lossy()));
 
     let mut meta = preset.clone();
     meta.bundle = None;
@@ -1110,6 +1115,35 @@ mod tests {
         assert_eq!(dest("tyres").as_deref(), Some("tyres/oem_mx.pkz"));
         assert!(dest("helmet_paint").is_none());
         assert!(plan.unresolved.iter().any(|u| u.slot == "suit_font"));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Another rider's paint that paint sync installed (view-only or not) is never exported:
+    /// not in a preset bundle, not in a share, not in this rider's published look, even when
+    /// the loadout names it because the game let them pick it in the garage.
+    #[test]
+    fn export_never_lists_synced_paints() {
+        let root = tmp("synced");
+        touch(&root.join("mods/bikes/KTM450/paints/Mine.pnt"));
+        touch(&root.join("mods/bikes/KTM450/paints/Theirs.pnt"));
+        touch(&root.join("mods/bikes/KTM450/paints/ViewOnly.pnt"));
+        let mods = root.join("mods");
+        std::fs::write(
+            mods.join("mxbapp_synced.json"),
+            r#"{"bikes/ktm450/paints/theirs.pnt":"aa","bikes/ktm450/paints/viewonly.pnt":"bb"}"#,
+        )
+        .unwrap();
+        std::fs::write(mods.join(crate::viewonly::JOURNAL_NAME), r#"{"bikes/ktm450/paints/viewonly.pnt":"bb"}"#).unwrap();
+        let cfg = AppConfig { mods_path: root.to_string_lossy().into_owned(), ..Default::default() };
+
+        for (paint, exported) in [("Mine", true), ("Theirs", false), ("ViewOnly", false)] {
+            let mut lo = Loadout::default();
+            lo.paint = paint.into();
+            let plan = plan(&cfg, &lo).unwrap();
+            assert_eq!(plan.assets.iter().any(|a| a.slot == "paint"), exported, "{paint}");
+            let many = plan_profile(&cfg, &[("KTM450".to_string(), lo.clone())]);
+            assert_eq!(many[0].assets.iter().any(|a| a.slot == "paint"), exported, "{paint} (publish)");
+        }
         let _ = std::fs::remove_dir_all(&root);
     }
 

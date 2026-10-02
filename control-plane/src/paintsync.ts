@@ -101,6 +101,8 @@ export interface RiderPaint {
   sha256: string;
   size: number;
   relDest: string;
+  /** Set (and only ever `true`) when the owner made it view-only: install for the session, never keep. */
+  viewOnly?: true;
 }
 
 export interface RiderView {
@@ -126,10 +128,12 @@ export async function ridersOn(
 ): Promise<RiderView[]> {
   const rows = await env.DB.prepare(
     "SELECT a.id AS account_id, a.rider_name, a.guid, COALESCE(pr.joined_at, pr.updated_at) AS joined_at," +
-      " MIN(p.slot) AS slot, p.file_name, p.sha256, p.size, p.rel_dest" +
+      " MIN(p.slot) AS slot, p.file_name, p.sha256, p.size, p.rel_dest," +
+      " MAX(COALESCE(pp.view_only, 0)) AS view_only" +
       " FROM presence pr" +
       " JOIN accounts a ON a.id = pr.account_id" +
       " LEFT JOIN loadout_paints p ON p.account_id = a.id" +
+      " LEFT JOIN paint_policies pp ON pp.owner_account_id = a.id AND pp.sha256 = p.sha256" +
       " WHERE pr.server_id = ? AND pr.updated_at > ?" +
       " GROUP BY a.id, p.rel_dest, p.sha256",
   )
@@ -144,6 +148,7 @@ export async function ridersOn(
       sha256: string | null;
       size: number | null;
       rel_dest: string | null;
+      view_only: number | null;
     }>();
 
   const riders = new Map<string, RiderView>();
@@ -154,10 +159,17 @@ export async function ridersOn(
       riders.set(r.account_id, rider);
     }
     if (r.sha256 && r.rel_dest && r.file_name && r.slot && isRelDest(r.rel_dest)) {
-      rider.paints.push({ slot: r.slot, fileName: r.file_name, sha256: r.sha256, size: r.size ?? 0, relDest: r.rel_dest });
+      const paint: RiderPaint = { slot: r.slot, fileName: r.file_name, sha256: r.sha256, size: r.size ?? 0, relDest: r.rel_dest };
+      if (r.view_only) paint.viewOnly = true;
+      rider.paints.push(paint);
     }
   }
   return [...riders.values()].sort((a, b) => a.joinedAt - b.joinedAt);
+}
+
+/** The rider with their view-only paints taken out, for an app that would keep them. */
+export function withoutViewOnly<R extends { paints: RiderPaint[] }>(r: R): R {
+  return { ...r, paints: r.paints.filter((p) => !p.viewOnly) };
 }
 
 /** What a client is shown of a rider: never the account id. */
