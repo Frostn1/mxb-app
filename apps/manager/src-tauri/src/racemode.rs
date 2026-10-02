@@ -1,7 +1,8 @@
 //! Race mode: before an app-launched join, set aside every mod the server doesn't need.
 //!
-//! MX Bikes mounts every `.pkz` under `mods` at startup, and it does it again on the way into
-//! a server. A rider with three hundred tracks pays for all three hundred to race on one of
+//! MX Bikes scans every `.pkz` under `mods` once, at startup (its content lists, paints
+//! included, are built by the boot content init and nothing on the way into a server rescans
+//! them). A rider with three hundred tracks pays for all three hundred to race on one of
 //! them. The server list already says which track a server runs and which bike classes it
 //! lets in, so the app knows before the game starts what the session can possibly use.
 //! Everything else can step aside for the length of the session — the same move Manage makes
