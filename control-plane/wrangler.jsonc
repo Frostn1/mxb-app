@@ -16,6 +16,8 @@
   // config means a change is a reviewable diff rather than an invisible dashboard edit.
   // The AWS key itself is a secret; see `src/env.d.ts`.
   "vars": {
+    // View-only/locked paints are pulled until the memory-only version lands. "on" restores them.
+    "VIEW_ONLY_MODE": "off",
     // The hard ceiling on concurrent servers. This, and the idle reaper below, are what
     // keep an hourly-billed resource from turning into an open-ended bill.
     "MXB_MAX_INSTANCES": "2",

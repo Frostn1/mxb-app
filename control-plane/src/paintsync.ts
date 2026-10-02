@@ -11,6 +11,7 @@
  */
 
 import { PRESENCE_TTL_MS } from "./validate";
+import { viewOnlyOn } from "./paintpolicy";
 
 /** A paint uploaded through this flow is served for this long after its last upload. */
 export const LIVE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
@@ -126,10 +127,11 @@ export async function ridersOn(
   isRelDest: (v: unknown) => boolean,
   now = Date.now(),
 ): Promise<RiderView[]> {
+  const viewOnlyLive = viewOnlyOn(env);
   const rows = await env.DB.prepare(
     "SELECT a.id AS account_id, a.rider_name, a.guid, COALESCE(pr.joined_at, pr.updated_at) AS joined_at," +
       " MIN(p.slot) AS slot, p.file_name, p.sha256, p.size, p.rel_dest," +
-      " MAX(COALESCE(pp.view_only, 0)) AS view_only" +
+      " MAX(COALESCE(pp.view_only, 0)) AS view_only, MAX(COALESCE(pp.locked, 0)) AS locked" +
       " FROM presence pr" +
       " JOIN accounts a ON a.id = pr.account_id" +
       " LEFT JOIN loadout_paints p ON p.account_id = a.id" +
@@ -149,6 +151,7 @@ export async function ridersOn(
       size: number | null;
       rel_dest: string | null;
       view_only: number | null;
+      locked: number | null;
     }>();
 
   const riders = new Map<string, RiderView>();
@@ -158,6 +161,8 @@ export async function ridersOn(
       rider = { accountId: r.account_id, riderName: r.rider_name, guid: r.guid, joinedAt: r.joined_at, paints: [] };
       riders.set(r.account_id, rider);
     }
+    // With view-only pulled, a paint its owner restricted is not delivered to anyone: riders show stock.
+    if (!viewOnlyLive && (r.view_only || r.locked)) continue;
     if (r.sha256 && r.rel_dest && r.file_name && r.slot && isRelDest(r.rel_dest)) {
       const paint: RiderPaint = { slot: r.slot, fileName: r.file_name, sha256: r.sha256, size: r.size ?? 0, relDest: r.rel_dest };
       if (r.view_only) paint.viewOnly = true;

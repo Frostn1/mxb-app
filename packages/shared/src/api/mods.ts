@@ -3531,6 +3531,8 @@ export interface OwnPaint {
 export interface OwnPaints {
   /** Steam sign-in proved this rider's GUID, which a lock needs. */
   canLock: boolean;
+  /** The control plane has view-only/locked paints on. False: show no controls at all. */
+  viewOnlyAvailable?: boolean;
   paints: OwnPaint[];
 }
 

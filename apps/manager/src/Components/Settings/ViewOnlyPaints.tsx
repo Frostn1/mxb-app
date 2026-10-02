@@ -172,6 +172,10 @@ export const ViewOnlyPaints = () => {
   const saved = (p: OwnPaint) =>
     setState((s) => (s ? { ...s, paints: s.paints.map((x) => (x.sha256 === p.sha256 ? p : x)) } : s));
 
+  // Pulled while the control plane reports it unavailable: no controls, no dead toggles. Nothing
+  // is shown while loading or on a failed load either.
+  if (!state?.viewOnlyAvailable) return null;
+
   return (
     <div className="mt-4">
       <div className="text-[12.5px] font-semibold text-foreground/85">{t("viewOnly.title")}</div>
