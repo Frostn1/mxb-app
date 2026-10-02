@@ -10,6 +10,7 @@
 //! predates them skips (one that predates chunks reads nothing past the flags):
 //! - `DRIV`: per point, speed m/s, throttle 0..1 and brake 0..1 (the harder of the two), so the
 //!   recorder colours its line on the track by where the lap braked (FrostMod v0.43.2).
+//! - `REFY`: per point, the reference lap's own height (the bike's y).
 //! - `TRRN`: per point, the track's own ground height at five offsets across the line, half a
 //!   metre apart, right to left, NaN off the grid; only when the laps sit steadily on this
 //!   terrain (`ground::measure`). The recorder lays its line on it instead of the centreline.
@@ -125,6 +126,16 @@ pub fn write_with(track_len: f32, fast: &Trace, parts: &[Part], flags: u32, terr
     }
     chunk(&mut b, b"DRIV", &driv);
 
+    // REFY: the reference lap's own height at each point (the bike's y as recorded), so the
+    // recorder's line follows the ground's rise along the line on tracks whose terrain it can't
+    // read (FrostMod v0.43.5).
+    let mut refy = (points.len() as u32).to_le_bytes().to_vec();
+    for &i in &taken {
+        let y = fast.pts[i].y;
+        refy.extend_from_slice(&(if y.is_finite() { y } else { 0.0 }).to_le_bytes());
+    }
+    chunk(&mut b, b"REFY", &refy);
+
     // TRRN: the ground across the line, left being the direction of travel turned a quarter
     // anticlockwise seen from above (x east, z north).
     if let Some(t) = terrain {
@@ -189,7 +200,10 @@ mod tests {
         // Then DRIV: three points, speed, throttle, brake.
         assert_eq!(&b[99..103], b"DRIV");
         assert_eq!((u32_at(103), u32_at(107)), (4 + 3 * 12, 3));
-        assert_eq!(b.len(), 111 + 3 * 12, "no TRRN without terrain");
+        // Then REFY: three heights.
+        assert_eq!(&b[147..151], b"REFY");
+        assert_eq!((u32_at(151), u32_at(155)), (4 + 3 * 4, 3));
+        assert_eq!(b.len(), 159 + 3 * 4, "no TRRN without terrain");
     }
 
     #[test]
