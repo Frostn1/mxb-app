@@ -373,6 +373,25 @@ pub fn coach_sessions(app: AppHandle) -> Vec<SessionSummary> {
 #[derive(Default)]
 pub struct SessionWatch(pub mxb_core::paintwatch::WatchSet);
 
+/// The installed tracks folder, watched so a new track gets its ground before anyone rides it.
+#[derive(Default)]
+pub struct TrackWatch(pub mxb_core::paintwatch::WatchSet);
+
+/// Make the ground grids now (start), and again whenever `mods/tracks` changes.
+pub fn watch_tracks(app: &AppHandle) {
+    crate::groundgrid::prepare_all(app);
+    let Some(state) = app.try_state::<TrackWatch>() else { return };
+    let dir = mxb_core::library::mods_subdir(&load_config(app).mods_path, "mods/tracks");
+    let handle = app.clone();
+    mxb_core::paintwatch::watch_folders(
+        &state.0,
+        "track watcher",
+        &[dir.to_string_lossy().into_owned()],
+        Duration::from_secs(10),
+        move |_| crate::groundgrid::prepare_all(&handle),
+    );
+}
+
 /// Told to the frontend when a recording is written or grows: the session list and the open
 /// session's laps re-read themselves rather than waiting for the rider to leave and come back.
 pub const SESSIONS_CHANGED: &str = "coach-sessions-changed";
@@ -389,6 +408,11 @@ pub fn watch_sessions(app: &AppHandle) {
     let handle = app.clone();
     mxb_core::paintwatch::watch_folders(&state.0, "session watcher", &dirs, SESSION_DEBOUNCE, move |paths| {
         log::info!("session watcher: {} file(s) changed", paths.len());
+        // The track's own ground for the recorder's line, the moment a track is seen ridden:
+        // no lap needed (groundgrid.rs). Once per track per run.
+        for p in paths.iter().filter(|p| p.to_ascii_lowercase().ends_with(".mxbc")) {
+            crate::groundgrid::ensure_for(&handle, Path::new(p));
+        }
         let _ = handle.emit(SESSIONS_CHANGED, ());
     });
 }

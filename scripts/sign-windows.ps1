@@ -49,19 +49,25 @@ foreach ($file in $Files) {
   # release shouldn't fail over it.
   $signed = $false
   for ($attempt = 1; $attempt -le 3 -and -not $signed; $attempt++) {
-    & $env:ARTIFACT_SIGNING_SIGNTOOL sign /v /fd SHA256 /tr $timestamp /td SHA256 `
-      /dlib $env:ARTIFACT_SIGNING_DLIB /dmdf $env:ARTIFACT_SIGNING_METADATA $file
-    $signed = $LASTEXITCODE -eq 0
+    # Arguments as an array, so a path with a space stays one argument. Output is captured and
+    # printed: Tauri shows nothing of this script's output when it fails.
+    $signArgs = @('sign', '/v', '/debug', '/fd', 'SHA256', '/tr', $timestamp, '/td', 'SHA256',
+      '/dlib', $env:ARTIFACT_SIGNING_DLIB, '/dmdf', $env:ARTIFACT_SIGNING_METADATA, $file)
+    $out = & $env:ARTIFACT_SIGNING_SIGNTOOL @signArgs 2>&1 | Out-String
+    $code = $LASTEXITCODE
+    Write-Host $out
+    $signed = $code -eq 0
     if (-not $signed -and $attempt -lt 3) {
-      Write-Host "sign-windows: signing $file failed (exit $LASTEXITCODE); retrying in 15 s"
+      Write-Host "sign-windows: signing $file failed (exit $code); retrying in 15 s"
       Start-Sleep -Seconds 15
     }
   }
   if (-not $signed) {
     throw "sign-windows: could not sign $file"
   }
-  & $env:ARTIFACT_SIGNING_SIGNTOOL verify /pa $file | Out-Null
+  $vout = & $env:ARTIFACT_SIGNING_SIGNTOOL verify /pa /v $file 2>&1 | Out-String
   if ($LASTEXITCODE -ne 0) {
+    Write-Host $vout
     throw "sign-windows: $file was signed but its signature does not verify"
   }
   Write-Host "sign-windows: signed $file"

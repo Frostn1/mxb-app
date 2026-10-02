@@ -24,9 +24,12 @@ pub(crate) const EXTRAS_NEED: &str = "0.24";
 /// The first recorder that paints the line to take on the track itself (FrostMod v0.42.0,
 /// `ground` in hud.ini). An older one only draws the trail inside the map.
 pub(crate) const GROUND_NEEDS: &str = "0.42";
-/// The first recorder that calls the jumps on that line (FrostMod v0.44.0, `jumps` in hud.ini):
+/// The first recorder that draws pace hints over that line (FrostMod v0.44.0, `pace` in hud.ini):
+/// chevrons when coming in too fast or too slow for Coach's lap, and MORE SPEED before a jump.
+pub(crate) const PACE_NEEDS: &str = "0.44";
+/// The first recorder that calls the jumps on that line (FrostMod v0.44.1, `jumps` in hud.ini):
 /// a bar at the lip, a mark where Coach's lap landed and SINGLE / DOUBLE / TRIPLE over the lip.
-pub(crate) const JUMPS_NEED: &str = "0.44";
+pub(crate) const JUMPS_NEED: &str = "0.44.1";
 
 /// The HUD parts, in the order the overlay lists them: key, label, whether the plugin draws it
 /// when the file doesn't say, and the recorder it needs.
@@ -45,6 +48,8 @@ pub const HUD_PARTS: &[Part] = &[
     // Follows the trail until the rider sets it on its own: the plugin reads a missing `ground`
     // as whatever `trail` says, and `hud_of` reports it the same way.
     Part { key: "ground", label: "Blue line on the track", default_on: false, needs: GROUND_NEEDS },
+    // Drawn over the line on the track, so turning it on turns that on too.
+    Part { key: "pace", label: "Pace hints", default_on: false, needs: PACE_NEEDS },
     // Drawn on the line on the track, so it shows only with that on; on by default there, since
     // a rider who turned the line on asked to be shown the track.
     Part { key: "jumps", label: "Jump calls on the line", default_on: true, needs: JUMPS_NEED },
@@ -252,6 +257,13 @@ pub fn coach_set_hud(app: AppHandle, key: String, on: bool) -> Result<Hud, Strin
         .find(|k| *k == key)
         .ok_or_else(|| format!("\"{key}\" isn't a HUD part."))?;
     let path = hud_path(&app)?;
+    ini::write(&path, "hud", &keys_for(key, on))?;
+    let (dir, mxbmrp3, pre) = where_and_what(&app)?;
+    Ok(hud_of(&dir.join("hud.ini"), mxbmrp3, pre))
+}
+
+/// What switching `key` writes: the key itself, and any part it can't show without.
+fn keys_for(key: &'static str, on: bool) -> Vec<(&'static str, String)> {
     let mut keys = vec![(key, if on { "1" } else { "0" }.to_string())];
     // The recorder draws the trail inside the map, so a trail with the map off is a switch that
     // can never do anything — and the map is off by default wherever MXBMRP3 is installed.
@@ -259,9 +271,11 @@ pub fn coach_set_hud(app: AppHandle, key: String, on: bool) -> Result<Hud, Strin
     if key == "trail" && on {
         keys.push(("map", "1".to_string()));
     }
-    ini::write(&path, "hud", &keys)?;
-    let (dir, mxbmrp3, pre) = where_and_what(&app)?;
-    Ok(hud_of(&dir.join("hud.ini"), mxbmrp3, pre))
+    // Pace hints are drawn over the line on the track: on their own they would show nothing.
+    if key == "pace" && on {
+        keys.push(("ground", "1".to_string()));
+    }
+    keys
 }
 
 /// Where the live cue sits on screen: `cue_x` is the centre of the cue box across the screen,
@@ -338,7 +352,7 @@ mod tests {
         let hud = hud_of(Path::new("/nowhere/hud.ini"), false, false);
         assert!(part(&hud, "jumps").on);
         assert_eq!(part(&hud, "jumps").needs, JUMPS_NEED);
-        assert!(at_least("0.44.0", JUMPS_NEED) && !at_least("0.43.4", JUMPS_NEED));
+        assert!(at_least("0.44.1", JUMPS_NEED) && !at_least("0.44.0", JUMPS_NEED));
     }
 
     /// The line on the track is its own switch, but until the rider sets it, it follows the
@@ -359,6 +373,26 @@ mod tests {
         assert!(!part(&hud_of(&path, false, false), "ground").on, "unless it is switched off itself");
         ini::write(&path, "hud", &[("trail", "0".into()), ("ground", "1".into())]).unwrap();
         assert!(part(&hud_of(&path, false, false), "ground").on, "and it can be on without the trail");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Pace hints wait to be asked for, need the recorder that draws them, and bring the line on
+    /// the track with them, since they are drawn over it.
+    #[test]
+    fn pace_hints_are_off_until_asked_for_and_bring_the_line() {
+        let none = hud_of(Path::new("/nowhere/hud.ini"), false, false);
+        assert!(!part(&none, "pace").on, "off by default, as the plugin reads it");
+        assert_eq!(part(&none, "pace").needs, PACE_NEEDS);
+        assert_eq!(part(&none, "pace").label, "Pace hints");
+        assert_eq!(keys_for("pace", true), vec![("pace", "1".to_string()), ("ground", "1".to_string())]);
+        assert_eq!(keys_for("pace", false), vec![("pace", "0".to_string())], "off leaves the line alone");
+
+        let dir = std::env::temp_dir().join(format!("coach-pace-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let path = dir.join("hud.ini");
+        ini::write(&path, "hud", &keys_for("pace", true)).unwrap();
+        let hud = hud_of(&path, false, false);
+        assert!(part(&hud, "pace").on && part(&hud, "ground").on, "both on");
         let _ = fs::remove_dir_all(&dir);
     }
 

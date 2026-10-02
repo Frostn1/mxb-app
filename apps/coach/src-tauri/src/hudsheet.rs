@@ -10,13 +10,14 @@
 //! predates them skips (one that predates chunks reads nothing past the flags):
 //! - `DRIV`: per point, speed m/s, throttle 0..1 and brake 0..1 (the harder of the two), so the
 //!   recorder colours its line on the track by where the lap braked (FrostMod v0.43.2).
+//! - `REFY`: per point, the reference lap's own height (the bike's y).
 //! - `TRRN`: per point, the track's own ground height at five offsets across the line, half a
 //!   metre apart, right to left, NaN off the grid; only when the laps sit steadily on this
 //!   terrain (`ground::measure`). The recorder lays its line on it instead of the centreline.
 //! - `AIRH`: per point, the bike's height (world y, m), its height above the track's own ground
 //!   at the line's centre (NaN without the terrain), and the share of the lap's samples from that
 //!   point to the next that were airborne, 0..1, so the recorder can call the jumps: where to
-//!   take off, where the lap landed, and how many faces it cleared (FrostMod v0.44.0).
+//!   take off, where the lap landed, and how many faces it cleared (FrostMod v0.44.1).
 
 use crate::analysis::{Review, Trace, STEP_M};
 
@@ -129,6 +130,16 @@ pub fn write_with(track_len: f32, fast: &Trace, parts: &[Part], flags: u32, terr
     }
     chunk(&mut b, b"DRIV", &driv);
 
+    // REFY: the reference lap's own height at each point (the bike's y as recorded), so the
+    // recorder's line follows the ground's rise along the line on tracks whose terrain it can't
+    // read (FrostMod v0.43.5).
+    let mut refy = (points.len() as u32).to_le_bytes().to_vec();
+    for &i in &taken {
+        let y = fast.pts[i].y;
+        refy.extend_from_slice(&(if y.is_finite() { y } else { 0.0 }).to_le_bytes());
+    }
+    chunk(&mut b, b"REFY", &refy);
+
     // AIRH: where the lap was in the air. Airborne is a share over the samples a point stands
     // for, so a thinned sheet still sees a short hop between two of its points.
     let mut airh = (points.len() as u32).to_le_bytes().to_vec();
@@ -210,11 +221,14 @@ mod tests {
         // Then DRIV: three points, speed, throttle, brake.
         assert_eq!(&b[99..103], b"DRIV");
         assert_eq!((u32_at(103), u32_at(107)), (4 + 3 * 12, 3));
+        // Then REFY: three heights.
+        assert_eq!(&b[147..151], b"REFY");
+        assert_eq!((u32_at(151), u32_at(155)), (4 + 3 * 4, 3));
         // Then AIRH: three points, height, height above the ground (unknown here), airborne.
-        assert_eq!(&b[147..151], b"AIRH");
-        assert_eq!((u32_at(151), u32_at(155)), (4 + 3 * 12, 3));
-        assert!(f32_at(163).is_nan(), "no terrain, no height above it");
-        assert_eq!(b.len(), 159 + 3 * 12, "no TRRN without terrain");
+        assert_eq!(&b[171..175], b"AIRH");
+        assert_eq!((u32_at(175), u32_at(179)), (4 + 3 * 12, 3));
+        assert!(f32_at(187).is_nan(), "no terrain, no height above it");
+        assert_eq!(b.len(), 183 + 3 * 12, "no TRRN without terrain");
     }
 
     #[test]
