@@ -100,12 +100,28 @@ fn hotkey_error() -> Option<String> {
     HOTKEY_ERROR.lock().ok().and_then(|slot| slot.clone())
 }
 
-/// The configured combo, falling back to the default when the setting is blank.
+/// MXB App's configured combo, falling back to the default when the setting is blank.
 pub fn hotkey_of(cfg: &config::AppConfig) -> &str {
-    match cfg.overlay_hotkey.trim() {
+    hotkey_for(cfg, App::Manager)
+}
+
+/// `app`'s own combo. Coach and MXB App keep separate settings (`coach_overlay_hotkey` and
+/// `overlay_hotkey`), so rebinding one never moves the other.
+pub fn hotkey_for(cfg: &config::AppConfig, app: App) -> &str {
+    let combo = match app {
+        App::Manager => cfg.overlay_hotkey.as_str(),
+        // Unmigrated (`None`): what they shared before the split.
+        App::Coach => cfg.coach_overlay_hotkey.as_deref().unwrap_or(&cfg.overlay_hotkey),
+    };
+    match combo.trim() {
         "" => DEFAULT_OVERLAY_HOTKEY,
         combo => combo,
     }
+}
+
+/// Whether both apps are on the same combo, so one key serves both overlays.
+pub fn hotkeys_shared(cfg: &config::AppConfig) -> bool {
+    hotkey_for(cfg, App::Manager) == hotkey_for(cfg, App::Coach)
 }
 
 /// Parse a Tauri accelerator string, naming the bad input on failure.
@@ -124,15 +140,19 @@ pub fn bind_toggle<R: Runtime>(
     spec: &'static Spec,
     cfg: &config::AppConfig,
 ) -> Result<(), String> {
-    let combo = hotkey_of(cfg).to_string();
+    let combo = hotkey_for(cfg, spec.app).to_string();
     let shortcut = parse_hotkey(&combo)?;
+    // Separate combos: each key opens its own app's overlay. One shared combo keeps the
+    // old behaviour, where the key opens whichever was used last.
+    let shared = hotkeys_shared(cfg);
     app.global_shortcut()
         .on_shortcut(shortcut, move |app, _shortcut, event| {
             // Fires on both press and release; acting on both would toggle twice.
             if event.state() != ShortcutState::Pressed {
                 return;
             }
-            if let Err(e) = toggle(app, spec) {
+            let result = if shared { toggle(app, spec) } else { toggle_own(app, spec) };
+            if let Err(e) = result {
                 log::error!("overlay toggle failed: {e}");
             }
         })
@@ -142,10 +162,10 @@ pub fn bind_toggle<R: Runtime>(
 }
 
 /// Current overlay settings plus what the game is doing right now.
-pub fn state(cfg: &config::AppConfig, peer: Option<PeerInfo>) -> OverlayState {
+pub fn state(cfg: &config::AppConfig, app: App, peer: Option<PeerInfo>) -> OverlayState {
     OverlayState {
         enabled: cfg.overlay_enabled,
-        hotkey: hotkey_of(cfg).to_string(),
+        hotkey: hotkey_for(cfg, app).to_string(),
         game_running: gamewindow::is_game_running(),
         fullscreen_blocked: gamewindow::is_exclusive_fullscreen(),
         // A disabled overlay has no binding by design — reporting that as a fault
@@ -270,6 +290,24 @@ pub fn toggle<R: Runtime>(app: &AppHandle<R>, spec: &Spec) -> Result<(), String>
             if LAST_WAS_PEER.load(Ordering::SeqCst) {
                 ask_peer_to_show(&link, &peer, None, None);
                 return Ok(());
+            }
+        }
+    }
+    show(app, spec, None, None)
+}
+
+/// A key that belongs to this app alone: close our overlay, or put the other's away and
+/// open ours.
+pub fn toggle_own<R: Runtime>(app: &AppHandle<R>, spec: &Spec) -> Result<(), String> {
+    if is_up(app) {
+        return hide(app);
+    }
+    if let Some(link) = link(app) {
+        if let Some(peer) = link.peer() {
+            if PEER_VISIBLE.load(Ordering::SeqCst) {
+                link.send(&Msg::Hide);
+                PEER_VISIBLE.store(false, Ordering::SeqCst);
+                gamewindow::allow_foreground(peer.pid);
             }
         }
     }
@@ -496,6 +534,21 @@ mod tests {
         assert_eq!(hotkey_of(&cfg), "Alt+F1");
     }
 
+    /// The bug: one shared setting meant a bind changed in Coach changed in MXB App too.
+    #[test]
+    fn setting_the_coach_hotkey_leaves_the_app_hotkey_alone() {
+        let mut cfg = config::AppConfig::default();
+        cfg.overlay_hotkey = "Alt+F1".into();
+        cfg.coach_overlay_hotkey = Some("Alt+F1".into());
+        cfg.coach_overlay_hotkey = Some("Alt+F2".into());
+        assert_eq!(hotkey_for(&cfg, App::Coach), "Alt+F2");
+        assert_eq!(hotkey_for(&cfg, App::Manager), "Alt+F1");
+        assert!(!hotkeys_shared(&cfg));
+        cfg.overlay_hotkey = "Alt+F3".into();
+        assert_eq!(state(&cfg, App::Coach, None).hotkey, "Alt+F2");
+        assert_eq!(state(&cfg, App::Manager, None).hotkey, "Alt+F3");
+    }
+
     #[test]
     fn the_default_hotkey_is_registrable() {
         parse_hotkey(DEFAULT_OVERLAY_HOTKEY).expect("the shipped default must parse");
@@ -509,7 +562,7 @@ mod tests {
 
         record_hotkey_result(&Err("another app already has it".into()));
         assert_eq!(
-            state(&cfg, None).hotkey_error.as_deref(),
+            state(&cfg, App::Manager, None).hotkey_error.as_deref(),
             Some("another app already has it"),
             "a hotkey that never bound has to say so somewhere the player can look",
         );
@@ -517,12 +570,12 @@ mod tests {
         let mut off = cfg.clone();
         off.overlay_enabled = false;
         assert!(
-            state(&off, None).hotkey_error.is_none(),
+            state(&off, App::Manager, None).hotkey_error.is_none(),
             "an overlay switched off isn't broken, so it doesn't get a warning",
         );
 
         record_hotkey_result(&Ok(()));
-        assert!(state(&cfg, None).hotkey_error.is_none(), "a later success clears it");
+        assert!(state(&cfg, App::Manager, None).hotkey_error.is_none(), "a later success clears it");
     }
 
     /// A hand-edited config holding junk should surface a message naming the junk,
