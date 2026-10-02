@@ -13,6 +13,7 @@ mod coach;
 mod cues;
 mod fixes;
 mod ground;
+mod groundgrid;
 mod hud;
 mod hudsheet;
 mod imports;
