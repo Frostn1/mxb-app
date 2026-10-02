@@ -4,12 +4,18 @@
 //! FrostMod's `src/coachhud.h`, `MXHD` version 1, little-endian, pinned byte for byte by
 //! `tests/coachhud_test.cpp` there and by the test here. The layout, in order: magic, version,
 //! track length; the reference lap's points (track position 0..1, seconds since the line, world
-//! x and z); the sections (start and end in metres from the line, name, tip); then flags.
+//! x and z); the sections (start and end in metres from the line, name, tip); then flags; then
+//! an optional channel block, `CHAN`, a count equal to the point count, and per point the speed
+//! (m/s), throttle (0..1) and brake (0..1, the larger of front and rear) of the same lap. Plugins
+//! that predate it stop reading at the flags, and a sheet without it just has no channels, so the
+//! version stays 1.
 
 use crate::analysis::{Review, Trace, STEP_M};
 
 pub const MAGIC: &[u8; 4] = b"MXHD";
 pub const VERSION: u32 = 1;
+/// Tags the optional per-point channel block after the flags.
+pub const CHANNELS: &[u8; 4] = b"CHAN";
 /// Bit 0: ask the rider to stop two seconds in neutral, so the coach can measure sag.
 pub const SAG_PROMPT: u32 = 1;
 /// The plugin reads at most this many points and sections, and 255 bytes of each text.
@@ -64,11 +70,14 @@ pub fn write(track_len: f32, fast: &Trace, parts: &[Part], flags: u32) -> Vec<u8
     let every = n.div_ceil(MAX_POINTS).max(1);
     let t0 = fast.pts.first().map_or(0.0, |p| p.t);
     let mut points: Vec<[f32; 4]> = Vec::new();
+    let mut chans: Vec<[f32; 3]> = Vec::new();
     for i in (0..n).step_by(every).chain((n > 0 && (n - 1) % every != 0).then_some(n - 1)) {
         let p = &fast.pts[i];
         let pos = if track_len > 0.0 { (i as f32 * STEP_M / track_len).min(1.0) } else { 0.0 };
         let elapsed = (p.t - t0).max(points.last().map_or(0.0, |q| q[1]));
         points.push([pos, elapsed, p.x, p.z]);
+        let unit = |v: f32| if v.is_finite() { v.clamp(0.0, 1.0) } else { 0.0 };
+        chans.push([if p.v.is_finite() { p.v.max(0.0) } else { 0.0 }, unit(p.throttle), unit(p.front.max(p.rear))]);
     }
     b.extend_from_slice(&(points.len() as u32).to_le_bytes());
     for p in &points {
@@ -86,6 +95,15 @@ pub fn write(track_len: f32, fast: &Trace, parts: &[Part], flags: u32) -> Vec<u8
         }
     }
     b.extend_from_slice(&flags.to_le_bytes());
+    if !chans.is_empty() {
+        b.extend_from_slice(CHANNELS);
+        b.extend_from_slice(&(chans.len() as u32).to_le_bytes());
+        for c in &chans {
+            for v in c {
+                b.extend_from_slice(&v.to_le_bytes());
+            }
+        }
+    }
     b
 }
 
@@ -120,7 +138,20 @@ mod tests {
         assert_eq!((b[76], &b[77..83]), (6, &b"Turn 1"[..]));
         assert_eq!((b[83], &b[84..95]), (11, &b"Brake later"[..]));
         assert_eq!(u32_at(95), SAG_PROMPT);
-        assert_eq!(b.len(), 99);
+        // Then the channels: tag, count, and speed, throttle, brake per point.
+        assert_eq!((&b[99..103], u32_at(103)), (&b"CHAN"[..], 3));
+        assert_eq!(b.len(), 99 + 8 + 3 * 12);
+    }
+
+    #[test]
+    fn channels_follow_the_lap_and_stay_in_range() {
+        let mut l = lap(2);
+        l.pts[0] = Point { v: 20.0, throttle: 0.5, front: 0.25, rear: 0.75, ..l.pts[0] };
+        l.pts[1] = Point { v: f32::NAN, throttle: 3.0, front: -1.0, ..l.pts[1] };
+        let b = write(2.0, &l, &[], 0);
+        let at = b.len() - 24;
+        let f: Vec<f32> = (0..6).map(|i| f32::from_le_bytes(b[at + i * 4..at + i * 4 + 4].try_into().unwrap())).collect();
+        assert_eq!(f, [20.0, 0.5, 0.75, 0.0, 1.0, 0.0]);
     }
 
     #[test]
@@ -135,5 +166,55 @@ mod tests {
     #[test]
     fn file_names_match_the_plugin() {
         assert_eq!(file_name("indiana nationals", "MX2OEM_2023_KTM_250_SX-F"), "indiana_nationals.MX2OEM_2023_KTM_250_SX-F.hud");
+    }
+
+    /// Offline regeneration of one sheet from recordings on disk, for checking the channels
+    /// without the app. Run by hand:
+    ///   HUD_SESSIONS=<mxbcoach\sessions> HUD_SHEET=<existing .hud> HUD_TRACK=755_Compound     ///   HUD_BIKE=MX2OEM_2023_KTM_250_SX-F HUD_OUT=<new .hud> cargo test regenerate_sheet -- --ignored
+    /// It races the fastest whole lap for that track and bike, and keeps the sections and flags
+    /// of the existing sheet. The app does the same, with the review's sections, when it writes cues.
+    #[test]
+    #[ignore]
+    fn regenerate_sheet() {
+        let var = |k: &str| std::env::var(k).unwrap_or_else(|_| panic!("set {k}"));
+        let (track, bike) = (var("HUD_TRACK"), var("HUD_BIKE"));
+        let mut best: Option<(i32, crate::telemetry::Recording, i32)> = None;
+        for e in std::fs::read_dir(var("HUD_SESSIONS")).unwrap().flatten() {
+            let Ok(rec) = crate::coach::load(&e.path().to_string_lossy()) else { continue };
+            if crate::cues::safe_name(&rec.event.track_id) != track || crate::cues::safe_name(&rec.event.bike_id) != bike {
+                continue;
+            }
+            for l in rec.laps().iter().filter(|l| l.whole && !l.invalid) {
+                if best.as_ref().map_or(true, |b| l.time_ms < b.0) {
+                    best = Some((l.time_ms, rec.clone(), l.num));
+                }
+            }
+        }
+        let (ms, rec, num) = best.expect("no whole lap for that track and bike");
+        let lap = rec.laps().into_iter().find(|l| l.num == num).unwrap();
+        let fast = Trace::new(&lap, rec.event.track_length).unwrap();
+        // The sections and flags of the sheet already in the game.
+        let old = std::fs::read(var("HUD_SHEET")).unwrap();
+        let u32_at = |i: usize| u32::from_le_bytes(old[i..i + 4].try_into().unwrap());
+        let mut at = 16 + u32_at(12) as usize * 16;
+        let n = u32_at(at);
+        at += 4;
+        let mut parts = Vec::new();
+        for _ in 0..n {
+            let f = |i: usize| f32::from_le_bytes(old[i..i + 4].try_into().unwrap());
+            let (start, end) = (f(at), f(at + 4));
+            at += 8;
+            let mut t = [String::new(), String::new()];
+            for s in &mut t {
+                let l = old[at] as usize;
+                *s = String::from_utf8_lossy(&old[at + 1..at + 1 + l]).into_owned();
+                at += 1 + l;
+            }
+            let [name, tip] = t;
+            parts.push(Part { start, end, name, tip });
+        }
+        let flags = u32_at(at);
+        std::fs::write(var("HUD_OUT"), write(rec.event.track_length, &fast, &parts, flags)).unwrap();
+        println!("lap {num} ({ms} ms), {} sections, flags {flags}", parts.len());
     }
 }
