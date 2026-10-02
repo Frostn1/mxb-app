@@ -178,6 +178,13 @@ pub fn start(app: &AppHandle) {
                     crate::racemode::restore_if_idle(&handle, "the game exited")
                 })
                 .await;
+                // View-only paints were for that session only. Paint sync's own loop does the
+                // same when it notices; whichever is first finds the journal, the other nothing.
+                let handle = app.clone();
+                let _ = tauri::async_runtime::spawn_blocking(move || {
+                    crate::viewonly::sweep_if_idle(&handle, "the game exited")
+                })
+                .await;
             }
 
             tokio::time::sleep(POLL).await;

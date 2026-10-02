@@ -3506,6 +3506,52 @@ export function removeSyncedPaints(): Promise<RemoveOutcome> {
   return invoke<RemoveOutcome>("remove_synced_paints");
 }
 
+/** Someone besides the owner allowed to ride a locked paint: an MXB App rider by name, or a GUID. */
+export interface PaintTeamEntry {
+  kind: "account" | "guid";
+  id: string;
+}
+
+/** One of the rider's own paints, with View-only, Locked and its team list. */
+export interface OwnPaint {
+  sha256: string;
+  fileName: string;
+  relDest: string;
+  bikeId: string;
+  slot: string | null;
+  /** In the look last published; otherwise a policy kept on a paint the rider took off. */
+  worn: boolean;
+  viewOnly: boolean;
+  locked: boolean;
+  /** A bike paint: the only kind a server can refuse, so the only kind a lock applies to. */
+  lockable: boolean;
+  team: PaintTeamEntry[];
+}
+
+export interface OwnPaints {
+  /** Steam sign-in proved this rider's GUID, which a lock needs. */
+  canLock: boolean;
+  paints: OwnPaint[];
+}
+
+/** The rider's own paints and what they've said about each. */
+export function paintPolicies(): Promise<OwnPaints> {
+  return invoke<OwnPaints>("paint_policies");
+}
+
+/**
+ * View-only: other riders see it on the server, and their app deletes it when the game closes.
+ * Locked: only the owner and `team` may ride in it, on MXB servers that enforce locks.
+ */
+export function setPaintPolicy(
+  sha256: string,
+  viewOnly: boolean,
+  locked: boolean,
+  team: PaintTeamEntry[],
+): Promise<void> {
+  return invoke<void>("set_paint_policy", { sha256, viewOnly, locked, team });
+}
+
 // ── Dedicated servers ────────────────────────────────────────────────────────
 
 /** A dedicated server the player administers, as stored in the app config. */

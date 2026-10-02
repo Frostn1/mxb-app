@@ -174,6 +174,7 @@ struct Pick {
 /// can't be given one can't be shared. See [`resolve_pick`] for what counts.
 fn picks(cfg: &AppConfig, paths: &[String]) -> (Vec<Pick>, Vec<Skipped>) {
     let root = library::mods_root(&cfg.mods_path);
+    let synced = crate::viewonly::SyncedSet::read(&root);
     let mut picks: Vec<Pick> = Vec::new();
     let mut skipped: Vec<Skipped> = Vec::new();
 
@@ -185,6 +186,11 @@ fn picks(cfg: &AppConfig, paths: &[String]) -> (Vec<Pick>, Vec<Skipped>) {
                 continue;
             }
         };
+        // Another rider's paint, put here by paint sync: not this player's to pass on.
+        if synced.has_rel(&rel) {
+            skipped.push(Skipped { path: raw.clone(), reason: "another rider's synced paint".to_string() });
+            continue;
+        }
 
         let is_dir = src.is_dir();
         picks.push(Pick {
@@ -287,6 +293,9 @@ pub async fn pack(
     for Pick { item, src } in &picks {
         entries.extend(bundle::entries_under(&format!("mods/{}", item.rel), src));
     }
+    // A shared folder can hold paints paint sync put there; those never go in.
+    let synced = crate::viewonly::SyncedSet::read(&library::mods_root(&cfg.mods_path));
+    entries.retain(|e| !synced.has_path(&e.src.to_string_lossy()));
 
     let items: Vec<ShareItem> = picks.into_iter().map(|p| p.item).collect();
 

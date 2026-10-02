@@ -11,6 +11,24 @@ import { DurableObject } from "cloudflare:workers";
 interface Member {
   accountId: string;
   serverKey: string;
+  /** The app said it honours view-only paints. Absent on sockets from before the flag: no. */
+  viewOnly?: boolean;
+}
+
+/**
+ * The frame for a member whose app would keep a view-only paint: the same frame with those
+ * paints taken out. Anything that isn't a rider frame goes as it is.
+ */
+export function legacyFrame(frame: string): string {
+  try {
+    const f = JSON.parse(frame) as { t?: unknown; rider?: { paints?: { viewOnly?: unknown }[] } };
+    const paints = f.rider?.paints;
+    if (f.t !== "joined" || !Array.isArray(paints)) return frame;
+    if (!paints.some((p) => p?.viewOnly)) return frame;
+    return JSON.stringify({ ...f, rider: { ...f.rider, paints: paints.filter((p) => !p?.viewOnly) } });
+  } catch {
+    return frame;
+  }
 }
 
 /** Enough for any grid the game can run, and a ceiling on what one room fans out to. */
@@ -26,11 +44,12 @@ export class PaintRoom extends DurableObject<Env> {
 
     if (new URL(request.url).pathname === "/notify") {
       const frame = await request.text();
+      let legacy: string | null = null;
       for (const ws of this.ctx.getWebSockets()) {
         const m = ws.deserializeAttachment() as Member | null;
         if (m?.accountId === accountId) continue;
         try {
-          ws.send(frame);
+          ws.send(m?.viewOnly ? frame : (legacy ??= legacyFrame(frame)));
         } catch {
           // A socket closing as we speak; its own close handler tidies up.
         }
@@ -53,7 +72,11 @@ export class PaintRoom extends DurableObject<Env> {
 
     const [client, server] = Object.values(new WebSocketPair());
     this.ctx.acceptWebSocket(server!);
-    server!.serializeAttachment({ accountId, serverKey } satisfies Member);
+    server!.serializeAttachment({
+      accountId,
+      serverKey,
+      viewOnly: request.headers.get("X-View-Only") === "1",
+    } satisfies Member);
     return new Response(null, { status: 101, webSocket: client });
   }
 

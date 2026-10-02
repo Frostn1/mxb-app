@@ -1243,6 +1243,26 @@ export const it: Translation = {
   "sync.autoNote":
     "Il tuo look si pubblica da solo — ogni moto, ogni volta che lo cambi nell'app o nel garage del gioco. Quello degli altri arriva quando premi Gioca.",
 
+  "viewOnly.title": "Livree solo visualizzazione e bloccate",
+  "viewOnly.desc": "Scegli chi può tenere o usare ciascuna delle tue livree. I piloti sul tuo server le vedono comunque.",
+  "viewOnly.honest": "Limiti onesti: solo visualizzazione fa cancellare la tua livrea dalle app degli altri piloti quando chiudono il gioco e la tiene fuori dalla loro libreria, dalle esportazioni e dalle condivisioni. Ferma la copia occasionale, non chi copia il file mentre il gioco è aperto o la cattura dallo schermo. Un blocco vale solo sui server MXB con i blocchi livrea attivi; altrove una livrea copiata si può ancora usare.",
+  "viewOnly.empty": "Le tue livree compaiono qui una volta pubblicato il tuo look.",
+  "viewOnly.viewOnly": "Solo visualizzazione",
+  "viewOnly.viewOnlyHint": "Gli altri sul server la vedono ma non la tengono.",
+  "viewOnly.locked": "Bloccata",
+  "viewOnly.lockedHint": "Solo tu e il tuo team potete usarla.",
+  "viewOnly.needsSteam": "Per bloccare serve l'accesso con Steam, così un server sa che il tuo GUID è davvero tuo.",
+  "viewOnly.notLockable": "Si possono bloccare solo le livree della moto: un server vede quale livrea della moto usi, non la tua attrezzatura.",
+  "viewOnly.team": "Team",
+  "viewOnly.teamPlaceholder": "Nome pilota o GUID (FF…)",
+  "viewOnly.add": "Aggiungi",
+  "viewOnly.save": "Salva",
+  "viewOnly.saved": "Salvato",
+  "viewOnly.saveFailed": "Salvataggio non riuscito: {{error}}",
+  "viewOnly.loadFailed": "Impossibile caricare le tue livree: {{error}}",
+  "viewOnly.notWorn": "Non nel tuo look attuale",
+  "viewOnly.remove": "Rimuovi",
+
   // ── Stringhe sfuggite alla prima scansione (JSX su più righe) ──────────────
   "libraryDetail.noEmbedded": "Nessun dettaglio incorporato trovato per questo elemento.",
   "modDetail.downloadFromHost": "Scarica da {{host}}",

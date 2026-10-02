@@ -1221,6 +1221,26 @@ export const en = {
   "sync.autoNote":
     "Your look publishes itself — every bike, whenever you change it in the app or in the game's own garage. Everyone else's arrives when you press Play.",
 
+  "viewOnly.title": "View-only and locked paints",
+  "viewOnly.desc": "Choose who may keep or ride in each of your paints. Riders on your server still see them either way.",
+  "viewOnly.honest": "Honest limits: view-only makes other riders' apps delete your paint when their game closes and keeps it out of their library, exports and shares. That stops casual copying, not someone who copies the file while their game is running or captures it off the screen. A lock is only enforced on MXB servers that have paint locks turned on; anywhere else a copied paint can still be ridden.",
+  "viewOnly.empty": "Your published paints show up here once your look has been published.",
+  "viewOnly.viewOnly": "View-only",
+  "viewOnly.viewOnlyHint": "Others on the server see it but don't keep it.",
+  "viewOnly.locked": "Locked",
+  "viewOnly.lockedHint": "Only you and your team can ride in it.",
+  "viewOnly.needsSteam": "Locking needs Steam sign-in, so a server can tell your GUID is really yours.",
+  "viewOnly.notLockable": "Only bike paints can be locked: a server sees which bike paint you ride, not your gear.",
+  "viewOnly.team": "Team",
+  "viewOnly.teamPlaceholder": "Rider name or GUID (FF…)",
+  "viewOnly.add": "Add",
+  "viewOnly.save": "Save",
+  "viewOnly.saved": "Saved",
+  "viewOnly.saveFailed": "Couldn't save: {{error}}",
+  "viewOnly.loadFailed": "Couldn't load your paints: {{error}}",
+  "viewOnly.notWorn": "Not in your current look",
+  "viewOnly.remove": "Remove",
+
   // ── Strings the multi-line JSX sweep initially missed ──────────────────────
   "libraryDetail.noEmbedded": "No embedded details were found for this item.",
   "modDetail.downloadFromHost": "Download from {{host}}",

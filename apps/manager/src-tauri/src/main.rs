@@ -27,6 +27,7 @@ mod frostmod_manage;
 pub(crate) use mxb_core::game;
 mod fileinfo;
 mod gameproc;
+mod viewonly;
 mod gamecache;
 mod hub_clearance;
 mod hub_session;
@@ -2858,6 +2859,34 @@ async fn publish_paints(
 }
 
 
+/// The rider's own paints, each with View-only, Locked and its team list (`viewonly.rs`).
+#[tauri::command]
+async fn paint_policies(app: tauri::AppHandle) -> Result<viewonly::OwnPaints, String> {
+    let cfg = config::load_or_detect(&app).unwrap_or_default();
+    if cfg.cp_token.trim().is_empty() {
+        return Err("Paint sync hasn't signed you up yet: start the game once with it on.".into());
+    }
+    viewonly::own_paints(&cfg.cp_token).await.map_err(|e| format!("{e:#}"))
+}
+
+/// Save View-only / Locked / the team list for one of the rider's own paints.
+#[tauri::command]
+async fn set_paint_policy(
+    app: tauri::AppHandle,
+    sha256: String,
+    view_only: bool,
+    locked: bool,
+    team: Vec<viewonly::TeamEntry>,
+) -> Result<(), String> {
+    let cfg = config::load_or_detect(&app).unwrap_or_default();
+    if cfg.cp_token.trim().is_empty() {
+        return Err("Paint sync hasn't signed you up yet: start the game once with it on.".into());
+    }
+    viewonly::set_policy(&cfg.cp_token, &sha256, view_only, locked, &team)
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
+
 /// Record what a publish achieved, so a cold start can still answer "is my look out there?".
 fn remember_publish(app: &tauri::AppHandle, outcome: &paintsync::PublishOutcome) {
     // Re-read immediately before writing: the publish took a round trip, and `config::save`
@@ -3364,6 +3393,12 @@ fn live_sync_session(app: &tauri::AppHandle, address: Option<String>) {
             } else if seen_running || started.elapsed() > LIVE_SYNC_STARTUP_GRACE {
                 log::info!("[sync] session over, stopping the live sync");
                 room.end(&app, &cfg).await;
+                // View-only paints were for that session only.
+                let handle = app.clone();
+                let _ = tauri::async_runtime::spawn_blocking(move || {
+                    viewonly::sweep_if_idle(&handle, "the game exited")
+                })
+                .await;
                 // Leaving the paint room is the session ending too. The session watcher
                 // restores Race mode at the same moment; whichever gets there first does it,
                 // and the other finds no journal.
@@ -8344,6 +8379,14 @@ fn main() {
                     racemode::restore_if_idle(&handle, "startup found a Race mode journal")
                 });
             }
+            // The same for view-only paints: a session the app never saw end (killed, crashed)
+            // left them on disk. Swept now unless the game is up, whose exit does it.
+            {
+                let handle = handle.clone();
+                tauri::async_runtime::spawn_blocking(move || {
+                    viewonly::sweep_if_idle(&handle, "app start");
+                });
+            }
             sessionwatch::start(handle);
             // The link to MXB Coach: one overlay key for both apps.
             overlay::start_link(handle);
@@ -8592,6 +8635,8 @@ fn main() {
             set_paint_sync_enabled,
             paint_sync_readiness,
             remove_synced_paints,
+            paint_policies,
+            set_paint_policy,
             set_preview_tyres,
             set_voice_input_device,
             set_voice_output_device,
@@ -9988,7 +10033,15 @@ fn scan_library_blocking(
     if ledger_due() {
         ledger_reconcile_detached(&app);
     }
-    library::scan_library(&cfg.mods_path, &subpath, &sound_bikes, cfg.game()).map_err(|e| format!("{e:#}"))
+    let mut entries =
+        library::scan_library(&cfg.mods_path, &subpath, &sound_bikes, cfg.game()).map_err(|e| format!("{e:#}"))?;
+    // Paint sync's files are other riders' paints: the library never offers them to browse,
+    // export or share (`viewonly.rs`).
+    let synced = viewonly::SyncedSet::read(&library::mods_root(&cfg.mods_path));
+    if !synced.is_empty() {
+        entries.retain(|e| !synced.has_path(&e.path));
+    }
+    Ok(entries)
 }
 
 /// Claim this player's MX Bikes GUID.

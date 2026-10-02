@@ -1211,6 +1211,26 @@ export const sv: Translation = {
   "sync.autoNote":
     "Din look publicerar sig — varje cykel, varje gång du ändrar den i appen eller i spelets eget garage. Alla andra kommer när du trycker på Play.",
 
+  "viewOnly.title": "Visningslackeringar och låsta lackeringar",
+  "viewOnly.desc": "Välj vem som får behålla eller köra med varje lackering. Förare på din server ser dem ändå.",
+  "viewOnly.honest": "Ärliga gränser: visning gör att andra förares appar raderar din lackering när deras spel stängs och håller den borta från deras bibliotek, exporter och delningar. Det stoppar slentriankopiering, inte någon som kopierar filen medan spelet är igång eller fångar den från skärmen. Ett lås gäller bara på MXB-servrar med lackeringslås påslaget; någon annanstans kan en kopierad lackering fortfarande köras.",
+  "viewOnly.empty": "Dina lackeringar visas här när din look har publicerats.",
+  "viewOnly.viewOnly": "Bara visning",
+  "viewOnly.viewOnlyHint": "Andra på servern ser den men behåller den inte.",
+  "viewOnly.locked": "Låst",
+  "viewOnly.lockedHint": "Bara du och ditt team kan köra med den.",
+  "viewOnly.needsSteam": "Att låsa kräver Steam-inloggning, så att en server vet att din GUID verkligen är din.",
+  "viewOnly.notLockable": "Bara cykellackeringar kan låsas: en server ser vilken cykellackering du kör med, inte din utrustning.",
+  "viewOnly.team": "Team",
+  "viewOnly.teamPlaceholder": "Förarnamn eller GUID (FF…)",
+  "viewOnly.add": "Lägg till",
+  "viewOnly.save": "Spara",
+  "viewOnly.saved": "Sparat",
+  "viewOnly.saveFailed": "Kunde inte spara: {{error}}",
+  "viewOnly.loadFailed": "Kunde inte läsa in dina lackeringar: {{error}}",
+  "viewOnly.notWorn": "Inte i din nuvarande look",
+  "viewOnly.remove": "Ta bort",
+
   // ── Strings the multi-line JSX sweep initially missed ──────────────────────
   "libraryDetail.noEmbedded": "Inga inbäddade detaljer hittades för den här artikeln.",
   "modDetail.downloadFromHost": "Ladda ner från {{host}}",
