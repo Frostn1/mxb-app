@@ -126,7 +126,6 @@ pub fn sweep(mods_dir: &Path, session_store: Option<&Path>) -> SweepOutcome {
                 out.kept_yours += 1;
                 continue;
             }
-            paintsync::note_sync_write(&dest);
             match std::fs::remove_file(&dest) {
                 Ok(()) => {
                     out.removed += 1;
