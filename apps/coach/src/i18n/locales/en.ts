@@ -413,6 +413,8 @@ export const en = {
   "hud.needs024": "Needs the recorder from FrostMod 0.24 or newer. Update it in Settings.",
   "hud.paceBody":
     "Over the line on the track: chevrons pointing back when you're coming in faster than Coach can stop, pointing on when you're slower than him, and MORE SPEED before a jump that needs it. Turns the line on too. Needs FrostMod 0.44.",
+  "hud.gearBody":
+    "Shows an arrow and the gear to be in where Coach's lap changes gear, on the line and beside the cue, when you're in a different gear. Turns the line on too. Needs FrostMod 0.45.",
   "hud.cuePos": "Where the cue shows",
   "hud.cuePosBody": "Pick a spot on the screen for the live cue. The section line follows it.",
   "hud.cuePos.left": "left",

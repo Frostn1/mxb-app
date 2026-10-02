@@ -54,6 +54,7 @@ export default function HudPanel() {
               )}
               {/* Pace hints are new and visual, so say what they draw before the rider rides out. */}
               {p.key === "pace" && <p className="mt-1 text-[11.5px] text-muted-foreground">{t("hud.paceBody")}</p>}
+              {p.key === "gear" && <p className="mt-1 text-[11.5px] text-muted-foreground">{t("hud.gearBody")}</p>}
               {/* The newest parts draw nothing on an older recorder, so say so rather than
                   leave a switch that looks broken. */}
               {p.needs === "0.24" && hud.preExtras && (

@@ -30,6 +30,9 @@ pub(crate) const PACE_NEEDS: &str = "0.44";
 /// The first recorder that calls the jumps on that line (FrostMod v0.44.1, `jumps` in hud.ini):
 /// a bar at the lip, a mark where Coach's lap landed and SINGLE / DOUBLE / TRIPLE over the lip.
 pub(crate) const JUMPS_NEED: &str = "0.44.1";
+/// The first recorder that hints gear changes (FrostMod v0.45.0, `gear` in hud.ini): an arrow and
+/// the target gear on the line where Coach's lap shifts, when the rider is in another gear.
+pub(crate) const GEAR_NEEDS: &str = "0.45";
 
 /// The HUD parts, in the order the overlay lists them: key, label, whether the plugin draws it
 /// when the file doesn't say, and the recorder it needs.
@@ -53,6 +56,8 @@ pub const HUD_PARTS: &[Part] = &[
     // Drawn on the line on the track, so it shows only with that on; on by default there, since
     // a rider who turned the line on asked to be shown the track.
     Part { key: "jumps", label: "Jump calls on the line", default_on: true, needs: JUMPS_NEED },
+    // Drawn on the line on the track too (and beside the cue box either way).
+    Part { key: "gear", label: "Gear hints", default_on: false, needs: GEAR_NEEDS },
     Part { key: "setup", label: "Setup card (when stopped)", default_on: true, needs: HUD_NEEDS },
 ];
 
@@ -272,7 +277,7 @@ fn keys_for(key: &'static str, on: bool) -> Vec<(&'static str, String)> {
         keys.push(("map", "1".to_string()));
     }
     // Pace hints are drawn over the line on the track: on their own they would show nothing.
-    if key == "pace" && on {
+    if (key == "pace" || key == "gear") && on {
         keys.push(("ground", "1".to_string()));
     }
     keys
@@ -394,6 +399,18 @@ mod tests {
         let hud = hud_of(&path, false, false);
         assert!(part(&hud, "pace").on && part(&hud, "ground").on, "both on");
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Gear hints wait to be asked for, need the recorder that draws them, and bring the line on
+    /// the track with them, like the pace hints.
+    #[test]
+    fn gear_hints_are_off_until_asked_for_and_bring_the_line() {
+        let none = hud_of(Path::new("/nowhere/hud.ini"), false, false);
+        assert!(!part(&none, "gear").on, "off by default, as the plugin reads it");
+        assert_eq!(part(&none, "gear").needs, GEAR_NEEDS);
+        assert_eq!(part(&none, "gear").label, "Gear hints");
+        assert_eq!(keys_for("gear", true), vec![("gear", "1".to_string()), ("ground", "1".to_string())]);
+        assert_eq!(keys_for("gear", false), vec![("gear", "0".to_string())], "off leaves the line alone");
     }
 
     /// The reported map state has to be the one the rider will actually get, or the switch
