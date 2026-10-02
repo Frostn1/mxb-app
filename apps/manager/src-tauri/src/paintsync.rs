@@ -25,41 +25,6 @@ pub use mxb_core::names::{control_plane, safe_dest};
 use mxb_core::names::PAINT_EXT;
 
 /// Does this path name a paint? Extension only — the bytes are the decoder's business.
-/// How long a paint sync write keeps the mods watcher off that file. Paint sync tells
-/// FrostMod itself when it has staged paints (`paints_staged`), at the moment FrostMod can
-/// afford it; the watcher seeing the same write and sending `refresh_paints` on top was one of
-/// the up-to-three refreshes per sync that made riders lag out.
-const SYNC_WRITE_WINDOW: std::time::Duration = std::time::Duration::from_secs(120);
-
-/// Paths paint sync wrote or removed recently, folded, with when.
-static SYNC_WRITES: std::sync::Mutex<Vec<(String, std::time::Instant)>> = std::sync::Mutex::new(Vec::new());
-
-fn fold_path(path: &Path) -> String {
-    path.to_string_lossy().replace('\\', "/").to_lowercase()
-}
-
-/// Record that paint sync just wrote (or removed) `path`, so the mods watcher leaves it to
-/// paint sync. See [`written_by_sync`].
-pub fn note_sync_write(path: &Path) {
-    let now = std::time::Instant::now();
-    let mut writes = SYNC_WRITES.lock().unwrap_or_else(|e| e.into_inner());
-    writes.retain(|(_, at)| now.duration_since(*at) < SYNC_WRITE_WINDOW);
-    let key = fold_path(path);
-    writes.retain(|(p, _)| *p != key);
-    writes.push((key, now));
-}
-
-/// Did paint sync write or remove `path` in the last [`SYNC_WRITE_WINDOW`]?
-pub fn written_by_sync(path: &Path) -> bool {
-    let now = std::time::Instant::now();
-    let key = fold_path(path);
-    SYNC_WRITES
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .iter()
-        .any(|(p, at)| *p == key && now.duration_since(*at) < SYNC_WRITE_WINDOW)
-}
-
 pub fn is_paint(path: &Path) -> bool {
     path.extension()
         .and_then(|e| e.to_str())
@@ -711,7 +676,6 @@ pub async fn pull(
         if let Some(parent) = dest.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        note_sync_write(&dest);
         std::fs::write(&dest, &bytes)?;
         manifest.claim(&paint.rel_dest, &paint.sha256);
         out.installed += 1;
