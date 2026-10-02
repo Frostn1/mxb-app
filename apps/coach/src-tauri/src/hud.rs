@@ -27,6 +27,9 @@ pub(crate) const GROUND_NEEDS: &str = "0.42";
 /// The first recorder that draws pace hints over that line (FrostMod v0.44.0, `pace` in hud.ini):
 /// chevrons when coming in too fast or too slow for Coach's lap, and MORE SPEED before a jump.
 pub(crate) const PACE_NEEDS: &str = "0.44";
+/// The first recorder that calls the jumps on that line (FrostMod v0.44.1, `jumps` in hud.ini):
+/// a bar at the lip, a mark where Coach's lap landed and SINGLE / DOUBLE / TRIPLE over the lip.
+pub(crate) const JUMPS_NEED: &str = "0.44.1";
 /// The first recorder that hints gear changes (FrostMod v0.45.0, `gear` in hud.ini): an arrow and
 /// the target gear on the line where Coach's lap shifts, when the rider is in another gear.
 pub(crate) const GEAR_NEEDS: &str = "0.45";
@@ -50,6 +53,9 @@ pub const HUD_PARTS: &[Part] = &[
     Part { key: "ground", label: "Blue line on the track", default_on: false, needs: GROUND_NEEDS },
     // Drawn over the line on the track, so turning it on turns that on too.
     Part { key: "pace", label: "Pace hints", default_on: false, needs: PACE_NEEDS },
+    // Drawn on the line on the track, so it shows only with that on; on by default there, since
+    // a rider who turned the line on asked to be shown the track.
+    Part { key: "jumps", label: "Jump calls on the line", default_on: true, needs: JUMPS_NEED },
     // Drawn on the line on the track too (and beside the cue box either way).
     Part { key: "gear", label: "Gear hints", default_on: false, needs: GEAR_NEEDS },
     Part { key: "setup", label: "Setup card (when stopped)", default_on: true, needs: HUD_NEEDS },
@@ -343,6 +349,15 @@ mod tests {
         assert_eq!(part(&hud, "susp").needs, EXTRAS_NEED);
         assert_eq!(part(&hud, "trail").needs, EXTRAS_NEED);
         assert_eq!(part(&hud, "cue").needs, HUD_NEEDS);
+    }
+
+    /// Jump calls ride on the line on the track and are on with it until the rider says.
+    #[test]
+    fn jump_calls_are_on_by_default_and_need_the_recorder_that_draws_them() {
+        let hud = hud_of(Path::new("/nowhere/hud.ini"), false, false);
+        assert!(part(&hud, "jumps").on);
+        assert_eq!(part(&hud, "jumps").needs, JUMPS_NEED);
+        assert!(at_least("0.44.1", JUMPS_NEED) && !at_least("0.44.0", JUMPS_NEED));
     }
 
     /// The line on the track is its own switch, but until the rider sets it, it follows the
