@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { RefreshCw } from "lucide-react";
-import { configLoad, errorText, isLegacyStatus, legacyProcess, serverLogs, serverRiders, serverSession, serverStatus, type ServerView } from "@/lib/api";
+import { configLoad, errorText, isLegacyStatus, legacyProcess, serverLogs, serverRestartService, serverRiders, serverSession, serverStatus, type ServerView } from "@/lib/api";
 import { duration, lapTime, sessionName } from "@/lib/format";
 import { usePoll } from "@/lib/usePoll";
 import { ConfigTab } from "./ConfigTab";
@@ -250,6 +250,13 @@ function SessionControls({ server, current, remaining, refresh }: { server: Serv
       else setError(message);
     } finally { setBusy(null); }
   };
+  const restartServer = async () => {
+    if (!window.confirm(`Restart the ${server.name} service? Connected riders will be disconnected.`)) return;
+    setBusy("Restarting the server…"); setError(null);
+    try { await serverRestartService(server.id); refresh(); }
+    catch (e) { setError(errorText(e)); }
+    finally { setBusy(null); }
+  };
   const running = /^running\((practice|qualifying|warmup|race)\)$/.exec(current)?.[1] ?? "";
   const countdown = /^countdown(?:\((practice|qualifying|warmup|race)\)|\s*\{\s*next:\s*(practice|qualifying|warmup|race)\s*\})$/i.exec(current);
   const pending = (countdown?.[1] ?? countdown?.[2] ?? "").toLowerCase();
@@ -273,6 +280,7 @@ function SessionControls({ server, current, remaining, refresh }: { server: Serv
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-3"><h3 className="font-heading text-base font-extrabold">Race control</h3>{busy ? <span className="truncate text-xs text-muted-foreground">{busy}</span> : locked ? <span className="truncate text-xs font-medium text-primary">{sessionName(pending)} starts in {remaining == null ? "a moment" : duration(remaining)}</span> : raceLocked ? <span className="truncate text-xs text-muted-foreground">The race must finish before changing sessions</span> : null}</div>
         <div className="flex gap-2">
+          {!server.local && <Button size="sm" variant="ghost" disabled={!!busy} title="systemctl restart mxbserver" onClick={() => void restartServer()}>Restart server</Button>}
           <Button size="sm" variant="ghost" disabled={!!busy || controlsLocked} title={raceLocked ? "The race must finish" : locked ? "The countdown must finish" : undefined} onClick={() => void act("restart")}>Restart current</Button>
           <Button size="sm" variant="primary" disabled={!!busy || controlsLocked} title={raceLocked ? "The race must finish" : locked ? "The countdown must finish" : undefined} onClick={() => void act("advance")}>Next stage</Button>
         </div>
@@ -328,7 +336,7 @@ function LogsTab({ server }: { server: ServerView }) {
         <Button onClick={logs.refresh} disabled={logs.loading} aria-label="Refresh logs">
           <RefreshCw className="size-4" /> Refresh
         </Button>
-        <span className="text-xs text-muted-foreground">last 500 lines of {server.logPath}</span>
+        <span className="text-xs text-muted-foreground">last 500 lines of {server.local ? server.logPath : "journalctl -u mxbserver"}</span>
       </div>
       {logs.error && <ErrorLine text={logs.error} />}
       <pre className="min-h-0 flex-1 overflow-auto rounded-lg bg-muted p-3 font-mono text-xs leading-relaxed whitespace-pre-wrap">

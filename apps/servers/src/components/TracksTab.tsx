@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
-import { ArrowDown, ArrowUp, GripVertical, Link2, Plus, Search, Trash2, Unlink, Upload } from "lucide-react";
-import { errorText, inspectTrackUpload, serverSetRotation, serverSetTrack, serverTrackMembership, serverTracks, serverUpload, type ServerView, type TrackState } from "@/lib/api";
+import { ArrowDown, ArrowUp, GripVertical, Plus, Search, Trash2, Upload } from "lucide-react";
+import { errorText, inspectTrackUpload, serverSetRotation, serverSetTrack, serverTracks, serverUpload, type ServerView, type TrackState } from "@/lib/api";
 import { Button, Card, ErrorLine, Notice } from "./ui";
 
 const trackCache = new Map<string, TrackState>();
@@ -62,15 +62,6 @@ export function TracksTab({ server }: { server: ServerView }) {
     try { await serverUpload(server.id, "track", path); setDone("Track installed."); await load(); }
     catch (e) { setError(errorText(e)); } finally { setBusy(null); }
   };
-  const membership = async (track: string, attached: boolean) => {
-    if (!attached && !window.confirm(`Remove ${track} from ${server.name}? The shared file stays available to other servers on this machine.`)) return;
-    setBusy(attached ? `Adding ${track}…` : `Removing ${track}…`); setError(null); setDone(null);
-    try {
-      await serverTrackMembership(server.id, track, attached);
-      setDone(attached ? `${track} added to this server.` : `${track} removed from this server.`);
-      await load();
-    } catch (e) { setError(errorText(e)); } finally { setBusy(null); }
-  };
   const switchTrack = async (mode: "next" | "random") => {
     if (!state?.current || state.rotation.length === 0) return;
     const selected = mode === "next"
@@ -118,16 +109,14 @@ export function TracksTab({ server }: { server: ServerView }) {
       {done && <div role="status" className="fixed right-5 top-12 z-50 rounded-lg border bg-card px-4 py-3 text-sm font-medium shadow-lg">{done}</div>}
       <div className="grid gap-5 lg:grid-cols-[minmax(16rem,0.75fr)_minmax(24rem,1.25fr)]">
         <Card className="flex min-h-[30rem] flex-col gap-4 overflow-hidden">
-          <div className="flex items-center justify-between gap-3"><div><h3 className="font-heading text-lg font-extrabold">Track library</h3><p className="text-xs text-muted-foreground">Shared on this machine</p></div><Button size="sm" onClick={() => void upload()} disabled={!!busy}><Upload className="size-3.5" /> Upload</Button></div>
+          <div className="flex items-center justify-between gap-3"><div><h3 className="font-heading text-lg font-extrabold">Track library</h3><p className="text-xs text-muted-foreground">The .pkz files in the server&apos;s track folder</p></div><Button size="sm" onClick={() => void upload()} disabled={!!busy}><Upload className="size-3.5" /> Upload</Button></div>
           {busy?.includes("track") && <div className="h-1.5 overflow-hidden rounded-full bg-secondary" role="progressbar" aria-label={busy}><div className="upload-progress-bar h-full w-2/5 rounded-full bg-primary" /></div>}
           <label className="relative"><Search className="absolute left-3 top-2.5 size-4 text-muted-foreground" /><input className="h-9 w-full rounded-md border border-input bg-background pl-9 pr-3 text-sm outline-none focus:border-ring" placeholder="Search tracks" value={query} onChange={(e) => setQuery(e.target.value)} /></label>
           <div className="flex min-h-0 flex-1 flex-col divide-y overflow-auto">
             {state === null && <p className="py-3 text-sm text-muted-foreground">Loading…</p>}
             {state && installed.length === 0 && <p className="py-3 text-sm text-muted-foreground">No matching tracks.</p>}
             {installed.map((track) => {
-              const attached = state?.installed.includes(track) ?? false;
-              const inUse = savedQueue.includes(track);
-              return <div key={track} className="flex items-center gap-2 py-2.5"><span className="min-w-0 flex-1 truncate text-sm font-medium">{track}</span><span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{attached ? "On server" : "On machine"}</span>{attached ? <><button type="button" title="Add to rotation" onClick={() => setQueue((q) => [...q, track])} className="grid size-8 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"><Plus className="size-4" /></button><button type="button" title={inUse ? "Remove it from the rotation first" : "Remove from this server"} disabled={inUse || !!busy} onClick={() => void membership(track, false)} className="grid size-8 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-destructive disabled:opacity-25"><Unlink className="size-4" /></button></> : <button type="button" title="Add to this server" disabled={!!busy} onClick={() => void membership(track, true)} className="grid size-8 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"><Link2 className="size-4" /></button>}</div>;
+              return <div key={track} className="flex items-center gap-2 py-2.5"><span className="min-w-0 flex-1 truncate text-sm font-medium">{track}</span><button type="button" title="Add to rotation" onClick={() => setQueue((q) => [...q, track])} className="grid size-8 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"><Plus className="size-4" /></button></div>;
             })}
           </div>
         </Card>

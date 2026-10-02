@@ -1,12 +1,12 @@
 //! Reaching a server's loopback-only ports: the system `ssh` forwards each one to a free local
-//! port (`ssh -N -L`), and runs the few read-only remote commands (`tail` of the log).
+//! port (`ssh -N -L`), and runs the host-side helper script (`remote.sh`) for config, systemctl and journalctl.
 //!
 //! This is the management plane's own design (D2: the admin and observe listeners never face
 //! the internet; remote access is an SSH tunnel), done by the app so nobody has to keep a
 //! terminal open. `BatchMode` means a missing key or an unknown passphrase fails fast instead
 //! of prompting inside a hidden process.
 
-use crate::store::{safe_remote_path, Server};
+use crate::store::Server;
 use std::collections::HashMap;
 use std::io::Read;
 use std::net::{SocketAddr, TcpListener, TcpStream};
@@ -16,7 +16,6 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 const CONNECT_SECS: u64 = 12;
-const TAIL_SECS: u64 = 15;
 
 fn base_args(server: &Server) -> Vec<String> {
     let mut args = vec![
@@ -116,18 +115,6 @@ pub fn tunnel_args(server: &Server, local: u16, remote: u16) -> Vec<String> {
     args.push("--".into());
     args.push(destination(server));
     args
-}
-
-/// The arguments of a remote `tail`; `None` when the path or count is not safe to send.
-pub fn tail_args(server: &Server, lines: u32) -> Option<Vec<String>> {
-    if !safe_remote_path(&server.log_path) || !(1..=5000).contains(&lines) {
-        return None;
-    }
-    let mut args = base_args(server);
-    args.push("--".into());
-    args.push(destination(server));
-    args.push(format!("tail -n {lines} -- {}", server.log_path));
-    Some(args)
 }
 
 /// Every ssh process this app starts, so quitting kills all of them: tunnels, tunnels still
@@ -355,50 +342,6 @@ impl Tunnels {
         self.registry.kill_all();
         self.clear(|_| false);
     }
-
-    /// The last `lines` lines of the server's log, within `TAIL_SECS`. Blocking.
-    pub fn tail(&self, server: &Server, lines: u32) -> Result<Vec<String>, String> {
-        let args = tail_args(server, lines).ok_or("unsafe log path or line count")?;
-        let mut cmd = command();
-        cmd.args(args).stdout(Stdio::piped()).stderr(Stdio::piped());
-        let (id, child) = self.registry.spawn(cmd)?;
-        let (out, err) = match child.lock() {
-            Ok(mut c) => (c.stdout.take(), c.stderr.take()),
-            Err(_) => (None, None),
-        };
-        // Both pipes are read on their own threads: 500 log lines can outgrow a pipe buffer.
-        let out = std::thread::spawn(move || read_all(out));
-        let err = std::thread::spawn(move || read_all(err));
-        let deadline = Instant::now() + Duration::from_secs(TAIL_SECS);
-        let status = loop {
-            let done = child
-                .lock()
-                .ok()
-                .and_then(|mut c| c.try_wait().ok().flatten());
-            if done.is_some() || Instant::now() > deadline {
-                break done;
-            }
-            std::thread::sleep(Duration::from_millis(100));
-        };
-        self.registry.kill(id);
-        let out = out.join().unwrap_or_default();
-        let err = err.join().unwrap_or_default();
-        match status {
-            None => Err(format!("reading the log on {} timed out", server.host)),
-            Some(status) if !status.success() => {
-                let why = String::from_utf8_lossy(&err).trim().to_string();
-                Err(if why.is_empty() {
-                    format!("ssh exited ({status})")
-                } else {
-                    why
-                })
-            }
-            Some(_) => Ok(String::from_utf8_lossy(&out)
-                .lines()
-                .map(str::to_string)
-                .collect()),
-        }
-    }
 }
 
 /// What a remote script printed.
@@ -545,22 +488,6 @@ mod tests {
         let dashdash = args.iter().position(|a| a == "--").unwrap();
         assert_eq!(args[dashdash + 1], "ubuntu@16.146.6.22");
         assert_eq!(args.len(), dashdash + 2);
-    }
-
-    #[test]
-    fn tail_sends_only_a_checked_path() {
-        let args = tail_args(&server(), 200).unwrap();
-        assert_eq!(
-            args.last().unwrap(),
-            "tail -n 200 -- /opt/mxbserver/logs/mxbserver.log"
-        );
-        let bad = Server {
-            log_path: "/x;rm -rf /".into(),
-            ..server()
-        };
-        assert!(tail_args(&bad, 200).is_none());
-        assert!(tail_args(&server(), 0).is_none());
-        assert!(tail_args(&server(), 5001).is_none());
     }
 
     #[test]

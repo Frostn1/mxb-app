@@ -227,18 +227,18 @@ export function ServerForm({
         <Field label="Status port" hint="The server's observe port (server.observe in its config). 9809 unless you changed it.">
           <Input type="number" min={1} max={65535} value={server.observePort} onChange={(e) => set("observePort", Number(e.target.value))} />
         </Field>
-        <Field
+        {server.local && <Field
           label="Log file"
           hint={server.local ? "Where the server's output goes, e.g. C:\\dev\\MXB\\local-server\\logs\\mxbserver.log" : undefined}
         >
           <Input value={server.logPath} onChange={(e) => set("logPath", e.target.value)} required />
-        </Field>
+        </Field>}
       </Section>}
 
       <div ref={tokenBox}>
-        <Section title={server.kind === "legacy" ? "mxb-agent token" : "Admin API"} hint={server.kind === "legacy" ? "Required to control the official dedicated server." : "Optional. Lets the app list who's riding. Needs an [admin] section in the server's config."}>
+        <Section title={server.kind === "legacy" ? "mxb-agent token" : "Admin API"} hint={server.kind === "legacy" ? "Required to control the official dedicated server." : "Lets the app list who's riding and, with a control-scope token, run race and session controls. Needs an [admin] section in the server's config."}>
           {server.kind === "native" && <>
-          <Field label="Admin port" hint="The port in [admin] listen, e.g. 9810.">
+          <Field label="Admin port" hint={server.local ? "The port in [admin] listen, e.g. 9810." : "Leave empty to use the port in the server's [admin] listen (default 9810)."}>
             <Input
               type="number"
               min={1}
@@ -275,7 +275,7 @@ export function ServerForm({
                   placeholder={server.kind === "legacy" ? "mxb-agent token" : "you.0123abcd…"}
                 />
                 <span className="text-xs text-muted-foreground">
-                  {server.kind === "legacy" ? "The token in mxb-agent's agent.json." : <>From <span className="font-mono">mxbserver admin token new --id you --scope read</span> on the server.</>} Kept in your OS keychain; the app never shows it again.
+                  {server.kind === "legacy" ? "The token in mxb-agent's agent.json." : <>From <span className="font-mono">mxbserver admin token new --id app --scope control</span> on the server (read scope only lists riders; race and session controls need control).</>} Kept in your OS keychain; the app never shows it again.
                   {hasToken && (
                     <>
                       {" "}
