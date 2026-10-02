@@ -24,6 +24,9 @@ pub(crate) const EXTRAS_NEED: &str = "0.24";
 /// The first recorder that paints the line to take on the track itself (FrostMod v0.42.0,
 /// `ground` in hud.ini). An older one only draws the trail inside the map.
 pub(crate) const GROUND_NEEDS: &str = "0.42";
+/// The first recorder that calls the jumps on that line (FrostMod v0.44.0, `jumps` in hud.ini):
+/// a bar at the lip, a mark where Coach's lap landed and SINGLE / DOUBLE / TRIPLE over the lip.
+pub(crate) const JUMPS_NEED: &str = "0.44";
 
 /// The HUD parts, in the order the overlay lists them: key, label, whether the plugin draws it
 /// when the file doesn't say, and the recorder it needs.
@@ -42,6 +45,9 @@ pub const HUD_PARTS: &[Part] = &[
     // Follows the trail until the rider sets it on its own: the plugin reads a missing `ground`
     // as whatever `trail` says, and `hud_of` reports it the same way.
     Part { key: "ground", label: "Blue line on the track", default_on: false, needs: GROUND_NEEDS },
+    // Drawn on the line on the track, so it shows only with that on; on by default there, since
+    // a rider who turned the line on asked to be shown the track.
+    Part { key: "jumps", label: "Jump calls on the line", default_on: true, needs: JUMPS_NEED },
     Part { key: "setup", label: "Setup card (when stopped)", default_on: true, needs: HUD_NEEDS },
 ];
 
@@ -324,6 +330,15 @@ mod tests {
         assert_eq!(part(&hud, "susp").needs, EXTRAS_NEED);
         assert_eq!(part(&hud, "trail").needs, EXTRAS_NEED);
         assert_eq!(part(&hud, "cue").needs, HUD_NEEDS);
+    }
+
+    /// Jump calls ride on the line on the track and are on with it until the rider says.
+    #[test]
+    fn jump_calls_are_on_by_default_and_need_the_recorder_that_draws_them() {
+        let hud = hud_of(Path::new("/nowhere/hud.ini"), false, false);
+        assert!(part(&hud, "jumps").on);
+        assert_eq!(part(&hud, "jumps").needs, JUMPS_NEED);
+        assert!(at_least("0.44.0", JUMPS_NEED) && !at_least("0.43.4", JUMPS_NEED));
     }
 
     /// The line on the track is its own switch, but until the rider sets it, it follows the
