@@ -5,6 +5,14 @@
 //! `tests/coachhud_test.cpp` there and by the test here. The layout, in order: magic, version,
 //! track length; the reference lap's points (track position 0..1, seconds since the line, world
 //! x and z); the sections (start and end in metres from the line, name, tip); then flags.
+//!
+//! Then chunks, each a four-byte tag, a u32 length and that many bytes, which a recorder that
+//! predates them skips (one that predates chunks reads nothing past the flags):
+//! - `DRIV`: per point, speed m/s, throttle 0..1 and brake 0..1 (the harder of the two), so the
+//!   recorder colours its line on the track by where the lap braked (FrostMod v0.43.2).
+//! - `TRRN`: per point, the track's own ground height at five offsets across the line, half a
+//!   metre apart, right to left, NaN off the grid; only when the laps sit steadily on this
+//!   terrain (`ground::measure`). The recorder lays its line on it instead of the centreline.
 
 use crate::analysis::{Review, Trace, STEP_M};
 
@@ -53,8 +61,25 @@ fn text(s: &str) -> &[u8] {
     &s.as_bytes()[..end]
 }
 
+/// The track's terrain, as `ground::height_at` reads it.
+pub struct Terrain<'a> {
+    pub width: usize,
+    pub height: usize,
+    pub metres_per_sample: f32,
+    pub heights: &'a [f32],
+}
+
+/// Ground samples across the line at each point, and how far apart.
+pub const TERRAIN_ACROSS: usize = 5;
+pub const TERRAIN_STEP_M: f32 = 0.5;
+
 /// The `.hud` file for this track, from the fast lap and the sections.
 pub fn write(track_len: f32, fast: &Trace, parts: &[Part], flags: u32) -> Vec<u8> {
+    write_with(track_len, fast, parts, flags, None)
+}
+
+/// [`write`], with the ground under the line when the track's terrain is known.
+pub fn write_with(track_len: f32, fast: &Trace, parts: &[Part], flags: u32, terrain: Option<&Terrain>) -> Vec<u8> {
     let mut b = MAGIC.to_vec();
     b.extend_from_slice(&VERSION.to_le_bytes());
     b.extend_from_slice(&track_len.to_le_bytes());
@@ -64,7 +89,9 @@ pub fn write(track_len: f32, fast: &Trace, parts: &[Part], flags: u32) -> Vec<u8
     let every = n.div_ceil(MAX_POINTS).max(1);
     let t0 = fast.pts.first().map_or(0.0, |p| p.t);
     let mut points: Vec<[f32; 4]> = Vec::new();
+    let mut taken: Vec<usize> = Vec::new();
     for i in (0..n).step_by(every).chain((n > 0 && (n - 1) % every != 0).then_some(n - 1)) {
+        taken.push(i);
         let p = &fast.pts[i];
         let pos = if track_len > 0.0 { (i as f32 * STEP_M / track_len).min(1.0) } else { 0.0 };
         let elapsed = (p.t - t0).max(points.last().map_or(0.0, |q| q[1]));
@@ -86,7 +113,46 @@ pub fn write(track_len: f32, fast: &Trace, parts: &[Part], flags: u32) -> Vec<u8
         }
     }
     b.extend_from_slice(&flags.to_le_bytes());
+
+    // DRIV: how the lap was ridden at each point.
+    let mut driv = (points.len() as u32).to_le_bytes().to_vec();
+    for &i in &taken {
+        let p = &fast.pts[i];
+        let clean = |v: f32, hi: f32| if v.is_finite() { v.clamp(0.0, hi) } else { 0.0 };
+        for v in [clean(p.v, 200.0), clean(p.throttle, 1.0), clean(p.front.max(p.rear), 1.0)] {
+            driv.extend_from_slice(&v.to_le_bytes());
+        }
+    }
+    chunk(&mut b, b"DRIV", &driv);
+
+    // TRRN: the ground across the line, left being the direction of travel turned a quarter
+    // anticlockwise seen from above (x east, z north).
+    if let Some(t) = terrain {
+        let mut trrn = (points.len() as u32).to_le_bytes().to_vec();
+        trrn.extend_from_slice(&(TERRAIN_ACROSS as u32).to_le_bytes());
+        trrn.extend_from_slice(&TERRAIN_STEP_M.to_le_bytes());
+        for j in 0..points.len() {
+            let (a, c) = (&points[j.saturating_sub(1)], &points[(j + 1).min(points.len() - 1)]);
+            let (dx, dz) = (c[2] - a[2], c[3] - a[3]);
+            let len = (dx * dx + dz * dz).sqrt();
+            let (nx, nz) = if len > 1e-3 { (-dz / len, dx / len) } else { (0.0, 0.0) };
+            for k in 0..TERRAIN_ACROSS {
+                let off = (k as f32 - (TERRAIN_ACROSS as f32 - 1.0) / 2.0) * TERRAIN_STEP_M;
+                let (x, z) = (points[j][2] + nx * off, points[j][3] + nz * off);
+                let h = crate::ground::height_at(t.width, t.height, t.metres_per_sample, t.heights, x, z)
+                    .unwrap_or(f32::NAN);
+                trrn.extend_from_slice(&h.to_le_bytes());
+            }
+        }
+        chunk(&mut b, b"TRRN", &trrn);
+    }
     b
+}
+
+fn chunk(b: &mut Vec<u8>, tag: &[u8; 4], payload: &[u8]) {
+    b.extend_from_slice(tag);
+    b.extend_from_slice(&(payload.len() as u32).to_le_bytes());
+    b.extend_from_slice(payload);
 }
 
 /// The file the plugin looks for first: this bike on this track, beside the `.cue`.
@@ -120,7 +186,35 @@ mod tests {
         assert_eq!((b[76], &b[77..83]), (6, &b"Turn 1"[..]));
         assert_eq!((b[83], &b[84..95]), (11, &b"Brake later"[..]));
         assert_eq!(u32_at(95), SAG_PROMPT);
-        assert_eq!(b.len(), 99);
+        // Then DRIV: three points, speed, throttle, brake.
+        assert_eq!(&b[99..103], b"DRIV");
+        assert_eq!((u32_at(103), u32_at(107)), (4 + 3 * 12, 3));
+        assert_eq!(b.len(), 111 + 3 * 12, "no TRRN without terrain");
+    }
+
+    #[test]
+    fn the_ground_across_the_line_rides_along_when_the_terrain_is_known() {
+        // A 10 x 10 grid a metre apart, rising a metre per metre north (z).
+        let heights: Vec<f32> = (0..100).map(|i| (i / 10) as f32).collect();
+        let t = Terrain { width: 10, height: 10, metres_per_sample: 1.0, heights: &heights };
+        // Riding east along z = 5: left is north, so the five samples run 4, 4.5, 5, 5.5, 6.
+        let fast = Trace { pts: (0..4).map(|i| Point { t: i as f32, x: 2.0 + i as f32, z: 5.0, v: 9.0, front: 0.5, ..Point::default() }).collect() };
+        let b = write_with(4.0, &fast, &[], 0, Some(&t));
+        let at = b.windows(4).position(|w| w == b"TRRN").expect("a TRRN chunk");
+        let u32_at = |i: usize| u32::from_le_bytes(b[i..i + 4].try_into().unwrap());
+        let f32_at = |i: usize| f32::from_le_bytes(b[i..i + 4].try_into().unwrap());
+        assert_eq!((u32_at(at + 8), u32_at(at + 12), f32_at(at + 16)), (4, 5, 0.5));
+        let row: Vec<f32> = (0..5).map(|k| f32_at(at + 20 + k * 4)).collect();
+        assert_eq!(row, vec![4.0, 4.5, 5.0, 5.5, 6.0]);
+        assert_eq!(u32_at(at + 4) as usize, 12 + 4 * 5 * 4);
+        // And DRIV carries the speed and the brake.
+        let d = b.windows(4).position(|w| w == b"DRIV").expect("a DRIV chunk");
+        assert_eq!((f32_at(d + 12), f32_at(d + 20)), (9.0, 0.5));
+        // Off the grid is NaN, which the recorder reads as "not known here".
+        let off = Trace { pts: (0..2).map(|i| Point { t: i as f32, x: 50.0 + i as f32, z: 50.0, ..Point::default() }).collect() };
+        let b2 = write_with(2.0, &off, &[], 0, Some(&t));
+        let at2 = b2.windows(4).position(|w| w == b"TRRN").unwrap();
+        assert!(f32::from_le_bytes(b2[at2 + 20..at2 + 24].try_into().unwrap()).is_nan());
     }
 
     #[test]

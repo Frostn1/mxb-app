@@ -1394,7 +1394,17 @@ pub fn coach_write_cues(
     let parts = crate::hudsheet::parts(&out.review, rec.event.track_length);
     let flags = if crate::sag::measure(&rec).is_some_and(|s| s.still) { 0 } else { crate::hudsheet::SAG_PROMPT };
     let hud_tmp = dir.join(format!("{hud_name}.tmp"));
-    fs::write(&hud_tmp, crate::hudsheet::write(rec.event.track_length, &fast, &parts, flags)).map_err(err)?;
+    // The track's own ground under the line, when its terrain reads and the laps sit steadily on
+    // it; otherwise the recorder falls back to the centreline's heights.
+    let master = terrain_under(&app, &rec);
+    let terrain = master.as_ref().map(|m| crate::hudsheet::Terrain {
+        width: m.info.width as usize,
+        height: m.info.height as usize,
+        metres_per_sample: m.info.metres_per_sample,
+        heights: &m.heights,
+    });
+    let sheet = crate::hudsheet::write_with(rec.event.track_length, &fast, &parts, flags, terrain.as_ref());
+    fs::write(&hud_tmp, sheet).map_err(err)?;
     move_into_place(&hud_tmp, &dir.join(&hud_name)).map_err(err)?;
     // Only once the sheet is really on disk: a write that failed is a sheet the rider never
     // heard, and it would be wrong to count it against them.
@@ -1538,6 +1548,23 @@ fn ground_for(app: &AppHandle, path: &str) -> Result<GroundAnswer, String> {
         }
     });
     Ok(GroundAnswer { ground: Some(ground), why })
+}
+
+/// The track's terrain for the HUD sheet, only when the laps ridden on it say it is the right
+/// terrain (`ground::measure` found a steady lift): a wrong one would lay the line in the air or
+/// under the dirt with total confidence.
+fn terrain_under(app: &AppHandle, rec: &Recording) -> Option<mxb_core::track::Master> {
+    let src = mxb_core::tracksource::resolve(&load_config(app), &rec.event.track_id)?;
+    if src.locked {
+        return None;
+    }
+    let master = mxb_core::track::load_master(app, &src.path, src.prefix.as_deref()).ok()?;
+    let points: Vec<[f32; 3]> =
+        rec.samples.iter().filter(|s| !s.airborne() && !s.crashed).step_by(5).map(|s| [s.x, s.y, s.z]).collect();
+    let i = &master.info;
+    crate::ground::measure(i.width as usize, i.height as usize, i.metres_per_sample, &master.heights, &points)
+        .lift
+        .map(|_| master)
 }
 
 /// The ground under a session's laps, built from the laps; see `surface.rs`.
