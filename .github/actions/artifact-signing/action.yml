@@ -100,6 +100,9 @@ runs:
         ENDPOINT: ${{ inputs.endpoint }}
         ACCOUNT: ${{ inputs.account }}
         PROFILE: ${{ inputs.profile }}
+        AZ_CLIENT: ${{ inputs.azure-client-id }}
+        AZ_TENANT: ${{ inputs.azure-tenant-id }}
+        AZ_SUBSCRIPTION: ${{ inputs.azure-subscription-id }}
         # Pinned so a release doesn't change tools under it. SignTool must be 10.0.2261.755 or
         # newer (Artifact Signing's requirement); the client is the dlib SignTool loads.
         SDK_BUILDTOOLS_VERSION: 10.0.28000.2705
@@ -138,6 +141,12 @@ runs:
         "ARTIFACT_SIGNING_SIGNTOOL=$($signtool.FullName)" | Add-Content $env:GITHUB_ENV
         "ARTIFACT_SIGNING_DLIB=$($dlib.FullName)" | Add-Content $env:GITHUB_ENV
         "ARTIFACT_SIGNING_METADATA=$metadataPath" | Add-Content $env:GITHUB_ENV
+        # The login above uses a GitHub OIDC assertion that is only valid for a few minutes, and
+        # a release builds for ~10 minutes before Tauri signs. sign-windows.ps1 therefore logs in
+        # again with a fresh token before each signing, from these ids (not secrets).
+        "AZURE_CLIENT_ID=$env:AZ_CLIENT" | Add-Content $env:GITHUB_ENV
+        "AZURE_TENANT_ID=$env:AZ_TENANT" | Add-Content $env:GITHUB_ENV
+        "AZURE_SUBSCRIPTION_ID=$env:AZ_SUBSCRIPTION" | Add-Content $env:GITHUB_ENV
 
         # The overlay `tauri build --config` merges in: Tauri runs this for every binary it
         # signs, with %1 standing for the file.
