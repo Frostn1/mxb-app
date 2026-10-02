@@ -475,7 +475,9 @@ impl Default for AppConfig {
             mxbmrp3_dismissed: false,
             overlay_enabled: true,
             overlay_hotkey: DEFAULT_OVERLAY_HOTKEY.to_string(),
-            coach_overlay_hotkey: Some(DEFAULT_OVERLAY_HOTKEY.to_string()),
+            // `None` until migrated: serde fills a missing field from this default, so
+            // `Some` here would hide that an old config never had its combo copied.
+            coach_overlay_hotkey: None,
             preview_tyres: String::new(),
             voice_enabled: false,
             paint_sync_rev: PAINT_SYNC_REV,
