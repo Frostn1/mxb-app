@@ -201,6 +201,13 @@ impl Drop for Tunnel {
     }
 }
 
+/// Why `upload_with_progress` stopped.
+#[derive(Debug)]
+pub enum UploadError {
+    Cancelled,
+    Failed(String),
+}
+
 type Key = (String, u16);
 type Slot = Arc<Mutex<Option<Tunnel>>>;
 
@@ -218,6 +225,112 @@ fn free_port() -> Result<u16, String> {
 }
 
 impl Tunnels {
+    /// Copy one local file to a random, checked name in the server's /tmp directory, reporting
+    /// the bytes sent so far. The file goes through `ssh ... cat` (scp prints no progress when
+    /// it is not on a terminal). `cancel` kills the transfer; the partial remote file is left
+    /// for the next `/tmp` clean-up.
+    pub fn upload_with_progress(
+        &self,
+        server: &Server,
+        local: &str,
+        remote_name: &str,
+        cancel: &AtomicBool,
+        mut progress: impl FnMut(u64),
+    ) -> Result<(), UploadError> {
+        use std::io::Write;
+        if !plain_word(remote_name) || remote_name.contains('.') || remote_name.contains('/') {
+            return Err(UploadError::Failed("unsafe upload destination".into()));
+        }
+        let mut file = std::fs::File::open(local)
+            .map_err(|e| UploadError::Failed(format!("could not read {local}: {e}")))?;
+        let mut cmd = command();
+        cmd.args(base_args(server))
+            .arg("--")
+            .arg(destination(server))
+            .arg(format!("umask 077 && cat > /tmp/{remote_name}"))
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped());
+        let (id, child) = self
+            .registry
+            .spawn(cmd)
+            .map_err(UploadError::Failed)?;
+        let (mut stdin, stderr) = {
+            let mut child = child.lock().map_err(|_| UploadError::Failed("lock poisoned".into()))?;
+            (child.stdin.take(), child.stderr.take())
+        };
+        // ssh's own messages, collected off to the side so a full pipe can never stall it.
+        let why = std::thread::spawn(move || {
+            let mut text = String::new();
+            if let Some(mut err) = stderr {
+                let _ = err.read_to_string(&mut text);
+            }
+            text
+        });
+        let mut sent = 0u64;
+        let mut buffer = vec![0u8; 64 * 1024];
+        let mut write_error = None;
+        loop {
+            if cancel.load(Ordering::SeqCst) {
+                break;
+            }
+            let read = match file.read(&mut buffer) {
+                Ok(0) => break,
+                Ok(n) => n,
+                Err(e) => {
+                    write_error = Some(format!("could not read {local}: {e}"));
+                    break;
+                }
+            };
+            let Some(pipe) = stdin.as_mut() else { break };
+            if let Err(e) = pipe.write_all(&buffer[..read]) {
+                write_error = Some(e.to_string());
+                break;
+            }
+            sent += read as u64;
+            progress(sent);
+        }
+        // Closing stdin ends `cat`; a cancelled or failed transfer kills ssh instead.
+        drop(stdin);
+        if cancel.load(Ordering::SeqCst) {
+            self.registry.kill(id);
+            let _ = why.join();
+            return Err(UploadError::Cancelled);
+        }
+        let deadline = Instant::now() + Duration::from_secs(60);
+        let status = loop {
+            let status = child.lock().ok().and_then(|mut c| c.try_wait().ok().flatten());
+            if let Some(status) = status {
+                break Some(status);
+            }
+            if cancel.load(Ordering::SeqCst) || Instant::now() > deadline {
+                break None;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        };
+        self.registry.kill(id);
+        let why = why.join().unwrap_or_default();
+        if cancel.load(Ordering::SeqCst) {
+            return Err(UploadError::Cancelled);
+        }
+        let why = why.trim().to_string();
+        match status {
+            Some(status) if status.success() && write_error.is_none() => Ok(()),
+            Some(status) => Err(UploadError::Failed(if !why.is_empty() {
+                why
+            } else if let Some(e) = write_error {
+                e
+            } else {
+                format!("ssh exited ({status})")
+            })),
+            None => Err(UploadError::Failed(if why.is_empty() {
+                format!("upload to {} did not finish", server.host)
+            } else {
+                why
+            })),
+        }
+    }
+
     /// Copy one local file to a random, checked name in the server's /tmp directory.
     pub fn upload(
         &self,

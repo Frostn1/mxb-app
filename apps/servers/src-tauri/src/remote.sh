@@ -26,7 +26,8 @@
 #   observe <obs>                 read /status and /readyz directly on the host
 #   logs <obs> <lines>            journalctl -u mxbserver (the log file for a bare server)
 #   service <obs> restart         systemctl restart mxbserver, wait for /readyz; @@result
-#   tracks <obs>                  @@dir, @@tracks_b64: the .pkz files beside the track package
+#   tracks <obs>                  @@dir, @@package, @@paths_b64, @@tracks_b64: the .pkz files beside the
+#                                 track package, in content/ and in content/tracks/
 #   install-track <obs> <tmp> <name> <sha>      move an uploaded .pkz into the track folder
 #   install-version <obs> <tmp> <name> <sha> <version>
 #                                 replace the server binary, restart, roll back if not ready
@@ -208,13 +209,23 @@ toml_get() {
     }'
 }
 
-# The folder holding the track packages: beside the configured [track] package.
-track_dir() {
+# The configured [track] package, resolved the way mxbserver resolves it (args.rs `config_path`):
+# a relative path is joined to the config file's own folder, an absolute one is used as is.
+track_package() {
   local pkg
   pkg="$(toml_get track package)"
   [[ -n "$pkg" ]] || die "the config has no [track] package"
   [[ "$pkg" == /* ]] || pkg="$(dirname "$CONFIG")/$pkg"
-  dirname "$pkg"
+  realpath -m "$pkg"
+}
+
+# The folder uploads go to: the configured package's folder. A package that points at a folder
+# that does not exist (nothing to put a file beside) falls back to content/tracks when that exists.
+track_dir() {
+  local dir
+  dir="$(dirname "$(track_package)")"
+  if ! priv test -d "$dir" && priv test -d "$WD/content/tracks"; then dir="$WD/content/tracks"; fi
+  echo "$dir"
 }
 
 # admin_listen: the admin API's address, from --admin or the config, else the default.
@@ -307,9 +318,28 @@ case "$CMD" in
     if restart && wait_ready; then say result restarted; else say result failed; die "the server did not come back after the restart"; fi
     ;;
   tracks)
-    dir="$(track_dir)"
+    pkg="$(track_package)"
+    dir="$(dirname "$pkg")"
     say dir "$dir"
-    say tracks_b64 "$(priv find "$dir" -maxdepth 1 -type f -iname '*.pkz' -printf '%f\n' 2>/dev/null | sort | base64 -w0)"
+    say package "$pkg"
+    # Every .pkz in the package's folder, plus content/ and content/tracks/ (where server
+    # packages are kept), each folder once.
+    paths=""
+    seen=""
+    for d in "$dir" "$WD/content" "$WD/content/tracks"; do
+      d="$(realpath -m "$d")"
+      [[ $'
+'"$seen" == *$'
+'"$d"$'
+'* ]] && continue
+      seen+="$d"$'
+'
+      paths+="$(priv find "$d" -maxdepth 1 -type f -iname '*.pkz' 2>/dev/null)"$'
+'
+    done
+    paths="$(printf '%s' "$paths" | sed '/^$/d' | sort -u)"
+    say paths_b64 "$(printf '%s' "$paths" | base64 -w0)"
+    say tracks_b64 "$(printf '%s' "$paths" | sed 's#.*/##' | sort -u | base64 -w0)"
     ;;
   install-track)
     tmp="${3:-}"; name="${4:-}"; want="${5:-}"
