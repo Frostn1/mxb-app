@@ -28,3 +28,14 @@ export function sessionName(stage: string): string {
   if (!m) return cap(stage);
   return m[1] === "running" ? cap(m[2]) : `${cap(m[2])} ${m[1]}`;
 }
+
+/** 1536 -> "1.5 KiB". */
+export function byteSize(bytes: number): string {
+  if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MiB`;
+  return `${Math.max(1, Math.ceil(bytes / 1024))} KiB`;
+}
+
+/** Bytes per second -> "2.4 MiB/s". */
+export function byteRate(bytesPerSecond: number): string {
+  return `${byteSize(bytesPerSecond)}/s`;
+}

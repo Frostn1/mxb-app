@@ -13,6 +13,7 @@ mod config;
 mod local;
 mod ssh;
 mod store;
+mod uploads;
 
 #[cfg(test)]
 mod tests {
@@ -72,6 +73,33 @@ mod tests {
     }
 
     #[test]
+    fn tracks_outside_the_package_folder_are_named_by_absolute_path() {
+        // prod: package = "../tracks/755-Compound.pkz", files only in content/ and content/tracks/.
+        let home = "/home/mxb/mxbserver";
+        let paths: Vec<String> = [
+            "content/tracks/755-Compound.pkz",
+            "content/tracks/WDR.MX.26.R01.pkz",
+            "content/zd-blackwood-server.pkz",
+        ]
+        .iter()
+        .map(|p| format!("{home}/{p}"))
+        .collect();
+        let package_dir = format!("{home}/tracks");
+        assert_eq!(
+            super::track_reference("755-Compound.pkz", &paths, &package_dir, "../tracks/"),
+            format!("{home}/content/tracks/755-Compound.pkz")
+        );
+        assert_eq!(
+            super::track_reference("zd-blackwood-server.pkz", &paths, &package_dir, "../tracks/"),
+            format!("{home}/content/zd-blackwood-server.pkz")
+        );
+        // In the package's own folder, or unknown: written beside the package as before.
+        let beside = vec![format!("{package_dir}/a.pkz")];
+        assert_eq!(super::track_reference("a.pkz", &beside, &package_dir, "../tracks/"), "../tracks/a.pkz");
+        assert_eq!(super::track_reference("new.pkz", &[], &package_dir, "../tracks/"), "../tracks/new.pkz");
+    }
+
+    #[test]
     fn upload_names_are_made_safe_without_making_the_user_rename_them() {
         assert_eq!(
             super::safe_remote_filename("My Track (Final).pkz"),
@@ -101,11 +129,13 @@ use serde_json::Value;
 use std::sync::Arc;
 use std::time::Duration;
 use store::{Server, ServerKind, Store};
-use tauri::{Manager, RunEvent, State};
+use tauri::{Emitter, Manager, RunEvent, State, WindowEvent};
 
 struct App {
     store: Store,
     tunnels: Arc<ssh::Tunnels>,
+    /// Track uploads, owned here so they outlive every screen.
+    uploads: Arc<uploads::Uploads>,
     http: reqwest::Client,
     /// Admin API ports found in each SSH server's config, by server id.
     admin_ports: std::sync::Mutex<std::collections::HashMap<String, u16>>,
@@ -783,28 +813,53 @@ async fn server_tracks(app: State<'_, App>, id: String) -> Result<TrackState, St
     }
     let (text, _) = read_config(&config)?;
     let (package, rotation) = config::tracks(&text)?;
-    use base64::Engine;
-    let names = listing
-        .field("tracks_b64")
-        .map(|b| {
-            base64::engine::general_purpose::STANDARD
-                .decode(b)
-                .unwrap_or_default()
-        })
-        .map(|b| String::from_utf8_lossy(&b).into_owned())
-        .unwrap_or_default();
-    let installed: Vec<String> = names
-        .lines()
-        .map(str::trim)
-        .filter(|n| !n.is_empty())
-        .map(str::to_string)
-        .collect();
+    let installed = listed_names(&listing);
     Ok(TrackState {
         library: installed.clone(),
         installed,
         current: package.as_deref().map(track_name),
         rotation: rotation.iter().map(|t| track_name(t)).collect(),
     })
+}
+
+
+fn decode_field(out: &ssh::ScriptOutput, field: &str) -> String {
+    use base64::Engine;
+    out.field(field)
+        .map(|b| {
+            base64::engine::general_purpose::STANDARD
+                .decode(b)
+                .unwrap_or_default()
+        })
+        .map(|b| String::from_utf8_lossy(&b).into_owned())
+        .unwrap_or_default()
+}
+
+/// The distinct track file names of a `tracks` run of remote.sh.
+fn listed_names(listing: &ssh::ScriptOutput) -> Vec<String> {
+    let mut names: Vec<String> = decode_field(listing, "tracks_b64")
+        .lines()
+        .map(str::trim)
+        .filter(|n| !n.is_empty())
+        .map(str::to_string)
+        .collect();
+    names.sort();
+    names.dedup();
+    names
+}
+
+/// How the config should name `name` in `[track] package` / `[rotation] tracks`: written
+/// beside the current package the way that path is written, or as the absolute path when the
+/// file lives in another folder (content/, content/tracks/).
+fn track_reference(name: &str, paths: &[String], package_dir: &str, prefix: &str) -> String {
+    let found = paths
+        .iter()
+        .find(|p| p.rsplit('/').next() == Some(name))
+        .map(String::as_str);
+    match found {
+        Some(path) if path.rsplit_once('/').map(|(d, _)| d) != Some(package_dir) => path.to_string(),
+        _ => format!("{prefix}{name}"),
+    }
 }
 
 /// Rewrite the server's `[track] package` (and the `[rotation] tracks` when given) in its
@@ -828,6 +883,12 @@ async fn apply_tracks(
         let config = tunnels.run_script(&server, REMOTE_SH, &["read", &port], 30)?;
         let (text, sha) = read_config(&config)?;
         let (package, old_rotation) = config::tracks(&text)?;
+        let listing = tunnels.run_script(&server, REMOTE_SH, &["tracks", &port], 30)?;
+        let package_dir = listing.field("dir").unwrap_or_default().to_string();
+        let paths: Vec<String> = decode_field(&listing, "paths_b64")
+            .lines()
+            .map(str::to_string)
+            .collect();
         // New tracks sit beside the current package, written the way the config writes it.
         let prefix = package
             .as_deref()
@@ -835,10 +896,13 @@ async fn apply_tracks(
             .map(|(dir, _)| format!("{dir}/"))
             .unwrap_or_default();
         let rotation = match rotation {
-            Some(names) => names.iter().map(|n| format!("{prefix}{n}")).collect(),
+            Some(names) => names
+                .iter()
+                .map(|n| track_reference(n, &paths, &package_dir, &prefix))
+                .collect(),
             None => old_rotation,
         };
-        let edited = config::set_tracks(&text, &format!("{prefix}{current}"), &rotation)?;
+        let edited = config::set_tracks(&text, &track_reference(&current, &paths, &package_dir, &prefix), &rotation)?;
         let encoded = b64(&edited);
         tunnels.run_script(&server, REMOTE_SH, &["apply", &port, &encoded, &sha], 300)
     })
@@ -1173,6 +1237,254 @@ async fn server_upload(
     } else {
         Err(out.text())
     }
+}
+
+const TRACK_UPLOAD_MAX: u64 = 512 * 1024 * 1024;
+const UPLOAD_ATTEMPTS: u32 = 3;
+
+fn publish_upload(
+    handle: &tauri::AppHandle,
+    uploads: &uploads::Uploads,
+    id: &str,
+    change: impl FnOnce(&mut uploads::UploadInfo),
+) {
+    if let Some(info) = uploads.update(id, change) {
+        let _ = handle.emit("upload-update", &info);
+    }
+}
+
+/// Start uploading a .pkz to a server. Returns at once; the transfer runs in the backend and
+/// reports through `upload-update` events and `upload_list`, whatever screen is showing.
+#[tauri::command]
+async fn upload_start(
+    handle: tauri::AppHandle,
+    app: State<'_, App>,
+    id: String,
+    path: String,
+) -> Result<uploads::UploadInfo, String> {
+    let server = app.store.get(&id)?;
+    if server.kind == ServerKind::Legacy {
+        return Err("Legacy connecting uses tracks and game versions already installed on the official server host.".into());
+    }
+    if server.local {
+        return Err("Uploads for a server on this PC are not wired yet.".into());
+    }
+    if let Some(existing) = app.uploads.running(&id, &path) {
+        return Ok(existing);
+    }
+    let original = std::path::Path::new(&path)
+        .file_name()
+        .and_then(|v| v.to_str())
+        .ok_or("the file has no usable name")?
+        .to_string();
+    let name = safe_remote_filename(&original);
+    if !name.to_ascii_lowercase().ends_with(".pkz") {
+        return Err("Tracks must be .pkz packages.".into());
+    }
+    let bytes = std::fs::metadata(&path)
+        .map_err(|e| format!("could not read {path}: {e}"))?
+        .len();
+    if bytes == 0 || bytes > TRACK_UPLOAD_MAX {
+        return Err(format!(
+            "the file must be between 1 byte and {} MiB",
+            TRACK_UPLOAD_MAX / 1024 / 1024
+        ));
+    }
+    let info = uploads::UploadInfo {
+        id: store::new_id(),
+        server_id: server.id.clone(),
+        server_name: server.name.clone(),
+        path: path.clone(),
+        file_name: name.clone(),
+        bytes,
+        sent: 0,
+        speed: 0.0,
+        attempt: 1,
+        status: uploads::UploadStatus::Checking,
+        error: None,
+    };
+    let cancel = app.uploads.add(info.clone());
+    let _ = handle.emit("upload-update", &info);
+    let tunnels = Arc::clone(&app.tunnels);
+    let registry = Arc::clone(&app.uploads);
+    let upload_id = info.id.clone();
+    tauri::async_runtime::spawn(async move {
+        run_track_upload(handle, tunnels, registry, server, upload_id, path, name, cancel).await;
+    });
+    Ok(info)
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn run_track_upload(
+    handle: tauri::AppHandle,
+    tunnels: Arc<ssh::Tunnels>,
+    registry: Arc<uploads::Uploads>,
+    server: Server,
+    id: String,
+    path: String,
+    name: String,
+    cancel: Arc<std::sync::atomic::AtomicBool>,
+) {
+    use std::sync::atomic::Ordering;
+    let fail = |message: String| {
+        publish_upload(&handle, &registry, &id, |i| {
+            i.status = uploads::UploadStatus::Error;
+            i.speed = 0.0;
+            i.error = Some(message);
+        });
+    };
+    let stopped = || {
+        publish_upload(&handle, &registry, &id, |i| {
+            i.status = uploads::UploadStatus::Cancelled;
+            i.speed = 0.0;
+        });
+    };
+    // The hash the host checks the upload against.
+    let digest = blocking({
+        let (path, cancel) = (path.clone(), Arc::clone(&cancel));
+        move || {
+            use sha2::Digest;
+            use std::io::Read;
+            let mut file =
+                std::fs::File::open(&path).map_err(|e| format!("could not read {path}: {e}"))?;
+            let mut hash = sha2::Sha256::new();
+            let mut buffer = [0u8; 64 * 1024];
+            loop {
+                if cancel.load(Ordering::SeqCst) {
+                    return Ok(String::new());
+                }
+                let read = file
+                    .read(&mut buffer)
+                    .map_err(|e| format!("could not read {path}: {e}"))?;
+                if read == 0 {
+                    return Ok(format!("{:x}", hash.finalize()));
+                }
+                hash.update(&buffer[..read]);
+            }
+        }
+    })
+    .await;
+    let digest = match digest {
+        Ok(_) if cancel.load(Ordering::SeqCst) => return stopped(),
+        Ok(d) => d,
+        Err(e) => return fail(e),
+    };
+    let temporary = format!("mxb-servers-{}", store::new_id());
+    for attempt in 1..=UPLOAD_ATTEMPTS {
+        publish_upload(&handle, &registry, &id, |i| {
+            i.status = uploads::UploadStatus::Uploading;
+            i.attempt = attempt;
+            i.sent = 0;
+            i.error = None;
+        });
+        let result = blocking({
+            let (tunnels, server, path, temporary) = (
+                Arc::clone(&tunnels),
+                server.clone(),
+                path.clone(),
+                temporary.clone(),
+            );
+            let (handle, registry, id, cancel) = (
+                handle.clone(),
+                Arc::clone(&registry),
+                id.clone(),
+                Arc::clone(&cancel),
+            );
+            move || {
+                let mut meter = uploads::SpeedMeter::new();
+                let mut last_emit = std::time::Instant::now();
+                Ok(
+                    tunnels.upload_with_progress(&server, &path, &temporary, &cancel, |sent| {
+                        let now = std::time::Instant::now();
+                        let speed = meter.record(sent, now);
+                        if now.duration_since(last_emit) >= Duration::from_millis(200) {
+                            last_emit = now;
+                            publish_upload(&handle, &registry, &id, |i| {
+                                i.sent = sent;
+                                i.speed = speed;
+                            });
+                        }
+                    }),
+                )
+            }
+        })
+        .await;
+        match result {
+            Ok(Ok(())) => break,
+            Ok(Err(ssh::UploadError::Cancelled)) => return stopped(),
+            Ok(Err(ssh::UploadError::Failed(message))) => {
+                if attempt < UPLOAD_ATTEMPTS && uploads::transient(&message) {
+                    publish_upload(&handle, &registry, &id, |i| {
+                        i.status = uploads::UploadStatus::Retrying;
+                        i.speed = 0.0;
+                        i.error = Some(message);
+                    });
+                    for _ in 0..30 {
+                        if cancel.load(Ordering::SeqCst) {
+                            return stopped();
+                        }
+                        sleep(Duration::from_millis(100)).await;
+                    }
+                    continue;
+                }
+                return fail(message);
+            }
+            Err(e) => return fail(e),
+        }
+    }
+    publish_upload(&handle, &registry, &id, |i| {
+        i.status = uploads::UploadStatus::Installing;
+        i.sent = i.bytes;
+        i.speed = 0.0;
+        i.error = None;
+    });
+    let port = server.observe_port.to_string();
+    let out = blocking(move || {
+        tunnels.run_script(
+            &server,
+            REMOTE_SH,
+            &["install-track", &port, &temporary, &name, &digest],
+            120,
+        )
+    })
+    .await;
+    match out {
+        Ok(out) if out.field("installed").is_some() => {
+            publish_upload(&handle, &registry, &id, |i| {
+                i.status = uploads::UploadStatus::Done;
+                i.speed = 0.0;
+            });
+        }
+        Ok(out) => fail(out.text()),
+        Err(e) => fail(e),
+    }
+}
+
+async fn sleep(duration: Duration) {
+    let _ = tauri::async_runtime::spawn_blocking(move || std::thread::sleep(duration)).await;
+}
+
+#[tauri::command]
+fn upload_list(app: State<'_, App>) -> Vec<uploads::UploadInfo> {
+    app.uploads.list()
+}
+
+/// Stop a running upload. Nothing else does: leaving a screen never cancels one.
+#[tauri::command]
+fn upload_cancel(app: State<'_, App>, id: String) -> bool {
+    app.uploads.cancel(&id)
+}
+
+/// Forget a finished (done, failed or cancelled) upload.
+#[tauri::command]
+fn upload_dismiss(app: State<'_, App>, id: String) {
+    app.uploads.dismiss(&id);
+}
+
+/// Quit now, after the screen confirmed losing any running uploads.
+#[tauri::command]
+fn quit_app(handle: tauri::AppHandle) {
+    handle.exit(0);
 }
 
 #[derive(Serialize)]
@@ -1535,10 +1847,22 @@ fn main() {
             app.manage(App {
                 store: Store::new(dir),
                 tunnels: Arc::default(),
+                uploads: Arc::default(),
                 http,
                 admin_ports: Default::default(),
             });
             Ok(())
+        })
+        .on_window_event(|window, event| {
+            // Quitting mid-upload loses it: ask the screen to confirm first.
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                if let Some(app) = window.try_state::<App>() {
+                    if app.uploads.active() > 0 {
+                        api.prevent_close();
+                        let _ = window.emit("quit-requested", ());
+                    }
+                }
+            }
         })
         .invoke_handler(tauri::generate_handler![
             servers_list,
@@ -1554,6 +1878,11 @@ fn main() {
             server_session,
             server_restart_service,
             server_upload,
+            upload_start,
+            upload_list,
+            upload_cancel,
+            upload_dismiss,
+            quit_app,
             inspect_track_upload,
             server_logs,
             server_test_token,

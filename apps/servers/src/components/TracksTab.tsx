@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { ArrowDown, ArrowUp, GripVertical, Plus, Search, Trash2, Upload } from "lucide-react";
-import { errorText, inspectTrackUpload, serverSetRotation, serverSetTrack, serverTracks, serverUpload, type ServerView, type TrackState } from "@/lib/api";
+import { errorText, inspectTrackUpload, serverSetRotation, serverSetTrack, serverTracks, type ServerView, type TrackState } from "@/lib/api";
+import { byteSize } from "@/lib/format";
+import { initUploads, onUploadSettled, startTrackUpload, useUploads } from "@/lib/uploads";
 import { Button, Card, ErrorLine, Notice } from "./ui";
+import { UploadRow } from "./UploadsIndicator";
 
 const trackCache = new Map<string, TrackState>();
 
@@ -26,6 +29,17 @@ export function TracksTab({ server }: { server: ServerView }) {
     } catch (e) { setError(errorText(e)); }
   }, [server.id]);
   useEffect(() => { void load(); }, [load]);
+  // Uploads belong to the app, not to this tab: whatever is running for this server shows up
+  // again here, and a finish while this tab is open refreshes the library.
+  const serverUploads = useUploads().filter((u) => u.serverId === server.id);
+  useEffect(() => {
+    void initUploads();
+    return onUploadSettled((u) => {
+      if (u.serverId !== server.id || u.status !== "done") return;
+      setDone(`${u.fileName} installed.`);
+      void load();
+    });
+  }, [server.id, load]);
   useEffect(() => {
     if (!done) return;
     const timer = window.setTimeout(() => setDone(null), 3000);
@@ -53,13 +67,15 @@ export function TracksTab({ server }: { server: ServerView }) {
     let check;
     try { check = await inspectTrackUpload(path); }
     catch (e) { setBusy(null); setError(errorText(e)); return; }
-    const size = check.bytes >= 1024 * 1024 ? `${(check.bytes / 1024 / 1024).toFixed(1)} MiB` : `${Math.ceil(check.bytes / 1024)} KiB`;
+    const size = byteSize(check.bytes);
     const question = check.serverTrack
       ? `Upload ${check.uploadName} (${size}) to this machine and add it to ${server.name}?`
-      : `${check.detail}\n\nIt will be stored as ${check.uploadName} (${size}). It may be a full client track and use unnecessary server storage. Upload it anyway?`;
+      : `${check.detail}
+
+It will be stored as ${check.uploadName} (${size}). It may be a full client track and use unnecessary server storage. Upload it anyway?`;
     if (!window.confirm(question)) { setBusy(null); return; }
-    setBusy("Uploading track…"); setError(null); setDone(null);
-    try { await serverUpload(server.id, "track", path); setDone("Track installed."); await load(); }
+    // Started in the backend: it keeps going when this tab is left, and the header shows it.
+    try { await startTrackUpload(server.id, path); }
     catch (e) { setError(errorText(e)); } finally { setBusy(null); }
   };
   const switchTrack = async (mode: "next" | "random") => {
@@ -110,13 +126,13 @@ export function TracksTab({ server }: { server: ServerView }) {
       <div className="grid gap-5 lg:grid-cols-[minmax(16rem,0.75fr)_minmax(24rem,1.25fr)]">
         <Card className="flex min-h-[30rem] flex-col gap-4 overflow-hidden">
           <div className="flex items-center justify-between gap-3"><div><h3 className="font-heading text-lg font-extrabold">Track library</h3><p className="text-xs text-muted-foreground">The .pkz files in the server&apos;s track folder</p></div><Button size="sm" onClick={() => void upload()} disabled={!!busy}><Upload className="size-3.5" /> Upload</Button></div>
-          {busy?.includes("track") && <div className="h-1.5 overflow-hidden rounded-full bg-secondary" role="progressbar" aria-label={busy}><div className="upload-progress-bar h-full w-2/5 rounded-full bg-primary" /></div>}
+          {serverUploads.length > 0 && <div className="divide-y rounded-lg border px-3">{serverUploads.map((u) => <UploadRow key={u.id} upload={u} showServer={false} />)}</div>}
           <label className="relative"><Search className="absolute left-3 top-2.5 size-4 text-muted-foreground" /><input className="h-9 w-full rounded-md border border-input bg-background pl-9 pr-3 text-sm outline-none focus:border-ring" placeholder="Search tracks" value={query} onChange={(e) => setQuery(e.target.value)} /></label>
           <div className="flex min-h-0 flex-1 flex-col divide-y overflow-auto">
             {state === null && <p className="py-3 text-sm text-muted-foreground">Loading…</p>}
             {state && installed.length === 0 && <p className="py-3 text-sm text-muted-foreground">No matching tracks.</p>}
             {installed.map((track) => {
-              return <div key={track} className="flex items-center gap-2 py-2.5"><span className="min-w-0 flex-1 truncate text-sm font-medium">{track}</span><button type="button" title="Add to rotation" onClick={() => setQueue((q) => [...q, track])} className="grid size-8 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"><Plus className="size-4" /></button></div>;
+              return <div key={track} className="flex items-center gap-2 py-2.5"><span className="min-w-0 flex-1 truncate text-sm font-medium">{track}</span>{track === state?.current && <span className="text-xs font-medium text-primary">Active</span>}<button type="button" title="Add to rotation" onClick={() => setQueue((q) => [...q, track])} className="grid size-8 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"><Plus className="size-4" /></button></div>;
             })}
           </div>
         </Card>

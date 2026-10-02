@@ -50,6 +50,9 @@ jobs:
       - name: Lint
         run: bun run lint
 
+      - name: MXB Servers frontend tests
+        run: bun run --filter @frost/servers test
+
       - name: Build
         run: bun run build
 

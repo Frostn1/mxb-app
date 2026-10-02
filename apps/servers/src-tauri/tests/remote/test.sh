@@ -102,6 +102,22 @@ printf 'pkz' > /tmp/mxb-servers-test
 if remote install-track "$OBS" mxb-servers-test d.pkz "$(printf '0%.0s' {1..64})"; then fail "track with a wrong hash installed"; fi
 rm -f /tmp/mxb-servers-test
 
+echo "=== tracks: a package whose folder does not exist; the files are in content/ and content/tracks/"
+sed -i 's#package = "tracks/a.pkz"#package = "../tracks/755-Compound.pkz"#' "$ROOT/config/server.toml"
+mkdir -p "$ROOT/content/tracks"
+touch "$ROOT/content/tracks/755-Compound.pkz" "$ROOT/content/tracks/WDR.MX.26.R01.pkz"   "$ROOT/content/tracks/WDR.MX.26.R02.pkz" "$ROOT/content/tracks/ZD_-_BlackwoodMXPark.pkz"   "$ROOT/content/arlfinals-rd02-pro-server.pkz" "$ROOT/content/zd-blackwood-server.pkz"   "$ROOT/content/tracks/755-compound.txt"
+[[ ! -d "$ROOT/tracks" ]] || fail "test layout has a tracks folder"
+out="$(remote tracks "$OBS")"
+[[ "$(field package <<<"$out")" == "$ROOT/tracks/755-Compound.pkz" ]] || fail "package: $out"
+want="755-Compound.pkz WDR.MX.26.R01.pkz WDR.MX.26.R02.pkz ZD_-_BlackwoodMXPark.pkz arlfinals-rd02-pro-server.pkz zd-blackwood-server.pkz "
+[[ "$(field tracks_b64 <<<"$out" | base64 -d | LC_ALL=C sort | tr '
+' ' ')" == "$want" ]] || fail "content track list: $out"
+[[ "$(field paths_b64 <<<"$out" | base64 -d | grep -c pkz)" == 6 ]] || fail "content track paths: $out"
+printf 'pkz' > /tmp/mxb-servers-test
+out="$(remote install-track "$OBS" mxb-servers-test e.pkz "$(sha256sum /tmp/mxb-servers-test | cut -d' ' -f1)")"
+[[ -f "$ROOT/content/tracks/e.pkz" ]] || fail "track not installed into content/tracks: $out"
+rm -f /tmp/mxb-servers-test
+
 echo "=== logs: the log file of a bare server"
 remote logs "$OBS" 5 | grep -q "stub server" || fail "logs"
 

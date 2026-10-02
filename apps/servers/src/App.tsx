@@ -6,6 +6,7 @@ import { FleetCard } from "@/components/FleetCard";
 import { ServerDetail } from "@/components/ServerDetail";
 import { ServerForm } from "@/components/ServerForm";
 import { Button, ErrorLine, type MenuItem } from "@/components/ui";
+import { UploadsIndicator } from "@/components/UploadsIndicator";
 import { WindowControls } from "@/components/WindowControls";
 
 type View =
@@ -73,6 +74,7 @@ export default function App() {
           ))}
         </nav>
         <div data-tauri-drag-region className="min-w-4 flex-1" />
+        <UploadsIndicator />
         <Button variant="primary" className="mr-2 shrink-0" onClick={() => setView({ kind: "form", id: null })}><Plus className="size-4" /> Add server</Button>
         <button type="button" onClick={() => setTheme(nextTheme[theme])} aria-label={`Theme: ${theme}`} title={`Theme: ${theme}`} className="grid size-9 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-accent"><ThemeIcon className="size-4" /></button>
         <div className="ml-2 h-5 border-l" />
