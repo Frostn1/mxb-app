@@ -309,12 +309,6 @@ fn split_evicted<'a>(
         .partition(|p| !evicted(p))
 }
 
-/// Drop the paint files paint sync itself just wrote or removed. Anything else - a track, a
-/// livery the player dropped in, a paint file paint sync did not touch - is kept.
-fn drop_sync_writes(changed: Vec<PathBuf>, by_sync: impl Fn(&Path) -> bool) -> Vec<PathBuf> {
-    changed.into_iter().filter(|p| !(is_paint_file(p) && by_sync(p))).collect()
-}
-
 /// Reduce a changed path to the mod it belongs to: `<type>/<name>` relative to the
 /// watched root, e.g. `.../mods/tracks/Red Bud/Red Bud.pkz` -> `tracks/Red Bud`.
 ///
@@ -375,12 +369,6 @@ fn on_batch(
     changed: Vec<PathBuf>,
 ) {
     if !live.load(Ordering::SeqCst) {
-        return;
-    }
-    // Paint sync's own writes are paint sync's to announce: it tells FrostMod when they are
-    // staged, at a moment FrostMod can afford the refresh (never while riding).
-    let changed = drop_sync_writes(changed, crate::paintsync::written_by_sync);
-    if changed.is_empty() {
         return;
     }
     let (present, evicted) = split_evicted(&changed, crate::cloudfiles::is_placeholder);
@@ -562,18 +550,6 @@ fn reload(app: &AppHandle, mods: Vec<String>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// Paint sync's own writes never reach FrostMod through the watcher: paint sync sends
-    /// `paints_staged` itself. A livery the player drops in, and any non-paint file, still do.
-    #[test]
-    fn paint_sync_writes_are_left_to_paint_sync() {
-        let synced = PathBuf::from("/m/mods/bikes/KTM/paints/Rider A.pnt");
-        let mine = PathBuf::from("/m/mods/bikes/KTM/paints/Mine.pnt");
-        let track = PathBuf::from("/m/mods/tracks/Red Bud/Red Bud.pkz");
-        let by_sync = |p: &Path| p.ends_with("Rider A.pnt") || p.ends_with("Red Bud.pkz");
-        let kept = drop_sync_writes(vec![synced, mine.clone(), track.clone()], by_sync);
-        assert_eq!(kept, vec![mine, track]);
-    }
 
     /// Paint files are recognised by folder and extension, case-insensitively, for bikes
     /// and for rider gear; nothing else is.

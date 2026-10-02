@@ -51,16 +51,6 @@
   as address, name and order only, and the port defaults to 54210 like Join.
 
 ### Changed
-- **Paint sync loads paints as part of joining a server, not mid-ride.** The game reads its
-  paint lists once, at boot, and never again by itself, so paint sync used to make FrostMod
-  rebuild them live: on every rider who arrived, plus a full content reload, plus the folder
-  watcher's own refresh. That was up to three refreshes per sync, on track, and it is what made
-  riders freeze or drop. Now the server's paints are downloaded and written while you join (for
-  a join from MXB App, before the game has even started, so the game lists them itself), and
-  FrostMod v0.43.0 or newer loads them once on the join's loading screen. A rider who joins
-  after you shows up at your next stop in the pits or your next join, never while you ride.
-  With an older FrostMod nothing is refreshed while you are on a server; the paints show from
-  the next launch.
 - **Auto race mode moves nothing with FrostMod v0.40.0 or newer.** It hands FrostMod a list of the tracks and bikes that stay (`frostmod_racemode.txt`), and FrostMod hides the rest from the game's own scan, so their archives are never opened. Ending the session just deletes the list. With an older FrostMod it still moves the unused mods aside as before.
 
 ## 2026-09-27 — v0.19.1 — Auto race mode, gear refresh and beta updates that find the next beta

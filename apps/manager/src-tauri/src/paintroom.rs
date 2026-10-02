@@ -965,7 +965,6 @@ pub fn install_picks(
                 continue;
             }
         }
-        paintsync::note_sync_write(&dest);
         if let Err(e) = std::fs::write(&dest, &bytes) {
             log::warn!("[room] couldn't write {}: {e}", dest.display());
             continue;
@@ -1019,7 +1018,6 @@ pub fn cleanup_received(
             // The player has made it theirs since.
             continue;
         }
-        paintsync::note_sync_write(&dest);
         if std::fs::remove_file(&dest).is_ok() {
             manifest.forget(&rel_dest);
             paintsync::prune_empty(mods_dir, dest.parent());
@@ -1172,14 +1170,14 @@ pub async fn download_grid(
     fetched
 }
 
-/// Put the grid's picked paints on disk where the game will load them, and clean up what
+/// Put the grid's picked paints on disk where FrostMod will load them, and clean up what
 /// nobody wears any more.
 ///
-/// Writing a file costs the game nothing: it reads its paint lists once, at boot, and never
-/// rescans them on a join. What makes a staged paint show is a FrostMod refresh, and
-/// [`signal_staged`] leaves the moment of that to FrostMod (the join's loading screen or the
-/// pits, never while riding). So this runs as soon as the paints are downloaded - before the
-/// game boots for an app-launched join, which needs no refresh at all.
+/// This is the half that costs frame time: writing into the mods folder is what the next
+/// [`crate::frostmod::signal_reload`] makes FrostMod decode and apply, on its render thread.
+/// The caller — [`Session::reconcile`] — only calls this while the *local* rider is parked in
+/// the pits and not mid-race; everything this function needs must already be in the store,
+/// which is why downloading ([`download_grid`]) is a separate, ungated step.
 pub fn apply_grid(cfg: &AppConfig, local: &mut Local, riders: &[&RoomRider], now: u64) -> PullOutcome {
     let mods_dir = crate::library::mods_root(&cfg.mods_path);
     let mut manifest = Manifest::read(&mods_dir);
@@ -1227,80 +1225,6 @@ pub fn apply_grid(cfg: &AppConfig, local: &mut Local, riders: &[&RoomRider], now
     out
 }
 
-// ── Telling the game ─────────────────────────────────────────────────────────
-
-/// What to tell the game once paints are on disk.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum StageSignal {
-    /// Nothing: no new file, the game isn't up (it reads them at boot), or the FrostMod
-    /// running can't be trusted to wait for the pits.
-    Nothing,
-    /// `paints_staged`: FrostMod (v0.43.0+) refreshes once on the join's loading screen or
-    /// in the pits, never while riding, and repaints only riders missing a paint.
-    PaintsStaged,
-    /// An older FrostMod, and the rider is in the menus, off any server: its plain refresh
-    /// has nobody on track to stall.
-    LegacyRefresh,
-}
-
-/// The one rule for every paint sync install, whichever path installed it.
-///
-/// This replaces the live triggers - a refresh per room arrival, a full content reload after
-/// every install, and the folder watcher's own refresh on top - which ran on track and made
-/// riders lag out.
-///
-/// `on_server` is `true` when it cannot be read: an older FrostMod is only refreshed when it
-/// is known to be safe.
-pub fn stage_signal(installed: usize, game_running: bool, frostmod_gates: bool, on_server: bool) -> StageSignal {
-    if installed == 0 || !game_running {
-        return StageSignal::Nothing;
-    }
-    if frostmod_gates {
-        return StageSignal::PaintsStaged;
-    }
-    if on_server {
-        StageSignal::Nothing
-    } else {
-        StageSignal::LegacyRefresh
-    }
-}
-
-/// Act on [`stage_signal`] for `installed` new paint files. At most one signal per install
-/// batch; FrostMod coalesces anything closer together than that.
-pub fn signal_staged(app: &tauri::AppHandle, installed: usize, on_server: bool) -> StageSignal {
-    let tag = crate::frostmod_manage::installed_version(app);
-    let signal = stage_signal(
-        installed,
-        crate::gameproc::is_game_running(),
-        crate::frostmod::paints_staged_supported(tag.as_deref()),
-        on_server,
-    );
-    match signal {
-        StageSignal::Nothing => {
-            if installed > 0 {
-                log::info!(
-                    "[room] {installed} paints staged; the game lists them when it next starts \
-                     (nothing sent: game not up, or FrostMod {tag:?} can't wait for the pits)"
-                );
-            }
-        }
-        StageSignal::PaintsStaged => {
-            log::info!(
-                "[room] {installed} paints staged -> FrostMod ({:?}); it loads them on the loading \
-                 screen or in the pits",
-                crate::frostmod::signal_paints_staged()
-            );
-        }
-        StageSignal::LegacyRefresh => {
-            log::info!(
-                "[room] {installed} paints staged in the menus -> refresh {:?}",
-                crate::gameproc::refresh_look(tag.as_deref())
-            );
-        }
-    }
-    signal
-}
-
 // ── A session ────────────────────────────────────────────────────────────────
 
 /// The joined server.
@@ -1335,10 +1259,14 @@ pub struct Session {
     current: Option<Current>,
     grid: Grid,
     local: Option<Local>,
-    /// Reads FrostMod's session block, to know whether the game is on a server. Held open
-    /// across ticks: re-opening the mapping every pass is the one thing this reader was
-    /// built to avoid.
+    /// Reads FrostMod's session block, to know whether the *local* rider is parked in the
+    /// pits or out on the grid. Held open across ticks: re-opening the mapping every pass is
+    /// the one thing this reader was built to avoid.
     session_reader: gamesession::Reader,
+    /// A grid change arrived while the local rider was on track or mid-race, so nothing was
+    /// installed yet. Retried every tick until [`Self::local_ready_to_apply`] allows it —
+    /// this rider's own next pits visit, or the session ending.
+    pending_apply: bool,
 }
 
 impl Session {
@@ -1349,15 +1277,25 @@ impl Session {
         Session { launched_to, ..Default::default() }
     }
 
-    /// Whether the game is on a server, `true` when that can't be read (see [`stage_signal`]).
-    fn on_server(&self) -> bool {
-        self.session_reader.read().map(|s| s.on_a_server()).unwrap_or(true)
-    }
-
-    /// The room for where the rider is has answered. Until then the caller polls fast: the
-    /// paints should be on disk while the game is still loading into the server.
-    pub fn settled(&self) -> bool {
-        self.current.as_ref().is_some_and(|c| !c.key.is_empty())
+    /// Whether the *local* rider is somewhere applying a paint won't cost a frame that
+    /// matters: parked in the pits, not on the grid at all, or the block can't be read (no
+    /// FrostMod, or not in an online session — nothing to protect either way).
+    ///
+    /// Only this rider's own state ever gates the apply. Waiting on the sender or another
+    /// rider to also be in the pits would mean it almost never fires — riders don't coordinate
+    /// pit stops with each other, and the paint they sent has nothing to do with where *they*
+    /// are once it has reached the control plane.
+    ///
+    /// `race_num` is the closest signal FrostMod's session block gives us to "on the grid":
+    /// it is `-1` until the rider has a car placed on the track, pits included, and something
+    /// else once they do. That is conservative rather than exact — it can't yet tell a rider
+    /// idling in the pit box from one on an out-lap — but conservative is the right direction
+    /// here: it only ever *delays* an apply, never applies one mid-corner.
+    fn local_ready_to_apply(&self) -> bool {
+        match self.session_reader.read() {
+            Some(session) if session.on_a_server() => session.race_num_for_room() == 0,
+            _ => true,
+        }
     }
 
     /// Where the rider is, from what we launched and what FrostMod reports.
@@ -1411,10 +1349,6 @@ impl Session {
         reported: Option<String>,
     ) -> Tick {
         let desired = self.target(reported.as_deref());
-        if desired.is_none() && self.current.is_none() {
-            // Not on a server and not headed to one: nothing to ask anyone.
-            return Tick::Live;
-        }
         let token = match crate::voice::signal::account(app, cfg).await {
             Ok(token) => token,
             Err(e) => {
@@ -1463,13 +1397,15 @@ impl Session {
         // What the room said.
         let events = self.current.as_ref().and_then(|c| c.room.as_ref()).map(Room::drain).unwrap_or_default();
         let mut changed = false;
+        let mut arrived = false;
         let mut closed = None;
         for event in events {
             match event {
                 RoomEvent::Joined(rider) => {
-                    // A rider who joins after us: their paints are downloaded and staged now,
-                    // and FrostMod loads them at our next load point (the pits, or the next
-                    // join) - never mid-ride.
+                    // A rider (re)entering the game is a new vehicle there, whether or not their
+                    // look changed — and a rejoin brings nothing to download, so the install
+                    // count alone would never tell FrostMod to put their paints on it.
+                    arrived |= !rider.paints.is_empty();
                     changed |= self.grid.joined(rider);
                 }
                 RoomEvent::Left { rider_name, guid } => changed |= self.grid.left(&rider_name, guid.as_deref()),
@@ -1482,8 +1418,13 @@ impl Session {
             cur.retry_at = Instant::now() + cur.backoff;
             cur.backoff = (cur.backoff * 2).min(HEARTBEAT);
         }
-        if changed {
-            self.reconcile(app, cfg, &token).await;
+        if changed || (self.pending_apply && self.local_ready_to_apply()) {
+            // Either the grid moved, or an earlier apply was queued because the local rider
+            // was on track and this tick finds them back in the pits — either way there is
+            // an apply to try now.
+            self.reconcile(app, cfg, &token, arrived).await;
+        } else if arrived {
+            crate::refresh_live_look(app);
         }
 
         // Reopen a dropped room, with backoff.
@@ -1572,7 +1513,7 @@ impl Session {
 
         let changed = self.grid.replace(joined.riders);
         if changed || self.current.as_ref().is_some_and(|c| c.room.is_none()) {
-            self.reconcile(app, cfg, token).await;
+            self.reconcile(app, cfg, token, false).await;
         }
         if self.current.as_ref().is_some_and(|c| c.room.is_none()) {
             self.open_room(token).await;
@@ -1598,14 +1539,18 @@ impl Session {
         }
     }
 
-    /// Download the grid's paints, put them on disk, and tell FrostMod they are staged.
+    /// Download the grid's paints — always, off the gate, off any thread the game cares
+    /// about — then, only while the local rider can afford it, put them on disk and have
+    /// FrostMod apply them.
     ///
-    /// Neither half costs the game a frame: it never rescans paints by itself, so a file on
-    /// disk is inert until FrostMod refreshes, and FrostMod decides when that is - once on the
-    /// join's loading screen, or in the pits, never while riding ([`signal_staged`]). On an
-    /// app-launched join this all happens before the game has booted, and the boot scan
-    /// lists the paints with no refresh at all.
-    async fn reconcile(&mut self, app: &tauri::AppHandle, cfg: &AppConfig, token: &str) {
+    /// The download half runs every time this is called, whatever the local rider is doing:
+    /// it never touches the mods folder, so it never costs FrostMod a frame. The apply half
+    /// — the one FrostMod actually renders — runs only when [`Self::local_ready_to_apply`]
+    /// says the local rider is in the pits and not mid-race; otherwise it is queued
+    /// (`pending_apply`) and retried on a later tick, including the heartbeat, until it can
+    /// go through. `arrived` still refreshes the on-screen roster immediately either way —
+    /// that costs nothing on the game's side, it's this app's own UI.
+    async fn reconcile(&mut self, app: &tauri::AppHandle, cfg: &AppConfig, token: &str, arrived: bool) {
         let now = crate::now_ms();
         let grid = std::mem::take(&mut self.grid);
         set_room_riders(Some(grid.riders().map(|r| fold_rider(&r.rider_name)).collect()));
@@ -1617,6 +1562,18 @@ impl Session {
             return;
         };
         download_grid(cfg, token, local, &riders, now).await;
+
+        if !self.local_ready_to_apply() {
+            drop(riders);
+            self.grid = grid;
+            self.pending_apply = true;
+            log::debug!("[room] paints downloaded; apply deferred until the local rider is in the pits");
+            if arrived {
+                crate::refresh_live_look(app);
+            }
+            return;
+        }
+        self.pending_apply = false;
 
         let Some(local) = self.local.as_mut() else {
             drop(riders);
@@ -1644,8 +1601,12 @@ impl Session {
             log::warn!("[room] couldn't record the sync: {e:#}");
         }
         crate::emit_sync(app, crate::SyncEvent::pulled(&out));
-        let on_server = self.on_server();
-        signal_staged(app, out.installed, on_server);
+        if out.installed > 0 {
+            let _ = crate::frostmod::signal_reload();
+            crate::refresh_live_look(app);
+        } else if arrived {
+            crate::refresh_live_look(app);
+        }
     }
 
     async fn leave_current(&mut self, token: &str) {
@@ -1703,40 +1664,13 @@ mod tests {
 
     const RED: &str = "bikes/KTM450/paints/Red.pnt";
 
-    /// No install while riding can make the game refresh: an up-to-date FrostMod is told the
-    /// paints are staged and waits for the loading screen or the pits itself; an older one is
-    /// told nothing at all while on a server.
     #[test]
-    fn staged_paints_never_ask_an_ungated_frostmod_to_refresh_on_a_server() {
-        // FrostMod v0.43.0+: always the gated verb, whatever the game is doing.
-        assert_eq!(stage_signal(3, true, true, true), StageSignal::PaintsStaged);
-        assert_eq!(stage_signal(3, true, true, false), StageSignal::PaintsStaged);
-        // Older FrostMod: nothing on a server (or when we can't tell), its refresh in the menus.
-        assert_eq!(stage_signal(3, true, false, true), StageSignal::Nothing);
-        assert_eq!(stage_signal(3, true, false, false), StageSignal::LegacyRefresh);
-        // Nothing new, or no game yet (the boot scan reads them): nothing to say.
-        assert_eq!(stage_signal(0, true, true, false), StageSignal::Nothing);
-        assert_eq!(stage_signal(5, false, true, false), StageSignal::Nothing);
-        assert_eq!(stage_signal(5, false, false, false), StageSignal::Nothing);
-    }
-
-    /// The old flow could fire up to three refreshes per sync. Now one install batch is one
-    /// signal at most, and a batch that installed nothing is none.
-    #[test]
-    fn one_install_batch_is_at_most_one_signal() {
-        let batches = [0usize, 4, 0, 0, 1];
-        let signals = batches
-            .iter()
-            .filter(|&&n| stage_signal(n, true, true, true) != StageSignal::Nothing)
-            .count();
-        assert_eq!(signals, 2);
-    }
-
-    #[test]
-    fn a_fresh_session_polls_fast_until_its_room_answers() {
-        // No room yet: the caller polls fast so the paints land while the game loads.
-        let session = Session::new(Some("1.2.3.4:54210".into()));
-        assert!(!session.settled());
+    fn a_fresh_session_is_ready_to_apply() {
+        // No FrostMod block to read (no game running, or a non-Windows dev build): there is
+        // nothing on the local rider's screen an apply could disrupt, so it is never queued.
+        let session = Session::new(None);
+        assert!(session.local_ready_to_apply());
+        assert!(!session.pending_apply);
     }
 
     #[test]
