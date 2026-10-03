@@ -115,7 +115,7 @@ function ThemedToaster() {
 
 export default function App() {
   return (
-    <ThemeProvider defaultTheme="dark" scalable={false}>
+    <ThemeProvider defaultTheme="system" scalable={false}>
       <I18nProvider>
         <UpdateProvider>
           <Shell />

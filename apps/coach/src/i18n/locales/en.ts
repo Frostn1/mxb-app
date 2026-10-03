@@ -26,6 +26,11 @@ export const en = {
   "update.checkFailed": "Couldn't check for updates",
 
   "coachSettings.updates": "Updates",
+  "settings.appearance": "Appearance",
+  "settings.theme": "Theme",
+  "settings.themeLight": "Light",
+  "settings.themeDark": "Dark",
+  "settings.themeSystem": "System",
   "coachSettings.beta": "Beta updates",
   "coachSettings.betaBody":
     "Get new versions as soon as they're out. The coach is in beta, so this starts on.",
