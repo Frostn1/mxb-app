@@ -35,13 +35,18 @@ pub(crate) const JUMPS_NEED: &str = "0.44.1";
 pub(crate) const GEAR_NEEDS: &str = "0.45";
 /// The version that reads the line's look: its width, opacity and colours, and the text on it.
 pub(crate) const LOOK_NEEDS: &str = "0.46.1";
+/// The first recorder that fades the line out near the rider (`line_fade`), steadies the jump marks
+/// and draws the pace and gear hints without being asked.
+pub(crate) const FADE_NEEDS: &str = "0.48";
 
 /// The HUD parts, in the order the overlay lists them: key, label, whether the plugin draws it
 /// when the file doesn't say, and the recorder it needs.
 ///
-/// Two of them are off until asked for. They are extra information over the game's own screen
-/// rather than coaching, so a rider who never opens this panel should not find their view
-/// covered in bars they didn't ask for.
+/// Two of them (the suspension bars and the trail) are off until asked for. They are extra
+/// information over the game's own screen rather than coaching, so a rider who never opens this
+/// panel should not find their view covered in bars they didn't ask for. The pace and gear hints
+/// are coaching and show with the line on the track; they were off until asked for, and a rider
+/// who never opened this panel never saw either.
 pub const HUD_PARTS: &[Part] = &[
     Part { key: "cue", label: "Live cue", default_on: true, needs: HUD_NEEDS },
     Part { key: "section", label: "Section and tip", default_on: true, needs: HUD_NEEDS },
@@ -53,13 +58,13 @@ pub const HUD_PARTS: &[Part] = &[
     // Follows the trail until the rider sets it on its own: the plugin reads a missing `ground`
     // as whatever `trail` says, and `hud_of` reports it the same way.
     Part { key: "ground", label: "Blue line on the track", default_on: false, needs: GROUND_NEEDS },
-    // Drawn over the line on the track, so turning it on turns that on too.
-    Part { key: "pace", label: "Pace hints", default_on: false, needs: PACE_NEEDS },
+    // Drawn over the line on the track, so it shows only with that on; on by default there.
+    Part { key: "pace", label: "Pace hints", default_on: true, needs: PACE_NEEDS },
     // Drawn on the line on the track, so it shows only with that on; on by default there, since
     // a rider who turned the line on asked to be shown the track.
     Part { key: "jumps", label: "Jump calls on the line", default_on: true, needs: JUMPS_NEED },
     // Drawn on the line on the track too (and beside the cue box either way).
-    Part { key: "gear", label: "Gear hints", default_on: false, needs: GEAR_NEEDS },
+    Part { key: "gear", label: "Gear hints", default_on: true, needs: GEAR_NEEDS },
     Part { key: "setup", label: "Setup card (when stopped)", default_on: true, needs: HUD_NEEDS },
 ];
 
@@ -317,6 +322,9 @@ pub struct LineLook {
     pub text_size: f32,
     /// `block`, `bold` or `italic`: what the plugin's block font can draw.
     pub text_style: String,
+    /// The line fades out toward the rider so the ruts it runs through stay visible: clear at the
+    /// bike, solid this many metres ahead. 0 is off, up to 30. FrostMod 0.48 reads it.
+    pub near_fade: f32,
 }
 
 /// `#rrggbb` each: the line's gradient from gas to heavy braking, and the pace hints.
@@ -347,7 +355,7 @@ impl Default for LineColours {
 
 impl Default for LineLook {
     fn default() -> Self {
-        Self { width: 1.0, opacity: 0.7, colours: LineColours::default(), text: true, text_size: 1.0, text_style: "block".into() }
+        Self { width: 1.0, opacity: 0.7, colours: LineColours::default(), text: true, text_size: 1.0, text_style: "block".into(), near_fade: 8.0 }
     }
 }
 
@@ -355,6 +363,7 @@ const TEXT_STYLES: [&str; 3] = ["block", "bold", "italic"];
 const WIDTH_RANGE: (f32, f32) = (0.25, 3.0);
 const OPACITY_RANGE: (f32, f32) = (0.1, 1.0);
 const TEXT_SIZE_RANGE: (f32, f32) = (0.5, 2.0);
+const NEAR_FADE_RANGE: (f32, f32) = (0.0, 30.0);
 
 /// `#rrggbb`, lower case, or None for anything else.
 fn hex_colour(v: &str) -> Option<String> {
@@ -384,6 +393,7 @@ fn tidy_look(l: LineLook) -> LineLook {
         text: l.text,
         text_size: num(l.text_size, TEXT_SIZE_RANGE, d.text_size),
         text_style: if TEXT_STYLES.contains(&style.as_str()) { style } else { d.text_style },
+        near_fade: num(l.near_fade, NEAR_FADE_RANGE, d.near_fade),
     }
 }
 
@@ -407,6 +417,7 @@ fn look_of(pairs: &[(String, String)]) -> LineLook {
         text: ini::on(ini::get(pairs, "line_text"), true),
         text_size: num("text_size", d.text_size),
         text_style: ini::get(pairs, "text_style").unwrap_or_default().to_string(),
+        near_fade: num("line_fade", d.near_fade),
     })
 }
 
@@ -425,6 +436,7 @@ fn look_keys(l: &LineLook) -> Vec<(&'static str, String)> {
         ("line_text", if l.text { "1" } else { "0" }.to_string()),
         ("text_size", format!("{:.2}", l.text_size)),
         ("text_style", l.text_style.clone()),
+        ("line_fade", format!("{:.1}", l.near_fade)),
     ]
 }
 
@@ -436,11 +448,18 @@ pub struct LineLookState {
     pub defaults: LineLook,
     /// The recorder that last ran is older than the one that reads the look.
     pub pre_look: bool,
+    /// The recorder that last ran is older than the one that fades the line near the rider.
+    pub pre_fade: bool,
 }
 
 fn look_state(dir: &Path) -> LineLookState {
     let pairs = ini::read_section(&fs::read_to_string(dir.join("hud.ini")).unwrap_or_default(), "hud");
-    LineLookState { look: look_of(&pairs), defaults: LineLook::default(), pre_look: older_than(dir, LOOK_NEEDS) }
+    LineLookState {
+        look: look_of(&pairs),
+        defaults: LineLook::default(),
+        pre_look: older_than(dir, LOOK_NEEDS),
+        pre_fade: older_than(dir, FADE_NEEDS),
+    }
 }
 
 #[tauri::command]
@@ -539,12 +558,12 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
-    /// Pace hints wait to be asked for, need the recorder that draws them, and bring the line on
+    /// Pace hints are on by default, need the recorder that draws them, and bring the line on
     /// the track with them, since they are drawn over it.
     #[test]
-    fn pace_hints_are_off_until_asked_for_and_bring_the_line() {
+    fn pace_hints_are_on_by_default_and_bring_the_line() {
         let none = hud_of(Path::new("/nowhere/hud.ini"), false, false);
-        assert!(!part(&none, "pace").on, "off by default, as the plugin reads it");
+        assert!(part(&none, "pace").on, "on by default, as the plugin reads it (FrostMod 0.48)");
         assert_eq!(part(&none, "pace").needs, PACE_NEEDS);
         assert_eq!(part(&none, "pace").label, "Pace hints");
         assert_eq!(keys_for("pace", true), vec![("pace", "1".to_string()), ("ground", "1".to_string())]);
@@ -559,12 +578,12 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
-    /// Gear hints wait to be asked for, need the recorder that draws them, and bring the line on
+    /// Gear hints are on by default, need the recorder that draws them, and bring the line on
     /// the track with them, like the pace hints.
     #[test]
-    fn gear_hints_are_off_until_asked_for_and_bring_the_line() {
+    fn gear_hints_are_on_by_default_and_bring_the_line() {
         let none = hud_of(Path::new("/nowhere/hud.ini"), false, false);
-        assert!(!part(&none, "gear").on, "off by default, as the plugin reads it");
+        assert!(part(&none, "gear").on, "on by default, as the plugin reads it (FrostMod 0.48)");
         assert_eq!(part(&none, "gear").needs, GEAR_NEEDS);
         assert_eq!(part(&none, "gear").label, "Gear hints");
         assert_eq!(keys_for("gear", true), vec![("gear", "1".to_string()), ("ground", "1".to_string())]);
@@ -687,6 +706,7 @@ mod tests {
             text: false,
             text_size: 1.5,
             text_style: "italic".into(),
+            near_fade: 14.5,
         };
         ini::write(&path, "hud", &look_keys(&want)).unwrap();
         let pairs = ini::read_section(&fs::read_to_string(&path).unwrap(), "hud");
@@ -702,12 +722,15 @@ mod tests {
             text: true,
             text_size: 0.0,
             text_style: "Gothic".into(),
+            near_fade: 80.0,
         });
         assert_eq!(silly.width, 3.0, "clamped");
         assert_eq!(silly.opacity, 0.7, "not a number: the default");
         assert_eq!(silly.colours.gas, LineColours::default().gas, "not a colour: the default");
         assert_eq!(silly.colours.coast, "#abcdef", "any case of hex");
         assert_eq!(silly.text_size, 0.5);
+        assert_eq!(silly.near_fade, 30.0, "clamped");
+        assert_eq!(look_of(&[("line_fade".into(), "0".into())]).near_fade, 0.0, "off is allowed");
         assert_eq!(silly.text_style, "block", "a style the font can't draw is block");
     }
 

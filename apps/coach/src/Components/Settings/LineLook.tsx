@@ -82,6 +82,7 @@ function LineParts() {
 /** A slider with its value beside it, written when let go. */
 function LookSlider({
   label,
+  desc,
   value,
   min,
   max,
@@ -91,6 +92,7 @@ function LookSlider({
   onCommit,
 }: {
   label: string;
+  desc?: string;
   value: number;
   min: number;
   max: number;
@@ -100,7 +102,7 @@ function LookSlider({
   onCommit: (v: number) => void;
 }) {
   return (
-    <FieldRow label={label}>
+    <FieldRow label={label} desc={desc}>
       <div className="flex w-[260px] items-center gap-3">
         <Slider
           className="flex-1"
@@ -111,7 +113,7 @@ function LookSlider({
           onValueChange={([v]) => onChange(v)}
           onValueCommit={([v]) => onCommit(v)}
         />
-        <span className="w-11 text-right font-mono text-[12px] text-muted-foreground">{format(value)}</span>
+        <span className="w-14 text-right font-mono text-[12px] text-muted-foreground">{format(value)}</span>
       </div>
     </FieldRow>
   );
@@ -208,6 +210,7 @@ export default function LineLookSettings() {
               onChange={(width) => setLook({ ...look, width })}
               onCommit={(width) => save({ ...look, width })}
             />
+            {state.preFade && !state.preLook && <p className="text-[12px] text-warning">{t("line.needsFade")}</p>}
             <LookSlider
               label={t("line.opacity")}
               value={look.opacity}
@@ -217,6 +220,17 @@ export default function LineLookSettings() {
               format={(v) => `${Math.round(v * 100)}%`}
               onChange={(opacity) => setLook({ ...look, opacity })}
               onCommit={(opacity) => save({ ...look, opacity })}
+            />
+            <LookSlider
+              label={t("line.nearFade")}
+              desc={t("line.nearFadeBody")}
+              value={look.nearFade}
+              min={0}
+              max={30}
+              step={1}
+              format={(v) => (v === 0 ? t("line.nearFadeOff") : `${v} m`)}
+              onChange={(nearFade) => setLook({ ...look, nearFade })}
+              onCommit={(nearFade) => save({ ...look, nearFade })}
             />
           </Section>
 
