@@ -134,7 +134,15 @@ fn build(app: &AppHandle, track: &str) -> Result<PathBuf, String> {
 
 /// Whether a track's terrain must never reach disk: locked, or secured with or without a key.
 fn withheld(src: &mxb_core::tracksource::TrackSource) -> bool {
-    src.locked || mxb_core::securesource::is_secured(Path::new(&src.path))
+    src.locked || (!src.stock && protected(Path::new(&src.path)))
+}
+
+/// Secured, or a GUID-locked archive. A GUID-locked `.pkz` is not a plain zip (it doesn't start
+/// with the zip magic), and the app can read it only through its sidecar, so `locked` is false
+/// whenever that reader works; the container itself is the tell. Folders and missing files are
+/// not protected.
+fn protected(path: &Path) -> bool {
+    mxb_core::securesource::is_secured(path) || (path.is_file() && !mxb_core::pkz::is_plain_zip(path))
 }
 
 fn build_from(
@@ -175,6 +183,7 @@ fn sweep_dir(dir: &Path, secured: &HashSet<String>) -> usize {
         }
         let stem = p.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
         if secured.contains(&mxb_core::tracksource::key(&stem)) && fs::remove_file(&p).is_ok() {
+            log::info!("deleted the track ground for locked track {stem}");
             n += 1;
         }
     }
@@ -214,7 +223,7 @@ fn run_all(app: &AppHandle) {
     let entries = mxb_core::library::scan_library(&cfg.mods_path, "mods/tracks", &[], cfg.game()).unwrap_or_default();
     let secured: HashSet<String> = entries
         .iter()
-        .filter(|e| e.secured || mxb_core::securesource::is_secured(Path::new(&e.path)))
+        .filter(|e| e.secured || e.locked || protected(Path::new(&e.path)))
         .map(|e| mxb_core::tracksource::key(&mxb_core::library::strip_ext(&e.name)))
         .collect();
     let gone = sweep_dir(&dir, &secured);
@@ -222,7 +231,7 @@ fn run_all(app: &AppHandle) {
         log::info!("removed {gone} track ground file(s) of secured tracks");
     }
     for e in entries {
-        if e.secured || e.locked || mxb_core::securesource::is_secured(Path::new(&e.path)) {
+        if e.secured || e.locked || protected(Path::new(&e.path)) {
             continue;
         }
         let id = mxb_core::track::folder_name(Path::new(&e.path)).unwrap_or_else(|| mxb_core::library::strip_ext(&e.name));
@@ -307,6 +316,19 @@ mod tests {
         };
         assert!(withheld(&src("C:/mods/tracks/755 Compound.mxbsecure")));
         assert!(!withheld(&src("C:/mods/tracks/Ridgedale.pkz")));
+
+        // A GUID-locked .pkz: not a zip, yet `locked` is false because the reader opened it.
+        let tdir = std::env::temp_dir().join(format!("coach-gg-guid-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&tdir);
+        fs::create_dir_all(&tdir).unwrap();
+        let opaque = tdir.join("Fake Locked.pkz");
+        fs::write(&opaque, b" not a zip, fake guid-locked body").unwrap();
+        let plain = tdir.join("Fake Open.pkz");
+        fs::write(&plain, b"PK empty zip").unwrap();
+        assert!(withheld(&src(&opaque.to_string_lossy())));
+        assert!(!withheld(&src(&plain.to_string_lossy())));
+        assert!(protected(&opaque) && !protected(&plain) && !protected(&tdir));
+        let _ = fs::remove_dir_all(&tdir);
 
         let dir = std::env::temp_dir().join(format!("coach-gg-sweep-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
