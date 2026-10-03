@@ -184,7 +184,7 @@ export type FieldKind =
 export interface ConfigField {
   section: string;
   key: string;
-  /** The page group: "event", "sessions", "rules", "penalties", "weather", "riders", "ghosts",
+  /** The page group: "event", "sessions", "rules", "penalties", "weather", "riders", "operations", "ghosts",
    *  "cuts", "deformation", "listing", "logging" or "advanced". */
   group: string;
   /** The stock server's own `section.key` ("" for our extras). */

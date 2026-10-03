@@ -32,6 +32,7 @@ const GROUPS = [
   { id: "penalties", title: "Penalties" },
   { id: "weather", title: "Weather & Track" },
   { id: "riders", title: "Riders" },
+  { id: "operations", title: "Logs, live & admin" },
   { id: "ghosts", title: "Bots" },
   { id: "cuts", title: "Cuts" },
   { id: "deformation", title: "Deformation" },

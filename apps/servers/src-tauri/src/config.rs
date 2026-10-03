@@ -519,6 +519,116 @@ pub const FIELDS: &[Field] = &[
         .help("Logs who hit whom and counts collisions per rider.")
         .default_is("off")
         .done(),
+    F::new("log", "file", "operations", "Log file", Kind::Text)
+        .stock("log.file")
+        .status("unsupported")
+        .help("mxbserver logs to the console and the journal, not to a stock log file.")
+        .done(),
+    F::new("live", "enable", "operations", "Live timing", Kind::Text)
+        .stock("live.enable")
+        .status("unsupported")
+        .help("mxbserver has no stock live timing output yet.")
+        .done(),
+    F::new("live", "port", "operations", "Live timing port", Kind::Text)
+        .stock("live.port")
+        .status("unsupported")
+        .help("mxbserver has no stock live timing output yet.")
+        .done(),
+    F::new("live", "password", "operations", "Live timing password", Kind::Text)
+        .stock("live.password")
+        .status("unsupported")
+        .help("mxbserver has no stock live timing output yet.")
+        .done(),
+    F::new("live", "file", "operations", "Live timing file", Kind::Text)
+        .stock("live.file")
+        .status("unsupported")
+        .help("mxbserver has no stock live timing output yet.")
+        .done(),
+    F::new("live", "track_position", "operations", "Live track position", Kind::Text)
+        .stock("live.track_position")
+        .status("unsupported")
+        .help("mxbserver has no stock live timing output yet.")
+        .done(),
+    F::new("live", "contacts", "operations", "Live contacts", Kind::Text)
+        .stock("live.contacts")
+        .status("unsupported")
+        .help("mxbserver has no stock live timing output yet.")
+        .done(),
+    F::new("live", "server_info", "operations", "Live server info", Kind::Text)
+        .stock("live.server_info")
+        .status("unsupported")
+        .help("mxbserver has no stock live timing output yet.")
+        .done(),
+    F::new("remote_admin", "enable", "operations", "Remote admin", Kind::Text)
+        .stock("remote_admin.enable")
+        .status("unsupported")
+        .help("Replaced by mxbserver's token-protected admin API, which this app uses.")
+        .done(),
+    F::new("remote_admin", "port", "operations", "Remote admin port", Kind::Text)
+        .stock("remote_admin.port")
+        .status("unsupported")
+        .help("Replaced by mxbserver's token-protected admin API, which this app uses.")
+        .done(),
+    F::new("remote_admin", "password", "operations", "Remote admin password", Kind::Text)
+        .stock("remote_admin.password")
+        .status("unsupported")
+        .help("Replaced by mxbserver's token-protected admin API, which this app uses.")
+        .done(),
+    F::new("rating", "class", "operations", "Rating class", Kind::Text)
+        .stock("rating.class")
+        .status("unsupported")
+        .help("mxbserver has no rating class restriction yet.")
+        .done(),
+    F::new("results", "export", "operations", "Export results", Kind::Text)
+        .stock("results.export")
+        .status("elsewhere")
+        .help("Set [results] export in the config file; it needs a restart.")
+        .done(),
+    F::new("results", "directory", "operations", "Results folder", Kind::Text)
+        .stock("results.directory")
+        .status("elsewhere")
+        .help("Set [results] directory in the config file; it needs a restart.")
+        .done(),
+    F::new("results", "prefix", "operations", "Results file prefix", Kind::Text)
+        .stock("results.prefix")
+        .status("elsewhere")
+        .help("Set [results] prefix in the config file; it needs a restart.")
+        .done(),
+    F::new("results", "incremental", "operations", "Incremental results", Kind::Text)
+        .stock("results.incremental")
+        .status("elsewhere")
+        .help("Set [results] incremental in the config file; it needs a restart.")
+        .done(),
+    F::new("results", "units", "operations", "Results units", Kind::Text)
+        .stock("results.units")
+        .status("unsupported")
+        .help("mxbserver's results files have no unit setting.")
+        .done(),
+    F::new("results", "contacts", "operations", "Results contacts", Kind::Text)
+        .stock("results.contacts")
+        .status("unsupported")
+        .help("mxbserver's results files have no contacts setting.")
+        .done(),
+    F::new("replay", "save", "operations", "Save replays", Kind::Text)
+        .stock("replay.save")
+        .status("unsupported")
+        .help("mxbserver records private segments, not stock replays.")
+        .done(),
+    F::new("replay", "directory", "operations", "Replay folder", Kind::Text)
+        .stock("replay.directory")
+        .status("unsupported")
+        .help("mxbserver records private segments, not stock replays.")
+        .done(),
+    F::new("replay", "prefix", "operations", "Replay file prefix", Kind::Text)
+        .stock("replay.prefix")
+        .status("unsupported")
+        .help("mxbserver records private segments, not stock replays.")
+        .done(),
+    F::new("replay", "name", "operations", "Replay name", Kind::Text)
+        .stock("replay.name")
+        .status("unsupported")
+        .help("mxbserver records private segments, not stock replays.")
+        .done(),
     // ---- Track cuts and penalties ---------------------------------------------------------------
     F::new("cuts", "enable", "cuts", "Detect track cuts", Kind::Bool)
         .help("Watches every rider's line against the track and logs when someone skips part of it. Needs a recent server.")
@@ -1166,6 +1276,28 @@ late_join_register = false
         "deformation.auto_reset",
         "dynamicsurface.disable",
         "dynamicsurface.persistent",
+        "log.file",
+        "live.enable",
+        "live.port",
+        "live.password",
+        "live.file",
+        "live.track_position",
+        "live.contacts",
+        "live.server_info",
+        "remote_admin.enable",
+        "remote_admin.port",
+        "remote_admin.password",
+        "rating.class",
+        "results.export",
+        "results.directory",
+        "results.prefix",
+        "results.incremental",
+        "results.units",
+        "results.contacts",
+        "replay.save",
+        "replay.directory",
+        "replay.prefix",
+        "replay.name",
     ];
 
     /// The `[event]` keys mxbserver parses (`event_options.rs` `EventOptions`).
@@ -1247,6 +1379,7 @@ late_join_register = false
                     "penalties",
                     "weather",
                     "riders",
+                    "operations",
                     "ghosts",
                     "cuts",
                     "deformation",
