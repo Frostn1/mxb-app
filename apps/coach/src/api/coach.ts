@@ -596,6 +596,8 @@ export interface LineLook {
   /** Times the text's own size, 0.5–2. */
   textSize: number;
   textStyle: TextStyle;
+  /** Metres: the line fades out toward the bike and is solid this far ahead. 0 is off, up to 30. */
+  nearFade: number;
 }
 
 export interface LineLookState {
@@ -604,6 +606,8 @@ export interface LineLookState {
   defaults: LineLook;
   /** The recorder that last ran is older than FrostMod 0.46.1, which reads the look. */
   preLook: boolean;
+  /** The recorder that last ran is older than FrostMod 0.48, which fades the line near the rider. */
+  preFade: boolean;
 }
 
 export const coachLineLook = () => invoke<LineLookState>("coach_line_look");
