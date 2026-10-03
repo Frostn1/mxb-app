@@ -1,6 +1,6 @@
 # Windows code signing through Azure Artifact Signing (formerly Trusted Signing).
 #
-# Shared by release.yml (MXB App); also used by the private apps repo. Run it on the
+# Shared by release.yml (MXB App), release-studio.yml, release-coach.yml and release-servers.yml. Run it on the
 # Windows leg before `tauri build`, then pass its `tauri-args` output to the build: that adds a
 # `bundle.windows.signCommand` overlay, so Tauri itself signs the app exe, the NSIS installer
 # and its uninstaller while it bundles. Signing has to happen there rather than after the

@@ -1,0 +1,150 @@
+name: Release MXB Servers
+
+# Build, sign and publish MXB Servers.
+#
+# Source lives in this repo; releases go to Frostn1/mxb-servers, as the coach's go to
+# mxb-coach, so this repo's `releases/latest` (the manager's updater endpoint) never points at
+# a Servers build.
+#
+# Tags are `servers-v0.1.0` here and land as `v0.1.0` over there, so neither repo's tag
+# namespace collides. `release.yml` triggers on `v*`, which does not match `servers-v*`.
+#
+# A plain installer release: the app has no updater (no `plugins.updater` in its
+# tauri.conf.json), so there is no latest.json, no TAURI_SIGNING_* key and no bridge job.
+# Windows-only by config (`bundle.targets` is `["nsis"]`), and it needs no private sidecar:
+# its only workspace crate is crates/content, which reads ordinary ZIP packages.
+
+on:
+  push:
+    tags:
+      - "servers-v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    # The environment gives the OIDC token one stable subject for Azure to trust
+    # (repo:Frostn1/mxb-app:environment:code-signing), whatever tag started the run. No
+    # protection rules: it exists only to name the job. See docs/signing/SETUP.md.
+    environment: code-signing
+    # id-token: the OIDC login for code signing (.github/actions/artifact-signing).
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # bun installs the workspace from bun.lock, and tauri-action runs the app's
+      # beforeBuildCommand (`bun run build`) with it too.
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: . -> target
+          shared-key: release
+          save-if: false
+
+      # The Coach / Studio / MXB Servers source is private (Frostn1/mxb-apps-private). Read-only
+      # deploy key; apply.sh copies apps/* in quietly (no verbose output: this log is public).
+      - name: Fetch private apps source
+        if: ${{ github.repository == 'Frostn1/mxb-app' }}
+        uses: actions/checkout@v4
+        with:
+          repository: Frostn1/mxb-apps-private
+          ssh-key: ${{ secrets.APPS_PRIVATE_DEPLOY_KEY }}
+          path: .apps-private
+
+      - name: Apply private apps
+        if: ${{ github.repository == 'Frostn1/mxb-app' }}
+        shell: bash
+        run: bash .apps-private/apply.sh "$GITHUB_WORKSPACE"
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      # `servers-v0.1.0-beta.1` → tag `v0.1.0-beta.1` over there, version `0.1.0-beta.1`.
+      # A workflow_dispatch run has a branch for a ref, so it builds a throwaway version.
+      - name: Tag without the servers- prefix
+        id: tag
+        shell: bash
+        run: |
+          raw="${{ github.ref_type == 'tag' && github.ref_name || format('servers-v0.0.{0}', github.run_number) }}"
+          tag="${raw#servers-}"
+          echo "name=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
+
+      # Windows code signing (Azure Artifact Signing). An ad-hoc dispatch can remain unsigned,
+      # but a canonical tag must fail rather than publish an unsigned Servers release.
+      - name: Set up Windows code signing
+        id: signing
+        uses: ./.github/actions/artifact-signing
+        with:
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          endpoint: ${{ vars.ARTIFACT_SIGNING_ENDPOINT }}
+          account: ${{ vars.ARTIFACT_SIGNING_ACCOUNT }}
+          profile: ${{ vars.ARTIFACT_SIGNING_PROFILE }}
+          required: ${{ github.repository == 'Frostn1/mxb-app' && github.ref_type == 'tag' }}
+
+      # The release body: this tag's CHANGELOG section (`MXB Servers v…`) when there is one,
+      # then the download guidance.
+      - name: Compose release notes
+        id: notes
+        shell: bash
+        run: |
+          {
+            echo 'body<<RELEASE_NOTES_EOF'
+            bash scripts/release-notes.sh "${{ steps.tag.outputs.name }}" --app="MXB Servers"
+            echo 'RELEASE_NOTES_EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Build and publish release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          # rustc warnings quote source lines; keep private source out of the public log.
+          RUSTFLAGS: "--cap-lints allow"
+          # A fine-grained PAT with contents:write on mxb-servers only. Deliberately not
+          # GITHUB_TOKEN: that cannot write to another repository.
+          GITHUB_TOKEN: ${{ secrets.SERVERS_RELEASE_TOKEN }}
+          VITE_APP_NAME: "MXB Servers"
+        with:
+          owner: Frostn1
+          repo: mxb-servers
+          # Required when publishing across repositories: the action has no commit of its
+          # own over there to hang the release off.
+          releaseCommitish: main
+          projectPath: apps/servers
+          tagName: ${{ steps.tag.outputs.name }}
+          releaseName: "MXB Servers ${{ steps.tag.outputs.version }}"
+          assetNamePattern: "MXB-Servers-[version]-[arch][ext]"
+          releaseBody: ${{ steps.notes.outputs.body }}
+          releaseDraft: false
+          # A suffixed tag is a beta of the version it names. The `servers-` prefix itself
+          # holds a '-', so check the tag without it (servers-v0.1.0 → v0.1.0).
+          prerelease: ${{ github.ref_type != 'tag' || contains(steps.tag.outputs.name, '-') }}
+          # The signing overlay (bundle.windows.signCommand) when signing is set up; else empty.
+          args: ${{ steps.signing.outputs.tauri-args }}
+
+      # Tauri hides the signing command's output when it fails; sign-windows.ps1 keeps a transcript.
+      - name: Show Windows signing log
+        if: ${{ failure() }}
+        shell: pwsh
+        run: |
+          $log = Join-Path $env:RUNNER_TEMP 'sign-windows.log'
+          if (Test-Path $log) { Get-Content $log } else { Write-Host 'no sign-windows.log (the signing script never ran)' }

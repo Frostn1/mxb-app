@@ -1,0 +1,222 @@
+name: Release Frost's Studio
+
+# Build and publish Frost's Studio.
+#
+# Source lives in this repo; releases go to Frostn1/frost-studio. That split is not
+# cosmetic: `releases/latest` resolves to one release per *repository*, and the manager's
+# updater endpoint — baked into every shipped binary since v0.1 — points at this repo's.
+# Publishing the studio here would hand every manager install a studio build as its next
+# update. So the studio gets its own repo, its own `releases/latest`, and its own signing
+# key: with both separate, a leaked studio token still cannot push a manager update.
+#
+# Tags are `studio-v0.1.0` here and land as `v0.1.0` over there, so neither repo's tag
+# namespace collides. `release.yml` triggers on `v*`, which does not match `studio-v*`.
+
+on:
+  push:
+    tags:
+      - "studio-v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows-latest
+            args: ""
+          - platform: macos-latest
+            args: "--target aarch64-apple-darwin"
+          # Pinned to 22.04 for the same reason the manager's is: the AppImage inherits the
+          # builder's glibc as its floor.
+          - platform: ubuntu-22.04
+            args: ""
+
+    runs-on: ${{ matrix.platform }}
+    # The environment gives the OIDC token one stable subject for Azure to trust
+    # (repo:Frostn1/mxb-app:environment:code-signing), whatever tag started the run; a tag's own
+    # subject names that tag, which no credential can be registered for in advance. No
+    # protection rules: it exists only to name the job. See docs/signing/SETUP.md.
+    environment: code-signing
+    # id-token: the Windows leg's OIDC login for code signing (.github/actions/artifact-signing).
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # bun installs the workspace from bun.lock, and tauri-action runs the app's
+      # beforeBuildCommand (`bun run build`) with it too.
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Enforce secure-content boundary before private sync
+        run: bun run check:secure-boundary
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin' || '' }}
+
+      # No libasound2-dev here: the voice stack is the manager's, and the studio does not
+      # build cpal. Everything else mirrors the manager's list.
+      - name: Install Linux system dependencies
+        if: startsWith(matrix.platform, 'ubuntu')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libsoup-3.0-dev \
+            patchelf \
+            squashfs-tools
+
+      # Same shared cache as the manager's release, warmed on main by release-cache.yml.
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: . -> target
+          shared-key: release
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      # The Coach / Studio / MXB Servers source is private (Frostn1/mxb-apps-private). Read-only
+      # deploy key; apply.sh copies apps/* in quietly (no verbose output: this log is public).
+      - name: Fetch private apps source
+        if: ${{ github.repository == 'Frostn1/mxb-app' }}
+        uses: actions/checkout@v4
+        with:
+          repository: Frostn1/mxb-apps-private
+          ssh-key: ${{ secrets.APPS_PRIVATE_DEPLOY_KEY }}
+          path: .apps-private
+
+      - name: Apply private apps
+        if: ${{ github.repository == 'Frostn1/mxb-app' }}
+        shell: bash
+        run: bash .apps-private/apply.sh "$GITHUB_WORKSPACE"
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      # The studio's Protect tab needs the same private module the manager does; without it
+      # the tab hides itself rather than failing, so a fork still builds.
+      - name: Fetch private sidecar module
+        if: ${{ github.repository == 'Frostn1/mxb-app' }}
+        uses: actions/checkout@v4
+        with:
+          repository: Frostn1/mxbapp-private
+          ssh-key: ${{ secrets.SIDECAR_DEPLOY_KEY }}
+          path: .sidecar-src
+
+      - name: Apply sidecar module
+        if: ${{ github.repository == 'Frostn1/mxb-app' }}
+        shell: bash
+        run: bash .sidecar-src/sync.sh "$GITHUB_WORKSPACE"
+
+      - name: Tag without the studio- prefix
+        id: tag
+        shell: bash
+        run: |
+          raw="${{ github.ref_type == 'tag' && github.ref_name || format('studio-v0.0.{0}', github.run_number) }}"
+          echo "name=${raw#studio-}" >> "$GITHUB_OUTPUT"
+
+      # What shipped, for the release page. Reads this tag's section of CHANGELOG.md,
+      # headed `## <date> — Frost's Studio v…`, so the Studio's v0.4.0 can't come out
+      # reading the MXB App's. Falls back to the download guidance alone with no section.
+      # Windows code signing (Azure Artifact Signing). An ad-hoc dispatch can remain unsigned,
+      # but a canonical tag must fail rather than publish an unsigned Studio release.
+      - name: Set up Windows code signing
+        id: signing
+        if: ${{ startsWith(matrix.platform, 'windows') }}
+        uses: ./.github/actions/artifact-signing
+        with:
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          endpoint: ${{ vars.ARTIFACT_SIGNING_ENDPOINT }}
+          account: ${{ vars.ARTIFACT_SIGNING_ACCOUNT }}
+          profile: ${{ vars.ARTIFACT_SIGNING_PROFILE }}
+          required: ${{ github.repository == 'Frostn1/mxb-app' && github.ref_type == 'tag' }}
+
+      - name: Compose release notes
+        id: notes
+        shell: bash
+        run: |
+          {
+            echo 'body<<RELEASE_NOTES_EOF'
+            bash scripts/release-notes.sh "${{ steps.tag.outputs.name }}" --app="Frost's Studio"
+            echo 'RELEASE_NOTES_EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Build and publish release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          # rustc warnings quote source lines; keep private source out of the public log.
+          RUSTFLAGS: "--cap-lints allow"
+          # A fine-grained PAT with contents:write on frost-studio only. Deliberately not
+          # GITHUB_TOKEN: that cannot write to another repository.
+          GITHUB_TOKEN: ${{ secrets.STUDIO_RELEASE_TOKEN }}
+          VITE_APP_NAME: "Frost's Studio"
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.STUDIO_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.STUDIO_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # Signs this build's anonymous usage reports, so the control plane can tell a report
+          # from one of our builds from a report from a script. Obfuscated into the binary by
+          # crates/core/build.rs — not secrecy, since anyone can download the build and read
+          # the pad, but it keeps the key off a `strings` dump. Unset expands to empty, which
+          # build.rs drops, so a fork builds an unsigned variant rather than failing; the
+          # endpoint takes unsigned reports until MXB_USAGE_REQUIRE_SIGNATURE is turned on.
+          MXB_USAGE_KEY: ${{ secrets.MXB_USAGE_KEY }}
+        with:
+          owner: Frostn1
+          repo: frost-studio
+          # Required when publishing across repositories: the action has no commit of its
+          # own over there to hang the release off.
+          releaseCommitish: main
+          projectPath: apps/studio
+          tagName: ${{ steps.tag.outputs.name }}
+          releaseName: "Frost's Studio ${{ steps.tag.outputs.name }}"
+          # What shipped, then which file to download — worded in scripts/release-notes.sh.
+          releaseBody: ${{ steps.notes.outputs.body }}
+          # Named here rather than renamed afterwards: this applies before latest.json is
+          # written, so the manifest and the assets cannot disagree.
+          assetNamePattern: "Frost-Studio-[version]-[arch][ext]"
+          releaseDraft: false
+          prerelease: ${{ github.ref_type != 'tag' || contains(github.ref_name, '-beta') || contains(github.ref_name, '-rc') }}
+          # The signing overlay on a signed Windows leg; empty everywhere else.
+          args: ${{ matrix.args }} ${{ steps.signing.outputs.tauri-args }}
+
+  # Announce the release in #studio-releases once every platform has uploaded. Real tags on
+  # the canonical repo only, like the manager's. The Studio has no beta channel, so a beta
+  # goes to the same webhook and is marked as one in the post.
+  notify:
+    needs: build
+    if: ${{ github.repository == 'Frostn1/mxb-app' && github.ref_type == 'tag' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Post release announcement to Discord
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: Frostn1/frost-studio
+          APP_NAME: "Frost's Studio"
+          SLUG: studio
+          ICON_URL: https://raw.githubusercontent.com/Frostn1/mxb-app/${{ github.ref_name }}/apps/studio/src-tauri/icons/icon.png
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_STUDIO_WEBHOOK_URL }}
+          DISCORD_BETA_WEBHOOK_URL: ${{ secrets.DISCORD_STUDIO_WEBHOOK_URL }}
+        run: bash scripts/notify-discord.sh "${GITHUB_REF_NAME#studio-}"
