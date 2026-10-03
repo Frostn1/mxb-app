@@ -54,6 +54,12 @@
 - **Auto race mode moves nothing with FrostMod v0.40.0 or newer.** It hands FrostMod a list of the tracks and bikes that stay (`frostmod_racemode.txt`), and FrostMod hides the rest from the game's own scan, so their archives are never opened. Ending the session just deletes the list. With an older FrostMod it still moves the unused mods aside as before.
 
 ### Fixed
+- **Archive entry paths are validated before extraction.** Every entry in a downloaded or
+  dropped `.zip`, `.7z` or `.rar` is checked before anything is written, and an archive with
+  any entry that would land outside the staging folder (a `..`, an absolute, drive or UNC path,
+  an alternate data stream, a reserved device name) or that carries a link is rejected whole.
+  The sweep that ran after extraction stays as a second check. `.pkz` unpacking in the viewer
+  also refuses drive-qualified entry names.
 - **MXB Coach: a supercross out lap no longer becomes a broken ghost lap.** The run from the gate
   to the line takes over a fifth of an SX out lap, and Coach only folded that fifth back before
   the line, so the rest of the run read as the end of the lap. Its trace then bridged 680 m with
