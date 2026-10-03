@@ -33,6 +33,8 @@ pub(crate) const JUMPS_NEED: &str = "0.44.1";
 /// The first recorder that hints gear changes (FrostMod v0.45.0, `gear` in hud.ini): an arrow and
 /// the target gear on the line where Coach's lap shifts, when the rider is in another gear.
 pub(crate) const GEAR_NEEDS: &str = "0.45";
+/// The version that reads the line's look: its width, opacity and colours, and the text on it.
+pub(crate) const LOOK_NEEDS: &str = "0.45.5";
 
 /// The HUD parts, in the order the overlay lists them: key, label, whether the plugin draws it
 /// when the file doesn't say, and the recorder it needs.
@@ -298,6 +300,162 @@ pub fn coach_set_cue_pos(app: AppHandle, x: f32, y: f32) -> Result<Hud, String> 
     Ok(hud_of(&dir.join("hud.ini"), mxbmrp3, pre))
 }
 
+/// The look of the line on the track and of the text on it, as `[hud]` keys in `hud.ini`. FrostMod
+/// 0.45.5 reads them; a key that isn't there is the look the line has always had, which is what
+/// [`LineLook::default`] is.
+#[derive(Clone, Debug, PartialEq, Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LineLook {
+    /// Times the line's own width, 0.25 to 3.
+    pub width: f32,
+    /// 0.1 to 1.
+    pub opacity: f32,
+    pub colours: LineColours,
+    /// The words and the gear sign on the line: jump calls, MORE SPEED, gear hints.
+    pub text: bool,
+    /// Times the text's own size, 0.5 to 2.
+    pub text_size: f32,
+    /// `block`, `bold` or `italic`: what the plugin's block font can draw.
+    pub text_style: String,
+}
+
+/// `#rrggbb` each: the line's gradient from gas to heavy braking, and the pace hints.
+#[derive(Clone, Debug, PartialEq, Serialize, serde::Deserialize)]
+pub struct LineColours {
+    pub gas: String,
+    pub coast: String,
+    pub light: String,
+    pub heavy: String,
+    pub fast: String,
+    pub slow: String,
+}
+
+/// The plugin's own colours (FrostMod `coachline::ToneColour`, `coachpace::kFastColour` and
+/// `kSlowColour`) to the nearest #rrggbb.
+impl Default for LineColours {
+    fn default() -> Self {
+        Self {
+            gas: "#26d933".into(),
+            coast: "#f7f7f7".into(),
+            light: "#ffdb0d".into(),
+            heavy: "#f21f14".into(),
+            fast: "#ff40cc".into(),
+            slow: "#33d9ff".into(),
+        }
+    }
+}
+
+impl Default for LineLook {
+    fn default() -> Self {
+        Self { width: 1.0, opacity: 0.7, colours: LineColours::default(), text: true, text_size: 1.0, text_style: "block".into() }
+    }
+}
+
+const TEXT_STYLES: [&str; 3] = ["block", "bold", "italic"];
+const WIDTH_RANGE: (f32, f32) = (0.25, 3.0);
+const OPACITY_RANGE: (f32, f32) = (0.1, 1.0);
+const TEXT_SIZE_RANGE: (f32, f32) = (0.5, 2.0);
+
+/// `#rrggbb`, lower case, or None for anything else.
+fn hex_colour(v: &str) -> Option<String> {
+    let h = v.trim().trim_start_matches('#');
+    (h.len() == 6 && h.chars().all(|c| c.is_ascii_hexdigit())).then(|| format!("#{}", h.to_ascii_lowercase()))
+}
+
+/// The line's look, with every value clamped and checked the way the plugin reads it.
+fn tidy_look(l: LineLook) -> LineLook {
+    let d = LineLook::default();
+    let num = |v: f32, (lo, hi): (f32, f32), def: f32| if v.is_finite() { v.clamp(lo, hi) } else { def };
+    let col = |v: &str, def: &str| hex_colour(v).unwrap_or_else(|| def.to_string());
+    let c = &l.colours;
+    let dc = &d.colours;
+    let style = l.text_style.trim().to_ascii_lowercase();
+    LineLook {
+        width: num(l.width, WIDTH_RANGE, d.width),
+        opacity: num(l.opacity, OPACITY_RANGE, d.opacity),
+        colours: LineColours {
+            gas: col(&c.gas, &dc.gas),
+            coast: col(&c.coast, &dc.coast),
+            light: col(&c.light, &dc.light),
+            heavy: col(&c.heavy, &dc.heavy),
+            fast: col(&c.fast, &dc.fast),
+            slow: col(&c.slow, &dc.slow),
+        },
+        text: l.text,
+        text_size: num(l.text_size, TEXT_SIZE_RANGE, d.text_size),
+        text_style: if TEXT_STYLES.contains(&style.as_str()) { style } else { d.text_style },
+    }
+}
+
+/// The look as the plugin will read it from `hud.ini`'s `[hud]` pairs.
+fn look_of(pairs: &[(String, String)]) -> LineLook {
+    let d = LineLook::default();
+    let num = |key: &str, def: f32| ini::get(pairs, key).and_then(|v| v.trim().parse::<f32>().ok()).unwrap_or(def);
+    let col = |key: &str, def: &str| ini::get(pairs, key).and_then(hex_colour).unwrap_or_else(|| def.to_string());
+    let dc = &d.colours;
+    tidy_look(LineLook {
+        width: num("line_width", d.width),
+        opacity: num("line_opacity", d.opacity),
+        colours: LineColours {
+            gas: col("col_gas", &dc.gas),
+            coast: col("col_coast", &dc.coast),
+            light: col("col_light", &dc.light),
+            heavy: col("col_heavy", &dc.heavy),
+            fast: col("col_fast", &dc.fast),
+            slow: col("col_slow", &dc.slow),
+        },
+        text: ini::on(ini::get(pairs, "line_text"), true),
+        text_size: num("text_size", d.text_size),
+        text_style: ini::get(pairs, "text_style").unwrap_or_default().to_string(),
+    })
+}
+
+/// The `[hud]` keys for a look, all of them, so what the rider sees in Coach is what is in the file.
+fn look_keys(l: &LineLook) -> Vec<(&'static str, String)> {
+    let c = &l.colours;
+    vec![
+        ("line_width", format!("{:.2}", l.width)),
+        ("line_opacity", format!("{:.2}", l.opacity)),
+        ("col_gas", c.gas.clone()),
+        ("col_coast", c.coast.clone()),
+        ("col_light", c.light.clone()),
+        ("col_heavy", c.heavy.clone()),
+        ("col_fast", c.fast.clone()),
+        ("col_slow", c.slow.clone()),
+        ("line_text", if l.text { "1" } else { "0" }.to_string()),
+        ("text_size", format!("{:.2}", l.text_size)),
+        ("text_style", l.text_style.clone()),
+    ]
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LineLookState {
+    pub look: LineLook,
+    /// What "reset" goes back to: the line as the plugin draws it with no keys at all.
+    pub defaults: LineLook,
+    /// The recorder that last ran is older than the one that reads the look.
+    pub pre_look: bool,
+}
+
+fn look_state(dir: &Path) -> LineLookState {
+    let pairs = ini::read_section(&fs::read_to_string(dir.join("hud.ini")).unwrap_or_default(), "hud");
+    LineLookState { look: look_of(&pairs), defaults: LineLook::default(), pre_look: older_than(dir, LOOK_NEEDS) }
+}
+
+#[tauri::command]
+pub fn coach_line_look(app: AppHandle) -> Result<LineLookState, String> {
+    Ok(look_state(&coach_dir(&app)?))
+}
+
+/// Write the whole look. The recorder re-reads `hud.ini` about once a second, so it shows live.
+#[tauri::command]
+pub fn coach_set_line_look(app: AppHandle, look: LineLook) -> Result<LineLookState, String> {
+    let dir = coach_dir(&app)?;
+    ini::write(&dir.join("hud.ini"), "hud", &look_keys(&tidy_look(look)))?;
+    Ok(look_state(&dir))
+}
+
 #[tauri::command]
 pub fn coach_voice(app: AppHandle) -> Result<Voice, String> {
     let (dir, _, pre) = where_and_what(&app)?;
@@ -511,6 +669,46 @@ mod tests {
         fs::create_dir_all(&dirs[1]).unwrap();
         assert_eq!(coach_dir_of(&dirs), Some(default.join("mxbcoach")), "the one with the sessions in it");
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// No keys is the plugin's own look; what is written reads back; nonsense is the default.
+    #[test]
+    fn the_line_look_round_trips_through_hud_ini() {
+        assert_eq!(look_of(&[]), LineLook::default(), "no keys: the line as it has always been");
+        let dir = std::env::temp_dir().join(format!("coach-look-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let path = dir.join("hud.ini");
+        // The other HUD keys are kept alongside it.
+        ini::write(&path, "hud", &[("cue", "0".into())]).unwrap();
+        let want = LineLook {
+            width: 2.0,
+            opacity: 0.45,
+            colours: LineColours { gas: "#0000ff".into(), slow: "#123abc".into(), ..LineColours::default() },
+            text: false,
+            text_size: 1.5,
+            text_style: "italic".into(),
+        };
+        ini::write(&path, "hud", &look_keys(&want)).unwrap();
+        let pairs = ini::read_section(&fs::read_to_string(&path).unwrap(), "hud");
+        assert_eq!(look_of(&pairs), want);
+        assert_eq!(ini::get(&pairs, "cue"), Some("0"), "the rest of the file left alone");
+        assert_eq!(ini::get(&pairs, "col_gas"), Some("#0000ff"));
+        let _ = fs::remove_dir_all(&dir);
+
+        let silly = tidy_look(LineLook {
+            width: 9.0,
+            opacity: f32::NAN,
+            colours: LineColours { gas: "green".into(), coast: "#ABCDEF".into(), ..LineColours::default() },
+            text: true,
+            text_size: 0.0,
+            text_style: "Gothic".into(),
+        });
+        assert_eq!(silly.width, 3.0, "clamped");
+        assert_eq!(silly.opacity, 0.7, "not a number: the default");
+        assert_eq!(silly.colours.gas, LineColours::default().gas, "not a colour: the default");
+        assert_eq!(silly.colours.coast, "#abcdef", "any case of hex");
+        assert_eq!(silly.text_size, 0.5);
+        assert_eq!(silly.text_style, "block", "a style the font can't draw is block");
     }
 
     #[test]

@@ -241,6 +241,8 @@ fn main() {
             hud::coach_hud,
             hud::coach_set_hud,
             hud::coach_set_cue_pos,
+            hud::coach_line_look,
+            hud::coach_set_line_look,
             hud::coach_voice,
             hud::coach_set_voice,
             overlay::overlay_toggle,

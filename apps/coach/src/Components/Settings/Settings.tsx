@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { FolderOpen, Monitor } from "lucide-react";
 import { getVersion } from "@tauri-apps/api/app";
@@ -9,6 +9,7 @@ import UninstallSetting from "@frost/shared/Components/Uninstall/UninstallSettin
 import { Button } from "@frost/shared/Components/ui/button";
 import { Switch } from "@frost/shared/Components/ui/switch";
 import { Segmented } from "@frost/shared/Components/ui/segmented";
+import { cn } from "@frost/shared/lib/utils";
 import { useTheme, type ThemeMode } from "@frost/shared/Context/Theme";
 import HotkeyField from "@frost/shared/Components/HotkeyField";
 import {
@@ -30,17 +31,47 @@ import {
   setGameDir,
   type CoachStatus,
 } from "@/api/coach";
-import Page, { Label } from "../Page";
 import HudPanel from "../Review/HudPanel";
 import { SpokenCues } from "../Review/LiveCues";
+import LineLookSettings, { LINE_PARTS } from "./LineLook";
+import { FieldRow, Rule, Section, ToggleRow } from "./parts";
 
 /** The folder a file sits in. */
 const folderOf = (path: string) => path.replace(/[\\/][^\\/]*$/, "");
 
+export type SectionId = "general" | "line" | "hud" | "recording" | "keybinds" | "about";
+
+/**
+ * The nav, and with it the page: one section on screen at a time, laid out as MXB App's
+ * Settings are so the two apps read alike. It used to be one long column, where the game's
+ * line, the recorder and the version number shared a scrollbar.
+ *
+ * Grouped by where a setting lives: the app itself, what shows in the game, what makes the
+ * coaching work at all, and the app's own details.
+ */
+const GROUPS: { label: TKey; sections: { id: SectionId; label: TKey }[] }[] = [
+  { label: "coachSettings.groupApp", sections: [{ id: "general", label: "coachSettings.general" }] },
+  {
+    label: "coachSettings.groupGame",
+    sections: [
+      { id: "line", label: "coachSettings.line" },
+      { id: "hud", label: "coachSettings.hud" },
+    ],
+  },
+  {
+    label: "coachSettings.groupSetup",
+    sections: [
+      { id: "recording", label: "coachSettings.recording" },
+      { id: "keybinds", label: "coachSettings.keybinds" },
+    ],
+  },
+  { label: "coachSettings.groupAbout", sections: [{ id: "about", label: "coachSettings.about" }] },
+];
+
 function Row({ label, value, onOpen }: { label: string; value: string; onOpen?: () => void }) {
   const t = useT();
   return (
-    <div className="flex items-center justify-between gap-4 border-b border-border py-3 last:border-b-0">
+    <div className="flex items-center justify-between gap-4 border-b border-border pb-3 last:border-b-0 last:pb-0">
       <div className="min-w-0">
         <div className="eyebrow">{label}</div>
         <div className="mt-1 break-all font-mono text-[12px] text-muted-foreground">{value || "—"}</div>
@@ -83,22 +114,19 @@ function Overlay() {
 
   const enabled = state?.enabled ?? true;
   return (
-    <div className="border border-border bg-card px-4 py-4">
-      <div className="flex items-center justify-between gap-4">
-        <div>
-          <div className="text-[13px] font-semibold">{t("overlay.enable")}</div>
-          <p className="mt-0.5 text-[12.5px] text-muted-foreground">{t("overlay.enableDesc")}</p>
-        </div>
-        <Switch
-          checked={enabled}
-          disabled={!state}
-          onCheckedChange={(on) => void run(() => setOverlayEnabled(on), "overlay.registerFailed")}
-        />
-      </div>
-      <div className="mt-4 flex items-start justify-between gap-6 border-t border-border pt-4">
-        <div>
-          <div className="text-[13px] font-semibold">{t("overlay.shortcut")}</div>
-          <p className="mt-0.5 text-[12.5px] text-muted-foreground">{t("overlay.shortcutDesc")}</p>
+    <>
+      <ToggleRow
+        label={t("overlay.enable")}
+        desc={t("overlay.enableDesc")}
+        checked={enabled}
+        disabled={!state}
+        onChange={(on) => void run(() => setOverlayEnabled(on), "overlay.registerFailed")}
+      />
+      <Rule />
+      <div className="flex items-start justify-between gap-6">
+        <div className="flex flex-col gap-0.5">
+          <span className="text-[12.5px] text-foreground/85">{t("overlay.shortcut")}</span>
+          <span className="text-[11.5px] leading-relaxed text-muted-foreground">{t("overlay.shortcutDesc")}</span>
         </div>
         <HotkeyField
           value={state?.hotkey ?? "CommandOrControl+Shift+X"}
@@ -107,31 +135,33 @@ function Overlay() {
         />
       </div>
       {state?.deferred && (
-        <p className="mt-3 text-[12px] text-muted-foreground">{t(`overlay.deferred.${state.deferred}` as TKey)}</p>
+        <p className="text-[12px] text-muted-foreground">{t(`overlay.deferred.${state.deferred}` as TKey)}</p>
       )}
       {/* Said plainly rather than left to look like a hotkey fault: with no link Coach keeps
           its own key, so the shortcut works — it is the sharing that doesn't. */}
-      {state?.linkDown && <p className="mt-3 text-[12px] text-warning">{t("overlay.linkDown")}</p>}
+      {state?.linkDown && <p className="text-[12px] text-warning">{t("overlay.linkDown")}</p>}
       {state?.hotkeyError && (
-        <div className="mt-3 text-[12px] text-warning">
+        <div className="text-[12px] text-warning">
           <div className="font-semibold">{t("overlay.hotkeyTaken")}</div>
           <div>{t("overlay.hotkeyTakenDesc")}</div>
         </div>
       )}
-      <div className="mt-4">
+      <div>
         <Button size="sm" variant="outline" disabled={!enabled} onClick={() => void run(overlayToggle, "overlay.showFailed")}>
           <Monitor className="size-3.5" />
           {t("overlay.showNow")}
         </Button>
       </div>
-    </div>
+    </>
   );
 }
 
-/** The recorder plugin, updates, and where the coach looks. */
-export default function Settings() {
+/** The recorder plugin, updates, where the coach looks, and what it shows in the game. */
+export default function Settings({ initialSection }: { initialSection?: SectionId } = {}) {
   const t = useT();
   const { game } = useConfig();
+  const [active, setActive] = useState<SectionId>(initialSection ?? "general");
+  const pane = useRef<HTMLDivElement>(null);
   const [status, setStatus] = useState<CoachStatus | null>(null);
   const [busy, setBusy] = useState(false);
   const [version, setVersion] = useState("");
@@ -199,138 +229,188 @@ export default function Settings() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const goto = (id: SectionId) => {
+    setActive(id);
+    pane.current?.scrollTo({ top: 0 });
+  };
+
   return (
-    <Page title={t("coachSettings.title")}>
-      <Label>{t("recorder.title")}</Label>
-      <div className="border border-border bg-card px-4 py-4">
-        <div className="text-[13px] font-semibold">
-          {status?.pluginInstalled ? t("recorder.on") : t("recorder.off")}
-        </div>
-        <p className="mt-1 text-[12.5px] text-muted-foreground">{t("recorder.body")}</p>
-        <div className="mt-4 flex flex-wrap gap-2">
-          <Button size="sm" disabled={busy || !status?.gameDir} onClick={() => run(() => installRecorder(), t("recorder.installed"))}>
-            {status?.pluginInstalled ? t("recorder.update") : t("recorder.install")}
-          </Button>
-          <Button size="sm" variant="outline" disabled={busy || !status?.gameDir} onClick={() => void fromFile()}>
-            {t("recorder.fromFile")}
-          </Button>
-          {status?.pluginInstalled && (
-            <Button size="sm" variant="outline" disabled={busy} onClick={() => run(removeRecorder, t("recorder.removed"))}>
-              {t("recorder.remove")}
-            </Button>
-          )}
-          {status?.recorderVersion && (
-            <span className="self-center font-mono text-[12px] text-muted-foreground">
-              {t("recorder.version", { version: status.recorderVersion })}
-            </span>
-          )}
-        </div>
-        {status && !status.recorderVersion && (
-          <p className="mt-3 text-[12px] text-muted-foreground">{t("recorder.versionUnknown")}</p>
-        )}
-        {status?.recorderOutdated && <p className="mt-3 text-[12px] text-warning">{t("recorder.updateIt")}</p>}
-        <div className="mt-4 border-t border-border pt-3">
-          <div className="text-[12.5px] font-semibold">{t("recorder.gameFolder")}</div>
-          <p className="mt-0.5 font-mono text-[12px] text-muted-foreground">
-            {status?.gameDir || t("recorder.gameFolderNone")}
-          </p>
-          <div className="mt-2 flex flex-wrap gap-2">
-            <Button size="sm" variant="outline" disabled={busy} onClick={() => void pickGame()}>
-              {t("recorder.gameFolderPick")}
-            </Button>
+    <div className="flex h-full">
+      <nav className="flex w-[170px] flex-none flex-col gap-4 overflow-y-auto px-4 pb-5 pt-8">
+        <h2 className="headline px-3 text-[24px]">{t("coachSettings.title")}</h2>
+        {GROUPS.map((g) => (
+          <div key={g.label} className="flex flex-col gap-0.5">
+            <span className="px-3 pb-1 text-[10.5px] font-semibold uppercase tracking-wide text-faint">{t(g.label)}</span>
+            {g.sections.map((s) => (
+              <button
+                key={s.id}
+                onClick={() => goto(s.id)}
+                className={cn(
+                  "cursor-default rounded-md px-3 py-1.5 text-left text-[12.5px] transition-colors",
+                  active === s.id
+                    ? "bg-foreground/[0.07] font-semibold text-foreground"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {t(s.label)}
+              </button>
+            ))}
           </div>
-          {status && !status.gameDir && (
-            <p className="mt-2 text-[12px] text-warning">{t("recorder.noGame")}</p>
-          )}
-        </div>
-      </div>
-
-      <div className="mt-8">
-        <Label>{t("settings.appearance")}</Label>
-        <div className="border border-border bg-card px-4 py-4">
-          <div className="flex items-center justify-between">
-            <span className="text-[12.5px] text-foreground/85">{t("settings.theme")}</span>
-            <Segmented
-              size="sm"
-              value={theme}
-              onChange={(v) => setTheme(v as ThemeMode)}
-              options={[
-                { value: "light", label: t("settings.themeLight") },
-                { value: "dark", label: t("settings.themeDark") },
-                { value: "system", label: t("settings.themeSystem") },
-              ]}
-            />
-          </div>
-        </div>
-      </div>
-
-      <div className="mt-8">
-        <Label>{t("overlay.section")}</Label>
-        <Overlay />
-      </div>
-
-      {/* The same panel the in-game tab shows, reading and writing the same hud.ini and
-          voice.ini, so every HUD option is here as well. */}
-      <div className="mt-8">
-        <HudPanel />
-        <div className="mt-3 border border-border bg-card px-4 py-3">
-          <SpokenCues />
-        </div>
-      </div>
-
-      <div className="mt-8">
-        <Label>{t("coachSettings.updates")}</Label>
-        <div className="border border-border bg-card px-4 py-4">
-          <div className="flex items-center justify-between gap-4">
-            <div>
-              <div className="text-[13px] font-semibold">{t("coachSettings.beta")}</div>
-              <p className="mt-0.5 text-[12.5px] text-muted-foreground">{t("coachSettings.betaBody")}</p>
-            </div>
-            <Switch
-              checked={beta}
-              onCheckedChange={(on) => {
-                setBetaUpdates(on);
-                setBeta(on);
-              }}
-            />
-          </div>
-          <div className="mt-4 flex items-center gap-3">
-            <Button size="sm" variant="outline" onClick={() => void update.check({ silent: false })}>
-              {t("coachSettings.check")}
-            </Button>
-            {version && <span className="font-mono text-[12px] text-muted-foreground">v{version}</span>}
-          </div>
-        </div>
-      </div>
-
-      {/* Whether Coach may ask anything. The same row MXB App and the Studio show, and it
-          carries its own label, so it needs no section heading over it. */}
-      <div className="mt-8 border border-border bg-card px-4 py-4">
-        <SurveySetting />
-      </div>
-
-      <div className="mt-8">
-        <Label>{t("coachSettings.where")}</Label>
-        <Row label={t("coachSettings.game")} value={game.display} />
-        <Row
-          label={t("coachSettings.gameFolder")}
-          value={status?.gameDir ?? ""}
-          onOpen={() => void show(openFolder(status?.gameDir ?? ""))}
-        />
-        <Row
-          label={t("coachSettings.plugin")}
-          value={plugin}
-          onOpen={() => void show(status?.pluginInstalled ? revealInExplorer(plugin) : openFolder(folderOf(plugin)))}
-        />
-        {(status?.sessionDirs.length ? status.sessionDirs : [""]).map((dir, k) => (
-          <Row key={dir || k} label={t("coachSettings.sessions")} value={dir} onOpen={() => void show(openFolder(dir))} />
         ))}
-      </div>
+      </nav>
 
-      {/* Last on the page, the same row MXB App and the Studio show. */}
-      <div className="mt-8 border border-border bg-card px-4 py-4">
-        <UninstallSetting />
+      <div ref={pane} className="min-h-0 flex-1 overflow-y-auto px-2 py-8 pr-8">
+        <div className="flex min-w-0 max-w-[820px] flex-col gap-[18px]">
+          {active === "general" && (
+            <>
+              <Section title={t("settings.appearance")}>
+                <FieldRow label={t("settings.theme")}>
+                  <Segmented
+                    size="sm"
+                    value={theme}
+                    onChange={(v) => setTheme(v as ThemeMode)}
+                    options={[
+                      { value: "light", label: t("settings.themeLight") },
+                      { value: "dark", label: t("settings.themeDark") },
+                      { value: "system", label: t("settings.themeSystem") },
+                    ]}
+                  />
+                </FieldRow>
+              </Section>
+              {/* Coach has one dictionary so far (i18n/index.ts serves it to every locale), so
+                  this says so rather than offering a picker that changes nothing. */}
+              <Section title={t("coachSettings.language")}>
+                <FieldRow label={t("coachSettings.language")} desc={t("coachSettings.languageBody")}>
+                  <span className="text-[12.5px] font-semibold">English</span>
+                </FieldRow>
+              </Section>
+            </>
+          )}
+
+          {active === "line" && <LineLookSettings />}
+
+          {/* The same panel the in-game tab shows, reading and writing the same hud.ini and
+              voice.ini; the line's own parts are under In-game line. */}
+          {active === "hud" && (
+            <>
+              <Section title={t("hud.title")}>
+                <HudPanel bare exclude={LINE_PARTS} />
+              </Section>
+              <Section title={t("coachSettings.spoken")}>
+                <SpokenCues />
+              </Section>
+            </>
+          )}
+
+          {active === "recording" && (
+            <>
+              <Section title={t("recorder.title")}>
+                <div>
+                  <div className="text-[13px] font-semibold">
+                    {status?.pluginInstalled ? t("recorder.on") : t("recorder.off")}
+                  </div>
+                  <p className="mt-1 text-[12.5px] text-muted-foreground">{t("recorder.body")}</p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    size="sm"
+                    disabled={busy || !status?.gameDir}
+                    onClick={() => run(() => installRecorder(), t("recorder.installed"))}
+                  >
+                    {status?.pluginInstalled ? t("recorder.update") : t("recorder.install")}
+                  </Button>
+                  <Button size="sm" variant="outline" disabled={busy || !status?.gameDir} onClick={() => void fromFile()}>
+                    {t("recorder.fromFile")}
+                  </Button>
+                  {status?.pluginInstalled && (
+                    <Button size="sm" variant="outline" disabled={busy} onClick={() => run(removeRecorder, t("recorder.removed"))}>
+                      {t("recorder.remove")}
+                    </Button>
+                  )}
+                  {status?.recorderVersion && (
+                    <span className="self-center font-mono text-[12px] text-muted-foreground">
+                      {t("recorder.version", { version: status.recorderVersion })}
+                    </span>
+                  )}
+                </div>
+                {status && !status.recorderVersion && (
+                  <p className="text-[12px] text-muted-foreground">{t("recorder.versionUnknown")}</p>
+                )}
+                {status?.recorderOutdated && <p className="text-[12px] text-warning">{t("recorder.updateIt")}</p>}
+                <Rule />
+                <div>
+                  <div className="text-[12.5px] font-semibold">{t("recorder.gameFolder")}</div>
+                  <p className="mt-0.5 font-mono text-[12px] text-muted-foreground">
+                    {status?.gameDir || t("recorder.gameFolderNone")}
+                  </p>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    <Button size="sm" variant="outline" disabled={busy} onClick={() => void pickGame()}>
+                      {t("recorder.gameFolderPick")}
+                    </Button>
+                  </div>
+                  {status && !status.gameDir && <p className="mt-2 text-[12px] text-warning">{t("recorder.noGame")}</p>}
+                </div>
+              </Section>
+
+              <Section title={t("coachSettings.where")}>
+                <Row label={t("coachSettings.game")} value={game.display} />
+                <Row
+                  label={t("coachSettings.gameFolder")}
+                  value={status?.gameDir ?? ""}
+                  onOpen={() => void show(openFolder(status?.gameDir ?? ""))}
+                />
+                <Row
+                  label={t("coachSettings.plugin")}
+                  value={plugin}
+                  onOpen={() => void show(status?.pluginInstalled ? revealInExplorer(plugin) : openFolder(folderOf(plugin)))}
+                />
+                {(status?.sessionDirs.length ? status.sessionDirs : [""]).map((dir, k) => (
+                  <Row key={dir || k} label={t("coachSettings.sessions")} value={dir} onOpen={() => void show(openFolder(dir))} />
+                ))}
+              </Section>
+            </>
+          )}
+
+          {active === "keybinds" && (
+            <Section title={t("overlay.section")}>
+              <Overlay />
+            </Section>
+          )}
+
+          {active === "about" && (
+            <>
+              <Section title={t("coachSettings.updates")}>
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <div className="text-[12.5px] text-foreground/85">{t("coachSettings.beta")}</div>
+                    <p className="mt-0.5 text-[11.5px] text-muted-foreground">{t("coachSettings.betaBody")}</p>
+                  </div>
+                  <Switch
+                    checked={beta}
+                    onCheckedChange={(on) => {
+                      setBetaUpdates(on);
+                      setBeta(on);
+                    }}
+                  />
+                </div>
+                <div className="flex items-center gap-3">
+                  <Button size="sm" variant="outline" onClick={() => void update.check({ silent: false })}>
+                    {t("coachSettings.check")}
+                  </Button>
+                  {version && <span className="font-mono text-[12px] text-muted-foreground">v{version}</span>}
+                </div>
+              </Section>
+              {/* The same rows MXB App and the Studio show; each carries its own label. */}
+              <div className="rounded-xl bg-card p-[18px]">
+                <SurveySetting />
+              </div>
+              <div className="rounded-xl bg-card p-[18px]">
+                <UninstallSetting />
+              </div>
+            </>
+          )}
+        </div>
       </div>
-    </Page>
+    </div>
   );
 }

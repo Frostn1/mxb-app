@@ -8,7 +8,7 @@ import Rail, { RailButton, type RailEntry } from "@frost/shared/Components/Shell
 import TitleBar from "@frost/shared/Components/Shell/TitleBar";
 import { I18nProvider, setAmbientVars, useT } from "@/i18n";
 import Sessions from "./Components/Sessions/Sessions";
-import Settings from "./Components/Settings/Settings";
+import Settings, { type SectionId } from "./Components/Settings/Settings";
 import UpdateBanner from "./Components/UpdateBanner";
 import CueKeeper from "./CueKeeper";
 import { track } from "@/lib/analytics";
@@ -39,6 +39,7 @@ function Shell() {
   const [config, setConfig] = useState<Config>({ modsPath: "" });
   const [games, setGames] = useState<GameInfo[]>([MXB_FALLBACK]);
   const [view, setView] = useState<View>("sessions");
+  const [settingsAt, setSettingsAt] = useState<SectionId>("general");
   // Which page is open. Derived and counted by an effect rather than inside the rail's handler,
   // for the reason the manager does the same: plenty of things move the view without going
   // through it. `view.settings` is deliberately the manager's name — it is the same page.
@@ -90,14 +91,27 @@ function Shell() {
               <RailButton
                 label={t("nav.settings")}
                 on={view === "settings"}
-                onClick={() => setView("settings")}
+                onClick={() => {
+                  setSettingsAt("general");
+                  setView("settings");
+                }}
               />
             }
           />
           <main className="flex min-w-0 flex-1 flex-col">
             <UpdateBanner />
             <div className="min-h-0 flex-1">
-              {view === "settings" ? <Settings /> : <Sessions onSettings={() => setView("settings")} />}
+              {view === "settings" ? (
+                <Settings key={settingsAt} initialSection={settingsAt} />
+              ) : (
+                <Sessions
+                  onSettings={() => {
+                    // Only ever asked for when the recorder is missing, so it opens there.
+                    setSettingsAt("recording");
+                    setView("settings");
+                  }}
+                />
+              )}
             </div>
           </main>
         </div>
