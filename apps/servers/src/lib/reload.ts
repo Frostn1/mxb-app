@@ -3,19 +3,6 @@
  *  (`/v1/config/validate` with the candidate) wins whenever it is available. */
 export type ReloadClass = "hot" | "next_session" | "next_event" | "restart";
 
-/** `[ghost]` keys that only change how the existing bots ride: a rebuild picks them up. */
-const GHOST_RIDING = new Set([
-  "ghost.speed_jitter_pct",
-  "ghost.lateral_m",
-  "ghost.skill_pct",
-  "ghost.racing",
-  "ghost.race_starts",
-  "ghost.laps",
-  "ghost.synth",
-  "ghost.synth_lift_m",
-  "ghost.library_min_laps",
-]);
-
 /** Keys whose change is applied to the queue or the bootstraps now and loaded by the next event
  *  (a track change): the rotation, the bike set, event options and the ruts. */
 const NEXT_EVENT = new Set([
@@ -36,24 +23,28 @@ const HOT = new Set([
   "server.name",
   "server.password",
   "server.max_clients",
+  "server.observe",
   "events.collisions",
   "ghost.react",
+  "ghost.fill_to",
   "world.suppress_client_relay",
 ]);
 
-/** The class of one `section.key`. `admission.allowed_bikes` is hot only while it stays
- *  within the bikes the server advertised at startup; only the server knows that, so this
- *  says "hot" and the server's answer corrects it. */
+/** The class of one `section.key`. The server's own answer corrects this where it knows better
+ *  (a server without live rotation, or one running in relay mode). */
 export function reloadClass(key: string): ReloadClass {
   const under = (section: string) => key.startsWith(`${section}.`);
-  if (HOT.has(key) || under("admission") || under("master")) return "hot";
+  if (HOT.has(key) || under("admission") || under("master") || under("admin") || under("recording")) return "hot";
   if (NEXT_EVENT.has(key) || under("bike_set") || under("bike_sets") || under("event") || under("event_probe")) return "next_event";
-  if (key === "native.track_bounds") return "restart";
+  if (key === "native.track_bounds") return "next_session";
   if (under("native")) return "hot";
   if (key === "sessions.race_extra_laps") return "next_session";
   if (under("sessions")) return "next_event";
   if (under("penalties") || under("cuts")) return "next_session";
-  if (GHOST_RIDING.has(key) || under("ghost.personality")) return "next_session";
+  // The bots (how many, who, what they ride), and the exporters, change when no race is under way.
+  if (under("ghost") || key === "track.roster") return "next_session";
+  if (under("results") || under("points") || under("championship") || under("rating") || under("paints")) return "next_session";
+  // The game port every rider is connected to, and development tools bound to the track's grid.
   return "restart";
 }
 
