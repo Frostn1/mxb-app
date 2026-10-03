@@ -183,7 +183,7 @@ export type FieldKind =
 export interface ConfigField {
   section: string;
   key: string;
-  /** "ghosts" | "race" | "events" | "advanced" */
+  /** "ghosts" | "race" | "track" | "events" | "cuts" | "penalties" | "advanced" */
   group: string;
   /** Under "More settings" in its group. */
   advanced: boolean;

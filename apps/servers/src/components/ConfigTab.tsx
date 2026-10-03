@@ -27,6 +27,7 @@ import { Button, ErrorLine, Notice, Toggle } from "./ui";
 const GROUPS = [
   { id: "ghosts", title: "Bots" },
   { id: "race", title: "Race format" },
+  { id: "track", title: "Track" },
   { id: "events", title: "Event logging" },
   { id: "cuts", title: "Cuts" },
   { id: "penalties", title: "Penalties" },
