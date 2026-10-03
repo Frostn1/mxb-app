@@ -17,6 +17,7 @@ import {
   type TextStyle,
 } from "@/api/coach";
 import { FieldRow, Rule, Section, ToggleRow } from "./parts";
+import TextItemsSettings from "./TextItems";
 
 /** How long a colour picker is left still before what it picked is written: dragging across
  *  the picker would otherwise write `hud.ini` dozens of times a second. */
@@ -302,6 +303,8 @@ export default function LineLookSettings() {
               </FieldRow>
             </div>
           </Section>
+
+          <TextItemsSettings />
         </>
       )}
     </>

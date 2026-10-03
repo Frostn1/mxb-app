@@ -38,6 +38,9 @@ pub(crate) const LOOK_NEEDS: &str = "0.46.1";
 /// The first recorder that fades the line out near the rider (`line_fade`), steadies the jump marks
 /// and draws the pace and gear hints without being asked.
 pub(crate) const FADE_NEEDS: &str = "0.48";
+/// The first recorder that gives each text item (jump call, MORE SPEED, gear badge, cue box) its own
+/// style, size and place (FrostMod 0.49.0, `<item>_style` and friends in hud.ini).
+pub(crate) const ITEMS_NEED: &str = "0.49";
 
 /// The HUD parts, in the order the overlay lists them: key, label, whether the plugin draws it
 /// when the file doesn't say, and the recorder it needs.
@@ -475,6 +478,205 @@ pub fn coach_set_line_look(app: AppHandle, look: LineLook) -> Result<LineLookSta
     Ok(look_state(&dir))
 }
 
+// ---------------------------------------------------------------------------------------
+// Text items: a style, size and place for each word the plugin draws (FrostMod 0.49.0)
+
+/// One text item the plugin draws: the jump call, MORE SPEED, the gear badge and the cue box.
+/// `[hud]` keys are `<id>_style`, `<id>_size`, `<id>_x`, `<id>_y`, `<id>_anchor` and, for the
+/// jump call, `jump_place`; the on/off key is `on_key`. The defaults are where the plugin draws
+/// each one with none of them set, so a file without them is the look it has always had.
+struct ItemDef {
+    id: &'static str,
+    label: &'static str,
+    on_key: &'static str,
+    /// Where it sits with no position written, as screen fractions: x by `anchor`, y its top.
+    x: f32,
+    y: f32,
+    anchor: &'static str,
+    /// Its size follows the line's text size (`text_size`) until it has one of its own.
+    follows_text_size: bool,
+}
+
+const TEXT_ITEMS: [ItemDef; 4] = [
+    // On the line at the lip by default; the position is for "fixed on screen".
+    ItemDef { id: "jump", label: "Jump call", on_key: "jump_text", x: 0.5, y: 0.45, anchor: "center", follows_text_size: true },
+    // Under the gap row (FrostMod `kRowDefaultX`, `kRowDefaultY` + `kRowH` + 0.006).
+    ItemDef { id: "pace", label: "MORE SPEED", on_key: "pace_text", x: 0.5, y: 0.396, anchor: "center", follows_text_size: true },
+    // Beside the cue box (`kCueBox`.x1 + 0.008), left edge.
+    ItemDef { id: "gear", label: "Gear badge", on_key: "gear_badge", x: 0.658, y: 0.285, anchor: "left", follows_text_size: false },
+    // The cue box: `cue_x` / `cue_y` are always its place, the middle and the top by default.
+    ItemDef { id: "cue", label: "Live cue", on_key: "cue", x: 0.5, y: 0.285, anchor: "center", follows_text_size: false },
+];
+
+/// What the plugin can draw an item in: its own look (the game's font on the HUD, the line's text
+/// style on the line) or the block font, as it is, fatter or leaning.
+const ITEM_STYLES: [&str; 4] = ["default", "block", "bold", "italic"];
+const ITEM_ANCHORS: [&str; 3] = ["left", "center", "right"];
+const ITEM_SIZE_RANGE: (f32, f32) = (0.5, 3.0);
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TextItemState {
+    pub id: &'static str,
+    pub label: &'static str,
+    pub on: bool,
+    pub style: String,
+    /// Times the item's own size; None until the rider sets one, which is today's size.
+    pub size: Option<f32>,
+    /// Screen fractions, 0..1: `x` by `anchor`, `y` the top of the text. The default place until
+    /// `placed`.
+    pub x: f32,
+    pub y: f32,
+    /// x and y are written: the item is fixed there rather than where it always sat.
+    pub placed: bool,
+    pub anchor: String,
+    pub default_x: f32,
+    pub default_y: f32,
+    pub default_anchor: &'static str,
+    /// The jump call only: `line` (over the lip) or `screen` (fixed at x, y).
+    pub place: Option<String>,
+    /// Its size is the line's text size until it has its own.
+    pub follows_text_size: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TextItems {
+    pub items: Vec<TextItemState>,
+    /// The line's own text size (`text_size`), what jump and MORE SPEED are drawn at with no size of their own.
+    pub text_size: f32,
+    /// The recorder that last ran is older than FrostMod 0.49, which reads the items.
+    pub pre_items: bool,
+}
+
+#[derive(Clone, Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TextItemIn {
+    pub id: String,
+    pub on: bool,
+    pub style: String,
+    pub size: Option<f32>,
+    pub placed: bool,
+    pub x: f32,
+    pub y: f32,
+    pub anchor: String,
+    pub place: Option<String>,
+    /// Put every key of this item back to unset.
+    #[serde(default)]
+    pub reset: bool,
+}
+
+fn fraction(pairs: &[(String, String)], key: &str) -> Option<f32> {
+    ini::get(pairs, key).and_then(|v| v.trim().parse::<f32>().ok()).filter(|v| v.is_finite() && (0.0..=1.0).contains(v))
+}
+
+/// The items as the plugin will read them from `hud.ini`'s `[hud]` pairs.
+fn items_of(pairs: &[(String, String)]) -> Vec<TextItemState> {
+    TEXT_ITEMS
+        .iter()
+        .map(|d| {
+            let key = |s: &str| format!("{}_{s}", d.id);
+            let style = ini::get(pairs, &key("style")).map(|v| v.trim().to_ascii_lowercase()).unwrap_or_default();
+            let anchor = ini::get(pairs, &key("anchor")).map(|v| v.trim().to_ascii_lowercase()).unwrap_or_default();
+            let (x, y) = (fraction(pairs, &key("x")), fraction(pairs, &key("y")));
+            TextItemState {
+                id: d.id,
+                label: d.label,
+                on: ini::on(ini::get(pairs, d.on_key), true),
+                style: if ITEM_STYLES.contains(&style.as_str()) { style } else { "default".into() },
+                size: ini::get(pairs, &key("size"))
+                    .and_then(|v| v.trim().parse::<f32>().ok())
+                    .filter(|v| v.is_finite() && *v > 0.0)
+                    .map(|v| v.clamp(ITEM_SIZE_RANGE.0, ITEM_SIZE_RANGE.1)),
+                x: x.zip(y).map_or(d.x, |(x, _)| x),
+                y: x.zip(y).map_or(d.y, |(_, y)| y),
+                placed: x.is_some() && y.is_some(),
+                anchor: if ITEM_ANCHORS.contains(&anchor.as_str()) { anchor } else { d.anchor.into() },
+                default_x: d.x,
+                default_y: d.y,
+                default_anchor: d.anchor,
+                place: (d.id == "jump")
+                    .then(|| if ini::get(pairs, "jump_place").map(str::trim) == Some("screen") { "screen" } else { "line" }.into()),
+                follows_text_size: d.follows_text_size,
+            }
+        })
+        .collect()
+}
+
+fn items_state(dir: &Path) -> TextItems {
+    let pairs = ini::read_section(&fs::read_to_string(dir.join("hud.ini")).unwrap_or_default(), "hud");
+    TextItems {
+        items: items_of(&pairs),
+        text_size: look_of(&pairs).text_size,
+        pre_items: older_than(dir, ITEMS_NEED),
+    }
+}
+
+/// The keys one item is written as and the keys it is taken out as, from what the rider set. A
+/// value the plugin would call the default is left out, so "default" stays unset in the file.
+fn item_edit(i: &TextItemIn) -> Result<(Vec<(String, String)>, Vec<String>), String> {
+    let d = TEXT_ITEMS.iter().find(|d| d.id == i.id).ok_or_else(|| format!("\"{}\" isn't a text item.", i.id))?;
+    let key = |s: &str| format!("{}_{s}", d.id);
+    let mut all = vec![key("style"), key("size"), key("x"), key("y"), key("anchor")];
+    if d.id == "jump" {
+        all.push("jump_place".to_string());
+    }
+    if i.reset {
+        // The on key too: switched back on, which is what the plugin does with none.
+        let mut remove: Vec<String> = all;
+        remove.push(d.on_key.to_string());
+        return Ok((Vec::new(), remove));
+    }
+    let mut set = vec![(d.on_key.to_string(), if i.on { "1" } else { "0" }.to_string())];
+    let mut remove = Vec::new();
+    let style = i.style.trim().to_ascii_lowercase();
+    match style.as_str() {
+        "block" | "bold" | "italic" => set.push((key("style"), style)),
+        _ => remove.push(key("style")),
+    }
+    match i.size.filter(|v| v.is_finite()) {
+        Some(v) => set.push((key("size"), format!("{:.2}", v.clamp(ITEM_SIZE_RANGE.0, ITEM_SIZE_RANGE.1)))),
+        None => remove.push(key("size")),
+    }
+    if i.placed && i.x.is_finite() && i.y.is_finite() {
+        set.push((key("x"), format!("{:.3}", i.x.clamp(0.0, 1.0))));
+        set.push((key("y"), format!("{:.3}", i.y.clamp(0.0, 1.0))));
+    } else {
+        remove.push(key("x"));
+        remove.push(key("y"));
+    }
+    let anchor = i.anchor.trim().to_ascii_lowercase();
+    if ITEM_ANCHORS.contains(&anchor.as_str()) && anchor != d.anchor {
+        set.push((key("anchor"), anchor));
+    } else {
+        remove.push(key("anchor"));
+    }
+    if d.id == "jump" {
+        if i.place.as_deref() == Some("screen") {
+            set.push(("jump_place".into(), "screen".into()));
+        } else {
+            remove.push("jump_place".into());
+        }
+    }
+    Ok((set, remove))
+}
+
+#[tauri::command]
+pub fn coach_text_items(app: AppHandle) -> Result<TextItems, String> {
+    Ok(items_state(&coach_dir(&app)?))
+}
+
+/// Write one item. The recorder re-reads `hud.ini` about once a second, so it shows live.
+#[tauri::command]
+pub fn coach_set_text_item(app: AppHandle, item: TextItemIn) -> Result<TextItems, String> {
+    let dir = coach_dir(&app)?;
+    let (set, remove) = item_edit(&item)?;
+    let set: Vec<(&str, String)> = set.iter().map(|(k, v)| (k.as_str(), v.clone())).collect();
+    let remove: Vec<&str> = remove.iter().map(String::as_str).collect();
+    ini::write_edit(&dir.join("hud.ini"), "hud", &set, &remove)?;
+    Ok(items_state(&dir))
+}
+
 #[tauri::command]
 pub fn coach_voice(app: AppHandle) -> Result<Voice, String> {
     let (dir, _, pre) = where_and_what(&app)?;
@@ -503,6 +705,90 @@ mod tests {
 
     fn part<'a>(h: &'a Hud, key: &str) -> &'a HudPart {
         h.parts.iter().find(|p| p.key == key).unwrap()
+    }
+
+    fn pairs(text: &str) -> Vec<(String, String)> {
+        ini::read_section(text, "hud")
+    }
+
+    /// No keys: every item is where and as the plugin draws it with none, and nothing is "placed".
+    #[test]
+    fn no_text_item_keys_is_todays_look() {
+        let items = items_of(&[]);
+        assert_eq!(items.len(), 4);
+        for i in &items {
+            assert!(i.on && !i.placed && i.size.is_none() && i.style == "default", "{}", i.id);
+            assert_eq!((i.x, i.y, i.anchor.as_str()), (i.default_x, i.default_y, i.default_anchor));
+        }
+        assert_eq!(items[0].place.as_deref(), Some("line"), "the jump call is on the line");
+        assert!(items[1..].iter().all(|i| i.place.is_none()));
+    }
+
+    #[test]
+    fn text_items_read_what_the_plugin_reads() {
+        let p = pairs(&format!(
+            "[hud]{n}pace_x=0.4{n}pace_y=0.8{n}pace_style=Bold{n}pace_size=9{n}pace_anchor=left{n}pace_text=0{n}jump_place=screen{n}gear_x=0.5{n}cue_style=gothic{n}",
+            n = '\n'
+        ));
+        let items = items_of(&p);
+        let pace = &items[1];
+        assert!(!pace.on && pace.placed && (pace.x, pace.y) == (0.4, 0.8));
+        assert_eq!((pace.style.as_str(), pace.anchor.as_str(), pace.size), ("bold", "left", Some(3.0)));
+        assert_eq!(items[0].place.as_deref(), Some("screen"));
+        assert!(!items[2].placed, "half a position is no position, as in the plugin");
+        assert_eq!(items[3].style, "default", "a style the font can't draw is the default");
+    }
+
+    #[test]
+    fn editing_an_item_writes_only_what_differs_from_the_default() {
+        let item = |f: &dyn Fn(&mut TextItemIn)| {
+            let mut i = TextItemIn {
+                id: "pace".into(), on: true, style: "default".into(), size: None, placed: false, x: 0.5, y: 0.396,
+                anchor: "center".into(), place: None, reset: false,
+            };
+            f(&mut i);
+            item_edit(&i).unwrap()
+        };
+        let (set, remove) = item(&|_| {});
+        assert_eq!(set, vec![("pace_text".to_string(), "1".to_string())]);
+        assert!(remove.contains(&"pace_x".to_string()) && remove.contains(&"pace_style".to_string()));
+        let (set, _) = item(&|i| {
+            i.placed = true;
+            i.x = 1.7;
+            i.y = 0.8;
+            i.style = "Italic".into();
+            i.size = Some(1.5);
+            i.anchor = "right".into();
+        });
+        let get = |k: &str| set.iter().find(|(n, _)| n == k).map(|(_, v)| v.as_str());
+        assert_eq!((get("pace_x"), get("pace_y"), get("pace_style")), (Some("1.000"), Some("0.800"), Some("italic")));
+        assert_eq!((get("pace_size"), get("pace_anchor")), (Some("1.50"), Some("right")));
+        let (set, remove) = item(&|i| i.reset = true);
+        assert!(set.is_empty() && remove.contains(&"pace_text".to_string()) && remove.contains(&"pace_size".to_string()));
+        assert!(!remove.contains(&"jump_place".to_string()), "resetting one item leaves the jump call's place alone");
+        assert!(item_edit(&TextItemIn { id: "gothic".into(), on: true, style: String::new(), size: None, placed: false, x: 0.0, y: 0.0, anchor: String::new(), place: None, reset: false }).is_err());
+    }
+
+    /// Setting and resetting through the file leaves Coach's other keys and the rider's own alone.
+    #[test]
+    fn an_item_round_trips_through_the_file_and_resets_to_nothing() {
+        let file = "[hud]\nenabled=1\nline_width=1.50\n";
+        let i = TextItemIn {
+            id: "jump".into(), on: true, style: "bold".into(), size: Some(2.0), placed: true, x: 0.3, y: 0.6,
+            anchor: "left".into(), place: Some("screen".into()), reset: false,
+        };
+        let (set, remove) = item_edit(&i).unwrap();
+        let removes: Vec<&str> = remove.iter().map(String::as_str).collect();
+        let sets: Vec<(&str, String)> = set.iter().map(|(k, v)| (k.as_str(), v.clone())).collect();
+        let written = ini::set_keys(&ini::remove_keys(file, "hud", &removes), "hud", &sets);
+        let back = &items_of(&pairs(&written))[0];
+        assert_eq!((back.style.as_str(), back.size, back.placed, back.anchor.as_str()), ("bold", Some(2.0), true, "left"));
+        assert_eq!(back.place.as_deref(), Some("screen"));
+        let (set, remove) = item_edit(&TextItemIn { reset: true, ..i }).unwrap();
+        assert!(set.is_empty());
+        let removes: Vec<&str> = remove.iter().map(String::as_str).collect();
+        let reset = ini::remove_keys(&written, "hud", &removes);
+        assert_eq!(reset, file, "back to the file as it was: Coach's keys kept, the item's all gone");
     }
 
     #[test]
