@@ -1908,16 +1908,15 @@ fn is_usable_filename(name: &str) -> bool {
 pub(crate) fn extract_archive(archive: &Path, dest: &Path) -> anyhow::Result<()> {
     match detect_ext(archive)?.as_str() {
         "zip" => extract_zip_from(File::open(archive)?, dest, archive)?,
+        // Every entry name is checked before anything is written — see `archive_guard`.
+        // The sweep after it is a second line of defence, not the guard: it only looks
+        // inside `dest`, so it could never see a file written beside it.
         "7z" => {
-            sevenz_rust::decompress_file(archive, dest)
-                .map_err(|e| anyhow::anyhow!("7z extraction failed: {e}"))?;
-            // `sevenz-rust` joins entry names to the destination without filtering `..`,
-            // so a hostile `.7z` can write outside `dest`. `zip` filters internally and
-            // the native unrar side is unverified — sweep both rather than trust them.
+            crate::archive_guard::extract_7z(archive, dest)?;
             purge_escapees(archive, dest)?;
         }
         "rar" => {
-            extract_rar(archive, dest)?;
+            crate::archive_guard::extract_rar(archive, dest)?;
             purge_escapees(archive, dest)?;
         }
         "pkz" | "pnt" => {
@@ -1940,10 +1939,9 @@ pub(crate) fn extract_zip_from<R: Read + std::io::Seek>(
     dest: &Path,
     label: &Path,
 ) -> anyhow::Result<()> {
-    zip::ZipArchive::new(reader)?.extract(dest)?;
-    // `zip` filters `..` out of entry names, but a symlink entry is the escape a name filter
-    // can't see: the link lands inside `dest` and points anywhere, and the entries after it
-    // are written straight through it. Sweep it like the rest.
+    // Names are checked before anything is written and link entries are refused; the sweep
+    // stays as a second line of defence.
+    crate::archive_guard::extract_zip(reader, dest, label)?;
     purge_escapees(label, dest)
 }
 
@@ -2022,28 +2020,6 @@ fn purge_escapees(archive: &Path, dest: &Path) -> anyhow::Result<()> {
         archive.file_name().unwrap_or_default().to_string_lossy(),
         escaped.len()
     )
-}
-
-fn extract_rar(archive: &Path, dest: &Path) -> anyhow::Result<()> {
-    std::fs::create_dir_all(dest)?;
-    let mut open = unrar::Archive::new(archive)
-        .open_for_processing()
-        .map_err(|e| anyhow::anyhow!("failed to open RAR: {e}"))?;
-    while let Some(header) = open
-        .read_header()
-        .map_err(|e| anyhow::anyhow!("RAR read error: {e}"))?
-    {
-        open = if header.entry().is_file() {
-            header
-                .extract_with_base(dest)
-                .map_err(|e| anyhow::anyhow!("RAR extract error: {e}"))?
-        } else {
-            header
-                .skip()
-                .map_err(|e| anyhow::anyhow!("RAR skip error: {e}"))?
-        };
-    }
-    Ok(())
 }
 
 pub(crate) fn detect_ext(archive: &Path) -> anyhow::Result<String> {
@@ -3686,11 +3662,10 @@ mod tests {
         Ok(())
     }
 
-    /// `zip` filters `..` out of entry names itself, so a zip-slip archive should extract
-    /// harmlessly *inside* the staging directory rather than escaping it. This pins that
-    /// behaviour: if a future `zip` upgrade regressed it, the sweep still has to catch it.
+    /// A zip naming a path above the staging folder is refused whole, and nothing lands
+    /// outside it. The entry-level cases for every format live in `archive_guard`.
     #[test]
-    fn a_zip_that_climbs_out_stays_inside_the_staging_folder() -> anyhow::Result<()> {
+    fn a_zip_that_climbs_out_is_rejected() -> anyhow::Result<()> {
         let base = place_tmp("zipslip");
         let outside = base.join("outside");
         std::fs::create_dir_all(&outside)?;
@@ -3705,7 +3680,7 @@ mod tests {
 
         let dest = base.join("staged");
         std::fs::create_dir_all(&dest)?;
-        let _ = extract_archive(&archive, &dest);
+        assert!(extract_archive(&archive, &dest).is_err());
 
         assert!(
             !outside.join("pwned.txt").exists(),

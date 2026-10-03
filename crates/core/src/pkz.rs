@@ -1103,6 +1103,11 @@ pub(crate) fn entry_names_bytes(bytes: &[u8]) -> Result<Vec<String>> {
 
 /// Resolve entry name under `out_dir`, dropping `..`/absolute (zip-slip guard).
 pub(crate) fn safe_dest(out_dir: &Path, name: &str) -> Option<PathBuf> {
+    // A `:` is a drive prefix (`C:x` would replace `out_dir` when joined) or an alternate
+    // data stream; neither belongs in an entry name.
+    if name.contains(':') || name.contains('\0') {
+        return None;
+    }
     let safe: PathBuf = name
         .replace('\\', "/")
         .split('/')
@@ -1223,6 +1228,18 @@ fn write_pkz(mut files: Vec<(String, PathBuf)>, to: &Path) -> Result<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn safe_dest_keeps_entries_under_the_output_folder() {
+        let out = Path::new("out");
+        for bad in ["C:x.pnt", "C:\\x.pnt", "C:/x.pnt", "a/x.pnt:stream", "a/x\0.pnt", ".."] {
+            assert!(safe_dest(out, bad).is_none(), "{bad:?} must be refused");
+        }
+        assert_eq!(
+            safe_dest(out, "../a\\b.pnt"),
+            Some(out.join(PathBuf::from("a").join("b.pnt")))
+        );
+    }
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
 

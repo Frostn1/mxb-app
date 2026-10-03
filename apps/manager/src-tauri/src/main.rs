@@ -2,6 +2,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 pub(crate) use mxb_core::bikefiles;
+mod archive_guard;
 mod bikeswap;
 mod bundle;
 mod cancel;
