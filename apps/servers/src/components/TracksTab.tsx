@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { ArrowDown, ArrowUp, GripVertical, Plus, Search, Trash2, Upload } from "lucide-react";
-import { errorText, inspectTrackUpload, serverSetRotation, serverSetTrack, serverTracks, type ServerView, type TrackState } from "@/lib/api";
+import { errorText, inspectTrackUpload, serverRestartService, serverSession, serverSetRotation, serverSetTrack, serverTracks, type ServerView, type TrackState } from "@/lib/api";
+import { describeRotationSave, playNextQueue, randomTrack } from "@/lib/rotation";
 import { byteSize } from "@/lib/format";
 import { initUploads, onUploadSettled, startTrackUpload, useUploads } from "@/lib/uploads";
 import { Button, Card, ErrorLine, Notice } from "./ui";
+import { ReloadBadge } from "./ConfigTab";
 import { UploadRow } from "./UploadsIndicator";
 
 const trackCache = new Map<string, TrackState>();
@@ -36,7 +38,7 @@ export function TracksTab({ server }: { server: ServerView }) {
     void initUploads();
     return onUploadSettled((u) => {
       if (u.serverId !== server.id || u.status !== "done") return;
-      setDone(`${u.fileName} installed.`);
+      setDone(`${u.fileName} installed. Add it to the rotation; no restart needed.`);
       void load();
     });
   }, [server.id, load]);
@@ -54,10 +56,22 @@ export function TracksTab({ server }: { server: ServerView }) {
     if (to < 0 || to >= queue.length || from === to) return;
     setQueue((old) => { const next = [...old]; const [item] = next.splice(from, 1); next.splice(to, 0, item); return next; });
   };
+  /** A server too old to change tracks while it runs keeps the saved order for a restart: say so,
+   *  and restart only when the user agrees (riders are disconnected). */
+  const restartForRotation = async (message: string) => {
+    if (!window.confirm(`${message}\n\nRestart ${server.name} now? Connected riders will be disconnected.`)) { setDone(message); return; }
+    setBusy("Restarting…");
+    await serverRestartService(server.id);
+    setDone("Restarted with the new rotation.");
+  };
   const save = async () => {
-    if (!queue.length || !window.confirm(`Save this track order? ${server.name} will restart.`)) return;
+    if (!queue.length) return;
     setBusy("Saving rotation…"); setError(null); setDone(null);
-    try { await serverSetRotation(server.id, queue); setDone("Track rotation saved."); await load(); }
+    try {
+      const said = describeRotationSave(await serverSetRotation(server.id, queue));
+      if (said.needsRestart) await restartForRotation(said.message); else setDone(said.message);
+      await load();
+    }
     catch (e) { setError(errorText(e)); } finally { setBusy(null); }
   };
   const upload = async () => {
@@ -80,16 +94,16 @@ It will be stored as ${check.uploadName} (${size}). It may be a full client trac
   };
   const switchTrack = async (mode: "next" | "random") => {
     if (!state?.current || state.rotation.length === 0) return;
-    const selected = mode === "next"
-      ? state.rotation[0]
-      : state.rotation[Math.floor(Math.random() * state.rotation.length)];
-    const nextQueue = [selected, ...state.rotation.filter((track) => track !== selected), state.current];
+    const selected = mode === "next" ? state.rotation[0] : randomTrack(state.rotation);
+    if (!selected) return;
+    const nextQueue = playNextQueue(state.current, state.rotation, selected);
     const label = mode === "next" ? `Play ${selected} next?` : `Switch to the randomly selected track ${selected}?`;
-    if (!window.confirm(`${label} ${server.name} will restart and connected riders will be disconnected.`)) return;
+    if (!window.confirm(`${label} The event ends now and riders reload the new track. ${server.name} does not restart.`)) return;
     setBusy(mode === "next" ? "Loading next track…" : "Loading random track…"); setError(null); setDone(null);
     try {
-      await serverSetRotation(server.id, nextQueue);
-      setDone(`${selected} is now playing.`);
+      const said = describeRotationSave(await serverSetRotation(server.id, nextQueue));
+      if (said.needsRestart) await restartForRotation(said.message);
+      else { await serverSession(server.id, "rotate"); setDone(`${selected} is now playing.`); }
       await load();
     } catch (e) { setError(errorText(e)); } finally { setBusy(null); }
   };
@@ -138,7 +152,7 @@ It will be stored as ${check.uploadName} (${size}). It may be a full client trac
         </Card>
 
         <Card className="flex min-h-[26rem] flex-col gap-4">
-          <div className="flex flex-wrap items-center justify-between gap-3"><div><h3 className="font-heading text-lg font-extrabold">Track rotation</h3><p className="text-xs text-muted-foreground">Drag to reorder.</p></div><div className="flex flex-wrap justify-end gap-2"><Button size="sm" disabled={!!busy || changed || !state?.rotation.length} title={changed ? "Save or reset your rotation changes first" : undefined} onClick={() => void switchTrack("next")}>Next track</Button><Button size="sm" disabled={!!busy || changed || !state?.rotation.length} title={changed ? "Save or reset your rotation changes first" : undefined} onClick={() => void switchTrack("random")}>Random track</Button><Button size="sm" disabled={!changed || !!busy} onClick={() => setQueue(savedQueue)}>Reset</Button><Button size="sm" variant="primary" disabled={!changed || !queue.length || !!busy} onClick={() => void save()}>Save rotation</Button></div></div>
+          <div className="flex flex-wrap items-center justify-between gap-3"><div><h3 className="font-heading text-lg font-extrabold">Track rotation</h3><p className="text-xs text-muted-foreground">Drag to reorder. Changes save without a restart<ReloadBadge kind="next_event" /></p></div><div className="flex flex-wrap justify-end gap-2"><Button size="sm" disabled={!!busy || changed || !state?.rotation.length} title={changed ? "Save or reset your rotation changes first" : undefined} onClick={() => void switchTrack("next")}>Next track</Button><Button size="sm" disabled={!!busy || changed || !state?.rotation.length} title={changed ? "Save or reset your rotation changes first" : undefined} onClick={() => void switchTrack("random")}>Random track</Button><Button size="sm" disabled={!changed || !!busy} onClick={() => setQueue(savedQueue)}>Reset</Button><Button size="sm" variant="primary" disabled={!changed || !queue.length || !!busy} onClick={() => void save()}>Save rotation</Button></div></div>
           <div
             className="-mx-4 -mb-4 min-h-0 flex-1 overflow-auto border-t p-8"
             style={{ backgroundImage: "radial-gradient(circle, color-mix(in srgb, var(--muted-foreground) 25%, transparent) 1px, transparent 1px)", backgroundSize: "20px 20px" }}
