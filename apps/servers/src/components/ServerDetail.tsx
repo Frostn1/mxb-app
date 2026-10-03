@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { RefreshCw } from "lucide-react";
-import { configLoad, errorText, isLegacyStatus, legacyProcess, serverLogs, serverRestartService, serverRiders, serverSession, serverStatus, type ServerView } from "@/lib/api";
+import { configLoad, errorText, isLegacyStatus, legacyProcess, presence, serverLogs, serverRestartService, serverRiders, serverSession, serverStatus, type ServerView } from "@/lib/api";
 import { duration, lapTime, sessionName } from "@/lib/format";
 import { usePoll } from "@/lib/usePoll";
 import { useEventFeed } from "@/lib/useEventFeed";
@@ -148,7 +148,8 @@ function StatusTab({
             <div className="grid grid-cols-3 gap-5">
               <Stat label="Stage" value={sessionName(native.session)} />
               <Stat label="Time left" value={native.session_remaining_seconds == null ? "—" : duration(native.session_remaining_seconds)} />
-              <Stat label="Riders" value={native.active_sessions} />
+              <Stat label="Riders" value={presence(native).riders} />
+              {presence(native).bots > 0 && <Stat label="Bots" value={presence(native).bots} />}
             </div>
           </Card>
           <Card className="flex flex-col gap-4">

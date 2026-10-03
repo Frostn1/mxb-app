@@ -31,6 +31,9 @@ export interface NativeStatus {
   ready: boolean;
   uptime_seconds: number;
   active_sessions: number;
+  /** People connected, and bots on track. Newer servers only (mxbserver #221); older ones send neither. */
+  humans?: number;
+  bots?: number;
   client_datagrams_total: number;
   server_datagrams_total: number;
   session: string;
@@ -45,6 +48,17 @@ export interface LegacyStatus {
 }
 
 export type Status = NativeStatus | LegacyStatus;
+
+/** People and bots on a native server. Servers that predate `humans`/`bots` fall back to
+ *  `active_sessions` and no bots. */
+export const presence = (s: NativeStatus): { riders: number; bots: number } => ({
+  riders: s.humans ?? s.active_sessions,
+  bots: s.bots ?? 0,
+});
+
+/** "0 riders · 6 bots"; the bots part is left out when there are none. */
+export const presenceLabel = ({ riders, bots }: { riders: number; bots: number }) =>
+  `${riders} ${riders === 1 ? "rider" : "riders"}${bots > 0 ? ` · ${bots} ${bots === 1 ? "bot" : "bots"}` : ""}`;
 export const isLegacyStatus = (status: Status): status is LegacyStatus => "kind" in status && status.kind === "stock";
 
 export type ServerState = "online" | "starting" | "offline" | "unreachable";
