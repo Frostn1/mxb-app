@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Rider } from "./api";
 import {
+  dedupePenalties,
   diffRiders,
   diffTiming,
   filterEvents,
@@ -59,6 +60,24 @@ describe("parseLogLine", () => {
       const e = parseLogLine(`event cut: #1 "A" · T · route 1.0 m · 2.00 m outside for 1.00 s · skipped 30.0 m to 40.0 m · zone "Z" · ${outcome}`);
       expect(e?.fields["Outcome"]).toBe(outcome.charAt(0).toUpperCase() + outcome.slice(1));
     }
+  });
+
+  it("keeps one row for a penalty seen in both the log and /timing", () => {
+    const ev = (id: string, source: "log" | "timing", at: number, fields: ServerEvent["fields"]): ServerEvent => ({ id, at, source, kind: "penalty", summary: id, riders: ["Rider"], fields });
+    const log = ev("log", "log", 1000, { "Added (s)": 10, Zone: "Z" });
+    // Timing first, log second: the log row replaces it.
+    let r = dedupePenalties([], [ev("t", "timing", 0, { "Added (s)": 10 })]);
+    r = dedupePenalties(r.buffer, [log]);
+    expect([...r.fresh, ...r.buffer].map((e) => e.id)).toEqual(["log"]);
+    // Log first, timing second: the timing one is dropped.
+    const dropped = dedupePenalties([log], [ev("t", "timing", 3000, { "Added (s)": 10 })]);
+    expect(dropped.fresh).toEqual([]);
+    // Different amount, other rider, or too late: kept.
+    expect(dedupePenalties([log], [ev("t", "timing", 3000, { "Added (s)": 5 })]).fresh).toHaveLength(1);
+    expect(dedupePenalties([log], [{ ...ev("t", "timing", 3000, { "Added (s)": 10 }), riders: ["Other"] }]).fresh).toHaveLength(1);
+    expect(dedupePenalties([log], [ev("t", "timing", 20_000, { "Added (s)": 10 })]).fresh).toHaveLength(1);
+    // Disqualifications match too.
+    expect(dedupePenalties([ev("l", "log", 0, { Disqualified: true })], [ev("t", "timing", 1000, { Disqualified: true })]).fresh).toEqual([]);
   });
 
   it("reads penalty lines: cut time, disqualification and jump start", () => {
