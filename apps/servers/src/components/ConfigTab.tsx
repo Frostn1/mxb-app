@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ChevronDown, ChevronRight, RotateCcw } from "lucide-react";
 import {
   configApply,
@@ -24,6 +24,7 @@ import {
 import { zonesFrom } from "@/lib/cuts";
 import type { ReloadChange } from "@/lib/reload";
 import { BADGES, changesTracks, classesFor, reloadClass, waitsForTrackLoad, type ReloadClass } from "@/lib/reload";
+import { completeToken, fieldMatches, parseQuery, tokenHints } from "@/lib/settingsFilter";
 import { CutZones } from "./CutZones";
 import { Button, ErrorLine, Notice, Toggle } from "./ui";
 
@@ -106,16 +107,23 @@ export function ConfigTab({ server }: { server: ServerView }) {
     return out;
   }, [values, state]);
   const changed = Object.keys(changes).length;
-  const matches = useCallback((f: ConfigField) => {
-    const q = query.trim().toLowerCase();
-    return !q || `${f.label} ${f.help}`.toLowerCase().includes(q);
-  }, [query]);
+  const parsed = useMemo(() => parseQuery(query), [query]);
+  const matches = useCallback((f: ConfigField) => fieldMatches(f, parsed), [parsed]);
+  const searching = parsed.tokens.length + parsed.words.length > 0;
+  const hints = tokenHints(query);
+  const total = state ? state.fields.filter(matches).length : 0;
+  const navRef = useRef<HTMLElement | null>(null);
+
+  // Keep the selected group in view in the (scrolling) category list.
+  useEffect(() => {
+    navRef.current?.querySelector('[aria-current="page"]')?.scrollIntoView({ block: "nearest" });
+  }, [activeGroup, state]);
 
   useEffect(() => {
-    if (!state || !query || state.fields.some((f) => f.group === activeGroup && matches(f))) return;
+    if (!state || !searching || state.fields.some((f) => f.group === activeGroup && matches(f))) return;
     const first = GROUPS.find((g) => state.fields.some((f) => f.group === g.id && matches(f)));
     if (first) setActiveGroup(first.id);
-  }, [activeGroup, matches, query, state]);
+  }, [activeGroup, matches, searching, state]);
 
   const review = async () => {
     if (!state) return;
@@ -251,10 +259,25 @@ export function ConfigTab({ server }: { server: ServerView }) {
 
       {step.kind === "edit" && (
         <>
-          <div className="grid min-h-0 flex-1 gap-6 md:grid-cols-[13rem_minmax(0,1fr)]">
+          <div className="grid min-h-0 flex-1 gap-6 md:grid-cols-[13rem_minmax(0,1fr)] md:grid-rows-[minmax(0,1fr)]">
             <div className="flex min-h-0 flex-col gap-3">
-              <input className="h-9 rounded-md border border-input bg-card px-3 text-sm outline-none focus:border-ring" placeholder="Search settings" value={query} onChange={(e) => setQuery(e.target.value)} />
-              <nav className="flex gap-1 overflow-x-auto md:flex-col md:overflow-visible" aria-label="Settings categories">
+              <div className="relative shrink-0">
+                <input className="h-9 w-full rounded-md border border-input bg-card px-3 text-sm outline-none focus:border-ring" placeholder="Search, or type : for filters" aria-label="Search settings" value={query} onChange={(e) => setQuery(e.target.value)} />
+                {hints.length > 0 && (
+                  <ul className="absolute left-0 right-0 top-10 z-10 rounded-md border bg-card p-1 shadow-md">
+                    {hints.map((t) => (
+                      <li key={t.token}>
+                        <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => setQuery(completeToken(query, t.token))} className="flex w-full flex-col rounded px-2 py-1 text-left text-xs hover:bg-accent">
+                          <span className="font-mono font-medium">{t.token}</span>
+                          <span className="text-muted-foreground">{t.hint}</span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+              {searching && <p className="shrink-0 text-xs text-muted-foreground">{total} setting{total === 1 ? "" : "s"}</p>}
+              <nav ref={navRef} className="flex min-h-0 gap-1 overflow-x-auto md:flex-1 md:flex-col md:overflow-x-hidden md:overflow-y-auto" aria-label="Settings categories">
               {GROUPS.map((g) => {
                 const changedHere = state.fields.filter((f) => f.group === g.id && `${f.section}.${f.key}` in changes).length + (g.id === "cuts" && "cuts.zones" in changes ? 1 : 0);
                 const found = state.fields.filter((f) => f.group === g.id && matches(f)).length;
@@ -270,7 +293,7 @@ export function ConfigTab({ server }: { server: ServerView }) {
                   >
                     <span>{g.title}</span>
                     <span className="flex items-center gap-1.5">
-                      {query && <span className="text-xs text-muted-foreground">{found}</span>}
+                      {searching && <span className="text-xs text-muted-foreground">{found}</span>}
                       {changedHere > 0 && <span className="rounded-full bg-primary px-1.5 text-xs text-primary-foreground">{changedHere}</span>}
                     </span>
                   </button>
@@ -278,7 +301,8 @@ export function ConfigTab({ server }: { server: ServerView }) {
               })}
               </nav>
             </div>
-            {GROUPS.filter((g) => g.id === activeGroup).map((g) => {
+            <div className="flex min-h-0 flex-col gap-6 overflow-y-auto">
+            {GROUPS.filter((g) => (searching ? state.fields.some((f) => f.group === g.id && matches(f)) : g.id === activeGroup)).map((g) => {
               const fields = state.fields.filter((f) => f.group === g.id && matches(f));
               return (
                 <Group key={g.id} title={g.title}>
@@ -296,6 +320,8 @@ export function ConfigTab({ server }: { server: ServerView }) {
               </Group>
               );
             })}
+            {searching && total === 0 && <p className="py-4 text-sm text-muted-foreground">No matching settings.</p>}
+            </div>
           </div>
           <div className="flex shrink-0 items-center justify-end gap-3 border-t bg-background py-3">
             {busy && <span className="mr-auto text-sm text-muted-foreground">{busy}</span>}
@@ -384,7 +410,7 @@ export function ConfigTab({ server }: { server: ServerView }) {
 
 function Group({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <section className="min-h-0 overflow-y-auto pr-6">
+    <section className="shrink-0 pr-6">
       <h3 className="font-heading text-lg font-extrabold tracking-tight">{title}</h3>
       <div className="mt-3 flex flex-col">{children}</div>
     </section>
