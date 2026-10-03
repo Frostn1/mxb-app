@@ -49,6 +49,7 @@ mod modwatch;
 mod mxb_fetch;
 mod mxb_session;
 mod overlay;
+mod profilecheck;
 mod profilewatch;
 pub(crate) use mxb_core::paint;
 pub(crate) use mxb_core::paintwatch;
@@ -134,6 +135,7 @@ use serverwatch::CachedServers;
 // that does it wants the same treatment — so this sits here rather than in one function.
 use mods::mxb::WpModsSource;
 use mods::{ModDetail, ModRating, ModSort, ModSource, ModSummary};
+use profilecheck::ProfileCheckState;
 use profilewatch::ProfileWatcher;
 use tauri::{
     menu::{Menu, MenuItem},
@@ -1488,6 +1490,14 @@ fn set_seen_version(app: tauri::AppHandle, version: String) -> Result<(), String
     config::save(&app, &cfg).map_err(|e| format!("{e:#}"))
 }
 
+/// The profile problem found at the last check, for a window that opened after it ran.
+#[tauri::command]
+fn profile_problem(
+    state: tauri::State<'_, ProfileCheckState>,
+) -> Option<profilecheck::ProfileProblem> {
+    state.0.lock().unwrap().clone()
+}
+
 /// Override the PiBoSo `profiles` folder for the split-folder edge case. An empty
 /// string clears the override, falling back to `<mods_path>/profiles`.
 #[tauri::command]
@@ -1497,9 +1507,10 @@ fn set_profiles_path(app: tauri::AppHandle, path: String) -> Result<(), String> 
     config::save(&app, &cfg).map_err(|e| format!("{e:#}"))?;
     // Both watchers are pinned to a folder that just moved; re-point them, and publish in
     // case the new folder's look differs from what the old one last sent.
+    let profiles = app.state::<ProfileWatcher>();
+    profilewatch::start(&app, &profiles, &cfg.profiles_dir(), watches_looks(&cfg));
+    profilecheck::refresh(&app, &cfg.profiles_dir());
     if watches_looks(&cfg) {
-        let profiles = app.state::<ProfileWatcher>();
-        profilewatch::start(&app, &profiles, &cfg.profiles_dir());
         watch_worn_paints(&app);
         publish_paints_soon(&app, &cfg, None);
     }
@@ -8279,6 +8290,7 @@ fn main() {
         .manage(FrostmodProcess::default())
         .manage(ModWatcher::default())
         .manage(ProfileWatcher::default())
+        .manage(ProfileCheckState::default())
         .manage(PaintWatcher::default())
         .manage(LookWatcher::default())
         .manage(SourceWatcher::default())
@@ -8543,10 +8555,10 @@ fn main() {
                 // what keeps the look watcher pointed at the right files, which has nothing
                 // to do with sync.
                 publish_paints_soon(handle, &cfg, None);
-                if watches_looks(&cfg) {
-                    let profiles = handle.state::<ProfileWatcher>();
-                    profilewatch::start(handle, &profiles, &cfg.profiles_dir());
-                }
+                // Always started: it also watches `global.ini` for a profile the game can't load.
+                let profiles = handle.state::<ProfileWatcher>();
+                profilewatch::start(handle, &profiles, &cfg.profiles_dir(), watches_looks(&cfg));
+                profilecheck::refresh(handle, &cfg.profiles_dir());
                 // And watch the paints the rider is wearing, so saving one over the top
                 // while the game runs reaches the game.
                 watch_worn_paints(handle);
@@ -8800,6 +8812,7 @@ fn main() {
             mxbmrp3::mxbmrp3_status,
             mxbmrp3::set_mxbmrp3_dismissed,
             set_profiles_path,
+            profile_problem,
             detect_game_path,
             count_profiles_in,
             get_mods_root,

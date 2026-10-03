@@ -2980,6 +2980,30 @@ export function onVoiceStatus(cb: (status: VoiceStatus) => void): Promise<Unlist
   return listen<VoiceStatus>("voice-status", (e) => cb(e.payload));
 }
 
+/** MX Bikes is set to load a profile it can't: its name can't be a Windows folder name, or
+ *  the folder isn't there. Either way the game quietly starts a blank profile. */
+export interface ProfileProblem {
+  kind: "illegalName" | "missingFolder";
+  /** `lastprofile` from the game's global.ini, as written. */
+  profile: string;
+  /** Forbidden characters in the name (illegalName only). */
+  badChars: string[];
+  /** Real profile folders to pick instead; empty when there are too many to list. */
+  existing: string[];
+}
+
+/** The problem found at the last check, for a window that opened after it ran. */
+export function getProfileProblem(): Promise<ProfileProblem | null> {
+  return invoke<ProfileProblem | null>("profile_problem");
+}
+
+/** Fires when the check re-runs and the answer changed; `null` means it's fixed. */
+export function onProfileProblem(
+  cb: (problem: ProfileProblem | null) => void,
+): Promise<UnlistenFn> {
+  return listen<ProfileProblem | null>("profile-problem", (e) => cb(e.payload));
+}
+
 /**
  * Fires at the start of each game session when the mods tree is on a cloud sync tool —
  * either with bytes actually evicted, or merely sitting behind the sync driver.
