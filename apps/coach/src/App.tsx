@@ -18,16 +18,18 @@ import SurveyPrompt from "@frost/shared/Components/Survey/SurveyPrompt";
 
 type View = "sessions" | "settings";
 
-/** The product name, with a smaller "by mxbsecure" under it. Grabs the window. */
+/** "MXB Coach by mxbsecure" on one line, the wordmark MXB App uses. Grabs the window. */
 function Brand() {
   return (
-    <div data-tauri-drag-region className="select-none px-2.5 pt-0.5">
-      <div data-tauri-drag-region className="headline text-[22px]">
-        Coach
-      </div>
-      <div data-tauri-drag-region className="mt-0.5 text-[11px] text-muted-foreground">
-        by mxbsecure
-      </div>
+    <div data-tauri-drag-region className="select-none whitespace-nowrap px-2.5 pt-0.5">
+      <span data-tauri-drag-region className="flex items-baseline gap-2 font-cond">
+        <span data-tauri-drag-region className="text-sm font-extrabold tracking-[-0.04em] text-foreground">
+          MXB Coach
+        </span>
+        <span data-tauri-drag-region className="text-[11px] font-medium text-faint">
+          by <span className="font-semibold text-muted-foreground">mxbsecure</span>
+        </span>
+      </span>
     </div>
   );
 }
@@ -83,6 +85,7 @@ function Shell() {
             active={view}
             onPick={setView}
             header={<Brand />}
+            className="w-[212px]"
             footer={
               <RailButton
                 label={t("nav.settings")}
