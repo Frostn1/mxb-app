@@ -41,6 +41,8 @@ export interface SavedCardProps {
   installingAt: Set<string>;
   favourite: (address: string) => boolean;
   paintSync: Record<string, number>;
+  /** Accepted friends on each server, by address. */
+  friends: Record<string, number>;
   joining: string | null;
   queue: { address: string; position: number } | null;
   onOpen: (s: MasterServer) => void;
@@ -139,6 +141,7 @@ const SavedServers = ({
               onActivateJoin={cards.onActivateJoin}
               favourite={cards.favourite(s.address)}
               paintSync={cards.paintSync[s.address] ?? 0}
+              friends={cards.friends[s.address] ?? 0}
               joining={cards.joining === s.address}
               busy={cards.joining !== null}
               queuePosition={cards.queue?.address === s.address ? cards.queue.position : null}

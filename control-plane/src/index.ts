@@ -49,6 +49,7 @@ import { eraseAccount } from "./erasure";
 import { stateRegions } from "./stateinvariants";
 import { listPlugins, myPlugins, pluginBundle, redeemKey } from "./plugins";
 import { deleteShare, publishShare, readShare, updateShare } from "./liveshare";
+import { handleFriends, pruneFriendPresence } from "./friends";
 import { leaveQueue, pruneQueue, putQueue, queueCounts } from "./serverqueue";
 import { generateTrack } from "./trackgen";
 import { getTracks, resolveTrackCatalog, trackArt } from "./trackcatalog";
@@ -150,6 +151,7 @@ export default {
         pruneCrashes(env),
         pruneLockAttempts(env),
         pruneQueue(env),
+        pruneFriendPresence(env),
         pruneLivePaints(env),
         resolveTrackCatalog(env),
       ]).then(
@@ -555,6 +557,12 @@ async function route(request: Request, env: Env): Promise<Response> {
   if (method === "PUT" && path === "/v1/queue") return putQueue(request, account.id, env);
   if (method === "DELETE" && path === "/v1/queue") return leaveQueue(account.id, env);
   if (method === "GET" && path === "/v1/queue/counts") return queueCounts(url, env);
+
+  // Friends and where they are riding (`friends.ts`). Open to every account, like presence:
+  // the riders who want it are not the invited few. Rate limited per account inside.
+  if (path === "/v1/friends" || path.startsWith("/v1/friends/")) {
+    return handleFriends(request, url, account, env);
+  }
 
   // View-only and locked paints (`paintpolicy.ts`): the owner's own settings for their paints.
   if (method === "GET" && path === "/v1/paints/policies") {

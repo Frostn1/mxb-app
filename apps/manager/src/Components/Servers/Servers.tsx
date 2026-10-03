@@ -80,6 +80,10 @@ import ServerRow from "./ServerRow";
 import ConnectionCheck from "./ConnectionCheck";
 import RegisterServerDialog from "./RegisterServerDialog";
 import SavedServers, { type SavedRow } from "./SavedServers";
+import FriendsPanel from "./FriendsPanel";
+import { joinAction } from "./joinAction";
+import { useFriends } from "@/lib/useFriends";
+import { friendsByAddress } from "@/lib/friends";
 import SavedServerDialog, { savedServerError } from "./SavedServerDialog";
 
 /** A saved server that didn't answer: its address, the player's name for it, and Join left on.
@@ -214,6 +218,7 @@ const Servers = ({ link }: ServersProps) => {
   const [query, setQuery] = useState("");
   const [joining, setJoining] = useState<string | null>(null);
   const queue = useServerQueue();
+  const friendsFeed = useFriends();
   const [joinOpen, setJoinOpen] = useState(false);
   // The address a shared link named, held until the dialog has it. Opening the dialog is
   // as far as a link goes — the game is started by the button, not by the URL.
@@ -887,6 +892,49 @@ const Servers = ({ link }: ServersProps) => {
     [installing],
   );
 
+  /** The same decision a server tile makes, so a friend on a track the player lacks is offered
+   *  the install rather than a join the game would fail. Anything that needs the player to
+   *  choose (buy, nothing to install, already queued) opens the server's pane instead. */
+  const friendJoinKind = useCallback(
+    (s: MasterServer) =>
+      joinAction({
+        missing: !!s.track && library[s.track] === null,
+        inactive: inactive[s.track],
+        product: catalog[s.track],
+        installing: installingAt.has(s.address),
+        queued: queue?.address === s.address,
+        joinable: s.joinable,
+        full: isFull(s),
+      }),
+    [library, inactive, catalog, installingAt, queue],
+  );
+  const joinFriend = useCallback(
+    (s: MasterServer) => {
+      const action = friendJoinKind(s);
+      switch (action.kind) {
+        case "join":
+          void join(s);
+          break;
+        case "wait":
+          void wait(s);
+          break;
+        case "install":
+          installAndJoin(s, action.product);
+          break;
+        case "activate":
+          void activateAndJoin(s, action.rel);
+          break;
+        default:
+          pick(s);
+      }
+    },
+    [friendJoinKind, join, wait, installAndJoin, activateAndJoin, pick],
+  );
+  const friendsHere = useMemo(() => {
+    const by = friendsByAddress(friendsFeed.state?.friends ?? [], known ?? []);
+    return Object.fromEntries(Object.entries(by).map(([address, list]) => [address, list.length]));
+  }, [friendsFeed.state, known]);
+
   const copy = useCallback(
     (address: string) => {
       navigator.clipboard
@@ -1160,6 +1208,22 @@ const Servers = ({ link }: ServersProps) => {
         />
       )}
 
+      {friendsFeed.state && (
+        <FriendsPanel
+          state={friendsFeed.state}
+          servers={known ?? []}
+          actionFor={(ref) => {
+            const s = (known ?? []).find((x) => x.address === ref.address);
+            return s ? friendJoinKind(s).kind : "missing";
+          }}
+          onJoin={(ref) => {
+            const s = (known ?? []).find((x) => x.address === ref.address);
+            if (s) joinFriend(s);
+          }}
+          onChanged={() => void friendsFeed.refresh()}
+        />
+      )}
+
       <SavedServers
         rows={savedRows}
         cards={{
@@ -1169,6 +1233,7 @@ const Servers = ({ link }: ServersProps) => {
           installingAt,
           favourite: favs.has,
           paintSync,
+          friends: friendsHere,
           joining,
           queue,
           onOpen: pick,
@@ -1230,6 +1295,7 @@ const Servers = ({ link }: ServersProps) => {
                 onActivateJoin={activateAndJoin}
                 favourite={favs.has(s.address)}
                 paintSync={paintSync[s.address] ?? 0}
+                friends={friendsHere[s.address] ?? 0}
                 joining={joining === s.address}
                 busy={joining !== null}
                 queuePosition={queue?.address === s.address ? queue.position : null}
@@ -1266,6 +1332,7 @@ const Servers = ({ link }: ServersProps) => {
                     selected={s.address === selected}
                     favourite={favs.has(s.address)}
                     paintSync={paintSync[s.address] ?? 0}
+                    friends={friendsHere[s.address] ?? 0}
                     queuePosition={queue?.address === s.address ? queue.position : null}
                     onSelect={pick}
                     onToggleFavourite={favs.toggle}

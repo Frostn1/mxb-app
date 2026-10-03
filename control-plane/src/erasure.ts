@@ -75,6 +75,8 @@ const PERSONAL: readonly string[] = [
   "loadout_paints",
   "loadouts",
   "presence",
+  "friend_presence",
+  "friend_profiles",
   "server_queue",
   "steam_logins",
   "steam_links",
@@ -120,6 +122,14 @@ export async function eraseAccount(account: Account, env: Env): Promise<Response
     env.DB.prepare(`DELETE FROM ${table} WHERE account_id = ?`).bind(account.id),
   );
 
+  // Friendships name the account on one side or the other, so they are not keyed on `account_id`.
+  statements.push(
+    env.DB.prepare("DELETE FROM friendships WHERE requester_id = ? OR addressee_id = ?").bind(
+      account.id,
+      account.id,
+    ),
+  );
+
   // A registered server is somebody else's joinable address, not a fact about its owner. The
   // ownership link is the personal part, so that is what goes.
   statements.push(
@@ -158,7 +168,7 @@ export async function eraseAccount(account: Account, env: Env): Promise<Response
     why: "purchases are keyed by Steam id and are what keep bought content working",
   });
 
-  const erasure: Erasure = { cleared: [...PERSONAL, "accounts (cleared in place)"], kept, erasedAt: now };
+  const erasure: Erasure = { cleared: [...PERSONAL, "friendships", "accounts (cleared in place)"], kept, erasedAt: now };
   console.log(JSON.stringify({ msg: "account erased", account: account.id, banned: Boolean(ban) }));
   return json(200, erasure);
 }

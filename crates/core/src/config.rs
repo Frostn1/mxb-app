@@ -113,6 +113,9 @@ pub struct AppConfig {
     /// When a queued turn comes and the game is already open, close it and launch into the
     /// server. Off by default: it ends whatever the rider is doing in the game.
     pub queue_restart_game: bool,
+    /// Tell accepted friends which server this rider is on. On by default for anyone with an
+    /// account; off sends nothing and clears what was sent.
+    pub friends_presence: bool,
     /// Extra command-line flags for `frostmod.exe`, exactly as they would be typed. Empty
     /// for everyone who hasn't been asked for one: these are FrostMod's diagnostics, and
     /// they carry their own warnings (`--force-overjump-off` is offline-only). Appended
@@ -468,6 +471,7 @@ impl Default for AppConfig {
             launch_at_startup_rev: LAUNCH_AT_STARTUP_REV,
             auto_run_frostmod: true,
             queue_restart_game: false,
+            friends_presence: true,
             frostmod_args: String::new(),
             instant_refresh: true,
             watch_mods_reload: true,

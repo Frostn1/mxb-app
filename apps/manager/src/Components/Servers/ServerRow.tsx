@@ -1,5 +1,5 @@
 import { memo } from "react";
-import { Lock, Users, Wifi, Palette, Star, Mountain, Hourglass } from "lucide-react";
+import { Lock, Users, Wifi, Palette, Star, Mountain, Hourglass, UserCheck } from "lucide-react";
 import type { CatalogTrack, MasterServer } from "@frost/shared/api/mods";
 import { cn } from "@frost/shared/lib/utils";
 import { useT } from "@/i18n";
@@ -27,6 +27,8 @@ interface Props {
   favourite: boolean;
   /** Riders on this server running paint sync. */
   paintSync: number;
+  /** Accepted friends currently on this server. */
+  friends?: number;
   /** The player's place, when they're in line for this server. */
   queuePosition: number | null;
   onSelect: (s: MasterServer) => void;
@@ -49,6 +51,7 @@ const ServerRow = memo(function ServerRow({
   selected,
   favourite,
   paintSync,
+  friends = 0,
   queuePosition,
   onSelect,
   onToggleFavourite,
@@ -134,6 +137,15 @@ const ServerRow = memo(function ServerRow({
               took the width the server name needed — and its second row was a ping this
               platform never measures, so most rows spent it on an em dash. */}
           <span className="ml-auto flex shrink-0 items-center gap-2.5 font-cond text-[11.5px] font-semibold tabular-nums">
+            {friends > 0 && (
+              <span
+                className="flex items-center gap-0.5 text-primary"
+                title={t("friends.badge", { count: friends })}
+              >
+                <UserCheck className="size-3" />
+                {friends}
+              </span>
+            )}
             {paintSync > 0 && (
               <span
                 className="flex items-center gap-0.5 text-success"
