@@ -147,7 +147,7 @@ export const serverSetRotation = (id: string, tracks: string[], restart = false)
 export const serverUpdateGithub = (id: string) =>
   invoke<Record<string, unknown>>("server_update_github", { id });
 
-export const serverSession = (id: string, action: "jump" | "advance" | "restart" | "rotate", to?: "practice" | "qualifying" | "warmup" | "race") =>
+export const serverSession = (id: string, action: "jump" | "advance" | "restart" | "rotate" | "reload" | "reset_ruts", to?: "practice" | "qualifying" | "warmup" | "race") =>
   invoke<Record<string, unknown>>("server_session", { id, action, to });
 
 export const serverUpload = (id: string, kind: "track" | "version", path: string, version?: string) =>
@@ -235,6 +235,19 @@ export const configLoad = (id: string, fresh = false): Promise<ConfigState> => {
 export const configPreview = (base: string, changes: Record<string, FieldValue>) =>
   invoke<{ text: string; diff: string }>("config_preview", { base, changes });
 
+/** The quick check: the running server's own dry run over the open admin tunnel (about a
+ *  round trip). `checked: false` when it cannot answer, so the caller falls back to
+ *  `configValidate`. */
+export interface ConfigCheck {
+  checked: boolean;
+  ok?: boolean;
+  /** Why the server refused the file (when `ok` is false). */
+  output?: string;
+  classify?: { changes?: ReloadChange[]; restart_required?: string[] } | null;
+}
+export const configCheck = (id: string, text: string) => invoke<ConfigCheck>("config_check", { id, text });
+
+/** The slow check: runs the server binary once on the host over SSH, which loads every track. */
 export const configValidate = (id: string, text: string) =>
   invoke<{ ok: boolean; output: string }>("config_validate", { id, text });
 

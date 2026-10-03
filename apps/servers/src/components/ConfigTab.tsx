@@ -3,6 +3,7 @@ import { ChevronDown, ChevronRight, RotateCcw } from "lucide-react";
 import {
   configApply,
   configApplyLive,
+  configCheck,
   configClassify,
   configLoad,
   configPreview,
@@ -11,15 +12,18 @@ import {
   peekConfig,
   serverRestartService,
   serverRiders,
+  serverSession,
   type ApplyResult,
   type ConfigField,
+  type ConfigCheck,
   type ConfigState,
   type FieldValue,
   type LiveApplyResult,
   type ServerView,
 } from "@/lib/api";
 import { zonesFrom } from "@/lib/cuts";
-import { BADGES, classesFor, reloadClass, type ReloadClass } from "@/lib/reload";
+import type { ReloadChange } from "@/lib/reload";
+import { BADGES, changesTracks, classesFor, reloadClass, waitsForTrackLoad, type ReloadClass } from "@/lib/reload";
 import { CutZones } from "./CutZones";
 import { Button, ErrorLine, Notice, Toggle } from "./ui";
 
@@ -70,10 +74,12 @@ export function ConfigTab({ server }: { server: ServerView }) {
   const [error, setError] = useState<string | null>(null);
   const [activeGroup, setActiveGroup] = useState<(typeof GROUPS)[number]["id"]>("event");
   const [query, setQuery] = useState("");
+  const [reloaded, setReloaded] = useState(false);
 
   const load = useCallback(async () => {
     if (!peekConfig(server.id)) setBusy("Reading settings…");
     setError(null);
+    setReloaded(false);
     try {
       const s = await configLoad(server.id);
       setState(s);
@@ -110,16 +116,35 @@ export function ConfigTab({ server }: { server: ServerView }) {
 
   const review = async () => {
     if (!state) return;
-    setBusy("Checking the new settings with the server itself…");
+    setBusy("Checking the new settings with the running server…");
     setError(null);
     try {
       const preview = await configPreview(state.text, changes);
       const keys = Object.keys(changes);
-      setStep({ kind: "review", text: preview.text, diff: preview.diff, check: null, classes: classesFor(keys, null) });
+      const show = (check: { ok: boolean; output: string } | null, told: { changes?: ReloadChange[] } | null) =>
+        setStep({ kind: "review", text: preview.text, diff: preview.diff, check, classes: classesFor(keys, told?.changes ?? null) });
+      show(null, null);
+      // The quick check: the running server's own dry run (it parses the file, range-checks every
+      // value and classifies each change) over the admin tunnel that is already open, so there is
+      // no new SSH connection and it answers in about a round trip.
+      const quick = await configCheck(server.id, preview.text).catch((): ConfigCheck => ({ checked: false }));
+      if (quick.checked) {
+        const told = quick.classify ?? null;
+        show({ ok: !!quick.ok, output: quick.output ?? "" }, told);
+        // Only a change to which tracks play is worth the slow check, which loads them.
+        if (!quick.ok || !changesTracks(keys)) return;
+        setBusy("The settings are accepted. Loading the changed tracks on the server to check them too (a few seconds per track)…");
+        show({ ok: true, output: "" }, told);
+        const slow = await configValidate(server.id, preview.text);
+        show(slow, told);
+        return;
+      }
+      // A server that cannot answer a dry run (no token, an older version): run the server
+      // binary once over SSH, as before.
+      setBusy("The server can't check a draft itself, so it is being run once over SSH (up to a minute)…");
       const check = await configValidate(server.id, preview.text);
-      // The running server's own classification; an older server can't say, so ours stands.
       const told = await configClassify(server.id, preview.text).catch(() => null);
-      setStep({ kind: "review", text: preview.text, diff: preview.diff, check, classes: classesFor(keys, told?.changes ?? null) });
+      show(check, told);
     } catch (e) {
       setError(errorText(e));
     } finally {
@@ -160,6 +185,24 @@ export function ConfigTab({ server }: { server: ServerView }) {
     const riders = await serverRiders(server.id).then((r) => r.length).catch(() => null);
     const who = riders === null ? "anyone riding" : riders === 0 ? "nobody (no riders on now)" : `${riders} rider${riders === 1 ? "" : "s"}`;
     return window.confirm(`Restart ${server.name}? This disconnects ${who}.`);
+  };
+
+  /** "Apply now" for what waits for the next track load: restart the event on the same track. */
+  const reloadEventNow = async () => {
+    const riders = await serverRiders(server.id).then((r) => r.length).catch(() => null);
+    const who = riders === null ? "Any riders on" : riders === 0 ? "No riders are on, so nobody is affected." : `${riders} rider${riders === 1 ? "" : "s"} on the server`;
+    const consequence = riders === 0 ? who : `${who} will go back to the pits.`;
+    if (!window.confirm(`Reload the current event on ${server.name}? It restarts on the same track from practice. ${consequence}`)) return;
+    setBusy("Reloading the event…");
+    setError(null);
+    try {
+      await serverSession(server.id, "reload");
+      setReloaded(true);
+    } catch (e) {
+      setError(errorText(e));
+    } finally {
+      setBusy(null);
+    }
   };
 
   const restartNow = async () => {
@@ -231,6 +274,7 @@ export function ConfigTab({ server }: { server: ServerView }) {
                 <Group key={g.id} title={g.title}>
                 {fields.length === 0 && <p className="py-4 text-sm text-muted-foreground">No matching settings.</p>}
                 <FieldList fields={fields.filter((f) => !f.advanced)} values={values} changes={changes} onChange={setValue} />
+                {g.id === "deformation" && <RutsReset server={server} />}
                 {g.id === "cuts" && (
                   <CutZones server={server} zones={zonesFrom(values["cuts.zones"])} onChange={(zones) => setValues({ ...values, "cuts.zones": zones })} />
                 )}
@@ -292,6 +336,8 @@ export function ConfigTab({ server }: { server: ServerView }) {
           result={step.result}
           busy={!!busy}
           onRestart={() => void restartNow()}
+          onApplyNow={() => void reloadEventNow()}
+          reloaded={reloaded}
           onApplyWithRestart={() => void applyWithRestart(step.text)}
           onBack={() => void load()}
         />
@@ -614,7 +660,39 @@ const BADGE_STYLE = {
   warn: { color: "var(--destructive)", background: "color-mix(in srgb, var(--destructive) 12%, transparent)" },
 } as const;
 
-/** "applies now", "next session" or "needs restart". */
+/** Puts the ground back to the track's start layout now, for every rider on, a few blocks at a
+ *  time (the same way live ruts are sent): nobody is disconnected. */
+function RutsReset({ server }: { server: ServerView }) {
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const reset = async () => {
+    if (!window.confirm(`Reset the track ruts on ${server.name}? The ground goes back to its start layout for everyone riding, a few blocks at a time. Nobody is disconnected.`)) return;
+    setBusy(true);
+    setError(null);
+    setMessage(null);
+    try {
+      await serverSession(server.id, "reset_ruts");
+      setMessage("The ruts are being reset. Riders see the ground return to its start layout over the next moments.");
+    } catch (e) {
+      setError(errorText(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="flex flex-wrap items-center gap-3 border-b py-4">
+      <Button disabled={busy} onClick={() => void reset()} title="Clears the ruts riders and bots have dug, without a restart">
+        Reset track ruts now
+      </Button>
+      <span className="text-sm text-muted-foreground">Clears the ruts dug so far on the running track. Nobody is disconnected.</span>
+      {message && <span className="w-full text-sm text-success">{message}</span>}
+      {error && <ErrorLine text={error} />}
+    </div>
+  );
+}
+
+/** "Applies now", "Next session", "Next track load" or "Needs restart", with a tooltip. */
 export function ReloadBadge({ kind }: { kind: ReloadClass }) {
   const badge = BADGES[kind];
   return (
@@ -654,18 +732,26 @@ function LiveResult({
   result,
   busy,
   onRestart,
+  onApplyNow,
+  reloaded,
   onApplyWithRestart,
   onBack,
 }: {
   result: LiveApplyResult;
   busy: boolean;
   onRestart: () => void;
+  /** Reload the current event so what waits for the next track load takes effect. */
+  onApplyNow: () => void;
+  reloaded: boolean;
   onApplyWithRestart: () => void;
   onBack: () => void;
 }) {
   const reload = result.reload ?? {};
   const applied = reload.applied ?? [];
   const deferred = reload.deferred ?? [];
+  const deferredClasses = classesFor(deferred, reload.changes ?? null);
+  const nextSession = deferred.filter((k) => deferredClasses[k] !== "next_event");
+  const nextLoad = deferred.filter((k) => deferredClasses[k] === "next_event");
   const restart = reload.restart_required ?? [];
   const ok = result.result === "applied";
   // A server from before hot reload answers without `deferred` and only reloads a few
@@ -707,7 +793,18 @@ function LiveResult({
       {ok && !old && (
         <div className="flex flex-col gap-3 rounded-xl border bg-card p-4">
           {list("Applied now", applied, "hot")}
-          {list("Applies at the next session", deferred, "next_session")}
+          {list("Applies at the next session", nextSession, "next_session")}
+          {list("Applies at the next track load", nextLoad, "next_event")}
+          {waitsForTrackLoad(Object.values(deferredClasses)) && (
+            <div className="flex flex-wrap items-center gap-3">
+              <Button disabled={busy || reloaded} onClick={onApplyNow} title="Restarts the event on the same track. Riders go back to the pits.">
+                {reloaded ? "Event reloaded" : "Apply now"}
+              </Button>
+              <span className="text-xs text-muted-foreground">
+                {reloaded ? "The event restarted on the same track with these settings." : "Reloads the current event on the same track. Riders go back to the pits."}
+              </span>
+            </div>
+          )}
           {list("Needs a restart to take effect", restart, "restart")}
           {!applied.length && !deferred.length && !restart.length && <p className="text-sm text-muted-foreground">Nothing the server uses changed.</p>}
         </div>

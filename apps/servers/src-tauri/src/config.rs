@@ -486,8 +486,18 @@ pub const FIELDS: &[Field] = &[
         "Deformation",
         Kind::Choice { options: &["off", "low", "medium", "high", "maximum"] },
     )
-    .help("How much the ground ruts: the ruts a track starts with, and how deep and how fast riders and bots dig more. Changed mid-race, it applies at the next session. The first time it is set, the server needs one restart.")
+    .help("How much the ground ruts: the ruts a track starts with, and how deep and how fast riders and bots dig more. A new level applies when the session ends or is restarted. The first time it is set, the server needs one restart.")
     .default_is("off (the server's own ruts settings)")
+    .done(),
+    F::new(
+        "world",
+        "ruts_persist",
+        "deformation",
+        "Keep ruts",
+        Kind::Choice { options: &["event", "session", "never"] },
+    )
+    .help("When the ruts dug so far go back to the track's start layout. Session: when a session is restarted and at each new event. Event: only at a new event. Never: also kept when the same track's event restarts.")
+    .default_is("session")
     .done(),
     F::new("event", "deformation_scale", "deformation", "Deformation scale", float(0.0, 10.0))
         .stock("deformation.scale")
@@ -1209,6 +1219,16 @@ late_join_register = false
             assert!(apply(FILE, &changes(&[("world.deformation", json!(level))])).is_ok());
         }
         assert!(apply(FILE, &changes(&[("world.deformation", json!("heavy"))])).is_err());
+    }
+
+    #[test]
+    fn ruts_persist_is_one_of_the_servers_modes() {
+        let out = apply(FILE, &changes(&[("world.ruts_persist", json!("never"))])).unwrap();
+        assert!(out.contains("ruts_persist = \"never\""));
+        for mode in ["event", "session"] {
+            assert!(apply(FILE, &changes(&[("world.ruts_persist", json!(mode))])).is_ok());
+        }
+        assert!(apply(FILE, &changes(&[("world.ruts_persist", json!("daily"))])).is_err());
     }
 
     #[test]

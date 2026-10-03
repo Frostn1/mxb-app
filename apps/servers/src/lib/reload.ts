@@ -37,6 +37,10 @@ export function reloadClass(key: string): ReloadClass {
   if (HOT.has(key) || under("admission") || under("master") || under("admin") || under("recording")) return "hot";
   if (NEXT_EVENT.has(key) || under("bike_set") || under("bike_sets") || under("event") || under("event_probe")) return "next_event";
   if (key === "native.track_bounds") return "next_session";
+  // The ground is rebuilt at the new level when the session ends or is restarted; the first
+  // time the key is added the server says "needs restart" itself (its answer wins).
+  if (key === "world.deformation") return "next_session";
+  if (key === "world.ruts_persist") return "hot";
   if (under("native")) return "hot";
   if (key === "sessions.race_extra_laps") return "next_session";
   if (under("sessions")) return "next_event";
@@ -48,20 +52,35 @@ export function reloadClass(key: string): ReloadClass {
   return "restart";
 }
 
+/** The words an operator sees for each class (the wire names stay the server's own). */
 export const BADGES: Record<ReloadClass, { label: string; title: string; tone: "ok" | "info" | "warn" }> = {
-  hot: { label: "applies now", title: "The running server picks this up at once; nobody is disconnected.", tone: "ok" },
+  hot: { label: "Applies now", title: "The running server picks this up at once; nobody is disconnected.", tone: "ok" },
   next_session: {
-    label: "next session",
-    title: "Applies at once when no race is running, otherwise when the current race ends. Nobody is disconnected.",
+    label: "Next session",
+    title: "Applies when the current session ends or is restarted (at once when no race is running). Nobody is disconnected.",
     tone: "info",
   },
   next_event: {
-    label: "next event",
-    title: "Applies from the next event, when the track changes: session lengths, the track rotation, the bike set. The running event is untouched and nobody is disconnected.",
+    label: "Next track load",
+    title: "Applies when the server loads the next event or track in the rotation: session lengths, the track rotation, the bike set, the starting ruts. The running event is untouched and nobody is disconnected. \"Apply now\" reloads the current event on the same track (riders go back to the pits).",
     tone: "info",
   },
-  restart: { label: "needs restart", title: "Only takes effect after the server restarts, which disconnects riders.", tone: "warn" },
+  restart: { label: "Needs restart", title: "Only takes effect after the server restarts, which disconnects riders.", tone: "warn" },
 };
+
+/** The badge words for a class: what the settings page and the review step print. */
+export const badgeLabel = (kind: ReloadClass): string => BADGES[kind].label;
+
+/** Whether any of these classes waits for the next track load, so "Apply now" (reload the
+ *  current event) makes it take effect. */
+export const waitsForTrackLoad = (classes: Iterable<ReloadClass>): boolean => {
+  for (const kind of classes) if (kind === "next_event") return true;
+  return false;
+};
+
+/** Whether a change touches which tracks the server plays: only then is the server's slow
+ *  check (it loads the tracks) worth running on top of its quick dry run. */
+export const changesTracks = (keys: string[]): boolean => keys.some((key) => key === "track.package" || key.startsWith("rotation."));
 
 /** One changed key as the server reports it (`changes[]` of reload/validate). */
 export interface ReloadChange {

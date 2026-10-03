@@ -6,7 +6,7 @@ describe("rotation save", () => {
   it("is applied live at the next event, with no restart", () => {
     const said = describeRotationSave({ live: true, restartRequired: false });
     expect(said.needsRestart).toBe(false);
-    expect(said.message).toContain("next event");
+    expect(said.message).toContain("next track load");
     expect(said.message).toContain("nobody is disconnected");
   });
 
@@ -22,7 +22,7 @@ describe("rotation keys", () => {
     for (const key of ["track.package", "rotation.tracks", "bike_set.manifest", "bike_sets.manifests", "event.weather", "world.ruts", "world.live_ruts"]) {
       expect(reloadClass(key)).toBe("next_event");
     }
-    expect(BADGES.next_event.label).toBe("next event");
+    expect(BADGES.next_event.label).toBe("Next track load");
     expect(reloadClass("admission.allowed_bikes")).toBe("hot");
     expect(reloadClass("world.probe")).toBe("restart");
   });

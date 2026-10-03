@@ -8,7 +8,7 @@ export function describeRotationSave(result: Pick<RotationResult, "live" | "rest
       needsRestart: true,
     };
   }
-  return { message: "Rotation saved. It applies at the next event; nobody is disconnected.", needsRestart: false };
+  return { message: "Rotation saved. It applies at the next track load; nobody is disconnected.", needsRestart: false };
 }
 
 /** The order that makes `selected` the track after the running one: it first, the others as
