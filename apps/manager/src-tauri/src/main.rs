@@ -40,6 +40,7 @@ pub(crate) use mxb_core::library;
 mod liveshare;
 pub(crate) use mxb_core::linkwalk;
 mod logs;
+mod masterfeed;
 mod masterstatus;
 mod memwatch;
 pub(crate) use mxb_core::modelswap;

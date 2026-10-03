@@ -18,7 +18,8 @@
 //! - **While MX Bikes is running the master is never asked.** `worldnet::list_servers`
 //!   already rebuilds the list by asking each remembered server about itself, because the
 //!   Steam account the master login spends is the one the game is holding. A beat during a
-//!   session is a handful of `GETINFO` datagrams and no account.
+//!   session is a handful of `GETINFO` datagrams and no account. What the *game* received
+//!   from the master reaches the book through [`masterfeed`], so new servers are still found.
 //! - **Nothing sweeps while nobody is there.** Leaving Online, minimising, or parking the main
 //!   window pauses discovery. Returning to Online wakes it immediately instead of inheriting an
 //!   idle sleep.
@@ -36,7 +37,7 @@ use tauri::{AppHandle, Emitter};
 use tokio::sync::Notify;
 
 use crate::masterstatus::{self, MasterOutcome};
-use crate::{roster, serverbook, WorldServer};
+use crate::{masterfeed, roster, serverbook, WorldServer};
 
 /// How often the background sweep runs. Rider counts and sessions are what move between two of
 /// these, and a couple of minutes is about how long a row stays true on a busy evening.
@@ -250,6 +251,11 @@ pub async fn sweep(app: AppHandle) -> Result<CachedServers, String> {
         return Ok(list);
     }
 
+    // What the game's own browser has received from the master goes into the book first: while
+    // MX Bikes runs the list is rebuilt from the book alone, so this is how a server that
+    // appeared since the last sweep gets asked about at all.
+    let feed = masterfeed::absorb(&app);
+
     let mut out = master_list(app.clone()).await;
 
     // A fresh install has an empty address book, so the fallback the rest of this depends on
@@ -271,6 +277,17 @@ pub async fn sweep(app: AppHandle) -> Result<CachedServers, String> {
             // corroborate the shared book using the copies it handed out — see `roster`.
             if *outcome == MasterOutcome::Answered {
                 contribute(list);
+            } else if let Some(feed) =
+                feed.as_ref().filter(|f| f.is_fresh(serverbook::now_millis()))
+            {
+                // The app didn't ask the master (the game holds the account), but the game did,
+                // and FrostMod handed over what it received. Those servers, live from the probe,
+                // are as good a sighting as a sweep of our own - and without them the shared
+                // list only ever hears from players who happen to have the game closed.
+                let seen = masterfeed::from_game(list, feed);
+                if !seen.is_empty() {
+                    contribute(&seen);
+                }
             }
         }
         Err(e) => report(&app, &MasterOutcome::Failed(e.clone())),
