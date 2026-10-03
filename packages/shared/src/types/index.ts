@@ -104,6 +104,8 @@ export interface Config {
   autoRunFrostmod?: boolean;
   /** Close an open game to launch into a queued server's slot (default false). */
   queueRestartGame?: boolean;
+  /** Tell accepted friends which server you are on (default true). */
+  friendsPresence?: boolean;
   /** Extra command-line flags for `frostmod.exe`, exactly as typed. Empty by default. */
   frostmodArgs?: string;
   instantRefresh?: boolean;

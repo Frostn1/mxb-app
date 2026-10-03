@@ -149,6 +149,9 @@
     { "name": "PAINTSYNC_LIMITER", "namespace_id": "1004", "simple": { "limit": 60, "period": 60 } },
     // Rating ingest: one push per finished race per managed server, so 30 a minute is far past
     // honest use (a pusher replaying a backlog just gets 429 and retries).
-    { "name": "INGEST_LIMITER", "namespace_id": "1005", "simple": { "limit": 30, "period": 60 } }
+    { "name": "INGEST_LIMITER", "namespace_id": "1005", "simple": { "limit": 30, "period": 60 } },
+    // Friends: per account, in separate read and write buckets. The app heartbeats presence
+    // twice a minute and refreshes the panel on open, so 60 a minute is far past honest use.
+    { "name": "FRIENDS_LIMITER", "namespace_id": "1006", "simple": { "limit": 60, "period": 60 } }
   ]
 }

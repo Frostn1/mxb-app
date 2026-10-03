@@ -13,6 +13,7 @@ import {
   Download,
   ShoppingCart,
   Power,
+  UserCheck,
 } from "lucide-react";
 import type { CatalogTrack, MasterServer } from "@frost/shared/api/mods";
 import { Badge } from "@frost/shared/Components/ui/badge";
@@ -51,6 +52,8 @@ interface Props {
   favourite: boolean;
   /** Riders on this server running paint sync. */
   paintSync: number;
+  /** Accepted friends currently on this server. */
+  friends?: number;
   joining: boolean;
   /** Joining anything is blocked while another join is starting. */
   busy: boolean;
@@ -86,6 +89,7 @@ const ServerCard = memo(function ServerCard({
   onActivateJoin,
   favourite,
   paintSync,
+  friends = 0,
   joining,
   busy,
   queuePosition,
@@ -230,7 +234,7 @@ const ServerCard = memo(function ServerCard({
 
         {/* The fourth corner. "Not installed" is an errand, not a fault, so it sits faded on
             the picture with the other overlays rather than squeezing the track's own line. */}
-        {(paintSync > 0 || (missing && !inactive)) && (
+        {(paintSync > 0 || friends > 0 || (missing && !inactive)) && (
           <span className="absolute bottom-1.5 right-1.5 flex items-center gap-1">
             {missing && !inactive && (
               <span
@@ -239,6 +243,15 @@ const ServerCard = memo(function ServerCard({
               >
                 <Download className="size-3" />
                 {t("serverBrowser.notInstalled")}
+              </span>
+            )}
+            {friends > 0 && (
+              <span
+                className="flex items-center gap-1 rounded-md bg-black/70 px-1.5 py-[3px] text-[12px] font-bold tabular-nums text-primary shadow-sm"
+                title={t("friends.badge", { count: friends })}
+              >
+                <UserCheck className="size-3" />
+                {friends}
               </span>
             )}
             {paintSync > 0 && (

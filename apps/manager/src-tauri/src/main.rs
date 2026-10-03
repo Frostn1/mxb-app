@@ -103,6 +103,7 @@ mod reshade;
 mod savedservers;
 mod serverbook;
 mod serverfilter;
+mod friends;
 mod serverqueue;
 mod servers;
 mod serverwatch;
@@ -3731,6 +3732,7 @@ fn join_server_now(app: tauri::AppHandle, address: String) -> Result<gameproc::L
     }
     let outcome = outcome.map_err(|e| format!("{e:#}"))?;
     if matches!(outcome, gameproc::LaunchOutcome::Launched) {
+        friends::note_join(&address);
         usage::track("server.join");
         publish_paints_soon(&app, &cfg, None);
         live_sync_session(&app, Some(address.clone()));
@@ -8613,6 +8615,8 @@ fn main() {
             // Voice follows the rider onto whatever server they join, and off it again.
             // There is nothing to press: the supervisor is the whole of "joining a room".
             voice::session::start(handle);
+            // Tells accepted friends which server the rider is on, unless they switched it off.
+            friends::start(handle);
             shop_session::load_session(handle);
             hub_session::load_session(handle);
             shop_catalog_session::load(handle);
@@ -8831,6 +8835,13 @@ fn main() {
             set_launch_at_startup,
             set_auto_run_frostmod,
             set_queue_restart_game,
+            friends::friends_list,
+            friends::friends_search,
+            friends::friends_request,
+            friends::friends_respond,
+            friends::friends_remove,
+            friends::friends_hide_presence,
+            friends::set_friends_presence,
             set_race_mode,
             race_mode_status,
             set_frostmod_args,
