@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { parseCuts, parseRecentCuts, type CutsInfo, type CutZone, type RecentCut } from "./cuts";
 import type { Timing } from "./events";
 
 export interface Server {
@@ -100,6 +101,12 @@ export async function serverRiders(id: string): Promise<Rider[]> {
   return body.riders ?? [];
 }
 
+/** The admin `/v1/cuts`; null when the server is too old to have it. */
+export const serverCuts = async (id: string): Promise<CutsInfo | null> => parseCuts(await invoke<unknown>("server_cuts", { id }));
+
+/** `cuts.recent` of the admin `/v1/events` (empty on an older server). */
+export const serverRecentCuts = async (id: string): Promise<RecentCut[]> => parseRecentCuts(await invoke<unknown>("server_cut_events", { id }));
+
 export const serverLogs = (id: string, lines: number) =>
   invoke<string[]>("server_logs", { id, lines });
 
@@ -173,7 +180,7 @@ export interface ConfigField {
 }
 
 /** A field's value: null when unset in the file. */
-export type FieldValue = boolean | number | string | string[] | null;
+export type FieldValue = boolean | number | string | string[] | CutZone[] | null;
 
 export interface ConfigState {
   text: string;

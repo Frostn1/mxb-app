@@ -46,6 +46,33 @@ describe("parseLogLine", () => {
     expect(e?.fields).toMatchObject({ "Track": "Fake Track", "Track position (m)": 845.2, "Distance outside (m)": 6.4, "Time outside (s)": 1.25 });
   });
 
+  it("reads the zone and outcome of a cut, with and without a zone", () => {
+    const full = parseLogLine('event cut: #12 "Rider" · Track Name · route 640.0 m · 3.20 m outside for 1.80 s · skipped 75.0 m to 715.0 m · zone "Skipping the \\"triple\\"" · penalty 10 s');
+    expect(full?.kind).toBe("cut");
+    expect(full?.summary).toContain('Skipping the "triple"');
+    expect(full?.summary).toContain("+10 s penalty");
+    expect(full?.fields).toMatchObject({ "Track": "Track Name", "Skipped (m)": 75, "Rejoined at (m)": 715, "Zone": 'Skipping the "triple"', "Outcome": "Penalty", "Penalty (s)": 10 });
+    const bare = parseLogLine('event cut: #12 "Rider" · Track Name · route 640.0 m · 3.20 m outside for 1.80 s · skipped 75.0 m to 715.0 m · report only');
+    expect(bare?.fields).toMatchObject({ "Outcome": "Report only" });
+    expect(bare?.fields).not.toHaveProperty("Zone");
+    for (const outcome of ["warning", "disqualified", "allowed"]) {
+      const e = parseLogLine(`event cut: #1 "A" · T · route 1.0 m · 2.00 m outside for 1.00 s · skipped 30.0 m to 40.0 m · zone "Z" · ${outcome}`);
+      expect(e?.fields["Outcome"]).toBe(outcome.charAt(0).toUpperCase() + outcome.slice(1));
+    }
+  });
+
+  it("reads penalty lines: cut time, disqualification and jump start", () => {
+    const cut = parseLogLine('event penalty: #12 "Rider" · cut · +10 s (20 s total) · zone "Skipping the triple"');
+    expect(cut?.kind).toBe("penalty");
+    expect(cut?.riders).toEqual(["Rider"]);
+    expect(cut?.fields).toMatchObject({ "Reason": "Track cut", "Added (s)": 10, "Total penalty (s)": 20, "Zone": "Skipping the triple" });
+    const dsq = parseLogLine('event penalty: #12 "Rider" · cut · disqualified · zone "X"');
+    expect(dsq?.fields).toMatchObject({ "Disqualified": true, "Zone": "X" });
+    expect(dsq?.summary).toContain("disqualified");
+    const start = parseLogLine('event penalty: #12 "Rider" · jump start · +10 s (10 s total)');
+    expect(start?.fields).toMatchObject({ "Reason": "Jump start", "Added (s)": 10, "Total penalty (s)": 10 });
+    expect(start?.fields).not.toHaveProperty("Zone");
+  });
   it("reads holeshot, finish, chequered flag, retirement and race over as race events", () => {
     const lines = [
       "event holeshot: #5 · 3.42 s since the gate drop (H7 layout confirmed; the seconds reading is inferred, H14 #3 unsettled)",

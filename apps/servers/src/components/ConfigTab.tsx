@@ -13,6 +13,8 @@ import {
   type FieldValue,
   type ServerView,
 } from "@/lib/api";
+import { zonesFrom } from "@/lib/cuts";
+import { CutZones } from "./CutZones";
 import { Button, ErrorLine, Notice, Toggle } from "./ui";
 
 /** The page's topics, in order. */
@@ -20,6 +22,8 @@ const GROUPS = [
   { id: "ghosts", title: "Bots" },
   { id: "race", title: "Race format" },
   { id: "events", title: "Event logging" },
+  { id: "cuts", title: "Cuts" },
+  { id: "penalties", title: "Penalties" },
   { id: "advanced", title: "Advanced" },
 ] as const;
 
@@ -136,7 +140,7 @@ export function ConfigTab({ server }: { server: ServerView }) {
               <input className="h-9 rounded-md border border-input bg-card px-3 text-sm outline-none focus:border-ring" placeholder="Search settings" value={query} onChange={(e) => setQuery(e.target.value)} />
               <nav className="flex gap-1 overflow-x-auto md:flex-col md:overflow-visible" aria-label="Settings categories">
               {GROUPS.map((g) => {
-                const changedHere = state.fields.filter((f) => f.group === g.id && `${f.section}.${f.key}` in changes).length;
+                const changedHere = state.fields.filter((f) => f.group === g.id && `${f.section}.${f.key}` in changes).length + (g.id === "cuts" && "cuts.zones" in changes ? 1 : 0);
                 const found = state.fields.filter((f) => f.group === g.id && matches(f)).length;
                 return (
                   <button
@@ -164,6 +168,9 @@ export function ConfigTab({ server }: { server: ServerView }) {
                 <Group key={g.id} title={g.title}>
                 {fields.length === 0 && <p className="py-4 text-sm text-muted-foreground">No matching settings.</p>}
                 <FieldList fields={fields.filter((f) => !f.advanced)} values={values} changes={changes} onChange={setValue} />
+                {g.id === "cuts" && (
+                  <CutZones server={server} zones={zonesFrom(values["cuts.zones"])} onChange={(zones) => setValues({ ...values, "cuts.zones": zones })} />
+                )}
                 {fields.some((f) => f.advanced) && (
                   <Disclosure title="More settings">
                     <FieldList fields={fields.filter((f) => f.advanced)} values={values} changes={changes} onChange={setValue} />
