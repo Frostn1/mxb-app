@@ -15,6 +15,9 @@ use toml_edit::{value, Array, DocumentMut, Item};
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum Kind {
     Bool,
+    /// An on/off setting whose unset state is its own choice (the server's default), so "off"
+    /// can be written explicitly. Edited as Default / On / Off.
+    Tri,
     Int {
         min: i64,
         max: i64,
@@ -39,8 +42,16 @@ pub enum Kind {
 pub struct Field {
     pub section: &'static str,
     pub key: &'static str,
-    /// Where the page shows it: "ghosts", "race", "events" or "advanced".
+    /// Where the page shows it: "event", "sessions", "rules", "penalties", "weather", "riders",
+    /// "ghosts", "cuts", "deformation", "listing", "logging" or "advanced".
     pub group: &'static str,
+    /// The stock server's own `section.key` for this setting ("" for our extras), shown so a
+    /// setting can be matched with the stock `server.ini`.
+    pub stock: &'static str,
+    /// Whether it works yet: "" (it does), "saved" (the server keeps and reports it, but riders
+    /// are not told yet), "elsewhere" (changed in another tab or the server file) or
+    /// "unsupported" (mxbserver has no such setting yet). The last two show no control.
+    pub status: &'static str,
     /// Tucked under "More settings" in its group.
     pub advanced: bool,
     pub label: &'static str,
@@ -66,6 +77,8 @@ impl F {
             section,
             key,
             group,
+            stock: "",
+            status: "",
             advanced: false,
             label,
             help: "",
@@ -84,6 +97,14 @@ impl F {
     }
     const fn unit(mut self, unit: &'static str) -> Self {
         self.0.unit = unit;
+        self
+    }
+    const fn stock(mut self, stock: &'static str) -> Self {
+        self.0.stock = stock;
+        self
+    }
+    const fn status(mut self, status: &'static str) -> Self {
+        self.0.status = status;
         self
     }
     const fn advanced(mut self) -> Self {
@@ -183,49 +204,318 @@ pub const FIELDS: &[Field] = &[
         .default_is("the first rider seen")
         .advanced()
         .done(),
-    // ---- Race and sessions -------------------------------------------------------------------
-    F::new("sessions", "practice_minutes", "race", "Practice length", int(0, 600))
+    // ---- Stock settings and extras, in page order ----------------------------------------------
+    F::new("event", "tracks_shuffle", "event", "Shuffle tracks", Kind::Tri)
+        .stock("event.tracks_shuffle")
+        .status("saved")
+        .help("Pick the next track at random instead of in order.")
+        .default_is("off")
+        .done(),
+    F::new("event", "open_practice", "event", "Open practice", Kind::Tri)
+        .stock("race.open_practice")
+        .status("saved")
+        .help("Riders may join during practice at any time.")
+        .default_is("stock default")
+        .done(),
+    F::new("event", "quick_race", "event", "Quick race", Kind::Tri)
+        .stock("race.quick_race")
+        .status("saved")
+        .help("Skip practice and qualifying and go straight to the race.")
+        .default_is("off")
+        .done(),
+    F::new("event", "sighting_lap", "event", "Sighting lap", Kind::Tri)
+        .stock("race.sighting_lap")
+        .status("saved")
+        .help("A slow lap before the race so riders can see the track.")
+        .default_is("off")
+        .done(),
+    F::new("event", "track", "event", "Track", Kind::Text)
+        .stock("event.track")
+        .status("elsewhere")
+        .help("Change the track on the Tracks tab.")
+        .done(),
+    F::new("event", "category", "event", "Category", Kind::Text)
+        .stock("event.category")
+        .status("elsewhere")
+        .help("Set by the server's bike set (config file, [bike_set]).")
+        .done(),
+    F::new("event", "allowed_bikes", "event", "Allowed bikes", Kind::Text)
+        .stock("event.allowed_bikes")
+        .status("elsewhere")
+        .help("Narrow the bikes in the config file ([admission] allowed_bikes).")
+        .done(),
+    F::new("sessions", "practice_minutes", "sessions", "Practice length", int(0, 600))
+        .stock("race.practice_length")
         .help("0 keeps practice running until you move the session on.")
         .default_is("20 min")
         .unit("min")
         .done(),
-    F::new("sessions", "qualifying_minutes", "race", "Qualifying length", int(1, 600))
+    F::new("event", "prequalify_length", "sessions", "Pre-qualify length", int(0, 600))
+        .stock("race.prequalify_length")
+        .status("saved")
+        .default_is("stock default")
+        .unit("min")
+        .done(),
+    F::new("sessions", "qualifying_minutes", "sessions", "Qualifying length", int(1, 600))
+        .stock("race.qualifypractice_length")
         .default_is("15 min")
         .unit("min")
         .done(),
-    F::new("sessions", "warmup_minutes", "race", "Warm-up length", int(1, 600))
+    F::new("sessions", "warmup_minutes", "sessions", "Warm-up length", int(1, 600))
+        .stock("race.warmup_length")
         .default_is("5 min")
         .unit("min")
         .done(),
-    F::new("sessions", "race_minutes", "race", "Race length", int(1, 600))
+    F::new("event", "race_length_format", "sessions", "Race length format", Kind::Choice { options: &["laps", "time", "percentage"] })
+        .stock("race.race_length_format")
+        .status("saved")
+        .help("How the race length is counted.")
+        .default_is("time")
+        .done(),
+    F::new("sessions", "race_minutes", "sessions", "Race length", int(1, 600))
+        .stock("race.race_length")
         .default_is("20 min")
         .unit("min")
         .done(),
-    F::new("sessions", "race_extra_laps", "race", "Laps after the clock runs out", int(0, 10))
+    F::new("event", "race_laps", "sessions", "Race laps", int(1, 200))
+        .stock("race.race_laps")
+        .status("saved")
+        .help("Used when the race length format is laps.")
+        .default_is("stock default")
+        .done(),
+    F::new("sessions", "race_extra_laps", "sessions", "Laps after the clock runs out", int(0, 10))
+        .stock("race.race_extralaps")
         .default_is("2")
         .done(),
-    F::new("sessions", "race_countdown_seconds", "race", "Start countdown", int(0, 300))
+    F::new("sessions", "race_countdown_seconds", "sessions", "Start countdown", int(0, 300))
         .help("0 starts the race straight away.")
         .default_is("30 s")
         .unit("s")
         .done(),
-    F::new("server", "max_clients", "race", "Player slots", int(1, 50))
+    F::new("event", "raceover_length", "sessions", "Race-over screen length", int(0, 600))
+        .stock("race.raceover_length")
+        .status("saved")
+        .help("How long the results stay up after the race.")
+        .default_is("stock default")
+        .unit("s")
+        .done(),
+    F::new("event", "restart_delay", "sessions", "Restart delay", int(0, 600))
+        .stock("race.restart_delay")
+        .status("saved")
+        .help("Wait before the next event starts.")
+        .default_is("stock default")
+        .unit("s")
+        .done(),
+    F::new("event", "overjump_crash", "rules", "Overjump crash", Kind::Tri)
+        .stock("hardcore.overjump_crash")
+        .status("saved")
+        .help("A rider who overjumps a jump crashes.")
+        .default_is("stock default")
+        .done(),
+    F::new("event", "force_cockpit", "rules", "Force cockpit", Kind::Tri)
+        .stock("hardcore.force_cockpit")
+        .status("saved")
+        .help("Everyone rides in the cockpit view.")
+        .default_is("off")
+        .done(),
+    F::new("event", "no_aids", "rules", "No aids", Kind::Tri)
+        .stock("hardcore.no_aids")
+        .status("saved")
+        .help("Riding aids are switched off for everyone.")
+        .default_is("off")
+        .done(),
+    F::new("event", "limited_tyre_sets", "rules", "Limited tyre sets", int(0, 20))
+        .stock("hardcore.limited_tyre_sets")
+        .status("saved")
+        .help("0 means unlimited.")
+        .default_is("unlimited")
+        .done(),
+    F::new("event", "force_shadows", "rules", "Force shadows", Kind::Tri)
+        .stock("hardcore.force_shadows")
+        .status("saved")
+        .default_is("off")
+        .done(),
+    F::new("event", "force_particles", "rules", "Force particles", Kind::Tri)
+        .stock("hardcore.force_particles")
+        .status("saved")
+        .default_is("off")
+        .done(),
+    F::new("event", "force_vieweffects", "rules", "Force view effects", Kind::Tri)
+        .stock("hardcore.force_vieweffects")
+        .status("saved")
+        .default_is("off")
+        .done(),
+    F::new("event", "force_leanhelp", "rules", "Force lean help", Kind::Tri)
+        .stock("hardcore.force_leanhelp")
+        .status("saved")
+        .default_is("off")
+        .done(),
+    F::new("event", "disable_collisions", "rules", "Disable collisions", Kind::Tri)
+        .stock("collisions.disable")
+        .status("saved")
+        .help("Riders pass through each other.")
+        .default_is("off")
+        .done(),
+    F::new("event", "collisions_max_ping", "rules", "Collisions max ping", int(0, 1000))
+        .stock("collisions.max_ping")
+        .status("saved")
+        .help("Collisions are off for riders above this ping. 0 means no limit.")
+        .default_is("no limit")
+        .unit("ms")
+        .done(),
+    F::new("event", "reset_type", "rules", "Bike reset", Kind::Choice { options: &["none", "fixed", "distance", "crash_speed"] })
+        .stock("reset.type")
+        .status("saved")
+        .help("How a rider may put the bike back on the track.")
+        .default_is("stock default")
+        .done(),
+    F::new("event", "reset_time", "rules", "Bike reset delay", int(0, 60))
+        .stock("reset.time")
+        .status("saved")
+        .default_is("stock default")
+        .unit("s")
+        .done(),
+    F::new("event", "polls_disable_during_races", "rules", "Disable polls during races", Kind::Tri)
+        .stock("polls.disable_during_races")
+        .status("saved")
+        .default_is("off")
+        .done(),
+    F::new("connection", "polls_disable", "rules", "Disable polls", Kind::Tri)
+        .stock("connection.polls_disable")
+        .status("unsupported")
+        .help("mxbserver has no polls yet.")
+        .done(),
+    F::new("chat", "disable", "rules", "Disable chat", Kind::Tri)
+        .stock("chat.disable")
+        .status("unsupported")
+        .help("mxbserver does not relay chat yet.")
+        .done(),
+    F::new("event", "weather_realistic", "weather", "Realistic weather", Kind::Tri)
+        .stock("weather.realistic")
+        .status("saved")
+        .default_is("off")
+        .done(),
+    F::new("event", "weather_conditions", "weather", "Weather conditions", Kind::Text)
+        .stock("weather.conditions")
+        .status("saved")
+        .help("The stock weather name, such as clear or overcast.")
+        .default_is("stock default")
+        .done(),
+    F::new("event", "temperature", "weather", "Temperature", float(-30.0, 60.0))
+        .stock("weather.temperature")
+        .status("saved")
+        .default_is("stock default")
+        .unit("°C")
+        .done(),
+    F::new("event", "wind_direction", "weather", "Wind direction", Kind::Choice { options: &["north", "northeast", "east", "southeast", "south", "southwest", "west", "northwest"] })
+        .stock("weather.wind_direction")
+        .status("saved")
+        .default_is("stock default")
+        .done(),
+    F::new("event", "wind_speed", "weather", "Wind speed", float(0.0, 100.0))
+        .stock("weather.wind_speed")
+        .status("saved")
+        .default_is("stock default")
+        .done(),
+    F::new("event", "track_conditions", "weather", "Track conditions", int(0, 100))
+        .stock("weather.track_conditions")
+        .status("saved")
+        .help("0 is dry, 100 is wet.")
+        .default_is("stock default")
+        .unit("%")
+        .done(),
+    F::new("server", "name", "riders", "Server name", Kind::Text)
+        .stock("connection.name")
+        .help("Shown in the server browser and on join.")
+        .default_is("Native MXB Server")
+        .done(),
+    F::new("server", "max_clients", "riders", "Player slots", int(1, 50))
+        .stock("connection.maxclient")
         .help("How many players can join at once.")
         .default_is("20")
         .done(),
-    // ---- Track -------------------------------------------------------------------------------
+    F::new("admission", "max_ping_ms", "riders", "Max ping", int(0, 5000))
+        .stock("connection.max_ping")
+        .help("Kick a rider whose ping stays above this for 10 s. 0 turns it off.")
+        .default_is("off")
+        .unit("ms")
+        .done(),
+    F::new("admission", "reserved_slots", "riders", "Reserved slots", int(0, 50))
+        .help("Slots kept for whitelisted riders.")
+        .default_is("0")
+        .done(),
+    F::new("server", "password", "riders", "Password", Kind::Text)
+        .stock("connection.password")
+        .status("unsupported")
+        .help("A password would lock every rider out until the stock password check is decoded.")
+        .done(),
+    F::new("connection", "admin_password", "riders", "Admin password", Kind::Text)
+        .stock("connection.admin_password")
+        .status("unsupported")
+        .help("mxbserver is administered through its token-protected admin API.")
+        .done(),
+    F::new("connection", "bandwidth", "riders", "Bandwidth", Kind::Text)
+        .stock("connection.bandwidth")
+        .status("unsupported")
+        .help("mxbserver has no bandwidth setting yet.")
+        .done(),
+    F::new("connection", "location", "riders", "Location", Kind::Text)
+        .stock("connection.location")
+        .status("unsupported")
+        .help("mxbserver does not advertise a location yet.")
+        .done(),
+    F::new("connection", "motd", "riders", "Message of the day", Kind::Text)
+        .stock("connection.motd")
+        .status("unsupported")
+        .help("mxbserver does not send a message of the day yet.")
+        .done(),
+    F::new("admission", "whitelist", "riders", "Whitelist", Kind::Text)
+        .stock("connection.whitelist")
+        .status("elsewhere")
+        .help("A list of rider names: edit [admission] whitelist in the config file.")
+        .done(),
+    F::new("admission", "bans", "riders", "Blacklist", Kind::Text)
+        .stock("connection.blacklist")
+        .status("elsewhere")
+        .help("Banned names: edit [admission] bans in the config file.")
+        .done(),
     F::new(
         "world",
         "deformation",
-        "track",
+        "deformation",
         "Deformation",
         Kind::Choice { options: &["off", "low", "medium", "high", "maximum"] },
     )
     .help("How much the ground ruts: the ruts a track starts with, and how deep and how fast riders and bots dig more. Changed mid-race, it applies at the next session. The first time it is set, the server needs one restart.")
     .default_is("off (the server's own ruts settings)")
     .done(),
-    // ---- Events ------------------------------------------------------------------------------
-    F::new("events", "collisions", "events", "Track collisions", Kind::Bool)
+    F::new("event", "deformation_scale", "deformation", "Deformation scale", float(0.0, 10.0))
+        .stock("deformation.scale")
+        .status("saved")
+        .help("How strongly riders deform the ground.")
+        .default_is("stock default")
+        .done(),
+    F::new("event", "deformation_auto_reset", "deformation", "Deformation auto reset", Kind::Tri)
+        .stock("deformation.auto_reset")
+        .status("saved")
+        .default_is("off")
+        .done(),
+    F::new("event", "dynamicsurface_disable", "deformation", "Disable dynamic surface", Kind::Tri)
+        .stock("dynamicsurface.disable")
+        .status("saved")
+        .default_is("off")
+        .done(),
+    F::new("event", "dynamicsurface_persistent", "deformation", "Persistent dynamic surface", Kind::Tri)
+        .stock("dynamicsurface.persistent")
+        .status("saved")
+        .help("Keep the ground's changes between events.")
+        .default_is("off")
+        .done(),
+    F::new("master", "enable", "listing", "Public listing", Kind::Bool)
+        .help("List the server in the in-game browser and MXB App's Browse tab.")
+        .default_is("off")
+        .done(),
+    F::new("events", "collisions", "logging", "Collision log", Kind::Bool)
         .help("Logs who hit whom and counts collisions per rider.")
         .default_is("off")
         .done(),
@@ -512,7 +802,7 @@ fn to_item(field: &Field, v: &Value) -> Result<Option<Item>, String> {
         return Ok(None);
     }
     let item = match &field.kind {
-        Kind::Bool => value(v.as_bool().ok_or_else(bad)?),
+        Kind::Bool | Kind::Tri => value(v.as_bool().ok_or_else(bad)?),
         Kind::Int { min, max } => {
             let n = v.as_i64().ok_or_else(bad)?;
             if n < *min || n > *max {
@@ -605,6 +895,9 @@ pub fn apply(text: &str, changes: &serde_json::Map<String, Value>) -> Result<Str
             .split_once('.')
             .ok_or_else(|| format!("unknown field {name}"))?;
         let field = field(section, key).ok_or_else(|| format!("unknown field {name}"))?;
+        if matches!(field.status, "elsewhere" | "unsupported") {
+            return Err(format!("{} can't be changed here", field.label));
+        }
         match to_item(field, v)? {
             Some(mut item) => {
                 // Keep the old value's spacing and trailing comment on the new one.
@@ -816,6 +1109,178 @@ late_join_register = false
         assert!(d.contains("+count = 2 # four bots"));
         assert!(!d.contains("+[server]"));
         assert_eq!(diff(FILE, FILE), "");
+    }
+
+    /// Every setting the stock server's `server.ini` reader takes for an event (read from the
+    /// binary's key table), by the stock `section.key`. Each must have a control or a note.
+    const STOCK_KEYS: &[&str] = &[
+        "connection.name",
+        "connection.maxclient",
+        "connection.password",
+        "connection.admin_password",
+        "connection.bandwidth",
+        "connection.max_ping",
+        "connection.polls_disable",
+        "connection.location",
+        "connection.motd",
+        "connection.whitelist",
+        "connection.blacklist",
+        "chat.disable",
+        "event.track",
+        "event.tracks_shuffle",
+        "event.category",
+        "event.allowed_bikes",
+        "hardcore.overjump_crash",
+        "hardcore.force_cockpit",
+        "hardcore.no_aids",
+        "hardcore.limited_tyre_sets",
+        "hardcore.force_shadows",
+        "hardcore.force_particles",
+        "hardcore.force_vieweffects",
+        "hardcore.force_leanhelp",
+        "collisions.disable",
+        "collisions.max_ping",
+        "reset.type",
+        "reset.time",
+        "polls.disable_during_races",
+        "race.open_practice",
+        "race.quick_race",
+        "race.practice_length",
+        "race.prequalify_length",
+        "race.qualifypractice_length",
+        "race.warmup_length",
+        "race.sighting_lap",
+        "race.race_length",
+        "race.race_length_format",
+        "race.race_laps",
+        "race.race_extralaps",
+        "race.raceover_length",
+        "race.restart_delay",
+        "weather.realistic",
+        "weather.conditions",
+        "weather.temperature",
+        "weather.wind_direction",
+        "weather.wind_speed",
+        "weather.track_conditions",
+        "deformation.scale",
+        "deformation.auto_reset",
+        "dynamicsurface.disable",
+        "dynamicsurface.persistent",
+    ];
+
+    /// The `[event]` keys mxbserver parses (`event_options.rs` `EventOptions`).
+    const SERVER_EVENT_KEYS: &[&str] = &[
+        "overjump_crash",
+        "force_cockpit",
+        "no_aids",
+        "limited_tyre_sets",
+        "force_shadows",
+        "force_particles",
+        "force_vieweffects",
+        "force_leanhelp",
+        "disable_collisions",
+        "collisions_max_ping",
+        "reset_type",
+        "reset_time",
+        "polls_disable_during_races",
+        "tracks_shuffle",
+        "open_practice",
+        "quick_race",
+        "sighting_lap",
+        "race_length_format",
+        "race_laps",
+        "prequalify_length",
+        "raceover_length",
+        "restart_delay",
+        "weather_realistic",
+        "weather_conditions",
+        "temperature",
+        "wind_direction",
+        "wind_speed",
+        "track_conditions",
+        "deformation_scale",
+        "deformation_auto_reset",
+        "dynamicsurface_disable",
+        "dynamicsurface_persistent",
+    ];
+
+    #[test]
+    fn every_stock_setting_has_a_control_or_a_note_under_its_stock_name() {
+        for stock in STOCK_KEYS {
+            let found: Vec<_> = FIELDS.iter().filter(|f| f.stock == *stock).collect();
+            assert_eq!(found.len(), 1, "stock key {stock} needs exactly one field");
+        }
+        for f in FIELDS.iter().filter(|f| !f.stock.is_empty()) {
+            assert!(
+                STOCK_KEYS.contains(&f.stock),
+                "{} is not a known stock key",
+                f.stock
+            );
+        }
+    }
+
+    #[test]
+    fn saved_stock_settings_are_exactly_the_servers_event_keys_and_names_are_unique() {
+        let mut saved: Vec<&str> = FIELDS
+            .iter()
+            .filter(|f| f.section == "event" && f.status == "saved")
+            .map(|f| f.key)
+            .collect();
+        saved.sort_unstable();
+        let mut server = SERVER_EVENT_KEYS.to_vec();
+        server.sort_unstable();
+        assert_eq!(saved, server);
+        let mut names: Vec<String> = FIELDS
+            .iter()
+            .map(|f| format!("{}.{}", f.section, f.key))
+            .collect();
+        names.sort();
+        let before = names.len();
+        names.dedup();
+        assert_eq!(names.len(), before, "a section.key is listed twice");
+        for f in FIELDS {
+            assert!(
+                [
+                    "event",
+                    "sessions",
+                    "rules",
+                    "penalties",
+                    "weather",
+                    "riders",
+                    "ghosts",
+                    "cuts",
+                    "deformation",
+                    "listing",
+                    "logging",
+                    "advanced"
+                ]
+                .contains(&f.group),
+                "{} is in an unknown group {}",
+                f.label,
+                f.group
+            );
+            assert!(["", "saved", "elsewhere", "unsupported"].contains(&f.status));
+        }
+    }
+
+    #[test]
+    fn an_explicit_off_is_written_and_unsupported_settings_are_refused() {
+        let out = apply(
+            "[event]
+",
+            &changes(&[
+                ("event.overjump_crash", json!(false)),
+                ("event.reset_type", json!("crash_speed")),
+            ]),
+        )
+        .unwrap();
+        assert!(out.contains("overjump_crash = false"), "{out}");
+        assert!(out.contains("reset_type = \"crash_speed\""), "{out}");
+        assert!(apply("", &changes(&[("event.wind_direction", json!("up"))])).is_err());
+        assert!(apply("", &changes(&[("connection.motd", json!("hi"))]))
+            .unwrap_err()
+            .contains("can't be changed here"));
+        assert!(apply("", &changes(&[("event.track", json!("x"))])).is_err());
     }
 }
 

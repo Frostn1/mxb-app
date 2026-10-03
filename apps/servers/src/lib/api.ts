@@ -173,6 +173,7 @@ export const errorText = (e: unknown) => {
 
 export type FieldKind =
   | { type: "bool" }
+  | { type: "tri" }
   | { type: "int"; min: number; max: number }
   | { type: "float"; min: number; max: number }
   | { type: "text" }
@@ -183,8 +184,14 @@ export type FieldKind =
 export interface ConfigField {
   section: string;
   key: string;
-  /** "ghosts" | "race" | "track" | "events" | "cuts" | "penalties" | "advanced" */
+  /** The page group: "event", "sessions", "rules", "penalties", "weather", "riders", "ghosts",
+   *  "cuts", "deformation", "listing", "logging" or "advanced". */
   group: string;
+  /** The stock server's own `section.key` ("" for our extras). */
+  stock: string;
+  /** "" (works), "saved" (kept and reported, riders not told yet), "elsewhere" (changed in
+   *  another tab or the file) or "unsupported" (mxbserver has no such setting yet). */
+  status: "" | "saved" | "elsewhere" | "unsupported";
   /** Under "More settings" in its group. */
   advanced: boolean;
   label: string;
