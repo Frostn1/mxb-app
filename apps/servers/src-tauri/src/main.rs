@@ -1235,6 +1235,10 @@ async fn server_session(
         "advance" => ("/v1/session/advance", serde_json::json!({})),
         "restart" => ("/v1/session/restart", serde_json::json!({})),
         "rotate" => ("/v1/session/rotate", serde_json::json!({})),
+        // The running event again on the same track: riders go back to the pits and anything
+        // waiting for the next track load is loaded.
+        "reload" => ("/v1/session/reload", serde_json::json!({})),
+        "reset_ruts" => ("/v1/world/ruts/reset", serde_json::json!({})),
         _ => return Err("unknown session action".into()),
     };
     admin_call(
@@ -2098,6 +2102,53 @@ async fn write_and_reload(
     }
 }
 
+/// The fast check for the Review step: the running server's own dry run (`/v1/config/validate`
+/// with the candidate: it parses the file, range-checks every value and classifies each change)
+/// over the admin tunnel that is already open. `checked: false` when that cannot answer (no
+/// token, an older server, nothing listening), so the caller falls back to the slow check over
+/// SSH. A refused file comes back as `checked: true, ok: false` with the server's reason.
+#[tauri::command]
+async fn config_check(app: State<'_, App>, id: String, text: String) -> Result<Value, String> {
+    let unchecked = || serde_json::json!({ "checked": false });
+    let server = app.store.get(&id)?;
+    if server.kind == ServerKind::Legacy {
+        return Ok(unchecked());
+    }
+    let Some(token) = store::token(&server.id) else {
+        return Ok(unchecked());
+    };
+    let Ok(port) = admin_port(&app, &server).await else {
+        return Ok(unchecked());
+    };
+    let body = serde_json::json!({ "content": text });
+    let Ok((code, answer)) = send(
+        &app,
+        &server,
+        port,
+        reqwest::Method::POST,
+        "/v1/config/validate",
+        Some(&token),
+        Some(&body),
+    )
+    .await
+    else {
+        return Ok(unchecked());
+    };
+    match code {
+        200..=299 => Ok(serde_json::json!({
+            "checked": true,
+            "ok": true,
+            "classify": serde_json::from_str::<Value>(&answer).unwrap_or(Value::Null),
+        })),
+        400 => Ok(serde_json::json!({
+            "checked": true,
+            "ok": false,
+            "output": admin_error(code, &answer, false),
+        })),
+        _ => Ok(unchecked()),
+    }
+}
+
 /// How the running server would apply `text` (`/v1/config/validate` with `content`): each changed
 /// key's class. Nothing is written. `{"supported": false}` from a server too old to say.
 #[tauri::command]
@@ -2184,6 +2235,7 @@ fn main() {
             config_apply,
             config_apply_live,
             config_classify,
+            config_check,
         ])
         .build(tauri::generate_context!())
         .expect("error while building MXB Servers")

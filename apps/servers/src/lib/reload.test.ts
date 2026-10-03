@@ -1,5 +1,29 @@
 import { describe, expect, it } from "vitest";
-import { classesFor, reloadClass } from "./reload";
+import { BADGES, badgeLabel, changesTracks, classesFor, reloadClass, waitsForTrackLoad } from "./reload";
+
+describe("badges", () => {
+  it("say plain words for each class", () => {
+    expect(badgeLabel("hot")).toBe("Applies now");
+    expect(badgeLabel("next_session")).toBe("Next session");
+    expect(badgeLabel("next_event")).toBe("Next track load");
+    expect(badgeLabel("restart")).toBe("Needs restart");
+    for (const badge of Object.values(BADGES)) expect(badge.title.length).toBeGreaterThan(20);
+    expect(BADGES.next_event.title).toContain("Apply now");
+  });
+
+  it("offer Apply now only when something waits for the next track load", () => {
+    expect(waitsForTrackLoad(["hot", "next_session"])).toBe(false);
+    expect(waitsForTrackLoad(["hot", "next_event"])).toBe(true);
+    expect(waitsForTrackLoad([])).toBe(false);
+  });
+
+  it("run the slow server check only for track and rotation changes", () => {
+    expect(changesTracks(["server.name", "world.deformation"])).toBe(false);
+    expect(changesTracks(["track.package"])).toBe(true);
+    expect(changesTracks(["rotation.tracks"])).toBe(true);
+    expect(changesTracks(["server.name", "rotation.tracks"])).toBe(true);
+  });
+});
 
 describe("reloadClass", () => {
   it("matches the server's classes for the settings MSM edits", () => {
@@ -32,6 +56,11 @@ describe("reloadClass", () => {
     for (const key of ["admin.listen", "admin.tokens_file", "admin.audit_file", "server.observe", "recording.directory", "ghost.fill_to"]) {
       expect(reloadClass(key)).toBe("hot");
     }
+  });
+
+  it("takes a deformation level at the next session and the ruts policy at once", () => {
+    expect(reloadClass("world.deformation")).toBe("next_session");
+    expect(reloadClass("world.ruts_persist")).toBe("hot");
   });
 
   it("prefers the server's own answer", () => {
