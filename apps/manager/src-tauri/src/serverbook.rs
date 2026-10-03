@@ -213,6 +213,51 @@ pub fn seed(existing: Vec<Entry>, addresses: &[String], now: u64) -> Vec<Entry> 
     book
 }
 
+/// Fold servers the *game* saw into the book (see [`crate::masterfeed`]).
+///
+/// Like [`seed`] it must never overwrite a row the master taught us — the game's browser gives
+/// an address and a name and nothing else — but unlike a seed it *is* a sighting: the game's own
+/// master list had the server in it just now. So an unknown address is added (named, joinable,
+/// stamped `now`) and a known one keeps its row and gets re-stamped, which keeps a server the
+/// game keeps seeing from ageing out of a book the app can't refresh during a session.
+pub fn learn(existing: Vec<Entry>, seen: &[(String, String)], now: u64) -> Vec<Entry> {
+    let cutoff = now.saturating_sub(KEEP.as_millis() as u64);
+    let mut book: Vec<Entry> = existing.into_iter().filter(|e| e.last_seen >= cutoff).collect();
+    let mut index: std::collections::HashMap<String, usize> =
+        book.iter().enumerate().map(|(i, e)| (e.address().to_string(), i)).collect();
+
+    for (address, name) in seen {
+        let address = address.trim();
+        if address.is_empty() {
+            continue;
+        }
+        match index.get(address) {
+            Some(&i) => {
+                let e = &mut book[i];
+                e.last_seen = e.last_seen.max(now);
+                if e.row.name.trim().is_empty() {
+                    e.row.name = name.trim().to_string();
+                }
+            }
+            None => {
+                index.insert(address.to_string(), book.len());
+                book.push(Entry {
+                    row: WorldServer {
+                        address: address.to_string(),
+                        name: name.trim().to_string(),
+                        joinable: true,
+                        ..Default::default()
+                    },
+                    last_seen: now,
+                });
+            }
+        }
+    }
+
+    book.sort_by(|a, b| b.last_seen.cmp(&a.last_seen).then_with(|| a.address().cmp(b.address())));
+    book.truncate(MAX_ENTRIES);
+    book
+}
 /// Turn the book back into rows to probe.
 ///
 /// Every field the master owns is restored and everything else left at its default, because
@@ -442,4 +487,33 @@ mod tests {
         assert!(read(&p).is_empty());
         let _ = std::fs::remove_dir_all(&dir);
     }
-}
+
+    #[test]
+    fn a_server_the_game_saw_is_added_and_named() {
+        let book = learn(vec![], &[("198.51.100.7:54210".into(), "CHEAP GAMER".into())], 5_000);
+        assert_eq!(book.len(), 1);
+        assert_eq!(book[0].row.name, "CHEAP GAMER");
+        assert!(book[0].row.joinable);
+        assert_eq!(rows(&book)[0].address, "198.51.100.7:54210");
+    }
+
+    #[test]
+    fn a_sighting_keeps_what_the_master_taught_us_and_restamps_it() {
+        let known = merge(vec![], &[server("198.51.100.1:54210", "One")], 1_000);
+        let book = learn(known, &[("198.51.100.1:54210".into(), "Renamed".into())], 9_000);
+        assert_eq!(book.len(), 1);
+        assert_eq!(book[0].row.name, "One");
+        assert_eq!(book[0].row.location, "EU");
+        assert_eq!(book[0].last_seen, 9_000);
+    }
+
+    #[test]
+    fn new_sightings_survive_a_full_book() {
+        let old: Vec<WorldServer> =
+            (0..MAX_ENTRIES).map(|i| server(&format!("198.51.100.1:{}", 10_000 + i), "Old")).collect();
+        let full = merge(vec![], &old, 1_000);
+        assert_eq!(full.len(), MAX_ENTRIES);
+        let book = learn(full, &[("203.0.113.9:54210".into(), "New".into())], 2_000);
+        assert_eq!(book.len(), MAX_ENTRIES);
+        assert!(book.iter().any(|e| e.address() == "203.0.113.9:54210"), "the coldest row goes, not the new one");
+    }}
