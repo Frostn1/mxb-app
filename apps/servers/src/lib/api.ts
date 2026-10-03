@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { parseCuts, parseRecentCuts, type CutsInfo, type CutZone, type RecentCut } from "./cuts";
+import { parseCuts, parseOutline, parseRecentCuts, type CutOutline, type CutsInfo, type CutZone, type RecentCut } from "./cuts";
 import type { Timing } from "./events";
 
 export interface Server {
@@ -103,6 +103,9 @@ export async function serverRiders(id: string): Promise<Rider[]> {
 
 /** The admin `/v1/cuts`; null when the server is too old to have it. */
 export const serverCuts = async (id: string): Promise<CutsInfo | null> => parseCuts(await invoke<unknown>("server_cuts", { id }));
+
+/** One track's outline from the admin `/v1/cuts/outline` (built from its TRH, no riding needed). */
+export const serverCutOutline = async (id: string, track: string): Promise<CutOutline> => parseOutline(await invoke<unknown>("server_cut_outline", { id, track }), track);
 
 /** `cuts.recent` of the admin `/v1/events` (empty on an older server). */
 export const serverRecentCuts = async (id: string): Promise<RecentCut[]> => parseRecentCuts(await invoke<unknown>("server_cut_events", { id }));
