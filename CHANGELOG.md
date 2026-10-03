@@ -53,6 +53,14 @@
 ### Changed
 - **Auto race mode moves nothing with FrostMod v0.40.0 or newer.** It hands FrostMod a list of the tracks and bikes that stay (`frostmod_racemode.txt`), and FrostMod hides the rest from the game's own scan, so their archives are never opened. Ending the session just deletes the list. With an older FrostMod it still moves the unused mods aside as before.
 
+### Fixed
+- **MXB Coach: a supercross out lap no longer becomes a broken ghost lap.** The run from the gate
+  to the line takes over a fifth of an SX out lap, and Coach only folded that fifth back before
+  the line, so the rest of the run read as the end of the lap. Its trace then bridged 680 m with
+  nothing, piled on one spot and flagged airborne (the gate reads as no ground). The in-game sheet
+  built from it drew the line in the wrong place and called two ROLLs on a track full of doubles
+  (Steezy Mx - SMX - Carson). Laps are now split where the position actually wraps.
+
 ## 2026-09-27 — v0.19.1 — Auto race mode, gear refresh and beta updates that find the next beta
 
 ### Added
