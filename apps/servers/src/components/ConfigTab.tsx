@@ -635,6 +635,9 @@ function LiveResult({
   const deferred = reload.deferred ?? [];
   const restart = reload.restart_required ?? [];
   const ok = result.result === "applied";
+  // A server from before hot reload answers without `deferred` and only reloads a few
+  // admission keys: the file is saved, but a restart is what applies it.
+  const old = ok && result.reload !== null && reload.deferred === undefined;
   const list = (title: string, keys: string[], kind: ReloadClass) =>
     keys.length > 0 && (
       <div>
@@ -653,7 +656,9 @@ function LiveResult({
     <div className="flex min-h-0 flex-col gap-4 overflow-y-auto">
       <Notice tone={ok ? "ok" : "bad"}>
         <span className="font-medium">
-          {ok
+          {old
+            ? "Saved, but this server version can't apply settings live. Restart it to apply them (or update the server)."
+            : ok
             ? restart.length
               ? "Saved and applied what the running server can take live. Nobody was disconnected."
               : "Applied to the running server. Nobody was disconnected."
@@ -666,7 +671,7 @@ function LiveResult({
         )}
       </Notice>
       {!ok && result.output && <pre className="max-h-48 overflow-auto rounded-lg bg-muted p-3 font-mono text-xs whitespace-pre-wrap">{result.output}</pre>}
-      {ok && (
+      {ok && !old && (
         <div className="flex flex-col gap-3 rounded-xl border bg-card p-4">
           {list("Applied now", applied, "hot")}
           {list("Applies at the next session", deferred, "next_session")}
@@ -675,7 +680,7 @@ function LiveResult({
         </div>
       )}
       <div className="flex gap-3">
-        {ok && restart.length > 0 && (
+        {ok && (old || restart.length > 0) && (
           <Button variant="primary" disabled={busy} onClick={onRestart}>
             Restart now
           </Button>
