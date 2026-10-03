@@ -21,6 +21,7 @@ import {
   type Surface,
 } from "@/api/coach";
 import { lapTime } from "@/lib/format";
+import { planDebrief, withTimeout, type Missing } from "./debriefPlan";
 import { useT } from "@/i18n";
 
 /**
@@ -58,6 +59,8 @@ export default function Debrief({
   const [lines, setLines] = useState<Lines | null>(null);
   const [scrubCalled, setScrubCalled] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** Why there is no full debrief, when there isn't enough to read one from. */
+  const [thin, setThin] = useState<Missing | "unreadable" | null>(null);
   const [step, setStep] = useState(0);
   /** Which way the corner is being looked at. Kept across steps: a rider who asked to watch
       the bike wants to watch the next corner too. */
@@ -72,25 +75,40 @@ export default function Debrief({
     setLines(null);
     setScrubCalled(false);
     setError(null);
+    setThin(null);
     setStep(0);
     let live = true;
-    coachSession(path)
+    withTimeout(coachSession(path), 30_000, "Reading the session took too long.")
       .then(async (d) => {
         if (!live) return;
         setDetail(d);
         // The best whole lap of the session, wherever in the stints it sits.
-        const laps = d.summary.laps.filter((l) => l.whole && !l.invalid);
-        const best = [...laps].sort((a, b) => a.timeMs - b.timeMs)[0];
-        if (!best) return;
+        const plan = planDebrief(d.summary.laps);
+        const best = plan.best;
+        if (!best) {
+          // Too little to read a debrief from: show the laps there are, not a spinner.
+          setThin(plan.missing);
+          return;
+        }
         // A technique belongs to the session if any valid lap calls for it, not merely the
         // fastest lap used for the rest of the debrief. Read all timed laps once, together.
-        const reviewed = await Promise.all(laps.map((lap) => coachReview(lap.path, lap.num, {})));
-        if (live) {
-          setData(reviewed.find((out) => out.lap.path === best.path && out.lap.lap === best.num) ?? reviewed[0]);
-          setScrubCalled(reviewed.some((out) => out.review.sections.some((section) => section.findings.some((f) => f.skill === "scrub"))));
+        // One lap that can't be read must not take the others with it.
+        const settled = await withTimeout(
+          Promise.allSettled(plan.laps.map((lap) => coachReview(lap.path, lap.num, {}))),
+          90_000,
+          "Reading the laps took too long.",
+        );
+        if (!live) return;
+        const reviewed = settled.flatMap((r) => (r.status === "fulfilled" ? [r.value] : []));
+        const main = reviewed.find((out) => out.lap.path === best.path && out.lap.lap === best.num);
+        if (!main) {
+          setThin("unreadable");
+          return;
         }
+        setData(main);
+        setScrubCalled(reviewed.some((out) => out.review.sections.some((section) => section.findings.some((f) => f.skill === "scrub"))));
       })
-      .catch((e) => live && setError(String(e)));
+      .catch((e) => live && setError(String(e instanceof Error ? e.message : e)));
     // The bike is the slowest thing on any step, so it starts loading with the debrief rather
     // than when the rider gets to it. By then it is already in hand.
     coachSession(path)
@@ -139,6 +157,9 @@ export default function Debrief({
         <p className="border border-border px-4 py-3 text-[12.5px] text-destructive">{error}</p>
       </Page>
     );
+  }
+  if (detail && thin) {
+    return <ThinSession detail={detail} why={thin} onBack={onBack} onAllLaps={onAllLaps} onReview={onReview} />;
   }
   if (!detail || !review || !data) {
     return (
@@ -352,5 +373,54 @@ function Stat({ label, value, note }: { label: string; value: string; note?: str
       <div className="mt-1 font-mono text-[22px] tabular-nums">{value}</div>
       {note && <div className="mt-0.5 text-[12px] text-muted-foreground">{note}</div>}
     </div>
+  );
+}
+
+/** A session with too little in it for a full debrief: every lap, partial ones marked, each
+ *  with the review that works on its own, so the rider can still get to a setup. */
+function ThinSession({
+  detail,
+  why,
+  onBack,
+  onAllLaps,
+  onReview,
+}: {
+  detail: SessionDetail;
+  why: Missing | "unreadable";
+  onBack: () => void;
+  onAllLaps: () => void;
+  onReview: (file: string, lap: number, solo: boolean, trackId: string) => void;
+}) {
+  const t = useT();
+  const s = detail.summary;
+  return (
+    <Page
+      title={t("debrief.title")}
+      sub={`${s.bikeName || s.bikeId} · ${s.trackName || s.trackId}`}
+      onBack={onBack}
+      backLabel={t("nav.sessions")}
+      actions={<Button size="sm" variant="outline" onClick={onAllLaps}>{t("debrief.allLaps")}</Button>}
+    >
+      <p className="border border-border bg-card px-4 py-3 text-[13px]">{t(`debrief.thin.${why}` as const)}</p>
+      <div className="mt-5 border border-border">
+        {s.laps.map((l) => (
+          <div
+            key={`${l.path}-${l.num}`}
+            className="flex items-center gap-3 border-b border-border px-4 py-2 text-[12.5px] last:border-b-0"
+          >
+            <span className="w-16 text-muted-foreground">{t("session.lap")} {l.num + 1}</span>
+            <span className="w-24 font-mono tabular-nums">{lapTime(l.timeMs || l.riddenMs)}</span>
+            <span className="flex flex-1 gap-1.5 text-muted-foreground">
+              {!l.whole && <span>{t("session.partial")}</span>}
+              {l.invalid && <span>{t("session.invalid")}</span>}
+              {l.crashed && <span>{t("session.crashed")}</span>}
+            </span>
+            <Button size="sm" variant="outline" onClick={() => onReview(l.path, l.num, true, s.trackId)}>
+              {t("session.review")}
+            </Button>
+          </div>
+        ))}
+      </div>
+    </Page>
   );
 }
