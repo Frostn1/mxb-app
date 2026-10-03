@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode } from "react";
 import { MoreHorizontal } from "lucide-react";
-import { isLegacyStatus, type StatusReport } from "@/lib/api";
+import { isLegacyStatus, presence, presenceLabel, type StatusReport } from "@/lib/api";
 
-/** One status for a server: Online · N riders, Starting…, Offline, Unreachable (SSH), or
+/** One status for a server: Online · N riders · N bots, Starting…, Offline, Unreachable (SSH), or
  *  Checking… before the first answer. Colour always comes with its words; the detail is in
  *  the tooltip. */
 export function StatusBadge({ report, error }: { report: StatusReport | null; error?: string | null }) {
@@ -16,10 +16,10 @@ export function StatusBadge({ report, error }: { report: StatusReport | null; er
     detail = error;
   } else if (report) {
     detail = report.detail;
-    const riders = report.status && !isLegacyStatus(report.status) ? report.status.active_sessions : null;
+    const counts = report.status && !isLegacyStatus(report.status) ? presence(report.status) : null;
     switch (report.state) {
       case "online":
-        label = riders == null ? "Online" : `Online · ${riders} ${riders === 1 ? "rider" : "riders"}`;
+        label = counts == null ? "Online" : `Online · ${presenceLabel(counts)}`;
         color = "var(--success)";
         break;
       case "starting":
