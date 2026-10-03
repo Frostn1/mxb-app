@@ -65,15 +65,18 @@ export default function Rail<T extends string>({
   onPick,
   header,
   footer,
+  className,
 }: {
   entries: RailEntry<T>[];
   active: T;
   onPick: (id: T) => void;
   header?: ReactNode;
   footer?: ReactNode;
+  /** Overrides the width, for a header that needs more room than the Studio's. */
+  className?: string;
 }) {
   return (
-    <nav className="flex w-[152px] shrink-0 flex-col border-r border-border bg-window px-2.5 py-3.5">
+    <nav className={cn("flex w-[152px] shrink-0 flex-col border-r border-border bg-window px-2.5 py-3.5", className)}>
       {header}
       <div className="mt-6 flex flex-1 flex-col items-stretch gap-0.5">
         {entries.map((e, i) => (
