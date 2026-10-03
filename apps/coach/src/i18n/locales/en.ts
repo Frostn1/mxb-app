@@ -422,7 +422,7 @@ export const en = {
   "line.hudOff": "The in-game HUD is off, so none of this shows. Turn it on under HUD & cues.",
   "line.lookTitle": "Line",
   "line.lookDesc": "Changes show in the game within a second, while you ride.",
-  "line.needs": "Needs the recorder from FrostMod 0.45.5 or newer. Update it under Recording.",
+  "line.needs": "Needs the recorder from FrostMod 0.46.1 or newer. Update it under Recording.",
   "line.width": "Width",
   "line.opacity": "Opacity",
   "line.colours": "Colours",

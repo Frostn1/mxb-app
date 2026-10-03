@@ -34,7 +34,7 @@ pub(crate) const JUMPS_NEED: &str = "0.44.1";
 /// the target gear on the line where Coach's lap shifts, when the rider is in another gear.
 pub(crate) const GEAR_NEEDS: &str = "0.45";
 /// The version that reads the line's look: its width, opacity and colours, and the text on it.
-pub(crate) const LOOK_NEEDS: &str = "0.45.5";
+pub(crate) const LOOK_NEEDS: &str = "0.46.1";
 
 /// The HUD parts, in the order the overlay lists them: key, label, whether the plugin draws it
 /// when the file doesn't say, and the recorder it needs.
@@ -301,7 +301,7 @@ pub fn coach_set_cue_pos(app: AppHandle, x: f32, y: f32) -> Result<Hud, String> 
 }
 
 /// The look of the line on the track and of the text on it, as `[hud]` keys in `hud.ini`. FrostMod
-/// 0.45.5 reads them; a key that isn't there is the look the line has always had, which is what
+/// 0.46.1 reads them; a key that isn't there is the look the line has always had, which is what
 /// [`LineLook::default`] is.
 #[derive(Clone, Debug, PartialEq, Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
