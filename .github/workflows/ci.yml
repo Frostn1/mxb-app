@@ -50,9 +50,6 @@ jobs:
       - name: Lint
         run: bun run lint
 
-      - name: MXB Servers frontend tests
-        run: bun run --filter @frost/servers test
-
       - name: Build
         run: bun run build
 
@@ -63,51 +60,13 @@ jobs:
       - name: Command census
         run: bash scripts/command-census.sh
 
-  # MXB Servers' config editing runs remote.sh on the server over SSH. This runs it for real
-  # against a bare-process layout like Lightsail's today, with a stub standing in for mxbserver.
-  servers-remote:
-    name: MXB Servers remote script
-    runs-on: ubuntu-latest
-    # It restarts processes; a hang must fail fast, not hold a runner for hours.
-    timeout-minutes: 10
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      - name: Shellcheck
-        run: shellcheck apps/servers/src-tauri/src/remote.sh apps/servers/src-tauri/tests/remote/test.sh apps/servers/src-tauri/tests/remote/ssh.sh
-      # Output to a file, not the step's own pipes: run straight on them the test sometimes
-      # hangs after a restart (never under SSH, never with a file; see ssh.sh for the real path).
-      - name: Apply, roll back and refuse against a stub server
-        run: |
-          rc=0
-          bash apps/servers/src-tauri/tests/remote/test.sh > remote-test.log 2>&1 || rc=$?
-          cat remote-test.log
-          exit $rc
-      - name: The same over real SSH, as the app runs it
-        run: |
-          rc=0
-          bash apps/servers/src-tauri/tests/remote/ssh.sh > remote-ssh.log 2>&1 || rc=$?
-          cat remote-ssh.log
-          exit $rc
-
   rust:
-    name: Rust (test) — ${{ matrix.platform }} — ${{ matrix.shard.name }}
+    name: Rust (test) — ${{ matrix.platform }}
     strategy:
       fail-fast: false
       matrix:
         # Linux is the quick check; Windows is what ships, so it must pass there too.
         platform: [ubuntu-latest, windows-latest]
-        # The studio's track tests were ~95% of this job: 820 s of synthesis and terrain noise
-        # on a 4-core runner. So they run as three jobs, split by measured time. Every shard
-        # compiles the same thing, so they share one cache; only the test filter differs.
-        # `rest` skips what the other two run, so a new module lands there rather than nowhere.
-        shard:
-          - name: synth
-            filter: "tracksynth::"
-          - name: layout
-            filter: "tracklayout:: trackllm::"
-          - name: rest
-            filter: "--skip tracksynth:: --skip tracklayout:: --skip trackllm::"
     runs-on: ${{ matrix.platform }}
     steps:
       - name: Checkout
@@ -148,7 +107,7 @@ jobs:
         # Tests needing a real MX Bikes asset are `#[ignore]`d and stay skipped here.
         # bash on Windows too, so the `--` reaches libtest rather than PowerShell.
         shell: bash
-        run: cargo test --workspace --locked -- ${{ matrix.shard.filter }}
+        run: cargo test --workspace --locked
 
   # The two things paint sync depends on that nothing was checking. Both ship separately from
   # the app — the agent runs on someone else's machine, and the Worker used to be deployed by

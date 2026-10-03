@@ -92,6 +92,21 @@ jobs:
           shared-key: release
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
+      # The Coach / Studio / MXB Servers source is private (Frostn1/mxb-apps-private). Read-only
+      # deploy key; apply.sh copies apps/* in quietly (no verbose output: this log is public).
+      - name: Fetch private apps source
+        if: ${{ github.repository == 'Frostn1/mxb-app' }}
+        uses: actions/checkout@v4
+        with:
+          repository: Frostn1/mxb-apps-private
+          ssh-key: ${{ secrets.APPS_PRIVATE_DEPLOY_KEY }}
+          path: .apps-private
+
+      - name: Apply private apps
+        if: ${{ github.repository == 'Frostn1/mxb-app' }}
+        shell: bash
+        run: bash .apps-private/apply.sh "$GITHUB_WORKSPACE"
+
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
@@ -148,6 +163,8 @@ jobs:
       - name: Build and publish release
         uses: tauri-apps/tauri-action@v0
         env:
+          # rustc warnings quote source lines; keep private source out of the public log.
+          RUSTFLAGS: "--cap-lints allow"
           # A fine-grained PAT with contents:write on frost-studio only. Deliberately not
           # GITHUB_TOKEN: that cannot write to another repository.
           GITHUB_TOKEN: ${{ secrets.STUDIO_RELEASE_TOKEN }}
