@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { errorText, serverLogs, serverRiders, serverTiming, type Rider, type ServerView } from "./api";
-import { diffRiders, diffTiming, newLogLines, parseLogLine, prepend, withNames, type ParsedEvent, type ServerEvent, type Timing } from "./events";
+import { dedupePenalties, diffRiders, diffTiming, newLogLines, parseLogLine, prepend, withNames, type ParsedEvent, type ServerEvent, type Timing } from "./events";
 
 const TIMING_MS = 1000;
 const LOG_MS = 3000;
@@ -32,7 +32,10 @@ export function useEventFeed(server: ServerView): EventFeed {
       source,
       backlog: backlog || undefined,
     }));
-    setEvents((buffer) => prepend(buffer, fresh));
+    setEvents((buffer) => {
+      const merged = dedupePenalties(buffer, fresh);
+      return prepend(merged.buffer, merged.fresh);
+    });
   }, []);
 
   useEffect(() => {

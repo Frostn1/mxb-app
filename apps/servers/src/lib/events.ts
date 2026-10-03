@@ -485,6 +485,38 @@ export function withNames(event: ParsedEvent, names: Map<number, string>): Parse
   return { ...event, riders: [name], summary: event.summary.replace(`#${race}`, `#${race} ${name}`), fields: { "Rider": name, ...event.fields } };
 }
 
+/** Who and how much a penalty event is about, so the log line and the `/timing` diff of one
+ *  penalty can be recognised as the same thing. */
+const penaltyKey = (e: ServerEvent): string | null => {
+  if (e.kind !== "penalty" || !e.riders[0] || (e.source !== "log" && e.source !== "timing")) return null;
+  const added = e.fields["Added (s)"];
+  return `${e.riders[0]}|${typeof added === "number" ? added : e.fields["Disqualified"] ? "dsq" : ""}`;
+};
+
+/** One row per penalty: a `/timing` penalty is dropped when the log line for the same rider and
+ *  amount is within `windowMs` (either arrived first), and the log row wins because it carries
+ *  the zone. Returns the buffer (a timing twin removed) and the fresh events still to add. */
+export function dedupePenalties(buffer: ServerEvent[], fresh: ServerEvent[], windowMs = 10_000): { buffer: ServerEvent[]; fresh: ServerEvent[] } {
+  let kept = buffer;
+  const out: ServerEvent[] = [];
+  for (const e of fresh) {
+    const key = penaltyKey(e);
+    if (!key) {
+      out.push(e);
+      continue;
+    }
+    const twin = (x: ServerEvent) => x.source !== e.source && penaltyKey(x) === key && Math.abs(x.at - e.at) <= windowMs;
+    if (e.source === "timing") {
+      if (out.some(twin) || kept.some(twin)) continue;
+    } else {
+      kept = kept.filter((x) => !(x.source === "timing" && twin(x)));
+      for (let i = out.length - 1; i >= 0; i--) if (out[i].source === "timing" && twin(out[i])) out.splice(i, 1);
+    }
+    out.push(e);
+  }
+  return { buffer: kept, fresh: out };
+}
+
 /** New events go first; the oldest fall off past `cap`. */
 export function prepend(buffer: ServerEvent[], fresh: ServerEvent[], cap = MAX_EVENTS): ServerEvent[] {
   if (fresh.length === 0) return buffer;
