@@ -335,12 +335,14 @@ pub fn read_meta_and_preview_under(
     Ok((meta, preview))
 }
 
-/// Top-level `.ini`: fewest path segments, then shortest.
+/// Top-level `.ini`: fewest path segments, then shortest. Never Windows' `desktop.ini`: a pack
+/// zipped from an Explorer-customised folder carries one next to the real file, and being
+/// shorter it won, so the pack read as having no `pic`, no name and no length.
 fn top_ini_index(names: &[String]) -> Option<usize> {
     names
         .iter()
         .enumerate()
-        .filter(|(_, n)| n.to_ascii_lowercase().ends_with(".ini"))
+        .filter(|(_, n)| n.to_ascii_lowercase().ends_with(".ini") && base_stem(n) != "desktop")
         .min_by_key(|(_, n)| (n.matches('/').count(), n.len()))
         .map(|(i, _)| i)
 }
@@ -424,14 +426,15 @@ fn inspect_zip_under(
     }
 
     let mut image = None;
-    if let Some(img_idx) = pick_image(&names, &ini_dir, pic.as_deref()) {
-        if let Ok(mut f) = archive.by_index(at(img_idx)) {
-            let mut bytes = Vec::new();
-            if f.read_to_end(&mut bytes).is_ok() {
-                meta.thumbnail = make_thumbnail(&names[img_idx], &bytes, THUMB_MAX);
-                image = Some((names[img_idx].clone(), bytes));
-            }
-        }
+    let picked = pick_decodable(&names, &ini_dir, pic.as_deref(), |i| {
+        let mut f = archive.by_index(at(i)).ok()?;
+        let mut bytes = Vec::new();
+        f.read_to_end(&mut bytes).ok()?;
+        Some(bytes)
+    });
+    if let Some((i, bytes, thumb)) = picked {
+        meta.thumbnail = Some(thumb);
+        image = Some((names[i].clone(), bytes));
     }
 
     if let Some(logo_idx) = logo_index(&names) {
@@ -477,11 +480,12 @@ fn inspect_dir(dir: &Path) -> Result<(PkzMeta, Option<(String, Vec<u8>)>)> {
     }
 
     let mut image = None;
-    if let Some(img_idx) = pick_image(&names, &ini_dir, pic.as_deref()) {
-        if let Ok(bytes) = std::fs::read(&rels[img_idx].1) {
-            meta.thumbnail = make_thumbnail(&names[img_idx], &bytes, THUMB_MAX);
-            image = Some((names[img_idx].clone(), bytes));
-        }
+    let picked = pick_decodable(&names, &ini_dir, pic.as_deref(), |i| {
+        std::fs::read(&rels[i].1).ok()
+    });
+    if let Some((i, bytes, thumb)) = picked {
+        meta.thumbnail = Some(thumb);
+        image = Some((names[i].clone(), bytes));
     }
 
     if let Some(logo_idx) = logo_index(&names) {
@@ -515,10 +519,10 @@ fn meta_from_entries(entries: &[(String, Vec<u8>)]) -> (PkzMeta, Option<(String,
     }
 
     let mut image = None;
-    if let Some(img_idx) = pick_image(&names, &ini_dir, pic.as_deref()) {
-        let bytes = &entries[img_idx].1;
-        meta.thumbnail = make_thumbnail(&names[img_idx], bytes, THUMB_MAX);
-        image = Some((names[img_idx].clone(), bytes.clone()));
+    let picked = pick_decodable(&names, &ini_dir, pic.as_deref(), |i| Some(entries[i].1.clone()));
+    if let Some((i, bytes, thumb)) = picked {
+        meta.thumbnail = Some(thumb);
+        image = Some((names[i].clone(), bytes));
     }
 
     if let Some(logo_idx) = logo_index(&names) {
@@ -709,20 +713,61 @@ fn parse_ini(text: &str, meta: &mut PkzMeta, pic: &mut Option<String>) {
 }
 
 fn pick_image(names: &[String], ini_dir: &str, pic: Option<&str>) -> Option<usize> {
+    image_candidates(names, ini_dir, pic).into_iter().next()
+}
+
+/// Every image worth trying as the preview, best first: the `.ini`'s own `pic` (any format the
+/// decoder knows, `.dds` included), then the remaining images by name score. Only the first
+/// that decodes to something plausible is used, see [`pick_decodable`].
+fn image_candidates(names: &[String], ini_dir: &str, pic: Option<&str>) -> Vec<usize> {
+    let mut out = Vec::new();
     if let Some(pic) = pic {
         let want = join_entry(ini_dir, pic).to_ascii_lowercase();
         if let Some(i) = names.iter().position(|n| n.to_ascii_lowercase() == want) {
-            return Some(i);
+            out.push(i);
         }
     }
 
-    // No usable `pic` — pick the best-scoring image.
-    names
+    // No usable `pic` (or it would not decode) — the best-scoring images, a handful at most.
+    let mut ranked: Vec<usize> = names
         .iter()
         .enumerate()
-        .filter(|(_, n)| is_image(n) && !is_bike_artwork(n))
-        .max_by_key(|(_, n)| image_score(n))
+        .filter(|(i, n)| {
+            is_image(n) && !is_bike_artwork(n) && !is_hud_font(n) && !out.contains(i)
+        })
         .map(|(i, _)| i)
+        .collect();
+    ranked.sort_by_key(|&i| (std::cmp::Reverse(image_score(&names[i])), std::cmp::Reverse(i)));
+    out.extend(ranked.into_iter().take(MAX_PREVIEW_CANDIDATES));
+    out
+}
+
+/// How many fallback images are decoded before giving up on a pack that has no picture.
+const MAX_PREVIEW_CANDIDATES: usize = 6;
+
+/// The first candidate that reads and decodes to a plausible picture: its index, bytes and
+/// card thumbnail. A `pic` the decoder cannot read, or a glyph strip standing in for a photo,
+/// falls through to the next candidate instead of becoming the hero image.
+fn pick_decodable(
+    names: &[String],
+    ini_dir: &str,
+    pic: Option<&str>,
+    mut read: impl FnMut(usize) -> Option<Vec<u8>>,
+) -> Option<(usize, Vec<u8>, String)> {
+    for i in image_candidates(names, ini_dir, pic) {
+        let Some(bytes) = read(i) else { continue };
+        if let Some(thumb) = make_thumbnail(&names[i], &bytes, THUMB_MAX) {
+            return Some((i, bytes, thumb));
+        }
+    }
+    None
+}
+
+/// The digit and letter strips a track's `gfx.cfg` draws its timer and standings from
+/// (`number.tga`, `number_standings.tga`): HUD fonts on transparency, never a picture of the
+/// track. Their colour channel under the alpha is a flat fill with a fine stripe pattern.
+fn is_hud_font(name: &str) -> bool {
+    base_stem(name).starts_with("number")
 }
 
 /// A path's file name without its extension, folded to lower case.
@@ -846,8 +891,46 @@ fn make_badge(name: &str, bytes: &[u8], max: u32) -> Option<String> {
     Some(format!("data:image/png;base64,{b64}"))
 }
 
+/// Whether a decoded picture can be a photo of anything: not a sliver (a font strip or a
+/// mis-sized texture is 5:1 or worse), not a flat fill, and not nearly all transparent. The
+/// last two are what a wrongly-decoded texture tends to look like.
+fn plausible_picture(img: &image::DynamicImage) -> bool {
+    let (w, h) = (img.width(), img.height());
+    if w < 8 || h < 8 || w.max(h) > h.min(w).saturating_mul(MAX_PICTURE_ASPECT) {
+        return false;
+    }
+    // Judge a small version: cheap, and averaging keeps the stripes of a bad decode visible
+    // as variance only if they are real structure.
+    let small = img.thumbnail(32, 32).to_rgba8();
+    let (mut sum, mut sum_sq, mut n, mut opaque) = (0f64, 0f64, 0f64, 0u32);
+    for p in small.pixels() {
+        let [r, g, b, a] = p.0;
+        if a >= 16 {
+            opaque += 1;
+        }
+        let l = 0.299 * r as f64 + 0.587 * g as f64 + 0.114 * b as f64;
+        sum += l;
+        sum_sq += l * l;
+        n += 1.0;
+    }
+    if n == 0.0 || (opaque as f64) < n * 0.25 {
+        return false;
+    }
+    let mean = sum / n;
+    let std = (sum_sq / n - mean * mean).max(0.0).sqrt();
+    std >= MIN_PICTURE_STDDEV
+}
+
+/// The widest a preview may be before it is a strip rather than a picture.
+const MAX_PICTURE_ASPECT: u32 = 5;
+/// Luminance spread (0-255) below which an image is a flat fill.
+const MIN_PICTURE_STDDEV: f64 = 3.0;
+
 fn make_thumbnail(name: &str, bytes: &[u8], max: u32) -> Option<String> {
     let img = decode_image(name, bytes)?;
+    if !plausible_picture(&img) {
+        return None;
+    }
 
     // Drop to RGB — JPEG can't hold the alpha a TGA may decode to.
     let thumb = image::DynamicImage::ImageRgb8(img.thumbnail(max, max).to_rgb8());
@@ -1597,6 +1680,96 @@ mod tests {
         let decoded = image::load_from_memory(&bytes).unwrap().to_rgba8();
         assert_eq!(decoded.dimensions(), (64, 96));
         assert_eq!(decoded.get_pixel(24, 40).0[3], 0);
+    }
+
+    /// A 16x16 DXT5 `.dds` whose blocks differ in colour, the shape of a track's `cover.dds`.
+    fn dxt5_dds() -> Vec<u8> {
+        let mut d = Vec::new();
+        d.extend_from_slice(b"DDS ");
+        let mut hdr = [0u32; 31];
+        hdr[0] = 124; // dwSize
+        hdr[1] = 0x0008_1007; // CAPS | HEIGHT | WIDTH | PIXELFORMAT | LINEARSIZE
+        hdr[2] = 16; // height
+        hdr[3] = 16; // width
+        hdr[4] = 256; // linear size
+        hdr[18] = 32; // pixel format size
+        hdr[19] = 4; // DDPF_FOURCC
+        hdr[20] = u32::from_le_bytes(*b"DXT5");
+        hdr[26] = 0x1000; // DDSCAPS_TEXTURE
+        for v in hdr {
+            d.extend_from_slice(&v.to_le_bytes());
+        }
+        for block in 0..16u16 {
+            d.extend_from_slice(&[255, 255, 0, 0, 0, 0, 0, 0]); // opaque alpha
+            let c0 = block.wrapping_mul(0x1111) | 0x0841;
+            d.extend_from_slice(&c0.to_le_bytes());
+            d.extend_from_slice(&0u16.to_le_bytes());
+            d.extend_from_slice(&[0, 0, 0, 0]); // every texel = colour 0
+        }
+        d
+    }
+
+    fn png_of(img: image::RgbaImage) -> Vec<u8> {
+        let mut png = Vec::new();
+        image::DynamicImage::ImageRgba8(img)
+            .write_to(&mut Cursor::new(&mut png), image::ImageFormat::Png)
+            .unwrap();
+        png
+    }
+
+    fn photo(w: u32, h: u32) -> Vec<u8> {
+        png_of(image::RgbaImage::from_fn(w, h, |x, y| {
+            image::Rgba([(x * 7) as u8, (y * 5) as u8, 90, 255])
+        }))
+    }
+
+    /// `WDR.MX.26.R01` names `pic = cover.dds`, a DXT5 texture the card never decoded.
+    #[test]
+    fn a_dxt5_cover_decodes() {
+        let thumb = make_thumbnail("T/cover.dds", &dxt5_dds(), THUMB_MAX).expect("dds thumbnail");
+        assert!(thumb.starts_with("data:image/jpeg;base64,"));
+    }
+
+    /// The `WDR.MX.26.R01` layout: Explorer's `desktop.ini` beside the track's own, shorter.
+    #[test]
+    fn desktop_ini_is_not_the_track_ini() {
+        let names: Vec<String> = ["T/desktop.ini", "T/T.ini", "T/number.tga"].map(String::from).into();
+        assert_eq!(top_ini_index(&names), Some(1));
+    }
+
+    #[test]
+    fn implausible_pictures_are_rejected() {
+        // A glyph strip: 792x108 like `number.tga`, 7:1.
+        assert_eq!(make_thumbnail("number.png", &photo(792, 108), THUMB_MAX), None);
+        // A flat fill.
+        let flat = png_of(image::RgbaImage::from_pixel(64, 64, image::Rgba([160, 150, 40, 255])));
+        assert_eq!(make_thumbnail("a.png", &flat, THUMB_MAX), None);
+        // Almost entirely transparent.
+        let ghost = png_of(image::RgbaImage::from_fn(64, 64, |x, _| {
+            image::Rgba([(x * 4) as u8, 90, 20, if x < 4 { 255 } else { 0 }])
+        }));
+        assert_eq!(make_thumbnail("a.png", &ghost, THUMB_MAX), None);
+        assert!(make_thumbnail("a.png", &photo(64, 48), THUMB_MAX).is_some());
+    }
+
+    #[test]
+    fn a_pic_that_will_not_decode_falls_to_the_next_image() {
+        let names: Vec<String> =
+            ["T/T.ini", "T/cover.bin", "T/number.tga", "T/preview.png"].map(String::from).into();
+        let files: Vec<Vec<u8>> =
+            vec![vec![], b"not an image".to_vec(), photo(792, 108), photo(64, 48)];
+        let got = pick_decodable(&names, "T", Some("cover.bin"), |i| Some(files[i].clone()));
+        assert_eq!(got.map(|(i, _, _)| i), Some(3));
+    }
+
+    /// The `WDR` pack: a `cover.dds` it cannot read plus only HUD number strips beside it.
+    #[test]
+    fn hud_font_strips_are_never_the_preview() {
+        let names: Vec<String> = ["T/T.ini", "T/cover.bin", "T/number.tga", "T/number_standings.tga"]
+            .map(String::from)
+            .into();
+        let files: Vec<Vec<u8>> = vec![vec![], vec![0; 8], photo(64, 48), photo(64, 48)];
+        assert!(pick_decodable(&names, "T", Some("cover.bin"), |i| Some(files[i].clone())).is_none());
     }
 
     #[test]

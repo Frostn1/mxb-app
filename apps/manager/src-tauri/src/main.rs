@@ -5059,7 +5059,8 @@ mod card_art_tests {
         let root = std::env::temp_dir().join(format!("card-art-{}", std::process::id()));
         let track = root.join("Walnut");
         std::fs::create_dir_all(&track).unwrap();
-        image::RgbImage::from_pixel(1600, 900, image::Rgb([200, 120, 40]))
+        // Not a flat fill: a flat preview is rejected as implausible.
+        image::RgbImage::from_fn(1600, 900, |x, y| image::Rgb([(x / 7) as u8, (y / 4) as u8, 40]))
             .save(track.join("preview.png"))
             .unwrap();
         let entry = library::LibraryEntry {
