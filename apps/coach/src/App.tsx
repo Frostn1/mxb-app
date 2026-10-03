@@ -4,8 +4,7 @@ import { appPlatform, getConfig, listGames } from "@frost/shared/api/mods";
 import type { Config, GameInfo } from "@frost/shared/types";
 import { ConfigContext, MXB_FALLBACK } from "@frost/shared/Context/Config";
 import { ThemeProvider, useTheme } from "@frost/shared/Context/Theme";
-import Rail, { RailButton, type RailEntry } from "@frost/shared/Components/Shell/Rail";
-import TitleBar from "@frost/shared/Components/Shell/TitleBar";
+import AppBar from "@frost/shared/Components/Shell/AppBar";
 import { I18nProvider, setAmbientVars, useT } from "@/i18n";
 import Sessions from "./Components/Sessions/Sessions";
 import Settings, { type SectionId } from "./Components/Settings/Settings";
@@ -17,22 +16,6 @@ import SigninGate from "@frost/shared/Components/SigninGate/SigninGate";
 import SurveyPrompt from "@frost/shared/Components/Survey/SurveyPrompt";
 
 type View = "sessions" | "settings";
-
-/** "MXB Coach by mxbsecure" on one line, the wordmark MXB App uses. Grabs the window. */
-function Brand() {
-  return (
-    <div data-tauri-drag-region className="select-none whitespace-nowrap px-2.5 pt-0.5">
-      <span data-tauri-drag-region className="flex items-baseline gap-2 font-cond">
-        <span data-tauri-drag-region className="text-sm font-extrabold tracking-[-0.04em] text-foreground">
-          MXB Coach
-        </span>
-        <span data-tauri-drag-region className="text-[11px] font-medium text-faint">
-          by <span className="font-semibold text-muted-foreground">mxbsecure</span>
-        </span>
-      </span>
-    </div>
-  );
-}
 
 function Shell() {
   const t = useT();
@@ -74,30 +57,30 @@ function Shell() {
     [config, reloadConfig, games, game],
   );
 
-  const entries: RailEntry<View>[] = [{ id: "sessions", label: t("nav.sessions") }];
+  // Top-level views as tabs; Settings is the gear, not a tab.
+  const tabs = [{ id: "sessions", label: t("nav.sessions") }];
 
   return (
     <ConfigContext.Provider value={ctx}>
       <div className="flex h-screen flex-col bg-background text-foreground">
-        <TitleBar />
+        <AppBar
+          name="MXB Coach"
+          tabs={tabs}
+          active={view === "settings" ? undefined : view}
+          onPick={(id) => setView(id as View)}
+          onSettings={() => {
+            setSettingsAt("general");
+            setView("settings");
+          }}
+          settingsActive={view === "settings"}
+          settingsLabel={t("nav.settings")}
+          windowLabels={{
+            minimize: t("window.minimize"),
+            maximize: t("window.maximize"),
+            close: t("window.close"),
+          }}
+        />
         <div className="flex min-h-0 flex-1">
-          <Rail
-            entries={entries}
-            active={view}
-            onPick={setView}
-            header={<Brand />}
-            className="w-[212px]"
-            footer={
-              <RailButton
-                label={t("nav.settings")}
-                on={view === "settings"}
-                onClick={() => {
-                  setSettingsAt("general");
-                  setView("settings");
-                }}
-              />
-            }
-          />
           <main className="flex min-w-0 flex-1 flex-col">
             <UpdateBanner />
             <div className="min-h-0 flex-1">

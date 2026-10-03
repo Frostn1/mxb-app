@@ -5,9 +5,13 @@ import { relaunch } from "@tauri-apps/plugin-process";
 import { toast } from "sonner";
 import { useT } from "@/i18n";
 
-/** The updater only works inside the Tauri runtime (no-op in the browser). */
+/**
+ * The updater only works inside the Tauri runtime (no-op in the browser) — and never in a dev
+ * build: `tauri dev` would otherwise offer, download and install the release over the dev
+ * build. `import.meta.env.DEV` is false in a release bundle.
+ */
 function inTauri(): boolean {
-  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+  return !import.meta.env.DEV && typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 }
 
 /** localStorage key remembering the last update version the user dismissed. */
@@ -91,7 +95,7 @@ export function UpdateProvider({ children }: { children: React.ReactNode }) {
   );
 
   const install = useCallback(async () => {
-    if (!available || installing) return;
+    if (!inTauri() || !available || installing) return;
     setInstalling(true);
     setProgress(null);
     try {

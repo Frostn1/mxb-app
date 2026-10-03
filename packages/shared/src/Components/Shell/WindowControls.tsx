@@ -11,28 +11,41 @@ const appWindow = getCurrentWindow();
  */
 export const IS_MAC = navigator.userAgent.includes("Mac");
 
-export default function WindowControls({ className }: { className?: string }) {
+export interface WindowLabels {
+  minimize: string;
+  maximize: string;
+  close: string;
+}
+
+const EN: WindowLabels = { minimize: "Minimize", maximize: "Maximize", close: "Close" };
+
+/** `wide` is the app title bar's size (`AppBar`); the studio's thin bar keeps the compact one. */
+export default function WindowControls({
+  className,
+  labels = EN,
+  wide,
+}: {
+  className?: string;
+  labels?: WindowLabels;
+  wide?: boolean;
+}) {
   if (IS_MAC) return null;
+  const btn = cn(
+    "grid h-full cursor-default place-items-center text-muted-foreground transition-colors",
+    wide ? "w-[46px] hover:bg-foreground/[0.06]" : "w-[42px] hover:bg-white/[0.06]",
+  );
   return (
     <div className={cn("flex h-full", className)}>
-      <button
-        onClick={() => appWindow.minimize()}
-        title="Minimize"
-        className="grid h-full w-[42px] cursor-default place-items-center text-muted-foreground transition-colors hover:bg-white/[0.06]"
-      >
+      <button onClick={() => appWindow.minimize()} title={labels.minimize} className={btn}>
         <Minus className="size-4" />
       </button>
-      <button
-        onClick={() => appWindow.toggleMaximize()}
-        title="Maximize"
-        className="grid h-full w-[42px] cursor-default place-items-center text-muted-foreground transition-colors hover:bg-white/[0.06]"
-      >
-        <Square className="size-[12px]" />
+      <button onClick={() => appWindow.toggleMaximize()} title={labels.maximize} className={btn}>
+        <Square className={wide ? "size-[13px]" : "size-[12px]"} />
       </button>
       <button
         onClick={() => appWindow.close()}
-        title="Close"
-        className="grid h-full w-[42px] cursor-default place-items-center text-muted-foreground transition-colors hover:bg-destructive hover:text-destructive-foreground"
+        title={labels.close}
+        className={cn(btn, "hover:bg-destructive hover:text-destructive-foreground")}
       >
         <X className="size-4" />
       </button>
