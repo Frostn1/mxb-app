@@ -48,6 +48,9 @@ export interface SavedCardProps {
   onWait: (s: MasterServer) => void;
   onInstall: (s: MasterServer, product: CatalogTrack) => void;
   onInstallJoin: (s: MasterServer, product: CatalogTrack) => void;
+  /** Track id to the `rel` of a copy Manage has parked. */
+  inactive: Record<string, string>;
+  onActivateJoin: (s: MasterServer, rel: string) => void;
   onCopy: (address: string) => void;
   onToggleFavourite: (address: string) => void;
 }
@@ -132,6 +135,8 @@ const SavedServers = ({
               installing={cards.installingAt.has(s.address)}
               onInstall={cards.onInstall}
               onInstallJoin={cards.onInstallJoin}
+              inactive={cards.inactive[s.track]}
+              onActivateJoin={cards.onActivateJoin}
               favourite={cards.favourite(s.address)}
               paintSync={cards.paintSync[s.address] ?? 0}
               joining={cards.joining === s.address}

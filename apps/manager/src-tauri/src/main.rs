@@ -4089,6 +4089,10 @@ pub struct TrackGuess {
     /// "we think" for these, because an internal id is not a product title and a fold of one
     /// onto the other is a guess however good it looks.
     pub exact: bool,
+    /// The player has this track but Manage has switched it off: the `rel` that
+    /// `mods_state_set` turns back on. Empty otherwise. `installed` stays empty for these,
+    /// because the game cannot see the track until it is switched on.
+    pub inactive: String,
 }
 
 /// Work out which track a server means.
@@ -4122,10 +4126,16 @@ async fn guess_server_track(
     // sell the player a track they already have.
     if let Ok(entries) = server_track_entries(app.clone()).await {
         let want = id.clone();
-        let hit = tauri::async_runtime::spawn_blocking(move || entries.find(&want))
+        let (hit, parked) = tauri::async_runtime::spawn_blocking(move || {
+            (entries.find(&want), entries.find_inactive(&want).map(|(_, rel)| rel.clone()))
+        })
         .await
-        .ok()
-        .flatten();
+        .unwrap_or_default();
+        // On disk but switched off in Manage. Not installed as far as the game is concerned,
+        // and not something to download again either: the panel offers to switch it on.
+        if let Some(rel) = parked {
+            guess.inactive = rel;
+        }
         if let Some(hit) = hit {
             guess.installed = mxb_core::library::strip_ext(&hit.name);
             guess.exact = true;
@@ -4375,16 +4385,30 @@ struct TrackLibraryCache {
 struct TrackLibrarySnapshot {
     entries: Vec<library::LibraryEntry>,
     installed: std::collections::HashMap<String, usize>,
+    /// Tracks Manage has switched off: parked in `mxbapp_disabled/tracks`, out of the game's
+    /// sight but still on disk. Each carries the `rel` that `mods_state_set` turns back on.
+    parked: Vec<(library::LibraryEntry, String)>,
+    inactive: std::collections::HashMap<String, usize>,
+}
+
+/// One scan of the track library: what the game can see, and what Manage has parked.
+#[derive(Default)]
+struct TrackScan {
+    active: Vec<library::LibraryEntry>,
+    parked: Vec<(library::LibraryEntry, String)>,
 }
 
 impl TrackLibrarySnapshot {
-    fn new(entries: Vec<library::LibraryEntry>) -> Self {
-        let installed = track_index(&entries, |entry| {
+    fn new(scan: TrackScan) -> Self {
+        let folder = |entry: &library::LibraryEntry| {
             cached(&TRACK_FOLDERS, (entry.path.clone(), entry.size, entry.modified), || {
                 mxb_core::track::folder_name(std::path::Path::new(&entry.path))
             })
-        });
-        Self { entries, installed }
+        };
+        let installed = track_index(&scan.active, folder);
+        let parked_entries: Vec<_> = scan.parked.iter().map(|(e, _)| e.clone()).collect();
+        let inactive = track_index(&parked_entries, folder);
+        Self { entries: scan.active, installed, parked: scan.parked, inactive }
     }
 
     fn find(&self, id: &str) -> Option<library::LibraryEntry> {
@@ -4393,6 +4417,67 @@ impl TrackLibrarySnapshot {
             .and_then(|index| self.entries.get(*index))
             .cloned()
     }
+
+    /// The `rel` that turns this track back on, when the player has it but Manage has parked
+    /// it. `None` when it is active (that is [`Self::find`]'s answer) or not on disk at all.
+    fn find_inactive(&self, id: &str) -> Option<&(library::LibraryEntry, String)> {
+        let key = mxb_core::tracksource::key(id);
+        if self.installed.contains_key(&key) {
+            return None;
+        }
+        self.inactive.get(&key).and_then(|index| self.parked.get(*index))
+    }
+}
+
+/// A fingerprint of every folder under `dir`: its path and modified time, all the way down.
+///
+/// The snapshot used to be keyed on `mods/tracks`' own mtime, which only moves when something
+/// is added *directly* inside it. Tracks sorted into `mods/tracks/supercross/` change that
+/// subfolder's mtime and nothing above it, so a track copied there while the app was open
+/// read as missing until restart — and the server browser offered to download it again.
+fn tree_stamp(dir: &std::path::Path) -> u64 {
+    use std::hash::{Hash, Hasher};
+    fn walk(dir: &std::path::Path, depth: u32, h: &mut std::collections::hash_map::DefaultHasher) {
+        let Ok(meta) = std::fs::metadata(dir) else { return };
+        dir.hash(h);
+        library::mtime_ms(&meta).hash(h);
+        // Deep enough for any category/track/subfolder layout; a cap so a junction loop
+        // can't keep this walking.
+        if depth >= 8 {
+            return;
+        }
+        let Ok(rd) = std::fs::read_dir(dir) else { return };
+        let mut dirs: Vec<_> = rd
+            .flatten()
+            .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
+            .map(|e| e.path())
+            .collect();
+        dirs.sort();
+        for d in dirs {
+            walk(&d, depth + 1, h);
+        }
+    }
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    walk(dir, 0, &mut h);
+    h.finish()
+}
+
+/// Parked tracks under `<root>/mxbapp_disabled/tracks`, each with the `rel` it is enabled by.
+fn scan_parked_tracks(mods_path: &str, game: &game::GameProfile) -> Vec<(library::LibraryEntry, String)> {
+    let shadow = modstate::shadow_root(mods_path);
+    if !shadow.is_dir() {
+        return Vec::new();
+    }
+    let shadow_str = shadow.to_string_lossy().into_owned();
+    library::scan_library(&shadow_str, "tracks", &[], game)
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|e| {
+            let parked = std::path::Path::new(&e.path).strip_prefix(&shadow).ok()?;
+            let rel = format!("mods/{}", parked.to_string_lossy().replace('\\', "/"));
+            Some((e, rel))
+        })
+        .collect()
 }
 
 fn track_index(
@@ -4424,7 +4509,7 @@ impl TrackLibraryCache {
     fn get_or_scan(
         &self,
         key: String,
-        scan: impl FnOnce() -> Result<Vec<library::LibraryEntry>, String>,
+        scan: impl FnOnce() -> Result<TrackScan, String>,
     ) -> Result<std::sync::Arc<TrackLibrarySnapshot>, String> {
         loop {
             let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
@@ -4472,14 +4557,21 @@ async fn server_track_entries(
     app: tauri::AppHandle,
 ) -> Result<std::sync::Arc<TrackLibrarySnapshot>, String> {
     let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
-    let tracks_dir = library::mods_subdir(&cfg.mods_path, "mods/tracks");
-    let directory_stamp = std::fs::metadata(&tracks_dir)
-        .map(|metadata| library::mtime_ms(&metadata))
-        .unwrap_or(0);
-    let key = format!("{}\0{}\0{directory_stamp}", cfg.mods_path, cfg.game().id);
     tauri::async_runtime::spawn_blocking(move || {
+        // Every folder in both trees, not just the two roots: see `tree_stamp`.
+        let tracks_dir = library::mods_subdir(&cfg.mods_path, "mods/tracks");
+        let parked_dir = modstate::shadow_root(&cfg.mods_path).join("tracks");
+        let key = format!(
+            "{}\0{}\0{:x}\0{:x}",
+            cfg.mods_path,
+            cfg.game().id,
+            tree_stamp(&tracks_dir),
+            tree_stamp(&parked_dir),
+        );
         SERVER_TRACK_LIBRARY.get_or_scan(key, || {
-            scan_library_blocking(app, "mods/tracks".into())
+            let parked = scan_parked_tracks(&cfg.mods_path, cfg.game());
+            let active = scan_library_blocking(app, "mods/tracks".into())?;
+            Ok(TrackScan { active, parked })
         })
     })
     .await
@@ -4489,6 +4581,24 @@ async fn server_track_entries(
 #[tauri::command]
 fn invalidate_server_track_cache() {
     SERVER_TRACK_LIBRARY.invalidate();
+}
+
+/// Of these track ids, the ones the player has but Manage has switched off, each mapped to the
+/// `rel` that `mods_state_set` turns back on. Active and absent ids are left out. One call for
+/// the whole list, off the same snapshot as [`server_track_previews`].
+#[tauri::command]
+async fn server_track_inactive(
+    app: tauri::AppHandle,
+    tracks: Vec<String>,
+) -> Result<std::collections::HashMap<String, String>, String> {
+    let snapshot = server_track_entries(app).await?;
+    Ok(tracks
+        .into_iter()
+        .filter_map(|id| {
+            let rel = snapshot.find_inactive(&id)?.1.clone();
+            Some((id, rel))
+        })
+        .collect())
 }
 
 /// A file by path, size and mtime, so a cache entry dies with the file it came from.
@@ -4767,7 +4877,7 @@ mod card_art_tests {
                     .get_or_scan("mods\0mxb".into(), || {
                         scans.fetch_add(1, Ordering::SeqCst);
                         std::thread::sleep(std::time::Duration::from_millis(20));
-                        Ok(vec![entry("Walnut")])
+                        Ok(TrackScan { active: vec![entry("Walnut")], ..Default::default() })
                     })
                     .unwrap()
             }));
@@ -4781,7 +4891,7 @@ mod card_art_tests {
         cache
             .get_or_scan("mods\0mxb".into(), || {
                 scans.fetch_add(1, Ordering::SeqCst);
-                Ok(vec![])
+                Ok(TrackScan::default())
             })
             .unwrap();
         assert_eq!(scans.load(Ordering::SeqCst), 1, "an unchanged sweep does no scan");
@@ -4790,7 +4900,7 @@ mod card_art_tests {
         cache
             .get_or_scan("mods\0mxb".into(), || {
                 scans.fetch_add(1, Ordering::SeqCst);
-                Ok(vec![entry("New Track")])
+                Ok(TrackScan { active: vec![entry("New Track")], ..Default::default() })
             })
             .unwrap();
         assert_eq!(scans.load(Ordering::SeqCst), 2, "install invalidation permits one rescan");
@@ -4812,7 +4922,12 @@ mod card_art_tests {
             let n = discoveries.fetch_add(1, Ordering::SeqCst);
             Some(folders[n].into())
         });
-        let snapshot = TrackLibrarySnapshot { entries, installed: index };
+        let snapshot = TrackLibrarySnapshot {
+            entries,
+            installed: index,
+            parked: Vec::new(),
+            inactive: Default::default(),
+        };
 
         for id in ["track_one", "TRACKTWO", "Track Three"] {
             assert!(snapshot.find(id).is_some(), "{id} should use the prebuilt index");
@@ -4822,6 +4937,51 @@ mod card_art_tests {
             3,
             "N lookups must not repeat the one discovery pass over three entries",
         );
+    }
+
+    /// A track dropped into a category subfolder while the app is open changes that
+    /// subfolder's mtime and nothing above it. The snapshot key has to notice.
+    #[test]
+    fn tree_stamp_sees_a_track_added_to_a_subfolder() {
+        let root = std::env::temp_dir().join(format!("mxb-tree-stamp-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let sub = root.join("supercross");
+        std::fs::create_dir_all(&sub).unwrap();
+        let before = tree_stamp(&root);
+        let root_mtime = std::fs::metadata(&root).unwrap().modified().unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(30));
+        std::fs::write(sub.join("Fakey Mx - FMX - Somewhere.pkz"), b"x").unwrap();
+        assert_eq!(
+            std::fs::metadata(&root).unwrap().modified().unwrap(),
+            root_mtime,
+            "the top folder's own mtime does not move (the old cache key)",
+        );
+        assert_ne!(tree_stamp(&root), before, "the tree stamp does");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_dashed_server_name_finds_its_file_and_parked_tracks_are_inactive() {
+        let mut nested = entry("Fakey Mx - FMX - Somewhere.pkz");
+        nested.path = "supercross/Fakey Mx - FMX - Somewhere.pkz".into();
+        let scan = TrackScan {
+            active: vec![nested],
+            parked: vec![
+                (entry("Parked Park.pkz"), "mods/tracks/motocross/Parked Park.pkz".into()),
+                // Parked AND active: the active copy wins, nothing to switch on.
+                (entry("Fakey Mx - FMX - Somewhere.pkz"), "mods/tracks/x.pkz".into()),
+            ],
+        };
+        let snapshot = TrackLibrarySnapshot::new(scan);
+        // The en-dash spelling a catalogue uses folds the same as the file's hyphens.
+        assert!(snapshot.find("Fakey Mx - FMX - Somewhere").is_some());
+        assert!(snapshot.find("fakey mx – fmx – somewhere").is_some());
+        assert!(snapshot.find_inactive("Fakey Mx - FMX - Somewhere").is_none());
+
+        assert!(snapshot.find("Parked Park").is_none(), "parked is not installed");
+        let (_, rel) = snapshot.find_inactive("parked_park").expect("parked is inactive");
+        assert_eq!(rel, "mods/tracks/motocross/Parked Park.pkz");
+        assert!(snapshot.find_inactive("Nowhere Raceway").is_none());
     }
 
     #[test]
@@ -5189,8 +5349,32 @@ fn shop_title_matches_server_id(canonical_id: &str, title: &str) -> bool {
     // rotation ids are the exception: `2026_ARLSX_RD09` names a unique season/series/round
     // but omits Indianapolis. A title beginning with that complete round identity is equally
     // exact, while the round marker prevents a broad prefix such as `2026 ARL SX` matching.
-    canonical_id.contains(&canonical_title)
-        || (canonical_id.contains("round") && canonical_title.starts_with(canonical_id))
+    //
+    // Both comparisons are on compact strings, so a number has to be matched whole: `round1`
+    // is a string prefix of `round17`, and that is how `2026_ARLSX_RD01_PRO` was once
+    // "exactly" `2026 SPX ARL SX ROUND 17`.
+    contains_whole_numbers(canonical_id, &canonical_title)
+        || (canonical_id.contains("round")
+            && canonical_title.starts_with(canonical_id)
+            && !splits_a_number(&canonical_title, 0, canonical_id.len()))
+}
+
+/// Whether `needle` occurs in `hay` somewhere that doesn't cut a number in two.
+fn contains_whole_numbers(hay: &str, needle: &str) -> bool {
+    !needle.is_empty()
+        && hay
+            .match_indices(needle)
+            .any(|(at, _)| !splits_a_number(hay, at, at + needle.len()))
+}
+
+/// Whether `hay[start..end]` begins or ends in the middle of a run of digits.
+fn splits_a_number(hay: &str, start: usize, end: usize) -> bool {
+    let digit = |c: Option<char>| c.is_some_and(|c| c.is_ascii_digit());
+    let inside_first = hay[start..end].chars().next();
+    let inside_last = hay[start..end].chars().next_back();
+    let before = hay[..start].chars().next_back();
+    let after = hay[end..].chars().next();
+    (digit(inside_first) && digit(before)) || (digit(inside_last) && digit(after))
 }
 
 fn shop_queries_for_server_id(id: &str) -> Vec<String> {
@@ -5467,6 +5651,22 @@ mod server_title_art_tests {
             &canonical_server_track_name("2026_ARLFINALS_RD02_PRO"),
             "2026 ARL FINALS RD 02"
         ));
+    }
+
+    /// A round number is matched whole. `round1` is a string prefix of `round17`, which once
+    /// made a server on round 1 read as the round 17 product (and the panel offer to join a
+    /// track the player didn't have).
+    #[test]
+    fn round_one_is_not_round_seventeen() {
+        let rd01 = canonical_server_track_name("2026_ARLSX_RD01_PRO");
+        assert!(!shop_title_matches_server_id(&rd01, "2026 SPX ARL SX ROUND 17"));
+        assert!(!shop_title_matches_server_id(&rd01, "2026 SPX ARL SX ROUND 10"));
+        assert!(shop_title_matches_server_id(&rd01, "2026 SPX ARL SX ROUND 01"));
+        assert!(shop_title_matches_server_id(&rd01, "2026 SPX ARL SX ROUND 1 - Fakeville"));
+        // The other direction: an id on round 17 must not contain a round 1 title.
+        let rd17 = canonical_server_track_name("2026_ARLMX_RD17_FAKEVILLE_Pro");
+        assert!(!shop_title_matches_server_id(&rd17, "2026 ARLMX RD1"));
+        assert!(shop_title_matches_server_id(&rd17, "2026 ARLMX RD17 - FAKEVILLE"));
     }
 }
 
@@ -8695,6 +8895,7 @@ fn main() {
             guess_server_track,
             server_track_previews,
             invalidate_server_track_cache,
+            server_track_inactive,
             server_track_catalog,
             ranked_identity,
             ranked_profile,
