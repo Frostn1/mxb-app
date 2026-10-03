@@ -6,7 +6,7 @@
 #
 # What's new first — the tag's CHANGELOG section, so the release page says what shipped
 # instead of only which file to download — then the download guidance. Used by
-# .github/workflows/release.yml and release-coach.yml, which pass the result to tauri-action
+# .github/workflows/release.yml, release-coach.yml and release-servers.yml, which pass the result to tauri-action
 # as `releaseBody`, so this file is the one place either half is worded.
 #
 #   --app=NAME  compose another product's notes: its changelog sections are read by that
@@ -46,7 +46,14 @@ section() {
 # top, because the one thing a tester needs to know is how it reaches them.
 case "$TAG" in
   *-*)
-    if [ -n "$APP" ]; then
+    # MXB Servers has no updater: a beta reaches a tester only as the installer below.
+    if [ "$APP" = "MXB Servers" ]; then
+      cat <<EOF
+> [!NOTE]
+> **This is a beta build of ${TAG%%-*}, for testing.** Download the installer below.
+
+EOF
+    elif [ -n "$APP" ]; then
       cat <<EOF
 > [!NOTE]
 > **This is a beta build of ${TAG%%-*}, for testing.** $APP installs it for you while
@@ -126,6 +133,16 @@ if [ "$APP" = "MXB Coach" ]; then
 The recorder only saves your laps. It changes nothing in the game.
 
 EOF
+fi
+
+# MXB Servers is a Windows-only installer with no in-app updater, so its page names one file.
+if [ "$APP" = "MXB Servers" ]; then
+  cat <<'EOF'
+## Which file do I download?
+
+**Download the `.exe`.** That's the Windows installer. Run it and you're done.
+EOF
+  exit 0
 fi
 
 cat <<'EOF'
