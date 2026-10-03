@@ -1037,7 +1037,7 @@ async fn apply_tracks(
     let out = match out {
         Ok(out) => out,
         Err((sha, edited)) => {
-            let applied = write_and_reload(app, &live_server, &sha, &edited).await?;
+            let applied = write_and_reload(app, &live_server, &sha, &edited, false).await?;
             if applied.result != "applied" {
                 return Err(applied.output);
             }
@@ -2019,9 +2019,10 @@ async fn config_apply_live(
     id: String,
     base_sha: String,
     text: String,
+    skip_check: Option<bool>,
 ) -> Result<LiveApply, String> {
     let server = app.store.get(&id)?;
-    write_and_reload(&app, &server, &base_sha, &text).await
+    write_and_reload(&app, &server, &base_sha, &text, skip_check.unwrap_or(false)).await
 }
 
 /// The body of [`config_apply_live`]: write `text` (checked against `base_sha`), then reload.
@@ -2030,6 +2031,7 @@ async fn write_and_reload(
     server: &Server,
     base_sha: &str,
     text: &str,
+    skip_check: bool,
 ) -> Result<LiveApply, String> {
     if !base_sha.chars().all(|c| c.is_ascii_hexdigit()) || base_sha.len() != 64 {
         return Err("bad config hash".into());
@@ -2044,7 +2046,11 @@ async fn write_and_reload(
         let port = server.observe_port.to_string();
         let target = server.clone();
         let out = blocking(move || {
-            tunnels.run_script(&target, REMOTE_SH, &["write", &port, &encoded, &base_sha], 300)
+            let mut args = vec!["write", port.as_str(), encoded.as_str(), base_sha.as_str()];
+            if skip_check {
+                args.push("skipcheck");
+            }
+            tunnels.run_script(&target, REMOTE_SH, &args, 300)
         })
         .await?;
         if out.field("result") != Some("written") {

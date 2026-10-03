@@ -278,8 +278,8 @@ export interface LiveApplyResult {
 }
 
 /** Apply without a restart: write the file, then the running server reloads it. */
-export const configApplyLive = async (id: string, baseSha: string, text: string) => {
-  const result = await invoke<LiveApplyResult>("config_apply_live", { id, baseSha, text });
+export const configApplyLive = async (id: string, baseSha: string, text: string, skipCheck = false) => {
+  const result = await invoke<LiveApplyResult>("config_apply_live", { id, baseSha, text, skipCheck });
   configCache.delete(id);
   return result;
 };

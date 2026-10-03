@@ -53,6 +53,9 @@ type Step =
       text: string;
       diff: string;
       check: { ok: boolean; output: string } | null;
+      /** The running server's own dry run vetted it and no track changed: applying needs no
+       *  slow check over SSH (the server's reload validates, and the old file goes back on a refusal). */
+      fast?: boolean;
       /** How each changed key applies: the server's answer, else the app's own table. */
       classes: Record<string, ReloadClass>;
     }
@@ -121,8 +124,9 @@ export function ConfigTab({ server }: { server: ServerView }) {
     try {
       const preview = await configPreview(state.text, changes);
       const keys = Object.keys(changes);
+      let fast = false;
       const show = (check: { ok: boolean; output: string } | null, told: { changes?: ReloadChange[] } | null) =>
-        setStep({ kind: "review", text: preview.text, diff: preview.diff, check, classes: classesFor(keys, told?.changes ?? null) });
+        setStep({ kind: "review", text: preview.text, diff: preview.diff, check, fast, classes: classesFor(keys, told?.changes ?? null) });
       show(null, null);
       // The quick check: the running server's own dry run (it parses the file, range-checks every
       // value and classifies each change) over the admin tunnel that is already open, so there is
@@ -132,7 +136,11 @@ export function ConfigTab({ server }: { server: ServerView }) {
         const told = quick.classify ?? null;
         show({ ok: !!quick.ok, output: quick.output ?? "" }, told);
         // Only a change to which tracks play is worth the slow check, which loads them.
-        if (!quick.ok || !changesTracks(keys)) return;
+        if (!quick.ok || !changesTracks(keys)) {
+          fast = !!quick.ok;
+          show({ ok: !!quick.ok, output: quick.output ?? "" }, told);
+          return;
+        }
         setBusy("The settings are accepted. Loading the changed tracks on the server to check them too (a few seconds per track)…");
         show({ ok: true, output: "" }, told);
         const slow = await configValidate(server.id, preview.text);
@@ -172,7 +180,9 @@ export function ConfigTab({ server }: { server: ServerView }) {
     setBusy("Saving a backup and applying to the running server…");
     setError(null);
     try {
-      setStep({ kind: "live", result: await configApplyLive(server.id, state.sha, text), text });
+      const fast = step.kind === "review" && !!step.fast;
+      setBusy(fast ? "Saving a backup and reloading the running server…" : "Saving a backup, checking and reloading the running server…");
+      setStep({ kind: "live", result: await configApplyLive(server.id, state.sha, text, fast), text });
     } catch (e) {
       setError(errorText(e));
     } finally {
