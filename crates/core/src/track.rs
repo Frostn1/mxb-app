@@ -292,7 +292,11 @@ fn ini_text(path: &Path, names: &[String]) -> Option<String> {
     let idx = names
         .iter()
         .enumerate()
-        .filter(|(_, n)| n.to_ascii_lowercase().ends_with(".ini"))
+        .filter(|(_, n)| {
+            let l = n.to_ascii_lowercase();
+            // Explorer's `desktop.ini` is shorter than the track's own file and must not win.
+            l.ends_with(".ini") && !l.ends_with("desktop.ini")
+        })
         .min_by_key(|(_, n)| (n.matches('/').count(), n.len()))
         .map(|(i, _)| i)?;
     let bytes = read_entry(path, &names[idx]).ok()?;

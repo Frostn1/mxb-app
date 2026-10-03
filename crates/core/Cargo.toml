@@ -43,6 +43,7 @@ image = { version = "0.25", default-features = false, features = [
     "jpeg",
     "tga",
     "bmp",
+    "dds",
     "webp",
     "gif",
 ] }
