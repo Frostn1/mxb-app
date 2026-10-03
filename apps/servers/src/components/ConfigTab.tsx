@@ -186,21 +186,25 @@ export function ConfigTab({ server }: { server: ServerView }) {
       )}
 
       {step.kind === "review" && (
-        <div className="flex flex-col gap-5">
-          <h3 className="font-heading text-lg font-extrabold tracking-tight">Review the change</h3>
+        // The tab doesn't scroll, so the diff is the part that does: it takes whatever height is
+        // left and scrolls both ways, while the heading, the check and the buttons stay put.
+        <div className="flex min-h-0 flex-1 flex-col gap-5">
+          <h3 className="shrink-0 font-heading text-lg font-extrabold tracking-tight">Review the change</h3>
           <Diff text={step.diff} />
-          {!step.check && busy && <p className="text-sm text-muted-foreground">{busy}</p>}
+          {!step.check && busy && <p className="shrink-0 text-sm text-muted-foreground">{busy}</p>}
           {step.check && (
-            <Notice tone={step.check.ok ? "ok" : "bad"}>
-              <span className="font-medium">
-                {step.check.ok ? "The server accepts these settings." : "The server refuses these settings."}
-              </span>
-              {!step.check.ok && step.check.output && (
-                <pre className="mt-2 max-h-48 overflow-auto font-mono text-xs whitespace-pre-wrap">{step.check.output}</pre>
-              )}
-            </Notice>
+            <div className="shrink-0">
+              <Notice tone={step.check.ok ? "ok" : "bad"}>
+                <span className="font-medium">
+                  {step.check.ok ? "The server accepts these settings." : "The server refuses these settings."}
+                </span>
+                {!step.check.ok && step.check.output && (
+                  <pre className="mt-2 max-h-48 overflow-auto font-mono text-xs whitespace-pre-wrap">{step.check.output}</pre>
+                )}
+              </Notice>
+            </div>
           )}
-          <div className="flex gap-3">
+          <div className="flex shrink-0 gap-3 border-t bg-background py-3">
             <Button variant="primary" disabled={!step.check?.ok || !!busy} onClick={() => void apply(step.text)}>
               Apply and restart
             </Button>
@@ -213,7 +217,7 @@ export function ConfigTab({ server }: { server: ServerView }) {
       )}
 
       {step.kind === "done" && (
-        <div className="flex flex-col gap-4">
+        <div className="flex min-h-0 flex-col gap-4 overflow-y-auto">
           <Notice tone={step.result.result === "applied" ? "ok" : "bad"}>
             <span className="font-medium">
               {step.result.result === "applied"
@@ -500,7 +504,10 @@ function BikesControl({ value, onChange }: { value: FieldValue; onChange: (v: Fi
 function Diff({ text }: { text: string }) {
   if (!text) return <p className="text-sm text-muted-foreground">Nothing changes in the file.</p>;
   return (
-    <pre className="overflow-auto rounded-xl border bg-card p-4 font-mono text-xs leading-relaxed">
+    // min-h-0 lets it shrink below its content inside the review column; long lines scroll
+    // sideways (w-max keeps every row as wide as the longest, so the colours line up).
+    <pre data-testid="config-diff" className="min-h-0 overflow-auto rounded-xl border bg-card p-4 font-mono text-xs leading-relaxed">
+      <div className="w-max min-w-full">
       {text.split("\n").map((line, i) => {
         const color =
           line.startsWith("+") && !line.startsWith("+++")
@@ -516,6 +523,7 @@ function Diff({ text }: { text: string }) {
           </div>
         );
       })}
+      </div>
     </pre>
   );
 }
