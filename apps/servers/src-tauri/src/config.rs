@@ -109,6 +109,14 @@ pub const FIELDS: &[Field] = &[
         .help("Computer-controlled riders based on recorded laps. Set this to 0 for no bots.")
         .default_is("0 (off)")
         .done(),
+    F::new("ghost", "fill_to", "ghosts", "Fill the field to", int(1, 50))
+        .help(
+            "Keep players plus bots at this many riders. A bot steps out when a player joins (at once \
+             outside a race, at the next gate during one) and comes back at the next session when a \
+             player leaves. Number of bots defaults to this.",
+        )
+        .default_is("off (every bot rides)")
+        .done(),
     F::new("ghost", "skill_pct", "ghosts", "Bot pace", float(70.0, 110.0))
         .help("100% follows the recorded lap's pace; lower is slower and higher is faster.")
         .default_is("replay the recording exactly")

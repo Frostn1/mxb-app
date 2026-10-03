@@ -22,6 +22,8 @@ const HOT = new Set([
   "server.max_clients",
   "events.collisions",
   "ghost.react",
+  // Restart-only on a server started without bots; the server's own answer says so.
+  "ghost.fill_to",
   "world.suppress_client_relay",
 ]);
 
