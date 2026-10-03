@@ -75,12 +75,40 @@ pub fn set_keys(text: &str, section: &str, keys: &[(&str, String)]) -> String {
     out
 }
 
+/// The text without these keys in one section: a key that isn't there is the owner's default,
+/// which is how a setting is put back to "unset" rather than to a number that happens to match.
+pub fn remove_keys(text: &str, section: &str, keys: &[&str]) -> String {
+    let mut inside = false;
+    let mut out: Vec<&str> = Vec::new();
+    for line in text.lines() {
+        if let Some(name) = line.trim().strip_prefix('[').and_then(|l| l.strip_suffix(']')) {
+            inside = name.trim().eq_ignore_ascii_case(section);
+        } else if inside {
+            if let Some((k, _)) = line.split_once('=') {
+                if keys.iter().any(|d| k.trim().eq_ignore_ascii_case(d)) {
+                    continue;
+                }
+            }
+        }
+        out.push(line);
+    }
+    let mut s = out.join("\n");
+    s.push('\n');
+    s
+}
+
 /// Written aside and moved in, so nothing ever reads half a file.
 pub fn write(path: &Path, section: &str, keys: &[(&str, String)]) -> Result<(), String> {
+    write_edit(path, section, keys, &[])
+}
+
+/// Set some keys and take others out in one write.
+pub fn write_edit(path: &Path, section: &str, keys: &[(&str, String)], remove: &[&str]) -> Result<(), String> {
     let dir = path.parent().ok_or("No folder for the settings file.")?;
     fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     let text = fs::read_to_string(path).unwrap_or_default();
     let tmp = path.with_extension("ini.tmp");
+    let text = if remove.is_empty() { text } else { remove_keys(&text, section, remove) };
     fs::write(&tmp, set_keys(&text, section, keys)).map_err(|e| e.to_string())?;
     fs::rename(&tmp, path).map_err(|e| e.to_string())
 }
@@ -125,6 +153,13 @@ mod tests {
         let pairs = read_section(&out, "setup");
         assert_eq!(get(&pairs, "testing"), Some("Coach indiana"));
         assert_eq!(get(&pairs, "race"), Some("my race setup"), "the race setup is the rider's");
+    }
+
+    #[test]
+    fn removing_a_key_leaves_the_rest_and_other_sections() {
+        let text = "[hud]\nenabled=1\npace_x=0.5\npace_y=0.8\n\n[other]\npace_x=9\n";
+        let out = remove_keys(text, "hud", &["pace_x", "PACE_Y"]);
+        assert_eq!(out, "[hud]\nenabled=1\n\n[other]\npace_x=9\n");
     }
 
     #[test]

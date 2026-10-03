@@ -629,3 +629,48 @@ export type CueVoice = "female" | "male";
 export const coachVoice = () => invoke<Voice>("coach_voice");
 export const coachSetVoice = (enabled: boolean, volume: number, voice: CueVoice) =>
   invoke<Voice>("coach_set_voice", { enabled, volume: Math.round(volume), voice });
+
+/** What a text item can be drawn in: its own look (the game's font on the HUD, the line's text
+ *  style on the line) or the recorder's block font, as it is, fatter or leaning. */
+export type ItemStyle = "default" | "block" | "bold" | "italic";
+export type ItemAnchor = "left" | "center" | "right";
+
+/** One word the recorder draws: the jump call, MORE SPEED, the gear badge or the cue box. */
+export interface TextItem {
+  id: "jump" | "pace" | "gear" | "cue";
+  label: string;
+  on: boolean;
+  style: ItemStyle;
+  /** Times the item's own size, 0.5–3. Null until set, which is today's size. */
+  size: number | null;
+  /** Screen fractions, 0–1: `x` by `anchor`, `y` the top of the text. The default place until `placed`. */
+  x: number;
+  y: number;
+  /** x and y are written: the item is fixed there rather than where it has always sat. */
+  placed: boolean;
+  anchor: ItemAnchor;
+  defaultX: number;
+  defaultY: number;
+  defaultAnchor: ItemAnchor;
+  /** The jump call only: over the lip on the line, or fixed on the screen at x, y. */
+  place: "line" | "screen" | null;
+  /** Its size is the line's text size until it has its own. */
+  followsTextSize: boolean;
+}
+
+export interface TextItems {
+  items: TextItem[];
+  /** The line's own text size, which jump and MORE SPEED are drawn at with none of their own. */
+  textSize: number;
+  /** The recorder that last ran is older than FrostMod 0.49, which reads the items. */
+  preItems: boolean;
+}
+
+/** What is written for one item; `reset` puts every one of its keys back to unset. */
+export type TextItemEdit = Pick<TextItem, "id" | "on" | "style" | "size" | "placed" | "x" | "y" | "anchor" | "place"> & {
+  reset?: boolean;
+};
+
+export const coachTextItems = () => invoke<TextItems>("coach_text_items");
+/** Write one text item to `hud.ini`. The recorder re-reads it about once a second. */
+export const coachSetTextItem = (item: TextItemEdit) => invoke<TextItems>("coach_set_text_item", { item });
