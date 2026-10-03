@@ -3643,6 +3643,9 @@ export interface MasterServer {
   passworded: boolean;
   /** The operator's own label — "USA", "EU West". Not the track. */
   location: string;
+  /** Bots riding on it, not counted in `players`. An MXB native server appends `+N bots` to
+   *  its location; {@link splitBots} moves that here. 0 for every other server. */
+  bots: number;
   /** Licence class required to join: "D" | "C" | "B" | "A", or "" for none. */
   rating: string;
   /** What it's running. */
@@ -3678,7 +3681,26 @@ export interface MasterServer {
  * this app couldn't sweep and the pool had nothing either.
  */
 export function listMasterServers(): Promise<CachedServers> {
-  return invoke<CachedServers>("list_master_servers");
+  return invoke<CachedServers>("list_master_servers").then(withBots);
+}
+
+/** The `+N bots` tag an MXB native server puts at the end of its location. */
+const BOT_TAG = /(?:^|\s)\+(\d{1,3}) bots?$/;
+
+/**
+ * Move an MXB native server's `+N bots` tag out of its location into `bots`. Its rider count
+ * is people only; the bots ride in the location text, which the game's own browser never
+ * draws. Any other server comes back with `bots: 0` and its location untouched.
+ */
+export function splitBots(s: MasterServer): MasterServer {
+  const location = s.location ?? "";
+  const tag = BOT_TAG.exec(location);
+  if (!tag) return { ...s, bots: s.bots ?? 0 };
+  return { ...s, location: location.slice(0, tag.index).trim(), bots: Number(tag[1]) };
+}
+
+function withBots(list: CachedServers): CachedServers {
+  return { ...list, servers: list.servers.map(splitBots) };
 }
 
 /**
@@ -3689,7 +3711,7 @@ export function listMasterServers(): Promise<CachedServers> {
  * somebody comes back to it.
  */
 export function onServersSwept(cb: (list: CachedServers) => void): Promise<UnlistenFn> {
-  return listen<CachedServers>("servers-swept", (event) => cb(event.payload));
+  return listen<CachedServers>("servers-swept", (event) => cb(withBots(event.payload)));
 }
 
 /** A list to draw at once, and the moment it was true. */
@@ -3710,7 +3732,7 @@ export interface CachedServers {
  * rejects: it is a head start on a fetch that is happening anyway.
  */
 export function cachedMasterServers(): Promise<CachedServers> {
-  return invoke<CachedServers>("cached_master_servers");
+  return invoke<CachedServers>("cached_master_servers").then(withBots);
 }
 
 /**
@@ -3720,7 +3742,7 @@ export function cachedMasterServers(): Promise<CachedServers> {
  * session and the track all move in that time. This costs one datagram and no sign-in.
  */
 export function probeServer(address: string): Promise<MasterServer> {
-  return invoke<MasterServer>("probe_server", { address });
+  return invoke<MasterServer>("probe_server", { address }).then(splitBots);
 }
 
 /** A server the player saved by address: only what they typed, in the order they chose. */

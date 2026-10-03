@@ -293,6 +293,11 @@ const ServerCard = memo(function ServerCard({
               {s.location}
             </Badge>
           )}
+          {s.bots > 0 && (
+            <Badge variant="count" title={t("serverBrowser.botsHint")}>
+              {t("serverBrowser.bots", { count: s.bots })}
+            </Badge>
+          )}
           {known(s.session) && <Badge variant="count">{s.session}</Badge>}
           {known(s.conditions) && <Badge variant="count">{s.conditions}</Badge>}
         </div>

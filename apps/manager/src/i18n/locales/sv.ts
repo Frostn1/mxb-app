@@ -1174,6 +1174,8 @@ export const sv: Translation = {
   "serverBrowser.paintSyncHere_other":
     "{{count}} ryttare på denna server kör färg synkronisering – du kommer att se de liverier de faktiskt byggt.",
   "serverBrowser.filtered": "Filtrerat",
+  "serverBrowser.bots": "+{{count}} botar",
+  "serverBrowser.botsHint": "Botar på servern, räknas inte som förare",
   "serverBrowser.hiddenCount": "{{count}} dold",
   "serverBrowser.hideFiltered": "Göm dem igen.",
   "serverBrowser.hiddenBecause": "Gömd: {{reason}}",

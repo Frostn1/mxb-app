@@ -1208,6 +1208,8 @@ export const es: Translation = {
   "serverBrowser.paintSyncHere_other":
     "{{count}} pilotos en este servidor usan la sincronización de pinturas: verás sus diseños reales.",
   "serverBrowser.filtered": "Filtrado",
+  "serverBrowser.bots": "+{{count}} bots",
+  "serverBrowser.botsHint": "Bots en este servidor, no cuentan como pilotos",
   "serverBrowser.hiddenCount": "{{count}} ocultos",
   "serverBrowser.hideFiltered": "Volver a ocultar",
   "serverBrowser.hiddenBecause": "Oculto: {{reason}}",

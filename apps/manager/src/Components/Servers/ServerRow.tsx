@@ -1,5 +1,5 @@
 import { memo } from "react";
-import { Lock, Users, Wifi, Palette, Star, Mountain, Hourglass, UserCheck } from "lucide-react";
+import { Lock, Users, Wifi, Palette, Star, Mountain, Hourglass, UserCheck, Bot } from "lucide-react";
 import type { CatalogTrack, MasterServer } from "@frost/shared/api/mods";
 import { cn } from "@frost/shared/lib/utils";
 import { useT } from "@/i18n";
@@ -123,6 +123,15 @@ const ServerRow = memo(function ServerRow({
               <span className="shrink-0 opacity-40">·</span>
               <span className="shrink-0 truncate">{s.location}</span>
             </>
+          )}
+          {s.bots > 0 && (
+            <span
+              className="flex shrink-0 items-center gap-0.5 text-faint"
+              title={t("serverBrowser.botsHint")}
+            >
+              <Bot className="size-3" />
+              {t("serverBrowser.bots", { count: s.bots })}
+            </span>
           )}
           {s.hidden && (
             <span
