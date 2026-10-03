@@ -70,9 +70,9 @@ export default function App() {
           </span>
         </div>
         <nav className="flex h-full min-w-0 items-center gap-1 overflow-hidden" aria-label="Servers">
-          <button type="button" onClick={() => setView({ kind: "fleet" })} className={`h-full border-b-2 px-3 text-sm font-medium ${view.kind === "fleet" ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`}>All servers</button>
+          <button type="button" onClick={() => setView({ kind: "fleet" })} className={`h-full shrink-0 border-b-2 px-3 text-sm font-medium ${view.kind === "fleet" ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`}>All servers</button>
           {servers.map((s) => (
-            <button key={s.id} type="button" onClick={() => setView({ kind: "server", id: s.id })} className={`flex h-full max-w-48 items-center gap-2 border-b-2 px-3 text-sm ${selected?.id === s.id && view.kind === "server" ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`}>
+            <button key={s.id} type="button" title={s.name} onClick={() => setView({ kind: "server", id: s.id })} className={`flex h-full min-w-24 max-w-[32rem] items-center gap-2 border-b-2 px-3 text-sm ${selected?.id === s.id && view.kind === "server" ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`}>
               <ServerIcon className="size-3.5 shrink-0" /><span className="truncate">{s.name}</span>
             </button>
           ))}
