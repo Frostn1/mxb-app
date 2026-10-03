@@ -569,6 +569,47 @@ export const coachSetHud = (key: string, on: boolean) => invoke<Hud>("coach_set_
  *  FrostMod 0.24 reads them; older recorders leave the cue where it was. */
 export const coachSetCuePos = (x: number, y: number) => invoke<Hud>("coach_set_cue_pos", { x, y });
 
+/** The line's colours, `#rrggbb`: its gradient from gas to heavy braking, and the pace hints. */
+export interface LineColours {
+  gas: string;
+  coast: string;
+  light: string;
+  heavy: string;
+  /** Pace hint: coming in too fast. */
+  fast: string;
+  /** Pace hint: too slow, and MORE SPEED. */
+  slow: string;
+}
+
+/** What the recorder's block font can draw: as it is, fatter, or leaning. */
+export type TextStyle = "block" | "bold" | "italic";
+
+/** The look of the line on the track and the text on it, `[hud]` keys in `hud.ini`. */
+export interface LineLook {
+  /** Times the line's own width, 0.25–3. */
+  width: number;
+  /** 0.1–1. */
+  opacity: number;
+  colours: LineColours;
+  /** Jump calls, MORE SPEED and gear hints on the line. Off leaves just the line. */
+  text: boolean;
+  /** Times the text's own size, 0.5–2. */
+  textSize: number;
+  textStyle: TextStyle;
+}
+
+export interface LineLookState {
+  look: LineLook;
+  /** The line as the recorder draws it with nothing set: what "reset" goes back to. */
+  defaults: LineLook;
+  /** The recorder that last ran is older than FrostMod 0.45.5, which reads the look. */
+  preLook: boolean;
+}
+
+export const coachLineLook = () => invoke<LineLookState>("coach_line_look");
+/** Write the whole look. The recorder re-reads `hud.ini` about once a second, so it shows live. */
+export const coachSetLineLook = (look: LineLook) => invoke<LineLookState>("coach_set_line_look", { look });
+
 /** Whether the recorder speaks its cues (`cues/voice.ini`), how loud, 0–100, and in which voice. */
 export interface Voice {
   enabled: boolean;

@@ -7,7 +7,15 @@ import { Label } from "../Page";
 
 /** What the recorder draws over the game, part by part. Shared by the review page and the
  *  overlay, so both switch the same `hud.ini`. */
-export default function HudPanel() {
+export default function HudPanel({
+  exclude = [],
+  bare = false,
+}: {
+  /** Parts shown somewhere else on the page (Settings puts the line's own under In-game line). */
+  exclude?: string[];
+  /** Without its own heading and card, for a page that gives it one (Settings). */
+  bare?: boolean;
+} = {}) {
   const t = useT();
   const [hud, setHud] = useState<Hud | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -28,8 +36,8 @@ export default function HudPanel() {
   if (!hud) return <p className="text-[12.5px] text-muted-foreground">{t("common.loading")}</p>;
   return (
     <div>
-      <Label>{t("hud.title")}</Label>
-      <div className="border border-border bg-card px-4 py-3">
+      {!bare && <Label>{t("hud.title")}</Label>}
+      <div className={bare ? undefined : "border border-border bg-card px-4 py-3"}>
         <p className="text-[12.5px] text-muted-foreground">{t("hud.body")}</p>
         {status?.recorderOutdated && (
           <p className="mt-2 text-[12px] text-warning">
@@ -41,7 +49,7 @@ export default function HudPanel() {
           <Switch checked={hud.enabled} onCheckedChange={(on) => void set("enabled", on)} />
         </div>
         <div className="divide-y divide-border">
-          {hud.parts.map((p) => (
+          {hud.parts.filter((p) => !exclude.includes(p.key)).map((p) => (
             <div key={p.key} className="py-2.5">
               <div className="flex items-center justify-between gap-4">
                 <span className="text-[12.5px]">{p.label}</span>
