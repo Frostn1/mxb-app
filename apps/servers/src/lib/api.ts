@@ -129,8 +129,20 @@ export const serverTracks = (id: string) => invoke<TrackState>("server_tracks", 
 export const serverSetTrack = (id: string, track: string) =>
   invoke<Record<string, unknown>>("server_set_track", { id, track });
 
-export const serverSetRotation = (id: string, tracks: string[]) =>
-  invoke<Record<string, unknown>>("server_set_rotation", { id, tracks });
+/** The answer of a rotation save (`server_set_rotation`). */
+export interface RotationResult {
+  result: string;
+  /** Applied by the running server: no restart, nobody disconnected. */
+  live?: boolean;
+  /** The server is too old to change tracks while it runs: the file is saved, a restart applies it. */
+  restartRequired?: boolean;
+  deferred?: string[];
+}
+
+/** Save the track order. The running server reloads it and plays it from the next event; with
+ *  `restart`, the server restarts instead (riders are disconnected). */
+export const serverSetRotation = (id: string, tracks: string[], restart = false) =>
+  invoke<RotationResult>("server_set_rotation", { id, tracks, restart });
 
 export const serverUpdateGithub = (id: string) =>
   invoke<Record<string, unknown>>("server_update_github", { id });

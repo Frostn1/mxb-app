@@ -16,8 +16,8 @@ describe("reloadClass", () => {
     expect(reloadClass("sessions.race_minutes")).toBe("next_event");
   });
 
-  it("keeps sockets, content and the bots themselves restart-only", () => {
-    for (const key of ["server.listen", "admin.listen", "track.package", "world.ruts", "ghost.count", "ghost.bikes", "native.track_bounds", "event.weather"]) {
+  it("keeps sockets and the bots themselves restart-only", () => {
+    for (const key of ["server.listen", "admin.listen", "world.probe", "ghost.count", "ghost.bikes", "native.track_bounds"]) {
       expect(reloadClass(key)).toBe("restart");
     }
   });

@@ -16,6 +16,22 @@ const GHOST_RIDING = new Set([
   "ghost.library_min_laps",
 ]);
 
+/** Keys whose change is applied to the queue or the bootstraps now and loaded by the next event
+ *  (a track change): the rotation, the bike set, event options and the ruts. */
+const NEXT_EVENT = new Set([
+  "track.package",
+  "rotation.tracks",
+  "world.ruts",
+  "world.soil",
+  "world.soils",
+  "world.wet",
+  "world.seed",
+  "world.raises",
+  "world.rut_calibration",
+  "world.live_ruts",
+  "world.deform_sample",
+]);
+
 const HOT = new Set([
   "server.name",
   "server.password",
@@ -31,6 +47,7 @@ const HOT = new Set([
 export function reloadClass(key: string): ReloadClass {
   const under = (section: string) => key.startsWith(`${section}.`);
   if (HOT.has(key) || under("admission") || under("master")) return "hot";
+  if (NEXT_EVENT.has(key) || under("bike_set") || under("bike_sets") || under("event") || under("event_probe")) return "next_event";
   if (key === "native.track_bounds") return "restart";
   if (under("native")) return "hot";
   if (key === "sessions.race_extra_laps") return "next_session";
@@ -47,7 +64,11 @@ export const BADGES: Record<ReloadClass, { label: string; title: string; tone: "
     title: "Applies at once when no race is running, otherwise when the current race ends. Nobody is disconnected.",
     tone: "info",
   },
-  next_event: { label: "next session", title: "Session lengths apply from the next event. Nobody is disconnected.", tone: "info" },
+  next_event: {
+    label: "next event",
+    title: "Applies from the next event, when the track changes: session lengths, the track rotation, the bike set. The running event is untouched and nobody is disconnected.",
+    tone: "info",
+  },
   restart: { label: "needs restart", title: "Only takes effect after the server restarts, which disconnects riders.", tone: "warn" },
 };
 

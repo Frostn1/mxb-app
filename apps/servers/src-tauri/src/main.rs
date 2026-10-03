@@ -42,6 +42,20 @@ mod tests {
     }
 
     #[test]
+    fn a_server_that_holds_the_track_keys_for_a_restart_is_too_old_for_live_rotation() {
+        let live = serde_json::json!({
+            "applied": [], "deferred": ["rotation.tracks"], "restart_required": []
+        });
+        assert!(!super::track_keys_need_restart(&live));
+        let old = serde_json::json!({
+            "applied": [], "restart_required": ["server.listen", "rotation.tracks"]
+        });
+        assert!(super::track_keys_need_restart(&old));
+        let other = serde_json::json!({ "restart_required": ["server.listen"] });
+        assert!(!super::track_keys_need_restart(&other));
+    }
+
+    #[test]
     fn a_query_value_is_percent_encoded() {
         assert_eq!(super::query_value("755 Compound"), "755%20Compound");
         assert_eq!(super::query_value("A&B=c+d/é"), "A%26B%3Dc%2Bd%2F%C3%A9");
@@ -954,14 +968,29 @@ fn track_reference(name: &str, paths: &[String], package_dir: &str, prefix: &str
     }
 }
 
+/// Whether a reload's `restart_required` list still names the track keys: a server from before
+/// live rotation holds them for a restart.
+fn track_keys_need_restart(reload: &Value) -> bool {
+    reload["restart_required"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .any(|key| key == "track.package" || key == "rotation.tracks")
+}
+
 /// Rewrite the server's `[track] package` (and the `[rotation] tracks` when given) in its
-/// config over SSH, and apply it: the host validates it, restarts the service with systemctl,
-/// and puts the old file back if the server doesn't come up.
+/// config over SSH and apply it. By default the running server reloads the file: the rotation
+/// takes effect at the next event, nobody is disconnected and nothing restarts, and a package
+/// uploaded a moment ago is picked up from the track folder. With `restart`, the host instead
+/// validates it, restarts the service with systemctl, and puts the old file back if the server
+/// doesn't come up.
 async fn apply_tracks(
     app: &App,
     server: Server,
     current: &str,
     rotation: Option<Vec<String>>,
+    restart: bool,
 ) -> Result<Value, String> {
     let bad =
         |name: &str| name.is_empty() || name == ".." || name.contains(['/', '\\', '"', '\n', '\r']);
@@ -971,6 +1000,7 @@ async fn apply_tracks(
     let tunnels = Arc::clone(&app.tunnels);
     let port = server.observe_port.to_string();
     let current = current.to_string();
+    let live_server = server.clone();
     let out = blocking(move || {
         let config = tunnels.run_script(&server, REMOTE_SH, &["read", &port], 30)?;
         let (text, sha) = read_config(&config)?;
@@ -995,10 +1025,33 @@ async fn apply_tracks(
             None => old_rotation,
         };
         let edited = config::set_tracks(&text, &track_reference(&current, &paths, &package_dir, &prefix), &rotation)?;
+        if !restart {
+            return Ok(Err((sha, edited)));
+        }
         let encoded = b64(&edited);
-        tunnels.run_script(&server, REMOTE_SH, &["apply", &port, &encoded, &sha], 300)
+        tunnels
+            .run_script(&server, REMOTE_SH, &["apply", &port, &encoded, &sha], 300)
+            .map(Ok)
     })
     .await?;
+    let out = match out {
+        Ok(out) => out,
+        Err((sha, edited)) => {
+            let applied = write_and_reload(app, &live_server, &sha, &edited).await?;
+            if applied.result != "applied" {
+                return Err(applied.output);
+            }
+            let held = track_keys_need_restart(&applied.reload);
+            return Ok(serde_json::json!({
+                "result": "applied",
+                "live": !held,
+                // An older server held the new tracks for a restart: the file is saved, and the
+                // app offers the restart.
+                "restartRequired": held,
+                "deferred": applied.reload["deferred"].clone(),
+            }));
+        }
+    };
     match out.field("result") {
         Some("applied") => Ok(serde_json::json!({ "result": "applied" })),
         Some("rolled-back") => Err(format!(
@@ -1027,7 +1080,7 @@ async fn server_set_track(app: State<'_, App>, id: String, track: String) -> Res
     if server.local {
         return Err("Track selection for a server on this PC is not wired yet.".into());
     }
-    apply_tracks(&app, server, track.trim(), None).await
+    apply_tracks(&app, server, track.trim(), None, false).await
 }
 
 #[tauri::command]
@@ -1035,6 +1088,7 @@ async fn server_set_rotation(
     app: State<'_, App>,
     id: String,
     tracks: Vec<String>,
+    restart: Option<bool>,
 ) -> Result<Value, String> {
     let server = app.store.get(&id)?;
     if server.kind == ServerKind::Legacy {
@@ -1055,7 +1109,7 @@ async fn server_set_rotation(
         return Err("Add at least one track.".into());
     }
     let current = tracks.remove(0);
-    apply_tracks(&app, server, &current, Some(tracks)).await
+    apply_tracks(&app, server, &current, Some(tracks), restart.unwrap_or(false)).await
 }
 
 /// Replace the server binary on the host (sha-checked upload, then `systemctl restart`; the old
@@ -1963,9 +2017,20 @@ async fn config_apply_live(
     text: String,
 ) -> Result<LiveApply, String> {
     let server = app.store.get(&id)?;
+    write_and_reload(&app, &server, &base_sha, &text).await
+}
+
+/// The body of [`config_apply_live`]: write `text` (checked against `base_sha`), then reload.
+async fn write_and_reload(
+    app: &App,
+    server: &Server,
+    base_sha: &str,
+    text: &str,
+) -> Result<LiveApply, String> {
     if !base_sha.chars().all(|c| c.is_ascii_hexdigit()) || base_sha.len() != 64 {
         return Err("bad config hash".into());
     }
+    let (base_sha, text) = (base_sha.to_string(), text.to_string());
     let (backup, output) = if server.local {
         let target = server.clone();
         blocking(move || local::write(&target, &base_sha, &text)).await?

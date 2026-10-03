@@ -582,7 +582,7 @@ const BADGE_STYLE = {
 } as const;
 
 /** "applies now", "next session" or "needs restart". */
-function ReloadBadge({ kind }: { kind: ReloadClass }) {
+export function ReloadBadge({ kind }: { kind: ReloadClass }) {
   const badge = BADGES[kind];
   return (
     <span className="ml-2 rounded px-1.5 py-0.5 text-xs font-normal" style={BADGE_STYLE[badge.tone]} title={badge.title}>
