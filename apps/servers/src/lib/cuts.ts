@@ -32,6 +32,49 @@ export interface CutsInfo {
   settings: { auto_half_width_m: number; min_excursion_seconds: number; min_gain_m: number } | null;
   penalties: { enable: boolean; cut_time_seconds: number; cut_offences_for_dsq: number; jump_start_seconds: number; holeshot: boolean } | null;
   tracks: CutTrack[];
+  /** Every track the server has a package for (older servers: none listed). */
+  folder_tracks: { track: string; file: string; secured: boolean }[];
+}
+
+/** Why a track has no outline. `unsupported`: a server older than `/v1/cuts/outline`. */
+export type OutlineStatus = "ok" | "secured" | "no_trh" | "no_outline" | "unreadable" | "unknown_track" | "unsupported";
+
+/** The admin `/v1/cuts/outline` answer for one track. `track` is set only when `status` is `ok`. */
+export interface CutOutline {
+  status: OutlineStatus;
+  message: string;
+  track: CutTrack | null;
+}
+
+const OUTLINE_STATUSES: OutlineStatus[] = ["ok", "secured", "no_trh", "no_outline", "unreadable", "unknown_track", "unsupported"];
+
+/** The raw `server_cut_outline` answer for the track called `name`. */
+export function parseOutline(raw: unknown, name: string): CutOutline {
+  const r = raw as Record<string, unknown> | null;
+  if (!r || r.supported === false) {
+    return { status: "unsupported", message: "This server is too old to send track outlines. Update it, or type the distances.", track: null };
+  }
+  const status = OUTLINE_STATUSES.find((s) => s === r.status) ?? "unreadable";
+  if (status === "unknown_track") {
+    return { status, message: `The server has no track package called "${name}", so it has no outline for it. Type the distances.`, track: null };
+  }
+  const points = (Array.isArray(r.points) ? r.points : []).filter((p): p is CutPoint => Array.isArray(p) && p.length >= 4 && p.slice(0, 4).every(isNum));
+  if (status === "ok" && points.length >= 2) {
+    return {
+      status,
+      message: "",
+      track: {
+        track: typeof r.track === "string" ? r.track : name,
+        source: "auto",
+        closed: r.closed === true,
+        length_m: isNum(r.length_m) ? r.length_m : (points[points.length - 1]?.[3] ?? 0),
+        points,
+        zones: [],
+      },
+    };
+  }
+  const message = typeof r.message === "string" && r.message ? r.message : "The server could not build an outline for this track. Type the distances.";
+  return { status: status === "ok" ? "no_outline" : status, message, track: null };
 }
 
 export type CutOutcome = "penalty" | "warning" | "disqualified" | "allowed" | "report_only";
@@ -87,6 +130,10 @@ export function parseCuts(raw: unknown): CutsInfo | null {
     settings: (r.settings as CutsInfo["settings"]) ?? null,
     penalties: (r.penalties as CutsInfo["penalties"]) ?? null,
     tracks,
+    folder_tracks: (Array.isArray(r.folder_tracks) ? r.folder_tracks : []).flatMap((t) => {
+      const o = t as Record<string, unknown>;
+      return typeof o?.track === "string" ? [{ track: o.track, file: typeof o.file === "string" ? o.file : "", secured: o.secured === true }] : [];
+    }),
   };
 }
 

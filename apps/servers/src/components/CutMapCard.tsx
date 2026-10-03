@@ -1,12 +1,13 @@
 import { useState } from "react";
-import { serverCuts, serverRecentCuts, type ServerView } from "@/lib/api";
+import { serverCutOutline, serverCuts, serverRecentCuts, type ServerView } from "@/lib/api";
 import { OUTCOME_LABEL } from "@/lib/cuts";
 import { usePoll } from "@/lib/usePoll";
 import { CutMap, CutMapLegend } from "./CutMap";
 import { Card } from "./ui";
 
 /** The Status tab's cut map: the current track's outline, its zones and the cuts so far. Shows
- *  nothing unless the server has cut detection on (or is too old to know about it). */
+ *  nothing when the server is too old to send outlines. With cut detection off it shows the outline
+ *  built from the track's TRH, or says why the track has none. */
 export function CutMapCard({ server }: { server: ServerView }) {
   const ready = server.kind === "native" && (!server.local || (server.adminPort != null && server.hasToken));
   const cuts = usePoll(() => (ready ? serverCuts(server.id) : Promise.resolve(null)), ready ? 15_000 : 0, `${server.id}-cuts`);
@@ -14,7 +15,42 @@ export function CutMapCard({ server }: { server: ServerView }) {
   const [chosen, setChosen] = useState<string | null>(null);
 
   const info = cuts.data;
-  if (!ready || !info || !info.enabled || info.tracks.length === 0) return null;
+  // Cut detection off (or no limits yet): the outline the server builds from the track's TRH.
+  const detecting = !!info && info.enabled && info.tracks.length > 0;
+  const current = info?.current_track ?? null;
+  const outline = usePoll(
+    () => (ready && info && !detecting && current ? serverCutOutline(server.id, current) : Promise.resolve(null)),
+    0,
+    `${server.id}-card-outline-${current}-${ready && info && !detecting ? 1 : 0}`,
+  );
+  if (!ready || !info) return null;
+  if (!detecting) {
+    const answer = outline.data;
+    if (!answer) return null;
+    if (!answer.track) {
+      // Say why for this track; an older server or an unknown name is not worth a card.
+      if (answer.status === "unsupported" || answer.status === "unknown_track") return null;
+      return (
+        <Card className="flex flex-col gap-1">
+          <h3 className="font-heading text-sm font-bold uppercase tracking-wide text-muted-foreground">Cut map</h3>
+          <p className="text-sm text-muted-foreground" data-testid="cut-map-missing">
+            {current}: {answer.message}
+          </p>
+        </Card>
+      );
+    }
+    return (
+      <Card className="flex flex-col gap-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h3 className="font-heading text-sm font-bold uppercase tracking-wide text-muted-foreground">Cut map</h3>
+          <span className="text-xs text-muted-foreground">
+            {answer.track.track} · {answer.track.length_m.toFixed(0)} m · auto outline · cut detection is off
+          </span>
+        </div>
+        <CutMap track={answer.track} zones={[]} />
+      </Card>
+    );
+  }
   const trackName = chosen && info.tracks.some((t) => t.track === chosen) ? chosen : (info.current_track ?? info.tracks[0].track);
   const track = info.tracks.find((t) => t.track === trackName) ?? info.tracks[0];
   const here = (recent.data ?? []).filter((c) => c.track === track.track);

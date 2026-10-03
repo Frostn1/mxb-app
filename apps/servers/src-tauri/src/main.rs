@@ -42,6 +42,13 @@ mod tests {
     }
 
     #[test]
+    fn a_query_value_is_percent_encoded() {
+        assert_eq!(super::query_value("755 Compound"), "755%20Compound");
+        assert_eq!(super::query_value("A&B=c+d/é"), "A%26B%3Dc%2Bd%2F%C3%A9");
+        assert_eq!(super::query_value("Plain-Track_1.x~"), "Plain-Track_1.x~");
+    }
+
+    #[test]
     fn a_track_name_is_the_last_path_part() {
         assert_eq!(super::track_name("tracks/smokey.pkz"), "smokey.pkz");
         assert_eq!(super::track_name(r"C:\tracks\a.pkz"), "a.pkz");
@@ -689,6 +696,50 @@ async fn server_cuts(app: State<'_, App>, id: String) -> Result<Value, String> {
         return Ok(serde_json::json!({ "supported": false }));
     }
     admin_get_optional(&app, &server, "/v1/cuts").await
+}
+
+/// Percent-encode a query value (everything but the RFC 3986 unreserved characters).
+fn query_value(text: &str) -> String {
+    text.bytes()
+        .map(|b| match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => (b as char).to_string(),
+            other => format!("%{other:02X}"),
+        })
+        .collect()
+}
+
+/// The admin `/v1/cuts/outline?track=`: one track's outline from its TRH, whether or not cut
+/// detection is on. `{"supported": false}` for a server older than the route; `{"status":
+/// "unknown_track"}` when the server has no package for that track.
+#[tauri::command]
+async fn server_cut_outline(app: State<'_, App>, id: String, track: String) -> Result<Value, String> {
+    let server = app.store.get(&id)?;
+    if server.kind == ServerKind::Legacy {
+        return Ok(serde_json::json!({ "supported": false }));
+    }
+    let token = store::token(&server.id).ok_or(NO_TOKEN)?;
+    let port = admin_port(&app, &server).await?;
+    let path = format!("/v1/cuts/outline?track={}", query_value(&track));
+    let (code, text) = send(&app, &server, port, reqwest::Method::GET, &path, Some(&token), None)
+        .await
+        .map_err(|miss| match miss {
+            Miss::NoAnswer(_) => format!(
+                "Nothing answers on admin port {port}. Is mxbserver running, with an [admin] section in its config (default 127.0.0.1:9810)?"
+            ),
+            other => other.text(),
+        })?;
+    if code == 404 {
+        let known = serde_json::from_str::<Value>(&text).ok().is_some_and(|v| v["error"] == "unknown_track");
+        return Ok(if known {
+            serde_json::json!({ "status": "unknown_track", "track": track })
+        } else {
+            serde_json::json!({ "supported": false })
+        });
+    }
+    if !(200..300).contains(&code) {
+        return Err(admin_error(code, &text, false));
+    }
+    serde_json::from_str(&text).map_err(|e| format!("{path}: {e}"))
 }
 
 /// The admin `/v1/events` (its `cuts.recent` feeds the cut map).
@@ -1927,6 +1978,7 @@ fn main() {
             server_status,
             server_riders,
             server_cuts,
+            server_cut_outline,
             server_cut_events,
             server_tracks,
             server_set_track,

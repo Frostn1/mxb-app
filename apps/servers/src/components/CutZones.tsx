@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { Plus, Trash2 } from "lucide-react";
-import { serverCuts, serverRecentCuts, type ServerView } from "@/lib/api";
+import { serverCutOutline, serverCuts, serverRecentCuts, type ServerView } from "@/lib/api";
 import { projectToLine, zoneWhere, type CutZone } from "@/lib/cuts";
 import { usePoll } from "@/lib/usePoll";
 import { CutMap, CutMapLegend } from "./CutMap";
@@ -24,12 +24,18 @@ export function CutZones({ server, zones, onChange }: { server: ServerView; zone
 
   const names = useMemo(() => {
     const out = new Set<string>();
+    for (const t of cuts.data?.folder_tracks ?? []) out.add(t.track);
     for (const t of cuts.data?.tracks ?? []) out.add(t.track);
     for (const z of zones) out.add(z.track);
     return [...out];
   }, [cuts.data, zones]);
   const trackName = chosen ?? cuts.data?.current_track ?? names[0] ?? "";
-  const track = cuts.data?.tracks.find((t) => t.track === trackName) ?? null;
+  // The server's own limits for a track when it has them (a limits file), else the outline it
+  // builds from the track's TRH: no riding, and cut detection can be off.
+  const wanted = trackName.trim();
+  const outline = usePoll(() => (adminReady && wanted && cuts.data ? serverCutOutline(server.id, wanted) : Promise.resolve(null)), 0, `${server.id}-outline-${wanted}-${cuts.data ? 1 : 0}`);
+  const fromCuts = cuts.data?.tracks.find((t) => t.track === trackName) ?? null;
+  const track = fromCuts ?? outline.data?.track ?? null;
   const rows = zones.map((zone, index) => ({ zone, index })).filter((r) => r.zone.track === trackName);
 
   const update = (index: number, patch: Partial<CutZone>) => onChange(zones.map((z, i) => (i === index ? { ...z, ...patch } : z)));
@@ -99,13 +105,17 @@ export function CutZones({ server, zones, onChange }: { server: ServerView; zone
 
       {cuts.data === null && cuts.at != null && (
         <p className="text-sm text-muted-foreground">
-          This server can&apos;t send track outlines (an older version, or cut detection is off), so there is no map to pick on. Type the distances instead.
+          This server is too old to send track outlines, so there is no map to pick on. Update it, or type the distances.
         </p>
       )}
       {cuts.error && <p className="text-sm text-muted-foreground">No map: {cuts.error}</p>}
-      {cuts.data && cuts.data.tracks.length === 0 && (
-        <p className="text-sm text-muted-foreground">The server has no outline for any track yet. Turn on cut detection and ride the track once; type the distances meanwhile.</p>
+      {cuts.data && !track && wanted && outline.loading && !outline.data && <p className="text-sm text-muted-foreground">Loading the outline of {wanted}…</p>}
+      {cuts.data && !track && outline.data && outline.data.status !== "ok" && (
+        <p className="text-sm text-muted-foreground" data-testid="cut-outline-missing" data-status={outline.data.status}>
+          {outline.data.message}
+        </p>
       )}
+      {outline.error && !track && <p className="text-sm text-muted-foreground">No map: {outline.error}</p>}
 
       {track && (
         <div className="flex flex-col gap-2">
