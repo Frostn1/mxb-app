@@ -277,14 +277,14 @@ fn restart(server: &Server, cmd: &LocalCommand) -> Result<(), String> {
     }
 }
 
-/// One apply at a time from this app.
-static APPLYING: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
-pub fn apply(server: &Server, base_sha: &str, text: &str) -> Result<Applied, String> {
-    let _one = APPLYING
-        .try_lock()
-        .map_err(|_| "Another config change is being applied.".to_string())?;
-    let cmd = command(server)?;
+/// Check `text` with the server's own binary, back up the live config and replace it. Nothing
+/// is restarted. Returns the config, the backup and the check's output.
+fn replace(
+    server: &Server,
+    cmd: &LocalCommand,
+    base_sha: &str,
+    text: &str,
+) -> Result<(PathBuf, PathBuf, String), String> {
     let config = config_path(cmd)?;
     let unchanged = || -> Result<bool, String> {
         let now = fs::read_to_string(&config).map_err(|e| format!("{}: {e}", config.display()))?;
@@ -318,6 +318,46 @@ pub fn apply(server: &Server, base_sha: &str, text: &str) -> Result<Applied, Str
     fs::write(&tmp, text).map_err(|e| e.to_string())?;
     fs::rename(&tmp, &config)
         .map_err(|e| format!("replace failed, the old config is still live: {e}"))?;
+    Ok((config, backup, output))
+}
+
+/// Apply without a restart: check, back up and replace only. The running server then reloads
+/// the file itself (admin API). Returns the backup's path and the check's output.
+pub fn write(server: &Server, base_sha: &str, text: &str) -> Result<(String, String), String> {
+    let _one = APPLYING
+        .try_lock()
+        .map_err(|_| "Another config change is being applied.".to_string())?;
+    let cmd = command(server)?;
+    let (_, backup, output) = replace(server, cmd, base_sha, text)?;
+    Ok((backup.display().to_string(), output))
+}
+
+/// Put back a backup that [`write`] made (the reload refused the new file).
+pub fn restore(server: &Server, backup: &str) -> Result<(), String> {
+    let config = config_path(command(server)?)?;
+    let backup = PathBuf::from(backup);
+    if backup.parent() != config.parent().map(|dir| dir.join("backups")).as_deref() {
+        return Err("not a backup of this config".into());
+    }
+    fs::copy(&backup, &config)
+        .map(|_| ())
+        .map_err(|e| format!("restore failed: {e}"))
+}
+
+/// Restart the server with its saved command, waiting until it is ready.
+pub fn restart_now(server: &Server) -> Result<(), String> {
+    restart(server, command(server)?)
+}
+
+/// One apply at a time from this app.
+static APPLYING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+pub fn apply(server: &Server, base_sha: &str, text: &str) -> Result<Applied, String> {
+    let _one = APPLYING
+        .try_lock()
+        .map_err(|_| "Another config change is being applied.".to_string())?;
+    let cmd = command(server)?;
+    let (config, backup, output) = replace(server, cmd, base_sha, text)?;
     let backup_text = backup.display().to_string();
     match restart(server, cmd) {
         Ok(()) => Ok(Applied {

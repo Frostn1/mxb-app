@@ -1203,7 +1203,8 @@ async fn server_restart_service(app: State<'_, App>, id: String) -> Result<Value
         return Err("Use the Restart button of the official server's controls.".into());
     }
     if server.local {
-        return Err("Restart a server on this PC from its own window.".into());
+        blocking(move || local::restart_now(&server)).await?;
+        return Ok(serde_json::json!({ "result": "restarted" }));
     }
     let tunnels = Arc::clone(&app.tunnels);
     let port = server.observe_port.to_string();
@@ -1939,6 +1940,119 @@ async fn config_apply(
     }
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LiveApply {
+    /// "applied" (the server reloaded it) or "failed" (nothing changed: the old file is back).
+    result: String,
+    backup: String,
+    output: String,
+    /// The server's reload answer: `applied`, `deferred`, `restart_required`, `changes`.
+    reload: Value,
+}
+
+/// Apply without a restart: check the new file with the server's own binary, back it up and
+/// replace it (no restart), then ask the running server to reload it through the admin API.
+/// Live settings apply at once, race rules at the next session, and restart-only ones are
+/// listed for the app to offer a restart. If the reload refuses it, the backup goes back.
+#[tauri::command]
+async fn config_apply_live(
+    app: State<'_, App>,
+    id: String,
+    base_sha: String,
+    text: String,
+) -> Result<LiveApply, String> {
+    let server = app.store.get(&id)?;
+    if !base_sha.chars().all(|c| c.is_ascii_hexdigit()) || base_sha.len() != 64 {
+        return Err("bad config hash".into());
+    }
+    let (backup, output) = if server.local {
+        let target = server.clone();
+        blocking(move || local::write(&target, &base_sha, &text)).await?
+    } else {
+        let tunnels = Arc::clone(&app.tunnels);
+        let encoded = b64(&text);
+        let port = server.observe_port.to_string();
+        let target = server.clone();
+        let out = blocking(move || {
+            tunnels.run_script(&target, REMOTE_SH, &["write", &port, &encoded, &base_sha], 300)
+        })
+        .await?;
+        if out.field("result") != Some("written") {
+            return Err(out.text());
+        }
+        (out.field("backup").unwrap_or("").to_string(), out.text())
+    };
+    let body = serde_json::json!({ "dry_run": false });
+    match admin_call(
+        &app,
+        &server,
+        reqwest::Method::POST,
+        "/v1/config/reload",
+        Some(&body),
+        true,
+    )
+    .await
+    {
+        Ok(reload) => Ok(LiveApply {
+            result: "applied".into(),
+            backup,
+            output,
+            reload,
+        }),
+        Err(error) => {
+            // The server runs on the old file still: put it back so the two agree.
+            let restored = if server.local {
+                let (target, path) = (server.clone(), backup.clone());
+                blocking(move || local::restore(&target, &path)).await
+            } else {
+                let tunnels = Arc::clone(&app.tunnels);
+                let port = server.observe_port.to_string();
+                let (target, path) = (server.clone(), backup.clone());
+                blocking(move || {
+                    let out = tunnels.run_script(&target, REMOTE_SH, &["restore", &port, &path], 60)?;
+                    if out.field("result") == Some("restored") {
+                        Ok(())
+                    } else {
+                        Err(out.text())
+                    }
+                })
+                .await
+            };
+            let output = match restored {
+                Ok(()) => format!("The server did not reload the new settings, so the previous file was put back: {error}"),
+                Err(why) => format!("The server did not reload the new settings ({error}), and putting the previous file back failed: {why}"),
+            };
+            Ok(LiveApply {
+                result: "failed".into(),
+                backup,
+                output,
+                reload: Value::Null,
+            })
+        }
+    }
+}
+
+/// How the running server would apply `text` (`/v1/config/validate` with `content`): each changed
+/// key's class. Nothing is written. `{"supported": false}` from a server too old to say.
+#[tauri::command]
+async fn config_classify(app: State<'_, App>, id: String, text: String) -> Result<Value, String> {
+    let server = app.store.get(&id)?;
+    if server.kind == ServerKind::Legacy {
+        return Ok(serde_json::json!({ "supported": false }));
+    }
+    let body = serde_json::json!({ "content": text });
+    admin_call(
+        &app,
+        &server,
+        reqwest::Method::POST,
+        "/v1/config/validate",
+        Some(&body),
+        true,
+    )
+    .await
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_log::Builder::new().build())
@@ -2003,6 +2117,8 @@ fn main() {
             config_preview,
             config_validate,
             config_apply,
+            config_apply_live,
+            config_classify,
         ])
         .build(tauri::generate_context!())
         .expect("error while building MXB Servers")

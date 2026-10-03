@@ -21,6 +21,11 @@
 #   apply <obs> <b64> <sha>       back up, replace, restart, wait for /readyz; puts the backup
 #                                 back and restarts again if the server isn't ready.
 #                                 @@backup, @@result applied|rolled-back|failed
+#   write <obs> <b64> <sha>       apply without a restart: check, back up and replace only; the
+#                                 app then asks the running server to reload it (admin API).
+#                                 @@backup, @@result written|failed
+#   restore <obs> <backup>        put a backup from `write` back (the reload refused it).
+#                                 @@result restored
 #   admin-addr <obs>              @@admin <listen> from the config's [admin] listen (or the
 #                                 --admin flag), else the default 127.0.0.1:9810
 #   observe <obs>                 read /status and /readyz directly on the host
@@ -239,7 +244,7 @@ admin_listen() {
 }
 
 OWNER=""
-if [[ "$CMD" =~ ^(read|validate|apply|admin-addr|tracks|install-track|install-version|logs|service)$ ]]; then
+if [[ "$CMD" =~ ^(read|validate|apply|write|restore|admin-addr|tracks|install-track|install-version|logs|service)$ ]]; then
   detect
   if [[ "$CMD" =~ ^(logs|service)$ ]]; then
     CONFIG=""
@@ -262,7 +267,7 @@ case "$CMD" in
     priv rm -f "$cand"
     say valid "$([[ $rc == 0 ]] && echo 1 || echo 0)"
     ;;
-  apply)
+  apply|write)
     b64="${3:?candidate}"; want="${4:?sha}"
     [[ "$want" =~ ^[0-9a-f]{64}$ ]] || die "bad sha"
     dir="$(dirname "$CONFIG")"
@@ -283,6 +288,8 @@ case "$CMD" in
     priv sh -c "ls -1t '$dir/backups/$(basename "$CONFIG")'.* 2>/dev/null | tail -n +21 | xargs -r rm -f"
     say backup "$backup"
     priv mv -f "$cand" "$CONFIG" || die "replace failed; the old config is still live"
+    # `write`: the running server reloads the file itself; nobody is disconnected.
+    if [[ "$CMD" == write ]]; then say result written; exit 0; fi
     if restart && wait_ready; then
       say result applied
     else
@@ -295,6 +302,14 @@ case "$CMD" in
       fi
       if restart && wait_ready; then say result rolled-back; else say result failed; fi
     fi
+    ;;
+  restore)
+    backup="${3:?backup}"
+    dir="$(dirname "$CONFIG")"
+    [[ "$backup" == "$dir/backups/$(basename "$CONFIG")."* && "$backup" != *..* ]] || die "not a backup of this config"
+    priv test -f "$backup" || die "no such backup"
+    priv cp -p "$backup" "$CONFIG" || die "restore failed"
+    say result restored
     ;;
   admin-addr)
     say admin "$(admin_listen)"
