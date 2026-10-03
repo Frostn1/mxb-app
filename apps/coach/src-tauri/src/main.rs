@@ -25,6 +25,7 @@ mod overlay;
 mod replay;
 mod sag;
 mod soil;
+mod stitch;
 mod stp;
 mod surface;
 mod telemetry;

@@ -479,6 +479,15 @@ export interface CuesOut {
    *  wherever somebody rode that lap; the ideal lap nobody did, so there the HUD races your
    *  fastest lap on the track instead. */
   ghost: LapRef;
+  /** What the in-game line is, and for the ideal line which laps it is stitched from. */
+  line: LineOut;
+}
+
+/** The in-game line: `fastest`, `ideal` (stitched) or `chosen`. */
+export interface LineOut {
+  kind: "fastest" | "ideal" | "chosen";
+  from: { startM: number; endM: number; lap: number; session: number; bike: string }[];
+  notes: string[];
 }
 
 /** Picks this lap's live cues for a rider's level and how much coaching they want, and writes
@@ -497,6 +506,7 @@ export const coachWriteCues = (
   amount: CueAmount,
   ref: RefArgs = {},
   latest?: boolean,
+  lineFrom: "fastest" | "ideal" | "chosen" = "fastest",
 ) =>
   invoke<CuesOut>("coach_write_cues", {
     path,
@@ -507,6 +517,7 @@ export const coachWriteCues = (
     refLap: ref.refLap ?? null,
     ideal: ref.ideal ?? false,
     latest: latest ?? false,
+    lineFrom,
   });
 
 /** A recording that couldn't be imported, and why. */
