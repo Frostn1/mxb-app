@@ -6,10 +6,7 @@
   "workspaces": [
     "packages/shared",
     "packages/mxbsecure-ui",
-    "apps/manager",
-    "apps/studio",
-    "apps/coach",
-    "apps/servers"
+    "apps/manager"
   ],
   "scripts": {
     "dev": "cd apps/manager && bun run dev",
@@ -20,13 +17,7 @@
     "check:secure-boundary": "bun scripts/check-secure-boundary.mjs",
     "check:no-ban-guids": "bun scripts/check-no-ban-guids.mjs",
     "typecheck": "bun run --filter '*' typecheck",
-    "lint": "eslint .",
-    "dev:studio": "cd apps/studio && bun run dev",
-    "tauri:studio": "cd apps/studio && bun run tauri",
-    "dev:coach": "cd apps/coach && bun run dev",
-    "tauri:coach": "cd apps/coach && bun run tauri",
-    "dev:servers": "cd apps/servers && bun run dev",
-    "tauri:servers": "cd apps/servers && bun run tauri"
+    "lint": "eslint ."
   },
   "overrides": {
     "postcss": "^8.5.25"

@@ -108,7 +108,3 @@ jobs:
       - name: Build manager
         working-directory: apps/manager
         run: bun run tauri build --no-bundle ${{ matrix.args }}
-
-      - name: Build studio
-        working-directory: apps/studio
-        run: bun run tauri build --no-bundle ${{ matrix.args }}
