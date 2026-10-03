@@ -74,6 +74,14 @@ const num = (text: string | undefined): number | null => {
   return Number.isFinite(value) ? value : null;
 };
 
+/** A Rust `{:?}` string: `"` ... `"` with backslash escapes. */
+const QUOTED = '"((?:\\\\.|[^"\\\\])*)"';
+
+const unquote = (text: string) =>
+  text.replace(/\\(?:u\{([0-9a-fA-F]+)\}|(.))/g, (_, hex: string | undefined, ch: string | undefined) =>
+    hex ? String.fromCodePoint(parseInt(hex, 16)) : ch === "n" ? "\n" : ch === "t" ? "\t" : ch === "r" ? "\r" : ch === "0" ? "\0" : (ch ?? ""),
+  );
+
 /** `"+1200s"` / `"+75.5s"` / `"+250ms"` (Rust's Duration Debug) -> seconds. */
 const debugSeconds = (text: string): number | null => {
   const m = /^([\d.]+)(ms|µs|us|ns|s)$/.exec(text.trim());
@@ -120,26 +128,62 @@ export function parseLogLine(input: string): ParsedEvent | null {
     };
   }
 
-  m = /^event cut: #(-?\d+) "((?:\\.|[^"])*)" · (.*?) · route ([\d.]+) m · ([\d.]+) m outside for ([\d.]+) s$/.exec(line);
+  m = new RegExp(
+    `^event cut: #(-?\\d+) ${QUOTED} · (.*?) · route ([\\d.]+) m · ([\\d.]+) m outside for ([\\d.]+) s` +
+      `(?: · skipped ([\\d.]+) m to ([\\d.]+) m)?(?: · zone ${QUOTED})?(?: · (penalty ([\\d.]+) s|warning|disqualified|allowed|report only))?$`,
+  ).exec(line);
   if (m) {
-    const [, race, name, track, route, outside, seconds] = m;
-    const rider = name.replace(/\\(.)/g, "$1");
+    const [, race, name, track, route, outside, seconds, skipped, to, zoneRaw, outcomeText, penalty] = m;
+    const rider = unquote(name);
+    const zone = zoneRaw == null ? null : unquote(zoneRaw);
+    const outcome = outcomeText == null ? null : outcomeText.startsWith("penalty") ? "Penalty" : outcomeText.charAt(0).toUpperCase() + outcomeText.slice(1);
+    const result = outcomeText == null ? "" : penalty ? ` · +${Number(penalty)} s penalty` : ` · ${outcomeText}`;
+    const fields: Record<string, FieldValue> = {
+      "Rider": rider,
+      "Race number": num(race),
+      "Track": track,
+      "Track position (m)": num(route),
+      "Distance outside (m)": num(outside),
+      "Time outside (s)": num(seconds),
+    };
+    if (skipped != null) {
+      fields["Skipped (m)"] = num(skipped);
+      fields["Rejoined at (m)"] = num(to);
+    }
+    if (zone != null) fields["Zone"] = zone;
+    if (outcome != null) fields["Outcome"] = outcome;
+    if (penalty != null) fields["Penalty (s)"] = num(penalty);
     return {
       kind: "cut",
-      summary: `#${race} ${rider} cut the track · ${Number(outside).toFixed(1)} m outside for ${Number(seconds).toFixed(2)} s`,
+      summary: `#${race} ${rider} cut the track · ${Number(outside).toFixed(1)} m outside for ${Number(seconds).toFixed(2)} s${zone != null ? ` · ${zone}` : ""}${result}`,
       riders: [rider],
-      fields: {
-        "Rider": rider,
-        "Race number": num(race),
-        "Track": track,
-        "Track position (m)": num(route),
-        "Distance outside (m)": num(outside),
-        "Time outside (s)": num(seconds),
-      },
+      fields,
       raw,
     };
   }
 
+  m = new RegExp(
+    `^event penalty: #(-?\\d+) ${QUOTED} · (cut|jump start) · (?:\\+([\\d.]+) s \\(([\\d.]+) s total\\)|(disqualified))(?: · zone ${QUOTED})?$`,
+  ).exec(line);
+  if (m) {
+    const [, race, name, what, added, total, dsq, zoneRaw] = m;
+    const rider = unquote(name);
+    const zone = zoneRaw == null ? null : unquote(zoneRaw);
+    const fields: Record<string, FieldValue> = { "Rider": rider, "Race number": num(race), "Reason": what === "cut" ? "Track cut" : "Jump start" };
+    if (zone != null) fields["Zone"] = zone;
+    if (dsq) fields["Disqualified"] = true;
+    else {
+      fields["Added (s)"] = num(added);
+      fields["Total penalty (s)"] = num(total);
+    }
+    return {
+      kind: "penalty",
+      summary: `#${race} ${rider} · ${what}${zone != null ? ` · ${zone}` : ""} · ${dsq ? "disqualified" : `+${Number(added)} s (${Number(total)} s total)`}`,
+      riders: [rider],
+      fields,
+      raw,
+    };
+  }
   m = /^event holeshot: #(-?\d+) · ([\d.]+) s since the gate drop/.exec(line);
   if (m) {
     return {

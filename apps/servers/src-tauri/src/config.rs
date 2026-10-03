@@ -210,7 +210,46 @@ pub const FIELDS: &[Field] = &[
         .help("Logs who hit whom and counts collisions per rider.")
         .default_is("off")
         .done(),
-    // ---- Advanced switches (A/B tests from the protocol work) ---------------------------------
+    // ---- Track cuts and penalties ---------------------------------------------------------------
+    F::new("cuts", "enable", "cuts", "Detect track cuts", Kind::Bool)
+        .help("Watches every rider's line against the track and logs when someone skips part of it. Needs a recent server.")
+        .default_is("off")
+        .done(),
+    F::new("cuts", "auto_half_width_m", "cuts", "Track half-width", float(1.0, 50.0))
+        .help("How far from the centre line counts as the track where the terrain can't be read; also the minimum.")
+        .default_is("6 m")
+        .unit("m")
+        .done(),
+    F::new("cuts", "min_excursion_seconds", "cuts", "Min excursion", float(0.0, 30.0))
+        .help("How long a rider has to stay off the track before it can count as a cut.")
+        .default_is("0.5 s")
+        .unit("s")
+        .done(),
+    F::new("cuts", "min_gain_m", "cuts", "Min distance skipped", float(0.0, 1000.0))
+        .help("The least lap distance a rider must skip for the excursion to count as a cut.")
+        .default_is("20 m")
+        .unit("m")
+        .done(),
+    F::new("penalties", "enable", "penalties", "Give penalties", Kind::Bool)
+        .help("Adds time for cuts and jump starts. Cuts inside a zone use that zone's time instead.")
+        .default_is("off")
+        .done(),
+    F::new("penalties", "cut_time_seconds", "penalties", "Penalty for a cut", int(0, 600))
+        .help("For cuts that no zone covers.")
+        .default_is("10 s")
+        .unit("s")
+        .done(),
+    F::new("penalties", "cut_offences_for_dsq", "penalties", "Cuts before disqualification", int(1, 100))
+        .default_is("3")
+        .done(),
+    F::new("penalties", "jump_start_seconds", "penalties", "Penalty for a jump start", int(0, 600))
+        .default_is("10 s")
+        .unit("s")
+        .done(),
+    F::new("penalties", "holeshot", "penalties", "Penalise the holeshot", Kind::Bool)
+        .help("Include the holeshot in penalty handling.")
+        .default_is("off")
+        .done(),    // ---- Advanced switches (A/B tests from the protocol work) ---------------------------------
     F::new("native", "late_join_register", "advanced", "Late joiners see earlier riders like a stock server", Kind::Bool)
         .help("Compatibility option: send the existing rider list when a new player leaves the pits.")
         .default_is("off")
@@ -309,9 +348,144 @@ pub fn read(text: &str) -> Result<serde_json::Map<String, Value>, String> {
         };
         out.insert(format!("{}.{}", field.section, field.key), v);
     }
+    out.insert(ZONES.into(), Value::Array(read_zones(&doc)));
     Ok(out)
 }
 
+/// The pseudo-field holding every `[[cuts.zones]]` entry, as a list of objects.
+pub const ZONES: &str = "cuts.zones";
+
+fn float_of(v: &toml_edit::Value) -> Option<f64> {
+    v.as_float().or_else(|| v.as_integer().map(|i| i as f64))
+}
+
+fn read_zones(doc: &DocumentMut) -> Vec<Value> {
+    let Some(tables) = doc
+        .get("cuts")
+        .and_then(|c| c.get("zones"))
+        .and_then(Item::as_array_of_tables)
+    else {
+        return Vec::new();
+    };
+    tables
+        .iter()
+        .map(|t| {
+            let num = |k: &str| t.get(k).and_then(Item::as_value).and_then(float_of);
+            let area = t.get("area").and_then(Item::as_array).map(|a| {
+                Value::Array(
+                    a.iter()
+                        .filter_map(|p| {
+                            let p = p.as_array()?;
+                            Some(json!([float_of(p.get(0)?)?, float_of(p.get(1)?)?]))
+                        })
+                        .collect(),
+                )
+            });
+            json!({
+                "track": t.get("track").and_then(Item::as_str).unwrap_or(""),
+                "name": t.get("name").and_then(Item::as_str).unwrap_or(""),
+                "from_m": num("from_m"),
+                "to_m": num("to_m"),
+                "area": area,
+                "seconds": num("seconds").map_or(10, |s| s.round() as i64),
+                "enable": t.get("enable").and_then(Item::as_bool).unwrap_or(true),
+            })
+        })
+        .collect()
+}
+
+/// Check the zones the app sends and write them as `[[cuts.zones]]` (all of them are replaced;
+/// an empty list removes them).
+fn set_zones(doc: &mut DocumentMut, zones: &Value) -> Result<(), String> {
+    let list = zones.as_array().ok_or("Cut zones: not a valid value")?;
+    let mut tables = toml_edit::ArrayOfTables::new();
+    for z in list {
+        let text = |k: &str| {
+            z.get(k)
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .unwrap_or("")
+        };
+        let (track, name) = (text("track"), text("name"));
+        if track.is_empty() || name.is_empty() {
+            return Err("Cut zones: every zone needs a track and a name".into());
+        }
+        for s in [track, name] {
+            if s.len() > 256 || s.contains(['\n', '\r', '\0']) {
+                return Err(format!("Cut zones: \"{s}\" is not a valid name"));
+            }
+        }
+        let mut t = toml_edit::Table::new();
+        t["track"] = value(track);
+        t["name"] = value(name);
+        let from = z.get("from_m").and_then(Value::as_f64);
+        let to = z.get("to_m").and_then(Value::as_f64);
+        match (from, to) {
+            (Some(a), Some(b)) => {
+                if !(a.is_finite() && b.is_finite()) || a < 0.0 || b < 0.0 {
+                    return Err(format!(
+                        "Cut zone {name}: from and to must be distances of 0 or more"
+                    ));
+                }
+                t["from_m"] = value(a);
+                t["to_m"] = value(b);
+            }
+            (None, None) => {}
+            _ => return Err(format!("Cut zone {name}: set both from and to, or neither")),
+        }
+        if let Some(points) = z.get("area").and_then(Value::as_array) {
+            if !points.is_empty() {
+                if points.len() < 3 || points.len() > 512 {
+                    return Err(format!("Cut zone {name}: an area needs 3 to 512 points"));
+                }
+                let mut area = Array::new();
+                for p in points {
+                    let xz = p.as_array().filter(|p| p.len() == 2);
+                    let coord = |i: usize| xz.and_then(|p| p[i].as_f64()).filter(|v| v.is_finite());
+                    let (Some(x), Some(y)) = (coord(0), coord(1)) else {
+                        return Err(format!("Cut zone {name}: bad area point"));
+                    };
+                    let mut pair = Array::new();
+                    pair.push(round1(x));
+                    pair.push(round1(y));
+                    area.push(pair);
+                }
+                t["area"] = value(area);
+            }
+        }
+        if from.is_none() && t.get("area").is_none() {
+            return Err(format!("Cut zone {name}: pick a range or draw an area"));
+        }
+        let seconds = z
+            .get("seconds")
+            .and_then(Value::as_i64)
+            .filter(|s| (0..=3600).contains(s))
+            .ok_or_else(|| format!("Cut zone {name}: seconds must be 0 to 3600"))?;
+        t["seconds"] = value(seconds);
+        t["enable"] = value(z.get("enable").and_then(Value::as_bool).unwrap_or(true));
+        tables.push(t);
+    }
+    if tables.is_empty() {
+        if let Some(cuts) = doc.get_mut("cuts").and_then(Item::as_table_like_mut) {
+            cuts.remove("zones");
+        }
+        return Ok(());
+    }
+    if !doc.contains_table("cuts") {
+        if doc.contains_key("cuts") {
+            return Err("[cuts] is not a table in this file".into());
+        }
+        let mut cuts = toml_edit::Table::new();
+        cuts.set_implicit(true);
+        doc["cuts"] = Item::Table(cuts);
+    }
+    doc["cuts"]["zones"] = Item::ArrayOfTables(tables);
+    Ok(())
+}
+
+fn round1(x: f64) -> f64 {
+    (x * 10.0).round() / 10.0
+}
 /// Check one change against its field and turn it into a TOML value; `None` unsets it.
 fn to_item(field: &Field, v: &Value) -> Result<Option<Item>, String> {
     let bad = || format!("{}: not a valid value", field.label);
@@ -404,6 +578,10 @@ fn to_item(field: &Field, v: &Value) -> Result<Option<Item>, String> {
 pub fn apply(text: &str, changes: &serde_json::Map<String, Value>) -> Result<String, String> {
     let mut doc = parse(text)?;
     for (name, v) in changes {
+        if name == ZONES {
+            set_zones(&mut doc, v)?;
+            continue;
+        }
         let (section, key) = name
             .split_once('.')
             .ok_or_else(|| format!("unknown field {name}"))?;
@@ -433,6 +611,12 @@ pub fn apply(text: &str, changes: &serde_json::Map<String, Value>) -> Result<Str
                 }
             }
         }
+    }
+    // Turning cuts on with no limits source means "auto"; a configured file path stays.
+    if changes.get("cuts.enable").and_then(Value::as_bool) == Some(true)
+        && doc.get("cuts").and_then(|c| c.get("limits")).is_none()
+    {
+        doc["cuts"]["limits"] = value("auto");
     }
     Ok(doc.to_string())
 }
@@ -632,5 +816,101 @@ mod track_tests {
         );
         let back = set_tracks(&out, "tracks/b.pkz", &[]).unwrap();
         assert_eq!(tracks(&back).unwrap().1, Vec::<String>::new());
+    }
+}
+
+#[cfg(test)]
+mod cuts_tests {
+    use super::*;
+
+    const FILE: &str =
+        "[server]\nname = \"x\"\n\n# cuts\n[cuts]\nlimits = \"tracks/limits.json\"\n";
+
+    fn one(k: &str, v: Value) -> serde_json::Map<String, Value> {
+        [(k.to_string(), v)].into_iter().collect()
+    }
+
+    #[test]
+    fn enabling_cuts_writes_only_changed_keys_and_defaults_limits_to_auto() {
+        let out = apply(
+            "[server]\nname = \"x\"\n",
+            &[
+                ("cuts.enable".to_string(), json!(true)),
+                ("cuts.min_gain_m".to_string(), json!(25.0)),
+                ("penalties.enable".to_string(), json!(true)),
+                ("penalties.cut_time_seconds".to_string(), json!(15)),
+            ]
+            .into_iter()
+            .collect(),
+        )
+        .unwrap();
+        assert!(out.contains("[cuts]"));
+        assert!(out.contains("enable = true"));
+        assert!(out.contains("limits = \"auto\""));
+        assert!(out.contains("min_gain_m = 25.0"));
+        assert!(!out.contains("auto_half_width_m"));
+        assert!(out.contains("[penalties]"));
+        assert!(out.contains("cut_time_seconds = 15"));
+        assert!(!out.contains("holeshot"));
+    }
+
+    #[test]
+    fn a_configured_limits_file_is_left_alone() {
+        let out = apply(FILE, &one("cuts.enable", json!(true))).unwrap();
+        assert!(out.contains("limits = \"tracks/limits.json\""));
+        assert!(!out.contains("\"auto\""));
+        assert!(out.contains("# cuts"));
+    }
+
+    #[test]
+    fn cut_bounds_are_checked() {
+        for (k, v) in [
+            ("cuts.auto_half_width_m", json!(0.0)),
+            ("penalties.cut_offences_for_dsq", json!(0)),
+            ("penalties.cut_time_seconds", json!(-1)),
+        ] {
+            assert!(apply(FILE, &one(k, v.clone())).is_err(), "{k} {v}");
+        }
+    }
+
+    #[test]
+    fn zones_round_trip_and_are_replaced_as_a_list() {
+        let zones = json!([
+            {"track": "Fake Track", "name": "Skipping the triple", "from_m": 620.0, "to_m": 680.0, "area": null, "seconds": 10, "enable": true},
+            {"track": "Fake Track", "name": "Shortcut \"B\"", "from_m": null, "to_m": null, "area": [[1.0, 2.0], [3.0, 2.0], [3.0, 5.5]], "seconds": 0, "enable": false}
+        ]);
+        let out = apply(FILE, &one(ZONES, zones.clone())).unwrap();
+        assert!(out.contains("[[cuts.zones]]"));
+        assert!(out.contains("from_m = 620.0"));
+        assert!(out.contains("area = [[1.0, 2.0], [3.0, 2.0], [3.0, 5.5]]"));
+        assert!(out.contains("limits = \"tracks/limits.json\""));
+        let back = read(&out).unwrap();
+        assert_eq!(back[ZONES], zones);
+        // Nothing sent for zones means nothing touched; an empty list removes them all.
+        assert_eq!(read(FILE).unwrap()[ZONES], json!([]));
+        let gone = apply(&out, &one(ZONES, json!([]))).unwrap();
+        assert!(!gone.contains("zones"));
+        assert!(gone.contains("limits"));
+    }
+
+    #[test]
+    fn zones_alone_do_not_create_an_empty_cuts_header() {
+        let zones = json!([{"track": "T", "name": "Z", "from_m": 1.0, "to_m": 2.0, "area": null, "seconds": 5, "enable": true}]);
+        let out = apply("[server]\nname = \"x\"\n", &one(ZONES, zones)).unwrap();
+        assert!(out.contains("[[cuts.zones]]"));
+        assert!(!out.contains("[cuts]"));
+    }
+
+    #[test]
+    fn bad_zones_are_refused() {
+        for z in [
+            json!([{"track": "", "name": "Z", "from_m": 1.0, "to_m": 2.0, "seconds": 5}]),
+            json!([{"track": "T", "name": "Z", "from_m": 1.0, "to_m": null, "seconds": 5}]),
+            json!([{"track": "T", "name": "Z", "seconds": 5}]),
+            json!([{"track": "T", "name": "Z", "area": [[0.0, 0.0], [1.0, 1.0]], "seconds": 5}]),
+            json!([{"track": "T", "name": "Z", "from_m": 1.0, "to_m": 2.0, "seconds": -1}]),
+        ] {
+            assert!(apply(FILE, &one(ZONES, z.clone())).is_err(), "{z}");
+        }
     }
 }

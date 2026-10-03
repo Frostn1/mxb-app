@@ -659,6 +659,47 @@ async fn admin_call(
     serde_json::from_str(&text).map_err(|e| format!("{path}: {e}"))
 }
 
+/// A GET of the admin API that treats 404 (a server older than the endpoint) as "not
+/// supported": `{"supported": false}` instead of an error.
+async fn admin_get_optional(app: &App, server: &Server, path: &str) -> Result<Value, String> {
+    let token = store::token(&server.id).ok_or(NO_TOKEN)?;
+    let port = admin_port(app, server).await?;
+    let (code, text) = send(app, server, port, reqwest::Method::GET, path, Some(&token), None)
+        .await
+        .map_err(|miss| match miss {
+            Miss::NoAnswer(_) => format!(
+                "Nothing answers on admin port {port}. Is mxbserver running, with an [admin] section in its config (default 127.0.0.1:9810)?"
+            ),
+            other => other.text(),
+        })?;
+    if code == 404 {
+        return Ok(serde_json::json!({ "supported": false }));
+    }
+    if !(200..300).contains(&code) {
+        return Err(admin_error(code, &text, false));
+    }
+    serde_json::from_str(&text).map_err(|e| format!("{path}: {e}"))
+}
+
+/// The admin `/v1/cuts`: cut detection settings, the penalties, and per track the outline and zones.
+#[tauri::command]
+async fn server_cuts(app: State<'_, App>, id: String) -> Result<Value, String> {
+    let server = app.store.get(&id)?;
+    if server.kind == ServerKind::Legacy {
+        return Ok(serde_json::json!({ "supported": false }));
+    }
+    admin_get_optional(&app, &server, "/v1/cuts").await
+}
+
+/// The admin `/v1/events` (its `cuts.recent` feeds the cut map).
+#[tauri::command]
+async fn server_cut_events(app: State<'_, App>, id: String) -> Result<Value, String> {
+    let server = app.store.get(&id)?;
+    if server.kind == ServerKind::Legacy {
+        return Ok(serde_json::json!({ "supported": false }));
+    }
+    admin_get_optional(&app, &server, "/v1/events").await
+}
 /// Try the saved admin token against `/v1/server` and say plainly what happened. A dry-run
 /// config reload (changes nothing) tells whether it also has the `control` scope.
 #[tauri::command]
@@ -1885,6 +1926,8 @@ fn main() {
             legacy_pairing,
             server_status,
             server_riders,
+            server_cuts,
+            server_cut_events,
             server_tracks,
             server_set_track,
             server_set_rotation,

@@ -5,6 +5,7 @@ import { duration, lapTime, sessionName } from "@/lib/format";
 import { usePoll } from "@/lib/usePoll";
 import { useEventFeed } from "@/lib/useEventFeed";
 import { ConfigTab } from "./ConfigTab";
+import { CutMapCard } from "./CutMapCard";
 import { EventsTab } from "./EventsTab";
 import { LegacySettings } from "./LegacySettings";
 import { TracksTab } from "./TracksTab";
@@ -166,6 +167,7 @@ function StatusTab({
         </div>
       )}
       {!server.local && native && <SessionControls server={server} current={native.session} remaining={native.session_remaining_seconds} refresh={poll.refresh} />}
+      {native && report?.state !== "offline" && server.kind === "native" && <CutMapCard server={server} />}
       {!report && !poll.error && (
         <p className="text-sm text-muted-foreground">{server.local ? "Connecting…" : "Connecting over SSH…"}</p>
       )}
