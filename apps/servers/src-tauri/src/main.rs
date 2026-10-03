@@ -1591,6 +1591,20 @@ async fn server_logs(app: State<'_, App>, id: String, lines: u32) -> Result<Vec<
     Ok(out.stdout.lines().map(str::to_string).collect())
 }
 
+/// The observe `/timing` feed: race numbers, names, laps and split times (no credentials, no
+/// GUIDs). The Events tab diffs it into lap finishes and time checks.
+#[tauri::command]
+async fn server_timing(app: State<'_, App>, id: String) -> Result<Value, String> {
+    let server = app.store.get(&id)?;
+    if server.kind == ServerKind::Legacy {
+        return Ok(serde_json::json!({ "available": false }));
+    }
+    let (code, body) = fetch(&app, &server, server.observe_port, "/timing", None)
+        .await
+        .map_err(Miss::text)?;
+    json_answer(code, &body, "/timing")
+}
+
 #[tauri::command]
 async fn legacy_config(app: State<'_, App>, id: String) -> Result<Value, String> {
     let server = app.store.get(&id)?;
@@ -1885,6 +1899,7 @@ fn main() {
             quit_app,
             inspect_track_upload,
             server_logs,
+            server_timing,
             server_test_token,
             legacy_config,
             legacy_config_save,

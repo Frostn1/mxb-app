@@ -3,13 +3,15 @@ import { RefreshCw } from "lucide-react";
 import { configLoad, errorText, isLegacyStatus, legacyProcess, serverLogs, serverRestartService, serverRiders, serverSession, serverStatus, type ServerView } from "@/lib/api";
 import { duration, lapTime, sessionName } from "@/lib/format";
 import { usePoll } from "@/lib/usePoll";
+import { useEventFeed } from "@/lib/useEventFeed";
 import { ConfigTab } from "./ConfigTab";
+import { EventsTab } from "./EventsTab";
 import { LegacySettings } from "./LegacySettings";
 import { TracksTab } from "./TracksTab";
 import { VersionTab } from "./VersionTab";
 import { Button, Card, ErrorLine, Notice, OverflowMenu, Stat, StatusBadge, type MenuItem } from "./ui";
 
-type Tab = "status" | "riders" | "tracks" | "version" | "logs" | "config";
+type Tab = "status" | "riders" | "events" | "tracks" | "version" | "logs" | "config";
 
 export function ServerDetail({
   server,
@@ -21,8 +23,10 @@ export function ServerDetail({
   onSetUpToken: () => void;
 }) {
   const [tab, setTab] = useState<Tab>("status");
+  // The event feed starts with the first visit to the tab and keeps collecting after it.
+  const [eventsSeen, setEventsSeen] = useState<string | null>(null);
   const status = usePoll(() => serverStatus(server.id), 3000, server.id);
-  const tabs: Tab[] = server.kind === "legacy" ? ["status", "riders", "tracks", "logs", "config"] : ["status", "riders", "tracks", "version", "logs", "config"];
+  const tabs: Tab[] = server.kind === "legacy" ? ["status", "riders", "tracks", "logs", "config"] : ["status", "riders", "events", "tracks", "version", "logs", "config"];
 
   return (
     <div className="flex h-full flex-col gap-6">
@@ -46,7 +50,10 @@ export function ServerDetail({
             key={t}
             role="tab"
             aria-selected={tab === t}
-            onClick={() => setTab(t)}
+            onClick={() => {
+              setTab(t);
+              if (t === "events") setEventsSeen(server.id);
+            }}
             className={`-mb-px border-b-2 px-3 py-2 text-sm font-medium capitalize ${
               tab === t ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"
             }`}
@@ -56,9 +63,10 @@ export function ServerDetail({
         ))}
       </nav>
 
-      <div className={`min-h-0 flex-1 ${tab === "config" ? "overflow-hidden" : "overflow-auto"}`}>
+      <div className={`min-h-0 flex-1 ${tab === "config" || tab === "events" ? "overflow-hidden" : "overflow-auto"}`}>
         {tab === "status" && <StatusTab server={server} poll={status} onSetUpToken={onSetUpToken} />}
         {tab === "riders" && <RidersTab server={server} onSetUpToken={onSetUpToken} />}
+        {(tab === "events" || eventsSeen === server.id) && server.kind === "native" && <EventsPanel key={server.id} server={server} hidden={tab !== "events"} />}
         {tab === "tracks" && <TracksTab server={server} />}
         {tab === "version" && <VersionTab server={server} />}
         {tab === "logs" && <LogsTab server={server} />}
@@ -66,6 +74,12 @@ export function ServerDetail({
       </div>
     </div>
   );
+}
+
+/** Mounted from the first visit to Events on, so the feed keeps collecting on other tabs. */
+function EventsPanel({ server, hidden }: { server: ServerView; hidden: boolean }) {
+  const feed = useEventFeed(server);
+  return <div className={hidden ? "hidden" : "h-full"}><EventsTab server={server} feed={feed} /></div>;
 }
 
 function AgentHelper({ onSetUpToken }: { onSetUpToken: () => void }) {

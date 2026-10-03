@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import type { Timing } from "./events";
 
 export interface Server {
   id: string;
@@ -101,6 +102,9 @@ export async function serverRiders(id: string): Promise<Rider[]> {
 
 export const serverLogs = (id: string, lines: number) =>
   invoke<string[]>("server_logs", { id, lines });
+
+/** The observe `/timing` feed (no credentials): live laps and split times per rider. */
+export const serverTiming = (id: string) => invoke<Timing>("server_timing", { id });
 
 export interface TrackState {
   installed: string[];
