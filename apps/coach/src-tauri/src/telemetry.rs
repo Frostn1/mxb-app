@@ -511,16 +511,49 @@ impl Recording {
 
 /// The lap crosses the line at both ends, so the first few samples can still read ~1 and the
 /// last few already ~0. Folds them back so position rises through the lap.
+///
+/// By where the position wraps, not by how far through the lap's time a sample is. A supercross
+/// out lap is the gate, a run of a quarter of the track to the line, and then a whole lap: the
+/// run to the line is more than the first fifth of its time, so folding only that fifth back
+/// (as this did) left the end of the run at 0.9 of a lap, after samples already folded below
+/// zero. The trace then bridged the start of the lap with nothing, flagged airborne off the gate,
+/// and the HUD sheet built from it put Coach's lap in the air for 680 m (Carson, v0.1.20).
 fn unwrap(samples: &mut [Sample]) {
-    let (Some(first), Some(last)) = (samples.first(), samples.last()) else { return };
-    let (t0, span) = (first.t, (last.t - first.t).max(1e-3));
-    for s in samples.iter_mut() {
-        let f = (s.t - t0) / span;
-        if f < 0.2 && s.pos > 0.5 {
-            s.pos -= 1.0;
-        } else if f > 0.8 && s.pos < 0.5 {
-            s.pos += 1.0;
+    if samples.len() < 2 {
+        return;
+    }
+    // Which crossing of the line each sample comes after: a drop of over half a lap is the line
+    // crossed going forward, a rise of as much is it crossed backwards.
+    let mut idx = vec![0i32; samples.len()];
+    for k in 1..samples.len() {
+        let d = samples[k].pos - samples[k - 1].pos;
+        idx[k] = idx[k - 1] + if d < -0.5 { 1 } else if d > 0.5 { -1 } else { 0 };
+    }
+    // The lap itself is the stretch between crossings that covers the most of the track; the
+    // bits before and after it are the ends of the laps either side (or the run from the gate).
+    let (lo, hi) = (*idx.iter().min().unwrap_or(&0), *idx.iter().max().unwrap_or(&0));
+    let mut main = lo;
+    let mut best = (f32::NEG_INFINITY, 0usize);
+    for i in lo..=hi {
+        let (mut a, mut b, mut n) = (f32::INFINITY, f32::NEG_INFINITY, 0usize);
+        for (s, &k) in samples.iter().zip(&idx) {
+            if k == i {
+                a = a.min(s.pos);
+                b = b.max(s.pos);
+                n += 1;
+            }
         }
+        if n == 0 {
+            continue;
+        }
+        let span = b - a;
+        if span > best.0 + 1e-4 || ((span - best.0).abs() <= 1e-4 && n > best.1) {
+            best = (span, n);
+            main = i;
+        }
+    }
+    for (s, &k) in samples.iter_mut().zip(&idx) {
+        s.pos += (k - main) as f32;
     }
 }
 
@@ -841,6 +874,39 @@ mod tests {
         assert!(lap.samples[0].pos < 0.0, "early sample folded before the line");
         assert!(lap.samples.last().unwrap().pos > 0.99);
         assert!(lap.whole, "a clean lap is whole");
+    }
+
+    /// Carson, v0.1.20: a supercross out lap. The gate is a quarter of the track before the
+    /// line, so the run to the line takes more than the first fifth of the stint's time; then a
+    /// whole lap. Every sample of the run must fold back below zero, so the lap's position only
+    /// ever rises and its trace has no hole where the run to the line was.
+    #[test]
+    fn a_supercross_out_lap_folds_the_whole_run_from_the_gate() {
+        let mut f = File::new();
+        f.event("t", 100.0);
+        // 3 s waiting in the gate at 0.743, then 26 s to the line, then a 77 s lap, at 10 Hz.
+        for k in 0..30 {
+            f.sample(k as f32 * 0.1, 0.743, |_| {});
+        }
+        for k in 0..260 {
+            f.sample(3.0 + k as f32 * 0.1, 0.743 + 0.256 * k as f32 / 260.0, |_| {});
+        }
+        for k in 0..=770 {
+            f.sample(29.0 + k as f32 * 0.1, (k as f32 / 770.0) % 1.0, |_| {});
+        }
+        f.lap(1, 77_000).end();
+        let lap = &parse(&f.0).unwrap().laps()[0];
+        assert_eq!(lap.issue, Some("out lap"), "still not a lap to compare against");
+        for w in lap.samples.windows(2) {
+            assert!(w[1].pos >= w[0].pos - 1e-6, "position goes back: {} then {}", w[0].pos, w[1].pos);
+        }
+        assert!((lap.samples[0].pos + 0.257).abs() < 1e-3, "the gate is before the line: {}", lap.samples[0].pos);
+        assert!(lap.samples.last().unwrap().pos > 0.99);
+        // And its trace is the lap ridden, start to finish, not a bridge over a hole: the lap's
+        // own 77 s, where the old fold left 680 m of it to a straight line between two samples.
+        let tr = crate::analysis::Trace::new(lap, 100.0).expect("a trace");
+        let span = tr.pts.last().unwrap().t - tr.pts[0].t;
+        assert!((span - 77.0).abs() < 1.0, "the lap takes its own time: {span}");
     }
 
     #[test]
