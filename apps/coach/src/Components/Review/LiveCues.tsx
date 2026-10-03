@@ -21,7 +21,7 @@ import { BEST, refArgs, type Reference } from "@/lib/reference";
 import { Label } from "../Page";
 import { ReferenceLine } from "./RefPicker";
 
-import { AMOUNTS, CUE_AMOUNT_KEY, CUE_LEVEL_KEY, LEVELS, remember, remembered } from "@/lib/cues";
+import { AMOUNTS, CUE_AMOUNT_KEY, CUE_LEVEL_KEY, LEVELS, LINE_FROMS, LINE_FROM_KEY, remember, remembered } from "@/lib/cues";
 
 /** The voices the recorder has clips for, as `hud.rs` writes them. */
 const VOICES = ["female", "male"] as const;
@@ -62,7 +62,7 @@ export default function LiveCues({
     inFlight.current = true;
     setBusy(true);
     try {
-      const out = await coachWriteCues(path, lap, level, amount, refArgs(reference), latest);
+      const out = await coachWriteCues(path, lap, level, amount, refArgs(reference), latest, remembered(LINE_FROM_KEY, LINE_FROMS, "fastest"));
       setSent(out);
       if (!quiet) toast.success(out.cues.length ? t("cues.sent", { n: out.cues.length }) : t("cues.none"));
     } catch (e) {
@@ -137,6 +137,17 @@ export default function LiveCues({
             {t("cues.ghost")} <ReferenceLine reference={sent.ghost} lapPath={path} />
           </p>
         )}
+        {sent && sent.line.kind === "ideal" && sent.line.from.length > 0 && (
+          <p className="text-[12px] text-muted-foreground">
+            {t("cues.lineIdeal")}{" "}
+            {sent.line.from.map((p) => t("cues.linePiece", { from: Math.round(p.startM), to: Math.round(p.endM), lap: p.lap, session: p.session })).join(" · ")}
+          </p>
+        )}
+        {sent && sent.line.notes.map((n, i) => (
+          <p key={i} className="text-[12px] text-muted-foreground">
+            {n}
+          </p>
+        ))}
         {sent && sent.cues.length > 0 && (
           <ol className="space-y-1 border-t border-border pt-2">
             {sent.cues.map((c, i) => (

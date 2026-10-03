@@ -7,6 +7,12 @@
 export const CUE_LEVEL_KEY = "coach-cue-level";
 export const CUE_AMOUNT_KEY = "coach-cue-amount";
 
+/** Which lap the in-game line is drawn from: the fastest lap (the default), the ideal lap
+ *  stitched from the laps that set each section's best, or the reference picked in the review. */
+export const LINE_FROM_KEY = "coach-line-from";
+export const LINE_FROMS = ["fastest", "ideal", "chosen"] as const;
+export type LineFrom = (typeof LINE_FROMS)[number];
+
 export const LEVELS = ["new", "intermediate", "subPro", "pro"] as const;
 export const AMOUNTS = ["few", "normal", "lots"] as const;
 

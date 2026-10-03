@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import { coachSessions, coachWriteCues, onSessionsChanged } from "@/api/coach";
-import { AMOUNTS, CUE_AMOUNT_KEY, CUE_LEVEL_KEY, LEVELS, remembered } from "@/lib/cues";
+import { AMOUNTS, CUE_AMOUNT_KEY, CUE_LEVEL_KEY, LEVELS, LINE_FROMS, LINE_FROM_KEY, remembered } from "@/lib/cues";
 
 /** The least time between two automatic re-picks: a re-pick is a full review of a lap, and the
  *  recorder's watcher fires whenever the recording grows, not once a lap. */
@@ -49,7 +49,7 @@ export default function CueKeeper() {
         if (!newest) return;
         const level = remembered(CUE_LEVEL_KEY, LEVELS, "intermediate");
         const amount = remembered(CUE_AMOUNT_KEY, AMOUNTS, "normal");
-        await coachWriteCues(newest.path, 1, level, amount, {}, true);
+        await coachWriteCues(newest.path, 1, level, amount, {}, true, remembered(LINE_FROM_KEY, LINE_FROMS, "fastest"));
       } catch {
         // Nothing to say: a session with no whole lap in it yet is the normal case out on
         // track, and a toast for it would fire every time the rider left the gate.

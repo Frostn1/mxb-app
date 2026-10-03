@@ -16,6 +16,7 @@ import {
   type LineLookState,
   type TextStyle,
 } from "@/api/coach";
+import { LINE_FROMS, LINE_FROM_KEY, remember, remembered, type LineFrom } from "@/lib/cues";
 import { FieldRow, Rule, Section, ToggleRow } from "./parts";
 
 /** How long a colour picker is left still before what it picked is written: dragging across
@@ -188,8 +189,22 @@ export default function LineLookSettings() {
     else void write(next);
   };
 
+  const [from, setFrom] = useState<LineFrom>(() => remembered(LINE_FROM_KEY, LINE_FROMS, "fastest"));
   return (
     <>
+      <Section title={t("line.from")} desc={t("line.fromDesc")}>
+        <Segmented
+          size="sm"
+          value={from}
+          onChange={(v) => {
+            setFrom(v);
+            remember(LINE_FROM_KEY, v);
+          }}
+          options={LINE_FROMS.map((v) => ({ value: v, label: t(`line.from.${v}` as TKey) }))}
+        />
+        {from === "ideal" && <p className="text-[12px] text-muted-foreground">{t("line.fromIdealBody")}</p>}
+      </Section>
+
       <Section title={t("line.title")} desc={t("line.desc")}>
         <LineParts />
       </Section>

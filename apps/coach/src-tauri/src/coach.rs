@@ -594,6 +594,22 @@ fn ideal_targets(
     sessions: &[SessionSummary],
     summary: &SessionSummary,
 ) -> Result<(Vec<analysis::Section>, Vec<f32>, i32, String), String> {
+    let pool = ideal_pool(sessions, summary)?;
+    Ok((pool.sections, pool.ideal.sections.iter().map(|b| b.best).collect(), pool.laps.len() as i32, pool.bike))
+}
+
+/// Everything the ideal lap is made of: the sections, which lap set each one's best, and the laps
+/// themselves (each with where it came from), for the line to be stitched from.
+struct IdealPool {
+    sections: Vec<analysis::Section>,
+    ideal: Ideal,
+    laps: Vec<(i32, Trace)>,
+    /// For each lap in `laps`: its recording and lap number, and which session of the pool it was in.
+    meta: Vec<(String, i32, usize)>,
+    bike: String,
+}
+
+fn ideal_pool(sessions: &[SessionSummary], summary: &SessionSummary) -> Result<IdealPool, String> {
     let grid = best_reference(sessions, &summary.track_id, &summary.bike_id, None)
         .ok_or("Ride one whole lap on this track first: the ideal lap is built out of your own laps.")?;
     let sections = analysis::sections(&trace(&load(&grid.path)?, grid.lap)?);
@@ -601,7 +617,8 @@ fn ideal_targets(
         .iter()
         .any(|s| s.track_id == summary.track_id && s.bike_id == summary.bike_id && s.laps.iter().any(|l| l.comparable()));
     let mut laps: Vec<(i32, Trace)> = Vec::new();
-    for s in sessions.iter().filter(|s| s.track_id == summary.track_id) {
+    let mut meta: Vec<(String, i32, usize)> = Vec::new();
+    for (si, s) in sessions.iter().filter(|s| s.track_id == summary.track_id).enumerate() {
         if on_this_bike && s.bike_id != summary.bike_id {
             continue;
         }
@@ -610,6 +627,7 @@ fn ideal_targets(
             for l in rec.laps().iter().filter(|l| l.whole && !l.invalid) {
                 if let Some(t) = Trace::new(l, rec.event.track_length) {
                     laps.push((laps.len() as i32, t));
+                    meta.push((st.path.clone(), l.num, si + 1));
                 }
             }
         }
@@ -617,7 +635,76 @@ fn ideal_targets(
     let ideal = analysis::ideal(&sections, &laps)
         .ok_or("There aren't enough whole laps of yours on this track to build an ideal lap.")?;
     let bike = if on_this_bike { summary.bike_name.clone() } else { grid.bike_name.clone() };
-    Ok((sections, ideal.sections.iter().map(|b| b.best).collect(), laps.len() as i32, bike))
+    Ok(IdealPool { sections, ideal, laps, meta, bike })
+}
+
+/// The line the in-game HUD draws, and which laps it is made of: shown in Coach.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LineOut {
+    /// `fastest`, `ideal` or `chosen`: what the line is.
+    pub kind: String,
+    /// For the ideal line, each stretch and the lap it came from, in lap order.
+    pub from: Vec<LinePiece>,
+    /// Anything worth telling the rider: a join moved, or the ideal line couldn't be built and the
+    /// fastest lap's is drawn instead.
+    pub notes: Vec<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LinePiece {
+    pub start_m: f32,
+    pub end_m: f32,
+    pub lap: i32,
+    /// Which session of this track the lap was ridden in, 1 being the newest.
+    pub session: usize,
+    pub bike: String,
+}
+
+/// The ideal lap as a line: each section from the lap that set its best, stitched (see
+/// `stitch.rs`). Err says why not, for the rider; the caller draws the fastest lap's instead.
+fn ideal_line(
+    sessions: &[SessionSummary],
+    summary: &SessionSummary,
+) -> Result<(Trace, Vec<analysis::Section>, LineOut), String> {
+    let pool = ideal_pool(sessions, summary)?;
+    // The grid most of the laps are on (a rebuilt layout is another length: those are left out).
+    let n = {
+        let mut counts: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
+        for (_, t) in &pool.laps {
+            *counts.entry(t.len()).or_default() += 1;
+        }
+        counts.into_iter().max_by_key(|&(len, c)| (c, len)).map_or(0, |(len, _)| len)
+    };
+    let refs: Vec<&Trace> = pool.laps.iter().map(|(_, t)| t).collect();
+    // Gaps between sections, and any lap off the grid, are the fastest whole lap's line.
+    let base = (0..refs.len())
+        .filter(|&i| refs[i].len() == n)
+        .min_by(|&a, &b| {
+            let t = |i: usize| refs[i].pts.last().map_or(f32::MAX, |p| p.t);
+            t(a).total_cmp(&t(b))
+        })
+        .ok_or("No lap here fits the track's grid.")?;
+    let best: Vec<usize> = pool.ideal.sections.iter().map(|b| b.lap.max(0) as usize).collect();
+    let ranges: Vec<(usize, usize)> = pool.sections.iter().map(|s| (s.start, s.end)).collect();
+    let st = crate::stitch::stitch(&ranges, &best, &refs, base)
+        .ok_or("The ideal line didn't join up into a line worth riding (the laps' lines are too far apart).")?;
+    let from = st
+        .pieces
+        .iter()
+        .map(|p| {
+            let (_, lap, session) = &pool.meta[p.lap];
+            LinePiece {
+                start_m: p.start as f32 * crate::analysis::STEP_M,
+                end_m: p.end as f32 * crate::analysis::STEP_M,
+                lap: *lap,
+                session: *session,
+                bike: pool.bike.clone(),
+            }
+        })
+        .collect();
+    Ok((st.trace, pool.sections, LineOut { kind: "ideal".into(), from, notes: st.notes }))
 }
 
 /// Reviews lap `lap` of `path` against `ref_path`/`ref_lap` — which can be an imported lap of
@@ -1167,6 +1254,9 @@ pub struct CuesOut {
     /// reference they picked wherever that is a lap somebody rode; the ideal lap never was,
     /// so there the HUD races the fastest lap on the track instead.
     pub ghost: LapRef,
+    /// What the in-game line is: the fastest lap, the ideal lap stitched from several, or the lap
+    /// the rider chose.
+    pub line: LineOut,
 }
 
 /// The rider's bike as it stands, from the id the recording carries.
@@ -1346,6 +1436,12 @@ fn newest_lap_in(sessions: &[SessionSummary], track: &str, bike: &str) -> Option
         .map(|l| (l.path.clone(), l.num))
 }
 
+/// What each HUD sheet written this run was made from, so an unchanged line isn't written again.
+fn hud_keys() -> &'static std::sync::Mutex<std::collections::HashMap<String, String>> {
+    static KEYS: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, String>>> = std::sync::OnceLock::new();
+    KEYS.get_or_init(Default::default)
+}
+
 /// Windows refusing to replace a file another process has open: `ERROR_SHARING_VIOLATION`, or
 /// `ERROR_ACCESS_DENIED`, which is how `MoveFileEx` usually reports the same thing.
 fn held_open(e: &std::io::Error) -> bool {
@@ -1385,6 +1481,7 @@ pub fn coach_write_cues(
     ref_lap: Option<i32>,
     ideal: Option<bool>,
     latest: Option<bool>,
+    line_from: Option<String>,
 ) -> Result<CuesOut, String> {
     // Which lap is coached is settled before the review, so the reference the rider picked is
     // applied to the lap the calls actually come from.
@@ -1395,6 +1492,7 @@ pub fn coach_write_cues(
         }
         false => (path, lap),
     };
+    let ref_arg_given = ref_path.is_some() || ideal.unwrap_or(false);
     let out = coach_review(app.clone(), path.clone(), lap, ref_path, ref_lap, None, ideal)?;
     let rec = load(&path)?;
     // The lap the calls are placed on, and the one the HUD races. The ideal lap can't be
@@ -1407,8 +1505,45 @@ pub fn coach_write_cues(
     };
     let r = &ghost;
     let ref_rec = if r.path == path { None } else { Some(load(&r.path)?) };
-    let fast = trace(ref_rec.as_ref().unwrap_or(&rec), r.lap)?;
-    let points = analysis::cue_points(&fast, &analysis::sections(&fast));
+    // The line the HUD draws: the fastest lap (today's), the ideal lap stitched from the laps that
+    // set each section's best, or the lap the rider chose. The cues come from the same line.
+    let want_line = line_from.as_deref().unwrap_or("fastest");
+    let own_fast = |g: &LapRef| -> Result<Trace, String> {
+        let rec2 = if g.path == path { None } else { Some(load(&g.path)?) };
+        trace(rec2.as_ref().unwrap_or(&rec), g.lap)
+    };
+    let mut fast = trace(ref_rec.as_ref().unwrap_or(&rec), r.lap)?;
+    let mut line = LineOut { kind: "fastest".into(), from: Vec::new(), notes: Vec::new() };
+    let mut stitched_sections: Option<Vec<analysis::Section>> = None;
+    let mut line_id = format!("{}#{}", r.path, r.lap);
+    match want_line {
+        "chosen" => line.kind = "chosen".into(),
+        "ideal" => {
+            let sessions = all_sessions(&app);
+            let summary = match sessions.iter().find(|s| s.stints.iter().any(|x| x.path == path)) {
+                Some(s) => s.clone(),
+                None => summarize(Path::new(&path), &rec),
+            };
+            match ideal_line(&sessions, &summary) {
+                Ok((t, secs, l)) => {
+                    fast = t;
+                    stitched_sections = Some(secs);
+                    line_id = l.from.iter().map(|p| format!("{}-{}:{}.{}", p.start_m, p.end_m, p.session, p.lap)).collect::<Vec<_>>().join(",");
+                    line = l;
+                }
+                Err(why) => line.notes.push(format!("The ideal line wasn't used: {why} The fastest lap's is drawn.")),
+            }
+        }
+        // The fastest lap on the track, whatever reference the review is held against.
+        _ if ref_arg_given => {
+            if let Some(g) = best_reference(&all_sessions(&app), &out.track_id, &rec.event.bike_id, None) {
+                fast = own_fast(&g)?;
+                line_id = format!("{}#{}", g.path, g.lap);
+            }
+        }
+        _ => {}
+    }
+    let points = analysis::cue_points(&fast, &stitched_sections.unwrap_or_else(|| analysis::sections(&fast)));
     // What the last sheets said, so this one moves on rather than repeating itself.
     let seen = read_history(&app, &rec.event.track_id, &rec.event.bike_id);
     let picked = crate::cues::pick(&points, &out.review, level, amount, &seen);
@@ -1436,13 +1571,24 @@ pub fn coach_write_cues(
         metres_per_sample: m.info.metres_per_sample,
         heights: &m.heights,
     });
-    let sheet = crate::hudsheet::write_with(rec.event.track_length, &fast, &parts, flags, terrain.as_ref());
-    fs::write(&hud_tmp, sheet).map_err(err)?;
-    move_into_place(&hud_tmp, &dir.join(&hud_name)).map_err(err)?;
+    // Coach rewrote this after every lap, and the recorder took each one into the line it was
+    // drawing. The line only changes when the lap it is made of does (a new best, another
+    // reference, a section best that moved), so an unchanged line is not written again.
+    let hud_path = dir.join(&hud_name);
+    let key = format!("{want_line}|{line_id}|{flags}|{}", terrain.is_some());
+    let unchanged = hud_path.exists() && hud_keys().lock().map_or(false, |m| m.get(&hud_name) == Some(&key));
+    if !unchanged {
+        let sheet = crate::hudsheet::write_with(rec.event.track_length, &fast, &parts, flags, terrain.as_ref());
+        fs::write(&hud_tmp, sheet).map_err(err)?;
+        move_into_place(&hud_tmp, &hud_path).map_err(err)?;
+        if let Ok(mut m) = hud_keys().lock() {
+            m.insert(hud_name.clone(), key);
+        }
+    }
     // Only once the sheet is really on disk: a write that failed is a sheet the rider never
     // heard, and it would be wrong to count it against them.
     write_history(&app, &rec.event.track_id, &rec.event.bike_id, &next);
-    Ok(CuesOut { file: file.display().to_string(), cues, ghost })
+    Ok(CuesOut { file: file.display().to_string(), cues, ghost, line })
 }
 
 /// The session's lines and its track, with the stint the lap under review was ridden in.
