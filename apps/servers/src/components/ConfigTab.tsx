@@ -25,7 +25,8 @@ import { Button, ErrorLine, Notice, Toggle } from "./ui";
 
 /** The page's topics, in order. */
 const GROUPS = [
-  // The stock server's own groups first, then our extras.
+  // The server itself first, then the stock server's own groups, then our extras.
+  { id: "server", title: "Server" },
   { id: "event", title: "Event" },
   { id: "sessions", title: "Session lengths" },
   { id: "rules", title: "Rules" },

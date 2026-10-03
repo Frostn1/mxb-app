@@ -42,7 +42,7 @@ pub enum Kind {
 pub struct Field {
     pub section: &'static str,
     pub key: &'static str,
-    /// Where the page shows it: "event", "sessions", "rules", "penalties", "weather", "riders",
+    /// Where the page shows it: "server", "event", "sessions", "rules", "penalties", "weather", "riders",
     /// "ghosts", "cuts", "deformation", "listing", "logging" or "advanced".
     pub group: &'static str,
     /// The stock server's own `section.key` for this setting ("" for our extras), shown so a
@@ -424,7 +424,7 @@ pub const FIELDS: &[Field] = &[
         .default_is("stock default")
         .unit("%")
         .done(),
-    F::new("server", "name", "riders", "Server name", Kind::Text)
+    F::new("server", "name", "server", "Server name", Kind::Text)
         .stock("connection.name")
         .help("Shown in the server browser and on join.")
         .default_is("Native MXB Server")
@@ -444,27 +444,27 @@ pub const FIELDS: &[Field] = &[
         .help("Slots kept for whitelisted riders.")
         .default_is("0")
         .done(),
-    F::new("server", "password", "riders", "Password", Kind::Text)
+    F::new("server", "password", "server", "Password", Kind::Text)
         .stock("connection.password")
         .status("unsupported")
         .help("A password would lock every rider out until the stock password check is decoded.")
         .done(),
-    F::new("connection", "admin_password", "riders", "Admin password", Kind::Text)
+    F::new("connection", "admin_password", "server", "Admin password", Kind::Text)
         .stock("connection.admin_password")
         .status("unsupported")
         .help("mxbserver is administered through its token-protected admin API.")
         .done(),
-    F::new("connection", "bandwidth", "riders", "Bandwidth", Kind::Text)
+    F::new("connection", "bandwidth", "server", "Bandwidth", Kind::Text)
         .stock("connection.bandwidth")
         .status("unsupported")
         .help("mxbserver has no bandwidth setting yet.")
         .done(),
-    F::new("connection", "location", "riders", "Location", Kind::Text)
+    F::new("connection", "location", "server", "Location", Kind::Text)
         .stock("connection.location")
         .status("unsupported")
         .help("mxbserver does not advertise a location yet.")
         .done(),
-    F::new("connection", "motd", "riders", "Message of the day", Kind::Text)
+    F::new("connection", "motd", "server", "Message of the day", Kind::Text)
         .stock("connection.motd")
         .status("unsupported")
         .help("mxbserver does not send a message of the day yet.")
@@ -1373,6 +1373,7 @@ late_join_register = false
         for f in FIELDS {
             assert!(
                 [
+                    "server",
                     "event",
                     "sessions",
                     "rules",
