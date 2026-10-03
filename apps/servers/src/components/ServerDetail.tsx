@@ -242,13 +242,16 @@ function LegacyStatusPanel({ server, status, detail, refresh }: { server: Server
   </div>;
 }
 
-function SessionControls({ server, current, remaining, refresh }: { server: ServerView; current: string; remaining: number | null; refresh: () => void }) {
+export function SessionControls({ server, current, remaining, refresh }: { server: ServerView; current: string; remaining: number | null; refresh: () => void }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const act = async (action: "jump" | "advance" | "restart", to?: "practice" | "qualifying" | "warmup" | "race") => {
     const destination = to ? sessionName(to) : "";
+    const inProgress = current.startsWith("running(race") || /^countdown/i.test(current);
     const prompt = action === "jump"
-      ? `Switch the live server to ${destination}?`
+      ? inProgress
+        ? `Switch the live server to ${destination}? This ends the ${/^countdown/i.test(current) ? "countdown" : "race"} in progress and riders will be moved.`
+        : `Switch the live server to ${destination}?`
       : action === "advance"
         ? "Advance the live server to its next stage?"
         : `Restart ${sessionName(current)} from the beginning?`;
@@ -292,7 +295,7 @@ function SessionControls({ server, current, remaining, refresh }: { server: Serv
   return (
     <Card className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex min-w-0 items-center gap-3"><h3 className="font-heading text-base font-extrabold">Race control</h3>{busy ? <span className="truncate text-xs text-muted-foreground">{busy}</span> : locked ? <span className="truncate text-xs font-medium text-primary">{sessionName(pending)} starts in {remaining == null ? "a moment" : duration(remaining)}</span> : raceLocked ? <span className="truncate text-xs text-muted-foreground">The race must finish before changing sessions</span> : null}</div>
+        <div className="flex min-w-0 items-center gap-3"><h3 className="font-heading text-base font-extrabold">Race control</h3>{busy ? <span className="truncate text-xs text-muted-foreground">{busy}</span> : locked ? <span className="truncate text-xs font-medium text-primary">{sessionName(pending)} starts in {remaining == null ? "a moment" : duration(remaining)}</span> : raceLocked ? <span className="truncate text-xs text-muted-foreground">Pick a stage to jump, or wait for the race to finish</span> : null}</div>
         <div className="flex gap-2">
           {!server.local && <Button size="sm" variant="ghost" disabled={!!busy} title="systemctl restart mxbserver" onClick={() => void restartServer()}>Restart server</Button>}
           <Button size="sm" variant="ghost" disabled={!!busy || controlsLocked} title={raceLocked ? "The race must finish" : locked ? "The countdown must finish" : undefined} onClick={() => void act("restart")}>Restart current</Button>
@@ -304,7 +307,7 @@ function SessionControls({ server, current, remaining, refresh }: { server: Serv
           <button
             key={stage}
             type="button"
-            disabled={!!busy || controlsLocked || running === stage}
+            disabled={!!busy || running === stage}
             onClick={() => void act("jump", stage)}
             aria-current={running === stage || pending === stage ? "step" : undefined}
             className={`flex items-center gap-3 border-b px-4 py-3 text-left transition disabled:cursor-default sm:border-b-0 sm:border-r sm:last:border-r-0 ${running === stage || pending === stage ? "bg-primary/10 text-primary" : "hover:bg-accent disabled:opacity-50"}`}
