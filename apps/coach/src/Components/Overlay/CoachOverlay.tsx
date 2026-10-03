@@ -243,7 +243,7 @@ function ThemedToaster() {
 /** MXB Coach's in-game overlay: the last lap's tips, setup fixes, live cues and the HUD. */
 export default function CoachOverlay() {
   return (
-    <ThemeProvider defaultTheme="dark" scalable={false}>
+    <ThemeProvider defaultTheme="system" scalable={false}>
       <I18nProvider>
         <Panel />
         <ThemedToaster />

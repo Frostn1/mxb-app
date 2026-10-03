@@ -8,6 +8,8 @@ import SurveySetting from "@frost/shared/Components/Survey/SurveySetting";
 import UninstallSetting from "@frost/shared/Components/Uninstall/UninstallSetting";
 import { Button } from "@frost/shared/Components/ui/button";
 import { Switch } from "@frost/shared/Components/ui/switch";
+import { Segmented } from "@frost/shared/Components/ui/segmented";
+import { useTheme, type ThemeMode } from "@frost/shared/Context/Theme";
 import HotkeyField from "@frost/shared/Components/HotkeyField";
 import {
   getOverlayState,
@@ -134,6 +136,7 @@ export default function Settings() {
   const [busy, setBusy] = useState(false);
   const [version, setVersion] = useState("");
   const [beta, setBeta] = useState(betaUpdates);
+  const { theme, setTheme } = useTheme();
   const update = useUpdate();
   useEffect(() => {
     getVersion().then(setVersion).catch(() => {});
@@ -239,6 +242,25 @@ export default function Settings() {
           {status && !status.gameDir && (
             <p className="mt-2 text-[12px] text-warning">{t("recorder.noGame")}</p>
           )}
+        </div>
+      </div>
+
+      <div className="mt-8">
+        <Label>{t("settings.appearance")}</Label>
+        <div className="border border-border bg-card px-4 py-4">
+          <div className="flex items-center justify-between">
+            <span className="text-[12.5px] text-foreground/85">{t("settings.theme")}</span>
+            <Segmented
+              size="sm"
+              value={theme}
+              onChange={(v) => setTheme(v as ThemeMode)}
+              options={[
+                { value: "light", label: t("settings.themeLight") },
+                { value: "dark", label: t("settings.themeDark") },
+                { value: "system", label: t("settings.themeSystem") },
+              ]}
+            />
+          </div>
         </div>
       </div>
 

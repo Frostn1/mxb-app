@@ -88,7 +88,7 @@ const REF = "#8a8a93";
 function Key({ colour, children }: { colour: string; children: string }) {
   return (
     <span className="flex items-center gap-1.5">
-      <span className="inline-block h-[3px] w-4 rounded" style={{ background: colour }} />
+      <span className="inline-block h-[3px] w-4 rounded" style={{ background: colour, boxShadow: "inset 0 0 0 1px var(--border)" }} />
       {children}
     </span>
   );
