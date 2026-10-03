@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Rider } from "./api";
 import {
-  countKinds,
   diffRiders,
   diffTiming,
   filterEvents,
@@ -198,6 +197,5 @@ describe("buffer and filters", () => {
     expect(filterEvents(events, new Set<EventKind>(["lap"]), "").map((e) => e.id)).toEqual(["1", "3"]);
     expect(filterEvents(events, new Set<EventKind>(["lap", "collision"]), "rider two").map((e) => e.id)).toEqual(["2", "3"]);
     expect(filterEvents(events, new Set<EventKind>(), "")).toEqual([]);
-    expect(countKinds(events)).toMatchObject({ lap: 2, collision: 1, info: 1, split: 0 });
   });
 });

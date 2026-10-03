@@ -10,9 +10,6 @@ const LOG_LINES = 500;
 export interface EventFeed {
   events: ServerEvent[];
   errors: { log: string | null; timing: string | null };
-  /** Joins and leaves carry names only with an admin token. */
-  named: boolean;
-  clear: () => void;
 }
 
 /** Collects the server's events while mounted: the log tail, `/timing` and (with a token) the
@@ -107,5 +104,5 @@ export function useEventFeed(server: ServerView): EventFeed {
     };
   }, [server.id, server.kind, named, add]);
 
-  return { events, errors: { log: logError, timing: timingError }, named, clear: () => setEvents([]) };
+  return { events, errors: { log: logError, timing: timingError } };
 }

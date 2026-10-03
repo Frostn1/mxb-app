@@ -455,10 +455,3 @@ export function filterEvents(events: ServerEvent[], kinds: ReadonlySet<EventKind
     (e) => kinds.has(e.kind) && (!q || e.riders.some((r) => r.toLowerCase().includes(q)) || e.summary.toLowerCase().includes(q)),
   );
 }
-
-/** How many of each kind, for the chip counts. */
-export function countKinds(events: ServerEvent[]): Record<EventKind, number> {
-  const counts = Object.fromEntries(EVENT_KINDS.map(({ kind }) => [kind, 0])) as Record<EventKind, number>;
-  for (const e of events) counts[e.kind]++;
-  return counts;
-}
