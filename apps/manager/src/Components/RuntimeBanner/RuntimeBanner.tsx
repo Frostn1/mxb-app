@@ -15,10 +15,13 @@ import {
   RUNTIME_NAME_KEY,
   crashDumpsOffered,
   crashDumpsWaiting,
+  getProfileProblem,
   onModsDehydrated,
+  onProfileProblem,
   onTrainersRepaired,
   shareLogs,
 } from "@frost/shared/api/mods";
+import type { ProfileProblem } from "@frost/shared/api/mods";
 import type { ModsDehydrated } from "@frost/shared/types";
 import { useFrostmod } from "@/Context/FrostmodContext";
 import { Trans } from "@/i18n";
@@ -240,6 +243,7 @@ function Bar({
   onAction,
   onDismiss,
   dismissLabel,
+  wrap,
 }: {
   tone: "danger" | "warning";
   body: ReactNode;
@@ -254,6 +258,8 @@ function Bar({
   onAction?: () => void;
   onDismiss: () => void;
   dismissLabel: string;
+  /** Let a long message run onto more lines instead of cutting it off. */
+  wrap?: boolean;
 }) {
   const danger = tone === "danger";
   const Icon = icon ?? (danger ? OctagonAlert : AlertTriangle);
@@ -266,7 +272,7 @@ function Bar({
       }`}
     >
       <Icon className={`size-3.5 shrink-0 ${danger ? "text-red-500" : "text-amber-500"}`} />
-      <span className="min-w-0 truncate">
+      <span className={wrap ? "min-w-0" : "min-w-0 truncate"}>
         {body}
         <span className="ml-1 text-muted-foreground">{pitch}</span>
       </span>
@@ -294,5 +300,58 @@ function Bar({
         </Button>
       </div>
     </div>
+  );
+}
+
+/**
+ * MX Bikes is set to load a profile it can't: the profile's name has a character Windows
+ * won't allow in a folder name, or its folder isn't there. The game says nothing and starts a
+ * blank profile (default bike, number, setup, kit), which looks like the whole setup was
+ * wiped. Read-only: the fix is the rider's, in the game; `global.ini` is never edited here.
+ * Renders nothing when the check finds no problem.
+ */
+export function ProfileBanner() {
+  const t = useT();
+  const [problem, setProblem] = useState<ProfileProblem | null>(null);
+  // Dismissed per problem, so fixing one and hitting another speaks up again.
+  const [dismissed, setDismissed] = useState<string | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    void getProfileProblem()
+      .then((p) => alive && setProblem(p))
+      .catch(() => {});
+    const stop = onProfileProblem((p) => {
+      setProblem(p);
+      setDismissed(null);
+    });
+    return () => {
+      alive = false;
+      void stop.then((off) => off());
+    };
+  }, []);
+
+  if (!problem) return null;
+  const key = `${problem.kind}:${problem.profile}`;
+  if (dismissed === key) return null;
+
+  const illegal = problem.kind === "illegalName";
+  const list = problem.existing.map((n) => `"${n}"`).join(", ");
+  const base = illegal ? "profile.illegal" : "profile.missing";
+  return (
+    <Bar
+      tone="danger"
+      wrap
+      body={t(`${base}Body` as "profile.illegalBody", {
+        name: problem.profile,
+        chars: problem.badChars.join(" "),
+      })}
+      pitch={t(
+        (list ? `${base}PitchPick` : `${base}Pitch`) as "profile.illegalPitch",
+        { list },
+      )}
+      onDismiss={() => setDismissed(key)}
+      dismissLabel={t("runtime.dismiss")}
+    />
   );
 }

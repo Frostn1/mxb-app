@@ -276,6 +276,16 @@ export const en = {
   "runtime.fixIt": "Install it",
   "runtime.installing": "Installing…",
   "runtime.dismiss": "Dismiss this warning",
+  "profile.illegalBody":
+    "MX Bikes is set to load the profile \"{{name}}\". Windows can't make a folder with {{chars}} in its name, so the game is using a blank profile instead.",
+  "profile.illegalPitch":
+    "In MX Bikes, pick your profile, or create profiles without | < > : \" / \\ ? * in the name.",
+  "profile.illegalPitchPick":
+    "In MX Bikes, pick your profile ({{list}}), or create profiles without | < > : \" / \\ ? * in the name.",
+  "profile.missingBody":
+    "MX Bikes is set to load the profile \"{{name}}\", which doesn't exist, so it's using a blank profile.",
+  "profile.missingPitch": "Pick your profile in MX Bikes.",
+  "profile.missingPitchPick": "Pick your profile in MX Bikes ({{list}}).",
   "crash.body": "MX Bikes closed unexpectedly last time you played.",
   "crash.bodyMany": "MX Bikes closed unexpectedly {{count}} times.",
   "crash.pitch":

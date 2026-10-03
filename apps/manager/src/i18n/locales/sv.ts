@@ -268,6 +268,16 @@ export const sv: Translation = {
   "runtime.fixIt": "Installera den",
   "runtime.installing": "Installerar...",
   "runtime.dismiss": "Avgå från denna varning",
+  "profile.illegalBody":
+    "MX Bikes is set to load the profile \"{{name}}\". Windows can't make a folder with {{chars}} in its name, so the game is using a blank profile instead.",
+  "profile.illegalPitch":
+    "In MX Bikes, pick your profile, or create profiles without | < > : \" / \\ ? * in the name.",
+  "profile.illegalPitchPick":
+    "In MX Bikes, pick your profile ({{list}}), or create profiles without | < > : \" / \\ ? * in the name.",
+  "profile.missingBody":
+    "MX Bikes is set to load the profile \"{{name}}\", which doesn't exist, so it's using a blank profile.",
+  "profile.missingPitch": "Pick your profile in MX Bikes.",
+  "profile.missingPitchPick": "Pick your profile in MX Bikes ({{list}}).",
   "crash.body": "MX Bikes stängde oväntat förra gången du spelade.",
   "crash.bodyMany": "MX Bikes stängde oväntat {{count}} gånger.",
   "crash.pitch":

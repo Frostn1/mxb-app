@@ -62,7 +62,7 @@ pub struct ProfileWatcher(pub Mutex<Option<Running>>);
 /// Best-effort throughout: a missing folder or a refused watch logs and returns. Losing this
 /// costs the immediacy of an in-game change being published, not correctness — the publish at
 /// launch catches the same change a moment later.
-pub fn start(app: &AppHandle, state: &ProfileWatcher, profiles_dir: &Path) {
+pub fn start(app: &AppHandle, state: &ProfileWatcher, profiles_dir: &Path, looks: bool) {
     stop(state);
     if !profiles_dir.is_dir() {
         log::info!("profile watcher: {} isn't there, not watching", profiles_dir.display());
@@ -72,13 +72,21 @@ pub fn start(app: &AppHandle, state: &ProfileWatcher, profiles_dir: &Path) {
     let live = Arc::new(AtomicBool::new(true));
     let app_handle = app.clone();
     let alive = live.clone();
+    let dir = profiles_dir.to_path_buf();
 
     let mut debouncer = match new_debouncer(DEBOUNCE, move |res: DebounceEventResult| {
         if !alive.load(Ordering::SeqCst) {
             return;
         }
         let Ok(events) = res else { return };
-        if !events.iter().any(|e| is_profile_ini(&e.path)) {
+        // `global.ini`, or a profile folder appearing or vanishing beside the others: the game
+        // may now be pointed at a profile it can't load, or that just got fixed.
+        if events.iter().any(|e| {
+            crate::profilecheck::is_global_ini(&e.path) || e.path.parent() == Some(dir.as_path())
+        }) {
+            crate::profilecheck::refresh(&app_handle, &dir);
+        }
+        if !looks || !events.iter().any(|e| is_profile_ini(&e.path)) {
             return;
         }
         // Which profile changed is not passed on: a rider has one identity, and
@@ -98,6 +106,13 @@ pub fn start(app: &AppHandle, state: &ProfileWatcher, profiles_dir: &Path) {
     if let Err(e) = debouncer.watcher().watch(profiles_dir, RecursiveMode::Recursive) {
         log::warn!("profile watcher: couldn't watch {}: {e}", profiles_dir.display());
         return;
+    }
+    // `global.ini` lives beside `profiles/`, not in it. Non-recursive: the game folder also
+    // holds `mods/` and `cache/`, which are far too busy to follow.
+    if let Some(parent) = profiles_dir.parent().filter(|p| p.is_dir()) {
+        if let Err(e) = debouncer.watcher().watch(parent, RecursiveMode::NonRecursive) {
+            log::warn!("profile watcher: couldn't watch {}: {e}", parent.display());
+        }
     }
     log::info!("profile watcher: watching {}", profiles_dir.display());
     *state.0.lock().unwrap() = Some(Running { _debouncer: debouncer, live });
