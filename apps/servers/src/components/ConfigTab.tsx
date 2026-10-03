@@ -25,12 +25,19 @@ import { Button, ErrorLine, Notice, Toggle } from "./ui";
 
 /** The page's topics, in order. */
 const GROUPS = [
-  { id: "ghosts", title: "Bots" },
-  { id: "race", title: "Race format" },
-  { id: "track", title: "Track" },
-  { id: "events", title: "Event logging" },
-  { id: "cuts", title: "Cuts" },
+  // The stock server's own groups first, then our extras.
+  { id: "event", title: "Event" },
+  { id: "sessions", title: "Session lengths" },
+  { id: "rules", title: "Rules" },
   { id: "penalties", title: "Penalties" },
+  { id: "weather", title: "Weather & Track" },
+  { id: "riders", title: "Riders" },
+  { id: "operations", title: "Logs, live & admin" },
+  { id: "ghosts", title: "Bots" },
+  { id: "cuts", title: "Cuts" },
+  { id: "deformation", title: "Deformation" },
+  { id: "listing", title: "Listing" },
+  { id: "logging", title: "Event logging" },
   { id: "advanced", title: "Advanced" },
 ] as const;
 
@@ -60,7 +67,7 @@ export function ConfigTab({ server }: { server: ServerView }) {
   const [step, setStep] = useState<Step>({ kind: "edit" });
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [activeGroup, setActiveGroup] = useState<(typeof GROUPS)[number]["id"]>("ghosts");
+  const [activeGroup, setActiveGroup] = useState<(typeof GROUPS)[number]["id"]>("event");
   const [query, setQuery] = useState("");
 
   const load = useCallback(async () => {
@@ -397,17 +404,29 @@ function SettingRow({
           <ReloadBadge kind={reloadClass(`${field.section}.${field.key}`)} />
         </span>
         {field.help && <span className="text-sm text-muted-foreground">{field.help}</span>}
-        <span className="text-xs text-muted-foreground">
+        {field.status === "saved" && (
+          <span className="text-xs text-muted-foreground">
+            Saved and reported by the server. Riders are not told yet, so it has no effect in game for now.
+          </span>
+        )}
+        {field.stock && <span className="font-mono text-xs text-muted-foreground">stock: {field.stock}</span>}
+        {field.status !== "elsewhere" && field.status !== "unsupported" && <span className="text-xs text-muted-foreground">
           {isDefault ? `Using the default: ${field.defaultText || "server default"}` : `Default: ${field.defaultText || "server default"}`}
           {!isDefault && field.kind.type !== "bool" && (
             <button type="button" className="ml-2 inline-flex items-center gap-1 text-link hover:underline" onClick={() => onChange(null)}>
               <RotateCcw className="size-3" /> Use default
             </button>
           )}
-        </span>
+        </span>}
       </div>
       <div className="flex items-start sm:justify-end">
-        <Control field={field} value={value} onChange={onChange} />
+        {field.status === "elsewhere" || field.status === "unsupported" ? (
+          <span className="rounded bg-secondary px-2 py-1 text-xs text-muted-foreground">
+            {field.status === "elsewhere" ? "Set elsewhere" : "Not supported yet"}
+          </span>
+        ) : (
+          <Control field={field} value={value} onChange={onChange} />
+        )}
       </div>
     </div>
   );
@@ -442,6 +461,18 @@ function Control({ field, value, onChange }: { field: ConfigField; value: FieldV
     case "bool":
       // Every switch here defaults to off, so off leaves the setting out of the file.
       return <Toggle label={field.label} checked={value === true} onChange={(on) => onChange(on ? true : null)} />;
+    case "tri":
+      return (
+        <Segmented
+          options={[
+            { value: "default", label: "Default" },
+            { value: "on", label: "On" },
+            { value: "off", label: "Off" },
+          ]}
+          value={value === true ? "on" : value === false ? "off" : "default"}
+          onChange={(v) => onChange(v === "on" ? true : v === "off" ? false : null)}
+        />
+      );
     case "int":
     case "float":
       return <NumberControl field={field} min={k.min} max={k.max} step={k.type === "int" ? 1 : k.max - k.min <= 20 ? 0.5 : 1} value={value} onChange={onChange} />;

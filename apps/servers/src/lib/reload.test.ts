@@ -15,6 +15,8 @@ describe("reloadClass", () => {
     expect(reloadClass("ghost.skill_pct")).toBe("next_session");
     expect(reloadClass("ghost.personality.seed")).toBe("next_session");
     expect(reloadClass("sessions.race_minutes")).toBe("next_event");
+    expect(reloadClass("event.overjump_crash")).toBe("next_event");
+    expect(reloadClass("event.weather_conditions")).toBe("next_event");
   });
 
   it("keeps only the game port and development tools restart-only", () => {
