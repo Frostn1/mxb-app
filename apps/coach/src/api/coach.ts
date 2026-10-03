@@ -602,7 +602,7 @@ export interface LineLookState {
   look: LineLook;
   /** The line as the recorder draws it with nothing set: what "reset" goes back to. */
   defaults: LineLook;
-  /** The recorder that last ran is older than FrostMod 0.45.5, which reads the look. */
+  /** The recorder that last ran is older than FrostMod 0.46.1, which reads the look. */
   preLook: boolean;
 }
 
