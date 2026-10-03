@@ -62,8 +62,12 @@ export default function App() {
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-background text-foreground">
       <header data-tauri-drag-region className="flex h-[52px] shrink-0 select-none items-center border-b bg-window pl-5">
-        <div data-tauri-drag-region className="mr-7 flex items-baseline gap-2 whitespace-nowrap">
-          <span className="font-heading text-base font-extrabold tracking-[-0.05em]">MXB Servers</span>
+        {/* "MXB Servers by mxbsecure" on one line, the wordmark MXB App and the Coach use. */}
+        <div data-tauri-drag-region className="mr-7 flex items-baseline gap-2 whitespace-nowrap font-cond">
+          <span data-tauri-drag-region className="text-sm font-extrabold tracking-[-0.04em] text-foreground">MXB Servers</span>
+          <span data-tauri-drag-region className="text-[11px] font-medium text-faint">
+            by <span className="font-semibold text-muted-foreground">mxbsecure</span>
+          </span>
         </div>
         <nav className="flex h-full min-w-0 items-center gap-1 overflow-hidden" aria-label="Servers">
           <button type="button" onClick={() => setView({ kind: "fleet" })} className={`h-full border-b-2 px-3 text-sm font-medium ${view.kind === "fleet" ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`}>All servers</button>
