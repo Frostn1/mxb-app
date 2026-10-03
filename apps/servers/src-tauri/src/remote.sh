@@ -277,7 +277,9 @@ case "$CMD" in
     [[ "$(sha_of "$CONFIG")" == "$want" ]] || die "the config changed on the server since it was loaded; reload and try again"
     cand="$dir/.candidate-$$.toml"
     decode "$b64" "$cand"
-    if ! validate_file "$cand"; then priv rm -f "$cand"; say result failed; die "the candidate did not pass the server's own check"; fi
+    # `skipcheck`: the running server's own reload validates the file (and the old one is put
+    # back if it refuses), so the slow run of the server binary is not needed.
+    if [[ "${5:-}" != skipcheck ]] && ! validate_file "$cand"; then priv rm -f "$cand"; say result failed; die "the candidate did not pass the server's own check"; fi
     # Again, after the check's minute: nobody edited it meanwhile.
     if [[ "$(sha_of "$CONFIG")" != "$want" ]]; then priv rm -f "$cand"; die "the config changed on the server during the check; reload and try again"; fi
     stamp="$(date -u +%Y%m%dT%H%M%S.%NZ)-$$"
