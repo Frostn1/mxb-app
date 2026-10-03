@@ -8,6 +8,7 @@ describe("reloadClass", () => {
     expect(reloadClass("native.late_join_register")).toBe("hot");
     expect(reloadClass("master.enable")).toBe("hot");
     expect(reloadClass("events.collisions")).toBe("hot");
+    expect(reloadClass("ghost.fill_to")).toBe("hot");
     expect(reloadClass("penalties.cut_time_seconds")).toBe("next_session");
     expect(reloadClass("cuts.zones")).toBe("next_session");
     expect(reloadClass("sessions.race_extra_laps")).toBe("next_session");
