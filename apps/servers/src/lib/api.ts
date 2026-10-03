@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { parseCuts, parseOutline, parseRecentCuts, type CutOutline, type CutsInfo, type CutZone, type RecentCut } from "./cuts";
 import type { Timing } from "./events";
+import type { ReloadChange } from "./reload";
 
 export interface Server {
   id: string;
@@ -230,7 +231,32 @@ export const configApply = async (id: string, baseSha: string, text: string) => 
   return result;
 };
 
-export const testToken = (id: string) => invoke<{ ok: boolean; message: string }>("server_test_token", { id });
+export interface LiveApplyResult {
+  /** "applied": the running server reloaded the file. "failed": nothing changed (the previous
+   *  file is back); `output` says why. */
+  result: "applied" | "failed" | string;
+  backup: string;
+  output: string;
+  reload: {
+    applied?: string[];
+    deferred?: string[];
+    restart_required?: string[];
+    changes?: ReloadChange[];
+  } | null;
+}
+
+/** Apply without a restart: write the file, then the running server reloads it. */
+export const configApplyLive = async (id: string, baseSha: string, text: string) => {
+  const result = await invoke<LiveApplyResult>("config_apply_live", { id, baseSha, text });
+  configCache.delete(id);
+  return result;
+};
+
+/** How the running server would apply `text`, per changed key; nothing is written. */
+export const configClassify = (id: string, text: string) =>
+  invoke<{ supported?: boolean; changes?: ReloadChange[]; restart_required?: string[] }>("config_classify", { id, text });
+
+export const testToken =(id: string) => invoke<{ ok: boolean; message: string }>("server_test_token", { id });
 
 export const legacyConfig = (id: string) => invoke<LegacyStatus>("legacy_config", { id });
 export const legacyConfigSave = (id: string, name: string, track: string, maxClients: number) =>

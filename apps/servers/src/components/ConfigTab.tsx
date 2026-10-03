@@ -2,18 +2,24 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react
 import { ChevronDown, ChevronRight, RotateCcw } from "lucide-react";
 import {
   configApply,
+  configApplyLive,
+  configClassify,
   configLoad,
   configPreview,
   configValidate,
   errorText,
   peekConfig,
+  serverRestartService,
+  serverRiders,
   type ApplyResult,
   type ConfigField,
   type ConfigState,
   type FieldValue,
+  type LiveApplyResult,
   type ServerView,
 } from "@/lib/api";
 import { zonesFrom } from "@/lib/cuts";
+import { BADGES, classesFor, reloadClass, type ReloadClass } from "@/lib/reload";
 import { CutZones } from "./CutZones";
 import { Button, ErrorLine, Notice, Toggle } from "./ui";
 
@@ -29,13 +35,23 @@ const GROUPS = [
 
 type Step =
   | { kind: "edit" }
-  | { kind: "review"; text: string; diff: string; check: { ok: boolean; output: string } | null }
-  | { kind: "done"; result: ApplyResult };
+  | {
+      kind: "review";
+      text: string;
+      diff: string;
+      check: { ok: boolean; output: string } | null;
+      /** How each changed key applies: the server's answer, else the app's own table. */
+      classes: Record<string, ReloadClass>;
+    }
+  | { kind: "done"; result: ApplyResult }
+  | { kind: "live"; result: LiveApplyResult; text: string };
 
 const same = (a: FieldValue, b: FieldValue) => JSON.stringify(a) === JSON.stringify(b);
 
 /** The server's settings as a form: change, review, apply. Applying checks the file with the
- *  server's own binary, backs it up, restarts, and puts the backup back if it isn't ready. */
+ *  server's own binary, backs it up and replaces it, then the running server reloads it: live
+ *  settings apply at once, race rules at the next session, and a restart (which disconnects
+ *  riders) is only offered when a restart-only setting changed. */
 export function ConfigTab({ server }: { server: ServerView }) {
   const cached = peekConfig(server.id);
   const [state, setState] = useState<ConfigState | null>(cached);
@@ -89,9 +105,27 @@ export function ConfigTab({ server }: { server: ServerView }) {
     setError(null);
     try {
       const preview = await configPreview(state.text, changes);
-      setStep({ kind: "review", text: preview.text, diff: preview.diff, check: null });
+      const keys = Object.keys(changes);
+      setStep({ kind: "review", text: preview.text, diff: preview.diff, check: null, classes: classesFor(keys, null) });
       const check = await configValidate(server.id, preview.text);
-      setStep({ kind: "review", text: preview.text, diff: preview.diff, check });
+      // The running server's own classification; an older server can't say, so ours stands.
+      const told = await configClassify(server.id, preview.text).catch(() => null);
+      setStep({ kind: "review", text: preview.text, diff: preview.diff, check, classes: classesFor(keys, told?.changes ?? null) });
+    } catch (e) {
+      setError(errorText(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  /** The old way: replace the file and restart. Only for a server too old to reload. */
+  const applyWithRestart = async (text: string) => {
+    if (!state) return;
+    if (!(await confirmRestart())) return;
+    setBusy("Saving a backup, applying and restarting… (up to a minute)");
+    setError(null);
+    try {
+      setStep({ kind: "done", result: await configApply(server.id, state.sha, text) });
     } catch (e) {
       setError(errorText(e));
     } finally {
@@ -101,11 +135,31 @@ export function ConfigTab({ server }: { server: ServerView }) {
 
   const apply = async (text: string) => {
     if (!state) return;
-    if (!window.confirm(`Apply to ${server.name}? The server restarts, so anyone riding is disconnected.`)) return;
-    setBusy("Saving a backup, applying and restarting… (up to a minute)");
+    setBusy("Saving a backup and applying to the running server…");
     setError(null);
     try {
-      setStep({ kind: "done", result: await configApply(server.id, state.sha, text) });
+      setStep({ kind: "live", result: await configApplyLive(server.id, state.sha, text), text });
+    } catch (e) {
+      setError(errorText(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  /** Asks, with how many riders a restart would disconnect right now. */
+  const confirmRestart = async () => {
+    const riders = await serverRiders(server.id).then((r) => r.length).catch(() => null);
+    const who = riders === null ? "anyone riding" : riders === 0 ? "nobody (no riders on now)" : `${riders} rider${riders === 1 ? "" : "s"}`;
+    return window.confirm(`Restart ${server.name}? This disconnects ${who}.`);
+  };
+
+  const restartNow = async () => {
+    if (!(await confirmRestart())) return;
+    setBusy("Restarting… (up to a minute)");
+    setError(null);
+    try {
+      await serverRestartService(server.id);
+      await load();
     } catch (e) {
       setError(errorText(e));
     } finally {
@@ -198,6 +252,7 @@ export function ConfigTab({ server }: { server: ServerView }) {
         <div className="flex min-h-0 flex-1 flex-col gap-5">
           <h3 className="shrink-0 font-heading text-lg font-extrabold tracking-tight">Review the change</h3>
           <Diff text={step.diff} />
+          <ChangeClasses classes={step.classes} />
           {!step.check && busy && <p className="shrink-0 text-sm text-muted-foreground">{busy}</p>}
           {step.check && (
             <div className="shrink-0">
@@ -213,7 +268,7 @@ export function ConfigTab({ server }: { server: ServerView }) {
           )}
           <div className="flex shrink-0 gap-3 border-t bg-background py-3">
             <Button variant="primary" disabled={!step.check?.ok || !!busy} onClick={() => void apply(step.text)}>
-              Apply and restart
+              Apply
             </Button>
             <Button disabled={!!busy} onClick={() => setStep({ kind: "edit" })}>
               Back
@@ -222,6 +277,17 @@ export function ConfigTab({ server }: { server: ServerView }) {
           </div>
         </div>
       )}
+
+      {step.kind === "live" && (
+        <LiveResult
+          result={step.result}
+          busy={!!busy}
+          onRestart={() => void restartNow()}
+          onApplyWithRestart={() => void applyWithRestart(step.text)}
+          onBack={() => void load()}
+        />
+      )}
+      {step.kind === "live" && busy && <p className="text-sm text-muted-foreground">{busy}</p>}
 
       {step.kind === "done" && (
         <div className="flex min-h-0 flex-col gap-4 overflow-y-auto">
@@ -327,6 +393,7 @@ function SettingRow({
         <span className="text-sm font-medium">
           {field.label}
           {changed && <span className="ml-2 rounded bg-primary/10 px-1.5 py-0.5 text-xs text-primary">changed</span>}
+          <ReloadBadge kind={reloadClass(`${field.section}.${field.key}`)} />
         </span>
         {field.help && <span className="text-sm text-muted-foreground">{field.help}</span>}
         <span className="text-xs text-muted-foreground">
@@ -504,6 +571,129 @@ function BikesControl({ value, onChange }: { value: FieldValue; onChange: (v: Fi
           onChange={(e) => list(e.target.value)}
         />
       )}
+    </div>
+  );
+}
+
+const BADGE_STYLE = {
+  ok: { color: "var(--success)", background: "color-mix(in srgb, var(--success) 12%, transparent)" },
+  info: { color: "var(--primary)", background: "color-mix(in srgb, var(--primary) 12%, transparent)" },
+  warn: { color: "var(--destructive)", background: "color-mix(in srgb, var(--destructive) 12%, transparent)" },
+} as const;
+
+/** "applies now", "next session" or "needs restart". */
+function ReloadBadge({ kind }: { kind: ReloadClass }) {
+  const badge = BADGES[kind];
+  return (
+    <span className="ml-2 rounded px-1.5 py-0.5 text-xs font-normal" style={BADGE_STYLE[badge.tone]} title={badge.title}>
+      {badge.label}
+    </span>
+  );
+}
+
+/** Each changed setting and how the running server takes it. */
+function ChangeClasses({ classes }: { classes: Record<string, ReloadClass> }) {
+  const keys = Object.keys(classes).sort();
+  if (!keys.length) return null;
+  const restart = keys.filter((k) => classes[k] === "restart").length;
+  return (
+    <div className="shrink-0 rounded-xl border bg-card p-4 text-sm">
+      <p className="mb-2 text-muted-foreground">
+        {restart === 0
+          ? "No restart needed: nobody riding is disconnected."
+          : `Everything else applies without a restart. ${restart} setting${restart === 1 ? " needs" : "s need"} a restart to take effect; you can restart after applying.`}
+      </p>
+      <ul className="flex flex-col gap-1">
+        {keys.map((k) => (
+          <li key={k} className="flex items-center justify-between gap-3 font-mono text-xs">
+            <span>{k}</span>
+            <ReloadBadge kind={classes[k]} />
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+/** After a live apply: what applied, what waits for the next session, and the restart offer
+ *  when (and only when) a restart-only setting changed. */
+function LiveResult({
+  result,
+  busy,
+  onRestart,
+  onApplyWithRestart,
+  onBack,
+}: {
+  result: LiveApplyResult;
+  busy: boolean;
+  onRestart: () => void;
+  onApplyWithRestart: () => void;
+  onBack: () => void;
+}) {
+  const reload = result.reload ?? {};
+  const applied = reload.applied ?? [];
+  const deferred = reload.deferred ?? [];
+  const restart = reload.restart_required ?? [];
+  const ok = result.result === "applied";
+  // A server from before hot reload answers without `deferred` and only reloads a few
+  // admission keys: the file is saved, but a restart is what applies it.
+  const old = ok && result.reload !== null && reload.deferred === undefined;
+  const list = (title: string, keys: string[], kind: ReloadClass) =>
+    keys.length > 0 && (
+      <div>
+        <p className="mb-1 text-sm font-medium">{title}</p>
+        <ul className="flex flex-col gap-1">
+          {keys.map((k) => (
+            <li key={k} className="flex items-center justify-between gap-3 font-mono text-xs">
+              <span>{k}</span>
+              <ReloadBadge kind={kind} />
+            </li>
+          ))}
+        </ul>
+      </div>
+    );
+  return (
+    <div className="flex min-h-0 flex-col gap-4 overflow-y-auto">
+      <Notice tone={ok ? "ok" : "bad"}>
+        <span className="font-medium">
+          {old
+            ? "Saved, but this server version can't apply settings live. Restart it to apply them (or update the server)."
+            : ok
+            ? restart.length
+              ? "Saved and applied what the running server can take live. Nobody was disconnected."
+              : "Applied to the running server. Nobody was disconnected."
+            : "Not applied: the server is still on its previous settings."}
+        </span>
+        {result.backup && (
+          <p className="mt-1 text-xs text-muted-foreground">
+            The previous settings are saved as <span className="font-mono">{result.backup}</span>
+          </p>
+        )}
+      </Notice>
+      {!ok && result.output && <pre className="max-h-48 overflow-auto rounded-lg bg-muted p-3 font-mono text-xs whitespace-pre-wrap">{result.output}</pre>}
+      {ok && !old && (
+        <div className="flex flex-col gap-3 rounded-xl border bg-card p-4">
+          {list("Applied now", applied, "hot")}
+          {list("Applies at the next session", deferred, "next_session")}
+          {list("Needs a restart to take effect", restart, "restart")}
+          {!applied.length && !deferred.length && !restart.length && <p className="text-sm text-muted-foreground">Nothing the server uses changed.</p>}
+        </div>
+      )}
+      <div className="flex gap-3">
+        {ok && (old || restart.length > 0) && (
+          <Button variant="primary" disabled={busy} onClick={onRestart}>
+            Restart now
+          </Button>
+        )}
+        {!ok && (
+          <Button disabled={busy} onClick={onApplyWithRestart}>
+            Apply with a restart instead
+          </Button>
+        )}
+        <Button disabled={busy} onClick={onBack}>
+          Back to settings
+        </Button>
+      </div>
     </div>
   );
 }
