@@ -213,6 +213,17 @@ pub const FIELDS: &[Field] = &[
         .help("How many players can join at once.")
         .default_is("20")
         .done(),
+    // ---- Track -------------------------------------------------------------------------------
+    F::new(
+        "world",
+        "deformation",
+        "track",
+        "Deformation",
+        Kind::Choice { options: &["off", "low", "medium", "high", "maximum"] },
+    )
+    .help("How much the ground ruts: the ruts a track starts with, and how deep and how fast riders and bots dig more. Changed mid-race, it applies at the next session. The first time it is set, the server needs one restart.")
+    .default_is("off (the server's own ruts settings)")
+    .done(),
     // ---- Events ------------------------------------------------------------------------------
     F::new("events", "collisions", "events", "Track collisions", Kind::Bool)
         .help("Logs who hit whom and counts collisions per rider.")
@@ -784,6 +795,17 @@ late_join_register = false
         ] {
             assert!(apply(FILE, &changes(&[(k, v.clone())])).is_err(), "{k} {v}");
         }
+    }
+
+    #[test]
+    fn deformation_is_one_of_the_servers_levels() {
+        let out = apply(FILE, &changes(&[("world.deformation", json!("high"))])).unwrap();
+        assert!(out.contains("[world]\ndeformation = \"high\""));
+        assert_eq!(read(&out).unwrap()["world.deformation"], json!("high"));
+        for level in ["off", "low", "medium", "maximum"] {
+            assert!(apply(FILE, &changes(&[("world.deformation", json!(level))])).is_ok());
+        }
+        assert!(apply(FILE, &changes(&[("world.deformation", json!("heavy"))])).is_err());
     }
 
     #[test]
