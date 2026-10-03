@@ -1184,6 +1184,8 @@ export const en = {
   "serverBrowser.paintSyncHere_other":
     "{{count}} riders on this server are running paint sync — you'll see the liveries they actually built.",
   "serverBrowser.filtered": "Filtered",
+  "serverBrowser.bots": "+{{count}} bots",
+  "serverBrowser.botsHint": "Bots riding on this server, not counted as players",
   "serverBrowser.hiddenCount": "{{count}} hidden",
   "serverBrowser.hideFiltered": "Hide them again",
   "serverBrowser.hiddenBecause": "Hidden: {{reason}}",

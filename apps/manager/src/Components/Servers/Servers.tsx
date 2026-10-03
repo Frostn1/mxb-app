@@ -99,6 +99,7 @@ function offlineRow(address: string, name: string): MasterServer {
     pingMs: null,
     passworded: false,
     location: "",
+    bots: 0,
     rating: "",
     track: "",
     trackLayout: "",

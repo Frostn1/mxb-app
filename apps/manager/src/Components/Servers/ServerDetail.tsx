@@ -420,7 +420,8 @@ const ServerDetail = ({
   }, [guessesVersion, track]);
 
   if (!server) return null;
-  const s = live ?? server;
+  // A probe that couldn't read the bot tag (an older app module) keeps the list's count.
+  const s = live ? { ...live, bots: live.bots || server.bots } : server;
 
   const yes = t("serverBrowser.yes");
   const flag = (on: boolean) => (on ? yes : "");
@@ -492,6 +493,11 @@ const ServerDetail = ({
         )}
         <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/35 to-black/45" />
         <div className="absolute left-4 right-12 top-3 flex flex-wrap justify-end gap-1.5">
+          {s.bots > 0 && (
+            <Badge variant="count" title={t("serverBrowser.botsHint")}>
+              {t("serverBrowser.bots", { count: s.bots })}
+            </Badge>
+          )}
           {s.hidden && (
             <Badge variant="count" title={t("serverBrowser.hiddenBecause", { reason: s.hidden })}>
               {t("serverBrowser.filtered")}

@@ -1214,6 +1214,8 @@ export const de: Translation = {
   "serverBrowser.paintSyncHere_other":
     "{{count}} Fahrer auf diesem Server nutzen Paint-Sync — du siehst ihre echten Designs.",
   "serverBrowser.filtered": "Gefiltert",
+  "serverBrowser.bots": "+{{count}} Bots",
+  "serverBrowser.botsHint": "Bots auf diesem Server, nicht als Fahrer gezählt",
   "serverBrowser.hiddenCount": "{{count}} ausgeblendet",
   "serverBrowser.hideFiltered": "Wieder ausblenden",
   "serverBrowser.hiddenBecause": "Ausgeblendet: {{reason}}",

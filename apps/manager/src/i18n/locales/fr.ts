@@ -1213,6 +1213,8 @@ export const fr: Translation = {
   "serverBrowser.paintSyncHere_other":
     "{{count}} pilotes sur ce serveur utilisent la synchro des peintures — vous verrez leurs vraies livrées.",
   "serverBrowser.filtered": "Filtré",
+  "serverBrowser.bots": "+{{count}} bots",
+  "serverBrowser.botsHint": "Bots sur ce serveur, non comptés comme pilotes",
   "serverBrowser.hiddenCount": "{{count}} masqués",
   "serverBrowser.hideFiltered": "Masquer à nouveau",
   "serverBrowser.hiddenBecause": "Masqué : {{reason}}",
