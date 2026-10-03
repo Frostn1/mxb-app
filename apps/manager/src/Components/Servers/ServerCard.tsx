@@ -12,6 +12,7 @@ import {
   Palette,
   Download,
   ShoppingCart,
+  Power,
 } from "lucide-react";
 import type { CatalogTrack, MasterServer } from "@frost/shared/api/mods";
 import { Badge } from "@frost/shared/Components/ui/badge";
@@ -21,6 +22,7 @@ import { cn } from "@frost/shared/lib/utils";
 import { useI18n } from "@/i18n";
 import { formatPrice, openShopUrl } from "../../api/shop";
 import { isFull } from "@/lib/useServerQueue";
+import { joinAction } from "./joinAction";
 
 /** Latency to colour: close is green, far is red. */
 function pingTone(ms: number): string {
@@ -42,6 +44,10 @@ interface Props {
   installing: boolean;
   onInstall: (s: MasterServer, product: CatalogTrack) => void;
   onInstallJoin: (s: MasterServer, product: CatalogTrack) => void;
+  /** The `rel` of the player's own copy, when Manage has switched the track off. */
+  inactive?: string;
+  /** Switch a parked track back on, then join. */
+  onActivateJoin: (s: MasterServer, rel: string) => void;
   favourite: boolean;
   /** Riders on this server running paint sync. */
   paintSync: number;
@@ -76,6 +82,8 @@ const ServerCard = memo(function ServerCard({
   installing,
   onInstall,
   onInstallJoin,
+  inactive,
+  onActivateJoin,
   favourite,
   paintSync,
   joining,
@@ -101,8 +109,16 @@ const ServerCard = memo(function ServerCard({
   const picture = art || (missing ? product?.image : null);
   const [unavailablePicture, setUnavailablePicture] = useState<string | null>(null);
   const shownPicture = picture === unavailablePicture ? null : picture;
-  const free = missing && product?.source === "mods" && !!product.slug;
-  const sold = missing && product?.source === "shop" ? product : null;
+  const action = joinAction({
+    missing,
+    inactive,
+    product,
+    installing,
+    queued: queuePosition !== null,
+    joinable: s.joinable,
+    full,
+  });
+  const sold = action.kind === "buy" ? action.product : null;
   const price = sold?.price;
   const priceLabel = !price
     ? ""
@@ -214,9 +230,9 @@ const ServerCard = memo(function ServerCard({
 
         {/* The fourth corner. "Not installed" is an errand, not a fault, so it sits faded on
             the picture with the other overlays rather than squeezing the track's own line. */}
-        {(paintSync > 0 || missing) && (
+        {(paintSync > 0 || (missing && !inactive)) && (
           <span className="absolute bottom-1.5 right-1.5 flex items-center gap-1">
-            {missing && (
+            {missing && !inactive && (
               <span
                 className="flex items-center gap-1 rounded-md bg-black/55 px-1.5 py-[3px] text-[11px] font-semibold uppercase tracking-wide text-white/75 shadow-sm backdrop-blur-[2px]"
                 title={t("serverBrowser.trackMissing")}
@@ -269,26 +285,39 @@ const ServerCard = memo(function ServerCard({
         </div>
 
         <div className="mt-auto flex flex-wrap items-center gap-2 pt-2">
-          {queuePosition !== null ? (
+          {action.kind === "queued" ? (
             <CardButton disabled>
               <Hourglass className="size-3.5" />
-              {t("serverBrowser.inLine", { position: queuePosition })}
+              {t("serverBrowser.inLine", { position: queuePosition ?? 0 })}
             </CardButton>
-          ) : installing ? (
+          ) : action.kind === "installing" ? (
             <CardButton disabled>
               <Loader2 className="size-3.5 animate-spin" />
               {t("serverBrowser.installing")}
             </CardButton>
-          ) : free && product ? (
+          ) : action.kind === "activate" ? (
+            <CardButton
+              primary={s.joinable}
+              disabled={busy || !s.joinable}
+              onClick={(e) => {
+                stop(e);
+                onActivateJoin(s, action.rel);
+              }}
+              title={t("serverBrowser.activateJoinHint")}
+            >
+              {joining ? <Loader2 className="size-3.5 animate-spin" /> : <Power className="size-3.5" />}
+              {t("serverBrowser.activateJoin")}
+            </CardButton>
+          ) : action.kind === "install" ? (
             <>
               <CardButton
                 primary={!s.joinable}
                 className="flex-none"
                 onClick={(e) => {
                   stop(e);
-                  onInstall(s, product);
+                  onInstall(s, action.product);
                 }}
-                title={t("serverBrowser.installHint", { title: product.name })}
+                title={t("serverBrowser.installHint", { title: action.product.name })}
               >
                 {t("serverBrowser.install")}
               </CardButton>
@@ -298,14 +327,29 @@ const ServerCard = memo(function ServerCard({
                   disabled={busy}
                   onClick={(e) => {
                     stop(e);
-                    onInstallJoin(s, product);
+                    onInstallJoin(s, action.product);
                   }}
-                  title={t("serverBrowser.installJoinHint", { title: product.name })}
+                  title={t("serverBrowser.installJoinHint", { title: action.product.name })}
                 >
                   {t("serverBrowser.installJoin")}
                 </CardButton>
               )}
             </>
+          ) : action.kind === "missing" ? (
+            // Not a plain Join: the player doesn't have this track, and a catalogue name that
+            // only resembles the id is not a reason to pretend otherwise. Still possible — a
+            // server may be about to rotate — but outlined and said plainly.
+            <CardButton
+              disabled={busy || !s.joinable}
+              onClick={(e) => {
+                stop(e);
+                onJoin(s);
+              }}
+              title={t("serverBrowser.joinAnywayHint")}
+            >
+              {joining && <Loader2 className="size-3.5 animate-spin" />}
+              {t("serverBrowser.joinAnyway")}
+            </CardButton>
           ) : sold ? (
             <CardButton
               primary
@@ -318,7 +362,7 @@ const ServerCard = memo(function ServerCard({
               <ShoppingCart className="size-3.5" />
               {priceLabel ? `${t("serverBrowser.buyTrack")} · ${priceLabel}` : t("serverBrowser.buyTrack")}
             </CardButton>
-          ) : s.joinable && full ? (
+          ) : action.kind === "wait" ? (
             <CardButton
               onClick={(e) => {
                 stop(e);

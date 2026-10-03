@@ -50,8 +50,10 @@ import {
   queueJoin,
   serversWithPaintSync,
   serverTrackPreviews,
+  serverTrackInactive,
   serverTrackCatalog,
   guessServerTrack,
+  modsStateSet,
   resolveQuickInstall,
   resetServerBrowser,
   modTypesFor,
@@ -71,7 +73,7 @@ import { BoundedCache } from "@/lib/boundedCache";
 import { REGION_LABEL_KEY, REGION_ORDER, canonicalRegion, type RegionKey } from "@/lib/serverRegion";
 import JoinServerDialog from "../Shell/JoinServerDialog";
 import { LoadingMark } from "../Shell/LoadingMark";
-import { guessPicture, useTrackGuesses, warmTracks } from "./trackGuesses";
+import { guessPicture, rememberGuess, useTrackGuesses, warmTracks } from "./trackGuesses";
 import ServerDetail, { ServerDetailDialog, ServerDetailEmpty } from "./ServerDetail";
 import ServerCard from "./ServerCard";
 import ServerRow from "./ServerRow";
@@ -397,30 +399,49 @@ const Servers = ({ link }: ServersProps) => {
   const [library, setLibrary] = useState<Record<string, string | null>>(() =>
     Object.fromEntries(LIBRARY.entries()),
   );
+  // Missing tracks the player does have, parked by Manage: id to the `rel` that turns it on.
+  const [inactive, setInactive] = useState<Record<string, string>>({});
   // Bumped when a track is installed from a tile, so its own art replaces the catalogue's.
   const [installed, setInstalled] = useState(0);
   // Asked for either view now: the list's rows carry the art small, and the pane beside them
   // shows it as the hero. It was tiles-only while the list was a table of text.
   useEffect(() => {
     if (!known?.length) return;
+    // A "not installed" is asked again on every sweep, as the comment above always promised:
+    // it used to stick for the life of the app, so a track copied in while the tab was open
+    // was offered as a download until restart. The backend snapshot is keyed on every folder
+    // in the track tree, so re-asking is a directory walk, not a rescan of the archives.
     const tracks = [
       ...new Set(
         known
           .map((s) => s.track)
-          .filter((tr) => tr && !LIBRARY.has(tr) && !LIBRARY_PENDING.has(tr)),
+          .filter(
+            (tr) =>
+              tr && !LIBRARY_PENDING.has(tr) && (!LIBRARY.has(tr) || LIBRARY.get(tr) === null),
+          ),
       ),
     ];
     if (tracks.length === 0) return;
     // Claim before invoking: a second sweep can land while the first decode is still running.
-    // Missing ids stay claimed too, since "not installed" is a useful negative cache entry.
     for (const tr of tracks) LIBRARY_PENDING.add(tr);
     serverTrackPreviews(tracks)
-      .then((found) => {
+      .then(async (found) => {
+        const absent: string[] = [];
         for (const tr of tracks) {
           const value = Object.prototype.hasOwnProperty.call(found, tr) ? found[tr] : null;
           LIBRARY.set(tr, tr, value, value === null ? 1 : 2 * value.length);
+          if (value === null) absent.push(tr);
         }
         setLibrary(Object.fromEntries(LIBRARY.entries()));
+        // Of the ones the game can't see, which the player has parked in Manage: those are
+        // switched on, never downloaded again.
+        const parked = absent.length ? await serverTrackInactive(absent).catch(() => null) : {};
+        if (!parked) return;
+        setInactive((cur) => {
+          const next = { ...cur };
+          for (const tr of tracks) delete next[tr];
+          return { ...next, ...parked };
+        });
       })
       .catch(() => {
         // A failed batch learned nothing and is safe to retry on the next sweep.
@@ -797,6 +818,40 @@ const Servers = ({ link }: ServersProps) => {
     [installTrack],
   );
 
+  // A track the player already has, parked by Manage: put it back where the game looks, then
+  // join. The same move Manage's own switch makes — nothing is downloaded or copied.
+  const activateAndJoin = useCallback(
+    async (s: MasterServer, rel: string) => {
+      try {
+        const out = await modsStateSet([rel], true);
+        if (out.failed.length > 0) {
+          toast.error(t("serverBrowser.activateFailed"), { description: out.failed[0][1] });
+          return;
+        }
+      } catch (e) {
+        toast.error(t("serverBrowser.activateFailed"), { description: String(e) });
+        return;
+      }
+      LIBRARY.delete(s.track);
+      LIBRARY_PENDING.delete(s.track);
+      CATALOG.delete(s.track);
+      setInactive((cur) => {
+        const next = { ...cur };
+        delete next[s.track];
+        return next;
+      });
+      // Same ordering as a finished install: Rust drops its snapshot before anything re-asks.
+      await invoke("invalidate_server_track_cache").catch(() => {});
+      setInstalled((n) => n + 1);
+      void guessServerTrack(s.track, s.name)
+        .then((g) => rememberGuess(s.track, g))
+        .catch(() => {});
+      if (isFull(s)) void wait(s);
+      else void join(s);
+    },
+    [t, join, wait],
+  );
+
   useEffect(() => {
     for (const [slug, intent] of Object.entries(installing)) {
       const job = active.find((a) => a.slug === slug);
@@ -865,6 +920,8 @@ const Servers = ({ link }: ServersProps) => {
     onWait: wait,
     onInstall: installOnly,
     onInstallJoin: installAndJoin,
+    inactive: detail ? inactive[detail.track] : undefined,
+    onActivateJoin: activateAndJoin,
     onCopy: copy,
     onToggleFavourite: favs.toggle,
   };
@@ -1119,6 +1176,8 @@ const Servers = ({ link }: ServersProps) => {
           onWait: wait,
           onInstall: installOnly,
           onInstallJoin: installAndJoin,
+          inactive,
+          onActivateJoin: activateAndJoin,
           onCopy: copy,
           onToggleFavourite: favs.toggle,
         }}
@@ -1167,6 +1226,8 @@ const Servers = ({ link }: ServersProps) => {
                 installing={installingAt.has(s.address)}
                 onInstall={installOnly}
                 onInstallJoin={installAndJoin}
+                inactive={inactive[s.track]}
+                onActivateJoin={activateAndJoin}
                 favourite={favs.has(s.address)}
                 paintSync={paintSync[s.address] ?? 0}
                 joining={joining === s.address}

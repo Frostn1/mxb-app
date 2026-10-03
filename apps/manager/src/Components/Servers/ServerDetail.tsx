@@ -16,6 +16,7 @@ import {
   Star,
   ShoppingCart,
   ServerOff,
+  Power,
 } from "lucide-react";
 import { open as openUrl } from "@tauri-apps/plugin-shell";
 import { toast } from "sonner";
@@ -41,7 +42,8 @@ import {
 } from "@frost/shared/api/mods";
 import { formatPrice, openShopUrl } from "../../api/shop";
 import { isFull } from "@/lib/useServerQueue";
-import { guessFor, rememberGuess } from "./trackGuesses";
+import { guessFor, rememberGuess, useTrackGuesses } from "./trackGuesses";
+import { joinAction } from "./joinAction";
 
 /**
  * Everything one server publishes about itself.
@@ -199,7 +201,12 @@ const Track = ({
 
         {/* One short line about where you stand with it, and the identified name only when
             it is not the name above. */}
-        {guess?.installed ? (
+        {guess?.inactive ? (
+          <p className="flex items-center gap-1.5 text-[12.5px] text-muted-foreground">
+            <Power className="size-3.5 shrink-0 text-faint" />
+            <span className="truncate">{t("serverBrowser.trackInactive")}</span>
+          </p>
+        ) : guess?.installed ? (
           <p className="flex items-center gap-1.5 text-[12.5px] text-muted-foreground">
             <CheckCircle2 className="size-3.5 shrink-0 text-faint" />
             <span className="truncate">
@@ -299,6 +306,10 @@ export interface ServerDetailProps {
   onWait: (server: MasterServer) => void;
   onInstall: (s: MasterServer, product: CatalogTrack) => void;
   onInstallJoin: (s: MasterServer, product: CatalogTrack) => void;
+  /** The `rel` of the player's own copy, when Manage has switched the track off. */
+  inactive?: string;
+  /** Switch a parked track back on, then join. */
+  onActivateJoin: (s: MasterServer, rel: string) => void;
   onCopy: (address: string) => void;
   onToggleFavourite: (address: string) => void;
   className?: string;
@@ -318,6 +329,8 @@ const ServerDetail = ({
   onWait,
   onInstall,
   onInstallJoin,
+  inactive,
+  onActivateJoin,
   onCopy,
   onToggleFavourite,
   className,
@@ -373,15 +386,19 @@ const ServerDetail = ({
     // Answered from the cache when it has been asked before. Identifying a track can cost
     // four catalogue searches — mxb-mods, two shop passes, then the Hub — and a rotation
     // brings the same handful of tracks back every few minutes, off every row that runs
-    // them. One answer per track per run of the app is enough.
+    // them.
+    //
+    // A remembered "you have it" holds for the run. A remembered "you don't" is shown at once
+    // but asked again: the player may have copied the track in since, and for a track not on
+    // disk the answer comes from the local scan and the book on disk, not from a catalogue.
     const hit = guessFor(track);
     if (hit) {
       setGuess(hit);
       setGuessing(false);
-      return;
+      if (hit.installed || hit.stock) return;
     }
     let cancelled = false;
-    setGuessing(true);
+    if (!hit) setGuessing(true);
     guessServerTrack(track, live?.name ?? server?.name)
       .then((g) => {
         rememberGuess(track, g);
@@ -393,6 +410,14 @@ const ServerDetail = ({
       cancelled = true;
     };
   }, [track, live?.name, server?.name]);
+
+  // Follow the shared store: switching a parked track on (or a sweep identifying it) lands a
+  // new answer there, and the pane must stop offering what has just been done.
+  const guessesVersion = useTrackGuesses();
+  useEffect(() => {
+    const latest = track ? guessFor(track) : undefined;
+    if (latest) setGuess(latest);
+  }, [guessesVersion, track]);
 
   if (!server) return null;
   const s = live ?? server;
@@ -416,8 +441,21 @@ const ServerDetail = ({
   // The same four-way decision the tile makes, so a server offers the same thing whichever
   // way it is being looked at.
   const full = isFull(s);
-  const free = missing && product?.source === "mods" && !!product.slug;
-  const sold = missing && product?.source === "shop" ? product : null;
+  const parked = inactive || guess?.inactive || undefined;
+  const action = joinAction({
+    // The pane asks afresh when it opens; an exact on-disk hit there outranks the list's
+    // older "not installed".
+    missing: missing && !guess?.installed && !guess?.stock,
+    // The pane's own identification knows about a parked copy too, so the button doesn't
+    // wait on the list's next sweep to stop offering a download for it.
+    inactive: parked,
+    product,
+    installing,
+    queued: queue?.address === s.address,
+    joinable: s.joinable,
+    full,
+  });
+  const sold = action.kind === "buy" ? action.product : null;
   const price = sold?.price;
   const priceLabel = !price
     ? ""
@@ -578,23 +616,37 @@ const ServerDetail = ({
             {/* Icon only on a narrow window; the tooltip still says what it does. */}
             <span className="max-[760px]:hidden">{t("serverBrowser.copyLink")}</span>
           </Button>
-          {queue?.address === s.address ? (
+          {action.kind === "queued" ? (
             <Button variant="outline" className="flex-1" disabled>
               <Hourglass className="size-3.5" />
-              {t("serverBrowser.inLine", { position: queue.position })}
+              {t("serverBrowser.inLine", { position: queue?.position ?? 0 })}
             </Button>
-          ) : installing ? (
+          ) : action.kind === "installing" ? (
             <Button variant="outline" className="flex-1" disabled>
               <Loader2 className="size-3.5 animate-spin" />
               {t("serverBrowser.installing")}
             </Button>
-          ) : free && product ? (
+          ) : action.kind === "activate" ? (
+            <Button
+              className="flex-1"
+              disabled={busy || !s.joinable}
+              onClick={() => onActivateJoin(s, action.rel)}
+              title={t("serverBrowser.activateJoinHint")}
+            >
+              {joining === s.address ? (
+                <Loader2 className="size-3.5 animate-spin" />
+              ) : (
+                <Power className="size-3.5" />
+              )}
+              {t("serverBrowser.activateJoin")}
+            </Button>
+          ) : action.kind === "install" ? (
             <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
               <Button
                 variant="outline"
                 className="shrink-0"
-                onClick={() => onInstall(s, product)}
-                title={t("serverBrowser.installHint", { title: product.name })}
+                onClick={() => onInstall(s, action.product)}
+                title={t("serverBrowser.installHint", { title: action.product.name })}
               >
                 <Download className="size-3.5" />
                 {t("serverBrowser.install")}
@@ -603,13 +655,43 @@ const ServerDetail = ({
                 <Button
                   className="flex-1"
                   disabled={busy}
-                  onClick={() => onInstallJoin(s, product)}
-                  title={t("serverBrowser.installJoinHint", { title: product.name })}
+                  onClick={() => onInstallJoin(s, action.product)}
+                  title={t("serverBrowser.installJoinHint", { title: action.product.name })}
                 >
                   <Plug className="size-3.5" />
                   {t("serverBrowser.installJoin")}
                 </Button>
               )}
+            </div>
+          ) : action.kind === "missing" ? (
+            // The player doesn't have this track. A name that only resembles it is a lead,
+            // not a reason to offer a plain Join: the page it came from goes first, and
+            // joining stays possible but outlined and labelled for what it is.
+            <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+              {guess?.productUrl ? (
+                <Button
+                  className="flex-1"
+                  onClick={() => void openUrl(guess.productUrl)}
+                  title={guess.productUrl}
+                >
+                  <ExternalLink className="size-3.5" />
+                  {t("serverBrowser.findTrack")}
+                </Button>
+              ) : null}
+              <Button
+                variant="outline"
+                className={guess?.productUrl ? "shrink-0" : "flex-1"}
+                onClick={() => onJoin(s)}
+                disabled={!s.joinable || busy}
+                title={t("serverBrowser.joinAnywayHint")}
+              >
+                {joining === s.address ? (
+                  <Loader2 className="size-3.5 animate-spin" />
+                ) : (
+                  <Plug className="size-3.5" />
+                )}
+                {t("serverBrowser.joinAnyway")}
+              </Button>
             </div>
           ) : sold ? (
             <Button
@@ -622,7 +704,7 @@ const ServerDetail = ({
                 ? `${t("serverBrowser.buyTrack")} · ${priceLabel}`
                 : t("serverBrowser.buyTrack")}
             </Button>
-          ) : s.joinable && full ? (
+          ) : action.kind === "wait" ? (
             <Button
               variant="outline"
               className="flex-1"

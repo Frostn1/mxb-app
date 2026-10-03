@@ -3962,6 +3962,11 @@ export interface TrackGuess {
   productImage: string;
   /** False when the name only resembles the track — show it as a guess. */
   exact: boolean;
+  /**
+   * You have this track but it is switched off in Manage: the `rel` that {@link modsStateSet}
+   * turns back on. `""` otherwise. `installed` is empty for these — the game can't see it.
+   */
+  inactive: string;
 }
 
 /**
@@ -3977,6 +3982,12 @@ export function guessServerTrack(track: string, hint?: string): Promise<TrackGue
  *  out. One call for the whole list. */
 export function serverTrackPreviews(tracks: string[]): Promise<Record<string, string>> {
   return invoke<Record<string, string>>("server_track_previews", { tracks });
+}
+
+/** Of these track ids, the ones you have but Manage has switched off, each mapped to the `rel`
+ *  that {@link modsStateSet} turns back on. Active and absent ids are left out. */
+export function serverTrackInactive(tracks: string[]): Promise<Record<string, string>> {
+  return invoke<Record<string, string>>("server_track_inactive", { tracks });
 }
 
 export interface CatalogPrice {
