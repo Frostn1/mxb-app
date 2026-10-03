@@ -17,9 +17,18 @@ describe("reloadClass", () => {
     expect(reloadClass("sessions.race_minutes")).toBe("next_event");
   });
 
-  it("keeps sockets and the bots themselves restart-only", () => {
-    for (const key of ["server.listen", "admin.listen", "world.probe", "ghost.count", "ghost.bikes", "native.track_bounds"]) {
+  it("keeps only the game port and development tools restart-only", () => {
+    for (const key of ["server.listen", "world.probe", "world.record", "world.inject_test_rut"]) {
       expect(reloadClass(key)).toBe("restart");
+    }
+  });
+
+  it("applies the bots, exporters and admin plane without a restart", () => {
+    for (const key of ["ghost.count", "ghost.bikes", "ghost.name", "ghost.replay", "ghost.record", "track.roster", "native.track_bounds", "results.directory", "points.enable", "rating.push_url", "paints.enforce_locks"]) {
+      expect(reloadClass(key)).toBe("next_session");
+    }
+    for (const key of ["admin.listen", "admin.tokens_file", "admin.audit_file", "server.observe", "recording.directory", "ghost.fill_to"]) {
+      expect(reloadClass(key)).toBe("hot");
     }
   });
 
