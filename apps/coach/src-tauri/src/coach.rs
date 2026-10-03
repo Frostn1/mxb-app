@@ -18,10 +18,19 @@ use crate::analysis::{self, Ideal, Review, Trace};
 use crate::telemetry::{self, Recording};
 
 const PLUGIN: &str = "mxbcoach.dlo";
-/// Built and released with FrostMod (`Frostn1/frostmod`, `src/mxbcoach.cpp`).
-const PLUGIN_URL: &str = "https://github.com/Frostn1/frostmod/releases/latest/download/mxbcoach.dlo";
+/// Built and released with FrostMod (`src/mxbcoach.cpp`). Published to the public release-only
+/// `frostmod-releases` (same tags and assets) so the source repo can go private; the source
+/// repo is the fallback until that mirror has a release. Asked in this order.
+const PLUGIN_REPOS: [&str; 2] = ["Frostn1/frostmod-releases", "Frostn1/frostmod"];
+
+fn plugin_url(repo: &str) -> String {
+    format!("https://github.com/{repo}/releases/latest/download/{PLUGIN}")
+}
+
 /// Which release that is. Same host the app's own updater already asks, once at startup.
-const PLUGIN_RELEASE: &str = "https://api.github.com/repos/Frostn1/frostmod/releases/latest";
+fn plugin_release(repo: &str) -> String {
+    format!("https://api.github.com/repos/{repo}/releases/latest")
+}
 /// What Coach last put in the plugins folder, remembered so a recorder the game has never run
 /// still has a known version. Nothing else can say: the recorder only writes `recorder.ini`
 /// once the game has loaded it, and versions before 0.23 never wrote one at all — which is
@@ -1606,11 +1615,19 @@ pub async fn coach_install_plugin(app: AppHandle, from: Option<String>) -> Resul
     let bytes = match from {
         Some(f) => fs::read(&f).map_err(err)?,
         None => {
-            let resp = reqwest::get(PLUGIN_URL).await.map_err(err)?;
-            if !resp.status().is_success() {
-                return Err(format!("Couldn't download the recorder ({}).", resp.status()));
+            let mut last = String::from("Couldn't download the recorder.");
+            let mut got = None;
+            for repo in PLUGIN_REPOS {
+                match reqwest::get(plugin_url(repo)).await {
+                    Ok(resp) if resp.status().is_success() => {
+                        got = Some(resp.bytes().await.map_err(err)?.to_vec());
+                        break;
+                    }
+                    Ok(resp) => last = format!("Couldn't download the recorder ({}).", resp.status()),
+                    Err(e) => last = err(e),
+                }
             }
-            resp.bytes().await.map_err(err)?.to_vec()
+            got.ok_or(last)?
         }
     };
     if !bytes.starts_with(b"MZ") {
@@ -1675,11 +1692,19 @@ fn write_installed_note(app: &AppHandle, version: &str) {
 /// The newest FrostMod release's version, without the `v`.
 async fn latest_recorder() -> Result<String, String> {
     let client = reqwest::Client::builder().user_agent("mxb-coach").build().map_err(err)?;
-    let resp = client.get(PLUGIN_RELEASE).send().await.map_err(err)?;
-    if !resp.status().is_success() {
-        return Err(format!("GitHub answered {}", resp.status()));
+    let mut last = String::from("no FrostMod release source");
+    let mut found = None;
+    for repo in PLUGIN_REPOS {
+        match client.get(plugin_release(repo)).send().await {
+            Ok(resp) if resp.status().is_success() => {
+                found = Some(resp);
+                break;
+            }
+            Ok(resp) => last = format!("GitHub answered {}", resp.status()),
+            Err(e) => last = err(e),
+        }
     }
-    let body: serde_json::Value = resp.json().await.map_err(err)?;
+    let body: serde_json::Value = found.ok_or(last)?.json().await.map_err(err)?;
     let tag = body.get("tag_name").and_then(|t| t.as_str()).ok_or("no tag in the release")?;
     Ok(tag.trim_start_matches('v').to_string())
 }

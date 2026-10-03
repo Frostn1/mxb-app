@@ -3,8 +3,12 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 use tauri::{AppHandle, Manager};
 
-/// FrostMod's GitHub repo — supported releases carry `frostmod.dll`.
-const REPO: &str = "Frostn1/frostmod";
+/// Where FrostMod releases are published — supported releases carry `frostmod.dll`.
+///
+/// `frostmod-releases` is the public, release-only mirror (same tags, same assets) that lets
+/// the source repo go private. Asked first; the source repo stays as the fallback until the
+/// mirror has a release, so nothing changes for players before it exists.
+const REPOS: [&str; 2] = ["Frostn1/frostmod-releases", "Frostn1/frostmod"];
 pub const UA: &str = "mxb-app";
 
 /// The plugin is a byte-identical copy of this DLL. The legacy executable is intentionally
@@ -213,8 +217,19 @@ struct Asset {
 
 async fn latest_release() -> anyhow::Result<Release> {
     let client = reqwest::Client::builder().user_agent(UA).build()?;
+    let mut last_err = None;
+    for repo in REPOS {
+        match latest_release_from(&client, repo).await {
+            Ok(rel) => return Ok(rel),
+            Err(e) => last_err = Some(e),
+        }
+    }
+    Err(last_err.unwrap_or_else(|| anyhow::anyhow!("no FrostMod release source")))
+}
+
+async fn latest_release_from(client: &reqwest::Client, repo: &str) -> anyhow::Result<Release> {
     let rel = client
-        .get(format!("https://api.github.com/repos/{REPO}/releases/latest"))
+        .get(format!("https://api.github.com/repos/{repo}/releases/latest"))
         .header("Accept", "application/vnd.github+json")
         .send()
         .await?
