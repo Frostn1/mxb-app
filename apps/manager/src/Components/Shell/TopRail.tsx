@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type Ref } from "react";
-import { Settings as SettingsIcon, Play, Gamepad2, Loader2 } from "lucide-react";
+import { Play, Gamepad2, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@frost/shared/lib/utils";
 import type { LoadedPlugin } from "@frost/shared/lib/pluginHost";
@@ -12,9 +12,8 @@ import { RAIL, railItemFor, type DashboardView, type RailItem } from "./nav";
 import DownloadQueue from "./DownloadQueue";
 import FrostmodBadge from "./FrostmodBadge";
 import QueueBanner from "./QueueBanner";
-import Brand from "./Brand";
 import ContextBar from "./ContextBar";
-import WindowControls, { IS_MAC } from "./WindowControls";
+import AppBar from "@frost/shared/Components/Shell/AppBar";
 
 /** MX Bikes takes a while to show up in the process list; stop saying "Starting…" after this. */
 const STARTING_TIMEOUT_MS = 15000;
@@ -81,92 +80,61 @@ export default function TopRail({ view, plugins, onNavigate, leftRef, rightRef }
 
   return (
     <>
-    <div
-      data-tauri-drag-region
-      className={cn(
-        "flex h-[52px] flex-none select-none items-center border-b border-border bg-window",
-        // Clear the space macOS reserves for its traffic-lights — and pad the trailing
-        // edge there too, because mac draws none of our own window controls, so PLAY
-        // would otherwise sit flush against the window edge.
-        IS_MAC ? "pl-[82px] pr-4" : "pl-[18px]",
-      )}
-    >
-      <Brand />
-
-      <nav className="ml-7 flex h-full items-stretch gap-[22px]">
-        {items.map((item) => {
-          const on = active?.id === item.id;
-          return (
-            <button
-              key={item.id}
-              onClick={() => onNavigate(item.view)}
-              className={cn(
-                "relative flex cursor-default items-center font-cond text-[14px] font-semibold tracking-[-0.02em] transition-colors",
-                on ? "text-foreground" : "text-muted-foreground hover:text-foreground",
-              )}
-            >
-              {item.rawLabel ?? t(item.label)}
-              {on && (
-                <span className="absolute inset-x-[-3px] bottom-0 h-[3px] rounded-full bg-primary" />
-              )}
-            </button>
-          );
-        })}
-      </nav>
-
-      <div data-tauri-drag-region className="flex-1" />
-
-      <div className="flex items-center gap-1 text-muted-foreground">
-        {/* What FrostMod is doing, and Start/Stop, from wherever you are. The sidebar
-            carried this on every screen and the rail has to as well: its state changes
-            while you are somewhere else, and Settings is four screens away. */}
-        {/* The server line, visible on every tab: the turn can come while you're elsewhere. */}
-        <QueueBanner />
-        <FrostmodBadge />
-        <DownloadQueue onOpenDownloads={() => onNavigate("downloads")} />
+    <AppBar
+      name={"MXB App"}
+      tabs={items.map((item) => ({ id: item.id, label: item.rawLabel ?? t(item.label) }))}
+      active={active?.id}
+      onPick={(id) => {
+        const item = items.find((i) => i.id === id);
+        if (item) onNavigate(item.view);
+      }}
+      right={
+        <>
+          {/* What FrostMod is doing, and Start/Stop, from wherever you are. The sidebar
+              carried this on every screen and the rail has to as well: its state changes
+              while you are somewhere else, and Settings is four screens away. */}
+          {/* The server line, visible on every tab: the turn can come while you're elsewhere. */}
+          <QueueBanner />
+          <FrostmodBadge />
+          <DownloadQueue onOpenDownloads={() => onNavigate("downloads")} />
+        </>
+      }
+      onSettings={() => onNavigate("settings")}
+      settingsActive={view === "settings"}
+      settingsLabel={t("nav.settings")}
+      windowLabels={{
+        minimize: t("window.minimize"),
+        maximize: t("window.maximize"),
+        close: t("window.close"),
+      }}
+      action={
         <button
-          onClick={() => onNavigate("settings")}
-          title={t("nav.settings")}
-          aria-label={t("nav.settings")}
+          data-tour="play"
+          onClick={onPlay}
+          disabled={gameRunning || starting}
+          title={gameRunning ? t("game.running") : t("game.launch")}
           className={cn(
-            "grid size-[30px] cursor-default place-items-center transition-colors hover:text-foreground",
-            view === "settings" && "bg-popover text-foreground",
+            "flex h-8 cursor-default items-center rounded-full px-6 transition-colors",
+            gameRunning || starting
+              ? "border border-input text-muted-foreground"
+              : "bg-primary text-primary-foreground hover:brightness-110 active:brightness-95",
           )}
         >
-          <SettingsIcon className="size-4" />
-        </button>
-      </div>
-
-      <span className="mx-3.5 h-5 w-px bg-border" />
-
-      <button
-        data-tour="play"
-        onClick={onPlay}
-        disabled={gameRunning || starting}
-        title={gameRunning ? t("game.running") : t("game.launch")}
-        className={cn(
-          "flex h-8 cursor-default items-center rounded-full px-6 transition-colors",
-          gameRunning || starting
-            ? "border border-input text-muted-foreground"
-            : "bg-primary text-primary-foreground hover:brightness-110 active:brightness-95",
-        )}
-      >
-        <span className="flex items-center gap-2">
-          {gameRunning ? (
-            <Gamepad2 className="size-3.5 text-success" />
-          ) : starting ? (
-            <Loader2 className="size-3.5 animate-spin" />
-          ) : (
-            <Play className="size-3.5 fill-current" />
-          )}
-          <span className="font-cond text-[14.5px] font-bold tracking-[-0.02em]">
-            {gameRunning ? t("game.running") : starting ? t("game.starting") : t("game.play")}
+          <span className="flex items-center gap-2">
+            {gameRunning ? (
+              <Gamepad2 className="size-3.5 text-success" />
+            ) : starting ? (
+              <Loader2 className="size-3.5 animate-spin" />
+            ) : (
+              <Play className="size-3.5 fill-current" />
+            )}
+            <span className="font-cond text-[14.5px] font-bold tracking-[-0.02em]">
+              {gameRunning ? t("game.running") : starting ? t("game.starting") : t("game.play")}
+            </span>
           </span>
-        </span>
-      </button>
-
-      <WindowControls className="ml-4" />
-    </div>
+        </button>
+      }
+    />
     <ContextBar
       item={active}
       view={view}

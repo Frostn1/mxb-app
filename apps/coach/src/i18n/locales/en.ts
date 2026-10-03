@@ -10,6 +10,9 @@ export const en = {
   ...base,
   "nav.sessions": "Sessions",
   "nav.settings": "Settings",
+  "window.minimize": "Minimize",
+  "window.maximize": "Maximize",
+  "window.close": "Close",
 
   "common.refresh": "Refresh",
   "common.loading": "Loading…",

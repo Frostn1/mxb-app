@@ -10,7 +10,7 @@ import { useT } from "@/i18n";
 export default function UpdateBanner() {
   const t = useT();
   const { available, installing, progress, install, dismiss } = useUpdate();
-  if (!available) return null;
+  if (import.meta.env.DEV || !available) return null;
 
   return (
     <div className="flex shrink-0 items-center gap-3 border-b border-primary/25 bg-primary/10 px-4 py-2 text-sm text-foreground">
