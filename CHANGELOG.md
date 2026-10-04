@@ -54,6 +54,16 @@
 - **Auto race mode moves nothing with FrostMod v0.40.0 or newer.** It hands FrostMod a list of the tracks and bikes that stay (`frostmod_racemode.txt`), and FrostMod hides the rest from the game's own scan, so their archives are never opened. Ending the session just deletes the list. With an older FrostMod it still moves the unused mods aside as before.
 
 ### Fixed
+- **A track install that fails no longer blocks joining from the Online tab.** When a server's
+  track can't be installed — the download fails, nothing can be downloaded, or the install makes
+  no progress for 90 seconds (30 for finding the download link) — the server says "Couldn't
+  install this track" and offers **Join anyway** (the same join an installed track gets; the
+  game handles a missing track itself), **Retry** and **Pick the track** (install it from a file
+  you already have, then join). A track nobody hosts gets Pick the track next to Join anyway too.
+  An install that was cancelled or dropped from the queue no longer leaves the server stuck on
+  "Installing". One-click track installs also skip mxbikes-shop.com product pages that
+  mxb-mods posts link next to the real file: the shop answers those with a Cloudflare 403,
+  which is why LUMBERYARD failed to install while its MEGA link worked.
 - **Archive entry paths are validated before extraction.** Every entry in a downloaded or
   dropped `.zip`, `.7z` or `.rar` is checked before anything is written, and an archive with
   any entry that would land outside the staging folder (a `..`, an absolute, drive or UNC path,

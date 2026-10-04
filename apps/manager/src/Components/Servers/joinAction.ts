@@ -17,6 +17,10 @@ export type JoinAction =
   | { kind: "activate"; rel: string }
   | { kind: "install"; product: CatalogTrack }
   | { kind: "buy"; product: CatalogTrack }
+  /** An install of this track failed, stalled or found nothing to download. Joining must
+   *  still be one click away — the game handles a missing track itself — next to Retry
+   *  (when there is something to retry) and picking the file by hand. */
+  | { kind: "failed"; product?: CatalogTrack }
   /** The player doesn't have it and nobody we know sells or hosts it. */
   | { kind: "missing" }
   | { kind: "wait" }
@@ -29,6 +33,8 @@ export interface JoinInputs {
   inactive?: string;
   product?: CatalogTrack;
   installing: boolean;
+  /** The last install of this track failed or timed out. */
+  failed?: boolean;
   queued: boolean;
   joinable: boolean;
   full: boolean;
@@ -39,6 +45,12 @@ export function joinAction(i: JoinInputs): JoinAction {
   if (i.installing) return { kind: "installing" };
   if (i.inactive) return { kind: "activate", rel: i.inactive };
   if (i.missing) {
+    // Ahead of Install: offering the same download again as the only button is how a 403
+    // left a player unable to join from this tab at all.
+    if (i.failed) {
+      const retry = i.product?.source === "mods" && i.product.slug ? i.product : undefined;
+      return retry ? { kind: "failed", product: retry } : { kind: "failed" };
+    }
     if (i.product?.source === "mods" && i.product.slug) {
       return { kind: "install", product: i.product };
     }
