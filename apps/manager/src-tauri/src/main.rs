@@ -330,6 +330,23 @@ fn normalize_game_folder(path: String) -> NormalizedGameFolder {
     }
 }
 
+/// Check a folder-picker choice against where the game keeps its user folder on this PC
+/// (the Documents known folder, which OneDrive or Properties > Location may have moved to
+/// another drive). An empty `path` just reports the expected folder. `game` defaults to the
+/// active one; setup passes its pick because nothing is saved yet.
+#[tauri::command]
+fn inspect_game_folder(
+    app: tauri::AppHandle,
+    path: String,
+    game: Option<game::Game>,
+) -> config::GameFolderCheck {
+    let profile = match game {
+        Some(g) => g.profile(),
+        None => config::load(&app).unwrap_or_default().game(),
+    };
+    config::inspect_game_folder(&path, profile)
+}
+
 /// Run an mxb-mods.com call; if Cloudflare refuses it, run it again from inside a real
 /// browser and keep using that transport for the rest of the session.
 ///
@@ -8730,6 +8747,7 @@ fn main() {
             create_config,
             complete_setup,
             normalize_game_folder,
+            inspect_game_folder,
             mxb_core::viewer::app_platform,
             search_mods,
             get_mod_detail,
