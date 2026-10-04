@@ -546,7 +546,7 @@ impl Tunnels {
             if done.is_some() || Instant::now() > deadline {
                 break done;
             }
-            std::thread::sleep(Duration::from_millis(100));
+            std::thread::sleep(Duration::from_millis(20));
         };
         self.registry.kill(id);
         let _ = feed.join();

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { describeRotationSave, playNextQueue, randomTrack } from "./rotation";
+import { describeRotationSave, playNextQueue, randomTrack, stateAfterSwitch } from "./rotation";
 import { BADGES, reloadClass } from "./reload";
 
 describe("rotation save", () => {
@@ -38,5 +38,13 @@ describe("play next", () => {
     expect(randomTrack(["b", "c", "d"], () => 0.99)).toBe("d");
     expect(randomTrack(["b", "c", "d"], () => 0)).toBe("b");
     expect(randomTrack([])).toBeNull();
+  });
+});
+
+describe("stateAfterSwitch", () => {
+  it("makes the first queued track current and the rest the rotation", () => {
+    const state = { current: "A", rotation: ["B", "C"], library: ["A", "B", "C"] };
+    const queue = playNextQueue("A", ["B", "C"], "C");
+    expect(stateAfterSwitch(state, queue)).toEqual({ current: "C", rotation: ["B", "A"], library: ["A", "B", "C"] });
   });
 });

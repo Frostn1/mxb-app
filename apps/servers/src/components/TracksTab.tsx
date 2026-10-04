@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { ArrowDown, ArrowUp, GripVertical, Plus, Search, Trash2, Upload } from "lucide-react";
 import { errorText, inspectTrackUpload, serverRestartService, serverSession, serverSetRotation, serverSetTrack, serverTracks, type ServerView, type TrackState } from "@/lib/api";
-import { describeRotationSave, playNextQueue, randomTrack } from "@/lib/rotation";
+import { describeRotationSave, playNextQueue, randomTrack, stateAfterSwitch } from "@/lib/rotation";
 import { byteSize } from "@/lib/format";
 import { initUploads, onUploadSettled, startTrackUpload, useUploads } from "@/lib/uploads";
 import { Button, Card, ErrorLine, Notice } from "./ui";
@@ -21,14 +21,14 @@ export function TracksTab({ server }: { server: ServerView }) {
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    setError(null);
+  const load = useCallback(async (quiet = false) => {
+    if (!quiet) setError(null);
     try {
       const tracks = await serverTracks(server.id);
       trackCache.set(server.id, tracks);
       setState(tracks);
       setQueue([...(tracks.current ? [tracks.current] : []), ...tracks.rotation]);
-    } catch (e) { setError(errorText(e)); }
+    } catch (e) { if (!quiet) setError(errorText(e)); }
   }, [server.id]);
   useEffect(() => { void load(); }, [load]);
   // Uploads belong to the app, not to this tab: whatever is running for this server shows up
@@ -99,15 +99,23 @@ It will be stored as ${check.uploadName} (${size}). It may be a full client trac
     const nextQueue = playNextQueue(state.current, state.rotation, selected);
     const label = mode === "next" ? `Play ${selected} next?` : `Switch to the randomly selected track ${selected}?`;
     if (!window.confirm(`${label} The event ends now and riders reload the new track. ${server.name} does not restart.`)) return;
-    setBusy(mode === "next" ? "Loading next track…" : "Loading random track…"); setError(null); setDone(null);
+    // Show the result at once; the server confirms (or this is rolled back) when it answers.
+    const before = { state, queue };
+    setBusy(`Loading ${selected}…`); setError(null); setDone(null);
+    setState(stateAfterSwitch(state, nextQueue)); setQueue(nextQueue);
+    const rollBack = () => { setState(before.state); setQueue(before.queue); };
     try {
       const said = describeRotationSave(await serverSetRotation(server.id, nextQueue));
-      if (said.needsRestart) await restartForRotation(said.message);
-      else { await serverSession(server.id, "rotate"); setDone(`${selected} is now playing.`); }
-      await load();
-    } catch (e) { setError(errorText(e)); } finally { setBusy(null); }
+      if (said.needsRestart) { rollBack(); await restartForRotation(said.message); await load(); }
+      else {
+        await serverSession(server.id, "rotate");
+        trackCache.set(server.id, stateAfterSwitch(state, nextQueue));
+        setDone(`${selected} is now playing.`);
+        // The new state is already on screen: confirm it with the server without making the user wait.
+        void load(true);
+      }
+    } catch (e) { rollBack(); setError(errorText(e)); void load(true); } finally { setBusy(null); }
   };
-
   const selectLegacyTrack = async (track: string) => {
     if (track === state?.current || !window.confirm(`Switch ${server.name} to ${track}? The official server will restart.`)) return;
     setBusy(`Switching to ${track}…`); setError(null); setDone(null);
