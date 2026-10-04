@@ -13,6 +13,7 @@ import type {
   DropPreview,
   LooseSwapBike,
   OrphanedSetup,
+  DisableSwapsReport,
   RegisterReport,
   Config,
   DownloadOption,
@@ -877,6 +878,14 @@ export function detectOrphanedSetup(): Promise<OrphanedSetup[]> {
 /** Copy a gutted bike's setup files back to its root. Returns how many were restored. */
 export function repairOrphanedSetup(bike: string): Promise<number> {
   return invoke<number>("repair_orphaned_setup", { bike });
+}
+
+/**
+ * Troubleshooting: put every bike back on the model the game ships with. Reversible — each
+ * swap stays in its bike's library. Refused while the game is running.
+ */
+export function disableAllModelSwaps(): Promise<DisableSwapsReport> {
+  return invoke<DisableSwapsReport>("disable_all_model_swaps");
 }
 
 /**

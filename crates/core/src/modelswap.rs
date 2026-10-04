@@ -152,8 +152,15 @@ fn dir_exists(p: &Path) -> bool {
 /// True if the bike ships a `.pkz` — a packed model the loose files layer over. It's what
 /// makes "no loose model" still mean *a* model, and so the only case where reverting to
 /// the game's own model is possible at all.
+///
+/// The `.pkz` is usually *beside* the folder, not in it: every OEM bike is
+/// `mods/bikes/<Bike>.pkz` with a `mods/bikes/<Bike>/` folder of loose overrides next to it.
+/// Looking only inside the folder missed that layout entirely, so going Stock on an OEM bike
+/// left a swap's `.hrc`s and `gfx.cfg` loose over the OEM mesh — a hybrid bike that loads
+/// whenever anyone on a server rides it.
 fn has_packed_fallback(bike_dir: &Path) -> bool {
-    list_files(bike_dir).iter().any(|f| f.to_ascii_lowercase().ends_with(".pkz"))
+    crate::library::sibling_pkz(bike_dir).is_file()
+        || list_files(bike_dir).iter().any(|f| f.to_ascii_lowercase().ends_with(".pkz"))
 }
 fn is_bookkeeping(name: &str) -> bool {
     name.eq_ignore_ascii_case(MANIFEST) || name.eq_ignore_ascii_case(MARKER)
@@ -250,12 +257,32 @@ fn active_set_files(mods_path: &str, bike: &str, active: &str, incoming: &[Strin
             m
         }
     };
-    // The bike's own setup is never a model's to own. A variant folder holding copies of
-    // the `.hrc`s/`.cfg`/`.geom` — or a manifest written back when one did — would park
-    // them, leaving the bike a mesh with nothing to say how it is assembled. Only a variant
-    // that actually brings its own replacement displaces them, via `incoming` below.
-    let owned: Vec<String> =
-        owned.into_iter().filter(|f| !crate::bikefiles::is_bike_setup(f)).collect();
+    // On an unpacked bike the setup is the bike's own and never a model's to own. A variant
+    // folder holding copies of the `.hrc`s/`.cfg`/`.geom` — or a manifest written back when
+    // one did — would park them, leaving the bike a mesh with nothing to say how it is
+    // assembled. Only a variant that actually brings its own replacement displaces them,
+    // via `incoming` below.
+    //
+    // Over a `.pkz` it is the other way round: the bike's own setup lives in the archive,
+    // so every loose `.hrc`/`.cfg`/`.geom` is an override some model brought, and it has to
+    // leave with that model. Kept at the root, swapping A -> B left A's `.hrc`s naming A's
+    // parts over B's mesh.
+    let packed = has_packed_fallback(&root);
+    let owned: Vec<String> = if packed {
+        let mut owned = owned;
+        // A loose mesh over the archive is a model, and the loose setup beside it is that
+        // model's — even with no manifest yet (a pack dropped straight into the folder).
+        if root_files.iter().any(|f| crate::bikefiles::is_mesh(f)) {
+            for f in root_files.iter().filter(|f| crate::bikefiles::is_bike_setup(f)) {
+                if !contains_ci(&owned, f) {
+                    owned.push(f.clone());
+                }
+            }
+        }
+        owned
+    } else {
+        owned.into_iter().filter(|f| !crate::bikefiles::is_bike_setup(f)).collect()
+    };
 
     root_files
         .into_iter()
@@ -763,6 +790,18 @@ pub fn apply_model_swap_reporting(
         }
     }
 
+    // 0) Refuse a swap that would leave the bike unloadable: a loose `.hrc` naming a mesh
+    //    that won't be there. The game loads a bike's model the first time anyone rides it —
+    //    you, or another rider as they join a server — so a broken set doesn't show in the
+    //    garage of someone who rides a different bike; it shows as a crash on a full server.
+    let missing = missing_scenes(&root, &root_files, &target_dir, &target_files);
+    if !missing.is_empty() {
+        anyhow::bail!(
+            "model '{target}' isn't complete: {} — not applied, so the bike stays loadable",
+            missing.join("; ")
+        );
+    }
+
     // 1) Back up the current set into the library (all-or-nothing).
     if !root_files.is_empty() && !move_set(&root, &backup_dir, &root_files) {
         anyhow::bail!("couldn't back up the current model — is the bike loaded in-game? Exit the bike first.");
@@ -782,6 +821,183 @@ pub fn apply_model_swap_reporting(
     // already happened, so a livery the game is holding open is worth a word to the user
     // rather than a rolled-back swap — hence a count, not an error.
     Ok(reconcile_paints(mods_path, bike))
+}
+
+/// The meshes an `.hrc` names, one per `scene = <file>` line, by bare file name.
+fn hrc_scenes(text: &str) -> Vec<String> {
+    text.lines()
+        .filter_map(|l| {
+            let (k, v) = l.trim().split_once('=')?;
+            if !k.trim().eq_ignore_ascii_case("scene") {
+                return None;
+            }
+            let v = v.trim().trim_matches('"');
+            let base = v.rsplit(['/', '\\']).next().unwrap_or(v).trim();
+            (!base.is_empty()).then(|| base.to_string())
+        })
+        .collect()
+}
+
+/// What the bike root would reference but not hold once `parked` leaves and `incoming`
+/// arrives, as "`<hrc>` names `<mesh>`" lines. Empty when every loose `.hrc` resolves.
+///
+/// A mesh may also come out of the bike's `.pkz`. When the archive can't be listed (an
+/// encrypted one, in a build without the reader) a reference is given the benefit of the
+/// doubt: refusing a swap on a guess is worse than the check not running.
+fn missing_scenes(
+    root: &Path,
+    parked: &[String],
+    variant: &Path,
+    incoming: &[String],
+) -> Vec<String> {
+    let mut after: Vec<(String, PathBuf)> = list_files(root)
+        .into_iter()
+        .filter(|f| !contains_ci(parked, f) && !contains_ci(incoming, f))
+        .map(|f| (f.clone(), root.join(&f)))
+        .collect();
+    after.extend(incoming.iter().map(|f| (f.clone(), variant.join(f))));
+    let loose: Vec<String> = after.iter().map(|(n, _)| n.clone()).collect();
+
+    let mut packed: Option<Option<Vec<String>>> = None;
+    let mut in_pkz = |scene: &str| -> bool {
+        let names = packed.get_or_insert_with(|| {
+            let mut pkzs = vec![crate::library::sibling_pkz(root)];
+            pkzs.extend(
+                list_files(root)
+                    .into_iter()
+                    .filter(|f| f.to_ascii_lowercase().ends_with(".pkz"))
+                    .map(|f| root.join(f)),
+            );
+            let present: Vec<PathBuf> = pkzs.into_iter().filter(|p| p.is_file()).collect();
+            if present.is_empty() {
+                return Some(Vec::new()); // nothing packed: a miss is a real miss
+            }
+            let mut names = Vec::new();
+            for p in present {
+                match crate::pkz::entry_names(&p) {
+                    Ok(n) => names.extend(
+                        n.into_iter()
+                            .map(|e| e.rsplit(['/', '\\']).next().unwrap_or(&e).to_string()),
+                    ),
+                    Err(_) => return None, // unreadable: can't tell
+                }
+            }
+            Some(names)
+        });
+        match names {
+            Some(n) => contains_ci(n, scene),
+            None => true,
+        }
+    };
+
+    let mut out = Vec::new();
+    for (name, path) in &after {
+        if !name.to_ascii_lowercase().ends_with(".hrc") {
+            continue;
+        }
+        let Ok(text) = fs::read_to_string(path) else { continue };
+        for scene in hrc_scenes(&text) {
+            if !contains_ci(&loose, &scene) && !in_pkz(&scene) {
+                let line = format!("{name} names {scene}, which isn't there");
+                if !out.contains(&line) {
+                    out.push(line);
+                }
+            }
+        }
+    }
+    out
+}
+
+/// What [`disable_all_model_swaps`] did, bike by bike.
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DisableReport {
+    /// Bikes put back on their own model.
+    pub reverted: Vec<String>,
+    /// Bikes that were already on their own model but still had a swap's loose
+    /// `.hrc`/`.cfg`/`.geom` over the `.pkz` — those files were parked.
+    pub cleaned: Vec<String>,
+    /// Bikes that couldn't be changed, with why.
+    pub failed: Vec<(String, String)>,
+}
+
+/// Where loose overrides left behind by an older version are parked. A folder like any
+/// variant, so it shows in the Locker and nothing is deleted; it has no mesh, so it can
+/// never be applied as a model.
+const LEFTOVERS: &str = "Leftover overrides";
+
+/// Put every bike back on the model the game ships with — the troubleshooting switch.
+///
+/// A bike over a `.pkz` goes Stock: every loose model file and override parks in its
+/// library, exactly as a hand-picked Stock swap would, and can be swapped back later. An
+/// unpacked mod bike has nothing to fall back to, so it returns to `Original` when a swap
+/// took it off that, and is otherwise left alone. Paints are never touched beyond the
+/// usual livery reconcile.
+pub fn disable_all_model_swaps(mods_path: &str) -> DisableReport {
+    let mut report = DisableReport::default();
+    let Ok(rd) = fs::read_dir(bikes_root(mods_path)) else {
+        return report;
+    };
+    let mut bikes: Vec<String> = rd
+        .flatten()
+        .filter(|e| e.path().is_dir())
+        .filter_map(|e| e.file_name().to_str().map(str::to_string))
+        .filter(|b| !b.starts_with('.') && is_simple_name(b))
+        .collect();
+    bikes.sort_by_key(|b| b.to_lowercase());
+
+    for bike in bikes {
+        let root = bike_dir(mods_path, &bike);
+        let active = current_active(mods_path, &bike);
+        let has_mesh = crate::bikefiles::dir_has_mesh(&root);
+        if has_packed_fallback(&root) {
+            if !active.eq_ignore_ascii_case(STOCK) && (has_mesh || !read_active(mods_path, &bike).is_empty()) {
+                match apply_model_swap(mods_path, &bike, STOCK) {
+                    Ok(()) => report.reverted.push(bike.clone()),
+                    Err(e) => {
+                        report.failed.push((bike.clone(), format!("{e:#}")));
+                        continue;
+                    }
+                }
+            }
+            // Already Stock, yet a swap's setup is still loose over the archive: what
+            // going Stock left behind before the sibling `.pkz` was recognised.
+            if crate::bikefiles::dir_has_mesh(&root) {
+                continue;
+            }
+            let strays = root_setup_files(mods_path, &bike);
+            if strays.is_empty() {
+                continue;
+            }
+            let dest = variant_dir(mods_path, &bike, LEFTOVERS);
+            if move_set(&root, &dest, &strays) {
+                let mut held = read_manifest(&dest).unwrap_or_default();
+                for f in strays {
+                    if !contains_ci(&held, &f) {
+                        held.push(f);
+                    }
+                }
+                write_manifest(&dest, &held);
+                if !report.reverted.contains(&bike) {
+                    report.cleaned.push(bike.clone());
+                }
+            } else {
+                report.failed.push((
+                    bike.clone(),
+                    "couldn't move its loose overrides — is the game running?".to_string(),
+                ));
+            }
+        } else if !read_active(mods_path, &bike).is_empty()
+            && !active.eq_ignore_ascii_case(ORIGINAL)
+            && dir_exists(&variant_dir(mods_path, &bike, ORIGINAL))
+        {
+            match apply_model_swap(mods_path, &bike, ORIGINAL) {
+                Ok(()) => report.reverted.push(bike.clone()),
+                Err(e) => report.failed.push((bike.clone(), format!("{e:#}"))),
+            }
+        }
+    }
+    report
 }
 
 // `PreviewSet` is the *shape* of a preview — which folders and which files — and the
@@ -2359,6 +2575,143 @@ mod tests {
             b"stock-hrc",
             "and the bike's own comes back"
         );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// An OEM bike as installed: `<Bike>.pkz` beside a folder of loose overrides.
+    fn make_oem_bike(mp: &str, bike: &str) {
+        touch(&bikes_root(mp).join(format!("{bike}.pkz")));
+        fs::create_dir_all(bike_dir(mp, bike)).unwrap();
+    }
+    /// A swap pack the way they ship: a mesh plus `.hrc`s and a `gfx.cfg` naming it.
+    fn make_pack(dir: &Path, mesh: &str) {
+        touch(&dir.join(mesh));
+        fs::write(dir.join("steer.hrc"), format!("level0\n{{\n\tscene = {mesh}\n\tname = steer\n}}\n"))
+            .unwrap();
+        fs::write(dir.join("gfx.cfg"), format!("model = {mesh}\n")).unwrap();
+    }
+
+    #[test]
+    fn a_pkz_beside_the_folder_counts_as_a_packed_fallback() {
+        let root = tmp("sibling-pkz");
+        let mp = root.to_str().unwrap();
+        make_oem_bike(mp, "KTM450");
+        assert!(has_packed_fallback(&bike_dir(mp, "KTM450")));
+        make_bike(mp, "Unpacked", "model.edf");
+        assert!(!has_packed_fallback(&bike_dir(mp, "Unpacked")));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// The reported crash shape: going Stock on an OEM bike left the swap's `.hrc`s and
+    /// `gfx.cfg` loose over the OEM mesh.
+    #[test]
+    fn going_stock_on_an_oem_bike_clears_the_swaps_setup() {
+        let root = tmp("oem-stock");
+        let mp = root.to_str().unwrap();
+        make_oem_bike(mp, "KTM450");
+        make_pack(&variant_dir(mp, "KTM450", "Handguards"), "model.edf");
+
+        apply_model_swap(mp, "KTM450", "Handguards").unwrap();
+        apply_model_swap(mp, "KTM450", STOCK).unwrap();
+        assert!(names_at(&bike_dir(mp, "KTM450")).is_empty(), "{:?}", names_at(&bike_dir(mp, "KTM450")));
+        let parked = names_at(&variant_dir(mp, "KTM450", "Handguards"));
+        for f in ["model.edf", "steer.hrc", "gfx.cfg"] {
+            assert!(contains_ci(&parked, f), "{f} parked with its model: {parked:?}");
+        }
+        // …and the way back still works.
+        apply_model_swap(mp, "KTM450", "Handguards").unwrap();
+        assert_eq!(names_at(&bike_dir(mp, "KTM450")), vec!["gfx.cfg", "model.edf", "steer.hrc"]);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn swapping_between_two_packs_on_an_oem_bike_never_mixes_their_setup() {
+        let root = tmp("oem-a-to-b");
+        let mp = root.to_str().unwrap();
+        make_oem_bike(mp, "KTM450");
+        make_pack(&variant_dir(mp, "KTM450", "A"), "model.edf");
+        touch(&variant_dir(mp, "KTM450", "B").join("other.edf"));
+
+        apply_model_swap(mp, "KTM450", "A").unwrap();
+        apply_model_swap(mp, "KTM450", "B").unwrap();
+        assert_eq!(names_at(&bike_dir(mp, "KTM450")), vec!["other.edf"], "A's setup left with A");
+        assert!(file_exists(&variant_dir(mp, "KTM450", "A").join("steer.hrc")));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_pack_dropped_loose_over_a_pkz_takes_its_setup_when_swapped_out() {
+        let root = tmp("oem-dropped");
+        let mp = root.to_str().unwrap();
+        make_oem_bike(mp, "KTM450");
+        make_pack(&bike_dir(mp, "KTM450"), "model.edf"); // never registered, no manifest
+        touch(&variant_dir(mp, "KTM450", "B").join("other.edf"));
+
+        apply_model_swap(mp, "KTM450", "B").unwrap();
+        assert_eq!(names_at(&bike_dir(mp, "KTM450")), vec!["other.edf"]);
+        assert!(file_exists(&variant_dir(mp, "KTM450", ORIGINAL).join("gfx.cfg")));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_swap_whose_hrc_names_a_missing_mesh_is_refused_untouched() {
+        let root = tmp("hrc-missing-mesh");
+        let mp = root.to_str().unwrap();
+        make_bike(mp, "Unpacked", "model.edf");
+        let v = variant_dir(mp, "Unpacked", "Broken");
+        touch(&v.join("model2.edf"));
+        fs::write(v.join("chassis.hrc"), "level0\n{\n\tscene = model3.edf\n}\n").unwrap();
+        let before = names_at(&bike_dir(mp, "Unpacked"));
+
+        let err = apply_model_swap(mp, "Unpacked", "Broken").unwrap_err().to_string();
+        assert!(err.contains("model3.edf"), "{err}");
+        assert_eq!(names_at(&bike_dir(mp, "Unpacked")), before, "nothing moved");
+        assert_eq!(current_active(mp, "Unpacked"), ORIGINAL);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn hrc_scenes_reads_every_scene_line() {
+        let text = "level0\n{\n\tscene = model.edf\n\tswitch = 0\n}\nlevel1\n{\n  SCENE=lod\\steer.edf\n}\n";
+        assert_eq!(hrc_scenes(text), vec!["model.edf", "steer.edf"]);
+    }
+
+    #[test]
+    fn disabling_all_swaps_puts_every_bike_back_and_is_reversible() {
+        let root = tmp("disable-all");
+        let mp = root.to_str().unwrap();
+        // An OEM bike wearing a swap.
+        make_oem_bike(mp, "KTM450");
+        make_pack(&variant_dir(mp, "KTM450", "Handguards"), "model.edf");
+        apply_model_swap(mp, "KTM450", "Handguards").unwrap();
+        // An OEM bike already "Stock" but with a swap's setup left loose (pre-fix damage).
+        make_oem_bike(mp, "YZ450");
+        fs::write(bike_dir(mp, "YZ450").join("steer.hrc"), "scene = model.edf\n").unwrap();
+        write_active(mp, "YZ450", STOCK).unwrap();
+        // An unpacked mod bike swapped off its own model.
+        make_bike(mp, "Mod250", "model.edf");
+        touch(&variant_dir(mp, "Mod250", "Factory").join("factory.edf"));
+        apply_model_swap(mp, "Mod250", "Factory").unwrap();
+        // An unpacked bike never swapped: left alone.
+        make_bike(mp, "Plain", "model.edf");
+
+        let r = disable_all_model_swaps(mp);
+        assert_eq!(r.reverted, vec!["KTM450", "Mod250"]);
+        assert_eq!(r.cleaned, vec!["YZ450"]);
+        assert!(r.failed.is_empty(), "{:?}", r.failed);
+
+        assert!(names_at(&bike_dir(mp, "KTM450")).is_empty());
+        assert!(names_at(&bike_dir(mp, "YZ450")).is_empty());
+        assert!(file_exists(&variant_dir(mp, "YZ450", LEFTOVERS).join("steer.hrc")));
+        assert!(file_exists(&bike_dir(mp, "Mod250").join("model.edf")));
+        assert!(file_exists(&bike_dir(mp, "Plain").join("model.edf")));
+        assert_eq!(current_active(mp, "Plain"), ORIGINAL);
+
+        // Idempotent, and the swap is one click away again.
+        let again = disable_all_model_swaps(mp);
+        assert!(again.reverted.is_empty() && again.cleaned.is_empty(), "{again:?}");
+        apply_model_swap(mp, "KTM450", "Handguards").unwrap();
+        assert!(file_exists(&bike_dir(mp, "KTM450").join("steer.hrc")));
         let _ = fs::remove_dir_all(&root);
     }
 

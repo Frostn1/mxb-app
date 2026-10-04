@@ -28,6 +28,7 @@ import {
   detectLooseSwaps,
   detectOrphanedSetup,
   repairOrphanedSetup,
+  disableAllModelSwaps,
   onModsChanged,
   scanSoundSwaps,
   applySoundSwap,
@@ -57,6 +58,16 @@ import {
   ContextMenuContent,
   ContextMenuItem,
 } from "@frost/shared/Components/ui/context-menu";
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogCancel,
+  AlertDialogAction,
+} from "@frost/shared/Components/ui/alert-dialog";
 
 /**
  * Locker — the app-side bike **model & sound swap** manager, twinned with FrostMod's
@@ -267,6 +278,32 @@ export default function Locker() {
     [load],
   );
 
+  // "Disable all swaps": the troubleshooting switch for a game that crashes joining servers.
+  const [disableOpen, setDisableOpen] = useState(false);
+  const onDisableAll = async () => {
+    setBusy("*");
+    try {
+      const r = await disableAllModelSwaps();
+      const changed = r.reverted.length + r.cleaned.length;
+      if (r.failed.length > 0) {
+        toast.error(
+          t("locker.disableAllFailed", {
+            bikes: r.failed.map(([b, why]) => `${b}: ${why}`).join("; "),
+          }),
+        );
+      } else if (changed === 0) {
+        toast.success(t("locker.disableAllNothing"));
+      } else {
+        toast.success(t("locker.disableAllDone", { count: changed }));
+      }
+      await load();
+    } catch (e) {
+      toast.error(String(e).replace(/^Error:\s*/, ""));
+    } finally {
+      setBusy(null);
+    }
+  };
+
   const onHideOrphan = useCallback((o: OrphanedSetup) => {
     setHiddenOrphans(writeHiddenOrphans(new Set(readHiddenOrphans()).add(orphanKey(o))));
   }, []);
@@ -301,6 +338,16 @@ export default function Locker() {
   return (
     <div className="flex h-full flex-col">
       <ContextBarRight>
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={busy !== null}
+          onClick={() => setDisableOpen(true)}
+          title={t("locker.disableAllHint")}
+        >
+          {busy === "*" ? <Loader2 className="size-3.5 animate-spin" /> : <Ban className="size-3.5" />}
+          {t("locker.disableAll")}
+        </Button>
         <Button variant="outline" size="sm" onClick={() => void load()}>
           <RefreshCw className={cn("size-3.5", rows === null && "animate-spin")} />
           {t("locker.rescan")}
@@ -493,6 +540,21 @@ export default function Locker() {
           </div>
         )}
       </div>
+
+      <AlertDialog open={disableOpen} onOpenChange={setDisableOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("locker.disableAllTitle")}</AlertDialogTitle>
+            <AlertDialogDescription>{t("locker.disableAllBody")}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
+            <AlertDialogAction onClick={() => void onDisableAll()}>
+              {t("locker.disableAll")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <RegisterSwapsDialog
         open={registerOpen}
