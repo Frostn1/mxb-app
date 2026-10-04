@@ -100,11 +100,11 @@ pub fn candidates_from(sources: &DocsSources, env: impl Fn(&str) -> Option<Strin
     ordered.extend(expanded(&sources.shell_personal));
     for var in ["OneDrive", "OneDriveConsumer", "OneDriveCommercial"] {
         if let Some(root) = env(var).filter(|r| !r.trim().is_empty()) {
-            ordered.push(PathBuf::from(root.trim()).join("Documents"));
+            ordered.push(win_join(&root, "Documents"));
         }
     }
     if let Some(profile) = env("USERPROFILE").filter(|p| !p.trim().is_empty()) {
-        ordered.push(PathBuf::from(profile.trim()).join("Documents"));
+        ordered.push(win_join(&profile, "Documents"));
     }
 
     let mut out: Vec<PathBuf> = Vec::new();
@@ -119,6 +119,12 @@ pub fn candidates_from(sources: &DocsSources, env: impl Fn(&str) -> Option<Strin
         }
     }
     out
+}
+
+/// `root\leaf` with a Windows separator on every host, so the candidates describe a Windows
+/// machine the same way on the macOS and Linux CI runners.
+fn win_join(root: &str, leaf: &str) -> PathBuf {
+    PathBuf::from(format!("{}\\{leaf}", root.trim().trim_end_matches(['\\', '/'])))
 }
 
 /// `Path::is_absolute`, but judged by Windows rules on every host, so the tests describing
