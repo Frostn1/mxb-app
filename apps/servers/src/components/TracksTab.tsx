@@ -2,7 +2,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { ArrowDown, ArrowUp, GripVertical, Plus, Search, Trash2, Upload } from "lucide-react";
 import { errorText, inspectTrackUpload, serverRestartService, serverSession, serverSetRotation, serverSetTrack, serverTracks, type ServerView, type TrackState } from "@/lib/api";
-import { describeRotationSave, playNextQueue, randomTrack, stateAfterSwitch } from "@/lib/rotation";
+import { addBlockedReason, blockedInQueue, describeRotationSave, isProtected, PROTECTED_REASON, playNextQueue, randomTrack, stateAfterSwitch } from "@/lib/rotation";
+import { runAction } from "@/lib/actions";
 import { byteSize } from "@/lib/format";
 import { initUploads, onUploadSettled, startTrackUpload, useUploads } from "@/lib/uploads";
 import { Button, Card, ErrorLine, Notice } from "./ui";
@@ -64,23 +65,48 @@ export function TracksTab({ server }: { server: ServerView }) {
     await serverRestartService(server.id);
     setDone("Restarted with the new rotation.");
   };
-  const save = async () => {
-    if (!queue.length) return;
-    setBusy("Saving rotation…"); setError(null); setDone(null);
-    try {
-      const said = describeRotationSave(await serverSetRotation(server.id, queue));
-      if (said.needsRestart) await restartForRotation(said.message); else setDone(said.message);
-      await load();
-    }
-    catch (e) { setError(errorText(e)); } finally { setBusy(null); }
+  const protectedTracks = state?.protected;
+  const blockedNow = blockedInQueue(queue, protectedTracks);
+  const addTrack = (track: string) => {
+    const why = addBlockedReason(track, protectedTracks);
+    if (why) { setError(why); return; }
+    setQueue((q) => [...q, track]);
   };
-  const upload = async () => {
-    const path = await open({ multiple: false, directory: false, filters: [{ name: "MXB track package", extensions: ["pkz"] }] });
+  const save = async () => {
+    if (!queue.length || !state) return;
+    if (blockedNow.length) { setError(`${blockedNow.join(", ")}: ${PROTECTED_REASON}. Remove it from the rotation to save.`); return; }
+    setBusy("Saving rotation…"); setError(null); setDone(null);
+    const before = state;
+    // The saved rotation is on screen at once; it is undone if the server refuses it.
+    const result = await runAction({
+      name: "save_rotation",
+      optimistic: () => { setState(stateAfterSwitch(before, queue)); return () => setState(before); },
+      run: () => serverSetRotation(server.id, queue),
+    });
+    if (!result.ok) { setError(result.error); setBusy(null); return; }
+    try {
+      const said = describeRotationSave(result.value);
+      if (said.needsRestart) { setState(before); await restartForRotation(said.message); await load(); } else { trackCache.set(server.id, stateAfterSwitch(before, queue)); setDone(said.message); void load(true); }
+    } catch (e) { setError(errorText(e)); } finally { setBusy(null); }
+  };  const upload = async () => {
+    let path = await open({ multiple: false, directory: false, filters: [{ name: "MXB track package", extensions: ["pkz"] }] });
     if (!path) return;
     setBusy("Checking track…"); setError(null); setDone(null);
     let check;
     try { check = await inspectTrackUpload(path); }
     catch (e) { setBusy(null); setError(errorText(e)); return; }
+    if (check.protected) {
+      const alt = check.alternative;
+      const altName = alt?.split(/[\\/]/).pop();
+      if (!alt || !window.confirm(`${check.detail}\n\nUse ${altName} (the server version of this track) instead?`)) {
+        setBusy(null);
+        if (!alt) setError(`${check.uploadName}: ${PROTECTED_REASON}. It was not uploaded, and no server version was found next to it or in Downloads.`);
+        return;
+      }
+      try { check = await inspectTrackUpload(alt); path = alt; }
+      catch (e) { setBusy(null); setError(errorText(e)); return; }
+      if (check.protected) { setBusy(null); setError(`${check.uploadName}: ${PROTECTED_REASON}.`); return; }
+    }
     const size = byteSize(check.bytes);
     const question = check.serverTrack
       ? `Upload ${check.uploadName} (${size}) to this machine and add it to ${server.name}?`
@@ -89,13 +115,16 @@ export function TracksTab({ server }: { server: ServerView }) {
 It will be stored as ${check.uploadName} (${size}). It may be a full client track and use unnecessary server storage. Upload it anyway?`;
     if (!window.confirm(question)) { setBusy(null); return; }
     // Started in the backend: it keeps going when this tab is left, and the header shows it.
-    try { await startTrackUpload(server.id, path); }
+    try { await startTrackUpload(server.id, path ?? ""); }
     catch (e) { setError(errorText(e)); } finally { setBusy(null); }
   };
   const switchTrack = async (mode: "next" | "random") => {
     if (!state?.current || state.rotation.length === 0) return;
-    const selected = mode === "next" ? state.rotation[0] : randomTrack(state.rotation);
-    if (!selected) return;
+    const runnable = state.rotation.filter((track) => !isProtected(track, state.protected));
+    const selected = mode === "next" ? state.rotation[0] : randomTrack(runnable);
+    if (!selected) { setError(`${PROTECTED_REASON}: nothing in the rotation can be played.`); return; }
+    const why = addBlockedReason(selected, state.protected);
+    if (why) { setError(why); return; }
     const nextQueue = playNextQueue(state.current, state.rotation, selected);
     const label = mode === "next" ? `Play ${selected} next?` : `Switch to the randomly selected track ${selected}?`;
     if (!window.confirm(`${label} The event ends now and riders reload the new track. ${server.name} does not restart.`)) return;
@@ -154,13 +183,13 @@ It will be stored as ${check.uploadName} (${size}). It may be a full client trac
             {state === null && <p className="py-3 text-sm text-muted-foreground">Loading…</p>}
             {state && installed.length === 0 && <p className="py-3 text-sm text-muted-foreground">No matching tracks.</p>}
             {installed.map((track) => {
-              return <div key={track} className="flex items-center gap-2 py-2.5"><span className="min-w-0 flex-1 truncate text-sm font-medium">{track}</span>{track === state?.current && <span className="text-xs font-medium text-primary">Active</span>}<button type="button" title="Add to rotation" onClick={() => setQueue((q) => [...q, track])} className="grid size-8 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"><Plus className="size-4" /></button></div>;
+              return <div key={track} className="flex items-center gap-2 py-2.5"><span className="min-w-0 flex-1 truncate text-sm font-medium">{track}</span>{track === state?.current && <span className="text-xs font-medium text-primary">Active</span>}{isProtected(track, protectedTracks) && <span className="text-xs text-destructive">{PROTECTED_REASON}</span>}<button type="button" title={isProtected(track, protectedTracks) ? PROTECTED_REASON : "Add to rotation"} disabled={isProtected(track, protectedTracks)} onClick={() => addTrack(track)} className="grid size-8 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-30"><Plus className="size-4" /></button></div>;
             })}
           </div>
         </Card>
 
         <Card className="flex min-h-[26rem] flex-col gap-4">
-          <div className="flex flex-wrap items-center justify-between gap-3"><div><h3 className="font-heading text-lg font-extrabold">Track rotation</h3><p className="text-xs text-muted-foreground">Drag to reorder. Changes save without a restart<ReloadBadge kind="next_event" /></p></div><div className="flex flex-wrap justify-end gap-2"><Button size="sm" disabled={!!busy || changed || !state?.rotation.length} title={changed ? "Save or reset your rotation changes first" : undefined} onClick={() => void switchTrack("next")}>Next track</Button><Button size="sm" disabled={!!busy || changed || !state?.rotation.length} title={changed ? "Save or reset your rotation changes first" : undefined} onClick={() => void switchTrack("random")}>Random track</Button><Button size="sm" disabled={!changed || !!busy} onClick={() => setQueue(savedQueue)}>Reset</Button><Button size="sm" variant="primary" disabled={!changed || !queue.length || !!busy} onClick={() => void save()}>Save rotation</Button></div></div>
+          <div className="flex flex-wrap items-center justify-between gap-3"><div><h3 className="font-heading text-lg font-extrabold">Track rotation</h3><p className="text-xs text-muted-foreground">Drag to reorder. Changes save without a restart<ReloadBadge kind="next_event" /></p></div><div className="flex flex-wrap justify-end gap-2"><Button size="sm" disabled={!!busy || changed || !state?.rotation.length} title={changed ? "Save or reset your rotation changes first" : undefined} onClick={() => void switchTrack("next")}>Next track</Button><Button size="sm" disabled={!!busy || changed || !state?.rotation.length} title={changed ? "Save or reset your rotation changes first" : undefined} onClick={() => void switchTrack("random")}>Random track</Button><Button size="sm" disabled={!changed || !!busy} onClick={() => setQueue(savedQueue)}>Reset</Button><Button size="sm" variant="primary" disabled={!changed || !queue.length || !!busy || blockedNow.length > 0} title={blockedNow.length ? `${blockedNow.join(", ")}: ${PROTECTED_REASON}` : undefined} onClick={() => void save()}>Save rotation</Button></div></div>
           <div
             className="-mx-4 -mb-4 min-h-0 flex-1 overflow-auto border-t p-8"
             style={{ backgroundImage: "radial-gradient(circle, color-mix(in srgb, var(--muted-foreground) 25%, transparent) 1px, transparent 1px)", backgroundSize: "20px 20px" }}

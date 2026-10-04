@@ -28,3 +28,17 @@ export function randomTrack(rotation: string[], random: () => number = Math.rand
 export function stateAfterSwitch<T extends { current: string | null; rotation: string[] }>(state: T, queue: string[]): T {
   return { ...state, current: queue[0] ?? null, rotation: queue.slice(1) };
 }
+/** Why a protected package can't be used (shown in the library and the rotation). */
+export const PROTECTED_REASON = "Can't run on this server (protected package)";
+
+export const isProtected = (track: string, protectedTracks: readonly string[] | undefined): boolean => !!protectedTracks?.includes(track);
+
+/** `null` when `track` may join the rotation, otherwise the reason it can't. */
+export function addBlockedReason(track: string, protectedTracks: readonly string[] | undefined): string | null {
+  return isProtected(track, protectedTracks) ? `${track}: ${PROTECTED_REASON}.` : null;
+}
+
+/** The queue's tracks that can't run, so a save that would fail is never sent. */
+export function blockedInQueue(queue: readonly string[], protectedTracks: readonly string[] | undefined): string[] {
+  return Array.from(new Set(queue.filter((track) => isProtected(track, protectedTracks))));
+}

@@ -136,6 +136,8 @@ export interface TrackState {
   library: string[];
   current: string | null;
   rotation: string[];
+  /** Packages the server cannot run (protected, not a zip). */
+  protected?: string[];
 }
 
 export const serverTracks = (id: string) => invoke<TrackState>("server_tracks", { id });
@@ -168,7 +170,7 @@ export const serverUpload = (id: string, kind: "track" | "version", path: string
   invoke<Record<string, unknown>>("server_upload", { id, kind, path, version });
 
 export const inspectTrackUpload = (path: string) =>
-  invoke<{ bytes: number; serverTrack: boolean; detail: string; uploadName: string }>("inspect_track_upload", { path });
+  invoke<{ bytes: number; serverTrack: boolean; detail: string; uploadName: string; protected: boolean; alternative: string | null }>("inspect_track_upload", { path });
 
 /** Tauri rejects with the command's error string. Prefer the server's useful message over shell noise. */
 export const errorText = (e: unknown) => {
