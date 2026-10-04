@@ -2773,6 +2773,13 @@ fn frostmod_attachment() -> frostmod::Attachment {
     frostmod::attachment()
 }
 
+/// Why the last Play handed to Steam never started the game, if it didn't. The Play button
+/// asks once its wait runs out, so a launch that went nowhere ends in a reason, not silence.
+#[tauri::command]
+fn launch_stall_reason() -> Option<String> {
+    gameproc::take_launch_stall()
+}
+
 /// Start MX Bikes from the Play button in the sidebar.
 #[tauri::command]
 fn launch_game(app: tauri::AppHandle) -> Result<gameproc::LaunchOutcome, String> {
@@ -8748,6 +8755,7 @@ fn main() {
             complete_setup,
             normalize_game_folder,
             inspect_game_folder,
+            launch_stall_reason,
             mxb_core::viewer::app_platform,
             search_mods,
             get_mod_detail,

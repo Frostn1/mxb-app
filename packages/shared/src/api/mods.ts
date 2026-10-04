@@ -2689,6 +2689,11 @@ export function launchGame(): Promise<LaunchOutcome> {
   return invoke<LaunchOutcome>("launch_game");
 }
 
+/** Why the last launch handed to Steam never started the game (taken once), or null. */
+export function launchStallReason(): Promise<string | null> {
+  return invoke<string | null>("launch_stall_reason");
+}
+
 /**
  * Start MX Bikes connected straight to `address` (`host` or `host:port`; the port
  * defaults to 54210).

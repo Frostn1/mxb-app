@@ -1284,31 +1284,63 @@ pub enum LaunchOutcome {
 
 /// The active game's install folder and its executable, for launching.
 ///
-/// Falls back to Steam detection when `gamePath` is blank: the setting only ever gets
-/// filled by that same detector, so an install we can find is one we can launch even if
-/// the config predates the setting.
+/// Tries the saved `gamePath` first and then Steam detection, which walks every library in
+/// `libraryfolders.vdf` on every drive. A saved folder that no longer holds the exe — the
+/// game moved to another library or drive — must not stop Play while Steam can say where it
+/// went; the user folder under Documents plays no part in this at all.
 fn resolve_exe(cfg: &AppConfig) -> anyhow::Result<(std::path::PathBuf, std::path::PathBuf)> {
     let game = cfg.game();
-    let dir = match cfg.game_path.trim() {
-        "" => crate::config::detect_game_path(game).ok_or_else(|| {
-            anyhow::anyhow!(
-                "{0} install folder isn't set — set it in Settings, under {0} install folder.",
-                game.display
-            )
-        })?,
-        p => p.to_string(),
+    pick_install(cfg.game_path.trim(), || crate::config::detect_game_path(game), game)
+}
+
+/// [`resolve_exe`] with detection passed in, so the fallback order can be tested without a
+/// Steam install. `detect` only runs when the saved folder doesn't do.
+fn pick_install(
+    saved: &str,
+    detect: impl FnOnce() -> Option<String>,
+    game: &crate::game::GameProfile,
+) -> anyhow::Result<(std::path::PathBuf, std::path::PathBuf)> {
+    let exe_in = |dir: &str| {
+        let dir = std::path::PathBuf::from(dir);
+        let exe = crate::library::resolve_child(&dir, game.exe);
+        exe.is_file().then_some((dir, exe))
     };
-    let dir = std::path::PathBuf::from(dir);
-    let exe = crate::library::resolve_child(&dir, game.exe);
-    if !exe.is_file() {
+    if !saved.is_empty() {
+        if let Some(found) = exe_in(saved) {
+            return Ok(found);
+        }
+    }
+    let detected = detect();
+    if let Some(found) = detected.as_deref().and_then(exe_in) {
+        if !saved.is_empty() {
+            log::warn!(
+                "{} isn't in the saved install folder {saved} — launching the copy Steam has at {}",
+                game.exe,
+                found.0.display()
+            );
+        }
+        return Ok(found);
+    }
+    let mut looked: Vec<String> = Vec::new();
+    if !saved.is_empty() {
+        looked.push(saved.to_string());
+    }
+    if let Some(d) = detected.filter(|d| !looked.contains(d)) {
+        looked.push(d);
+    }
+    if looked.is_empty() {
         anyhow::bail!(
-            "Couldn't find {} in {} — check the {} install folder in Settings.",
-            game.exe,
-            dir.display(),
+            "Couldn't find your {0} install: no install folder is set and Steam has no {0} \
+             in any of its libraries. Set it in Settings, under {0} install folder.",
             game.display
         );
     }
-    Ok((dir, exe))
+    anyhow::bail!(
+        "Couldn't find {} in {} — check the {} install folder in Settings.",
+        game.exe,
+        looked.join(" or "),
+        game.display
+    )
 }
 
 /// The Wine prefix `exe` lives in, and the runner that should drive it (macOS).
@@ -1368,6 +1400,13 @@ const STEAM_EXE: &str = "steam.exe";
 #[cfg_attr(not(windows), allow(dead_code))]
 fn steam_owned(dir: &std::path::Path) -> bool {
     dir.components().any(|c| c.as_os_str().eq_ignore_ascii_case("steamapps"))
+}
+
+/// Does Steam have this app installed? `HKCU\Software\Valve\Steam\Apps\<appid>\Installed`,
+/// written by the client for every library on every drive. `None` when Windows won't say.
+#[cfg(windows)]
+fn steam_says_installed(appid: &str) -> Option<bool> {
+    hkcu_dword(&format!("Software\\Valve\\Steam\\Apps\\{appid}"), "Installed").map(|v| v != 0)
 }
 
 /// Does Steam have this app down as already running?
@@ -1473,6 +1512,38 @@ fn hkcu_string(subkey: &str, value: &str) -> Option<String> {
     (!s.trim().is_empty()).then_some(s)
 }
 
+/// Why the last launch handed to Steam never produced a game process, until Play is pressed
+/// again. The Play button asks for it once its own wait runs out, so a launch that went
+/// nowhere ends in an error that says what happened instead of a button that just resets.
+static LAUNCH_STALL: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+#[cfg_attr(not(windows), allow(dead_code))]
+fn set_launch_stall(reason: Option<String>) {
+    if let Ok(mut slot) = LAUNCH_STALL.lock() {
+        *slot = reason;
+    }
+}
+
+/// The reason the last handed-off launch went nowhere, if it did. Read once: taking it
+/// clears it, so one stall is reported once.
+pub fn take_launch_stall() -> Option<String> {
+    LAUNCH_STALL.lock().ok().and_then(|mut slot| slot.take())
+}
+
+/// The words for a Steam launch that never started the game.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn stall_message(via: &str, exe: &str, waited_secs: u64, install: Option<&std::path::Path>) -> String {
+    let at = install
+        .map(|d| format!(" (installed at {})", d.display()))
+        .unwrap_or_default();
+    format!(
+        "{via} was asked to start the game {waited_secs} seconds ago, but no {exe} process \
+         appeared{at}. Steam may be showing a prompt or an update behind its window, or it \
+         may not have the game installed where it thinks. Start it once from Steam's Library \
+         to see Steam's own message."
+    )
+}
+
 /// Watch for the game after a launch we handed to somebody else, and say so if it never
 /// arrives.
 ///
@@ -1481,9 +1552,10 @@ fn hkcu_string(subkey: &str, value: &str) -> Option<String> {
 /// looked exactly like one that worked. This is the only thing that can tell them apart, and
 /// it does it in the log rather than by blocking the button.
 #[cfg(windows)]
-fn watch_for_start(via: &'static str) {
+fn watch_for_start(via: &'static str, install: Option<std::path::PathBuf>) {
     /// Generous: a cold start off a slow disk, with Steam checking files first.
     const WAIT: std::time::Duration = std::time::Duration::from_secs(45);
+    set_launch_stall(None);
     std::thread::spawn(move || {
         let deadline = std::time::Instant::now() + WAIT;
         while std::time::Instant::now() < deadline {
@@ -1492,11 +1564,9 @@ fn watch_for_start(via: &'static str) {
             }
             std::thread::sleep(std::time::Duration::from_millis(500));
         }
-        log::warn!(
-            "{} was asked to start the game {WAIT:?} ago and no {} process ever appeared",
-            via,
-            crate::game::active().exe
-        );
+        let reason = stall_message(via, crate::game::active().exe, WAIT.as_secs(), install.as_deref());
+        log::warn!("{reason}");
+        set_launch_stall(Some(reason));
     });
 }
 
@@ -1886,7 +1956,33 @@ fn launch_with(cfg: &AppConfig, address: Option<&str>) -> anyhow::Result<LaunchO
     if is_game_running() {
         return Ok(LaunchOutcome::AlreadyRunning);
     }
-    let (dir, exe) = resolve_exe(cfg)?;
+    let (dir, exe) = match resolve_exe(cfg) {
+        Ok(found) => found,
+        Err(e) => {
+            // No exe we can see, but Steam says the game is installed — in a library we
+            // couldn't read, say. Steam knows where its own game is; ask it rather than
+            // refusing, and keep our reason in the log in case Steam can't either.
+            #[cfg(windows)]
+            {
+                let appid = cfg.game().steam_appid;
+                if steam_says_installed(appid) == Some(true) {
+                    log::warn!("{e:#}; Steam has {} installed, asking it to start the game", cfg.game().display);
+                    let started = match address {
+                        Some(addr) => steam_applaunch(appid, addr),
+                        None => shell_open(&steam_url(appid, None)),
+                    };
+                    return match started {
+                        Ok(()) => {
+                            watch_for_start("Steam", None);
+                            Ok(LaunchOutcome::Launched)
+                        }
+                        Err(steam_err) => Err(e.context(format!("{steam_err:#}"))),
+                    };
+                }
+            }
+            return Err(e);
+        }
+    };
     let game = cfg.game().display;
     match address {
         Some(addr) => log::info!("launching {game} into {addr}: {}", exe.display()),
@@ -1923,7 +2019,7 @@ fn launch_with(cfg: &AppConfig, address: Option<&str>) -> anyhow::Result<LaunchO
                     let addr = address.unwrap_or_default();
                     match steam_applaunch(appid, addr) {
                         Ok(()) => {
-                            watch_for_start("Steam");
+                            watch_for_start("Steam", Some(dir.clone()));
                             return Ok(LaunchOutcome::Launched);
                         }
                         // No Steam client to ask is no reason to leave Join dead: the exe
@@ -1935,7 +2031,7 @@ fn launch_with(cfg: &AppConfig, address: Option<&str>) -> anyhow::Result<LaunchO
                     let url = steam_url(appid, address);
                     match shell_open(&url) {
                         Ok(()) => {
-                            watch_for_start("Steam");
+                            watch_for_start("Steam", Some(dir.clone()));
                             return Ok(LaunchOutcome::Launched);
                         }
                         // A Steam whose own URL scheme isn't registered is a broken install,
@@ -2207,14 +2303,96 @@ mod tests {
     fn a_folder_without_the_exe_says_where_to_fix_it() {
         let dir = temp_dir("empty");
 
-        let mut cfg = AppConfig::default();
-        cfg.game_path = dir.to_string_lossy().into_owned();
-        let err = resolve_exe(&cfg).expect_err("no exe means no launch");
+        // Detection stubbed out: on a machine with the game installed, real detection
+        // would rightly find it and launch.
+        let saved = dir.to_string_lossy().into_owned();
+        let err = pick_install(&saved, || None, &crate::game::MXB)
+            .expect_err("no exe means no launch");
         let msg = format!("{err:#}");
         assert!(msg.contains(crate::game::MXB.exe), "names what's missing: {msg}");
+        assert!(msg.contains(&saved), "names where it looked: {msg}");
         assert!(msg.contains("Settings"), "points at the fix: {msg}");
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The saved install folder is stale — the game moved to a Steam library on another
+    /// drive — and Steam detection (every `libraryfolders.vdf` library) knows where it went.
+    /// Play launches that copy instead of refusing.
+    #[test]
+    fn a_stale_install_folder_falls_back_to_the_steam_library_on_another_drive() {
+        let root = temp_dir("moved-library");
+        let stale = root.join("C/Program Files (x86)/Steam/steamapps/common/MX Bikes");
+        let moved = root.join("E/SteamLibrary/steamapps/common/MX Bikes");
+        std::fs::create_dir_all(&stale).unwrap();
+        std::fs::create_dir_all(&moved).unwrap();
+        std::fs::write(moved.join(crate::game::MXB.exe), b"stub").unwrap();
+
+        let detected = moved.to_string_lossy().into_owned();
+        let (dir, exe) = pick_install(&stale.to_string_lossy(), || Some(detected), &crate::game::MXB)
+            .expect("the detected copy launches");
+        assert_eq!(dir, moved);
+        assert_eq!(exe, moved.join(crate::game::MXB.exe));
+
+        // Nothing saved at all: detection alone is enough.
+        let detected = moved.to_string_lossy().into_owned();
+        let (dir, _) = pick_install("", || Some(detected), &crate::game::MXB).unwrap();
+        assert_eq!(dir, moved);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A Steam launch that never produced a process is reported with what was waited for
+    /// and where the game is, once.
+    #[test]
+    fn a_stalled_launch_is_reported_once_with_its_reason() {
+        let msg = stall_message(
+            "Steam",
+            "mxbikes.exe",
+            45,
+            Some(std::path::Path::new(r"E:\SteamLibrary\steamapps\common\MX Bikes")),
+        );
+        assert!(msg.contains("mxbikes.exe") && msg.contains("45 seconds"), "{msg}");
+        assert!(msg.contains(r"E:\SteamLibrary\steamapps\common\MX Bikes"), "{msg}");
+        assert!(msg.contains("Steam's Library"), "says what to try: {msg}");
+
+        set_launch_stall(Some(msg.clone()));
+        assert_eq!(take_launch_stall(), Some(msg));
+        assert_eq!(take_launch_stall(), None, "reported once");
+    }
+
+    /// A good saved folder wins and detection never runs.
+    #[test]
+    fn a_working_saved_folder_is_used_without_detecting() {
+        let dir = temp_dir("saved-wins");
+        std::fs::write(dir.join(crate::game::MXB.exe), b"stub").unwrap();
+        let (found, _) = pick_install(
+            &dir.to_string_lossy(),
+            || panic!("detection must not run when the saved folder works"),
+            &crate::game::MXB,
+        )
+        .unwrap();
+        assert_eq!(found, dir);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Neither saved nor detected: the error says both facts, not just "failed".
+    #[test]
+    fn no_install_anywhere_says_so() {
+        let err = pick_install("", || None, &crate::game::MXB).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("Steam") && msg.contains("Settings"), "{msg}");
+
+        let root = temp_dir("both-empty");
+        let (a, b) = (root.join("a"), root.join("b"));
+        std::fs::create_dir_all(&a).unwrap();
+        std::fs::create_dir_all(&b).unwrap();
+        let detected = b.to_string_lossy().into_owned();
+        let msg = format!(
+            "{:#}",
+            pick_install(&a.to_string_lossy(), || Some(detected), &crate::game::MXB).unwrap_err()
+        );
+        assert!(msg.contains(&*a.to_string_lossy()) && msg.contains(&*b.to_string_lossy()), "{msg}");
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     /// The whole macOS launch, end to end, against a stub standing in for Wine.
