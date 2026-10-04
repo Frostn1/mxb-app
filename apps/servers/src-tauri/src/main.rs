@@ -18,6 +18,50 @@ mod uploads;
 #[cfg(test)]
 mod tests {
     #[test]
+    fn only_the_zip_signature_is_a_package_the_server_can_run() {
+        assert!(super::is_zip_magic(&[b'P', b'K', 3, 4, 9]));
+        assert!(!super::is_zip_magic(&[0x25, 0x80, 0xba, 0x8d]));
+        assert!(!super::is_zip_magic(b"PK"));
+    }
+
+    #[test]
+    fn a_protected_local_file_is_detected_from_its_first_bytes() {
+        let dir = std::env::temp_dir().join(format!("msm-magic-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let protected = dir.join("a.pkz");
+        let zip = dir.join("b.pkz");
+        std::fs::write(&protected, [0x25, 0x80, 0xba, 0x8d, 1, 2, 3]).unwrap();
+        std::fs::write(&zip, [b'P', b'K', 3, 4, 1, 2]).unwrap();
+        assert!(super::is_protected_file(&protected));
+        assert!(!super::is_protected_file(&zip));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_rotation_with_a_protected_package_is_blocked_with_the_reason() {
+        let protected = vec!["WDR_R02.pkz".to_string()];
+        let blocked = super::protected_picks(["a.pkz", "WDR_R02.pkz", "WDR_R02.pkz"], &protected);
+        assert_eq!(blocked, vec!["WDR_R02.pkz".to_string()]);
+        assert!(super::protected_message(&blocked).contains("protected package"));
+        assert!(super::protected_picks(["a.pkz"], &protected).is_empty());
+    }
+
+    #[test]
+    fn the_config_names_exactly_the_picked_tracks() {
+        let paths = vec!["content/tracks/a.pkz".to_string(), "content/tracks/WDR_R02.pkz".to_string()];
+        let picked = vec!["a.pkz".to_string()];
+        assert_eq!(super::picked_references(&picked, &paths, "content/tracks", "content/tracks/"), vec!["content/tracks/a.pkz".to_string()]);
+    }
+
+    #[test]
+    fn an_unchanged_file_keeps_its_remembered_hash() {
+        let key = ("p.pkz".to_string(), 10, 5);
+        assert_eq!(super::cached_hash(&key), None);
+        super::remember_hash(key.clone(), "abc");
+        assert_eq!(super::cached_hash(&key).as_deref(), Some("abc"));
+        assert_eq!(super::cached_hash(&("p.pkz".to_string(), 11, 5)), None);
+    }
+    #[test]
     fn the_admin_port_comes_from_the_listen_address() {
         assert_eq!(super::parse_admin_listen("127.0.0.1:9810"), Some(9810));
         assert_eq!(super::parse_admin_listen("[::1]:9811\n"), Some(9811));
@@ -858,6 +902,8 @@ struct TrackState {
     library: Vec<String>,
     current: Option<String>,
     rotation: Vec<String>,
+    /// Packages the server cannot run (encrypted/protected, not a zip): shown as such, never added.
+    protected: Vec<String>,
 }
 
 /// The file name of a track path from the config (`tracks/smokey.pkz` -> `smokey.pkz`).
@@ -901,47 +947,164 @@ async fn server_tracks(app: State<'_, App>, id: String) -> Result<TrackState, St
             installed,
             current: status["server"]["track"].as_str().map(str::to_string),
             rotation: Vec::new(),
+            protected: Vec::new(),
         });
     }
     if server.local {
         return Err("Track management for a server on this PC is not wired yet.".into());
     }
     let tunnels = Arc::clone(&app.tunnels);
-    let port = server.observe_port.to_string();
-    let (config, listing) = blocking(move || {
-        read_and_list(&tunnels, &server, &port)
-    })
-    .await?;
-    if !listing.success {
-        return Err(listing.text());
-    }
-    let (text, _) = read_config(&config)?;
-    let (package, rotation) = config::tracks(&text)?;
-    let installed = listed_names(&listing);
+    let id = server.id.clone();
+    let snapshot = blocking(move || fetch_snapshot(&tunnels, &server)).await?;
+    snapshot_put(&id, &snapshot);
     Ok(TrackState {
-        library: installed.clone(),
-        installed,
-        current: package.as_deref().map(track_name),
-        rotation: rotation.iter().map(|t| track_name(t)).collect(),
+        library: snapshot.names.clone(),
+        installed: snapshot.names.clone(),
+        current: snapshot.package.as_deref().map(track_name),
+        rotation: snapshot.rotation.iter().map(|t| track_name(t)).collect(),
+        protected: snapshot.protected.clone(),
     })
 }
 
 
-/// The `read` and `tracks` runs of remote.sh at the same time: they are independent, and each is
-/// a full SSH connection setup, so running them one after the other doubled the wait.
-fn read_and_list(
-    tunnels: &ssh::Tunnels,
-    server: &Server,
-    port: &str,
-) -> Result<(ssh::ScriptOutput, ssh::ScriptOutput), String> {
-    std::thread::scope(|scope| {
-        let listing = scope.spawn(|| tunnels.run_script(server, REMOTE_SH, &["tracks", port], 30));
-        let config = tunnels.run_script(server, REMOTE_SH, &["read", port], 30);
-        let listing = listing.join().map_err(|_| "track listing failed".to_string())?;
-        Ok((config?, listing?))
+/// The config and track listing of a server as last read, so a rotation change needs no read of
+/// its own: it writes against the remembered hash, which the host checks again (a config edited
+/// elsewhere since is refused, and the change is redone once on a fresh read).
+#[derive(Clone)]
+struct Snapshot {
+    text: String,
+    sha: String,
+    package: Option<String>,
+    rotation: Vec<String>,
+    package_dir: String,
+    paths: Vec<String>,
+    names: Vec<String>,
+    protected: Vec<String>,
+    at: std::time::Instant,
+}
+
+const SNAPSHOT_SECS: u64 = 120;
+
+fn snapshots() -> &'static std::sync::Mutex<std::collections::HashMap<String, Snapshot>> {
+    static MAP: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, Snapshot>>> =
+        std::sync::OnceLock::new();
+    MAP.get_or_init(Default::default)
+}
+
+fn snapshot_get(id: &str) -> Option<Snapshot> {
+    let map = snapshots().lock().ok()?;
+    map.get(id)
+        .filter(|s| s.at.elapsed().as_secs() < SNAPSHOT_SECS)
+        .cloned()
+}
+
+fn snapshot_put(id: &str, snapshot: &Snapshot) {
+    if let Ok(mut map) = snapshots().lock() {
+        map.insert(id.to_string(), snapshot.clone());
+    }
+}
+
+fn snapshot_forget(id: &str) {
+    if let Ok(mut map) = snapshots().lock() {
+        map.remove(id);
+    }
+}
+
+/// Read the config and list the tracks in ONE SSH connection (each connection costs a full
+/// handshake). Blocking.
+fn fetch_snapshot(tunnels: &ssh::Tunnels, server: &Server) -> Result<Snapshot, String> {
+    let port = server.observe_port.to_string();
+    let out = tunnels.run_script(server, REMOTE_SH, &["read-tracks", &port], 30)?;
+    if !out.success {
+        return Err(out.text());
+    }
+    let (text, sha) = read_config(&out)?;
+    let (package, rotation) = config::tracks(&text)?;
+    Ok(Snapshot {
+        text,
+        sha,
+        package,
+        rotation,
+        package_dir: out.field("dir").unwrap_or_default().to_string(),
+        paths: decode_field(&out, "paths_b64").lines().map(str::to_string).collect(),
+        names: listed_names(&out),
+        protected: decode_field(&out, "protected_b64").lines().map(str::trim).filter(|n| !n.is_empty()).map(str::to_string).collect(),
+        at: std::time::Instant::now(),
     })
 }
 
+/// A package that starts with the zip signature `PK\x03\x04` is one the server can open. Anything
+/// else is a protected (encrypted) package: the server refuses it by design. Only the first four
+/// bytes are ever looked at.
+fn is_zip_magic(head: &[u8]) -> bool {
+    head.starts_with(&[b'P', b'K', 3, 4])
+}
+
+/// Whether the local file is a protected package (it starts with something other than the zip
+/// signature). An unreadable or too short file is not called protected here.
+fn is_protected_file(path: &std::path::Path) -> bool {
+    use std::io::Read;
+    let mut head = [0u8; 4];
+    std::fs::File::open(path)
+        .and_then(|mut f| f.read_exact(&mut head))
+        .is_ok_and(|()| !is_zip_magic(&head))
+}
+
+/// The names among the picked tracks (the current one and the rotation) that are protected.
+fn protected_picks<'a>(picked: impl IntoIterator<Item = &'a str>, protected: &[String]) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for name in picked {
+        if protected.iter().any(|p| p == name) && !out.iter().any(|o| o == name) {
+            out.push(name.to_string());
+        }
+    }
+    out
+}
+
+fn protected_message(names: &[String]) -> String {
+    format!(
+        "{} can't run on this server (protected package). Use the server version of the track instead.",
+        names.join(", ")
+    )
+}
+
+/// The config references for exactly the tracks the user picked, in their order: nothing else
+/// from the track folders is ever added.
+fn picked_references(names: &[String], paths: &[String], package_dir: &str, prefix: &str) -> Vec<String> {
+    names.iter().map(|n| track_reference(n, paths, package_dir, prefix)).collect()
+}
+
+/// Per-step timings of one action, logged as one line when it ends:
+/// `[msm-timing] apply_tracks total=412ms snapshot(cached)=0ms write=380ms reload=31ms`.
+struct Steps {
+    name: &'static str,
+    start: std::time::Instant,
+    last: std::time::Instant,
+    parts: Vec<String>,
+}
+
+impl Steps {
+    fn new(name: &'static str) -> Self {
+        let now = std::time::Instant::now();
+        Steps { name, start: now, last: now, parts: Vec::new() }
+    }
+    fn step(&mut self, label: &str) {
+        let now = std::time::Instant::now();
+        self.parts.push(format!("{label}={}ms", now.duration_since(self.last).as_millis()));
+        self.last = now;
+    }
+}
+
+impl Drop for Steps {
+    fn drop(&mut self) {
+        log::info!(
+            "[msm-timing] {} total={}ms {}",
+            self.name,
+            self.start.elapsed().as_millis(),
+            self.parts.join(" ")
+        );
+    }
+}
 fn decode_field(out: &ssh::ScriptOutput, field: &str) -> String {
     use base64::Engine;
     out.field(field)
@@ -1010,70 +1173,104 @@ async fn apply_tracks(
     if bad(current) || rotation.iter().flatten().any(|name| bad(name)) {
         return Err("Track names must be plain file names.".into());
     }
-    let tunnels = Arc::clone(&app.tunnels);
-    let port = server.observe_port.to_string();
-    let current = current.to_string();
-    let live_server = server.clone();
-    let out = blocking(move || {
-        let (config, listing) = read_and_list(&tunnels, &server, &port)?;
-        let (text, sha) = read_config(&config)?;
-        let (package, old_rotation) = config::tracks(&text)?;
-        let package_dir = listing.field("dir").unwrap_or_default().to_string();
-        let paths: Vec<String> = decode_field(&listing, "paths_b64")
-            .lines()
-            .map(str::to_string)
-            .collect();
+    let mut steps = Steps::new("apply_tracks");
+    let mut fresh = false;
+    loop {
+        let snapshot = match snapshot_get(&server.id).filter(|_| !fresh) {
+            Some(cached) => {
+                steps.step("snapshot(cached)");
+                cached
+            }
+            None => {
+                let (tunnels, target) = (Arc::clone(&app.tunnels), server.clone());
+                let read = blocking(move || fetch_snapshot(&tunnels, &target)).await?;
+                snapshot_put(&server.id, &read);
+                steps.step("snapshot(ssh)");
+                read
+            }
+        };
         // New tracks sit beside the current package, written the way the config writes it.
-        let prefix = package
+        let prefix = snapshot
+            .package
             .as_deref()
             .and_then(|p| p.rsplit_once('/'))
             .map(|(dir, _)| format!("{dir}/"))
             .unwrap_or_default();
-        let rotation = match rotation {
-            Some(names) => names
-                .iter()
-                .map(|n| track_reference(n, &paths, &package_dir, &prefix))
-                .collect(),
-            None => old_rotation,
+        let blocked = protected_picks(
+            std::iter::once(current).chain(rotation.iter().flatten().map(String::as_str)),
+            &snapshot.protected,
+        );
+        if !blocked.is_empty() {
+            return Err(protected_message(&blocked));
+        }
+        let new_rotation: Vec<String> = match &rotation {
+            Some(names) => picked_references(names, &snapshot.paths, &snapshot.package_dir, &prefix),
+            None => snapshot.rotation.clone(),
         };
-        let edited = config::set_tracks(&text, &track_reference(&current, &paths, &package_dir, &prefix), &rotation)?;
-        if !restart {
-            return Ok(Err((sha, edited)));
+        let current_reference = track_reference(current, &snapshot.paths, &snapshot.package_dir, &prefix);
+        let edited = config::set_tracks(&snapshot.text, &current_reference, &new_rotation)?;
+        if restart {
+            snapshot_forget(&server.id);
+            let (tunnels, target) = (Arc::clone(&app.tunnels), server.clone());
+            let (port, encoded, sha) = (server.observe_port.to_string(), b64(&edited), snapshot.sha.clone());
+            let out = blocking(move || {
+                tunnels.run_script(&target, REMOTE_SH, &["apply", &port, &encoded, &sha], 300)
+            })
+            .await?;
+            return match out.field("result") {
+                Some("applied") => Ok(serde_json::json!({ "result": "applied" })),
+                Some("rolled-back") => Err(format!(
+                    "The server did not come back with that track, so the old config is live again. {}",
+                    out.text()
+                )),
+                _ => Err(out.text()),
+            };
         }
-        let encoded = b64(&edited);
-        tunnels
-            .run_script(&server, REMOTE_SH, &["apply", &port, &encoded, &sha], 300)
-            .map(Ok)
-    })
-    .await?;
-    let out = match out {
-        Ok(out) => out,
-        Err((sha, edited)) => {
-            let applied = write_and_reload(app, &live_server, &sha, &edited, false).await?;
-            if applied.result != "applied" {
-                return Err(applied.output);
+        // The running server's own reload validates the file and the host puts the old one back
+        // if it refuses, so the slow run of the server binary on the host is skipped.
+        let applied = write_and_reload(app, &server, &snapshot.sha, &edited, true).await;
+        steps.step("write+reload");
+        let applied = match applied {
+            Err(e) if !fresh && e.contains("changed on the server") => {
+                snapshot_forget(&server.id);
+                fresh = true;
+                continue;
             }
-            let held = track_keys_need_restart(&applied.reload);
-            return Ok(serde_json::json!({
-                "result": "applied",
-                "live": !held,
-                // An older server held the new tracks for a restart: the file is saved, and the
-                // app offers the restart.
-                "restartRequired": held,
-                "deferred": applied.reload["deferred"].clone(),
-            }));
+            Err(e) => {
+                snapshot_forget(&server.id);
+                return Err(e);
+            }
+            Ok(applied) => applied,
+        };
+        if applied.result != "applied" {
+            snapshot_forget(&server.id);
+            return Err(applied.output);
         }
-    };
-    match out.field("result") {
-        Some("applied") => Ok(serde_json::json!({ "result": "applied" })),
-        Some("rolled-back") => Err(format!(
-            "The server did not come back with that track, so the old config is live again. {}",
-            out.text()
-        )),
-        _ => Err(out.text()),
+        // What the host holds now, so the next change needs no read either.
+        use sha2::Digest;
+        let (package, rotation_now) = config::tracks(&edited)?;
+        snapshot_put(
+            &server.id,
+            &Snapshot {
+                sha: format!("{:x}", sha2::Sha256::digest(edited.as_bytes())),
+                text: edited,
+                package,
+                rotation: rotation_now,
+                at: std::time::Instant::now(),
+                ..snapshot
+            },
+        );
+        let held = track_keys_need_restart(&applied.reload);
+        return Ok(serde_json::json!({
+            "result": "applied",
+            "live": !held,
+            // An older server held the new tracks for a restart: the file is saved, and the
+            // app offers the restart.
+            "restartRequired": held,
+            "deferred": applied.reload["deferred"].clone(),
+        }));
     }
 }
-
 #[tauri::command]
 async fn server_set_track(app: State<'_, App>, id: String, track: String) -> Result<Value, String> {
     let server = app.store.get(&id)?;
@@ -1444,6 +1641,9 @@ async fn upload_start(
     if !name.to_ascii_lowercase().ends_with(".pkz") {
         return Err("Tracks must be .pkz packages.".into());
     }
+    if is_protected_file(std::path::Path::new(&path)) {
+        return Err(format!("{original} is a protected package: the server cannot run it, so it is not uploaded."));
+    }
     let bytes = std::fs::metadata(&path)
         .map_err(|e| format!("could not read {path}: {e}"))?
         .len();
@@ -1477,6 +1677,31 @@ async fn upload_start(
     Ok(info)
 }
 
+type HashKey = (String, u64, u128);
+
+/// Path, size and modification time: a file with the same three has the same contents.
+fn file_key(path: &str) -> Option<HashKey> {
+    let meta = std::fs::metadata(path).ok()?;
+    let modified = meta.modified().ok()?.duration_since(std::time::UNIX_EPOCH).ok()?.as_nanos();
+    Some((path.to_string(), meta.len(), modified))
+}
+
+fn hash_cache() -> &'static std::sync::Mutex<std::collections::HashMap<HashKey, String>> {
+    static MAP: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<HashKey, String>>> =
+        std::sync::OnceLock::new();
+    MAP.get_or_init(Default::default)
+}
+
+fn cached_hash(key: &HashKey) -> Option<String> {
+    hash_cache().lock().ok()?.get(key).cloned()
+}
+
+fn remember_hash(key: HashKey, digest: &str) {
+    if let Ok(mut map) = hash_cache().lock() {
+        map.insert(key, digest.to_string());
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn run_track_upload(
     handle: tauri::AppHandle,
@@ -1502,12 +1727,17 @@ async fn run_track_upload(
             i.speed = 0.0;
         });
     };
-    // The hash the host checks the upload against.
+    // The hash the host checks the upload against, remembered per file (path, size, mtime) so an
+    // unchanged file is not hashed again.
     let digest = blocking({
         let (path, cancel) = (path.clone(), Arc::clone(&cancel));
         move || {
             use sha2::Digest;
             use std::io::Read;
+            let key = file_key(&path);
+            if let Some(hit) = key.as_ref().and_then(cached_hash) {
+                return Ok(hit);
+            }
             let mut file =
                 std::fs::File::open(&path).map_err(|e| format!("could not read {path}: {e}"))?;
             let mut hash = sha2::Sha256::new();
@@ -1520,7 +1750,11 @@ async fn run_track_upload(
                     .read(&mut buffer)
                     .map_err(|e| format!("could not read {path}: {e}"))?;
                 if read == 0 {
-                    return Ok(format!("{:x}", hash.finalize()));
+                    let digest = format!("{:x}", hash.finalize());
+                    if let Some(k) = key {
+                        remember_hash(k, &digest);
+                    }
+                    return Ok(digest);
                 }
                 hash.update(&buffer[..read]);
             }
@@ -1532,6 +1766,24 @@ async fn run_track_upload(
         Ok(d) => d,
         Err(e) => return fail(e),
     };
+    // Already on the host with the same contents? Then there is nothing to send.
+    let on_host = blocking({
+        let (tunnels, server, name, digest) = (Arc::clone(&tunnels), server.clone(), name.clone(), digest.clone());
+        move || {
+            let port = server.observe_port.to_string();
+            tunnels.run_script(&server, REMOTE_SH, &["has-track", &port, &name, &digest], 30)
+        }
+    })
+    .await;
+    if matches!(on_host, Ok(ref out) if out.field("match") == Some("1")) {
+        log::info!("[msm-timing] upload skipped: the host already has an identical file");
+        publish_upload(&handle, &registry, &id, |i| {
+            i.status = uploads::UploadStatus::Done;
+            i.sent = i.bytes;
+            i.speed = 0.0;
+        });
+        return;
+    }
     let temporary = format!("mxb-servers-{}", store::new_id());
     for attempt in 1..=UPLOAD_ATTEMPTS {
         publish_upload(&handle, &registry, &id, |i| {
@@ -1602,6 +1854,7 @@ async fn run_track_upload(
         i.error = None;
     });
     let port = server.observe_port.to_string();
+    let server_id = server.id.clone();
     let out = blocking(move || {
         tunnels.run_script(
             &server,
@@ -1613,6 +1866,7 @@ async fn run_track_upload(
     .await;
     match out {
         Ok(out) if out.field("installed").is_some() => {
+            snapshot_forget(&server_id);
             publish_upload(&handle, &registry, &id, |i| {
                 i.status = uploads::UploadStatus::Done;
                 i.speed = 0.0;
@@ -1657,6 +1911,10 @@ struct TrackUploadCheck {
     server_track: bool,
     detail: String,
     upload_name: String,
+    /// A protected package: refused before any upload.
+    protected: bool,
+    /// A server-version package of the same track found next to it or in Downloads.
+    alternative: Option<String>,
 }
 
 fn safe_remote_filename(name: &str) -> String {
@@ -1677,6 +1935,32 @@ fn safe_remote_filename(name: &str) -> String {
     } else {
         cleaned
     }
+}
+
+/// A small server-version package of the same track: a `*server*.pkz` that starts with the same
+/// stem, beside the chosen file or in Downloads, and is a readable zip.
+fn server_alternative(file: &std::path::Path) -> Option<String> {
+    let stem = file.file_stem()?.to_str()?.to_ascii_lowercase();
+    let downloads = std::env::var_os("USERPROFILE")
+        .or_else(|| std::env::var_os("HOME"))
+        .map(|home| std::path::Path::new(&home).join("Downloads"));
+    let folders = [file.parent().map(std::path::Path::to_path_buf), downloads];
+    for folder in folders.into_iter().flatten() {
+        for entry in std::fs::read_dir(folder).ok()?.flatten() {
+            let path = entry.path();
+            let name = path.file_name()?.to_str()?.to_ascii_lowercase();
+            if path != file
+                && name.ends_with(".pkz")
+                && name.contains("server")
+                && name.starts_with(&stem)
+                && path.is_file()
+                && !is_protected_file(&path)
+            {
+                return Some(path.to_string_lossy().into_owned());
+            }
+        }
+    }
+    None
 }
 
 #[tauri::command]
@@ -1701,18 +1985,32 @@ async fn inspect_track_upload(path: String) -> Result<TrackUploadCheck, String> 
         if bytes == 0 || bytes > 512 * 1024 * 1024 {
             return Err("Track packages must be between 1 byte and 512 MiB.".into());
         }
+        if is_protected_file(file) {
+            return Ok(TrackUploadCheck {
+                bytes,
+                server_track: false,
+                detail: "This is a protected track package. The server cannot run it, so it will not be uploaded.".into(),
+                upload_name,
+                protected: true,
+                alternative: server_alternative(file),
+            });
+        }
         match mxb_content::TrackPackage::open(file) {
             Ok(track) => Ok(TrackUploadCheck {
                 bytes,
                 server_track: true,
                 detail: format!("Server track package · {}", track.id),
                 upload_name,
+                protected: false,
+                alternative: None,
             }),
             Err(error) => Ok(TrackUploadCheck {
                 bytes,
                 server_track: false,
                 detail: format!("This does not look like a server track package: {error:#}"),
                 upload_name,
+                protected: false,
+                alternative: None,
             }),
         }
     })

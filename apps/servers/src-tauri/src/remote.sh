@@ -254,11 +254,54 @@ if [[ "$CMD" =~ ^(read|validate|apply|write|restore|admin-addr|tracks|install-tr
   [[ "$MODE" == systemd ]] && OWNER="$RUNAS"
 fi
 
-case "$CMD" in
-  read)
+cmd_read() {
     say mode "$MODE"; say config "$CONFIG"
     say sha "$(sha_of "$CONFIG")"
     say config_b64 "$(priv cat "$CONFIG" | base64 -w0)"
+}
+cmd_tracks() {
+    pkg="$(track_package)"
+    dir="$(dirname "$pkg")"
+    say dir "$dir"
+    say package "$pkg"
+    # Every .pkz in the package's folder, plus content/ and content/tracks/ (where server
+    # packages are kept), each folder once.
+    paths=""
+    seen=""
+    for d in "$dir" "$WD/content" "$WD/content/tracks"; do
+      d="$(realpath -m "$d")"
+      [[ $'
+'"$seen" == *$'
+'"$d"$'
+'* ]] && continue
+      seen+="$d"$'
+'
+      paths+="$(priv find "$d" -maxdepth 1 -type f -iname '*.pkz' 2>/dev/null)"$'
+'
+    done
+    paths="$(printf '%s' "$paths" | sed '/^$/d' | sort -u)"
+    say paths_b64 "$(printf '%s' "$paths" | base64 -w0)"
+    say tracks_b64 "$(printf '%s' "$paths" | sed 's#.*/##' | sort -u | base64 -w0)"
+    # Protected packages (first four bytes are not the zip signature): the server cannot run them.
+    protected=""
+    while IFS= read -r p; do
+      [[ -n "$p" ]] || continue
+      sig="$(priv head -c4 "$p" 2>/dev/null | od -An -tx1 | tr -d ' \n')"
+      [[ ${#sig} == 8 && "$sig" != 504b0304 ]] && protected+="${p##*/}"$'\n'
+    done <<< "$paths"
+    say protected_b64 "$(printf '%s' "$protected" | base64 -w0)"
+}
+case "$CMD" in
+  read) cmd_read ;;
+  tracks) cmd_tracks ;;
+  # Both in one SSH connection: every connection costs a full handshake.
+  read-tracks) cmd_read; cmd_tracks ;;
+  has-track)
+    name="${3:-}"; want="${4:-}"
+    [[ "$name" =~ ^[A-Za-z0-9._-]+\.[Pp][Kk][Zz]$ && "$name" != .* ]] || die "bad track filename"
+    [[ "$want" =~ ^[0-9a-f]{64}$ ]] || die "bad upload hash"
+    have="$(priv sha256sum "$(track_dir)/$name" 2>/dev/null | cut -d" " -f1)"
+    say match "$([[ -n "$have" && "$have" == "$want" ]] && echo 1 || echo 0)"
     ;;
   validate)
     cand="$(dirname "$CONFIG")/.candidate-$$.toml"
@@ -333,30 +376,6 @@ case "$CMD" in
   service)
     [[ "${3:-}" == restart ]] || die "unknown service action"
     if restart && wait_ready; then say result restarted; else say result failed; die "the server did not come back after the restart"; fi
-    ;;
-  tracks)
-    pkg="$(track_package)"
-    dir="$(dirname "$pkg")"
-    say dir "$dir"
-    say package "$pkg"
-    # Every .pkz in the package's folder, plus content/ and content/tracks/ (where server
-    # packages are kept), each folder once.
-    paths=""
-    seen=""
-    for d in "$dir" "$WD/content" "$WD/content/tracks"; do
-      d="$(realpath -m "$d")"
-      [[ $'
-'"$seen" == *$'
-'"$d"$'
-'* ]] && continue
-      seen+="$d"$'
-'
-      paths+="$(priv find "$d" -maxdepth 1 -type f -iname '*.pkz' 2>/dev/null)"$'
-'
-    done
-    paths="$(printf '%s' "$paths" | sed '/^$/d' | sort -u)"
-    say paths_b64 "$(printf '%s' "$paths" | base64 -w0)"
-    say tracks_b64 "$(printf '%s' "$paths" | sed 's#.*/##' | sort -u | base64 -w0)"
     ;;
   install-track)
     tmp="${3:-}"; name="${4:-}"; want="${5:-}"

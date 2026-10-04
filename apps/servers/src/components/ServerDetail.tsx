@@ -3,6 +3,7 @@ import { RefreshCw } from "lucide-react";
 import { configLoad, errorText, isLegacyStatus, legacyProcess, presence, serverLogs, serverRestartService, serverRiders, serverSession, serverStatus, type ServerView } from "@/lib/api";
 import { duration, lapTime, sessionName } from "@/lib/format";
 import { usePoll } from "@/lib/usePoll";
+import { runAction } from "@/lib/actions";
 import { useEventFeed } from "@/lib/useEventFeed";
 import { ConfigTab } from "./ConfigTab";
 import { CutMapCard } from "./CutMapCard";
@@ -248,6 +249,7 @@ function LegacyStatusPanel({ server, status, detail, refresh }: { server: Server
 export function SessionControls({ server, current, remaining, refresh }: { server: ServerView; current: string; remaining: number | null; refresh: () => void }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [pendingStage, setPendingStage] = useState<string | null>(null);
   const act = async (action: "jump" | "advance" | "restart", to?: "practice" | "qualifying" | "warmup" | "race") => {
     const destination = to ? sessionName(to) : "";
     const inProgress = current.startsWith("running(race") || /^countdown/i.test(current);
@@ -260,15 +262,13 @@ export function SessionControls({ server, current, remaining, refresh }: { serve
         : `Restart ${sessionName(current)} from the beginning?`;
     if (!window.confirm(prompt)) return;
     const label = to ? `Starting ${to}…` : action === "advance" ? "Advancing session…" : "Restarting session…";
-    setBusy(label); setError(null);
-    try {
-      await serverSession(server.id, action, to);
-      refresh();
-    } catch (e) {
-      const message = errorText(e);
-      if (message.includes("already running") || message.includes("countdown always runs") || message.includes("race runs until it is over")) refresh();
-      else setError(message);
-    } finally { setBusy(null); }
+    // The clicked stage is marked at once; the mark is dropped if the server refuses.
+    setBusy(label); setError(null); setPendingStage(to ?? null);
+    const result = await runAction({ name: `session_${action}`, run: () => serverSession(server.id, action, to) });
+    if (result.ok) refresh();
+    else if (result.error.includes("already running") || result.error.includes("countdown always runs") || result.error.includes("race runs until it is over")) refresh();
+    else setError(result.error);
+    setPendingStage(null); setBusy(null);
   };
   const restartServer = async () => {
     if (!window.confirm(`Restart the ${server.name} service? Connected riders will be disconnected.`)) return;
@@ -312,13 +312,13 @@ export function SessionControls({ server, current, remaining, refresh }: { serve
             type="button"
             disabled={!!busy || running === stage}
             onClick={() => void act("jump", stage)}
-            aria-current={running === stage || pending === stage ? "step" : undefined}
+            aria-current={running === stage || pending === stage || pendingStage === stage ? "step" : undefined}
             className={`flex items-center gap-3 border-b px-4 py-3 text-left transition disabled:cursor-default sm:border-b-0 sm:border-r sm:last:border-r-0 ${running === stage || pending === stage ? "bg-primary/10 text-primary" : "hover:bg-accent disabled:opacity-50"}`}
           >
             <span className="grid size-6 shrink-0 place-items-center rounded-full bg-secondary font-mono text-xs text-muted-foreground">{index + 1}</span>
             <span className="flex min-w-0 flex-1 items-center justify-between gap-2 text-sm font-medium capitalize">
               <span className="flex flex-col"><span>{stage === "warmup" ? "Warm-up" : stage}</span><span className="text-[11px] font-normal normal-case text-muted-foreground">{details[stage]}</span></span>
-              {running === stage && <span className="rounded-full bg-primary px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-primary-foreground">Current</span>}
+              {pendingStage === stage && <span className="rounded-full bg-primary/20 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-primary">Starting…</span>}{running === stage && !pendingStage && <span className="rounded-full bg-primary px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-primary-foreground">Current</span>}
               {pending === stage && <span className="rounded-full bg-primary px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-primary-foreground">Next</span>}
             </span>
           </button>

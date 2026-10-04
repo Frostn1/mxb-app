@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { describeRotationSave, playNextQueue, randomTrack, stateAfterSwitch } from "./rotation";
+import { describeRotationSave, playNextQueue, randomTrack, stateAfterSwitch, addBlockedReason, blockedInQueue } from "./rotation";
 import { BADGES, reloadClass } from "./reload";
 
 describe("rotation save", () => {
@@ -46,5 +46,17 @@ describe("stateAfterSwitch", () => {
     const state = { current: "A", rotation: ["B", "C"], library: ["A", "B", "C"] };
     const queue = playNextQueue("A", ["B", "C"], "C");
     expect(stateAfterSwitch(state, queue)).toEqual({ current: "C", rotation: ["B", "A"], library: ["A", "B", "C"] });
+  });
+});
+describe("protected packages", () => {
+  const protectedTracks = ["WDR_R02.pkz"];
+  it("blocks adding a protected package, with the reason", () => {
+    expect(addBlockedReason("WDR_R02.pkz", protectedTracks)).toContain("protected package");
+    expect(addBlockedReason("Smokey.pkz", protectedTracks)).toBeNull();
+    expect(addBlockedReason("Smokey.pkz", undefined)).toBeNull();
+  });
+  it("finds the protected ones already in a queue", () => {
+    expect(blockedInQueue(["A.pkz", "WDR_R02.pkz", "WDR_R02.pkz"], protectedTracks)).toEqual(["WDR_R02.pkz"]);
+    expect(blockedInQueue(["A.pkz"], protectedTracks)).toEqual([]);
   });
 });
