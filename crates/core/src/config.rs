@@ -754,11 +754,9 @@ pub fn default_user_dir(game: &GameProfile) -> Option<PathBuf> {
     if let Some(p) = detect_prefix_mods_path(game) {
         return Some(PathBuf::from(p));
     }
-    Some(
-        dirs_next::document_dir()?
-            .join("PiBoSo")
-            .join(game.user_dir),
-    )
+    // The shell's Documents known folder, not `%USERPROFILE%\Documents`: OneDrive's
+    // Known Folder Move and Properties > Location both move it, and the game follows it.
+    crate::docsdir::user_dir(game.user_dir)
 }
 
 /// The folder every binary in this workspace keeps its shared state under.
@@ -971,6 +969,63 @@ pub fn normalize_selected_game_folder(path: &str) -> Option<(PathBuf, &'static s
         return Some((parent.to_path_buf(), "mods-subfolder"));
     }
     None
+}
+
+/// What a folder-picker choice turned out to be, next to where the game keeps its user
+/// folder on this machine — so setup can say "expected X, you picked Y" instead of a bare
+/// "doesn't match", and use the pick when it really is a game folder.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GameFolderCheck {
+    /// The folder that will be stored: the pick, or the folder above it when a `mods` or
+    /// `profiles` subfolder was picked.
+    pub path: String,
+    /// `"mods-subfolder"` / `"profiles-subfolder"` when `path` isn't the pick itself.
+    pub correction: Option<&'static str>,
+    /// Where the game's user folder is on this machine (the Documents known folder, which
+    /// may be redirected to OneDrive or another drive), when it can be worked out.
+    pub expected: Option<String>,
+    /// `path` is the `expected` folder.
+    pub matches_expected: bool,
+    pub exists: bool,
+    pub has_mods: bool,
+    pub has_profiles: bool,
+    /// `path` is a relocated mods tree (`mxbikes.ini`'s `[mods] folder`).
+    pub is_mods_tree: bool,
+    /// The folder holds what the app reads — accept it wherever it is.
+    pub usable: bool,
+}
+
+/// Judge a picked folder against `expected`. A usable folder is usable on any drive: being
+/// somewhere other than `expected` is reported, never refused.
+pub fn check_game_folder(picked: &str, expected: Option<&Path>) -> GameFolderCheck {
+    let (path, correction) = match normalize_selected_game_folder(picked) {
+        Some((up, why)) => (up, Some(why)),
+        None => (PathBuf::from(picked.trim()), None),
+    };
+    let exists = !picked.trim().is_empty() && path.is_dir();
+    let has_mods = exists && crate::library::resolve_child(&path, "mods").is_dir();
+    let has_profiles = exists && is_user_dir(&path);
+    let is_mods_tree = exists && crate::library::is_mods_tree(&path);
+    let matches_expected = expected
+        .map(|e| crate::docsdir::same_folder(&path, e))
+        .unwrap_or(false);
+    GameFolderCheck {
+        path: path.to_string_lossy().into_owned(),
+        correction,
+        expected: expected.map(|e| e.to_string_lossy().into_owned()),
+        matches_expected,
+        exists,
+        has_mods,
+        has_profiles,
+        is_mods_tree,
+        usable: has_mods || has_profiles || is_mods_tree,
+    }
+}
+
+/// [`check_game_folder`] against this machine's real user folder for `game`.
+pub fn inspect_game_folder(picked: &str, game: &GameProfile) -> GameFolderCheck {
+    check_game_folder(picked, default_user_dir(game).as_deref())
 }
 
 /// The saved config, or one built on the spot when the MX Bikes folder sits where it
@@ -1511,6 +1566,86 @@ fn parse_library_paths(vdf: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn scratch(tag: &str) -> PathBuf {
+        let root = std::env::temp_dir().join(format!(
+            "frost-{tag}-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        root
+    }
+
+    /// The reported case: Documents lives on another drive, the player picks the real
+    /// `PiBoSo\MX Bikes` there, and it must be accepted as the expected folder — whatever
+    /// `%USERPROFILE%\Documents` would have said.
+    #[test]
+    fn a_pick_on_another_drive_matching_the_known_folder_is_accepted() {
+        let root = scratch("docs-other-drive");
+        let user = root.join("D").join("Documents").join("PiBoSo").join("MX Bikes");
+        std::fs::create_dir_all(user.join("profiles")).unwrap();
+        std::fs::create_dir_all(user.join("mods")).unwrap();
+
+        // Spelled differently from the pick (case, slashes, trailing separator) on purpose:
+        // the shell and a folder picker don't agree on spelling.
+        let expected = PathBuf::from(
+            user.to_string_lossy().to_uppercase().replace('\\', "/") + "/",
+        );
+        let check = check_game_folder(&user.to_string_lossy(), Some(&expected));
+        if cfg!(windows) {
+            assert!(check.matches_expected, "{check:?}");
+        }
+        assert!(check.usable && check.has_mods && check.has_profiles, "{check:?}");
+
+        // Picking the `mods` subfolder resolves to the user folder above it.
+        let check = check_game_folder(&user.join("mods").to_string_lossy(), Some(&user));
+        assert_eq!(check.correction, Some("mods-subfolder"));
+        assert!(check.matches_expected && check.usable, "{check:?}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Expected says the stock C: folder, but the player's folder is somewhere else that
+    /// really holds the game's files: reported as a mismatch, still usable.
+    #[test]
+    fn a_real_game_folder_elsewhere_is_usable_but_reported() {
+        let root = scratch("docs-onedrive");
+        let onedrive = root.join("OneDrive").join("Documents").join("PiBoSo").join("MX Bikes");
+        std::fs::create_dir_all(onedrive.join("profiles")).unwrap();
+        let expected = PathBuf::from(r"C:\Users\rider\Documents\PiBoSo\MX Bikes");
+
+        let check = check_game_folder(&onedrive.to_string_lossy(), Some(&expected));
+        assert!(!check.matches_expected);
+        assert!(check.usable && check.has_profiles && !check.has_mods, "{check:?}");
+        assert_eq!(check.expected.as_deref(), Some(r"C:\Users\rider\Documents\PiBoSo\MX Bikes"));
+
+        // An empty folder is neither: the UI says what was expected and what was found.
+        let empty = root.join("Downloads");
+        std::fs::create_dir_all(&empty).unwrap();
+        let check = check_game_folder(&empty.to_string_lossy(), Some(&expected));
+        assert!(check.exists && !check.usable && !check.matches_expected, "{check:?}");
+
+        let check = check_game_folder(&root.join("gone").to_string_lossy(), None);
+        assert!(!check.exists && !check.usable && check.expected.is_none());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Pure path comparison on the shapes redirected Documents folders take.
+    #[test]
+    fn expected_folder_comparison_across_drives_and_onedrive() {
+        use crate::docsdir::same_folder;
+        let p = |s: &str| PathBuf::from(s);
+        assert!(same_folder(&p(r"D:\Documents\PiBoSo\MX Bikes"), &p(r"d:\documents\PiBoSo\MX Bikes\")));
+        assert!(same_folder(
+            &p(r"C:\Users\rider\OneDrive\Documents\PiBoSo\MX Bikes"),
+            &p("C:/Users/rider/OneDrive/Documents/PiBoSo/MX Bikes"),
+        ));
+        assert!(!same_folder(
+            &p(r"C:\Users\rider\OneDrive\Documents\PiBoSo\MX Bikes"),
+            &p(r"C:\Users\rider\Documents\PiBoSo\MX Bikes"),
+        ));
+        assert!(!same_folder(&p(r"D:\Documents\PiBoSo\MX Bikes"), &p(r"C:\Documents\PiBoSo\MX Bikes")));
+    }
 
     #[test]
     fn legacy_folder_config_is_treated_as_setup_complete() {

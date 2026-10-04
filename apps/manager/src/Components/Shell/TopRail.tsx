@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type Ref } from "react";
+import { useCallback, useEffect, useRef, useState, type Ref } from "react";
 import { Play, Gamepad2, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@frost/shared/lib/utils";
@@ -6,7 +6,7 @@ import type { LoadedPlugin } from "@frost/shared/lib/pluginHost";
 import { useConfig } from "@frost/shared/Context/Config";
 import { useGameRunning } from "../../lib/useGameRunning";
 import { useT } from "@/i18n";
-import { launchGame } from "@frost/shared/api/mods";
+import { launchGame, launchStallReason } from "@frost/shared/api/mods";
 import type { GameCaps } from "@frost/shared/types";
 import { RAIL, railItemFor, type DashboardView, type RailItem } from "./nav";
 import DownloadQueue from "./DownloadQueue";
@@ -17,6 +17,9 @@ import AppBar from "@frost/shared/Components/Shell/AppBar";
 
 /** MX Bikes takes a while to show up in the process list; stop saying "Starting…" after this. */
 const STARTING_TIMEOUT_MS = 15000;
+/** A launch handed to Steam is given 45s by the backend to produce a game process; ask why
+ *  it didn't just after that, so a launch that went nowhere ends in a reason, not silence. */
+const STALL_CHECK_MS = 47000;
 
 interface TopRailProps {
   view: DashboardView;
@@ -58,7 +61,16 @@ export default function TopRail({ view, plugins, onNavigate, leftRef, rightRef }
     return () => clearTimeout(id);
   }, [starting, gameRunning]);
 
+  const stallTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (stallTimer.current) clearTimeout(stallTimer.current);
+    },
+    [],
+  );
+
   const onPlay = useCallback(async () => {
+    if (stallTimer.current) clearTimeout(stallTimer.current);
     setStarting(true);
     try {
       const outcome = await launchGame();
@@ -67,6 +79,13 @@ export default function TopRail({ view, plugins, onNavigate, leftRef, rightRef }
         setStarting(false);
       } else {
         toast.success(t("game.launching"));
+        stallTimer.current = setTimeout(() => {
+          launchStallReason()
+            .then((reason) => {
+              if (reason) toast.error(t("game.launchFailed"), { description: reason, duration: 20000 });
+            })
+            .catch(() => {});
+        }, STALL_CHECK_MS);
       }
     } catch (e) {
       toast.error(t("game.launchFailed"), { description: String(e) });

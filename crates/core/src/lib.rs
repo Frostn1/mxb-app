@@ -12,6 +12,7 @@ pub mod bikefiles;
 pub mod clientlog;
 pub mod cloudfiles;
 pub mod config;
+pub mod docsdir;
 pub mod game;
 pub mod gamewindow;
 pub mod library;

@@ -11,8 +11,10 @@ import {
   createConfig,
   completeSetup,
   detectGamePath,
+  inspectGameFolder,
   normalizeGameFolder,
   setGamePath as saveGamePath,
+  type GameFolderCheck,
   type GameFolderCorrection,
 } from "@frost/shared/api/mods";
 import { usePlatform } from "@frost/shared/lib/usePlatform";
@@ -102,9 +104,17 @@ export default function Setup({ onComplete, game, games, firstRun }: SetupProps)
     attempted.current = false;
     setPhase("detect");
   }, []);
-  const defaultHint = hintFor(usePlatform(), picked);
+  const platform = usePlatform();
+  // Where the game's folder really is on this PC. Documents can be redirected — OneDrive's
+  // Known Folder Move, or moved to another drive in its Properties — so a literal
+  // `Documents\PiBoSo\…` would send someone to the wrong place; the backend asks Windows.
+  const [expected, setExpected] = useState<string | null>(null);
+  const defaultHint =
+    platform === "windows" && expected ? expected : hintFor(platform, picked);
   const [chosen, setChosen] = useState<string | null>(null);
   const [folderCorrection, setFolderCorrection] = useState<GameFolderCorrection | null>(null);
+  /** What the pick turned out to hold, next to where the game normally keeps it. */
+  const [folderCheck, setFolderCheck] = useState<GameFolderCheck | null>(null);
   const [busy, setBusy] = useState(false);
   const [integrationBusy, setIntegrationBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -134,8 +144,15 @@ export default function Setup({ onComplete, game, games, firstRun }: SetupProps)
     setGameAuto(false);
     setChosen(null);
     setFolderCorrection(null);
+    setFolderCheck(null);
+    setExpected(null);
     setError(null);
     setDetecting(true);
+    inspectGameFolder("", picked.id)
+      .then((check) => {
+        if (!cancelled) setExpected(check.expected);
+      })
+      .catch(() => {});
     detectGamePath(picked.id)
       .then((found) => {
         if (cancelled) return;
@@ -203,15 +220,26 @@ export default function Setup({ onComplete, game, games, firstRun }: SetupProps)
       title: t("setup.pickModsFolder", { game: picked.display }),
     });
     if (typeof folder === "string") {
-      const normalized = await normalizeGameFolder(folder).catch(() => ({
-        path: folder,
-        correction: null,
-      }));
-      setChosen(normalized.path);
-      setFolderCorrection(normalized.correction);
+      // A folder that holds the game's files is accepted wherever it is — another drive,
+      // OneDrive — and only described when it isn't where Windows says Documents is.
+      const check = await inspectGameFolder(folder, picked.id).catch(() => null);
+      if (check) {
+        setChosen(check.path);
+        setFolderCorrection(check.correction);
+        setFolderCheck(check);
+      } else {
+        const normalized = await normalizeGameFolder(folder).catch(() => ({
+          path: folder,
+          correction: null,
+        }));
+        setChosen(normalized.path);
+        setFolderCorrection(normalized.correction);
+        setFolderCheck(null);
+      }
       setError(null);
     }
   };
+  const pickLooksEmpty = !!folderCheck && folderCheck.exists && !folderCheck.usable;
 
   const chooseGame = async (persist = false): Promise<string | null> => {
     const folder = await pickFolder({
@@ -462,6 +490,34 @@ export default function Setup({ onComplete, game, games, firstRun }: SetupProps)
                   )}
                 </p>
               )}
+              {folderCheck && folderCheck.usable && !folderCheck.matchesExpected && folderCheck.expected && (
+                <p className="border-l-2 border-primary/50 py-0.5 pl-3 text-[12px] leading-relaxed text-foreground/80">
+                  <Trans
+                    k="setup.folderElsewhere"
+                    values={{
+                      game: picked.display,
+                      expected: (
+                        <span className="select-text break-all font-mono">{folderCheck.expected}</span>
+                      ),
+                    }}
+                  />
+                </p>
+              )}
+              {pickLooksEmpty && (
+                <p className="border-l-2 border-warning/70 py-0.5 pl-3 text-[12px] leading-relaxed text-foreground/80">
+                  <Trans
+                    k="setup.folderEmpty"
+                    values={{
+                      game: picked.display,
+                      expected: (
+                        <span className="select-text break-all font-mono">
+                          {folderCheck?.expected ?? defaultHint}
+                        </span>
+                      ),
+                    }}
+                  />
+                </p>
+              )}
               <button
                 onClick={choose}
                 className="cursor-default self-start text-[12px] font-semibold text-primary hover:brightness-110"
@@ -537,7 +593,11 @@ export default function Setup({ onComplete, game, games, firstRun }: SetupProps)
           onClick={() => (chosen ? void finish(chosen) : void choose())}
         >
           {!chosen && <FolderOpen className="size-4" />}
-          {chosen ? t("setup.startBrowsing") : t("setup.chooseGameFolder")}
+          {chosen
+            ? pickLooksEmpty
+              ? t("setup.useAnyway")
+              : t("setup.startBrowsing")
+            : t("setup.chooseGameFolder")}
         </Button>
       </div>
     </div>

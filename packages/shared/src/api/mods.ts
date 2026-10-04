@@ -347,6 +347,28 @@ export function normalizeGameFolder(path: string): Promise<{
   return invoke("normalize_game_folder", { path });
 }
 
+/** A picked folder checked against where the game keeps its user folder on this PC. */
+export interface GameFolderCheck {
+  /** What will be stored — the pick, or the folder above a picked `mods`/`profiles`. */
+  path: string;
+  correction: GameFolderCorrection | null;
+  /** The game's user folder under the Documents known folder (may be on OneDrive or
+   *  another drive), or null when it can't be worked out. */
+  expected: string | null;
+  matchesExpected: boolean;
+  exists: boolean;
+  hasMods: boolean;
+  hasProfiles: boolean;
+  isModsTree: boolean;
+  /** Holds what the app reads, wherever it is. */
+  usable: boolean;
+}
+
+/** Check a picked folder (or, with `""`, just report the expected one). */
+export function inspectGameFolder(path: string, game?: GameId): Promise<GameFolderCheck> {
+  return invoke<GameFolderCheck>("inspect_game_folder", { path, game });
+}
+
 /** Change only the MX Bikes folder — an empty string re-runs auto-detection. Unlike
  *  `createConfig`, the rest of the settings are preserved. Resolves to the folder actually
  *  adopted: picking the `mods` folder settles on the game folder above it. */
@@ -2674,6 +2696,11 @@ export function frostmodAttachment(): Promise<Attachment> {
 /** Start MX Bikes. Resolves to `already_running` when the game is already up. */
 export function launchGame(): Promise<LaunchOutcome> {
   return invoke<LaunchOutcome>("launch_game");
+}
+
+/** Why the last launch handed to Steam never started the game (taken once), or null. */
+export function launchStallReason(): Promise<string | null> {
+  return invoke<string | null>("launch_stall_reason");
 }
 
 /**
