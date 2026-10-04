@@ -1036,6 +1036,25 @@ async fn repair_orphaned_setup(app: tauri::AppHandle, bike: String) -> Result<us
     .map_err(|e| format!("repair_orphaned_setup task failed: {e}"))?
 }
 
+/// The troubleshooting switch: every bike back on the model the game ships with. Refused
+/// while the game runs — it holds the bike files open, and half a revert is worse than none.
+#[tauri::command]
+async fn disable_all_model_swaps(
+    app: tauri::AppHandle,
+) -> Result<modelswap::DisableReport, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        if gameproc::is_game_running() {
+            return Err("Close MX Bikes first — it holds the bike files open.".to_string());
+        }
+        let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+        let report = modelswap::disable_all_model_swaps(&cfg.mods_path);
+        usage::track("modelswap.disable_all");
+        Ok(report)
+    })
+    .await
+    .map_err(|e| format!("disable_all_model_swaps task failed: {e}"))?
+}
+
 // ── Paint studio ────────────────────────────────────────────────────────────────────
 //
 // A `.pnt` is a packed container no image editor can write, so a livery drawn in GIMP has
@@ -8794,6 +8813,7 @@ fn main() {
             register_loose_swaps,
             detect_orphaned_setup,
             repair_orphaned_setup,
+            disable_all_model_swaps,
             add_to_library,
             cancel_install,
             import_file,

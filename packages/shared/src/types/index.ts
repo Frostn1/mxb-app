@@ -416,6 +416,16 @@ export interface OrphanedSetup {
   files: string[];
 }
 
+/** What "Disable all swaps" did, bike by bike. */
+export interface DisableSwapsReport {
+  /** Bikes put back on the model the game ships with. */
+  reverted: string[];
+  /** Bikes already on their own model that still had a swap's loose setup files parked. */
+  cleaned: string[];
+  /** `[bike, why]` for each bike that couldn't be changed. */
+  failed: [string, string][];
+}
+
 /** A material group over a node's kept triangles (for per-part texturing). */
 export interface Submesh {
   /** Mesh-group name from the `.edf` (e.g. `frame.005`, `chain`). */
