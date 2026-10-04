@@ -244,7 +244,7 @@ admin_listen() {
 }
 
 OWNER=""
-if [[ "$CMD" =~ ^(read|validate|apply|write|restore|admin-addr|tracks|install-track|install-version|logs|service)$ ]]; then
+if [[ "$CMD" =~ ^(read|read-tracks|has-track|validate|apply|write|restore|admin-addr|tracks|install-track|install-version|logs|service)$ ]]; then
   detect
   if [[ "$CMD" =~ ^(logs|service)$ ]]; then
     CONFIG=""
