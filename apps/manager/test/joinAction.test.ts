@@ -38,6 +38,28 @@ describe("joinAction", () => {
     });
   });
 
+  test("a failed install still offers the join, with Retry when there is a download", () => {
+    // LUMBERYARD: the one-click install hit a 403 and the only button left was Install again.
+    expect(joinAction({ ...base, missing: true, product: free, failed: true })).toEqual({
+      kind: "failed",
+      product: free,
+    });
+    // Nothing to retry for a shop product or an unknown track — still never a dead end.
+    expect(joinAction({ ...base, missing: true, product: sold, failed: true })).toEqual({
+      kind: "failed",
+    });
+    expect(joinAction({ ...base, missing: true, failed: true })).toEqual({ kind: "failed" });
+  });
+
+  test("a stale failure doesn't outlive the track arriving", () => {
+    // Installed by hand since: a plain join, whatever the last install did.
+    expect(joinAction({ ...base, product: free, failed: true }).kind).toBe("join");
+    // A retry under way shows as installing.
+    expect(
+      joinAction({ ...base, missing: true, product: free, failed: true, installing: true }).kind,
+    ).toBe("installing");
+  });
+
   test("queue, install and full keep their precedence", () => {
     expect(joinAction({ ...base, queued: true, missing: true }).kind).toBe("queued");
     expect(joinAction({ ...base, installing: true, missing: true }).kind).toBe("installing");

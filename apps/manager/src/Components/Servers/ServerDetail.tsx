@@ -17,6 +17,9 @@ import {
   ShoppingCart,
   ServerOff,
   Power,
+  RotateCw,
+  FolderOpen,
+  AlertTriangle,
 } from "lucide-react";
 import { open as openUrl } from "@tauri-apps/plugin-shell";
 import { toast } from "sonner";
@@ -296,6 +299,10 @@ export interface ServerDetailProps {
   product?: CatalogTrack;
   /** Its track is installing. */
   installing: boolean;
+  /** The last install of its track failed or stalled. */
+  failed?: boolean;
+  /** Install the track from a file the player picks, then join. */
+  onPickTrack?: (s: MasterServer) => void;
   favourite: boolean;
   /** The address a join is starting for, app-wide. */
   joining: string | null;
@@ -321,6 +328,8 @@ const ServerDetail = ({
   missing,
   product,
   installing,
+  failed = false,
+  onPickTrack,
   favourite,
   joining,
   busy,
@@ -452,6 +461,7 @@ const ServerDetail = ({
     inactive: parked,
     product,
     installing,
+    failed,
     queued: queue?.address === s.address,
     joinable: s.joinable,
     full,
@@ -599,6 +609,16 @@ const ServerDetail = ({
                 : t("serverBrowser.queueHint")}
           </p>
         )}
+        {action.kind === "failed" && (
+          <p className="flex items-start gap-1.5 text-[12px] text-amber-300">
+            <AlertTriangle className="mt-px size-3.5 shrink-0" />
+            <span>
+              <span className="font-semibold">{t("serverBrowser.trackInstallFailed")}</span>
+              {" · "}
+              {t("serverBrowser.trackInstallFailedHint")}
+            </span>
+          </p>
+        )}
         {/* Wraps rather than clipping: with Install, Install & join, copy and star side by side
             the row is wider than a narrow window, and the star used to fall off the edge. */}
         <div className="flex flex-wrap items-center gap-2">
@@ -669,6 +689,51 @@ const ServerDetail = ({
                 </Button>
               )}
             </div>
+          ) : action.kind === "failed" ? (
+            // The install didn't happen; joining must not depend on it. The game handles a
+            // track it doesn't have, so Join anyway leads and launches the same join a
+            // present track would.
+            <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+              <Button
+                className="flex-1"
+                onClick={() => onJoin(s)}
+                disabled={!s.joinable || busy}
+                title={t("serverBrowser.joinAnywayHint")}
+              >
+                {joining === s.address ? (
+                  <Loader2 className="size-3.5 animate-spin" />
+                ) : (
+                  <Plug className="size-3.5" />
+                )}
+                {t("serverBrowser.joinAnyway")}
+              </Button>
+              {action.product && (
+                <Button
+                  variant="outline"
+                  className="shrink-0"
+                  onClick={() => {
+                    const product = action.product!;
+                    if (s.joinable) onInstallJoin(s, product);
+                    else onInstall(s, product);
+                  }}
+                  title={t("serverBrowser.installHint", { title: action.product.name })}
+                >
+                  <RotateCw className="size-3.5" />
+                  {t("serverBrowser.retryInstall")}
+                </Button>
+              )}
+              {onPickTrack && (
+                <Button
+                  variant="outline"
+                  className="shrink-0"
+                  onClick={() => onPickTrack(s)}
+                  title={t("serverBrowser.pickTrackHint")}
+                >
+                  <FolderOpen className="size-3.5" />
+                  {t("serverBrowser.pickTrack")}
+                </Button>
+              )}
+            </div>
           ) : action.kind === "missing" ? (
             // The player doesn't have this track. A name that only resembles it is a lead,
             // not a reason to offer a plain Join: the page it came from goes first, and
@@ -698,6 +763,17 @@ const ServerDetail = ({
                 )}
                 {t("serverBrowser.joinAnyway")}
               </Button>
+              {onPickTrack && (
+                <Button
+                  variant="outline"
+                  className="shrink-0 px-3"
+                  onClick={() => onPickTrack(s)}
+                  title={t("serverBrowser.pickTrackHint")}
+                  aria-label={t("serverBrowser.pickTrack")}
+                >
+                  <FolderOpen className="size-3.5" />
+                </Button>
+              )}
             </div>
           ) : sold ? (
             <Button

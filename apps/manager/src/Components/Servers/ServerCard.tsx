@@ -14,6 +14,8 @@ import {
   ShoppingCart,
   Power,
   UserCheck,
+  RotateCw,
+  FolderOpen,
 } from "lucide-react";
 import type { CatalogTrack, MasterServer } from "@frost/shared/api/mods";
 import { Badge } from "@frost/shared/Components/ui/badge";
@@ -43,6 +45,10 @@ interface Props {
   product?: CatalogTrack;
   /** Its track is installing. */
   installing: boolean;
+  /** The last install of its track failed or stalled. */
+  failed?: boolean;
+  /** Install the track from a file the player picks, then join. */
+  onPickTrack?: (s: MasterServer) => void;
   onInstall: (s: MasterServer, product: CatalogTrack) => void;
   onInstallJoin: (s: MasterServer, product: CatalogTrack) => void;
   /** The `rel` of the player's own copy, when Manage has switched the track off. */
@@ -83,6 +89,8 @@ const ServerCard = memo(function ServerCard({
   missing,
   product,
   installing,
+  failed = false,
+  onPickTrack,
   onInstall,
   onInstallJoin,
   inactive,
@@ -118,6 +126,7 @@ const ServerCard = memo(function ServerCard({
     inactive,
     product,
     installing,
+    failed,
     queued: queuePosition !== null,
     joinable: s.joinable,
     full,
@@ -353,21 +362,81 @@ const ServerCard = memo(function ServerCard({
                 </CardButton>
               )}
             </>
+          ) : action.kind === "failed" ? (
+            // The install didn't happen. Joining is still the point: the game deals with a
+            // track it doesn't have, so Join anyway leads, with Retry and Pick beside it.
+            <>
+              <span
+                className="w-full truncate text-[11.5px] font-medium text-amber-300"
+                title={t("serverBrowser.trackInstallFailedHint")}
+              >
+                {t("serverBrowser.trackInstallFailed")}
+              </span>
+              <CardButton
+                primary={s.joinable}
+                disabled={busy || !s.joinable}
+                onClick={(e) => {
+                  stop(e);
+                  onJoin(s);
+                }}
+                title={t("serverBrowser.joinAnywayHint")}
+              >
+                {joining && <Loader2 className="size-3.5 animate-spin" />}
+                {t("serverBrowser.joinAnyway")}
+              </CardButton>
+              {action.product && (
+                <IconButton
+                  onClick={(e) => {
+                    stop(e);
+                    const product = action.product!;
+                    if (s.joinable) onInstallJoin(s, product);
+                    else onInstall(s, product);
+                  }}
+                  label={t("serverBrowser.retryInstall")}
+                >
+                  <RotateCw className="size-3.5" />
+                </IconButton>
+              )}
+              {onPickTrack && (
+                <IconButton
+                  onClick={(e) => {
+                    stop(e);
+                    onPickTrack(s);
+                  }}
+                  label={t("serverBrowser.pickTrackHint")}
+                >
+                  <FolderOpen className="size-3.5" />
+                </IconButton>
+              )}
+            </>
           ) : action.kind === "missing" ? (
             // Not a plain Join: the player doesn't have this track, and a catalogue name that
             // only resembles the id is not a reason to pretend otherwise. Still possible — a
             // server may be about to rotate — but outlined and said plainly.
-            <CardButton
-              disabled={busy || !s.joinable}
-              onClick={(e) => {
-                stop(e);
-                onJoin(s);
-              }}
-              title={t("serverBrowser.joinAnywayHint")}
-            >
-              {joining && <Loader2 className="size-3.5 animate-spin" />}
-              {t("serverBrowser.joinAnyway")}
-            </CardButton>
+            <>
+              <CardButton
+                disabled={busy || !s.joinable}
+                onClick={(e) => {
+                  stop(e);
+                  onJoin(s);
+                }}
+                title={t("serverBrowser.joinAnywayHint")}
+              >
+                {joining && <Loader2 className="size-3.5 animate-spin" />}
+                {t("serverBrowser.joinAnyway")}
+              </CardButton>
+              {onPickTrack && (
+                <IconButton
+                  onClick={(e) => {
+                    stop(e);
+                    onPickTrack(s);
+                  }}
+                  label={t("serverBrowser.pickTrackHint")}
+                >
+                  <FolderOpen className="size-3.5" />
+                </IconButton>
+              )}
+            </>
           ) : sold ? (
             <CardButton
               primary
@@ -439,6 +508,20 @@ const CardButton = ({
         : "border border-white/[0.1] text-muted-foreground",
       className,
     )}
+  />
+);
+
+/** A square button the size of Copy, for the second and third choices on a full row. */
+const IconButton = ({
+  label,
+  ...props
+}: React.ButtonHTMLAttributes<HTMLButtonElement> & { label: string }) => (
+  <button
+    type="button"
+    {...props}
+    title={label}
+    aria-label={label}
+    className="grid size-[30px] shrink-0 cursor-default place-items-center rounded-md border border-white/[0.1] text-muted-foreground transition-colors hover:text-foreground"
   />
 );
 

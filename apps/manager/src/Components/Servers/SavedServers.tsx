@@ -39,6 +39,10 @@ export interface SavedCardProps {
   library: Record<string, string | null>;
   catalog: Record<string, CatalogTrack>;
   installingAt: Set<string>;
+  /** Tracks whose last install failed or stalled. */
+  failedTracks: Set<string>;
+  /** Install the track from a file the player picks, then join. */
+  onPickTrack: (s: MasterServer) => void;
   favourite: (address: string) => boolean;
   paintSync: Record<string, number>;
   /** Accepted friends on each server, by address. */
@@ -135,6 +139,8 @@ const SavedServers = ({
               missing={!!s.track && cards.library[s.track] === null}
               product={cards.catalog[s.track]}
               installing={cards.installingAt.has(s.address)}
+              failed={cards.failedTracks.has(s.track)}
+              onPickTrack={cards.onPickTrack}
               onInstall={cards.onInstall}
               onInstallJoin={cards.onInstallJoin}
               inactive={cards.inactive[s.track]}

@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { invoke } from "@tauri-apps/api/core";
+import { open as pickFile } from "@tauri-apps/plugin-dialog";
 import { SearchBox } from "@frost/shared/Components/ui/search-box";
 import { cn } from "@frost/shared/lib/utils";
 import { Button } from "@frost/shared/Components/ui/button";
@@ -55,6 +56,7 @@ import {
   guessServerTrack,
   modsStateSet,
   resolveQuickInstall,
+  destStorageKey,
   resetServerBrowser,
   modTypesFor,
   probeSavedServers,
@@ -82,6 +84,13 @@ import RegisterServerDialog from "./RegisterServerDialog";
 import SavedServers, { type SavedRow } from "./SavedServers";
 import FriendsPanel from "./FriendsPanel";
 import { joinAction } from "./joinAction";
+import {
+  RESOLVE_TIMEOUT_MS,
+  startWatch,
+  stepWatch,
+  withTimeout,
+  type InstallWatch,
+} from "./installWatch";
 import { useFriends } from "@/lib/useFriends";
 import { friendsByAddress } from "@/lib/friends";
 import SavedServerDialog, { savedServerError } from "./SavedServerDialog";
@@ -760,35 +769,74 @@ const Servers = ({ link }: ServersProps) => {
 
   // A free track goes through the install queue. It only joins the server afterward when
   // the player chose the explicit Install & join action.
-  const { startPendingInstall, active } = useInstall();
+  const { startPendingInstall, startImport, active, queued, cancel } = useInstall();
   const [installing, setInstalling] = useState<
     Record<string, { server: MasterServer; joinAfter: boolean }>
   >({});
-  // Slugs whose install has been seen running. A finished card left over from an earlier
-  // install of the same track must not join the server before this one has even started.
-  const started = useRef(new Set<string>());
+  // Each install's watch: whether it has been seen running (a finished card left over from an
+  // earlier install of the same track must not join the server before this one has even
+  // started), and when it last moved, so a stalled or vanished job can't hold the tile.
+  const watches = useRef(new Map<string, InstallWatch>());
   const doneInstalling = useCallback((slug: string) => {
-    started.current.delete(slug);
+    watches.current.delete(slug);
     setInstalling((cur) => {
       const rest = { ...cur };
       delete rest[slug];
       return rest;
     });
   }, []);
+  // Tracks whose install failed, stalled or found nothing to download, with whether the
+  // player had asked to join afterwards. Their servers offer Join anyway / Retry / Pick
+  // instead of the same Install that just failed.
+  const [failedTracks, setFailedTracks] = useState<Record<string, boolean>>({});
+  const markFailed = useCallback((track: string, joinAfter: boolean) => {
+    if (!track) return;
+    setFailedTracks((cur) => ({ ...cur, [track]: joinAfter }));
+  }, []);
+  const clearFailed = useCallback((track: string) => {
+    setFailedTracks((cur) => {
+      if (!(track in cur)) return cur;
+      const rest = { ...cur };
+      delete rest[track];
+      return rest;
+    });
+  }, []);
+  // A clock for the watches while anything is installing: a stall shows as nothing
+  // happening, and nothing happening re-renders nothing.
+  const [tick, setTick] = useState(0);
+  const anyInstalling = Object.keys(installing).length > 0;
+  useEffect(() => {
+    if (!anyInstalling) return;
+    const id = window.setInterval(() => setTick((n) => n + 1), 5_000);
+    return () => window.clearInterval(id);
+  }, [anyInstalling]);
+
+  const watchFrom = useCallback(
+    (slug: string, s: MasterServer, joinAfter: boolean) => {
+      clearFailed(s.track);
+      watches.current.set(slug, startWatch(Date.now(), active.find((a) => a.slug === slug)));
+      setInstalling((cur) => ({ ...cur, [slug]: { server: s, joinAfter } }));
+    },
+    [active, clearFailed],
+  );
 
   const installTrack = useCallback(
     (s: MasterServer, product: CatalogTrack, joinAfter = false) => {
       const slug = product.slug;
       const tracks = modTypesFor(game.id).find((m) => m.id === "tracks");
       if (!slug || !tracks) return;
-      setInstalling((cur) => ({ ...cur, [slug]: { server: s, joinAfter } }));
+      watchFrom(slug, s, joinAfter);
       startPendingInstall({
         slug,
         title: product.name,
         subpath: tracks.installSubpath,
         resolve: async () => {
           try {
-            const res = await resolveQuickInstall(slug, tracks, game, tracks.categoryId);
+            // One page fetch. A site that never answers must not keep the tile on Installing.
+            const res = await withTimeout(
+              resolveQuickInstall(slug, tracks, game, tracks.categoryId),
+              RESOLVE_TIMEOUT_MS,
+            );
             if (res.ok) return { ...res.params, categoryId: tracks.categoryId };
             if (res.reason === "blocked") {
               toast.error(t("browse.needsBrowser", { title: res.title }), {
@@ -803,15 +851,57 @@ const Servers = ({ link }: ServersProps) => {
             }
           } catch (e) {
             toast.error(t("serverBrowser.installFailed", { title: product.name }), {
-              description: String(e),
+              description: e === "timeout" ? t("serverBrowser.installTimedOut") : String(e),
             });
           }
           doneInstalling(slug);
+          markFailed(s.track, joinAfter);
           return null;
         },
       });
     },
-    [game, startPendingInstall, doneInstalling, t],
+    [game, startPendingInstall, doneInstalling, markFailed, watchFrom, t],
+  );
+
+  // "Pick the track": the player already has the file — downloaded from a page the app
+  // couldn't, or handed over by a friend. Same install queue as any import, then the join.
+  const pickTrack = useCallback(
+    async (s: MasterServer) => {
+      const tracks = modTypesFor(game.id).find((m) => m.id === "tracks");
+      if (!tracks) return;
+      let picked: string | string[] | null = null;
+      try {
+        picked = await pickFile({
+          multiple: false,
+          filters: [{ name: t("modDetail.modFiles"), extensions: ["pkz", "zip", "rar", "7z"] }],
+        });
+      } catch (e) {
+        toast.error(t("serverBrowser.installFailed", { title: s.track }), {
+          description: String(e),
+        });
+        return;
+      }
+      if (typeof picked !== "string") return;
+      // Keyed like a catalogue install when there is one, so progress lands on this tile; a
+      // track nobody hosts is a plain file import, slug-less like any other.
+      const slug = catalog[s.track]?.slug ?? "";
+      let destFolder = "";
+      try {
+        destFolder = localStorage.getItem(destStorageKey(game, tracks)) ?? "";
+      } catch {
+        // Storage disabled: the tracks root, which the game reads too.
+      }
+      watchFrom(slug, s, s.joinable);
+      startImport({
+        slug,
+        title: catalog[s.track]?.name || s.track,
+        subpath: tracks.installSubpath,
+        destFolder,
+        categoryId: tracks.categoryId ?? undefined,
+        path: picked,
+      });
+    },
+    [game, catalog, startImport, watchFrom, t],
   );
 
   const installOnly = useCallback(
@@ -859,18 +949,42 @@ const Servers = ({ link }: ServersProps) => {
   );
 
   useEffect(() => {
+    const now = Date.now();
     for (const [slug, intent] of Object.entries(installing)) {
       const job = active.find((a) => a.slug === slug);
-      if (!job) continue;
-      const finished = job.stage === "done" || job.stage === "error" || job.stage === "review";
-      if (!finished) {
-        started.current.add(slug);
+      const waiting = queued.find((q) => q.slug === slug);
+      // A picked file is copied, not downloaded: no byte counts to watch and nothing a timeout
+      // should stop, so it reads as local work until it finishes.
+      const copying =
+        job?.source.kind === "import" && !["done", "error", "review"].includes(job.stage);
+      const { watch, verdict } = stepWatch(
+        watches.current.get(slug) ?? startWatch(now),
+        copying ? { stage: "placing" } : job,
+        !!waiting,
+        now,
+      );
+      watches.current.set(slug, watch);
+      if (verdict === "running") continue;
+      doneInstalling(slug);
+      if (verdict === "timeout") {
+        // Stop a transfer that stopped moving, so Retry starts clean rather than collapsing
+        // onto it. One still waiting behind other installs is left in line: it isn't stuck,
+        // it just can't be what the join waits on.
+        if (job && (job.stage === "resolving" || job.stage === "downloading")) cancel(job.key);
+        else if (waiting?.preparing) cancel(waiting.key);
+        toast.error(t("serverBrowser.installFailed", { title: job?.title ?? intent.server.track }), {
+          description: t("serverBrowser.installTimedOut"),
+        });
+      }
+      // A pack goes to review and an error has its own card; neither is ready to ride. Nor is
+      // a job that stopped or vanished — but none of them may take the join away.
+      if (verdict !== "done") {
+        if (verdict !== "gone" || job?.stage !== "review") {
+          markFailed(intent.server.track, intent.joinAfter);
+        }
         continue;
       }
-      if (!started.current.has(slug)) continue;
-      doneInstalling(slug);
-      // A pack goes to review and an error has its own card; neither is ready to ride.
-      if (job.stage !== "done") continue;
+      clearFailed(intent.server.track);
       const s = servers?.find((x) => x.address === intent.server.address) ?? intent.server;
       if (s?.track) {
         // Preview and identification share a backend library snapshot. The completed install
@@ -886,12 +1000,14 @@ const Servers = ({ link }: ServersProps) => {
       if (s && isFull(s)) void wait(s);
       else void join(s);
     }
-  }, [active, installing, servers, join, wait, doneInstalling]);
+    // `tick` only re-runs the watches while nothing else changes.
+  }, [active, queued, installing, servers, join, wait, doneInstalling, markFailed, clearFailed, cancel, t, tick]);
 
   const installingAt = useMemo(
     () => new Set(Object.values(installing).map(({ server }) => server.address)),
     [installing],
   );
+  const failedSet = useMemo(() => new Set(Object.keys(failedTracks)), [failedTracks]);
 
   /** The same decision a server tile makes, so a friend on a track the player lacks is offered
    *  the install rather than a join the game would fail. Anything that needs the player to
@@ -903,17 +1019,20 @@ const Servers = ({ link }: ServersProps) => {
         inactive: inactive[s.track],
         product: catalog[s.track],
         installing: installingAt.has(s.address),
+        failed: failedSet.has(s.track),
         queued: queue?.address === s.address,
         joinable: s.joinable,
         full: isFull(s),
       }),
-    [library, inactive, catalog, installingAt, queue],
+    [library, inactive, catalog, installingAt, failedSet, queue],
   );
   const joinFriend = useCallback(
     (s: MasterServer) => {
       const action = friendJoinKind(s);
       switch (action.kind) {
+        // A failed install still joins: that is what the friend's button promises.
         case "join":
+        case "failed":
           void join(s);
           break;
         case "wait":
@@ -961,6 +1080,8 @@ const Servers = ({ link }: ServersProps) => {
     missing: !!detail?.track && library[detail.track] === null,
     product: detail ? catalog[detail.track] : undefined,
     installing: !!detail && installingAt.has(detail.address),
+    failed: !!detail && failedSet.has(detail.track),
+    onPickTrack: pickTrack,
     favourite: !!detail && favs.has(detail.address),
     joining,
     busy: joining !== null,
@@ -1232,6 +1353,8 @@ const Servers = ({ link }: ServersProps) => {
           library,
           catalog,
           installingAt,
+          failedTracks: failedSet,
+          onPickTrack: pickTrack,
           favourite: favs.has,
           paintSync,
           friends: friendsHere,
@@ -1290,6 +1413,8 @@ const Servers = ({ link }: ServersProps) => {
                 missing={!!s.track && library[s.track] === null}
                 product={catalog[s.track]}
                 installing={installingAt.has(s.address)}
+                failed={failedSet.has(s.track)}
+                onPickTrack={pickTrack}
                 onInstall={installOnly}
                 onInstallJoin={installAndJoin}
                 inactive={inactive[s.track]}

@@ -290,7 +290,7 @@ const FriendCard = ({
       ? t("friends.installJoin")
       : kind === "wait"
         ? t("friends.wait")
-        : kind === "join" || kind === "activate"
+        : kind === "join" || kind === "activate" || kind === "failed"
           ? t("friends.join")
           : t("friends.view");
 

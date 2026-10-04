@@ -2110,6 +2110,12 @@ const BLOCKED_HOST_PATTERNS: string[] = [
   // listing for the actual MediaFire / MEGA / Drive files. It is a web page, not a file
   // host; leave it available as the manual/info choice but never try to unpack its HTML.
   "oem.mxb-mods.com",
+  // A store product page, not a file: mxb-mods posts link the track's mxbikes-shop.com
+  // listing next to the real MEGA / Drive download, and the shop answers an unattended
+  // request with a Cloudflare challenge (403). Ranked first, it took every one-click install
+  // of LUMBERYARD down with "403 Forbidden" while the MEGA link beside it worked. Purchases
+  // download through signed `index.php?eddfile=` links, which this doesn't match.
+  "mxbikes-shop.com/downloads/",
 ];
 
 export function isBlockedDownload(opt: { url: string; host: string }): boolean {
