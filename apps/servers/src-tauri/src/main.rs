@@ -909,9 +909,7 @@ async fn server_tracks(app: State<'_, App>, id: String) -> Result<TrackState, St
     let tunnels = Arc::clone(&app.tunnels);
     let port = server.observe_port.to_string();
     let (config, listing) = blocking(move || {
-        let config = tunnels.run_script(&server, REMOTE_SH, &["read", &port], 30)?;
-        let listing = tunnels.run_script(&server, REMOTE_SH, &["tracks", &port], 30)?;
-        Ok((config, listing))
+        read_and_list(&tunnels, &server, &port)
     })
     .await?;
     if !listing.success {
@@ -928,6 +926,21 @@ async fn server_tracks(app: State<'_, App>, id: String) -> Result<TrackState, St
     })
 }
 
+
+/// The `read` and `tracks` runs of remote.sh at the same time: they are independent, and each is
+/// a full SSH connection setup, so running them one after the other doubled the wait.
+fn read_and_list(
+    tunnels: &ssh::Tunnels,
+    server: &Server,
+    port: &str,
+) -> Result<(ssh::ScriptOutput, ssh::ScriptOutput), String> {
+    std::thread::scope(|scope| {
+        let listing = scope.spawn(|| tunnels.run_script(server, REMOTE_SH, &["tracks", port], 30));
+        let config = tunnels.run_script(server, REMOTE_SH, &["read", port], 30);
+        let listing = listing.join().map_err(|_| "track listing failed".to_string())?;
+        Ok((config?, listing?))
+    })
+}
 
 fn decode_field(out: &ssh::ScriptOutput, field: &str) -> String {
     use base64::Engine;
@@ -1002,10 +1015,9 @@ async fn apply_tracks(
     let current = current.to_string();
     let live_server = server.clone();
     let out = blocking(move || {
-        let config = tunnels.run_script(&server, REMOTE_SH, &["read", &port], 30)?;
+        let (config, listing) = read_and_list(&tunnels, &server, &port)?;
         let (text, sha) = read_config(&config)?;
         let (package, old_rotation) = config::tracks(&text)?;
-        let listing = tunnels.run_script(&server, REMOTE_SH, &["tracks", &port], 30)?;
         let package_dir = listing.field("dir").unwrap_or_default().to_string();
         let paths: Vec<String> = decode_field(&listing, "paths_b64")
             .lines()
@@ -2060,8 +2072,8 @@ async fn write_and_reload(
     };
     let body = serde_json::json!({ "dry_run": false });
     match admin_call(
-        &app,
-        &server,
+        app,
+        server,
         reqwest::Method::POST,
         "/v1/config/reload",
         Some(&body),

@@ -22,3 +22,9 @@ export function randomTrack(rotation: string[], random: () => number = Math.rand
   if (rotation.length === 0) return null;
   return rotation[Math.min(rotation.length - 1, Math.floor(random() * rotation.length))];
 }
+
+/** What the server reports once queue (from playNextQueue) is saved and rotated to: its
+ *  first track is running, the rest is the rotation. Shown at once while the server works. */
+export function stateAfterSwitch<T extends { current: string | null; rotation: string[] }>(state: T, queue: string[]): T {
+  return { ...state, current: queue[0] ?? null, rotation: queue.slice(1) };
+}
