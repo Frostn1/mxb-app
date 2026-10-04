@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 2026-10-04 — v0.19.2 — Friends, model-swap crash fix, other-drive installs, honest ping
+
 ### Added
 - **View-only and locked paints** (Settings → Paint sync). Mark any of your paints *View-only*: 
   riders on your server still see it, but their MXB App keeps it in a session-only store, deletes 
