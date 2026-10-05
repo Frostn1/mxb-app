@@ -324,9 +324,12 @@ pub fn in_onedrive(path: &std::path::Path, roots: &[std::path::PathBuf]) -> bool
     if path.as_os_str().is_empty() {
         return false;
     }
-    let named = path.components().any(|c| {
-        c.as_os_str().to_string_lossy().to_ascii_lowercase().starts_with("onedrive")
-    });
+    // Split on both separators rather than `components()`: a Windows path read on the Linux
+    // side of Proton is one long component with backslashes in it.
+    let named = path
+        .to_string_lossy()
+        .split(['/', '\\'])
+        .any(|seg| seg.to_ascii_lowercase().starts_with("onedrive"));
     if named {
         return true;
     }
