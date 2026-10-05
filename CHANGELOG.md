@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 2026-10-04 — v0.19.3 — Install folder fixes, OneDrive and ReShade checks, game logs in exports
+
 ## 2026-10-04 — v0.19.2 — Friends, model-swap crash fix, other-drive installs, honest ping
 
 ### Added
