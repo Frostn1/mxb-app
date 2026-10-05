@@ -4,6 +4,9 @@ import type {
   SharePreview,
   Attachment,
   ModsDehydrated,
+  HealthReport,
+  PinResult,
+  ReshadeHealth,
   TrainersRepaired,
   BikeModels,
   BikeSounds,
@@ -3054,6 +3057,28 @@ export function onModsDehydrated(
   cb: (info: ModsDehydrated) => void,
 ): Promise<UnlistenFn> {
   return listen<ModsDehydrated>("mods-dehydrated", (e) => cb(e.payload));
+}
+
+/** The OneDrive and ReShade health checks, read fresh. Attributes only — nothing is downloaded. */
+export function healthCheck(): Promise<HealthReport> {
+  return invoke<HealthReport>("health_check");
+}
+
+/** Mark the PiBoSo folder "Always keep on this device". Progress arrives on {@link onPinProgress}. */
+export function keepPibosoOnDevice(): Promise<PinResult> {
+  return invoke<PinResult>("keep_piboso_on_device");
+}
+
+/** Progress of {@link keepPibosoOnDevice}: items marked so far, of `total`. */
+export function onPinProgress(
+  cb: (p: { done: number; total: number }) => void,
+): Promise<UnlistenFn> {
+  return listen<{ done: number; total: number }>("onedrive-pin-progress", (e) => cb(e.payload));
+}
+
+/** Turn ReShade off (`opengl32.dll` → `opengl32.dll.off`) or back on. Refused while the game runs. */
+export function setReshadeEnabled(enabled: boolean): Promise<ReshadeHealth> {
+  return invoke<ReshadeHealth>("set_reshade_enabled", { enabled });
 }
 
 /** Subscribe to trainer repairs.

@@ -3,6 +3,7 @@ import {
   Check,
   ExternalLink,
   FolderOpen,
+  Power,
   RefreshCw,
   Trash2,
   TriangleAlert,
@@ -14,6 +15,7 @@ import {
   applyReshadePreset,
   deleteReshadePreset,
   reshadeStatus,
+  setReshadeEnabled,
   setReshadePath,
   RESHADE_OFF,
 } from "@frost/shared/api/mods";
@@ -144,6 +146,34 @@ export default function ReshadeCard() {
 
   const openSite = () => void openUrl(RESHADE_URL);
 
+  /** The health check's off switch, here too: `opengl32.dll` ↔ `opengl32.dll.off`. */
+  const setEnabled = async (enable: boolean) => {
+    setBusy("__toggle");
+    try {
+      await setReshadeEnabled(enable);
+      await refresh();
+      toast.success(t(enable ? "health.reshadeOnDone" : "health.reshadeOffDone"));
+    } catch (e) {
+      toast.error(t("health.reshadeFailed"), { description: String(e) });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const toggleButton = (enable: boolean) => (
+    <Button
+      size="sm"
+      variant={enable ? "default" : "ghost"}
+      disabled={busy !== null || running}
+      onClick={() => void setEnabled(enable)}
+    >
+      <Power className="size-3.5" />
+      {running
+        ? t("health.closeGameFirst")
+        : t(enable ? "health.reshadeOn" : "health.reshadeOff")}
+    </Button>
+  );
+
   // No folder at all, so nothing below can be answered. Saying "not installed" here would
   // send someone off to install what they may well already have — but they can name the
   // folder themselves rather than being sent to the game-folder setting and back.
@@ -173,6 +203,20 @@ export default function ReshadeCard() {
         </div>
         {chooseButton}
         {gameFolderLink}
+      </div>
+    );
+  }
+
+  // Turned off from the health notice: say so, and offer the way back before anything else —
+  // "not installed" would send them off to reinstall what is sitting right there.
+  if (!status.installed && status.disabled) {
+    return (
+      <div className="flex flex-col items-start gap-3">
+        <p className="text-[12px] leading-relaxed text-muted-foreground">
+          {t("reshade.disabled")}
+        </p>
+        {toggleButton(true)}
+        <FolderLine dir={status.gameDir} custom={status.custom} />
       </div>
     );
   }
@@ -241,10 +285,13 @@ export default function ReshadeCard() {
             ? t("reshade.installedVersion", { version: status.version })
             : t("reshade.installed")}
         </span>
-        <Button size="sm" variant="ghost" onClick={() => void refresh()}>
-          <RefreshCw className="size-3.5" />
-          {t("reshade.recheck")}
-        </Button>
+        <span className="flex items-center gap-1">
+          {toggleButton(false)}
+          <Button size="sm" variant="ghost" onClick={() => void refresh()}>
+            <RefreshCw className="size-3.5" />
+            {t("reshade.recheck")}
+          </Button>
+        </span>
       </div>
 
       {!status.hasShaders && (

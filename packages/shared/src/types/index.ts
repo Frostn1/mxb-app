@@ -1154,6 +1154,8 @@ export interface ReshadeStatus {
   folderMissing: boolean;
   /** A ReShade `opengl32.dll` is in place. MX Bikes and GP Bikes are OpenGL. */
   installed: boolean;
+  /** Turned off by the health check (renamed to `opengl32.dll.off`); can be turned back on. */
+  disabled: boolean;
   /** ReShade is here under a DirectX name these games never load — a fixable mistake. */
   wrongApi: string | null;
   version: string | null;
@@ -1276,6 +1278,62 @@ export interface ModsDehydrated {
   examples: string[];
   /** The sync tool the tree sits under, e.g. `"OneDrive"`. Null if it doesn't sit under one. */
   provider: string | null;
+}
+
+/** Online-only files by area. Mirrors `cloudfiles::AreaCounts`. */
+export interface CloudAreaCounts {
+  bikes: number;
+  tracks: number;
+  paints: number;
+  plugins: number;
+}
+
+/** The OneDrive health check. Mirrors `cloudfiles::CloudHealth`. */
+export interface OneDriveHealth {
+  /** The folder "Keep on this device" pins — normally `Documents\PiBoSo`. */
+  pibosoDir: string;
+  pibosoInOnedrive: boolean;
+  gameDir: string;
+  gameInOnedrive: boolean;
+  /** Already marked "Always keep on this device". */
+  pinned: boolean;
+  /** Files whose bytes aren't on this PC — counted from attributes, never downloaded. */
+  onlineOnly: CloudAreaCounts;
+  scanned: number;
+  truncated: boolean;
+}
+
+/** The ReShade health check. Mirrors `reshade::Health`. */
+export interface ReshadeHealth {
+  gameDir: string;
+  /** ReShade is `opengl32.dll` in the game folder, so the game loads it. */
+  active: boolean;
+  /** ReShade DLLs under names the game never loads. */
+  otherDlls: string[];
+  /** Turned off (`opengl32.dll.off`); can be turned back on. */
+  disabled: boolean;
+  version: string | null;
+  addons: string[];
+  config: boolean;
+  log: boolean;
+}
+
+/** Both health checks. Mirrors `health::Report`. */
+export interface HealthReport {
+  onedrive: OneDriveHealth;
+  reshade: ReshadeHealth;
+}
+
+/** What "Keep on this device" did. Mirrors `cloudfiles::PinResult`. */
+export interface PinResult {
+  /** False off Windows. */
+  supported: boolean;
+  total: number;
+  pinned: number;
+  failed: number;
+  firstError: string | null;
+  /** Still online-only right after: OneDrive is downloading them in the background. */
+  stillOnlineOnly: number;
 }
 
 /** Trainer files the app repaired before the game could crash on them. Matches `Report`. */

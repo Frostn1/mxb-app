@@ -101,6 +101,7 @@ mod paintroom;
 mod paintsync;
 mod racemode;
 mod ranked;
+mod health;
 mod reshade;
 mod savedservers;
 mod serverbook;
@@ -972,6 +973,72 @@ async fn delete_reshade_preset(app: tauri::AppHandle, name: String) -> Result<()
     .map_err(|e| format!("delete_reshade_preset task failed: {e}"))?
 }
 
+/// The OneDrive and ReShade health checks — see [`health`]. Read by the Home screen's
+/// notices; the same report goes into the log export's summary.
+#[tauri::command]
+async fn health_check(app: tauri::AppHandle) -> Result<health::Report, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let cfg = config::load(&app).unwrap_or_default();
+        Ok(health::check(&cfg))
+    })
+    .await
+    .map_err(|e| format!("health_check task failed: {e}"))?
+}
+
+/// Progress for [`keep_piboso_on_device`]: `{ done, total }` items marked so far.
+const PIN_PROGRESS_EVENT: &str = "onedrive-pin-progress";
+
+#[derive(Clone, serde::Serialize)]
+struct PinProgress {
+    done: usize,
+    total: usize,
+}
+
+/// Mark the PiBoSo folder "Always keep on this device". The folder is the one the health
+/// check names, re-derived from the config here — the UI never passes a path.
+#[tauri::command]
+async fn keep_piboso_on_device(app: tauri::AppHandle) -> Result<cloudfiles::PinResult, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        use tauri::Emitter as _;
+        let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+        let Some(dir) = health::pin_target(&cfg) else {
+            return Err("The PiBoSo folder isn't set or isn't there.".to_string());
+        };
+        let result = cloudfiles::pin_tree(&dir, |done, total| {
+            let _ = app.emit(PIN_PROGRESS_EVENT, PinProgress { done, total });
+        });
+        log::info!(
+            "[cloud] keep on this device: {} — pinned {} of {}, {} failed, {} still downloading{}",
+            dir.display(),
+            result.pinned,
+            result.total,
+            result.failed,
+            result.still_online_only,
+            result.first_error.as_deref().map(|e| format!(" (first error: {e})")).unwrap_or_default()
+        );
+        Ok(result)
+    })
+    .await
+    .map_err(|e| format!("keep_piboso_on_device task failed: {e}"))?
+}
+
+/// Turn ReShade off (rename `opengl32.dll` aside) or back on. Refused while the game runs.
+#[tauri::command]
+async fn set_reshade_enabled(
+    app: tauri::AppHandle,
+    enabled: bool,
+) -> Result<reshade::Health, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+        let out = reshade::set_enabled(&cfg.reshade_dir(), enabled, gameproc::is_game_running())
+            .map_err(|e| format!("{e:#}"))?;
+        log::info!("[reshade] turned {} by the player", if enabled { "on" } else { "off" });
+        Ok(out)
+    })
+    .await
+    .map_err(|e| format!("set_reshade_enabled task failed: {e}"))?
+}
+
 #[tauri::command]
 async fn bind_sound(
     app: tauri::AppHandle,
@@ -1355,7 +1422,9 @@ async fn export_logs(app: tauri::AppHandle, dest: String) -> Result<logs::Export
     tauri::async_runtime::spawn_blocking(move || {
         let cfg = config::load(&app).unwrap_or_default();
         let info = logs::info(&log_dir, &frostmod_dir, &secure_dir, &cfg);
-        let summary = logs::summary(&version, frostmod_version.as_deref(), &cfg, &info);
+        let health = health::check(&cfg).summary_lines();
+        let summary =
+            logs::summary(&version, frostmod_version.as_deref(), &cfg, &info, &health);
         logs::export(std::path::Path::new(&dest), &info, &summary).map_err(|e| format!("{e:#}"))
     })
     .await
@@ -1376,11 +1445,19 @@ async fn share_logs(app: tauri::AppHandle) -> Result<logs::ShareResult, String> 
     let cfg = config::load(&app).unwrap_or_default();
     let secure_dir = secure_launch::secure_dir(&app).unwrap_or_default();
     let info = logs::info(&log_dir, &frostmod_dir, &secure_dir, &cfg);
+    // Walks the mods tree's metadata, so off the async runtime like the export's own work.
+    let health = {
+        let cfg = cfg.clone();
+        tauri::async_runtime::spawn_blocking(move || health::check(&cfg).summary_lines())
+            .await
+            .unwrap_or_default()
+    };
     let summary = logs::summary(
         &version,
         frostmod_manage::installed_version(&app).as_deref(),
         &cfg,
         &info,
+        &health,
     );
     logs::share(&app, &info, &summary)
         .await
@@ -8835,6 +8912,9 @@ fn main() {
             set_reshade_path,
             apply_reshade_preset,
             delete_reshade_preset,
+            health_check,
+            keep_piboso_on_device,
+            set_reshade_enabled,
             detect_loose_swaps,
             register_loose_swaps,
             detect_orphaned_setup,
