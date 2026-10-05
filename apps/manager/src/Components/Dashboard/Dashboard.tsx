@@ -17,6 +17,7 @@ import { parsePluginView, usePlugins } from "@frost/shared/lib/usePlugins";
 import Servers from "../Servers/Servers";
 import DropZone from "../Dropzone/DropZone";
 import RuntimeBanner, { ProfileBanner } from "../RuntimeBanner/RuntimeBanner";
+import HealthBanner from "../RuntimeBanner/HealthBanner";
 import UpdateBanner from "../UpdateBanner/UpdateBanner";
 import SecurePrompt from "./SecurePrompt";
 import GameIntegrationConsent from "../GameIntegration/GameIntegrationConsent";
@@ -308,6 +309,8 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
       />
       <RuntimeBanner />
       <ProfileBanner />
+      {/* OneDrive and ReShade: the two setups behind crashes on joining busy servers. */}
+      <HealthBanner />
       <UpdateBanner />
       {/* An offer, not a problem, so it waits for the intro and the tour and sits below both bars. */}
       <Mxbmrp3Prompt paused={welcomeActive || tourRun} className="border-b border-border px-3 py-2" />

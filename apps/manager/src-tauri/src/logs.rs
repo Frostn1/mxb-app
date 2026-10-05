@@ -366,6 +366,7 @@ pub fn summary(
     frostmod_version: Option<&str>,
     cfg: &AppConfig,
     info: &LogsInfo,
+    health: &str,
 ) -> String {
     let mut out = String::new();
     out.push_str(&format!("MXB App {version}\n"));
@@ -378,6 +379,9 @@ pub fn summary(
     out.push_str(&format!("mods folder: {}\n", show(&cfg.mods_path)));
     out.push_str(&format!("install folder: {}\n", show(&cfg.install_dir())));
     out.push_str(&format!("profiles folder: {}\n", cfg.profiles_dir().display()));
+    // The `onedrive: …` and `reshade: …` lines from [`crate::health`] — the two setups behind
+    // crashes on joining busy servers, so support sees them without having to ask.
+    out.push_str(health);
     for (label, group) in groups(info) {
         out.push_str(&format!(
             "\n{label} logs: {}{}\n",
@@ -528,13 +532,14 @@ mod tests {
         let cfg = AppConfig::default();
         let info = info(&app_dir, &frostmod_dir, &root.join("secure"), &cfg);
 
-        let text = summary("9.9.9", Some("v0.13.0"), &cfg, &info);
+        let text = summary("9.9.9", Some("v0.13.0"), &cfg, &info, "onedrive: x\nreshade: y\n");
         assert!(text.contains("MXB App 9.9.9"), "{text}");
         assert!(text.contains("frostmod: v0.13.0"), "{text}");
         assert!(text.contains("frostmod.log"), "{text}");
+        assert!(text.contains("onedrive: x\nreshade: y\n"), "{text}");
 
         // Nothing installed is a fact worth stating, not a line to leave out.
-        assert!(summary("9.9.9", None, &cfg, &info).contains("frostmod: (not installed)"));
+        assert!(summary("9.9.9", None, &cfg, &info, "").contains("frostmod: (not installed)"));
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -567,7 +572,7 @@ mod tests {
         assert_eq!(info.secure.files.len(), 1);
 
         let dest = root.join("out").join("logs.zip");
-        let result = export(&dest, &info, &summary("9.9.9", Some("v0.13.0"), &cfg, &info)).unwrap();
+        let result = export(&dest, &info, &summary("9.9.9", Some("v0.13.0"), &cfg, &info, "")).unwrap();
         assert_eq!(result.files, 4);
 
         let mut zip = zip::ZipArchive::new(std::fs::File::open(&dest).unwrap()).unwrap();

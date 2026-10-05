@@ -239,9 +239,580 @@ pub fn is_placeholder(_path: &std::path::Path) -> bool {
     false
 }
 
+// ---------------------------------------------------------------------------
+// The health check: is the PiBoSo folder in OneDrive, and is any of it online-only?
+// ---------------------------------------------------------------------------
+//
+// The session-start warning above only fires when the app sees a game session begin, and it
+// only lands in the log. A player who launches from Steam never sees it. This half answers
+// the same question on demand, for the Home screen and the log export, and adds the one fix
+// the app can make for them: mark the folder "Always keep on this device".
+//
+// Joining a busy server is where an online-only folder hurts most: the game loads every
+// other rider's bike, paints and textures at once, on its main thread, and each placeholder
+// it touches is a download it has to wait for.
+
+/// `FILE_ATTRIBUTE_*` values the check reads. Spelled out here rather than pulled from a
+/// bindings crate: the core crate binds the handful of Win32 calls it needs by hand.
+pub mod attr {
+    pub const READONLY: u32 = 0x0000_0001;
+    pub const HIDDEN: u32 = 0x0000_0002;
+    pub const SYSTEM: u32 = 0x0000_0004;
+    pub const DIRECTORY: u32 = 0x0000_0010;
+    pub const ARCHIVE: u32 = 0x0000_0020;
+    pub const NORMAL: u32 = 0x0000_0080;
+    pub const TEMPORARY: u32 = 0x0000_0100;
+    pub const OFFLINE: u32 = 0x0000_1000;
+    pub const NOT_CONTENT_INDEXED: u32 = 0x0000_2000;
+    pub const RECALL_ON_OPEN: u32 = 0x0004_0000;
+    /// "Always keep on this device" — what Explorer's menu item and `attrib +P` set.
+    pub const PINNED: u32 = 0x0008_0000;
+    /// "Free up space" — the opposite of `PINNED`; the two must never be set together.
+    pub const UNPINNED: u32 = 0x0010_0000;
+    pub const RECALL_ON_DATA_ACCESS: u32 = 0x0040_0000;
+
+    /// The attributes `SetFileAttributesW` accepts. Anything else in a value read back from
+    /// `GetFileAttributesW` (directory, reparse point, the recall bits) has to be masked off
+    /// before writing it back.
+    pub const SETTABLE: u32 = READONLY
+        | HIDDEN
+        | SYSTEM
+        | ARCHIVE
+        | TEMPORARY
+        | OFFLINE
+        | NOT_CONTENT_INDEXED
+        | PINNED
+        | UNPINNED;
+}
+
+/// The bytes of a file with these attributes are not on this PC.
+pub fn attrs_online_only(attrs: u32) -> bool {
+    attrs & (attr::OFFLINE | attr::RECALL_ON_OPEN | attr::RECALL_ON_DATA_ACCESS) != 0
+}
+
+/// Marked "Always keep on this device".
+pub fn attrs_pinned(attrs: u32) -> bool {
+    attrs & attr::PINNED != 0
+}
+
+/// The attribute set to write to pin an item: whatever it had that can be written back, minus
+/// "free up space", plus "always keep". Never zero, so it can't be read as "no change".
+pub fn attrs_to_pin(attrs: u32) -> u32 {
+    let next = (attrs & attr::SETTABLE & !attr::UNPINNED) | attr::PINNED;
+    if next == 0 {
+        attr::NORMAL
+    } else {
+        next
+    }
+}
+
+/// OneDrive's own roots, from the variables its client sets for every signed-in account.
+/// They catch a OneDrive folder that has been moved or renamed — a path check alone would
+/// miss `D:\Cloud\Documents`.
+pub fn onedrive_roots() -> Vec<std::path::PathBuf> {
+    ["OneDrive", "OneDriveConsumer", "OneDriveCommercial"]
+        .iter()
+        .filter_map(|v| std::env::var_os(v))
+        .filter(|v| !v.is_empty())
+        .map(std::path::PathBuf::from)
+        .collect()
+}
+
+/// Does `path` sit under OneDrive? Either a folder in it is named like OneDrive's own
+/// (`OneDrive`, `OneDrive - Contoso`), or it is under one of `roots`.
+pub fn in_onedrive(path: &std::path::Path, roots: &[std::path::PathBuf]) -> bool {
+    if path.as_os_str().is_empty() {
+        return false;
+    }
+    let named = path.components().any(|c| {
+        c.as_os_str().to_string_lossy().to_ascii_lowercase().starts_with("onedrive")
+    });
+    if named {
+        return true;
+    }
+    let norm = |p: &std::path::Path| {
+        p.to_string_lossy().replace('/', "\\").trim_end_matches('\\').to_ascii_lowercase()
+    };
+    let here = norm(path);
+    roots.iter().map(|r| norm(r)).any(|r| {
+        !r.is_empty() && (here == r || here.starts_with(&format!("{r}\\")))
+    })
+}
+
+/// The PiBoSo folder a game folder sits in (`Documents\PiBoSo` for `…\PiBoSo\MX Bikes\mods`),
+/// or `dir` itself when there is no such ancestor. This is the folder worth pinning: it holds
+/// the mods and the profiles both, for every PiBoSo game the player has.
+pub fn piboso_root(dir: &std::path::Path) -> std::path::PathBuf {
+    dir.ancestors()
+        .find(|a| {
+            a.file_name()
+                .is_some_and(|n| n.to_string_lossy().eq_ignore_ascii_case("piboso"))
+        })
+        .unwrap_or(dir)
+        .to_path_buf()
+}
+
+/// Online-only files, by what the game would be loading when it reached them.
+#[derive(Debug, Clone, Copy, Default, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AreaCounts {
+    pub bikes: usize,
+    pub tracks: usize,
+    pub paints: usize,
+    pub plugins: usize,
+}
+
+impl AreaCounts {
+    pub fn total(&self) -> usize {
+        self.bikes + self.tracks + self.paints + self.plugins
+    }
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CloudHealth {
+    /// The folder "Keep on this device" pins — the PiBoSo folder. Empty when unknown.
+    pub piboso_dir: String,
+    /// It sits under OneDrive.
+    pub piboso_in_onedrive: bool,
+    /// The game's install folder, and whether that is under OneDrive too.
+    pub game_dir: String,
+    pub game_in_onedrive: bool,
+    /// The PiBoSo folder already carries "Always keep on this device".
+    pub pinned: bool,
+    /// Files whose bytes aren't on this PC.
+    pub online_only: AreaCounts,
+    /// Files looked at, so `online_only` has a denominator.
+    pub scanned: usize,
+    /// The walk stopped at its cap; the counts are a floor.
+    pub truncated: bool,
+}
+
+impl CloudHealth {
+    pub fn in_onedrive(&self) -> bool {
+        self.piboso_in_onedrive || self.game_in_onedrive
+    }
+
+    /// Worth a notice: anything in OneDrive, or anything online-only wherever it is.
+    pub fn needs_attention(&self) -> bool {
+        self.in_onedrive() || self.online_only.total() > 0
+    }
+
+    /// One line for the log export's `summary.txt`.
+    pub fn summary_line(&self) -> String {
+        let place = match (self.piboso_in_onedrive, self.game_in_onedrive) {
+            (true, true) => "PiBoSo and game folders in OneDrive",
+            (true, false) => "PiBoSo folder in OneDrive",
+            (false, true) => "game folder in OneDrive",
+            (false, false) => "not in OneDrive",
+        };
+        let c = &self.online_only;
+        format!(
+            "onedrive: {place}; {} online-only of {}{} scanned (bikes {}, tracks {}, paints {}, \
+             plugins {}); pinned: {}",
+            c.total(),
+            self.scanned,
+            if self.truncated { "+" } else { "" },
+            c.bikes,
+            c.tracks,
+            c.paints,
+            c.plugins,
+            if self.pinned { "yes" } else { "no" },
+        )
+    }
+}
+
+/// Cap on the walk. A big mods tree is tens of thousands of files; the answer is already
+/// clear long before this.
+const HEALTH_MAX_FILES: usize = 250_000;
+const HEALTH_MAX_DEPTH: usize = 12;
+
+/// Which area a file under the mods tree belongs to. Paints live inside bike folders
+/// (`bikes/<Bike>/paints/…`), so they are told apart by the `paints` segment or the extension.
+fn mods_area(rel: &std::path::Path) -> Option<Area> {
+    let mut segs = rel.components().map(|c| c.as_os_str().to_string_lossy().to_ascii_lowercase());
+    let top = segs.next()?;
+    let rest: Vec<String> = segs.collect();
+    let is_paint = rest.iter().any(|s| s == "paints")
+        || rest.last().is_some_and(|f| f.ends_with(".pnt"));
+    match top.as_str() {
+        "bikes" if is_paint => Some(Area::Paints),
+        "bikes" => Some(Area::Bikes),
+        "tracks" => Some(Area::Tracks),
+        _ if is_paint => Some(Area::Paints),
+        _ => None,
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Area {
+    Bikes,
+    Tracks,
+    Paints,
+}
+
+impl AreaCounts {
+    fn bump(&mut self, area: Area) {
+        match area {
+            Area::Bikes => self.bikes += 1,
+            Area::Tracks => self.tracks += 1,
+            Area::Paints => self.paints += 1,
+        }
+    }
+}
+
+/// Is this directory entry online-only? Reads the attributes the directory listing already
+/// carries — on Windows `DirEntry::metadata` costs no extra call and never opens the file.
+#[cfg(windows)]
+fn entry_online_only(entry: &std::fs::DirEntry) -> bool {
+    use std::os::windows::fs::MetadataExt;
+    entry.metadata().is_ok_and(|m| attrs_online_only(m.file_attributes()))
+}
+
+#[cfg(not(windows))]
+fn entry_online_only(entry: &std::fs::DirEntry) -> bool {
+    is_placeholder(&entry.path())
+}
+
+/// Walk `root`, calling `on_file(relative path, online_only)` per file. Never opens a file.
+fn walk_files(
+    root: &std::path::Path,
+    budget: &mut usize,
+    truncated: &mut bool,
+    mut on_file: impl FnMut(&std::path::Path, bool),
+) {
+    let mut stack = vec![(root.to_path_buf(), 0usize)];
+    while let Some((dir, depth)) = stack.pop() {
+        if depth > HEALTH_MAX_DEPTH {
+            continue;
+        }
+        let Ok(entries) = std::fs::read_dir(&dir) else { continue };
+        for entry in entries.flatten() {
+            if *budget == 0 {
+                *truncated = true;
+                return;
+            }
+            let Ok(kind) = entry.file_type() else { continue };
+            let path = entry.path();
+            if kind.is_dir() {
+                stack.push((path, depth + 1));
+                continue;
+            }
+            *budget -= 1;
+            let rel = path.strip_prefix(root).unwrap_or(&path);
+            on_file(rel, entry_online_only(&entry));
+        }
+    }
+}
+
+/// Count online-only files in the places the game loads from when joining a server: the
+/// mods tree's bikes, tracks and paints, rider paints under the profiles folder, and the
+/// game's `plugins` folder. Attributes only — nothing is hydrated by looking.
+pub fn check(
+    mods_root: &std::path::Path,
+    profiles_dir: &std::path::Path,
+    game_dir: &std::path::Path,
+) -> CloudHealth {
+    check_with_roots(mods_root, profiles_dir, game_dir, &onedrive_roots())
+}
+
+/// The folder to pin: the PiBoSo folder above the mods tree, or above the profiles when the
+/// mods tree has been moved somewhere with no PiBoSo parent, or the mods tree itself.
+pub fn pin_dir(
+    mods_root: &std::path::Path,
+    profiles_dir: &std::path::Path,
+) -> Option<std::path::PathBuf> {
+    let has = |p: &&std::path::Path| !p.as_os_str().is_empty();
+    [mods_root, profiles_dir]
+        .into_iter()
+        .filter(has)
+        .map(piboso_root)
+        .find(|p| p.file_name().is_some_and(|n| n.to_string_lossy().eq_ignore_ascii_case("piboso")))
+        .or_else(|| has(&mods_root).then(|| mods_root.to_path_buf()))
+}
+
+pub fn check_with_roots(
+    mods_root: &std::path::Path,
+    profiles_dir: &std::path::Path,
+    game_dir: &std::path::Path,
+    roots: &[std::path::PathBuf],
+) -> CloudHealth {
+    let mut out = CloudHealth::default();
+    let has = |p: &std::path::Path| !p.as_os_str().is_empty();
+
+    if let Some(p) = &pin_dir(mods_root, profiles_dir) {
+        out.piboso_dir = p.to_string_lossy().into_owned();
+        out.piboso_in_onedrive = in_onedrive(p, roots) || in_onedrive(mods_root, roots);
+        out.pinned = read_attrs(p).is_some_and(attrs_pinned);
+    }
+    if has(game_dir) {
+        out.game_dir = game_dir.to_string_lossy().into_owned();
+        out.game_in_onedrive = in_onedrive(game_dir, roots);
+    }
+
+    let mut budget = HEALTH_MAX_FILES;
+    let mut truncated = false;
+    let mut counts = AreaCounts::default();
+    let mut scanned = 0usize;
+    if has(mods_root) {
+        for sub in ["bikes", "tracks"] {
+            let dir = crate::library::resolve_child(mods_root, sub);
+            walk_files(&dir, &mut budget, &mut truncated, |rel, online| {
+                scanned += 1;
+                if online {
+                    if let Some(area) = mods_area(&std::path::Path::new(sub).join(rel)) {
+                        counts.bump(area);
+                    }
+                }
+            });
+        }
+    }
+    if has(profiles_dir) {
+        walk_files(profiles_dir, &mut budget, &mut truncated, |rel, online| {
+            let paint = rel.components().any(|c| c.as_os_str().eq_ignore_ascii_case("paints"));
+            if paint {
+                scanned += 1;
+                if online {
+                    counts.paints += 1;
+                }
+            }
+        });
+    }
+    if has(game_dir) {
+        let dir = crate::library::resolve_child(game_dir, "plugins");
+        walk_files(&dir, &mut budget, &mut truncated, |_, online| {
+            scanned += 1;
+            if online {
+                counts.plugins += 1;
+            }
+        });
+    }
+    out.online_only = counts;
+    out.scanned = scanned;
+    out.truncated = truncated;
+    out
+}
+
+#[cfg(windows)]
+fn wide(path: &std::path::Path) -> Vec<u16> {
+    use std::os::windows::ffi::OsStrExt;
+    path.as_os_str().encode_wide().chain(std::iter::once(0)).collect()
+}
+
+#[cfg(windows)]
+mod win {
+    extern "system" {
+        pub fn GetFileAttributesW(name: *const u16) -> u32;
+        pub fn SetFileAttributesW(name: *const u16, attrs: u32) -> i32;
+    }
+}
+
+/// The item's attributes, without opening it.
+#[cfg(windows)]
+pub fn read_attrs(path: &std::path::Path) -> Option<u32> {
+    let w = wide(path);
+    // SAFETY: NUL-terminated UTF-16 that outlives the call; metadata only.
+    let a = unsafe { win::GetFileAttributesW(w.as_ptr()) };
+    (a != u32::MAX).then_some(a)
+}
+
+#[cfg(not(windows))]
+pub fn read_attrs(_path: &std::path::Path) -> Option<u32> {
+    None
+}
+
+/// What pinning did, for the player to read as it is.
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PinResult {
+    /// False off Windows, where there is no such attribute to set.
+    pub supported: bool,
+    /// Files and folders found under the PiBoSo folder, the folder itself included.
+    pub total: usize,
+    /// Of those, how many now carry "Always keep on this device".
+    pub pinned: usize,
+    /// How many refused the change.
+    pub failed: usize,
+    /// The first refusal, so a failure has a reason attached.
+    pub first_error: Option<String>,
+    /// Files still online-only right after pinning. OneDrive downloads them in the
+    /// background; until it finishes, they are not on this PC yet.
+    pub still_online_only: usize,
+}
+
+/// Mark `root` and everything under it "Always keep on this device" — the same attribute
+/// Explorer's menu item and `attrib +P -U /s /d` set. OneDrive then downloads whatever is
+/// online-only and stops evicting it. Nothing is moved, copied or read.
+///
+/// `progress(done, total)` is called as it goes; `total` is known after a metadata-only walk.
+#[cfg(windows)]
+pub fn pin_tree(root: &std::path::Path, mut progress: impl FnMut(usize, usize)) -> PinResult {
+    let mut out = PinResult { supported: true, ..Default::default() };
+    let mut items = vec![root.to_path_buf()];
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&dir) else { continue };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if entry.file_type().is_ok_and(|k| k.is_dir()) {
+                stack.push(path.clone());
+            }
+            items.push(path);
+        }
+    }
+    out.total = items.len();
+    progress(0, out.total);
+    for (i, path) in items.iter().enumerate() {
+        match read_attrs(path) {
+            Some(a) if attrs_pinned(a) && a & attr::UNPINNED == 0 => out.pinned += 1,
+            Some(a) => {
+                let w = wide(path);
+                // SAFETY: NUL-terminated UTF-16 that outlives the call. Changes attributes
+                // only; the file is not opened, so this cannot hydrate it by itself.
+                let ok = unsafe { win::SetFileAttributesW(w.as_ptr(), attrs_to_pin(a)) } != 0;
+                if ok {
+                    out.pinned += 1;
+                } else {
+                    out.failed += 1;
+                    if out.first_error.is_none() {
+                        out.first_error = Some(format!(
+                            "{}: {}",
+                            path.display(),
+                            std::io::Error::last_os_error()
+                        ));
+                    }
+                }
+            }
+            None => {
+                out.failed += 1;
+                if out.first_error.is_none() {
+                    out.first_error = Some(format!("{}: can't read its attributes", path.display()));
+                }
+            }
+        }
+        if i % 200 == 0 || i + 1 == out.total {
+            progress(i + 1, out.total);
+        }
+    }
+    out.still_online_only = items
+        .iter()
+        .filter(|p| read_attrs(p).is_some_and(|a| a & attr::DIRECTORY == 0 && attrs_online_only(a)))
+        .count();
+    out
+}
+
+#[cfg(not(windows))]
+pub fn pin_tree(_root: &std::path::Path, _progress: impl FnMut(usize, usize)) -> PinResult {
+    PinResult::default()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn attributes_parse_to_online_only_and_pinned() {
+        // A hydrated, ordinary file.
+        assert!(!attrs_online_only(attr::ARCHIVE));
+        // Files On-Demand placeholder, the classic offline bit, and the whole-file variant.
+        assert!(attrs_online_only(attr::ARCHIVE | attr::RECALL_ON_DATA_ACCESS));
+        assert!(attrs_online_only(attr::OFFLINE));
+        assert!(attrs_online_only(attr::RECALL_ON_OPEN | attr::DIRECTORY));
+        // Pinned but still downloading: both are true at once, and that's honest.
+        let downloading = attr::PINNED | attr::RECALL_ON_DATA_ACCESS;
+        assert!(attrs_pinned(downloading) && attrs_online_only(downloading));
+        assert!(!attrs_pinned(attr::UNPINNED));
+    }
+
+    #[test]
+    fn pinning_clears_unpinned_and_drops_unsettable_bits() {
+        let a = attr::ARCHIVE | attr::UNPINNED | attr::RECALL_ON_DATA_ACCESS | attr::DIRECTORY;
+        let next = attrs_to_pin(a);
+        assert_eq!(next, attr::ARCHIVE | attr::PINNED);
+        assert_eq!(attrs_to_pin(0), attr::PINNED);
+        assert_eq!(attrs_to_pin(attr::READONLY | attr::HIDDEN), attr::READONLY | attr::HIDDEN | attr::PINNED);
+    }
+
+    #[test]
+    fn onedrive_paths_are_recognised_and_other_drives_are_not() {
+        let none: Vec<std::path::PathBuf> = Vec::new();
+        let p = std::path::Path::new("C:\\Users\\u\\OneDrive\\Documents\\PiBoSo\\MX Bikes\\mods");
+        assert!(in_onedrive(p, &none));
+        assert!(in_onedrive(std::path::Path::new("C:/Users/u/OneDrive - Contoso/Documents/PiBoSo"), &none));
+        assert!(!in_onedrive(std::path::Path::new("D:\\Games\\PiBoSo\\MX Bikes"), &none));
+        assert!(!in_onedrive(std::path::Path::new("C:\\Users\\u\\Documents\\PiBoSo"), &none));
+        assert!(!in_onedrive(std::path::Path::new(""), &none));
+        // A OneDrive moved somewhere that doesn't say so is caught by its root.
+        let roots = vec![std::path::PathBuf::from("D:\\Cloud")];
+        assert!(in_onedrive(std::path::Path::new("d:\\cloud\\Documents\\PiBoSo"), &roots));
+        assert!(!in_onedrive(std::path::Path::new("D:\\Cloudy\\PiBoSo"), &roots));
+        assert!(!in_onedrive(std::path::Path::new("E:\\Cloud\\PiBoSo"), &roots));
+    }
+
+    #[test]
+    fn the_piboso_folder_is_found_above_the_mods_tree() {
+        let p = std::path::Path::new("C:/Users/u/OneDrive/Documents/PiBoSo/MX Bikes/mods");
+        assert_eq!(piboso_root(p), std::path::Path::new("C:/Users/u/OneDrive/Documents/PiBoSo"));
+        let moved = std::path::Path::new("D:/mods");
+        assert_eq!(piboso_root(moved), moved);
+    }
+
+    #[test]
+    fn files_are_counted_by_area() {
+        let count = |rel: &str| {
+            let mut c = AreaCounts::default();
+            if let Some(area) = mods_area(std::path::Path::new(rel)) {
+                c.bump(area);
+            }
+            c
+        };
+        assert_eq!(count("bikes/KTM/ktm.pkz").bikes, 1);
+        assert_eq!(count("bikes/KTM/paints/red.pnt").paints, 1);
+        assert_eq!(count("bikes/KTM/loose.pnt").paints, 1);
+        assert_eq!(count("tracks/Club/club.pkz").tracks, 1);
+        assert_eq!(count("misc/readme.txt").total(), 0);
+    }
+
+    /// NTFS stores the pinned bit on any file, synced or not, so a temp folder is enough to
+    /// check the walk marks every item, the folder itself included, and reports it.
+    #[cfg(windows)]
+    #[test]
+    fn pinning_marks_the_folder_and_everything_in_it() {
+        let d = std::env::temp_dir().join(format!("frost-pin-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(d.join("mods/bikes")).unwrap();
+        std::fs::write(d.join("mods/bikes/a.pkz"), b"x").unwrap();
+        let mut last = (0, 0);
+        let r = pin_tree(&d, |done, total| last = (done, total));
+        assert!(r.supported);
+        assert_eq!((r.total, r.pinned, r.failed, r.still_online_only), (4, 4, 0, 0));
+        assert_eq!(last, (4, 4));
+        assert!(read_attrs(&d.join("mods/bikes/a.pkz")).is_some_and(attrs_pinned));
+        assert!(read_attrs(&d).is_some_and(attrs_pinned));
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn a_local_folder_off_onedrive_reports_nothing() {
+        let root = std::env::temp_dir().join(format!("frost-cloudhealth-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let mods = root.join("Games").join("mods");
+        std::fs::create_dir_all(mods.join("bikes/KTM/paints")).unwrap();
+        std::fs::create_dir_all(mods.join("tracks/Club")).unwrap();
+        std::fs::write(mods.join("bikes/KTM/ktm.pkz"), b"x").unwrap();
+        std::fs::write(mods.join("bikes/KTM/paints/red.pnt"), b"x").unwrap();
+        std::fs::write(mods.join("tracks/Club/club.pkz"), b"x").unwrap();
+        let game = root.join("Game");
+        std::fs::create_dir_all(game.join("plugins")).unwrap();
+        std::fs::write(game.join("plugins/a.dlo"), b"x").unwrap();
+
+        let h = check_with_roots(&mods, &root.join("nope"), &game, &[]);
+        assert_eq!(h.scanned, 4);
+        assert_eq!(h.online_only.total(), 0);
+        assert!(!h.needs_attention() || root.to_string_lossy().to_ascii_lowercase().contains("onedrive"));
+        assert!(h.summary_line().starts_with("onedrive: "));
+        let _ = std::fs::remove_dir_all(&root);
+    }
 
     #[test]
     fn only_content_extensions_are_counted() {

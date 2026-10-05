@@ -57,9 +57,9 @@ const SHADER_DIR: &str = "reshade-shaders";
 /// The name of the no-effects preset, and the file it lives in.
 ///
 /// ReShade has no "off" state in its config — the nearest honest thing is a preset that runs
-/// no techniques, which this app writes itself. Disabling by renaming `opengl32.dll` was the
-/// alternative and is worse: it fails while the game holds the file open, and it is the kind
-/// of change a player won't connect back to a dropdown in a settings page.
+/// no techniques, which this app writes itself. A preset that runs nothing still leaves
+/// ReShade hooked into the game, though, so the health check's "Turn off ReShade" goes further
+/// and renames the DLL aside — see [`set_enabled`], which refuses while the game is running.
 pub const OFF: &str = "Off";
 const OFF_FILE: &str = "Off.ini";
 
@@ -105,6 +105,8 @@ pub struct Status {
     pub folder_missing: bool,
     /// A ReShade `opengl32.dll` is in place — the game will load it.
     pub installed: bool,
+    /// ReShade was turned off by renaming it to `opengl32.dll.off`, and can be turned back on.
+    pub disabled: bool,
     /// ReShade is here, but as this DLL, which these games never load. Set only when the
     /// OpenGL one is absent, because a correct install alongside a leftover DirectX one is
     /// working fine and shouldn't be nagged about.
@@ -503,6 +505,7 @@ pub fn status(reshade_path: &str) -> Status {
         custom: false,
         folder_missing: false,
         installed,
+        disabled: !installed && is_reshade_dll(&resolve_child(&game_dir, OPENGL_DLL_OFF)),
         wrong_api,
         version: gl.flatten(),
         has_shaders,
@@ -736,9 +739,224 @@ fn walk_files(dir: &Path) -> Vec<PathBuf> {
     out
 }
 
+// ---------------------------------------------------------------------------
+// Health check: is ReShade hooked into the game, and turning it off/on
+// ---------------------------------------------------------------------------
+//
+// ReShade hooks `opengl32`, and joining a busy server is when the game loads every other
+// rider's bikes, paints and textures at once. Players have had crashes and freezes there that
+// stopped the moment ReShade went. So the health check names it, and offers a reversible off
+// switch: `opengl32.dll` → `opengl32.dll.off`, and back.
+
+/// The name a turned-off ReShade DLL carries. Anything ending in `.off` is ignored by the
+/// detection below — it is a disabled copy, not a hook.
+const OPENGL_DLL_OFF: &str = "opengl32.dll.off";
+const LOG: &str = "ReShade.log";
+const ADDON_EXTENSIONS: [&str; 3] = ["addon", "addon32", "addon64"];
+
+#[derive(Debug, Clone, Default, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct Health {
+    /// The folder looked in — the game folder, or the ReShade override.
+    pub game_dir: String,
+    /// ReShade is `opengl32.dll` here, so the game loads it. This is the one that can crash.
+    pub active: bool,
+    /// ReShade is here as a DLL the game never loads (`dxgi.dll` and friends).
+    pub other_dlls: Vec<String>,
+    /// Turned off by [`set_enabled`]; can be turned back on.
+    pub disabled: bool,
+    pub version: Option<String>,
+    /// ReShade add-ons beside it (`*.addon`, `*.addon64`). They only run when ReShade does.
+    pub addons: Vec<String>,
+    /// `ReShade.ini` / `ReShade.log` — traces of an install, even with no DLL left.
+    pub config: bool,
+    pub log: bool,
+}
+
+impl Health {
+    /// One line for the log export's `summary.txt`.
+    pub fn summary_line(&self) -> String {
+        if self.game_dir.is_empty() {
+            return "reshade: unknown (no game folder)".into();
+        }
+        let state = if self.active {
+            match &self.version {
+                Some(v) => format!("ACTIVE as opengl32.dll (v{v})"),
+                None => "ACTIVE as opengl32.dll".into(),
+            }
+        } else if self.disabled {
+            "turned off (opengl32.dll.off)".into()
+        } else {
+            "not active".into()
+        };
+        let mut extra = Vec::new();
+        if !self.other_dlls.is_empty() {
+            extra.push(format!("unused dll: {}", self.other_dlls.join(", ")));
+        }
+        if !self.addons.is_empty() {
+            extra.push(format!("add-ons: {}", self.addons.join(", ")));
+        }
+        if self.config {
+            extra.push("ReShade.ini".into());
+        }
+        if self.log {
+            extra.push("ReShade.log".into());
+        }
+        if extra.is_empty() {
+            format!("reshade: {state}")
+        } else {
+            format!("reshade: {state}; {}", extra.join("; "))
+        }
+    }
+}
+
+/// What ReShade is doing in `dir`. Reads each candidate DLL once to confirm it is ReShade
+/// (the marker or the version resource), so an unrelated `opengl32.dll` is never named.
+pub fn health(dir: &str) -> Health {
+    let dir = dir.trim();
+    let mut out = Health { game_dir: dir.to_string(), ..Default::default() };
+    if dir.is_empty() {
+        return out;
+    }
+    let game_dir = PathBuf::from(dir);
+    if !game_dir.is_dir() {
+        return out;
+    }
+    if let Some(version) = probe_dll(&resolve_child(&game_dir, OPENGL_DLL)) {
+        out.active = true;
+        out.version = version;
+    } else if let Some(version) = probe_dll(&resolve_child(&game_dir, OPENGL_DLL_OFF)) {
+        out.disabled = true;
+        out.version = version;
+    }
+    out.other_dlls = WRONG_API_DLLS
+        .iter()
+        .filter(|n| is_reshade_dll(&resolve_child(&game_dir, n)))
+        .map(|n| (*n).to_string())
+        .collect();
+    if let Ok(rd) = fs::read_dir(&game_dir) {
+        for e in rd.flatten() {
+            let p = e.path();
+            let is_addon = p.extension().is_some_and(|x| {
+                ADDON_EXTENSIONS.iter().any(|a| x.eq_ignore_ascii_case(a))
+            });
+            if is_addon && p.is_file() {
+                out.addons.push(e.file_name().to_string_lossy().into_owned());
+            }
+        }
+    }
+    out.addons.sort_by_key(|a| a.to_lowercase());
+    out.config = resolve_child(&game_dir, CONFIG).is_file();
+    out.log = resolve_child(&game_dir, LOG).is_file();
+    out
+}
+
+/// Turn ReShade off (`opengl32.dll` → `opengl32.dll.off`) or back on.
+///
+/// Refuses while the game is running: the game holds the DLL open, so the rename would fail
+/// halfway into a confusing error, and a change under a running game takes effect nowhere.
+/// Only ever renames a file that is ReShade's, and never overwrites one.
+pub fn set_enabled(dir: &str, enable: bool, game_running: bool) -> anyhow::Result<Health> {
+    if game_running {
+        anyhow::bail!("Close the game first — it has ReShade loaded.");
+    }
+    let game_dir = game_dir_of(dir)?;
+    let on = resolve_child(&game_dir, OPENGL_DLL);
+    let off = resolve_child(&game_dir, OPENGL_DLL_OFF);
+    let (from, to) = if enable { (&off, &on) } else { (&on, &off) };
+    if !is_reshade_dll(from) {
+        if is_reshade_dll(to) {
+            // Already where it was asked to be: nothing to do, and that is a success.
+            return Ok(health(dir));
+        }
+        anyhow::bail!("ReShade isn't in {}", game_dir.display());
+    }
+    if to.exists() {
+        anyhow::bail!(
+            "{} is already there — move it aside first so nothing is overwritten",
+            to.display()
+        );
+    }
+    fs::rename(from, to)?;
+    Ok(health(dir))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn health_names_an_active_reshade_and_its_traces() {
+        let dir = fixture("health-active", OPENGL_DLL);
+        write(&dir.join(CONFIG), "[GENERAL]\n");
+        write(&dir.join(LOG), "log");
+        write(&dir.join("Effects.addon64"), "x");
+        write(&dir.join("Old.addon64.off"), "x");
+        let h = health(&game(&dir));
+        assert!(h.active && !h.disabled);
+        assert_eq!(h.version.as_deref(), Some("6.8.0"));
+        assert_eq!(h.addons, vec!["Effects.addon64"]);
+        assert!(h.config && h.log);
+        assert!(h.summary_line().starts_with("reshade: ACTIVE as opengl32.dll (v6.8.0)"));
+    }
+
+    #[test]
+    fn health_ignores_a_foreign_opengl32_and_disabled_copies() {
+        let dir = tmp("health-foreign");
+        write(&dir.join(OPENGL_DLL), "MZ some other wrapper");
+        let h = health(&game(&dir));
+        assert!(!h.active && !h.disabled);
+        assert_eq!(h.summary_line(), "reshade: not active");
+
+        let dir = fixture("health-dxgi", "dxgi.dll");
+        let h = health(&game(&dir));
+        assert!(!h.active);
+        assert_eq!(h.other_dlls, vec!["dxgi.dll"]);
+
+        let dir = fixture("health-off", OPENGL_DLL_OFF);
+        let h = health(&game(&dir));
+        assert!(!h.active && h.disabled);
+        assert!(h.summary_line().contains("turned off"));
+        assert!(!status(&game(&dir)).installed && status(&game(&dir)).disabled);
+    }
+
+    #[test]
+    fn turning_off_and_on_round_trips_and_the_running_game_blocks_both() {
+        let dir = fixture("health-toggle", OPENGL_DLL);
+        let g = game(&dir);
+        let before = fs::read(dir.join(OPENGL_DLL)).unwrap();
+
+        // Blocked while the game runs, and nothing moved.
+        assert!(set_enabled(&g, false, true).is_err());
+        assert!(dir.join(OPENGL_DLL).is_file());
+
+        let h = set_enabled(&g, false, false).unwrap();
+        assert!(!h.active && h.disabled);
+        assert!(!dir.join(OPENGL_DLL).exists());
+
+        assert!(set_enabled(&g, true, true).is_err());
+        assert!(!dir.join(OPENGL_DLL).exists());
+
+        let h = set_enabled(&g, true, false).unwrap();
+        assert!(h.active && !h.disabled);
+        assert_eq!(fs::read(dir.join(OPENGL_DLL)).unwrap(), before);
+
+        // Asking again for the state it's already in is a no-op, not an error.
+        assert!(set_enabled(&g, true, false).unwrap().active);
+    }
+
+    #[test]
+    fn turning_off_never_overwrites_or_touches_a_foreign_dll() {
+        let dir = fixture("health-clash", OPENGL_DLL);
+        write(&dir.join(OPENGL_DLL_OFF), "someone else's file");
+        assert!(set_enabled(&game(&dir), false, false).is_err());
+        assert!(dir.join(OPENGL_DLL).is_file());
+
+        let dir = tmp("health-foreign-toggle");
+        write(&dir.join(OPENGL_DLL), "MZ not reshade");
+        assert!(set_enabled(&game(&dir), false, false).is_err());
+        assert!(dir.join(OPENGL_DLL).is_file());
+    }
 
     fn game(tmp: &Path) -> String {
         tmp.to_string_lossy().into_owned()

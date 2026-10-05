@@ -170,8 +170,9 @@ export default function RuntimeBanner() {
   }
 
   // Below the two runtime bars: those are things that stop FrostMod dead, this is a folder
-  // that makes the game slow and fragile. Shown only when nothing louder is up.
-  if (!runtimeWarning && cloud && !cloudDismissed) {
+  // that makes the game slow and fragile. Shown only when nothing louder is up. OneDrive is
+  // left to `HealthBanner`, which says the same thing and can also fix it.
+  if (!runtimeWarning && cloud && !cloudDismissed && cloud.provider !== "OneDrive") {
     const evicted = cloud.count > 0;
     const provider = cloud.provider ?? t("cloud.genericProvider");
     return (
@@ -231,7 +232,7 @@ export default function RuntimeBanner() {
  * markup. `danger` is a file crashing the game right now; `warning` is something that
  * won't work when it's reached.
  */
-function Bar({
+export function Bar({
   tone,
   body,
   pitch,
@@ -240,7 +241,10 @@ function Bar({
   actionIcon: ActionIcon,
   busyLabel,
   busy,
+  actionDisabled,
   onAction,
+  secondary,
+  onSecondary,
   onDismiss,
   dismissLabel,
   wrap,
@@ -255,7 +259,12 @@ function Bar({
   actionIcon?: typeof Download;
   busyLabel?: string;
   busy?: boolean;
+  /** The action can't run right now (the game is open); `action` should say why. */
+  actionDisabled?: boolean;
   onAction?: () => void;
+  /** A quieter second button — advice rather than a fix. */
+  secondary?: string;
+  onSecondary?: () => void;
   onDismiss: () => void;
   dismissLabel: string;
   /** Let a long message run onto more lines instead of cutting it off. */
@@ -278,8 +287,24 @@ function Bar({
       </span>
 
       <div className="ml-auto flex shrink-0 items-center gap-1">
+        {secondary && onSecondary && (
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-6 px-2 text-xs"
+            onClick={onSecondary}
+            disabled={busy}
+          >
+            {secondary}
+          </Button>
+        )}
         {action && ActionIcon && onAction && (
-          <Button size="sm" className="h-6 px-2 text-xs" onClick={onAction} disabled={busy}>
+          <Button
+            size="sm"
+            className="h-6 px-2 text-xs"
+            onClick={onAction}
+            disabled={busy || actionDisabled}
+          >
             {busy ? (
               <Loader2 className="size-3 animate-spin" />
             ) : (
