@@ -26,6 +26,7 @@ mod firstpaint;
 mod frostmod;
 mod frostmod_manage;
 pub(crate) use mxb_core::game;
+pub(crate) use mxb_core::{docsdir, gamefolders};
 mod fileinfo;
 mod gameproc;
 mod viewonly;
@@ -1488,11 +1489,136 @@ fn app_log_dir(app: &tauri::AppHandle) -> std::path::PathBuf {
     app.path().app_log_dir().unwrap_or_default()
 }
 
+/// Save the game's install folder. Only a folder holding the executable is accepted — the
+/// Documents side (`…\PiBoSo`, `…\PiBoSo\MX Bikes`) is refused with a message saying which
+/// folder is wanted — and a pick of the Steam library above it is taken down to the game's
+/// folder. Blank clears it. Answers the folder actually saved.
+///
+/// This is where `Documents\PiBoSo` got in as an "install folder": setup and Settings saved
+/// whatever was picked, and FrostMod then went into a `plugins` folder the game never reads.
 #[tauri::command]
-fn set_game_path(app: tauri::AppHandle, path: String) -> Result<(), String> {
+fn set_game_path(app: tauri::AppHandle, path: String) -> Result<String, String> {
     let mut cfg = config::load(&app).unwrap_or_default();
-    cfg.game_path = path;
-    config::save(&app, &cfg).map_err(|e| format!("{e:#}"))
+    let old = cfg.game_path.trim().to_string();
+    let path = if path.trim().is_empty() {
+        String::new()
+    } else {
+        let side = gamefolders::user_side_folders(&cfg, &docsdir::candidates());
+        gamefolders::check_install_pick(&path, cfg.game(), &side)?
+            .to_string_lossy()
+            .into_owned()
+    };
+    cfg.game_path = path.clone();
+    config::save(&app, &cfg).map_err(|e| format!("{e:#}"))?;
+    if !old.is_empty() && !docsdir::same_folder(std::path::Path::new(&old), std::path::Path::new(&path)) {
+        log::info!("{} install folder set: {old} → {path}", cfg.game().display);
+        frostmod_manage::install_moved(&app, &cfg, std::path::Path::new(&old));
+    } else {
+        frostmod_manage::sync_if_shut(&app);
+    }
+    Ok(path)
+}
+
+/// Check a picked install folder without saving it — setup, before there is a config to
+/// save it in. Answers the folder that would be saved, or why it isn't an install.
+#[tauri::command]
+fn check_install_folder(
+    app: tauri::AppHandle,
+    path: String,
+    game: Option<game::Game>,
+) -> Result<String, String> {
+    let mut cfg = config::load(&app).unwrap_or_default();
+    if let Some(g) = game {
+        cfg.active_game = g;
+    }
+    let side = gamefolders::user_side_folders(&cfg, &docsdir::candidates());
+    gamefolders::check_install_pick(&path, cfg.game(), &side).map(|p| p.to_string_lossy().into_owned())
+}
+
+/// Check the saved install and user folders against the disk and put them right: an install
+/// folder without the executable (or one on the Documents side) is replaced by Steam's real
+/// install or cleared; a user folder that moved is found again. Corrections are saved and
+/// logged, a plugin left in the old install folder is taken back, and — with
+/// `restart_watchers` — the watchers are re-pointed so nothing needs an app restart.
+///
+/// Answers the config as it now stands, or `None` without one. `fill_blank` also runs Steam
+/// detection for a blank install folder (startup, Play), which the periodic check skips.
+fn repair_game_folders(
+    app: &tauri::AppHandle,
+    why: &str,
+    fill_blank: bool,
+    restart_watchers: bool,
+) -> Option<AppConfig> {
+    let mut cfg = config::load(app).ok()?;
+    let fix = gamefolders::repair(&mut cfg, fill_blank);
+    if !fix.changed() {
+        if let gamefolders::InstallRepair::Offline { path } = &fix.install {
+            log::debug!("{} install folder {path} is on a drive that isn't connected", cfg.game().display);
+        }
+        return Some(cfg);
+    }
+    let game = cfg.game().display;
+    match &fix.install {
+        gamefolders::InstallRepair::Fixed { from, to, .. } if from.is_empty() => {
+            log::info!("[{why}] auto-detected {game} install: {to}");
+        }
+        gamefolders::InstallRepair::Fixed { from, to, why: what } => {
+            log::warn!("[{why}] {game} install folder corrected: {from} → {to} ({what})");
+        }
+        gamefolders::InstallRepair::Cleared { from, why: what } => {
+            log::warn!(
+                "[{why}] {game} install folder cleared: {from} ({what}); Steam doesn't know \
+                 where the game is either — set it in Settings"
+            );
+        }
+        _ => {}
+    }
+    if let Some((from, to)) = &fix.user.mods {
+        log::warn!("[{why}] {game} folder moved: {from} → {to}");
+    }
+    if let Some(gone) = &fix.user.profiles_cleared {
+        log::warn!("[{why}] profiles folder {gone} is gone — using the one in the {game} folder");
+    }
+    if let Err(e) = config::save(app, &cfg) {
+        log::warn!("couldn't save the corrected folders: {e:#}");
+        return Some(cfg);
+    }
+    if let Some(old) = fix.install.replaced() {
+        frostmod_manage::install_moved(app, &cfg, std::path::Path::new(old));
+    } else if fix.install.changed() {
+        frostmod_manage::sync_if_shut(app);
+    }
+    if fix.user.changed() {
+        if fix.user.mods.is_some() {
+            // FrostMod's `frostmod_mods.txt` names the mods tree.
+            frostmod_manage::sync_if_shut(app);
+        }
+        if restart_watchers {
+            if cfg.watch_mods_reload {
+                modwatch::start(app, &app.state::<ModWatcher>(), &cfg.mods_path);
+            }
+            let profiles = app.state::<ProfileWatcher>();
+            profilewatch::start(app, &profiles, &cfg.profiles_dir(), watches_looks(&cfg));
+            profilecheck::refresh(app, &cfg.profiles_dir());
+            if watches_looks(&cfg) {
+                watch_worn_paints(app);
+            }
+        }
+    }
+    let _ = app.emit("game-folders-changed", ());
+    Some(cfg)
+}
+
+/// Re-check the folders once a minute, so a user folder moved while the app is open (out of
+/// OneDrive, to another drive) is followed without a restart.
+fn watch_game_folders(app: &tauri::AppHandle) {
+    let app = app.clone();
+    let _ = std::thread::Builder::new()
+        .name("game-folders".into())
+        .spawn(move || loop {
+            std::thread::sleep(std::time::Duration::from_secs(60));
+            let _ = repair_game_folders(&app, "periodic check", false, true);
+        });
 }
 
 /// macOS: pick the Wine binary that starts the game. Blank hands it back to auto-detection.
@@ -1562,11 +1688,44 @@ async fn set_mods_path(
     path: String,
 ) -> Result<String, String> {
     let mut cfg = config::load(&app).unwrap_or_default();
+    let old_install = cfg.game_path.trim().to_string();
+    let picked = path.trim().to_string();
     cfg.mods_path = path;
     let cfg = config::finalize(cfg);
+    let game = cfg.game();
+    if cfg.mods_path.trim().is_empty()
+        && !picked.is_empty()
+        && gamefolders::has_exe(std::path::Path::new(&picked), game)
+    {
+        // The install folder entered here, and no user folder to put in its place: refuse
+        // rather than save a blank, which would drop the player back into first-run setup.
+        // The install half of the mistake is still worth keeping.
+        if let Ok(mut saved) = config::load(&app) {
+            if saved.game_path.trim() != cfg.game_path.trim() {
+                saved.game_path = cfg.game_path.clone();
+                if config::save(&app, &saved).is_ok() && !old_install.is_empty() {
+                    frostmod_manage::install_moved(&app, &saved, std::path::Path::new(&old_install));
+                }
+            }
+        }
+        return Err(format!(
+            "{picked} is where {0} is installed (it holds {1}) — that goes in the install \
+             folder setting. The {0} folder is the one in Documents: …\\Documents\\PiBoSo\\{2}.",
+            game.display, game.exe, game.user_dir
+        ));
+    }
     config::save(&app, &cfg).map_err(|e| format!("{e:#}"))?;
     if cfg.watch_mods_reload {
         modwatch::start(&app, &watcher, &cfg.mods_path);
+    }
+    // An install folder entered here moved to the install setting; the plugin follows it.
+    if !docsdir::same_folder(std::path::Path::new(&old_install), std::path::Path::new(cfg.game_path.trim())) {
+        log::info!("{} install folder: {old_install} → {}", game.display, cfg.game_path);
+        if old_install.is_empty() {
+            frostmod_manage::sync_if_shut(&app);
+        } else {
+            frostmod_manage::install_moved(&app, &cfg, std::path::Path::new(&old_install));
+        }
     }
     // The folder actually adopted, which isn't always the one picked: detection fills a
     // blank, and a pick of the `mods` folder resolves to the game folder above it. Settings
@@ -2882,6 +3041,9 @@ fn launch_game(app: tauri::AppHandle) -> Result<gameproc::LaunchOutcome, String>
     // `load_or_detect`, not `load`: a missing config file shouldn't turn Play into an
     // error when the install is sitting exactly where the detector looks.
     let cfg = config::load_or_detect(&app).unwrap_or_default();
+    // Every launch re-checks the folders: the install must be the one holding the exe, or
+    // the plugin goes somewhere the game never reads and Play has to guess.
+    let cfg = repair_game_folders(&app, "play", true, true).unwrap_or(cfg);
     // A plugin-only FrostMod is loaded by the game as it starts, so this is the last moment
     // an update that landed during the previous session can go in. The exit poll normally
     // got there first; a relaunch inside its fifteen seconds would not.
@@ -3840,6 +4002,7 @@ async fn join_server(
 /// [`join_server`]'s body, for the callers already off the main thread.
 fn join_server_now(app: tauri::AppHandle, address: String) -> Result<gameproc::LaunchOutcome, String> {
     let cfg = config::load_or_detect(&app).unwrap_or_default();
+    let cfg = repair_game_folders(&app, "join", true, true).unwrap_or(cfg);
     // Race mode goes first: the game mounts the mods folder as it starts, so whatever is
     // going to step aside has to have done it by then. A no-op when it's off, and when the
     // game is already up (which `gameproc::join` is about to report anyway).
@@ -8592,17 +8755,15 @@ fn main() {
             // `load_or_detect` rebuilds a missing/unreadable config from the standard
             // MX Bikes folder, so a lost config no longer means a trip through setup.
             if let Some(mut cfg) = config::load_or_detect(handle) {
-                // Auto-detect the active game's install on launch for configs that
-                // never got one (created before detection existed, or when the
-                // game wasn't installed yet). Only fills a blank — never overrides
-                // a manual pick — and persists it so the 3D rider preview works.
-                if cfg.game_path.trim().is_empty() {
-                    if let Some(gp) = config::detect_game_path(cfg.game()) {
-                        log::info!("auto-detected {} install: {gp}", cfg.game().display);
-                        cfg.game_path = gp;
-                        let _ = config::save(handle, &cfg);
-                    }
+                // Check both folders before anything uses them: a blank install folder is
+                // auto-detected, one that doesn't hold the executable (a `Documents\PiBoSo`
+                // saved by an older setup, a game moved to another library) is replaced by
+                // Steam's real install, and a user folder that moved is found again. The
+                // watchers below start on the corrected folders, so no restart is asked for.
+                if let Some(fixed) = repair_game_folders(handle, "startup", true, false) {
+                    cfg = fixed;
                 }
+                watch_game_folders(handle);
                 let manager = handle.autolaunch();
                 let stale = cfg.autostart_binding_rev < config::AUTOSTART_BINDING_REV;
                 // Every call below is keyed on the *current* product name, so none of them
@@ -8937,6 +9098,7 @@ fn main() {
             open_logs_folder,
             export_logs,
             set_game_path,
+            check_install_folder,
             set_wine_runner,
             wine_host_info,
             set_mods_path,

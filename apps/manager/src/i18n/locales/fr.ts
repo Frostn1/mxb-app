@@ -1418,6 +1418,14 @@ export const fr: Translation = {
   "settings.resetToDefault": "Réinitialiser",
   "settings.gameInstallDesc":
     "Dossier d'installation du jeu (facultatif) — là où {{game}} est installé (contient {{file}}). Définissez-le pour charger le vrai corps du pilote dans l'aperçu 3D.",
+  "settings.modsFolderHint":
+    "Le dossier {{game}} dans Documents (…\\Documents\\PiBoSo\\{{game}}), qui contient mods et profiles — pas le dossier d'installation Steam ci-dessous.",
+  "settings.modsFolderNotGame":
+    "Ce dossier ne contient pas les dossiers mods ou profiles de {{game}}. Choisis …\\Documents\\PiBoSo\\{{game}} ou utilise Détecter automatiquement.",
+  "settings.installTitle":
+    "Dossier d'installation de {{game}}",
+  "settings.installHint":
+    "Là où Steam a installé le jeu — le dossier qui contient {{exe}} (…\\steamapps\\common\\{{game}}). Le jeu charge les plugins comme FrostMod depuis son dossier plugins. Pas le dossier Documents ci-dessus.",
 
   // ── Bibliothèque ───────────────────────────────────────────────────────────
   "library.help":

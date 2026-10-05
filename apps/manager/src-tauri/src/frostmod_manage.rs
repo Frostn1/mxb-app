@@ -1017,7 +1017,8 @@ pub fn sync_plugin(app: &AppHandle, cfg: &crate::config::AppConfig) -> PluginSyn
     if !cfg.auto_run_frostmod || !is_installed(app) {
         crate::frostmod::set_plugin_mode(None);
         // Every known game, even with the active one's folder unknown: the switch is off
-        // for all of them.
+        // for all of them — and every folder the record says we ever put it in.
+        let _ = remove_strays(&frostmod_dir(app), None, None, &[]);
         let ours = remove_our_plugins(cfg, game_dir.as_deref(), false);
         let Some(game_dir) = game_dir else {
             return PluginSync::default();
@@ -1037,6 +1038,23 @@ pub fn sync_plugin(app: &AppHandle, cfg: &crate::config::AppConfig) -> PluginSyn
         crate::frostmod::set_plugin_mode(None);
         return PluginSync::default();
     };
+    // Only a folder holding the executable is one the game loads plugins from. A
+    // `Documents\PiBoSo` saved as the install folder used to get the plugin anyway — into a
+    // `plugins` folder the game never reads — and FrostMod silently never ran. Install
+    // nothing there, and take back what an earlier build put there.
+    if !crate::gamefolders::has_exe(&game_dir, cfg.game()) {
+        crate::frostmod::set_plugin_mode(None);
+        warn_once(format!(
+            "[frostmod] not installing the plugin: {} has no {} in it, so the game doesn't \
+             load plugins from there",
+            game_dir.display(),
+            cfg.game().exe
+        ));
+        let dir = frostmod_dir(app);
+        let pointer = as_game_sees_it(cfg, &dir);
+        let _ = remove_strays(&dir, None, pointer.as_deref(), &[game_dir]);
+        return PluginSync::default();
+    }
     let game_running = crate::gameproc::is_game_running();
 
     // One game at a time, as the injector was: FrostMod's folder — `frostmod_mods.txt`, the
@@ -1053,7 +1071,135 @@ pub fn sync_plugin(app: &AppHandle, cfg: &crate::config::AppConfig) -> PluginSyn
         .and_then(|root| as_game_sees_it(cfg, &root));
     write_launcher_files(&dir, mods.as_deref(), &split_args(&cfg.frostmod_args));
     let pointer = as_game_sees_it(cfg, &dir);
-    sync_plugin_files(&dir, &game_dir, pointer.as_deref(), game_running)
+    let sync = sync_plugin_files(&dir, &game_dir, pointer.as_deref(), game_running);
+    if matches!(sync.game_plugin, PluginCopy::Current | PluginCopy::Refreshed) {
+        record_place(&dir, &game_dir);
+    }
+    let _ = remove_strays(&dir, Some(&game_dir), pointer.as_deref(), &[]);
+    sync
+}
+
+/// FrostMod's own record of every game folder it put `frostmod.dlo` into, one path a line.
+/// This is what lets a copy left behind in a folder that stopped being the install — a wrong
+/// folder corrected, a game moved to another library — be found and taken back later.
+const PLACES_FILE: &str = "plugin_places.txt";
+
+fn read_places(dir: &Path) -> Vec<PathBuf> {
+    std::fs::read_to_string(dir.join(PLACES_FILE))
+        .map(|text| {
+            text.lines()
+                .map(str::trim)
+                .filter(|l| !l.is_empty())
+                .map(PathBuf::from)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn write_places(dir: &Path, places: &[PathBuf]) {
+    let path = dir.join(PLACES_FILE);
+    if places.is_empty() {
+        let _ = std::fs::remove_file(path);
+        return;
+    }
+    let body: Vec<String> = places.iter().map(|p| p.to_string_lossy().into_owned()).collect();
+    if std::fs::read_to_string(&path).is_ok_and(|cur| cur == body.join("\n")) {
+        return;
+    }
+    if let Err(e) = std::fs::write(&path, body.join("\n")) {
+        log::warn!("[frostmod] couldn't write {}: {e}", path.display());
+    }
+}
+
+fn record_place(dir: &Path, game_dir: &Path) {
+    let mut places = read_places(dir);
+    if places.iter().any(|p| crate::docsdir::same_folder(p, game_dir)) {
+        return;
+    }
+    places.push(game_dir.to_path_buf());
+    write_places(dir, &places);
+}
+
+/// Take our plugin back out of every folder it was put in that isn't the game's install
+/// (`install`; `None` means none is — Game Integration off, or no install known).
+///
+/// Only ever a copy the app's own records say is ours: the folder is in [`PLACES_FILE`], or the
+/// `frostmod.dir` beside it holds exactly the pointer this app writes (`pointer`), which covers
+/// copies placed before the record existed. Either way the pointer has to be there: a `.dlo`
+/// without one is the player's own. `extra` names folders to check that may not be recorded —
+/// a just-replaced install folder. Returns the folders cleaned.
+fn remove_strays(
+    dir: &Path,
+    install: Option<&Path>,
+    pointer: Option<&str>,
+    extra: &[PathBuf],
+) -> Vec<PathBuf> {
+    let same = crate::docsdir::same_folder;
+    let recorded = read_places(dir);
+    if recorded.is_empty() && extra.is_empty() {
+        return Vec::new();
+    }
+    let mut candidates = recorded.clone();
+    for e in extra {
+        if !candidates.iter().any(|c| same(c, e)) {
+            candidates.push(e.clone());
+        }
+    }
+    let mut keep = Vec::new();
+    let mut removed = Vec::new();
+    for place in candidates {
+        if install.is_some_and(|i| same(i, &place)) {
+            keep.push(place);
+            continue;
+        }
+        let pointer_file = dir_pointer_path(&place);
+        if !pointer_file.exists() {
+            // Nothing of ours there any more (or never was); nothing to remember either.
+            continue;
+        }
+        let in_record = recorded.iter().any(|r| same(r, &place));
+        let our_pointer = pointer.is_some_and(|p| {
+            std::fs::read_to_string(&pointer_file).is_ok_and(|cur| cur.trim() == p.trim())
+        });
+        if !in_record && !our_pointer {
+            continue;
+        }
+        if remove_game_plugin(&place) == PluginCopy::Absent {
+            log::info!(
+                "[frostmod] took the plugin back out of {} — it isn't the game's install folder, \
+                 so the game never loaded it from there",
+                place.display()
+            );
+            removed.push(place);
+        } else {
+            // Held open (renamed aside or not): tried again next pass.
+            keep.push(place);
+        }
+    }
+    write_places(dir, &keep);
+    removed
+}
+
+/// The install folder changed away from `old`: take back a plugin we put there, and put it
+/// where the game really loads it from (when the game is shut).
+pub fn install_moved(app: &AppHandle, cfg: &crate::config::AppConfig, old: &Path) {
+    let dir = frostmod_dir(app);
+    let pointer = as_game_sees_it(cfg, &dir);
+    let install = game_dir_of(cfg).filter(|d| crate::gamefolders::has_exe(d, cfg.game()));
+    let _ = remove_strays(&dir, install.as_deref(), pointer.as_deref(), &[old.to_path_buf()]);
+    sync_if_shut(app);
+}
+
+/// Log `msg` once, until a different message comes along — `sync_plugin` runs on the status
+/// poll, four times a minute.
+fn warn_once(msg: String) {
+    static LAST: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+    if let Ok(mut last) = LAST.lock() {
+        if last.as_deref() != Some(msg.as_str()) {
+            log::warn!("{msg}");
+            *last = Some(msg);
+        }
+    }
 }
 
 /// Is the installed FrostMod a plugin-only build?
@@ -2278,6 +2424,50 @@ mod plugin_only_tests {
         assert!(!dir_pointer_path(&game).exists());
         // Nothing there is nothing to do.
         assert_eq!(remove_game_plugin(&game), PluginCopy::Absent);
+    }
+
+    /// The reported case: the plugin went into `Documents\PiBoSo\plugins` because that was
+    /// saved as the install. Once the real install is known, the plugin goes there and the
+    /// stray copy is taken back — ours by the record or by our pointer, never the player's.
+    #[test]
+    fn the_plugin_lands_in_the_real_install_and_a_stray_copy_is_taken_back() {
+        let (managed, install) = dirs("stray-install");
+        let (_, docs_piboso) = dirs("stray-docs");
+        let (_, recorded) = dirs("stray-recorded");
+        let (_, hand) = dirs("stray-hand");
+        std::fs::write(managed.join("frostmod.dll"), b"plugin").unwrap();
+        let pointer = managed.to_string_lossy().into_owned();
+
+        // An older build put it in the Documents folder, with our pointer beside it, and left
+        // no record; another stray is in the record; the player put one in by hand.
+        for d in [&docs_piboso, &recorded] {
+            std::fs::write(game_plugin_path(d), b"plugin").unwrap();
+            std::fs::write(dir_pointer_path(d), pointer.as_bytes()).unwrap();
+        }
+        std::fs::write(dir_pointer_path(&recorded), b"C:\\some\\older\\pointer").unwrap();
+        write_places(&managed, std::slice::from_ref(&recorded));
+        std::fs::write(game_plugin_path(&hand), b"hand-installed").unwrap();
+
+        let sync = sync_plugin_files(&managed, &install, Some(&pointer), false);
+        assert_eq!(sync.game_plugin, PluginCopy::Current);
+        assert_eq!(std::fs::read(game_plugin_path(&install)).unwrap(), b"plugin");
+        assert_eq!(std::fs::read_to_string(dir_pointer_path(&install)).unwrap(), pointer);
+        record_place(&managed, &install);
+
+        let removed = remove_strays(&managed, Some(&install), Some(&pointer), &[docs_piboso.clone(), hand.clone()]);
+        assert_eq!(removed.len(), 2, "{removed:?}");
+        for d in [&docs_piboso, &recorded] {
+            assert!(!game_plugin_path(d).exists() && !dir_pointer_path(d).exists(), "{}", d.display());
+        }
+        assert!(game_plugin_path(&install).exists(), "the real install keeps its plugin");
+        assert!(game_plugin_path(&hand).exists(), "a .dlo with no pointer of ours is left alone");
+        assert_eq!(read_places(&managed), vec![install.clone()]);
+
+        // Integration off: no install is kept, and the record empties.
+        let removed = remove_strays(&managed, None, None, &[]);
+        assert_eq!(removed, vec![install.clone()]);
+        assert!(!game_plugin_path(&install).exists());
+        assert!(read_places(&managed).is_empty());
     }
 
     /// Integration off, or a rollback, reaches every game the config knows — but only the

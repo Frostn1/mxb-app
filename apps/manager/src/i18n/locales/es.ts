@@ -1413,6 +1413,14 @@ export const es: Translation = {
   "settings.resetToDefault": "Restablecer",
   "settings.gameInstallDesc":
     "Carpeta de instalación del juego (opcional) — donde está instalado {{game}} (contiene {{file}}). Defínela para cargar el cuerpo real del piloto en la vista previa 3D.",
+  "settings.modsFolderHint":
+    "La carpeta de {{game}} en Documentos (…\\Documents\\PiBoSo\\{{game}}), con mods y profiles — no la carpeta de instalación de Steam de abajo.",
+  "settings.modsFolderNotGame":
+    "Esta carpeta no contiene las carpetas mods ni profiles de {{game}}. Elige …\\Documents\\PiBoSo\\{{game}} o usa Detectar automáticamente.",
+  "settings.installTitle":
+    "Carpeta de instalación de {{game}}",
+  "settings.installHint":
+    "Donde Steam instaló el juego: la carpeta que contiene {{exe}} (…\\steamapps\\common\\{{game}}). El juego carga plugins como FrostMod desde su carpeta plugins. No es la carpeta de Documentos de arriba.",
 
   // ── Biblioteca ─────────────────────────────────────────────────────────────
   "library.help":

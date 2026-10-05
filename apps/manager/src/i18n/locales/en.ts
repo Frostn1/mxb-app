@@ -1389,6 +1389,14 @@ export const en = {
   "settings.resetToDefault": "Reset to default",
   "settings.gameInstallDesc":
     "Game install folder (optional) — where {{game}} is installed (holds {{file}}). Set it to load the real rider body in the 3D preview.",
+  "settings.modsFolderHint":
+    "The {{game}} folder in Documents (…\\Documents\\PiBoSo\\{{game}}), which holds mods and profiles — not the Steam install folder below.",
+  "settings.modsFolderNotGame":
+    "This folder doesn't hold {{game}}'s mods or profiles folders. Pick …\\Documents\\PiBoSo\\{{game}}, or use Detect automatically.",
+  "settings.installTitle":
+    "{{game}} install folder",
+  "settings.installHint":
+    "Where Steam installed the game — the folder that holds {{exe}} (…\\steamapps\\common\\{{game}}). The game loads plugins such as FrostMod from its plugins folder. Not the Documents folder above.",
 
   // ── Library (installed mods) ───────────────────────────────────────────────
   "library.help":

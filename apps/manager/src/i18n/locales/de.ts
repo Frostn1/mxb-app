@@ -1419,6 +1419,14 @@ export const de: Translation = {
   "settings.resetToDefault": "Auf Standard zurücksetzen",
   "settings.gameInstallDesc":
     "Spiel-Installationsordner (optional) — wo {{game}} installiert ist (enthält {{file}}). Setze ihn, um den echten Fahrerkörper in der 3D-Vorschau zu laden.",
+  "settings.modsFolderHint":
+    "Der {{game}}-Ordner in Dokumente (…\\Documents\\PiBoSo\\{{game}}) mit mods und profiles — nicht der Steam-Installationsordner unten.",
+  "settings.modsFolderNotGame":
+    "Dieser Ordner enthält keine mods- oder profiles-Ordner von {{game}}. Wähle …\\Documents\\PiBoSo\\{{game}} oder nutze Automatisch erkennen.",
+  "settings.installTitle":
+    "{{game}}-Installationsordner",
+  "settings.installHint":
+    "Wo Steam das Spiel installiert hat — der Ordner mit {{exe}} (…\\steamapps\\common\\{{game}}). Das Spiel lädt Plugins wie FrostMod aus dessen plugins-Ordner. Nicht der Dokumente-Ordner oben.",
 
   // ── Bibliothek ─────────────────────────────────────────────────────────────
   "library.help":
