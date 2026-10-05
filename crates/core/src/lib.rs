@@ -14,6 +14,7 @@ pub mod cloudfiles;
 pub mod config;
 pub mod docsdir;
 pub mod game;
+pub mod gamefolders;
 pub mod gamewindow;
 pub mod library;
 pub mod overlay;

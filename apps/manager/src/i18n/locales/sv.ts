@@ -1379,6 +1379,14 @@ export const sv: Translation = {
   "settings.resetToDefault": "Återställ till förval",
   "settings.gameInstallDesc":
     "Spelinstallationsmapp (valfritt) – där {{game}} är installerat (håller {{file}}). Ställ in den för att ladda den riktiga ryttare kroppen i 3D-förhandsgranskningen.",
+  "settings.modsFolderHint":
+    "{{game}}-mappen i Dokument (…\\Documents\\PiBoSo\\{{game}}) med mods och profiles — inte Steam-installationsmappen nedan.",
+  "settings.modsFolderNotGame":
+    "Den här mappen saknar {{game}}s mods- och profiles-mappar. Välj …\\Documents\\PiBoSo\\{{game}} eller använd Identifiera automatiskt.",
+  "settings.installTitle":
+    "{{game}}-installationsmapp",
+  "settings.installHint":
+    "Där Steam installerade spelet — mappen med {{exe}} (…\\steamapps\\common\\{{game}}). Spelet laddar plugins som FrostMod från dess plugins-mapp. Inte Dokument-mappen ovan.",
 
   // ── Library (installed mods) ───────────────────────────────────────────────
   "library.help":

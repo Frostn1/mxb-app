@@ -26,8 +26,10 @@ import PaintSync from "./PaintSync";
 import Plugins from "./Plugins";
 import Accounts from "./Accounts";
 import {
+  checkInstallFolder,
   countProfilesIn,
   detectGamePath,
+  inspectGameFolder,
   exportLogs,
   getModsRoot,
   gameCacheInfo,
@@ -398,6 +400,47 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
       .then(setModsRoot)
       .catch(() => setModsRoot(null));
   }, [config.modsPath]);
+
+  // The two folders are easy to mix up — the game folder in Documents and the Steam install
+  // — so each is checked as it's shown, and a wrong one says what belongs there instead.
+  const [modsIssue, setModsIssue] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    const path = config.modsPath?.trim();
+    if (!path) {
+      setModsIssue(null);
+      return;
+    }
+    inspectGameFolder(path)
+      .then((check) => {
+        if (!cancelled) setModsIssue(check.exists && !check.usable ? check.path : null);
+      })
+      .catch(() => {
+        if (!cancelled) setModsIssue(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [config.modsPath]);
+  const [installIssue, setInstallIssue] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    const path = config.gamePath?.trim();
+    if (!path) {
+      setInstallIssue(null);
+      return;
+    }
+    checkInstallFolder(path)
+      .then(() => {
+        if (!cancelled) setInstallIssue(null);
+      })
+      .catch((e) => {
+        if (!cancelled) setInstallIssue(String(e));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [config.gamePath, config.modsPath]);
 
   const [gameCache, setGameCache] = useState<{
     path: string;
@@ -1366,6 +1409,15 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
                 {config.modsPath ? t("settings.change") : t("settings.set")}
               </Button>
             </div>
+            <p className="-mt-0.5 text-[11.5px] leading-relaxed text-muted-foreground">
+              {t("settings.modsFolderHint", { game: game.display })}
+            </p>
+            {modsIssue && (
+              <p className="-mt-0.5 flex items-start gap-1.5 text-[11.5px] leading-relaxed text-warning">
+                <TriangleAlert className="mt-[2px] size-3.5 flex-none" />
+                <span>{t("settings.modsFolderNotGame", { game: game.display })}</span>
+              </p>
+            )}
             <button
               onClick={detectAgain}
               disabled={busy}
@@ -1483,20 +1535,21 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
 
             <div className="mt-1 h-px bg-border" />
 
-            {/* Optional game *install* folder (holds core rider.pkz) — powers the
-                real 3D rider body in the preset preview. */}
-            <p className="text-[12px] text-muted-foreground">
-              <Trans
-                k="settings.gameInstallDesc"
-                values={{ file: <span className="font-mono">rider.pkz</span> }}
-              />
+            {/* The game's *install* folder — the Steam one holding the exe, whose `plugins`
+                folder is where the game loads FrostMod from. Titled on its own so it can't
+                be mistaken for the Documents folder above. */}
+            <p className="text-[13px] font-medium">
+              {t("settings.installTitle", { game: game.display })}
+            </p>
+            <p className="-mt-1 text-[12px] leading-relaxed text-muted-foreground">
+              {t("settings.installHint", { game: game.display, exe: game.exe })}
             </p>
             <div className="flex gap-2">
               <div className="flex min-w-0 flex-1 items-center gap-2 rounded-lg bg-background px-3 py-2.5 font-mono text-[12px] text-muted-foreground">
                 <span className="flex-1 truncate" title={config.gamePath}>
                   {config.gamePath || t("settings.notSet")}
                 </span>
-                {config.gamePath && (
+                {config.gamePath && !installIssue && (
                   <span className="flex flex-none items-center gap-1 font-sans text-[11px] font-semibold text-success">
                     <Check className="size-3" strokeWidth={3} /> Set
                   </span>
@@ -1506,6 +1559,12 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
                 {config.gamePath ? t("settings.change") : t("settings.set")}
               </Button>
             </div>
+            {installIssue && (
+              <p className="-mt-0.5 flex items-start gap-1.5 text-[11.5px] leading-relaxed text-warning">
+                <TriangleAlert className="mt-[2px] size-3.5 flex-none" />
+                <span className="break-words">{installIssue}</span>
+              </p>
+            )}
             <button
               onClick={detectGameFolder}
               disabled={busy}

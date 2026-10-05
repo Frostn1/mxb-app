@@ -15,6 +15,7 @@ import {
   getConfig,
   isConfigured,
   listGames,
+  onGameFoldersChanged,
   onModsVerify,
   setActiveGame,
   setIntroSeen,
@@ -103,6 +104,17 @@ const App = () => {
         setReady(true);
       }
     })();
+  }, [reloadConfig]);
+
+  // The backend corrected a saved folder — an install folder without the game in it, or a
+  // user folder that moved. Pick up the new paths so Settings and the library show them.
+  useEffect(() => {
+    const unlisten = onGameFoldersChanged(() => {
+      void reloadConfig().catch(() => {});
+    });
+    return () => {
+      void unlisten.then((off) => off()).catch(() => {});
+    };
   }, [reloadConfig]);
 
   // The overlay can't draw over a game in exclusive fullscreen, and it can't say so

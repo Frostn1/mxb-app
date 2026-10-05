@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import { open as pickFolder } from "@tauri-apps/plugin-dialog";
 import {
+  checkInstallFolder,
   createConfig,
   completeSetup,
   detectGamePath,
@@ -249,8 +250,13 @@ export default function Setup({ onComplete, game, games, firstRun }: SetupProps)
     });
     if (typeof folder === "string") {
       try {
-        if (persist) await saveGamePath(folder);
-        setGamePath(folder);
+        // Only a folder holding the game's exe is an install — the Documents\PiBoSo side is
+        // refused with a message saying which folder is wanted, and a picked Steam library
+        // resolves to the game's folder inside it.
+        const install = persist
+          ? await saveGamePath(folder)
+          : await checkInstallFolder(folder, picked.id);
+        setGamePath(install);
         setGameAuto(false);
         setError(null);
         return folder;

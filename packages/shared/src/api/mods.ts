@@ -1506,8 +1506,21 @@ export function setRunInBackground(enabled: boolean): Promise<void> {
   return invoke<void>("set_run_in_background", { enabled });
 }
 
-export function setGamePath(path: string): Promise<void> {
-  return invoke<void>("set_game_path", { path });
+/** Save the install folder. Rejects a folder without the game's exe (the Documents\PiBoSo
+ *  side included) with a message naming the folder wanted; resolves to the folder saved,
+ *  which may be the game's folder inside a picked Steam library. */
+export function setGamePath(path: string): Promise<string> {
+  return invoke<string>("set_game_path", { path });
+}
+
+/** Check a picked install folder without saving it (setup). Same rules as `setGamePath`. */
+export function checkInstallFolder(path: string, game?: GameId): Promise<string> {
+  return invoke<string>("check_install_folder", { path, game });
+}
+
+/** The backend corrected the saved install or user folder (a stale path, a moved folder). */
+export function onGameFoldersChanged(cb: () => void): Promise<UnlistenFn> {
+  return listen("game-folders-changed", () => cb());
 }
 
 /**

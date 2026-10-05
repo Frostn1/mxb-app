@@ -909,7 +909,7 @@ pub fn load(app: &AppHandle) -> anyhow::Result<AppConfig> {
 /// Checking for those rather than just "the folder exists" keeps auto-detection from
 /// quietly adopting an empty `Documents\PiBoSo\MX Bikes` for someone whose setup lives
 /// elsewhere; they still get the setup screen to point us at it.
-fn looks_like_mods_dir(path: &str) -> bool {
+pub(crate) fn looks_like_mods_dir(path: &str) -> bool {
     let dir = Path::new(path.trim());
     if path.trim().is_empty() || !dir.is_dir() {
         return false;
@@ -1135,6 +1135,16 @@ fn patch_file(path: &Path, keys: serde_json::Map<String, serde_json::Value>) -> 
 
 pub fn finalize(mut cfg: AppConfig) -> AppConfig {
     let game = cfg.game();
+    let docs = crate::docsdir::candidates();
+    // The Steam install entered as the mods folder (it holds the executable, which no user
+    // folder does): it becomes the install folder, and the mods folder is detected below.
+    if let Some(install) = crate::gamefolders::take_install_out_of_mods(&mut cfg, &docs) {
+        log::info!(
+            "{} install folder {install} was entered as the mods folder — using it as the \
+             install folder and detecting the mods folder",
+            game.display
+        );
+    }
     // Picked one level too deep — take the folder above `mods`, which is the one every
     // other path in the app is built from. Done here so it covers both ways in: first-run
     // setup (`create_config`) and Change… in Settings (`set_mods_path`).
@@ -1187,6 +1197,13 @@ pub fn finalize(mut cfg: AppConfig) -> AppConfig {
         }
     }
     adopt_relocated_mods_folder(&mut cfg);
+    // An install folder is one that holds the executable, never the Documents side. A pick
+    // that isn't one (setup's "where is the game?", a stale path) is replaced by Steam's real
+    // install, or dropped — before it is saved, rather than after the plugin went into it.
+    let fix = crate::gamefolders::repair_install(&mut cfg, &docs, false, || detect_game_path(game));
+    if fix.changed() {
+        log::info!("{} install folder: {fix:?}", game.display);
+    }
     cfg.stash_active();
     cfg
 }
@@ -1462,14 +1479,126 @@ pub fn detect_game_path(game: &GameProfile) -> Option<String> {
     if dev_profile_root().is_some() {
         return None;
     }
+    // Case-tolerant: a case-sensitive filesystem can hold `GPBikes.exe`. The executable as
+    // well as the marker: a folder without it is no install, whatever else is in it.
+    let is_install = |dir: &Path| {
+        crate::library::resolve_child(dir, game.install_marker).is_file()
+            && crate::library::resolve_child(dir, game.exe).is_file()
+    };
     for lib in steam_libraries() {
-        let dir = lib.join("steamapps").join("common").join(game.steam_common);
-        // Case-tolerant: a case-sensitive filesystem can hold `GPBikes.exe`.
-        if crate::library::resolve_child(&dir, game.install_marker).is_file() {
+        if let Some(dir) = install_in_library(&lib, game).filter(|d| is_install(d)) {
             return Some(dir.to_string_lossy().into_owned());
         }
     }
+    // Steam's own uninstall entry names the folder, whatever library it is in.
+    registry_install_location(game.steam_appid)
+        .filter(|d| is_install(d))
+        .map(|d| d.to_string_lossy().into_owned())
+}
+
+/// The game's folder inside one Steam library: the folder its app manifest
+/// (`appmanifest_<appid>.acf`) names, else the stock `common\<steam_common>`.
+fn install_in_library(lib: &Path, game: &GameProfile) -> Option<PathBuf> {
+    let steamapps = lib.join("steamapps");
+    let common = steamapps.join("common");
+    let manifest = steamapps.join(format!("appmanifest_{}.acf", game.steam_appid));
+    if let Some(dir) = std::fs::read_to_string(&manifest)
+        .ok()
+        .and_then(|text| parse_acf_installdir(&text))
+        .map(|name| common.join(name))
+        .filter(|d| d.is_dir())
+    {
+        return Some(dir);
+    }
+    let dir = common.join(game.steam_common);
+    dir.is_dir().then_some(dir)
+}
+
+/// `"installdir"  "MX Bikes"` out of a Steam app manifest.
+fn parse_acf_installdir(acf: &str) -> Option<String> {
+    acf.lines().find_map(|line| {
+        let rest = line.trim().strip_prefix("\"installdir\"")?;
+        let start = rest.find('"')? + 1;
+        let len = rest[start..].find('"')?;
+        let name = rest[start..start + len].replace("\\\\", "\\");
+        (!name.trim().is_empty()).then_some(name)
+    })
+}
+
+/// `InstallLocation` of Steam's uninstall entry for `appid`, which the client writes for a game
+/// in any library on any drive.
+#[cfg(windows)]
+fn registry_install_location(appid: &str) -> Option<PathBuf> {
+    let keys = [
+        format!(r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Steam App {appid}"),
+        format!(r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\Steam App {appid}"),
+    ];
+    keys.iter().find_map(|k| {
+        windows_registry::LOCAL_MACHINE
+            .open(k)
+            .and_then(|k| k.get_string("InstallLocation"))
+            .ok()
+            .filter(|v| !v.trim().is_empty())
+            .map(PathBuf::from)
+    })
+}
+
+#[cfg(not(windows))]
+fn registry_install_location(_appid: &str) -> Option<PathBuf> {
     None
+}
+
+/// Where Steam itself is installed, as the registry has it: `SteamPath` for the current user,
+/// then the machine-wide `InstallPath` — a Steam on any drive, under any name.
+#[cfg(windows)]
+fn registry_steam_roots() -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    if let Ok(p) = windows_registry::CURRENT_USER
+        .open(r"Software\Valve\Steam")
+        .and_then(|k| k.get_string("SteamPath"))
+    {
+        out.push(p);
+    }
+    for key in [r"SOFTWARE\WOW6432Node\Valve\Steam", r"SOFTWARE\Valve\Steam"] {
+        if let Ok(p) = windows_registry::LOCAL_MACHINE
+            .open(key)
+            .and_then(|k| k.get_string("InstallPath"))
+        {
+            out.push(p);
+        }
+    }
+    out.into_iter()
+        .filter(|p| !p.trim().is_empty())
+        // `SteamPath` is written with forward slashes.
+        .map(|p| PathBuf::from(p.replace('/', "\\")))
+        .collect()
+}
+
+#[cfg(windows)]
+#[link(name = "kernel32")]
+unsafe extern "system" {
+    fn GetLogicalDrives() -> u32;
+    fn GetDriveTypeW(root: *const u16) -> u32;
+}
+
+/// This machine's local drives, fixed and removable. Network and optical drives are left out:
+/// probing a disconnected share can stall for many seconds.
+#[cfg(windows)]
+fn local_drives() -> Vec<char> {
+    const DRIVE_REMOVABLE: u32 = 2;
+    const DRIVE_FIXED: u32 = 3;
+    // SAFETY: takes nothing, returns a bitmask of the drive letters in use.
+    let mask = unsafe { GetLogicalDrives() };
+    (0..26u8)
+        .filter(|i| mask & (1 << i) != 0)
+        .map(|i| (b'A' + i) as char)
+        .filter(|d| {
+            let root: Vec<u16> = format!("{d}:\\").encode_utf16().chain(Some(0)).collect();
+            // SAFETY: `root` is NUL-terminated UTF-16 and outlives the call.
+            let kind = unsafe { GetDriveTypeW(root.as_ptr()) };
+            kind == DRIVE_FIXED || kind == DRIVE_REMOVABLE
+        })
+        .collect()
 }
 
 /// Candidate Steam library roots: the default install locations plus any extra
@@ -1487,18 +1616,27 @@ pub(crate) fn steam_libraries() -> Vec<PathBuf> {
 
     #[cfg(windows)]
     {
+        // The registry first: it names Steam wherever it was installed, and that Steam's
+        // `libraryfolders.vdf` lists every other library.
+        for root in registry_steam_roots() {
+            push(&mut roots, root);
+        }
         for var in ["ProgramFiles(x86)", "ProgramFiles"] {
             if let Ok(pf) = std::env::var(var) {
                 push(&mut roots, PathBuf::from(pf).join("Steam"));
             }
         }
-        for drive in ['C', 'D', 'E', 'F'] {
-            push(
-                &mut roots,
-                PathBuf::from(format!("{drive}:\\Program Files (x86)\\Steam")),
-            );
-            push(&mut roots, PathBuf::from(format!("{drive}:\\Steam")));
-            push(&mut roots, PathBuf::from(format!("{drive}:\\SteamLibrary")));
+        for drive in local_drives() {
+            for sub in [
+                "Program Files (x86)\\Steam",
+                "Program Files\\Steam",
+                "Steam",
+                "SteamLibrary",
+                "Games\\Steam",
+                "Games\\SteamLibrary",
+            ] {
+                push(&mut roots, PathBuf::from(format!("{drive}:\\{sub}")));
+            }
         }
     }
 
@@ -2318,6 +2456,31 @@ mod tests {
     /// The section layout is read off the binary's string table rather than any published
     /// spec, so the parser is forgiving — and everything it returns is checked against the
     /// filesystem before it's used, which is what makes forgiving safe.
+    /// A library whose app manifest names a folder other than the stock one is still found,
+    /// and a folder without the executable never counts as the install.
+    #[test]
+    fn the_app_manifest_names_the_install_folder() {
+        let acf = "\"AppState\"\n{\n\t\"appid\"\t\t\"655500\"\n\t\"installdir\"\t\t\"MX Bikes Beta\"\n}\n";
+        assert_eq!(parse_acf_installdir(acf), Some("MX Bikes Beta".into()));
+        assert_eq!(parse_acf_installdir("\"AppState\" {}"), None);
+
+        let root = std::env::temp_dir().join(format!("frost-acf-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let steamapps = root.join("steamapps");
+        let dir = steamapps.join("common").join("MX Bikes Beta");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(steamapps.join("appmanifest_655500.acf"), acf).unwrap();
+        let game = crate::game::Game::Mxb.profile();
+        assert_eq!(install_in_library(&root, game), Some(dir.clone()));
+        // No manifest: the stock folder name, when it is there.
+        std::fs::remove_file(steamapps.join("appmanifest_655500.acf")).unwrap();
+        assert_eq!(install_in_library(&root, game), None);
+        let stock = steamapps.join("common").join("MX Bikes");
+        std::fs::create_dir_all(&stock).unwrap();
+        assert_eq!(install_in_library(&root, game), Some(stock));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     #[test]
     fn parses_the_mods_folder_out_of_a_piboso_ini() {
         let ini = b"; comment\n[master]\nserver = master.mx-bikes.com:54200\n\n[mods]\nfolder = C:\\mods   ; where my stuff is\n";
