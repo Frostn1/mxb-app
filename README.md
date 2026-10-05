@@ -193,7 +193,7 @@ Running through all of it:
 | [`crates/core/`](crates/core/) | Shared Rust: the game's own file formats, and the model pipeline both apps draw with. |
 | [`packages/shared/`](packages/shared/) | Shared TypeScript: the 3D viewer, the UI primitives, the API client and the base dictionary. |
 | [`control-plane/`](control-plane/) | The Cloudflare Worker paint sync, plugin licensing and server registration talk to. |
-| [`server-agent/`](server-agent/) | The Rust agent that runs on a dedicated-server box. |
+| [`server-agent/`](server-agent/) | Moved: mxb-agent is server code and lives in the private server repo now. |
 | [`docs/replay/`](docs/replay/) | How the Replay Mod and the Studio's recorder agree on a take — the contract the in-game DLL writes to. |
 | [`scripts/`](scripts/) | Release plumbing — changelog sections, Discord notes, the Linux AppImage fix-up. |
 | [`site/`](site/) | The landing page published by [`pages.yml`](.github/workflows/pages.yml). |
@@ -201,9 +201,6 @@ Running through all of it:
 The repo is a bun + Cargo workspace holding two applications. They share one copy of the
 file-format and 3D code (`crates/core`, `packages/shared`) and one config folder, so a bike
 the Studio paints is a bike the manager already knows about.
-
-`server-agent/` is deliberately outside the Cargo workspace: it needs its own release
-profile, which a workspace member cannot have.
 
 ## Development
 

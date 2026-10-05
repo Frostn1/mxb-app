@@ -143,8 +143,7 @@ jobs:
 
       - name: Run tests
         # The Cargo workspace root is the repo root now, so this runs from there and
-        # `--workspace` covers every member. `server-agent` is excluded from the
-        # workspace and keeps its own job below.
+        # `--workspace` covers every member.
         # Tests needing a real MX Bikes asset are `#[ignore]`d and stay skipped here.
         # bash on Windows too, so the `--` reaches libtest rather than PowerShell.
         shell: bash
@@ -314,33 +313,3 @@ jobs:
             }
           }
           if ($bad) { exit 1 }
-
-  server-agent:
-    name: Server agent (test)
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache Rust build
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: ./server-agent -> target
-
-      - name: Run tests
-        working-directory: ./server-agent
-        run: cargo test --locked
-
-      - name: Build Linux release
-        working-directory: ./server-agent
-        run: cargo build --release --locked
-
-      - name: Upload Linux release
-        uses: actions/upload-artifact@v4
-        with:
-          name: mxb-agent-linux-x86_64
-          path: server-agent/target/release/mxb-agent
-          if-no-files-found: error
