@@ -1433,6 +1433,8 @@ export const de: Translation = {
     "Der {{game}}-Ordner in Dokumente (…\\Documents\\PiBoSo\\{{game}}) mit mods und profiles — nicht der Steam-Installationsordner unten.",
   "settings.modsFolderNotGame":
     "Dieser Ordner enthält keine mods- oder profiles-Ordner von {{game}}. Wähle …\\Documents\\PiBoSo\\{{game}} oder nutze Automatisch erkennen.",
+  "settings.modsFolderElsewhere":
+    "{{game}} liest normalerweise {{expected}}, wo ebenfalls {{game}}-Dateien liegen, aber dein Mods-Ordner ist woanders. Hier installierte Mods erscheinen im Spiel nur, wenn {{game}} diesen Ordner liest. Erscheinen sie nicht, nutze die automatische Erkennung.",
   "settings.installTitle":
     "{{game}}-Installationsordner",
   "settings.installHint":

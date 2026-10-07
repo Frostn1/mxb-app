@@ -1393,6 +1393,8 @@ export const sv: Translation = {
     "{{game}}-mappen i Dokument (…\\Documents\\PiBoSo\\{{game}}) med mods och profiles — inte Steam-installationsmappen nedan.",
   "settings.modsFolderNotGame":
     "Den här mappen saknar {{game}}s mods- och profiles-mappar. Välj …\\Documents\\PiBoSo\\{{game}} eller använd Identifiera automatiskt.",
+  "settings.modsFolderElsewhere":
+    "{{game}} läser normalt {{expected}}, som också har {{game}}-filer, men din modmapp ligger någon annanstans. Mods som installeras här syns inte i spelet om inte {{game}} läser den här mappen. Syns de inte, använd automatisk identifiering.",
   "settings.installTitle":
     "{{game}}-installationsmapp",
   "settings.installHint":
