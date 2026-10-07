@@ -92,6 +92,10 @@ import { VoiceRoom } from "./voiceroom";
 import { PaintRoom } from "./paintroom";
 import { ingestResults, leaderboard as ratingLeaderboard, myRatings, ratedClasses, serverForRatingToken } from "./rating";
 import { isSeriesPath, pruneSeriesRegistrations, seriesRoutes } from "./series";
+import { runMirror, type MirrorJob } from "./mirror";
+import { consumeMirror } from "./mirrorfetch";
+import { publicModRoutes } from "./modapi";
+import { abortUpload, completeUpload, deleteMod, editMod, expireUploads, myMods, openUpload, uploadStatus } from "./uploads";
 import { viewOnlyOn, listPolicies, lockKey, minisignPublicKey, putPolicy, signedLocks, wantsViewOnly } from "./paintpolicy";
 import {
   liveKey,
@@ -139,7 +143,12 @@ export default {
    * 3am. This is the only thing standing between "we should turn those off" and a month of
    * charges for an empty grid.
    */
-  async scheduled(_event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+  async scheduled(event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+    // The mod mirror runs on a cron of its own, so its budget never shares a run with the reaper.
+    if (event.cron === MIRROR_CRON) {
+      ctx.waitUntil(Promise.all([runMirror(env), expireUploads(env)]).then(() => undefined));
+      return;
+    }
     ctx.waitUntil(
       Promise.all([
         reapIdleServers(env),
@@ -163,7 +172,16 @@ export default {
       ),
     );
   },
-} satisfies ExportedHandler<Env>;
+
+  /** The mod catalogue's slow work, one job a message: a mirrored file to fetch, or an upload
+   *  to check (`mirrorfetch.ts`, `uploads.ts`). */
+  async queue(batch: MessageBatch<MirrorJob>, env: Env): Promise<void> {
+    await consumeMirror(batch, env);
+  },
+} satisfies ExportedHandler<Env, MirrorJob>;
+
+/** Must match the second entry of `triggers.crons` in wrangler.jsonc. */
+const MIRROR_CRON = "*/10 * * * *";
 
 async function route(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
@@ -236,6 +254,14 @@ async function route(request: Request, env: Env): Promise<Response> {
   // What a server's track is and its picture, for the app's server tiles. Public like the
   // server list: a player with no account browses servers too, and it's catalogue data.
   if (method === "GET" && path === "/v1/tracks") return getTracks(url, env);
+
+  // The mod catalogue (`modapi.ts`): search, one mod, download redirects, reports. Public
+  // catalogue data, rate-limited per address, above the account gate like the track catalogue.
+  // An owner's edits to their own mod fall through to the gate below.
+  if (path.startsWith("/v1/assets/")) {
+    const catalogued = await publicModRoutes(request, url, env);
+    if (catalogued) return catalogued;
+  }
   const art = /^\/v1\/tracks\/art\/([^/]{1,200})$/.exec(path);
   if (art && method === "GET") return trackArt(decodeURIComponent(art[1]), env);
 
@@ -492,6 +518,35 @@ async function route(request: Request, env: Env): Promise<Response> {
   // Open to every account, self-serve ones included: who you are, where you are, and the
   // voice room for the server you said you are on.
   if (method === "GET" && path === "/v1/me") return me(account, env);
+
+  // Mod uploads from the MXB App (`uploads.ts`). Below the ban gate on purpose: a banned
+  // account uploads nothing. Steam confirmation is checked inside, where the reason is said.
+  if (path === "/v1/uploads" && method === "POST") {
+    const r = await openUpload(request, account, env);
+    return json(r.status, r.body);
+  }
+  const upload = /^\/v1\/uploads\/([0-9a-f]{32})(\/complete)?$/.exec(path);
+  if (upload) {
+    const r =
+      method === "GET" && !upload[2]
+        ? await uploadStatus(upload[1], account, env)
+        : method === "POST" && upload[2]
+          ? await completeUpload(request, upload[1], account, env)
+          : method === "DELETE" && !upload[2]
+            ? await abortUpload(upload[1], account, env)
+            : { status: 405, body: { error: "method not allowed" } };
+    return json(r.status, r.body);
+  }
+  if (method === "GET" && path === "/v1/me/mods") {
+    const r = await myMods(account, env);
+    return json(r.status, r.body);
+  }
+  const ownedMod = /^\/v1\/assets\/(\d{1,12})$/.exec(path);
+  if (ownedMod && (method === "PATCH" || method === "DELETE")) {
+    const r =
+      method === "PATCH" ? await editMod(request, Number(ownedMod[1]), account, env) : await deleteMod(Number(ownedMod[1]), account, env);
+    return json(r.status, r.body);
+  }
   if (method === "PUT" && path === "/v1/me/guid") return putGuid(request, account, env);
   if (method === "PUT" && path === "/v1/me/name") return putName(request, account, env);
 

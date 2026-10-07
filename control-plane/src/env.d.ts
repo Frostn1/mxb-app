@@ -12,6 +12,17 @@
  */
 declare global {
 interface Env {
+    /** R2 S3 credentials for presigning upload part URLs (`uploads.ts`): an R2 API token with
+     *  Object Read & Write on `mxb-private` only, and the account's S3 endpoint
+     *  (`https://<account>.r2.cloudflarestorage.com`, a secret because this repo is public and
+     *  the account id is kept out of it). Without all three, `POST /v1/uploads` answers 503. */
+    R2_ACCESS_KEY_ID?: string;
+    R2_SECRET_ACCESS_KEY?: string;
+    R2_S3_ENDPOINT?: string;
+    /** HMAC key for the mod mirror's signed links to locked (`.mxbsecure`) files
+     *  (`mirrorapi.ts`). Any long random string. Without it those downloads answer 503;
+     *  public files are unaffected. */
+    MXB_ASSET_URL_KEY?: string;
     /** View-only and locked paints: `on` delivers and accepts them; anything else (unset) pulls them. */
     VIEW_ONLY_MODE?: string;
     /** Paint download authorisation: unset = enforced, `log` = serve but log what would be refused, `off` = unchecked. A rollback lever, not a setting. */

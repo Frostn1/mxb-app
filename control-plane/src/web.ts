@@ -22,6 +22,7 @@ import { repairBySteamId } from "./steamlink";
 import { isWebSeriesPath, webSeriesRoutes } from "./series";
 import { steamResult } from "./page";
 import { isWebAdmin, isWebAdminPath, webAdminRoutes } from "./webadmin";
+import { isWebModsPath, webModRoutes } from "./modreports";
 import { isVerified, loginUrl, steamPersonaName, verifyAssertion } from "./steam";
 import {
   clearedCookie,
@@ -67,6 +68,9 @@ export async function webRoutes(
   const method = request.method;
   const origin = allowedOrigin(request, env);
   const key = env.MXB_WEB_SESSION_KEY;
+
+  // Mod moderation (`modreports.ts`): its own prefix, so its page can live off the dashboard.
+  if (isWebModsPath(path)) return webModRoutes(request, url, env, origin);
 
   // Entering a series signed in: the GUID comes from this session's Steam ID (`series.ts`).
   if (isWebSeriesPath(path)) return webSeriesRoutes(request, url, env, origin);

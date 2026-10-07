@@ -71,14 +71,44 @@
     // Who may use the FBX -> EDF converter on mxbsecure.com, besides the admins, who always
     // may: SteamID64s, comma or space separated. Empty means the admins alone. A list here
     // rather than a table so that granting it is a reviewable diff, like the admin list above.
+    // The mod catalogue (`mirror.ts`, `uploads.ts`, `modapi.ts`). "on" lets the sync walk
+    // mxb-mods.com; anything else stops it without touching what is already mirrored. Uploads
+    // and the public API run either way.
+    "MXB_MIRROR": "on",
+    // Where public mod files are served from: the custom domain on the `mxb-assets` bucket.
+    "MXB_ASSETS_CDN": "https://cdn.mxbsecure.com",
+    // The private bucket's name, for the S3 endpoint the upload URLs are presigned against.
+    "MXB_PRIVATE_BUCKET": "mxb-private",
     "MXB_CONVERTER_STEAM_IDS": "76561199650233712,76561199807040854,76561198798423111,76561198937606502"
   },
 
   // The idle reaper. Every five minutes it asks each running server who is connected and
   // destroys the ones that have been empty long enough — the difference between "no
   // unattended servers" being a policy and being a fact.
+  // The second is the mod catalogue's own run (`MIRROR_CRON` in `src/index.ts`), kept apart so
+  // its budget never shares an invocation with the reaper.
   "triggers": {
-    "crons": ["*/5 * * * *"]
+    "crons": ["*/5 * * * *", "*/10 * * * *"]
+  },
+
+  // The upload check hashes and inflates up to 2 GiB in one queue invocation; the default 30 s
+  // of CPU is too tight for the largest tracks. A ceiling, not a reservation.
+  "limits": { "cpu_ms": 300000 },
+
+  // The mod catalogue's slow work: one mirrored file to fetch, or one upload to check, per
+  // message. Two at a time, so the download hosts see a polite client.
+  "queues": {
+    "producers": [{ "binding": "MIRROR_QUEUE", "queue": "mxb-mirror" }],
+    "consumers": [
+      {
+        "queue": "mxb-mirror",
+        "max_batch_size": 1,
+        "max_batch_timeout": 5,
+        "max_concurrency": 2,
+        "max_retries": 3,
+        "dead_letter_queue": "mxb-mirror-dlq"
+      }
+    ]
   },
 
   "observability": {
@@ -131,6 +161,18 @@
     {
       "binding": "FBX2EDF",
       "bucket_name": "mxb-fbx2edf"
+    },
+    // The mod catalogue's public files, content-addressed under paints/ bikes/ liveries/ kits/
+    // tracks/ server/ other/. Served by its custom domain cdn.mxbsecure.com, behind the cache.
+    {
+      "binding": "ASSET_MIRROR",
+      "bucket_name": "mxb-assets"
+    },
+    // Never public: `.mxbsecure` locked content (signed links only), and uploads in
+    // quarantine/ until their checks pass.
+    {
+      "binding": "ASSET_LOCKED",
+      "bucket_name": "mxb-private"
     }
   ],
 
@@ -155,6 +197,11 @@
     { "name": "FRIENDS_LIMITER", "namespace_id": "1006", "simple": { "limit": 60, "period": 60 } },
     // Series registration: anonymous, per address. Five a minute is a rider fixing a typo; the
     // daily cap in D1 (`series.ts`) is the real ceiling.
-    { "name": "REGISTER_LIMITER", "namespace_id": "1007", "simple": { "limit": 5, "period": 60 } }
+    { "name": "REGISTER_LIMITER", "namespace_id": "1007", "simple": { "limit": 5, "period": 60 } },
+    // The mod catalogue's public routes, per address: a page of search is one call, a download one
+    // more. 120 a minute is a person clicking fast.
+    { "name": "ASSETS_LIMITER", "namespace_id": "1008", "simple": { "limit": 120, "period": 60 } },
+    // Opening upload sessions, per account. The daily quotas in `uploads.ts` are the real ceiling.
+    { "name": "UPLOAD_LIMITER", "namespace_id": "1009", "simple": { "limit": 10, "period": 60 } }
   ]
 }
