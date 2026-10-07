@@ -68,6 +68,7 @@ mod roster;
 /// Beta capture aid: logs the running build's fingerprint and, on request, a memory region's
 /// bytes, so a clean-install baseline can be read off the app log to arm state invariants.
 mod statedump;
+mod storage;
 /// What the running game's own memory says about itself — digests of named regions, compared
 /// against a per-build baseline the control plane holds. The client half of state invariants.
 mod stateinvariants;
@@ -9182,6 +9183,11 @@ fn main() {
             cancel_drop,
             move_mod,
             uninstall_mod,
+            storage::storage_scan,
+            storage::storage_duplicates,
+            storage::storage_leftovers,
+            storage::storage_trash_archives,
+            storage::storage_remove_mods,
             log_client,
             logs_info,
             share_logs,

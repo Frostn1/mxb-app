@@ -47,6 +47,7 @@ const ModDetail = lazy(() => import("../ModDetail/ModDetail"));
 const Ranked = lazy(() => import("../Ranked/Ranked"));
 const Library = lazy(() => import("../Library/Library"));
 const Downloads = lazy(() => import("../Downloads/Downloads"));
+const Storage = lazy(() => import("../Storage/Storage"));
 const Locker = lazy(() => import("../Locker/Locker"));
 const Presets = lazy(() => import("../Presets/Presets"));
 const Manage = lazy(() => import("../Manage/Manage"));
@@ -386,6 +387,9 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
               onOpenShop={() => navigate("shop")}
               onOpenHub={() => navigate("hub")}
             />
+          </RetainedView>
+          <RetainedView active={builtInsActive && view === "storage"} slots={ctxSlots}>
+            <Storage onChanged={onInstalled} />
           </RetainedView>
           <RetainedView active={builtInsActive && view === "locker"} slots={ctxSlots}>
             <Locker />
