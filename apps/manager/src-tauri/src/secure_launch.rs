@@ -842,15 +842,35 @@ const DLL_LOG: &str = "mxbsecure.log";
 /// tables. On Windows the DLL loads as a plugin and unseals its keys on its own thread, so those
 /// lists are usually built before the keys are ready, and a secured file is missing from them.
 /// The DLL re-runs the track loader itself in its `Startup` export; nothing else is rebuilt there.
-/// Everything else needs FrostMod's content reload, so only ask for it when there is something
-/// other than a track to show.
+/// Everything else needs a FrostMod refresh, so only ask for it when there is something other
+/// than a track to show.
+///
+/// The smallest FrostMod refresh that lists every secured asset, or `None` for tracks only.
+/// A paint (bike or rider gear, under a `paints` folder) is in one of the six paint lists, so
+/// the paint refresh covers it; other rider gear needs the gear refresh (gear models plus every
+/// paint list); a bike, or anything not recognised, needs the full reload.
 #[cfg_attr(not(windows), allow(dead_code))]
-fn needs_list_rebuild(assets: &[SecureAsset]) -> bool {
-    assets.iter().any(|a| {
-        !a.blob_path
-            .split(['/', '\\'])
-            .any(|c| c.eq_ignore_ascii_case("tracks"))
-    })
+fn list_rebuild_kind(assets: &[SecureAsset]) -> Option<crate::frostmod::ReloadKind> {
+    use crate::frostmod::ReloadKind;
+    let mut kind: Option<ReloadKind> = None;
+    for a in assets {
+        let has = |name: &str| a.blob_path.split(['/', '\\']).any(|c| c.eq_ignore_ascii_case(name));
+        let this = if has("tracks") {
+            continue;
+        } else if has("paints") {
+            ReloadKind::Paints
+        } else if has("rider") {
+            ReloadKind::Gear
+        } else {
+            ReloadKind::Full
+        };
+        kind = Some(match (kind, this) {
+            (Some(ReloadKind::Full), _) | (_, ReloadKind::Full) => ReloadKind::Full,
+            (Some(ReloadKind::Gear), _) | (_, ReloadKind::Gear) => ReloadKind::Gear,
+            _ => ReloadKind::Paints,
+        });
+    }
+    kind
 }
 
 /// Where in the DLL's log this game's lines start, when the app did not see the game start: the
@@ -868,7 +888,9 @@ fn last_attach_offset(log: &std::path::Path) -> u64 {
 
 /// Windows, once per game start: when the DLL reports its hooks (its keys and catalog are
 /// ready), ask FrostMod to rebuild the game's content lists so secured paints, gear and bikes
-/// appear. This reuses FrostMod's verified content reload, the same signal the Wine platforms
+/// appear: only the paint lists, or the gear and paint lists, when that is all they are
+/// ([`list_rebuild_kind`]); the full reload for a bike. This reuses FrostMod's verified content
+/// reload rows, the same full reload the Wine platforms
 /// send after injecting ([`inject_and_rescan`]) and a mid-session unlock sends
 /// ([`refresh_after_change`]). FrostMod rebuilds every list from disk and re-applies paints to
 /// riders already on track; the game's own boot scan ran before the DLL could serve them.
@@ -877,9 +899,9 @@ fn last_attach_offset(log: &std::path::Path) -> u64 {
 /// the app shows a hint.
 #[cfg(windows)]
 fn rebuild_lists_once_ready(app: &AppHandle, dir: &std::path::Path, mark: Option<u64>, assets: &[SecureAsset]) {
-    if !needs_list_rebuild(assets) {
+    let Some(kind) = list_rebuild_kind(assets) else {
         return; // tracks only: the DLL rebuilds the track list itself
-    }
+    };
     let log = dir.join(DLL_LOG);
     let app = app.clone();
     let count = assets.len();
@@ -901,12 +923,15 @@ fn rebuild_lists_once_ready(app: &AppHandle, dir: &std::path::Path, mark: Option
         }
         let outcome = if crate::frostmod::reload_listener_present() {
             std::thread::sleep(std::time::Duration::from_secs(1));
-            crate::frostmod::signal_reload()
+            // The smallest refresh that lists them: secured paints alone no longer rescan
+            // tracks and bikes. An older FrostMod gets the full reload.
+            let tag = crate::frostmod_manage::installed_version(&app);
+            crate::frostmod::signal_reload_kind(kind, tag.as_deref())
         } else {
             crate::frostmod::ReloadOutcome::NotRunning
         };
         log::info!(
-            "[secure] startup: hooks live; asked FrostMod to rebuild the content lists for {count} secured asset(s): {outcome:?}"
+            "[secure] startup: hooks live; asked FrostMod for a {kind:?} refresh of the content lists for {count} secured asset(s): {outcome:?}"
         );
         if matches!(outcome, crate::frostmod::ReloadOutcome::NotRunning) {
             log::warn!(
@@ -1365,10 +1390,26 @@ mod tests {
         let track = asset(r"C:\G\mods\Tracks\motocross\Pine.mxbsecure");
         let paint = asset(r"C:\G\mods\bikes\KTM450\paints\Red.mxbsecure");
         let helmet = asset("/home/r/mods/rider/helmets/Airoh/paints/Blue.MXBSECURE");
-        assert!(!needs_list_rebuild(&[track.clone()]));
-        assert!(!needs_list_rebuild(&[]));
-        assert!(needs_list_rebuild(&[track, paint]));
-        assert!(needs_list_rebuild(&[helmet]));
+        assert!(list_rebuild_kind(&[track.clone()]).is_none());
+        assert!(list_rebuild_kind(&[]).is_none());
+        assert!(list_rebuild_kind(&[track, paint]).is_some());
+        assert!(list_rebuild_kind(&[helmet]).is_some());
+    }
+
+    #[test]
+    fn the_startup_refresh_is_the_smallest_that_lists_them() {
+        use crate::frostmod::ReloadKind;
+        let track = asset(r"C:\G\mods\Tracks\motocross\Pine.mxbsecure");
+        let bike_paint = asset(r"C:\G\mods\bikes\KTM450\paints\Red.mxbsecure");
+        let helmet_paint = asset("/home/r/mods/rider/helmets/Airoh/paints/Blue.MXBSECURE");
+        let helmet = asset(r"C:\G\mods\rider\helmets\Airoh\model.mxbsecure");
+        let bike = asset(r"C:\G\mods\bikes\KTM450.mxbsecure");
+        assert_eq!(list_rebuild_kind(&[track.clone()]), None);
+        assert_eq!(list_rebuild_kind(&[]), None);
+        assert_eq!(list_rebuild_kind(&[track.clone(), bike_paint.clone()]), Some(ReloadKind::Paints));
+        assert_eq!(list_rebuild_kind(&[bike_paint.clone(), helmet_paint]), Some(ReloadKind::Paints));
+        assert_eq!(list_rebuild_kind(&[bike_paint.clone(), helmet]), Some(ReloadKind::Gear));
+        assert_eq!(list_rebuild_kind(&[bike_paint, bike, track]), Some(ReloadKind::Full));
     }
 
     #[test]
