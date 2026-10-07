@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useFillViewport } from "../../lib/fillViewport";
 import { RefreshCw } from "lucide-react";
 import type { ModType } from "@frost/shared/api/mods";
 import { useConfig } from "@frost/shared/Context/Config";
@@ -285,6 +286,15 @@ export default function Mods({
     if (shopOn) shop.reload();
   }, [modsOn, hubOn, shopOn, listing, hub, shop]);
 
+  const gridScroller = useRef<HTMLDivElement>(null);
+  useFillViewport(gridScroller, {
+    itemCount: items.length,
+    hasMore,
+    busy: busy || loadingMore,
+    blocked: errors.length > 0,
+    loadMore,
+  });
+
   const openItem = useCallback(
     (item: MergedMod) => {
       if (item.source === "mods" && item.mod) {
@@ -409,7 +419,7 @@ export default function Mods({
               </div>
             )}
 
-            <div className="min-h-0 flex-1 overflow-y-auto px-7 pb-6">
+            <div ref={gridScroller} className="min-h-0 flex-1 overflow-y-auto px-7 pb-6">
               {allFailed ? (
                 <div className="mx-auto flex max-w-md flex-col items-center gap-3 py-20 text-center">
                   <p className="text-[13px] font-semibold text-destructive">
@@ -423,7 +433,7 @@ export default function Mods({
                   </Button>
                 </div>
               ) : items.length === 0 && busy ? (
-                <div className="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-3.5">
+                <div className="grid grid-cols-[repeat(auto-fill,minmax(clamp(200px,13vw,280px),1fr))] gap-3.5">
                   {Array.from({ length: 8 }).map((_, i) => (
                     <Skeleton key={i} className="aspect-[4/3] rounded-xl" />
                   ))}
@@ -434,7 +444,7 @@ export default function Mods({
                 </p>
               ) : (
                 <>
-                  <div className="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-3.5">
+                  <div className="grid grid-cols-[repeat(auto-fill,minmax(clamp(200px,13vw,280px),1fr))] gap-3.5">
                     {items.map((item) => {
                       const mod = item.mod;
                       return (
