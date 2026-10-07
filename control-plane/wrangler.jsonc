@@ -152,6 +152,9 @@
     { "name": "INGEST_LIMITER", "namespace_id": "1005", "simple": { "limit": 30, "period": 60 } },
     // Friends: per account, in separate read and write buckets. The app heartbeats presence
     // twice a minute and refreshes the panel on open, so 60 a minute is far past honest use.
-    { "name": "FRIENDS_LIMITER", "namespace_id": "1006", "simple": { "limit": 60, "period": 60 } }
+    { "name": "FRIENDS_LIMITER", "namespace_id": "1006", "simple": { "limit": 60, "period": 60 } },
+    // Series registration: anonymous, per address. Five a minute is a rider fixing a typo; the
+    // daily cap in D1 (`series.ts`) is the real ceiling.
+    { "name": "REGISTER_LIMITER", "namespace_id": "1007", "simple": { "limit": 5, "period": 60 } }
   ]
 }

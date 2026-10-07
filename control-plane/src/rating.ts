@@ -464,6 +464,12 @@ export async function leaderboard(
   return { status: 200, body: { class: cls, riders: out } };
 }
 
+/** The classes that have at least one rated rider, for the site's class picker. */
+export async function ratedClasses(env: Env): Promise<LeaderboardResult> {
+  const rows = await env.DB.prepare("SELECT DISTINCT class FROM rider_ratings ORDER BY class").all<{ class: string }>();
+  return { status: 200, body: { classes: rows.results.map((r) => r.class) } };
+}
+
 export interface ProfileResult {
   status: number;
   body: unknown;

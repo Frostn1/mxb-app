@@ -42,6 +42,7 @@ import {
 import { batchCodes, keyQuery, licenseQuery } from "./pluginspage";
 import { paintThumb } from "./pntthumb";
 import { adminRiderLookup, issueRatingToken, leaderboard as ratingLeaderboard } from "./rating";
+import { adminListSeries, adminSeriesAction } from "./series";
 import { isSteamId64 } from "./steam";
 import { steamAdoption } from "./steamstats";
 import {
@@ -222,6 +223,12 @@ export async function webAdminRoutes(
       case "/v1/web/admin/bans":
         return said(200, { bans: await listBans(env) });
 
+      // Public series (`series.ts`): which slugs are reserved, published, and waiting on review.
+      case "/v1/web/admin/series": {
+        const result = await adminListSeries(env);
+        return said(result.status, result.body);
+      }
+
       // Admin sees everything the public leaderboard hides: banned riders included, so a
       // flagged/banned rider's numbers stay reviewable instead of just disappearing.
       case "/v1/web/admin/rating/leaderboard": {
@@ -273,6 +280,21 @@ export async function webAdminRoutes(
       return said(result.status, result.body);
     }
     return said(404, { error: "no such server-manager endpoint" });
+  }
+
+  // Reserving a series slug mints its publish token, shown once here and pasted into MSM.
+  if (request.method === "POST" && path === "/v1/web/admin/series") {
+    const refused = refuseCrossSiteWrite(request, env);
+    if (refused) return cors(refused, origin);
+    let body: Record<string, unknown>;
+    try {
+      body = (await request.json()) as Record<string, unknown>;
+    } catch {
+      return said(400, { error: "that was not JSON" });
+    }
+    const result = await adminSeriesAction(env, body);
+    console.log(JSON.stringify({ msg: "series admin", action: String(body.action ?? ""), slug: String(body.slug ?? ""), admin: session.steamId, status: result.status }));
+    return said(result.status, result.body);
   }
 
   // The one write here. A rule takes effect on the next report from every install, so it is
