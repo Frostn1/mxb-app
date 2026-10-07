@@ -9,7 +9,7 @@ vi.mock("cloudflare:workers", () => ({ DurableObject: class {} }));
 const { default: worker } = await import("../src/index");
 
 const API = "https://cp.test";
-const SITE = "https://mxbsecure.com";
+const SITE = "https://racing.mxbsecure.com";
 const KEY = "series-test-session-key-series-test";
 // Made-up identifiers in the shapes the endpoints must handle. Not anybody's.
 const FAKE_STEAM_ID = "76561190000000001";
