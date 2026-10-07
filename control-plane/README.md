@@ -51,6 +51,8 @@ consequences fall out of that, and they're baked into the schema:
 | GET | `/v1/survey/polls` | — | The questions the apps should be asking. Carries no install id and is the same for everybody, so it is cacheable. |
 | POST | `/v1/survey` | — | One install's answer to one question. Unauthenticated for the same reason as `/v1/usage`; bounded by size, a closed answer vocabulary and a per-address daily cap. |
 | GET | `/v1/survey/stats` | `ADMIN_KEY` | What people answered, as JSON |
+| POST | `/v1/search-misses` | — | One Browse search that found nothing: the query text (trimmed, lowercased, 80 chars) and the game, counted per day. No install id, account, Steam id or IP is stored; same size and rate-limit posture as `/v1/survey`. Swept after 90 days. |
+| GET | `/v1/search-misses/stats` | `ADMIN_KEY` | The most-missed queries over a window, as JSON |
 | POST | `/v1/master-status` | — | One install saying whether it could reach MX Bikes' own master server. Unauthenticated for the same reason as `/v1/usage`; one row per install per minute. |
 | GET | `/v1/status` | — | Is the master answering? Public, CORS-open and cacheable — it is what mxbsecure.com/status renders and what a Discord bot answering `!timeout` reads. |
 | POST | `/v1/roster` | — | Addresses an app saw in the game's own master list. Held back until distinct networks agree — see below; without that this would be a reflection amplifier. |
