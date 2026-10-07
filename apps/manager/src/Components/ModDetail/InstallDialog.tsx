@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useDownloadSize } from "../../lib/useDownloadSize";
 import {
   AlertTriangle,
   ChevronDown,
@@ -181,6 +182,8 @@ export default function InstallDialog({
   );
 
   const selectedMirror = mirrors[mirrorIdx];
+  // Only the chosen file is asked about, and only while the dialog is open.
+  const selectedSize = useDownloadSize(open ? selectedMirror : null);
   const thumb = image ?? detail?.images[0];
   const subtitleType =
     modType.id === "bikes"
@@ -303,7 +306,10 @@ export default function InstallDialog({
         />
         <span className="flex min-w-0 flex-1 flex-col">
           <span className="truncate text-[12.5px] font-semibold">{m.host}</span>
-          <span className="text-[11px] text-muted-foreground">{note}</span>
+          <span className="text-[11px] text-muted-foreground">
+            {note}
+            {on && selectedSize ? ` · ${selectedSize}` : ""}
+          </span>
           {fileLabel && (
             <span className="truncate font-mono text-[10.5px] text-faint">{fileLabel}</span>
           )}
