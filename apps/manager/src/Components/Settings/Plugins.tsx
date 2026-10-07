@@ -43,6 +43,10 @@ function until(at: number | null): string | null {
  * send them all to the same place — support.
  */
 function describe(t: TFunc<TKey>, p: PluginView): { tone: Tone; title: string; detail: string } {
+  // A free plugin with no license yet only needs the account; there is no key to redeem.
+  if (p.free && p.status === "expired") {
+    return { tone: "locked", title: t("plugins.free"), detail: t("plugins.freeSignIn") };
+  }
   if (p.status === "expired") {
     return p.expires
       ? {
@@ -59,13 +63,14 @@ function describe(t: TFunc<TKey>, p: PluginView): { tone: Tone; title: string; d
       detail: t("plugins.needsCheckDetail"),
     };
   }
+  const have = p.free ? t("plugins.free") : t("plugins.licensed");
   if (!p.published) {
-    return { tone: "stale", title: t("plugins.licensed"), detail: t("plugins.noBuildYet") };
+    return { tone: "stale", title: have, detail: t("plugins.noBuildYet") };
   }
   if (!p.installedVersion) {
     return {
       tone: "ready",
-      title: t("plugins.licensed"),
+      title: have,
       detail: t("plugins.readyToInstall", { version: p.version ?? "" }),
     };
   }
@@ -82,7 +87,9 @@ function describe(t: TFunc<TKey>, p: PluginView): { tone: Tone; title: string; d
   return {
     tone: "good",
     title: t("plugins.active"),
-    detail: t("plugins.activeDetail", { date: until(p.expires) ?? "" }),
+    detail: p.free
+      ? t("plugins.activeFreeDetail")
+      : t("plugins.activeDetail", { date: until(p.expires) ?? "" }),
   };
 }
 
@@ -120,7 +127,7 @@ const PluginRow = ({
   const Icon = TONE_ICON[tone];
   const canInstall = plugin.published && (plugin.status === "live") && !plugin.ready;
   // A working plugin whose panels are in the other window. Saying where it went is the
-  // whole job here: somebody who has just installed the Replay Mod and finds no new row in
+  // whole job here: somebody who has just installed MXB Replay and finds no new row in
   // this app has been told the install worked and shown nothing to prove it.
   const inStudio = plugin.ready && plugin.host === "studio";
 

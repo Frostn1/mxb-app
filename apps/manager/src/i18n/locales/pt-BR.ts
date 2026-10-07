@@ -2507,7 +2507,7 @@ export const ptBR: Translation = {
 
   // --- paid plugins ---
   "plugins.section": "Plugins",
-  "plugins.sectionDesc": "Complementos pagos para o {{app}}. A licença é uma assinatura mensal vinculada à sua conta e continua funcionando offline por uma semana entre as verificações.",
+  "plugins.sectionDesc": "Complementos para o {{app}}. Os gratuitos são instalados com a sua conta. Os pagos precisam de uma chave e funcionam offline por uma semana entre as verificações.",
   "plugins.keyLabel": "Resgatar uma chave",
   "plugins.keyHelp": "Cole a chave que você recebeu. Para renovar, use outra chave — ela soma ao tempo que resta.",
   "plugins.redeem": "Resgatar",
@@ -2525,6 +2525,9 @@ export const ptBR: Translation = {
   "plugins.active": "Ativo",
   "plugins.activeDetail": "licenciado até {{date}}.",
   "plugins.licensed": "Licenciado",
+  "plugins.free": "Grátis",
+  "plugins.freeSignIn": "entre na sua conta para instalar. Não precisa de chave.",
+  "plugins.activeFreeDetail": "grátis com a sua conta.",
   "plugins.readyToInstall": "a versão {{version}} está pronta para instalar.",
   "plugins.noBuildYet": "ainda não há uma versão para instalar.",
   "plugins.updateAvailable": "Atualização disponível",

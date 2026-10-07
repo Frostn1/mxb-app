@@ -2527,7 +2527,7 @@ export const de: Translation = {
 
   // --- paid plugins ---
   "plugins.section": "Plugins",
-  "plugins.sectionDesc": "Kostenpflichtige Erweiterungen für {{app}}. Eine Lizenz ist ein Monatsabo, das an dein Konto gebunden ist und zwischen den Prüfungen eine Woche offline weiterläuft.",
+  "plugins.sectionDesc": "Erweiterungen für {{app}}. Kostenlose installierst du mit deinem Konto. Kostenpflichtige brauchen einen Schlüssel und laufen zwischen den Prüfungen eine Woche offline weiter.",
   "plugins.keyLabel": "Schlüssel einlösen",
   "plugins.keyHelp": "Füge den erhaltenen Schlüssel ein. Zum Verlängern dient ein weiterer Schlüssel — er wird auf die verbleibende Zeit addiert.",
   "plugins.redeem": "Einlösen",
@@ -2545,6 +2545,9 @@ export const de: Translation = {
   "plugins.active": "Aktiv",
   "plugins.activeDetail": "lizenziert bis {{date}}.",
   "plugins.licensed": "Lizenziert",
+  "plugins.free": "Kostenlos",
+  "plugins.freeSignIn": "melde dich an, um es zu installieren. Kein Schlüssel nötig.",
+  "plugins.activeFreeDetail": "kostenlos mit deinem Konto.",
   "plugins.readyToInstall": "Version {{version}} kann installiert werden.",
   "plugins.noBuildYet": "es gibt noch keinen Build zum Installieren.",
   "plugins.updateAvailable": "Update verfügbar",

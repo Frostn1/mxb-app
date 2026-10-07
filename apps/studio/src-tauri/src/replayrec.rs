@@ -1,6 +1,6 @@
 //! Recording a replay, so nobody has to run OBS beside the game.
 //!
-//! The Replay Mod flies a camera path inside MX Bikes and always has. What it could not do
+//! MXB Replay flies a camera path inside MX Bikes and always has. What it could not do
 //! was keep the result: the mod drew the shot and the rider was on their own for the part
 //! that turns a shot into a video — find OBS, set up a scene, remember to press record, crop
 //! the overlay out afterwards. Every one of those is a place to lose a take you cannot get
@@ -459,7 +459,7 @@ pub fn start(app: &tauri::AppHandle, source: Source) -> Result<PathBuf, String> 
         return Err("Already recording.".into());
     }
     if !cfg!(windows) {
-        return Err("Recording a replay needs Windows, where MX Bikes and the Replay Mod run.".into());
+        return Err("Recording a replay needs Windows, where MX Bikes and MXB Replay run.".into());
     }
 
     let (cfg, _) = sys(app);
@@ -675,7 +675,7 @@ fn civil(secs: i64) -> (i64, u32, u32, u32, u32, u32) {
 /// Watch the mod's take file and record what it announces.
 ///
 /// One thread for the life of the Studio. It does nothing at all until a take file appears,
-/// which for everyone without the Replay Mod is forever — a sleeping thread and a `stat` of a
+/// which for everyone without MXB Replay is forever — a sleeping thread and a `stat` of a
 /// path that isn't there, twice a second.
 pub fn watch(app: tauri::AppHandle) {
     std::thread::spawn(move || {

@@ -2472,7 +2472,7 @@ export const en = {
 
   // --- paid plugins ---
   "plugins.section": "Plugins",
-  "plugins.sectionDesc": "Paid add-ons for {{app}}. A license is a monthly subscription tied to your account, and it keeps working offline for a week between checks.",
+  "plugins.sectionDesc": "Add-ons for {{app}}. Free ones install with your account. Paid ones need a key, and keep working offline for a week between checks.",
   "plugins.keyLabel": "Redeem a key",
   "plugins.keyHelp": "Paste the key you were sent. Renewing is another key — it adds to whatever time you have left.",
   "plugins.redeem": "Redeem",
@@ -2490,6 +2490,9 @@ export const en = {
   "plugins.active": "Active",
   "plugins.activeDetail": "licensed until {{date}}.",
   "plugins.licensed": "Licensed",
+  "plugins.free": "Free",
+  "plugins.freeSignIn": "sign in to install it. No key needed.",
+  "plugins.activeFreeDetail": "free with your account.",
   "plugins.readyToInstall": "version {{version}} is ready to install.",
   "plugins.noBuildYet": "there's no build to install yet.",
   "plugins.updateAvailable": "Update available",

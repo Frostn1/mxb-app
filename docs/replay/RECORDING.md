@@ -1,6 +1,6 @@
 # Recording a replay
 
-How Frost's Replay Mod and Frost's Studio between them turn a camera path into a video file,
+How MXB Replay and Frost's Studio between them turn a camera path into a video file,
 and what each half has to do for that to happen without anybody pressing record.
 
 Two halves, in two repositories:
@@ -16,7 +16,7 @@ The piece they agree on is in the shared core:
 ## Why the Studio and not MXB App
 
 Cutting a replay is the same errand as painting a bike or building a track: you are making
-something. MXB App installs mods. So the Replay Mod's panels open in Frost's Studio, and the
+something. MXB App installs mods. So MXB Replay's panels open in Frost's Studio, and the
 manager keeps the half that is genuinely its own — buying the licence, installing the bundle
 and updating it — with an **Open in Studio** button on Settings → Plugins.
 
@@ -25,7 +25,7 @@ plugin's first panel — or a screen of its own, when the name is one of those (
 
 Mechanically, that is one field. `manifest.json` may carry `"host": "studio"` or
 `"host": "manager"`, and **a manifest that says nothing means Studio** — which is what makes
-the Replay Mod's existing bundle land in the right window without a byte of it changing. Each
+MXB Replay's existing bundle land in the right window without a byte of it changing. Each
 app mounts only the plugins whose host it is, so nothing appears twice.
 
 ### What a moved panel can still reach
@@ -89,8 +89,8 @@ That is the whole contract. A mod build that does none of it still works: the St
 ## What the recorder does
 
 `replayrec.rs` runs a watcher thread for the life of the Studio, polling twice a second. It
-does nothing at all until a take file appears — which, for everybody who does not own the
-Replay Mod, is forever.
+does nothing at all until a take file appears — which, for everybody who has not installed
+MXB Replay, is forever.
 
 When a take starts it spawns **ffmpeg** against the game's window and writes an `.mp4` into
 `Videos\Frost Replays` (or wherever Settings says), named for the track and the slot:

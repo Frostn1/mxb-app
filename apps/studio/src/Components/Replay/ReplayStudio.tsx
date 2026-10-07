@@ -41,7 +41,7 @@ import { useT } from "@/i18n";
 import { track } from "@/lib/analytics";
 
 /**
- * Replay — the Replay Mod's half that lives outside the game.
+ * Replay — MXB Replay's half that lives outside the game.
  *
  * The mod flies the camera; this screen keeps what it flew. It is in the Studio and not in
  * the mod manager because cutting a replay is the same errand as painting a bike or building

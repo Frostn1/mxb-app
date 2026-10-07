@@ -121,6 +121,9 @@ interface LicenseRow {
 
 const DAY = 86400;
 
+/** How far a free plugin's license reaches. It is re-issued on every check-in. */
+export const FREE_TERM_DAYS = 365;
+
 function nowSec(): number {
   return Math.floor(Date.now() / 1000);
 }
@@ -162,16 +165,17 @@ async function issue(
   );
 }
 
-/** The catalogue. Public: what is for sale is not a secret, and the app shows it to everyone. */
+/** The catalogue. Public: what is on offer is not a secret, and the app shows it to everyone. */
 export async function listPlugins(env: Env): Promise<Response> {
   const { results } = await env.DB.prepare(
-    `SELECT id, name, summary, version, bundle_sha256 FROM plugins ORDER BY name`,
+    `SELECT id, name, summary, version, bundle_sha256, free FROM plugins ORDER BY name`,
   ).all<{
     id: string;
     name: string;
     summary: string | null;
     version: string | null;
     bundle_sha256: string | null;
+    free: number;
   }>();
   return json(200, {
     plugins: (results ?? []).map((p) => ({
@@ -181,6 +185,7 @@ export async function listPlugins(env: Env): Promise<Response> {
       version: p.version,
       // Published means "there is a build to install", which is not the same as "for sale".
       published: Boolean(p.bundle_sha256),
+      free: Boolean(p.free),
     })),
   });
 }
@@ -202,8 +207,30 @@ export async function myPlugins(account: Account, env: Env): Promise<Response> {
     .all<LicenseRow>();
 
   const now = nowSec();
+  const rows: (LicenseRow & { free?: boolean })[] = [...(results ?? [])];
+
+  // Free plugins: every account holds one, so there is no row to read. The expiry rolls
+  // forward on each check-in and the license still asks for a refresh within the usual
+  // grace, so the app treats it exactly like a paid one. A revoked row still wins.
+  const { results: free } = await env.DB.prepare(
+    `SELECT p.id AS plugin_id, p.bundle_sha256, p.version, p.name
+       FROM plugins p
+      WHERE p.free = 1
+        AND NOT EXISTS (SELECT 1 FROM plugin_licenses l
+                         WHERE l.plugin_id = p.id AND l.account_id = ?
+                           AND l.revoked_at IS NOT NULL)`,
+  )
+    .bind(account.id)
+    .all<Omit<LicenseRow, "expires_at">>();
+  for (const f of free ?? []) {
+    const i = rows.findIndex((r) => r.plugin_id === f.plugin_id);
+    const row = { ...f, expires_at: now + FREE_TERM_DAYS * DAY, free: true };
+    if (i >= 0) rows[i] = row;
+    else rows.push(row);
+  }
+
   const licenses = [];
-  for (const row of results ?? []) {
+  for (const row of rows) {
     licenses.push({
       plugin: row.plugin_id,
       name: row.name,
@@ -214,6 +241,7 @@ export async function myPlugins(account: Account, env: Env): Promise<Response> {
       // notice it is stale would make every consumer responsible for a check that belongs
       // in exactly one place.
       license: row.expires_at > now ? await issue(env, key, account.id, row) : null,
+      free: row.free ?? false,
     });
   }
   return json(200, { licenses });
@@ -331,7 +359,8 @@ export async function redeemKey(
 }
 
 /**
- * The bundle itself, for an account whose license is live right now.
+ * The bundle itself, for an account whose license is live right now, or for any signed-in
+ * account when the plugin is free.
  *
  * Streamed from R2 rather than redirected to it: a redirect would be a URL that works for
  * whoever holds it, and the whole point of this route is that it does not.
@@ -342,17 +371,26 @@ export async function pluginBundle(
   env: Env,
 ): Promise<Response> {
   const row = await env.DB.prepare(
-    `SELECT p.bundle_key, p.bundle_sha256, l.expires_at
+    `SELECT p.bundle_key, p.bundle_sha256, p.free, l.expires_at,
+            (SELECT 1 FROM plugin_licenses r
+              WHERE r.plugin_id = p.id AND r.account_id = ? AND r.revoked_at IS NOT NULL) AS revoked
        FROM plugins p
        LEFT JOIN plugin_licenses l ON l.plugin_id = p.id AND l.account_id = ?
                                    AND l.revoked_at IS NULL
       WHERE p.id = ?`,
   )
-    .bind(account.id, pluginId)
-    .first<{ bundle_key: string | null; bundle_sha256: string | null; expires_at: number | null }>();
+    .bind(account.id, account.id, pluginId)
+    .first<{
+      bundle_key: string | null;
+      bundle_sha256: string | null;
+      free: number;
+      expires_at: number | null;
+      revoked: number | null;
+    }>();
 
   if (!row) return json(404, { error: "no such plugin" });
-  if (!row.expires_at || row.expires_at <= nowSec()) {
+  const freeForThem = Boolean(row.free) && !row.revoked;
+  if (!freeForThem && (!row.expires_at || row.expires_at <= nowSec())) {
     return json(403, { error: "no live license for that plugin" });
   }
   if (!row.bundle_key) return json(404, { error: "that plugin has no build published yet" });

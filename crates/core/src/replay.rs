@@ -1,4 +1,4 @@
-//! The Replay Mod, as the Studio needs to see it: where its files live, which camera paths
+//! MXB Replay, as the Studio needs to see it: where its files live, which camera paths
 //! are saved, and the one file the mod writes to say a take is running.
 //!
 //! The mod itself is a paid plugin — a DLL that runs inside MX Bikes and a panel that runs in
@@ -274,7 +274,7 @@ pub struct Recording {
     /// **On by default**, which is the whole point of the feature: the thing it replaces is
     /// remembering to press record in OBS, and a switch you have to find first replaces
     /// nothing. It cannot start a recording without the mod saying so, so "on" costs a
-    /// stopped watcher thread to anybody who does not own the Replay Mod.
+    /// stopped watcher thread to anybody who does not own MXB Replay.
     pub auto: bool,
     /// Where finished recordings land. Blank means the system's Videos folder, in
     /// `Frost Replays`.
