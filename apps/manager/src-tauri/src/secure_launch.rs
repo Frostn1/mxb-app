@@ -848,7 +848,8 @@ const DLL_LOG: &str = "mxbsecure.log";
 /// The smallest FrostMod refresh that lists every secured asset, or `None` for tracks only.
 /// A paint (bike or rider gear, under a `paints` folder) is in one of the six paint lists, so
 /// the paint refresh covers it; other rider gear needs the gear refresh (gear models plus every
-/// paint list); a bike, or anything not recognised, needs the full reload.
+/// paint list); a bike needs the bikes refresh (bikes, series, bike paints); anything not
+/// recognised, or a mix no single smaller refresh covers, needs the full reload.
 #[cfg_attr(not(windows), allow(dead_code))]
 fn list_rebuild_kind(assets: &[SecureAsset]) -> Option<crate::frostmod::ReloadKind> {
     use crate::frostmod::ReloadKind;
@@ -861,13 +862,19 @@ fn list_rebuild_kind(assets: &[SecureAsset]) -> Option<crate::frostmod::ReloadKi
             ReloadKind::Paints
         } else if has("rider") {
             ReloadKind::Gear
+        } else if has("bikes") {
+            ReloadKind::Bikes
         } else {
             ReloadKind::Full
         };
+        // Paints nests in Gear; any other mix of kinds is the full reload (as FrostMod merges).
         kind = Some(match (kind, this) {
-            (Some(ReloadKind::Full), _) | (_, ReloadKind::Full) => ReloadKind::Full,
-            (Some(ReloadKind::Gear), _) | (_, ReloadKind::Gear) => ReloadKind::Gear,
-            _ => ReloadKind::Paints,
+            (None, k) => k,
+            (Some(a), b) if a == b => a,
+            (Some(ReloadKind::Paints), ReloadKind::Gear) | (Some(ReloadKind::Gear), ReloadKind::Paints) => {
+                ReloadKind::Gear
+            }
+            _ => ReloadKind::Full,
         });
     }
     kind
@@ -889,7 +896,7 @@ fn last_attach_offset(log: &std::path::Path) -> u64 {
 /// Windows, once per game start: when the DLL reports its hooks (its keys and catalog are
 /// ready), ask FrostMod to rebuild the game's content lists so secured paints, gear and bikes
 /// appear: only the paint lists, or the gear and paint lists, when that is all they are
-/// ([`list_rebuild_kind`]); the full reload for a bike. This reuses FrostMod's verified content
+/// ([`list_rebuild_kind`]); the bikes refresh for a bike. This reuses FrostMod's verified content
 /// reload rows, the same full reload the Wine platforms
 /// send after injecting ([`inject_and_rescan`]) and a mid-session unlock sends
 /// ([`refresh_after_change`]). FrostMod rebuilds every list from disk and re-applies paints to
@@ -1409,7 +1416,11 @@ mod tests {
         assert_eq!(list_rebuild_kind(&[track.clone(), bike_paint.clone()]), Some(ReloadKind::Paints));
         assert_eq!(list_rebuild_kind(&[bike_paint.clone(), helmet_paint]), Some(ReloadKind::Paints));
         assert_eq!(list_rebuild_kind(&[bike_paint.clone(), helmet]), Some(ReloadKind::Gear));
-        assert_eq!(list_rebuild_kind(&[bike_paint, bike, track]), Some(ReloadKind::Full));
+        assert_eq!(list_rebuild_kind(&[bike_paint, bike.clone(), track.clone()]), Some(ReloadKind::Full));
+        assert_eq!(list_rebuild_kind(&[bike.clone(), track]), Some(ReloadKind::Bikes));
+        assert_eq!(list_rebuild_kind(&[bike.clone(), bike.clone()]), Some(ReloadKind::Bikes));
+        let helmet_model = asset(r"C:\G\mods\rider\helmets\Airoh\model.mxbsecure");
+        assert_eq!(list_rebuild_kind(&[bike, helmet_model]), Some(ReloadKind::Full));
     }
 
     #[test]

@@ -343,16 +343,30 @@ pub fn signal_refresh_gear() -> CommandOutcome {
     send_command(command_json("refresh_gear", ""))
 }
 
+/// The oldest FrostMod that handles `refresh_tracks` and `refresh_bikes` (frostmod#139). An
+/// older one drops the verbs, so it gets the full reload instead.
+const TRACKS_BIKES_REFRESH_MIN_VERSION: &str = "v0.49.8";
+
+/// May we send `refresh_tracks` / `refresh_bikes` to the installed FrostMod, tagged `tag`?
+pub fn tracks_bikes_refresh_supported(tag: Option<&str>) -> bool {
+    match (tag.and_then(version_parts), version_parts(TRACKS_BIKES_REFRESH_MIN_VERSION)) {
+        (Some(have), Some(min)) => have >= min,
+        _ => false,
+    }
+}
+
 /// Which of FrostMod's content refreshes to ask for. The smaller ones replay only some rows of
-/// its verified reload table, so they skip the slow lists (tracks, bikes):
-/// `Paints` the six paint lists; `Gear` the rider gear models and every paint list; `Full`
-/// everything. FrostMod has no tracks-only or bikes-only refresh (those rows are unproven).
+/// its verified reload table, so they skip the slow lists:
+/// `Paints` the six paint lists; `Gear` the rider gear models and every paint list; `Tracks`
+/// the track list; `Bikes` the bike list, the series and the bike paints; `Full` everything.
 #[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ReloadKind {
     Paints,
     Gear,
+    Tracks,
+    Bikes,
     Full,
 }
 
@@ -362,6 +376,8 @@ pub fn reload_kind_verb(kind: ReloadKind, tag: Option<&str>) -> Option<&'static 
     match kind {
         ReloadKind::Paints if paint_refresh_supported(tag) => Some("refresh_paints"),
         ReloadKind::Gear if gear_refresh_supported(tag) => Some("refresh_gear"),
+        ReloadKind::Tracks if tracks_bikes_refresh_supported(tag) => Some("refresh_tracks"),
+        ReloadKind::Bikes if tracks_bikes_refresh_supported(tag) => Some("refresh_bikes"),
         _ => None,
     }
 }
@@ -757,6 +773,10 @@ mod tests {
         assert_eq!(reload_kind_verb(ReloadKind::Gear, Some("v0.39.2")), None);
         assert_eq!(reload_kind_verb(ReloadKind::Paints, Some("v0.38.0")), None);
         assert_eq!(reload_kind_verb(ReloadKind::Paints, None), None);
+        assert_eq!(reload_kind_verb(ReloadKind::Tracks, Some("v0.49.8")), Some("refresh_tracks"));
+        assert_eq!(reload_kind_verb(ReloadKind::Bikes, Some("v0.50.0")), Some("refresh_bikes"));
+        assert_eq!(reload_kind_verb(ReloadKind::Bikes, Some("v0.49.7")), None);
+        assert_eq!(reload_kind_verb(ReloadKind::Tracks, None), None);
     }
 
     use super::*;
