@@ -2,26 +2,30 @@
  * Public series for mxbsecure.com/series.
  *
  * A series is scored in MSM (the MXB Servers desktop app) from mxbserver weekends and official
- * servers' live timing. MSM publishes the result here and the site reads it back. Three surfaces:
+ * servers' live timing. MSM publishes the result here and the site reads it back. Four surfaces:
  *
  *  - publish / unpublish (`PUT`/`DELETE /v1/series/{slug}`) and the registration list, behind a
  *    per-series publish token. An admin reserves the slug on mxbsecure.com/admin, which mints the
  *    token and shows it once; only the SHA-256 digest is stored, like account and rating tokens.
- *    A token is scoped to its one series, so a leaked token can rewrite one standings page and
- *    nothing else (not a managed server's rating token, which can feed the global ratings).
- *  - public reads (`GET /v1/series`, `GET /v1/series/{slug}`), CORS-open and cacheable: they carry
- *    display names, points and places only.
- *  - registration (`POST /v1/series/{slug}/register`), the one anonymous write. There is no
- *    Turnstile on the site, so it is held by a per-address limiter, a per-address daily cap kept in
- *    D1 as a keyed hash, and a honeypot field. Entries start pending; only approved ones are public.
+ *    A token is scoped to its one series.
+ *  - public reads (`GET /v1/series`, `GET /v1/series/{slug}`), CORS-open and cacheable.
+ *  - anonymous registration (`POST /v1/series/{slug}/register`): unverified, held by a per-address
+ *    limiter, a keyed per-address daily cap in D1 and a honeypot (the site has no Turnstile).
+ *  - signed-in registration (`/v1/web/series/{slug}/register`): the site's Steam session, so the
+ *    rider's GUID comes from the Steam ID Valve vouched for (`guidFromSteamId`), never from a form.
  *
- * Nothing that identifies a player beyond the name they race under is accepted: a publish carrying
- * anything shaped like a GUID or Steam ID, or a field named like one, is refused whole rather than
- * scrubbed, so a misbehaving publisher finds out instead of leaking quietly.
+ * Riders are identified by GUID. MSM sends it on result and standing rows, over the publish call
+ * only, and it is stored so ratings, bans and registrations can be joined on it. No public read
+ * returns it or anything derived from it. Every other string in a publish is still refused if it
+ * is shaped like a GUID, Steam ID or UUID, so an identifier cannot reach the page as a name.
  */
 
+import { cors, refuseCrossSiteWrite } from "./assets";
 import { bearer, hashToken, newToken } from "./auth";
 import { isBanned } from "./bans";
+import { guidFromSteamId } from "./steam";
+import { isGuid } from "./validate";
+import { webSession } from "./websession";
 
 export interface Result {
   status: number;
@@ -32,6 +36,7 @@ const SITE = "https://mxbsecure.com";
 export const SLUG_RE = /^[a-z0-9](?:[a-z0-9-]{0,46}[a-z0-9])?$/;
 const MAX_BODY_BYTES = 1_000_000;
 const MAX_ROUNDS = 100;
+const MAX_UPCOMING = 50;
 const MAX_RESULTS = 200;
 const MAX_STANDINGS = 500;
 const MAX_CLASSES = 20;
@@ -39,9 +44,7 @@ const KEEP_SNAPSHOTS = 10;
 /** Registrations one address may send per day, across every series. */
 const REGISTRATIONS_PER_DAY = 10;
 const DAY_MS = 24 * 60 * 60 * 1000;
-
-export const MMR_NOTE =
-  "MMR is matched to riders by display name, so it can be wrong when names are shared or changed.";
+const FAR_FUTURE = 32_503_680_000;
 
 const STATUSES = new Set(["finished", "dnf", "dsq", "dns"]);
 const REG_STATUSES = new Set(["pending", "approved", "rejected"]);
@@ -50,7 +53,9 @@ const REG_STATUSES = new Set(["pending", "approved", "rejected"]);
 // Identifier screening.
 // ---------------------------------------------------------------------------------------------
 
-const FORBIDDEN_KEYS = new Set(["guid", "steam_id", "steamid", "key", "identity", "server_id", "serverid"]);
+/** The one field allowed to hold a GUID: a rider row's own `guid`. */
+const GUID_FIELD = "guid";
+const FORBIDDEN_KEYS = new Set(["steam_id", "steamid", "key", "identity", "server_id", "serverid"]);
 const STEAM_ID = /7656119\d{10}/;
 const HEX_RUN = /[0-9a-f]{16,}/i;
 const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
@@ -60,7 +65,10 @@ export function looksLikeIdentifier(value: string): boolean {
   return STEAM_ID.test(value) || HEX_RUN.test(value) || UUID.test(value);
 }
 
-/** The first identifier-shaped thing in a JSON value, as a path for the error, or null. */
+/**
+ * The first identifier-shaped thing in a JSON value outside a `guid` field, as a path for the
+ * error, or null. A `guid` field is checked separately, for being a GUID.
+ */
 export function findIdentifier(value: unknown, path = "body", depth = 0): string | null {
   if (depth > 8) return `${path} (nested too deeply)`;
   if (typeof value === "string") return looksLikeIdentifier(value) ? path : null;
@@ -74,11 +82,18 @@ export function findIdentifier(value: unknown, path = "body", depth = 0): string
   if (value && typeof value === "object") {
     for (const [k, v] of Object.entries(value)) {
       if (FORBIDDEN_KEYS.has(k.toLowerCase())) return `${path}.${k}`;
+      if (k === GUID_FIELD) continue;
       const hit = findIdentifier(v, `${path}.${k}`, depth + 1);
       if (hit) return hit;
     }
   }
   return null;
+}
+
+/** A GUID as stored: trimmed, upper-case. Null for absent; undefined for something invalid. */
+function guidField(v: unknown): string | null | undefined {
+  if (v === null || v === undefined || v === "") return null;
+  return isGuid(v) ? v.trim().toUpperCase() : undefined;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -104,6 +119,8 @@ const className = (v: unknown): string | null => {
 interface ResultRow {
   place: number | null;
   name: string;
+  guid: string | null;
+  number: number | null;
   class: string;
   points: number;
   status: string;
@@ -116,12 +133,15 @@ interface RoundRow {
   label: string;
   track: string;
   startedAt: number | null;
+  status: "done" | "dropped";
   results: ResultRow[];
 }
 
 interface StandingRow {
   position: number;
   name: string;
+  guid: string | null;
+  number: number | null;
   class: string;
   points: number;
   grossPoints: number;
@@ -130,7 +150,7 @@ interface StandingRow {
   rounds: { round: number; place: number | null; points: number; dropped: boolean }[];
 }
 
-interface NextRound {
+interface Upcoming {
   label: string | null;
   track: string | null;
   startsAt: number | null;
@@ -142,17 +162,27 @@ export interface Publish {
   pointsTable: number[];
   dropWorst: number;
   registrationOpen: boolean;
-  nextRound: NextRound | null;
+  upcoming: Upcoming[];
   rounds: RoundRow[];
   standings: StandingRow[];
 }
 
 const POINTS_MAX = 100_000;
 
+function parseRider(v: Raw): { guid: string | null; number: number | null } | string {
+  const guid = guidField(v.guid);
+  if (guid === undefined) return "guid must be an MX Bikes GUID or null";
+  const number = optInt(v.number, 0, 999);
+  if (number === undefined) return "number must be 0-999 or null";
+  return { guid, number };
+}
+
 function parseResult(v: unknown): ResultRow | string {
   if (!isObj(v)) return "each result must be an object";
   const name = text(v.name, 64);
   if (!name) return "each result needs a name of at most 64 characters";
+  const rider = parseRider(v);
+  if (typeof rider === "string") return rider;
   const place = optInt(v.place, 1, 1000);
   if (place === undefined) return "result place must be a whole number or null";
   const cls = className(v.class);
@@ -165,13 +195,15 @@ function parseResult(v: unknown): ResultRow | string {
   if (laps === null) return "result laps must be a whole number";
   const best = optInt(v.best_lap_ms, 1, 3_600_000);
   if (best === undefined) return "best_lap_ms must be milliseconds or null";
-  return { place, name, class: cls, points, status, laps, bestLapMs: best };
+  return { place, name, ...rider, class: cls, points, status, laps, bestLapMs: best };
 }
 
 function parseStanding(v: unknown): StandingRow | string {
   if (!isObj(v)) return "each standing must be an object";
   const name = text(v.name, 64);
   if (!name) return "each standing needs a name of at most 64 characters";
+  const rider = parseRider(v);
+  if (typeof rider === "string") return rider;
   const position = int(v.position, 1, 10_000);
   const points = int(v.points, 0, POINTS_MAX * MAX_ROUNDS);
   const gross = int(v.gross_points ?? v.points, 0, POINTS_MAX * MAX_ROUNDS);
@@ -192,14 +224,24 @@ function parseStanding(v: unknown): StandingRow | string {
     if (round === null || place === undefined || cellPoints === null) return "standing round cells need round, place and points";
     rounds.push({ round, place, points: cellPoints, dropped: c.dropped === true });
   }
-  return { position, name, class: cls, points, grossPoints: gross, wins, roundsRidden: ridden, rounds };
+  return { position, name, ...rider, class: cls, points, grossPoints: gross, wins, roundsRidden: ridden, rounds };
+}
+
+function parseUpcoming(n: unknown): Upcoming | string {
+  if (!isObj(n)) return "each upcoming round must be an object";
+  const label = n.label == null ? null : text(n.label, 64);
+  const track = n.track == null ? null : text(n.track, 120);
+  const startsAt = optInt(n.starts_at, 0, FAR_FUTURE);
+  if ((n.label != null && label === null) || (n.track != null && track === null)) return "upcoming label or track is too long";
+  if (startsAt === undefined) return "starts_at must be unix seconds or null";
+  return { label: label || null, track: track || null, startsAt };
 }
 
 export function parsePublish(body: unknown): Publish | { error: string } {
   if (!isObj(body)) return { error: "expected a JSON object" };
   if (body.v !== 1) return { error: "unsupported or missing payload version (expected v: 1)" };
   const hit = findIdentifier(body);
-  if (hit) return { error: `${hit} looks like a GUID, Steam ID or rider key; publish display names only` };
+  if (hit) return { error: `${hit} looks like a GUID, Steam ID or rider key; only a rider's guid field may hold one` };
 
   const name = text(body.name, 64);
   if (!name) return { error: "name is required (at most 64 characters)" };
@@ -224,17 +266,14 @@ export function parsePublish(body: unknown): Publish | { error: string } {
   const dropWorst = int(body.drop_worst ?? 0, 0, MAX_ROUNDS);
   if (dropWorst === null) return { error: "drop_worst must be a whole number" };
 
-  let nextRound: NextRound | null = null;
-  if (body.next_round !== undefined && body.next_round !== null) {
-    if (!isObj(body.next_round)) return { error: "next_round must be an object or null" };
-    const n = body.next_round;
-    const label = n.label === undefined || n.label === null ? null : text(n.label, 64);
-    const track = n.track === undefined || n.track === null ? null : text(n.track, 120);
-    const startsAt = optInt(n.starts_at, 0, 32_503_680_000);
-    if (label === undefined || track === undefined || startsAt === undefined) return { error: "next_round fields are invalid" };
-    if (n.label != null && label === null) return { error: "next_round label is too long" };
-    if (n.track != null && track === null) return { error: "next_round track is too long" };
-    nextRound = label || track || startsAt ? { label: label || null, track: track || null, startsAt } : null;
+  // `upcoming`, or v1's single `next_round`.
+  const upcomingRaw = body.upcoming ?? (body.next_round == null ? [] : [body.next_round]);
+  if (!Array.isArray(upcomingRaw) || upcomingRaw.length > MAX_UPCOMING) return { error: `upcoming must be a list of at most ${MAX_UPCOMING}` };
+  const upcoming: Upcoming[] = [];
+  for (const u of upcomingRaw) {
+    const parsed = parseUpcoming(u);
+    if (typeof parsed === "string") return { error: parsed };
+    if (parsed.label || parsed.track || parsed.startsAt) upcoming.push(parsed);
   }
 
   const roundsRaw = body.rounds ?? [];
@@ -248,8 +287,10 @@ export function parsePublish(body: unknown): Publish | { error: string } {
     const label = text(r.label ?? "", 64);
     const track = text(r.track ?? "", 120);
     if (label === null || track === null) return { error: "round label or track is too long" };
-    const startedAt = optInt(r.started_unix, 0, 32_503_680_000);
+    const startedAt = optInt(r.started_unix, 0, FAR_FUTURE);
     if (startedAt === undefined) return { error: "started_unix must be unix seconds or null" };
+    const status = r.status === undefined || r.status === "done" ? "done" : r.status === "dropped" ? "dropped" : null;
+    if (!status) return { error: "round status must be done or dropped" };
     if (!Array.isArray(r.results) || r.results.length > MAX_RESULTS) return { error: `round results must be a list of at most ${MAX_RESULTS}` };
     const results: ResultRow[] = [];
     for (const x of r.results) {
@@ -257,7 +298,7 @@ export function parsePublish(body: unknown): Publish | { error: string } {
       if (typeof parsed === "string") return { error: `round ${round}: ${parsed}` };
       results.push(parsed);
     }
-    rounds.push({ round, label, track, startedAt, results });
+    rounds.push({ round, label, track, startedAt, status, results });
   }
   rounds.sort((a, b) => a.round - b.round);
 
@@ -277,7 +318,7 @@ export function parsePublish(body: unknown): Publish | { error: string } {
     pointsTable,
     dropWorst,
     registrationOpen: body.registration_open !== false,
-    nextRound,
+    upcoming,
     rounds,
     standings,
   };
@@ -287,7 +328,7 @@ export function parsePublish(body: unknown): Publish | { error: string } {
 // Tokens.
 // ---------------------------------------------------------------------------------------------
 
-/** The series a bearer token publishes, if it is that slug's current token. */
+/** Null when the bearer token is that slug's current publish token, else the refusal. */
 async function authorised(request: Request, env: Env, slug: string): Promise<Result | null> {
   const token = bearer(request.headers.get("Authorization"));
   if (!token) return { status: 401, body: { error: "a series publish token is required" } };
@@ -406,25 +447,25 @@ export async function publishSeries(request: Request, env: Env, slug: string): P
   if ("error" in parsed) return { status: 400, body: { error: parsed.error } };
 
   const now = Date.now();
-  const writes = [
+  await env.DB.batch([
     env.DB.prepare(
       `UPDATE series SET name = ?, published = 1, classes = ?, points_table = ?, drop_worst = ?,
-              registration_open = ?, next_round = ?, updated_at = ? WHERE slug = ?`,
+              registration_open = ?, upcoming = ?, updated_at = ? WHERE slug = ?`,
     ).bind(
       parsed.name,
       JSON.stringify(parsed.classes),
       JSON.stringify(parsed.pointsTable),
       parsed.dropWorst,
       parsed.registrationOpen ? 1 : 0,
-      parsed.nextRound ? JSON.stringify(parsed.nextRound) : null,
+      JSON.stringify(parsed.upcoming),
       now,
       slug,
     ),
     env.DB.prepare("DELETE FROM series_rounds WHERE series_slug = ?").bind(slug),
     ...parsed.rounds.map((r) =>
       env.DB.prepare(
-        "INSERT INTO series_rounds (series_slug, round_no, label, track, started_at, results) VALUES (?, ?, ?, ?, ?, ?)",
-      ).bind(slug, r.round, r.label, r.track, r.startedAt, JSON.stringify(r.results)),
+        "INSERT INTO series_rounds (series_slug, round_no, label, track, started_at, status, results) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      ).bind(slug, r.round, r.label, r.track, r.startedAt, r.status, JSON.stringify(r.results)),
     ),
     env.DB.prepare("INSERT INTO series_standings (series_slug, standings, created_at) VALUES (?, ?, ?)").bind(
       slug,
@@ -435,8 +476,7 @@ export async function publishSeries(request: Request, env: Env, slug: string): P
       `DELETE FROM series_standings WHERE series_slug = ? AND id NOT IN
          (SELECT id FROM series_standings WHERE series_slug = ? ORDER BY id DESC LIMIT ${KEEP_SNAPSHOTS})`,
     ).bind(slug, slug),
-  ];
-  await env.DB.batch(writes);
+  ]);
   return { status: 200, body: { ok: true, slug, url: `${SITE}/series/${slug}`, updatedAt: now } };
 }
 
@@ -448,7 +488,7 @@ export async function unpublishSeries(request: Request, env: Env, slug: string):
 }
 
 // ---------------------------------------------------------------------------------------------
-// Public reads.
+// Public reads. Nothing here may carry a GUID: every row is rebuilt field by field.
 // ---------------------------------------------------------------------------------------------
 
 interface SeriesRow {
@@ -458,7 +498,7 @@ interface SeriesRow {
   points_table: string;
   drop_worst: number;
   registration_open: number;
-  next_round: string | null;
+  upcoming: string;
   updated_at: number | null;
 }
 
@@ -471,19 +511,15 @@ function json<T>(raw: string | null, fallback: T): T {
   }
 }
 
-async function latestStandings(env: Env, slug: string): Promise<StandingRow[]> {
-  const row = await env.DB.prepare(
-    "SELECT standings FROM series_standings WHERE series_slug = ? ORDER BY id DESC LIMIT 1",
-  )
-    .bind(slug)
-    .first<{ standings: string }>();
-  return json<StandingRow[]>(row?.standings ?? null, []);
+/** The first upcoming round still ahead (or undated), as of `now` in unix seconds. */
+export function nextRound(upcoming: Upcoming[], nowSec = Math.floor(Date.now() / 1000)): Upcoming | null {
+  return upcoming.find((u) => u.startsAt === null || u.startsAt >= nowSec - 6 * 3600) ?? null;
 }
 
 export async function listPublished(env: Env): Promise<Result> {
   const rows = await env.DB.prepare(
-    `SELECT s.slug, s.name, s.classes, s.points_table, s.drop_worst, s.registration_open, s.next_round, s.updated_at,
-            (SELECT COUNT(*) FROM series_rounds r WHERE r.series_slug = s.slug) AS rounds,
+    `SELECT s.slug, s.name, s.classes, s.points_table, s.drop_worst, s.registration_open, s.upcoming, s.updated_at,
+            (SELECT COUNT(*) FROM series_rounds r WHERE r.series_slug = s.slug AND r.status = 'done') AS rounds,
             (SELECT standings FROM series_standings st WHERE st.series_slug = s.slug ORDER BY st.id DESC LIMIT 1) AS standings
        FROM series s WHERE s.published = 1 ORDER BY s.updated_at DESC`,
   ).all<SeriesRow & { rounds: number; standings: string | null }>();
@@ -500,7 +536,7 @@ export async function listPublished(env: Env): Promise<Result> {
           rounds: r.rounds,
           riders: standings.length,
           updatedAt: r.updated_at,
-          nextRound: json<NextRound | null>(r.next_round, null),
+          nextRound: nextRound(json<Upcoming[]>(r.upcoming, [])),
           registrationOpen: r.registration_open === 1,
           leader: leader ? { name: leader.name, points: leader.points } : null,
         };
@@ -509,59 +545,50 @@ export async function listPublished(env: Env): Promise<Result> {
   };
 }
 
-interface Mmr {
-  rating: number;
-  races: number;
-  class: string;
-}
-
 /**
- * Each standing rider's rating in their class, matched by display name. Ratings are keyed on the
- * GUID and the series has only names, so this is a best guess: a name shared by two rated GUIDs
- * in a class matches nobody, and a banned rider never matches (the public leaderboard hides them,
- * so this does too).
+ * Each GUID's rating, rounded: in `cls` when given, else the class the rider has raced most.
+ * A banned rider has none (the public leaderboard hides them, so this does too).
  */
-export async function mmrByName(
+export async function mmrByGuid(
   env: Env,
-  riders: { name: string; class: string }[],
+  riders: { guid: string | null; class: string }[],
   seriesClasses: string[],
-): Promise<Map<string, Mmr | null>> {
-  const out = new Map<string, Mmr | null>();
-  const classFor = (cls: string) => cls || (seriesClasses.length === 1 ? seriesClasses[0] : "");
-  const wanted = [...new Set(riders.map((r) => classFor(r.class)).filter(Boolean))];
-  if (wanted.length === 0) return out;
+): Promise<Map<string, number | null>> {
+  const out = new Map<string, number | null>();
+  const guids = [...new Set(riders.map((r) => r.guid).filter((g): g is string => !!g))];
+  if (guids.length === 0) return out;
 
-  const rows = await env.DB.prepare(
-    `SELECT r.guid AS guid, r.class AS class, r.rating AS rating, r.races AS races,
-            (SELECT name FROM race_results WHERE guid = r.guid AND counted = 1 ORDER BY id DESC LIMIT 1) AS name
-       FROM rider_ratings r
-      WHERE r.class IN (${wanted.map(() => "?").join(", ")})`,
-  )
-    .bind(...wanted)
-    .all<{ guid: string; class: string; rating: number; races: number; name: string | null }>();
-
-  // class -> lowercased name -> candidates
-  const index = new Map<string, Map<string, { guid: string; rating: number; races: number }[]>>();
-  for (const row of rows.results) {
-    if (!row.name) continue;
-    const byName = index.get(row.class) ?? new Map();
-    index.set(row.class, byName);
-    const k = row.name.trim().toLowerCase();
-    byName.set(k, [...(byName.get(k) ?? []), { guid: row.guid, rating: row.rating, races: row.races }]);
+  const rows: { guid: string; class: string; rating: number; races: number }[] = [];
+  // D1 caps bound parameters per statement; 90 per query keeps well under it.
+  for (let i = 0; i < guids.length; i += 90) {
+    const chunk = guids.slice(i, i + 90);
+    const res = await env.DB.prepare(
+      `SELECT UPPER(guid) AS guid, class, rating, races FROM rider_ratings
+        WHERE UPPER(guid) IN (${chunk.map(() => "?").join(", ")})`,
+    )
+      .bind(...chunk)
+      .all<{ guid: string; class: string; rating: number; races: number }>();
+    rows.push(...res.results);
   }
+  const byGuid = new Map<string, typeof rows>();
+  for (const row of rows) byGuid.set(row.guid, [...(byGuid.get(row.guid) ?? []), row]);
 
+  const banned = new Map<string, boolean>();
   for (const rider of riders) {
-    const cls = classFor(rider.class);
-    const key = `${rider.class}\u0000${rider.name.trim().toLowerCase()}`;
+    if (!rider.guid) continue;
+    const cls = rider.class || (seriesClasses.length === 1 ? seriesClasses[0] : "");
+    const key = `${rider.guid}\u0000${rider.class}`;
     if (out.has(key)) continue;
-    const candidates = cls ? index.get(cls)?.get(rider.name.trim().toLowerCase()) ?? [] : [];
-    const only = candidates.length === 1 ? candidates[0] : null;
-    out.set(
-      key,
-      only && !(await isBanned(env, { guid: only.guid }))
-        ? { rating: Math.round(only.rating), races: only.races, class: cls }
-        : null,
-    );
+    const ratings = byGuid.get(rider.guid) ?? [];
+    const pick = cls
+      ? ratings.find((r) => r.class === cls)
+      : [...ratings].sort((a, b) => b.races - a.races)[0];
+    if (!pick) {
+      out.set(key, null);
+      continue;
+    }
+    if (!banned.has(rider.guid)) banned.set(rider.guid, await isBanned(env, { guid: rider.guid }));
+    out.set(key, banned.get(rider.guid) ? null : Math.round(pick.rating));
   }
   return out;
 }
@@ -569,7 +596,7 @@ export async function mmrByName(
 export async function readSeries(env: Env, slug: string): Promise<Result> {
   if (!SLUG_RE.test(slug)) return { status: 404, body: { error: "no such series" } };
   const s = await env.DB.prepare(
-    `SELECT slug, name, classes, points_table, drop_worst, registration_open, next_round, updated_at
+    `SELECT slug, name, classes, points_table, drop_worst, registration_open, upcoming, updated_at
        FROM series WHERE slug = ? AND published = 1`,
   )
     .bind(slug)
@@ -577,22 +604,36 @@ export async function readSeries(env: Env, slug: string): Promise<Result> {
   if (!s) return { status: 404, body: { error: "no such series" } };
 
   const classes = json<string[]>(s.classes, []);
-  const [roundRows, standings, entries] = await Promise.all([
+  const upcoming = json<Upcoming[]>(s.upcoming, []);
+  const [roundRows, snapshot, entries] = await Promise.all([
     env.DB.prepare(
-      "SELECT round_no, label, track, started_at, results FROM series_rounds WHERE series_slug = ? ORDER BY round_no",
+      "SELECT round_no, label, track, started_at, status, results FROM series_rounds WHERE series_slug = ? ORDER BY round_no",
     )
       .bind(slug)
-      .all<{ round_no: number; label: string; track: string; started_at: number | null; results: string }>(),
-    latestStandings(env, slug),
+      .all<{ round_no: number; label: string; track: string; started_at: number | null; status: string; results: string }>(),
+    env.DB.prepare("SELECT standings FROM series_standings WHERE series_slug = ? ORDER BY id DESC LIMIT 1")
+      .bind(slug)
+      .first<{ standings: string }>(),
     env.DB.prepare(
-      `SELECT rider_name, race_number, class, team FROM series_registrations
+      `SELECT rider_name, race_number, class, team, guid FROM series_registrations
         WHERE series_slug = ? AND status = 'approved' ORDER BY race_number, name_key`,
     )
       .bind(slug)
-      .all<{ rider_name: string; race_number: number; class: string; team: string | null }>(),
+      .all<{ rider_name: string; race_number: number; class: string; team: string | null; guid: string | null }>(),
   ]);
+  const standings = json<StandingRow[]>(snapshot?.standings ?? null, []);
 
-  const mmr = await mmrByName(env, standings, classes);
+  const numberByGuid = new Map<string, number>();
+  for (const e of entries.results) if (e.guid) numberByGuid.set(e.guid, e.race_number);
+  const numberFor = (row: { guid?: string | null; number?: number | null }) =>
+    row.number ?? (row.guid ? numberByGuid.get(row.guid) ?? null : null);
+
+  const mmr = await mmrByGuid(
+    env,
+    standings.map((r) => ({ guid: r.guid ?? null, class: r.class })),
+    classes,
+  );
+
   return {
     status: 200,
     body: {
@@ -603,20 +644,44 @@ export async function readSeries(env: Env, slug: string): Promise<Result> {
       dropWorst: s.drop_worst,
       updatedAt: s.updated_at,
       registrationOpen: s.registration_open === 1,
-      nextRound: json<NextRound | null>(s.next_round, null),
       rounds: roundRows.results.map((r) => ({
         round: r.round_no,
         label: r.label,
         track: r.track,
         startedAt: r.started_at,
-        results: json<ResultRow[]>(r.results, []),
+        status: r.status === "dropped" ? "dropped" : "done",
+        results: json<ResultRow[]>(r.results, []).map((x) => ({
+          place: x.place,
+          name: x.name,
+          number: numberFor(x),
+          class: x.class,
+          points: x.points,
+          status: x.status,
+          laps: x.laps,
+          bestLapMs: x.bestLapMs,
+        })),
       })),
+      upcoming,
+      nextRound: nextRound(upcoming),
       standings: standings.map((row) => ({
-        ...row,
-        mmr: mmr.get(`${row.class}\u0000${row.name.trim().toLowerCase()}`) ?? null,
+        position: row.position,
+        number: numberFor(row),
+        name: row.name,
+        class: row.class,
+        points: row.points,
+        grossPoints: row.grossPoints,
+        wins: row.wins,
+        roundsRidden: row.roundsRidden,
+        rounds: row.rounds,
+        mmr: row.guid ? mmr.get(`${row.guid}\u0000${row.class}`) ?? null : null,
       })),
-      entries: entries.results.map((e) => ({ name: e.rider_name, number: e.race_number, class: e.class, team: e.team })),
-      mmrNote: MMR_NOTE,
+      entries: entries.results.map((e) => ({
+        name: e.rider_name,
+        number: e.race_number,
+        class: e.class,
+        team: e.team,
+        verified: e.guid !== null,
+      })),
     },
   };
 }
@@ -640,10 +705,79 @@ async function addressHash(env: Env, ip: string): Promise<string> {
   return [...new Uint8Array(mac)].map((b) => b.toString(16).padStart(2, "0")).join("").slice(0, 32);
 }
 
+interface Entry {
+  name: string;
+  number: number;
+  class: string;
+  team: string | null;
+  discord: string | null;
+}
+
+/** The form's fields, checked against the series. A string is the error to show. */
+function parseEntry(body: Raw, classes: string[]): Entry | string {
+  const name = text(body.name, 32);
+  if (!name) return "Enter your in-game name (32 characters at most).";
+  if (looksLikeIdentifier(name)) return "Enter the name you race under, not an ID.";
+  const number = int(typeof body.number === "string" ? Number(body.number) : body.number, 0, 999);
+  if (number === null) return "Race number must be 0 to 999.";
+  const cls = className(body.class) ?? "";
+  if (classes.length > 0 && !classes.includes(cls)) return "Pick a class.";
+  const team = body.team == null || body.team === "" ? null : text(body.team, 40);
+  if (team === null && body.team != null && body.team !== "") return "Team is too long (40 characters at most).";
+  const discord = body.discord == null || body.discord === "" ? null : text(body.discord, 40);
+  if (discord === null && body.discord != null && body.discord !== "") return "Discord is too long (40 characters at most).";
+  if ((team && looksLikeIdentifier(team)) || (discord && looksLikeIdentifier(discord))) {
+    return "Team and Discord should be names, not IDs.";
+  }
+  return { name, number, class: cls, team, discord };
+}
+
+async function openSeries(env: Env, slug: string): Promise<{ classes: string[]; open: boolean } | null> {
+  const s = await env.DB.prepare("SELECT classes, registration_open FROM series WHERE slug = ? AND published = 1")
+    .bind(slug)
+    .first<{ classes: string; registration_open: number }>();
+  return s ? { classes: json<string[]>(s.classes, []), open: s.registration_open === 1 } : null;
+}
+
+async function insertEntry(
+  env: Env,
+  slug: string,
+  entry: Entry,
+  who: { guid: string | null; verified: boolean; ipHash: string | null },
+): Promise<Result> {
+  try {
+    await env.DB.prepare(
+      `INSERT INTO series_registrations
+         (id, series_slug, rider_name, name_key, race_number, class, team, discord, status, guid, verified, ip_hash, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)`,
+    )
+      .bind(
+        crypto.randomUUID(),
+        slug,
+        entry.name,
+        entry.name.toLowerCase(),
+        entry.number,
+        entry.class,
+        entry.team,
+        entry.discord,
+        who.guid,
+        who.verified ? 1 : 0,
+        who.ipHash,
+        Date.now(),
+      )
+      .run();
+  } catch (err) {
+    if (String(err).includes("UNIQUE")) return { status: 409, body: { error: "You're already entered, or that name is taken." } };
+    throw err;
+  }
+  return { status: 201, body: { ok: true, status: "pending", verified: who.verified } };
+}
+
+/** Anonymous: unverified, until the operator links the entry to a rider in MSM. */
 export async function register(request: Request, env: Env, slug: string): Promise<Result> {
   const ip = request.headers.get("CF-Connecting-IP") ?? "unknown";
   if (env.REGISTER_LIMITER && !(await env.REGISTER_LIMITER.limit({ key: ip })).success) {
-    return { status: 429, body: { error: "Too many tries from your connection. Wait a minute and try again." } };
+    return { status: 429, body: { error: "Too many tries. Wait a minute." } };
   }
   let body: unknown;
   try {
@@ -653,32 +787,15 @@ export async function register(request: Request, env: Env, slug: string): Promis
   }
   if (!isObj(body)) return { status: 400, body: { error: "expected a JSON object" } };
 
-  const s = await env.DB.prepare("SELECT classes, registration_open FROM series WHERE slug = ? AND published = 1")
-    .bind(slug)
-    .first<{ classes: string; registration_open: number }>();
+  const s = await openSeries(env, slug);
   if (!s) return { status: 404, body: { error: "no such series" } };
-
   // The honeypot: a field people never see. Answered as a success so a bot learns nothing.
   if (typeof body.website === "string" && body.website.trim() !== "") {
-    return { status: 201, body: { ok: true, status: "pending" } };
+    return { status: 201, body: { ok: true, status: "pending", verified: false } };
   }
-  if (s.registration_open !== 1) return { status: 403, body: { error: "Registration for this series is closed." } };
-
-  const name = text(body.name, 32);
-  if (!name) return { status: 400, body: { error: "Enter your in-game name (32 characters at most)." } };
-  if (looksLikeIdentifier(name)) return { status: 400, body: { error: "Enter the name you race under, not an ID." } };
-  const number = int(typeof body.number === "string" ? Number(body.number) : body.number, 0, 999);
-  if (number === null) return { status: 400, body: { error: "Race number must be a whole number from 0 to 999." } };
-  const classes = json<string[]>(s.classes, []);
-  const cls = className(body.class) ?? "";
-  if (classes.length > 0 && !classes.includes(cls)) return { status: 400, body: { error: "Pick one of the series' classes." } };
-  const team = body.team == null || body.team === "" ? null : text(body.team, 40);
-  if (team === null && body.team != null && body.team !== "") return { status: 400, body: { error: "Team name is too long (40 characters at most)." } };
-  const discord = body.discord == null || body.discord === "" ? null : text(body.discord, 40);
-  if (discord === null && body.discord != null && body.discord !== "") return { status: 400, body: { error: "Discord name is too long (40 characters at most)." } };
-  if ((team && looksLikeIdentifier(team)) || (discord && looksLikeIdentifier(discord))) {
-    return { status: 400, body: { error: "Team and Discord should be names, not IDs." } };
-  }
+  if (!s.open) return { status: 403, body: { error: "Registration is closed." } };
+  const entry = parseEntry(body, s.classes);
+  if (typeof entry === "string") return { status: 400, body: { error: entry } };
 
   const ipHash = await addressHash(env, ip);
   const recent = await env.DB.prepare(
@@ -687,33 +804,68 @@ export async function register(request: Request, env: Env, slug: string): Promis
     .bind(ipHash, Date.now() - DAY_MS)
     .first<{ n: number }>();
   if ((recent?.n ?? 0) >= REGISTRATIONS_PER_DAY) {
-    return { status: 429, body: { error: "Too many registrations from your connection today." } };
+    return { status: 429, body: { error: "Too many entries from your connection today." } };
   }
+  return insertEntry(env, slug, entry, { guid: null, verified: false, ipHash });
+}
 
-  try {
-    await env.DB.prepare(
-      `INSERT INTO series_registrations
-         (id, series_slug, rider_name, name_key, race_number, class, team, discord, status, ip_hash, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`,
-    )
-      .bind(crypto.randomUUID(), slug, name, name.toLowerCase(), number, cls, team || null, discord || null, ipHash, Date.now())
-      .run();
-  } catch (err) {
-    if (String(err).includes("UNIQUE")) return { status: 409, body: { error: "That name is already registered for this series." } };
-    throw err;
+/** The signed-in rider: their GUID from the Steam ID Valve confirmed, never from the form. */
+async function sessionGuid(request: Request, env: Env): Promise<{ guid: string; steamId: string } | null> {
+  const session = await webSession(request, env);
+  if (!session) return null;
+  const guid = guidFromSteamId(session.steamId);
+  return guid ? { guid, steamId: session.steamId } : null;
+}
+
+export async function registerSignedIn(request: Request, env: Env, slug: string): Promise<Result> {
+  const who = await sessionGuid(request, env);
+  if (!who) return { status: 401, body: { error: "Sign in with Steam first." } };
+  if (env.REGISTER_LIMITER && !(await env.REGISTER_LIMITER.limit({ key: who.steamId })).success) {
+    return { status: 429, body: { error: "Too many tries. Wait a minute." } };
   }
-  return { status: 201, body: { ok: true, status: "pending" } };
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return { status: 400, body: { error: "expected a JSON body" } };
+  }
+  if (!isObj(body)) return { status: 400, body: { error: "expected a JSON object" } };
+  const s = await openSeries(env, slug);
+  if (!s) return { status: 404, body: { error: "no such series" } };
+  if (!s.open) return { status: 403, body: { error: "Registration is closed." } };
+  if (await isBanned(env, { guid: who.guid, steamId: who.steamId })) {
+    return { status: 403, body: { error: "This account can't enter." } };
+  }
+  const entry = parseEntry(body, s.classes);
+  if (typeof entry === "string") return { status: 400, body: { error: entry } };
+  return insertEntry(env, slug, entry, { guid: who.guid, verified: true, ipHash: null });
+}
+
+export async function myRegistration(request: Request, env: Env, slug: string): Promise<Result> {
+  const who = await sessionGuid(request, env);
+  if (!who) return { status: 401, body: { error: "not signed in" } };
+  const row = await env.DB.prepare(
+    "SELECT rider_name, race_number, class, team, status FROM series_registrations WHERE series_slug = ? AND guid = ?",
+  )
+    .bind(slug, who.guid)
+    .first<{ rider_name: string; race_number: number; class: string; team: string | null; status: string }>();
+  return {
+    status: 200,
+    body: {
+      entry: row ? { name: row.rider_name, number: row.race_number, class: row.class, team: row.team, status: row.status } : null,
+    },
+  };
 }
 
 export async function listRegistrations(request: Request, env: Env, slug: string): Promise<Result> {
   const denied = await authorised(request, env, slug);
   if (denied) return denied;
   const rows = await env.DB.prepare(
-    `SELECT id, rider_name, race_number, class, team, discord, status, created_at, decided_at
+    `SELECT id, rider_name, race_number, class, team, discord, status, guid, verified, created_at, decided_at
        FROM series_registrations WHERE series_slug = ? ORDER BY created_at`,
   )
     .bind(slug)
-    .all<{ id: string; rider_name: string; race_number: number; class: string; team: string | null; discord: string | null; status: string; created_at: number; decided_at: number | null }>();
+    .all<{ id: string; rider_name: string; race_number: number; class: string; team: string | null; discord: string | null; status: string; guid: string | null; verified: number; created_at: number; decided_at: number | null }>();
   return {
     status: 200,
     body: {
@@ -725,6 +877,8 @@ export async function listRegistrations(request: Request, env: Env, slug: string
         team: r.team,
         discord: r.discord,
         status: r.status,
+        verified: r.verified === 1,
+        guid: r.guid,
         createdAt: r.created_at,
         decidedAt: r.decided_at,
       })),
@@ -732,6 +886,7 @@ export async function listRegistrations(request: Request, env: Env, slug: string
   };
 }
 
+/** Approve, reject or reopen an entry, and/or link it to a rider's GUID (operator, in MSM). */
 export async function decideRegistration(request: Request, env: Env, slug: string, id: string): Promise<Result> {
   const denied = await authorised(request, env, slug);
   if (denied) return denied;
@@ -741,15 +896,37 @@ export async function decideRegistration(request: Request, env: Env, slug: strin
   } catch {
     return { status: 400, body: { error: "expected a JSON body" } };
   }
-  const status = isObj(body) ? String(body.status ?? "") : "";
-  if (!REG_STATUSES.has(status)) return { status: 400, body: { error: "status must be approved, rejected or pending" } };
-  const res = await env.DB.prepare(
-    "UPDATE series_registrations SET status = ?, decided_at = ? WHERE id = ? AND series_slug = ?",
+  if (!isObj(body)) return { status: 400, body: { error: "expected a JSON object" } };
+  const row = await env.DB.prepare(
+    "SELECT status, guid, verified FROM series_registrations WHERE id = ? AND series_slug = ?",
   )
-    .bind(status, status === "pending" ? null : Date.now(), id, slug)
-    .run();
-  if (!res.meta.changes) return { status: 404, body: { error: "no such registration" } };
-  return { status: 200, body: { ok: true, id, status } };
+    .bind(id, slug)
+    .first<{ status: string; guid: string | null; verified: number }>();
+  if (!row) return { status: 404, body: { error: "no such registration" } };
+
+  let status = row.status;
+  if (body.status !== undefined) {
+    if (!REG_STATUSES.has(String(body.status))) return { status: 400, body: { error: "status must be approved, rejected or pending" } };
+    status = String(body.status);
+  }
+  let guid = row.guid;
+  if (body.guid !== undefined) {
+    if (row.verified === 1) return { status: 409, body: { error: "a verified entry's rider comes from their Steam sign-in" } };
+    const g = guidField(body.guid);
+    if (g === undefined) return { status: 400, body: { error: "guid must be an MX Bikes GUID or null" } };
+    guid = g;
+  }
+  try {
+    await env.DB.prepare(
+      "UPDATE series_registrations SET status = ?, guid = ?, decided_at = ? WHERE id = ? AND series_slug = ?",
+    )
+      .bind(status, guid, status === "pending" ? null : Date.now(), id, slug)
+      .run();
+  } catch (err) {
+    if (String(err).includes("UNIQUE")) return { status: 409, body: { error: "another entry is already linked to that rider" } };
+    throw err;
+  }
+  return { status: 200, body: { ok: true, id, status, guid } };
 }
 
 /** Forget the address hashes once the daily cap no longer needs them. */
@@ -820,4 +997,34 @@ export async function seriesRoutes(request: Request, url: URL, env: Env): Promis
   else if (sub === "registrations" && id && method === "POST") r = await decideRegistration(request, env, slug, id);
   else r = { status: 405, body: { error: "method not allowed" } };
   return respond(r.status, r.body);
+}
+
+/** `/v1/web/series/{slug}/register` and `/registration`: the site's Steam session. */
+export function isWebSeriesPath(path: string): boolean {
+  return /^\/v1\/web\/series\/[^/]+\/(register|registration)$/.test(path);
+}
+
+export async function webSeriesRoutes(request: Request, url: URL, env: Env, origin: string | null): Promise<Response> {
+  const m = /^\/v1\/web\/series\/([^/]+)\/(register|registration)$/.exec(url.pathname)!;
+  const slug = decodeURIComponent(m[1]);
+  const said = (r: Result) => {
+    const res = cors(
+      new Response(JSON.stringify(r.body), { status: r.status, headers: { "content-type": "application/json" } }),
+      origin,
+    );
+    res.headers.set("Cache-Control", "no-store");
+    return res;
+  };
+  if (request.method === "OPTIONS") {
+    if (request.headers.get("Origin") && !origin) return said({ status: 403, body: { error: "origin not allowed" } });
+    return cors(new Response(null, { status: 204 }), origin, true, "GET, POST, OPTIONS", "Content-Type");
+  }
+  if (!SLUG_RE.test(slug)) return said({ status: 404, body: { error: "no such series" } });
+  if (m[2] === "registration" && request.method === "GET") return said(await myRegistration(request, env, slug));
+  if (m[2] === "register" && request.method === "POST") {
+    const refused = refuseCrossSiteWrite(request, env);
+    if (refused) return cors(refused, origin);
+    return said(await registerSignedIn(request, env, slug));
+  }
+  return said({ status: 405, body: { error: "method not allowed" } });
 }

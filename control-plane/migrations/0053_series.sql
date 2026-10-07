@@ -1,12 +1,14 @@
 -- Public series on mxbsecure.com (`series.ts`).
 --
 -- A series is run in MSM (the MXB Servers desktop app), which scores its rounds from mxbserver
--- weekends and official servers' live timing. What lands here is the publishable result of that:
--- display names, points and places, never a GUID or Steam ID (the publish endpoint rejects any).
+-- weekends and official servers' live timing, and publishes the result here.
+--
+-- Riders are identified by their MX Bikes GUID, which MSM sends over the authenticated publish
+-- call. It is stored here, privately, because that is what ratings, bans and registrations are
+-- keyed on; no public read ever returns it, or anything derived from it.
 --
 -- The slug is reserved by an admin on mxbsecure.com/admin, which mints the series' publish token.
--- Only the token's SHA-256 digest is stored, the same rule as account and rating tokens: a dump of
--- this table holds nothing that can publish.
+-- Only the token's SHA-256 digest is stored, the same rule as account and rating tokens.
 CREATE TABLE series (
   slug              TEXT PRIMARY KEY,
   name              TEXT NOT NULL,
@@ -18,7 +20,7 @@ CREATE TABLE series (
   points_table      TEXT NOT NULL DEFAULT '[]',   -- JSON array of numbers
   drop_worst        INTEGER NOT NULL DEFAULT 0,
   registration_open INTEGER NOT NULL DEFAULT 1,
-  next_round        TEXT,                         -- JSON { label, track, startsAt } or NULL
+  upcoming          TEXT NOT NULL DEFAULT '[]',   -- JSON [{ label, track, startsAt }]
   created_at        INTEGER NOT NULL,
   updated_at        INTEGER
 );
@@ -33,7 +35,9 @@ CREATE TABLE series_rounds (
   label        TEXT NOT NULL,
   track        TEXT NOT NULL,
   started_at   INTEGER,                          -- unix seconds, as MSM has it
-  results      TEXT NOT NULL,                    -- JSON array of result rows
+  -- 'dropped': the round counts for nobody.
+  status       TEXT NOT NULL DEFAULT 'done' CHECK (status IN ('done', 'dropped')),
+  results      TEXT NOT NULL,                    -- JSON array of result rows, GUIDs included
   PRIMARY KEY (series_slug, round_no)
 );
 
@@ -42,7 +46,7 @@ CREATE TABLE series_rounds (
 CREATE TABLE series_standings (
   id           INTEGER PRIMARY KEY AUTOINCREMENT,
   series_slug  TEXT NOT NULL REFERENCES series (slug) ON DELETE CASCADE,
-  standings    TEXT NOT NULL,                    -- JSON array of standing rows
+  standings    TEXT NOT NULL,                    -- JSON array of standing rows, GUIDs included
   created_at   INTEGER NOT NULL
 );
 
@@ -60,6 +64,10 @@ CREATE TABLE series_registrations (
   team         TEXT,
   discord      TEXT,
   status       TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected')),
+  -- The rider's GUID: from their Steam sign-in on mxbsecure.com (verified = 1), or linked by the
+  -- operator in MSM afterwards (verified stays 0). NULL for an unlinked anonymous entry.
+  guid         TEXT,
+  verified     INTEGER NOT NULL DEFAULT 0,
   -- A keyed hash of the address the form came from, for the per-address cap only. Never the address.
   ip_hash      TEXT,
   created_at   INTEGER NOT NULL,
@@ -68,3 +76,5 @@ CREATE TABLE series_registrations (
 );
 
 CREATE INDEX series_registrations_ip ON series_registrations (ip_hash, created_at);
+-- One entry per rider per series, by GUID as well as by name.
+CREATE UNIQUE INDEX series_registrations_guid ON series_registrations (series_slug, guid) WHERE guid IS NOT NULL;
