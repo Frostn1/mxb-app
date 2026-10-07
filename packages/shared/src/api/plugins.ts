@@ -63,11 +63,6 @@ export function listPlugins(): Promise<PluginView[]> {
   return invoke("plugin_list");
 }
 
-/** Trade a key for months on a license. Resolves with the plugin's name. */
-export function redeemPluginKey(code: string): Promise<string> {
-  return invoke("plugin_redeem", { code });
-}
-
 /** Download, verify and unpack. Resolves with the plugin's name. */
 export function installPlugin(id: string): Promise<string> {
   return invoke("plugin_install", { id });

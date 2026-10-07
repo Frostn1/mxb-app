@@ -862,44 +862,14 @@ describe("the dashboards on the site", () => {
     expect((await get(`/v1/web/admin/paints/paint?sha=${"a".repeat(64)}`)).status).toBe(404);
   });
 
-  it("mints, revokes and grants, and refuses what the data layer refuses", async () => {
+  it("has no plugin key admin any more", async () => {
     const env = await deployment(ADMINS);
     const frost = await cookieFor(CREATOR);
-    await env.DB.prepare("INSERT INTO plugins (id, name, created_at) VALUES ('voice', 'Voice', 1)").run();
-    const post = (body: unknown, opts: Record<string, unknown> = {}) =>
-      web(env, req("POST", "/v1/web/admin/plugins", { cookie: frost, body, ...opts }));
-    const read = async (path: string) =>
-      (await (await web(env, req("GET", path, { cookie: frost }))).json()) as Record<string, never>;
-
-    expect((await post({ action: "mint", plugin: "voice", months: 3, count: 2 }, { origin: "https://evil.example" })).status).toBe(403);
-    expect((await post({ action: "sideways" })).status).toBe(400);
-    // The ceilings are `mintKeys`'s, not this endpoint's: one place decides what is sane.
-    expect((await post({ action: "mint", plugin: "voice", months: 99, count: 2 })).status).toBe(400);
-    expect((await post({ action: "mint", plugin: "nope", months: 3, count: 2 })).status).toBe(400);
-
-    const minted = await post({ action: "mint", plugin: "voice", months: 3, count: 2, note: "testers" });
-    expect(minted.status).toBe(200);
-    const { at } = (await minted.json()) as { at: number };
-
-    const keys = await read(`/v1/web/admin/plugins/keys?minted=${at}`);
-    expect((keys.batch as unknown as string[]).length).toBe(2);
-    expect((keys.found as unknown as { rows: { code: string }[] }).rows).toHaveLength(2);
-    // The migrations ship a plugin of their own, so this is "contains", not "equals".
-    expect(keys.plugins as unknown as { id: string; keys: number }[]).toContainEqual(
-      expect.objectContaining({ id: "voice", keys: 2 }),
-    );
-
-    const code = (keys.batch as unknown as string[])[0];
-    expect((await post({ action: "key-revoke", code })).status).toBe(200);
-    const revoked = await read("/v1/web/admin/plugins/keys?state=revoked");
-    expect((revoked.found as unknown as { total: number }).total).toBe(1);
-    expect((await post({ action: "key-restore", code })).status).toBe(200);
-
-    expect((await post({ action: "grant", who: "nobody", plugin: "voice", months: 3 })).status).toBe(400);
-    expect((await post({ action: "grant", who: "Frost", plugin: "voice", months: 3 })).status).toBe(200);
-    expect((await read("/v1/web/admin/plugins/licenses")).found).toMatchObject({ total: 1 });
-    expect((await post({ action: "license-revoke", account: "acc_frost", plugin: "voice" })).status).toBe(200);
-    expect((await read("/v1/web/admin/plugins/licenses?state=live")).found).toMatchObject({ total: 0 });
+    const mint = await web(env, req("POST", "/v1/web/admin/plugins", { cookie: frost, body: { action: "mint", plugin: "replaycam", months: 1, count: 1 } }));
+    expect(mint.status).not.toBe(200);
+    for (const path of ["/v1/web/admin/plugins/keys", "/v1/web/admin/plugins/licenses"]) {
+      expect((await web(env, req("GET", path, { cookie: frost }))).status).not.toBe(200);
+    }
   });
 
   it("adds and removes creators, making a web-only row for someone with no app account", async () => {

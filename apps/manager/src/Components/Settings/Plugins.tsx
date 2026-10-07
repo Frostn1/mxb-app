@@ -11,12 +11,10 @@ import {
   WifiOff,
 } from "lucide-react";
 import { Button } from "@frost/shared/Components/ui/button";
-import { Input } from "@frost/shared/Components/ui/input";
 import { cn } from "@frost/shared/lib/utils";
 import {
   installPlugin,
   listPlugins,
-  redeemPluginKey,
   removePlugin,
   type PluginView,
 } from "@frost/shared/api/plugins";
@@ -24,37 +22,17 @@ import { mountPlugin, unmountPlugin } from "@frost/shared/lib/pluginHost";
 import { launchStudio } from "@frost/shared/api/mods";
 import { useT, type TFunc, type TKey } from "@/i18n";
 
-/** `1756598400` -> `30 September`. Whole days: nobody renews to the minute. */
-function until(at: number | null): string | null {
-  if (!at) return null;
-  return new Date(at * 1000).toLocaleDateString(undefined, {
-    day: "numeric",
-    month: "long",
-    year: "numeric",
-  });
-}
-
 /**
  * What this row is, in one sentence, plus the one button that changes it.
  *
- * A paid thing that isn't working has to say which of the four reasons it is: not bought,
- * bought but not installed, installed but the license needs re-checking, or working. Every
- * one of those sends the person somewhere different, and a single "unavailable" state would
- * send them all to the same place — support.
+ * Every plugin is free. One that isn't working has to say which reason it is: no license yet
+ * (sign in), not installed, the license needs re-checking, or working. Each sends the person
+ * somewhere different.
  */
 function describe(t: TFunc<TKey>, p: PluginView): { tone: Tone; title: string; detail: string } {
-  // A free plugin with no license yet only needs the account; there is no key to redeem.
-  if (p.free && p.status === "expired") {
-    return { tone: "locked", title: t("plugins.free"), detail: t("plugins.freeSignIn") };
-  }
+  // No license yet only needs the account; there are no keys.
   if (p.status === "expired") {
-    return p.expires
-      ? {
-          tone: "locked",
-          title: t("plugins.lapsed"),
-          detail: t("plugins.lapsedDetail", { date: until(p.expires) ?? "" }),
-        }
-      : { tone: "locked", title: t("plugins.notLicensed"), detail: t("plugins.notLicensedDetail") };
+    return { tone: "locked", title: t("plugins.free"), detail: t("plugins.freeSignIn") };
   }
   if (p.status === "stale") {
     return {
@@ -63,7 +41,7 @@ function describe(t: TFunc<TKey>, p: PluginView): { tone: Tone; title: string; d
       detail: t("plugins.needsCheckDetail"),
     };
   }
-  const have = p.free ? t("plugins.free") : t("plugins.licensed");
+  const have = t("plugins.free");
   if (!p.published) {
     return { tone: "stale", title: have, detail: t("plugins.noBuildYet") };
   }
@@ -87,9 +65,7 @@ function describe(t: TFunc<TKey>, p: PluginView): { tone: Tone; title: string; d
   return {
     tone: "good",
     title: t("plugins.active"),
-    detail: p.free
-      ? t("plugins.activeFreeDetail")
-      : t("plugins.activeDetail", { date: until(p.expires) ?? "" }),
+    detail: t("plugins.activeFreeDetail"),
   };
 }
 
@@ -178,15 +154,13 @@ const PluginRow = ({
 /**
  * The Plugins page.
  *
- * Everything here works offline except redeeming a key: the license is a signed statement
+ * Everything here works offline except installing: the license is a signed statement
  * the app already holds, so a list that showed nothing without a network would be lying
  * about a plugin that is, right now, running.
  */
 const Plugins = () => {
   const t = useT();
   const [plugins, setPlugins] = useState<PluginView[] | null>(null);
-  const [code, setCode] = useState("");
-  const [redeeming, setRedeeming] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
@@ -202,25 +176,9 @@ const Plugins = () => {
 
   useEffect(() => {
     void refresh();
-    // Once, on open. Redeeming and installing refresh themselves.
+    // Once, on open. Installing and removing refresh themselves.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  const redeem = async () => {
-    const trimmed = code.trim();
-    if (!trimmed) return;
-    setRedeeming(true);
-    try {
-      const name = await redeemPluginKey(trimmed);
-      setCode("");
-      toast.success(t("plugins.redeemed", { name }));
-      await refresh();
-    } catch (e) {
-      toast.error(String(e));
-    } finally {
-      setRedeeming(false);
-    }
-  };
 
   const install = async (p: PluginView) => {
     setBusyId(p.id);
@@ -280,31 +238,6 @@ const Plugins = () => {
       <div>
         <h2 className="text-lg font-semibold">{t("plugins.section")}</h2>
         <p className="text-sm text-muted-foreground">{t("plugins.sectionDesc")}</p>
-      </div>
-
-      <div className="space-y-2">
-        <label className="text-sm font-medium" htmlFor="plugin-key">
-          {t("plugins.keyLabel")}
-        </label>
-        <div className="flex gap-2">
-          <Input
-            id="plugin-key"
-            value={code}
-            onChange={(e) => setCode(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") void redeem();
-            }}
-            placeholder="FRST-XXXX-XXXX-XXXX"
-            autoComplete="off"
-            spellCheck={false}
-            className="font-mono"
-          />
-          <Button onClick={() => void redeem()} disabled={redeeming || !code.trim()}>
-            {redeeming && <Loader2 className="size-3.5 animate-spin" />}
-            {t("plugins.redeem")}
-          </Button>
-        </div>
-        <p className="text-xs text-muted-foreground">{t("plugins.keyHelp")}</p>
       </div>
 
       <div className="space-y-2">
