@@ -8,8 +8,7 @@
     "deploy": "wrangler deploy",
     "typecheck": "tsc --noEmit",
     "types": "wrangler types",
-    "test": "vitest run",
-    "render:bootstrap": "tsx scripts/render-bootstrap.ts"
+    "test": "vitest run"
   },
   "engines": {
     "node": ">=22.13"
@@ -23,7 +22,6 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.122.0",
-    "aws4fetch": "^1.0.20",
     "zod": "^4.1.0"
   }
 }

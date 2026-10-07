@@ -27,6 +27,7 @@ export const SITE_ORIGINS = [
   "https://www.mxbsecure.com",
   // The same site, served per section on its own host (mxbsecure-web routes by hostname).
   "https://racing.mxbsecure.com",
+  "https://servers.mxbsecure.com",
   "https://app.mxbsecure.com",
   "https://studio.mxbsecure.com",
   "https://frostmod.mxbsecure.com",
