@@ -40,7 +40,9 @@ import { track } from "../../lib/analytics";
 import type { DownloadRecord } from "@frost/shared/types";
 import { useFrostmod } from "../../Context/FrostmodContext";
 import { invoke } from "@tauri-apps/api/core";
-import { Mxbmrp3Prompt } from "../Mxbmrp3/Mxbmrp3Suggestion";
+import { Mxbmrp3Prompt, useMxbmrp3 } from "../Mxbmrp3/Mxbmrp3Suggestion";
+import TipHost from "../Tips/TipHost";
+import { TipNavContext } from "../Tips/TipNav";
 
 const Mods = lazy(() => import("../Mods/Mods"));
 const ModDetail = lazy(() => import("../ModDetail/ModDetail"));
@@ -255,6 +257,11 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
     };
   }, [game.id, games, navigate, openModTarget, t]);
 
+  // Tips open pages through this, from the home card and from Settings → Tips alike.
+  const tipNav = useMemo(() => ({ navigate }), [navigate]);
+  const { suggest: mxbmrp3Showing } = useMxbmrp3();
+  const tourDone = Boolean(config.tourDone) || localStorage.getItem(TOUR_DONE_KEY) === "1";
+
   const [ctxLeft, setCtxLeft] = useState<HTMLDivElement | null>(null);
   const [ctxRight, setCtxRight] = useState<HTMLDivElement | null>(null);
   const ctxSlots = useMemo(() => ({ left: ctxLeft, right: ctxRight }), [ctxLeft, ctxRight]);
@@ -280,6 +287,7 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
 
   return (
     <TourContext.Provider value={{ startTour }}>
+    <TipNavContext.Provider value={tipNav}>
     {/* Outside the installers: both of them write to the history, and the sidebar reads it. */}
     <DownloadsProvider>
     {/* Above the installer, not below it: a *download* stages a plan too now — a pack like
@@ -315,6 +323,18 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
       <UpdateBanner />
       {/* An offer, not a problem, so it waits for the intro and the tour and sits below both bars. */}
       <Mxbmrp3Prompt paused={welcomeActive || tourRun} className="border-b border-border px-3 py-2" />
+      {/* One occasional tip, on the home screen only, after the intro and the tour, and never
+          beside another offer or over a release showcase. */}
+      <TipHost
+        paused={
+          welcomeActive ||
+          tourRun ||
+          !tourDone ||
+          Boolean(release) ||
+          mxbmrp3Showing ||
+          !(builtInsActive && view === "servers")
+        }
+      />
       {/* Waits for the intro and the tour so it isn't competing with them for attention,
           then stays put: its steps open Browse, and a panel that closed on the first click
           would strand a new player on a search page. */}
@@ -432,6 +452,7 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
       </InstallProvider>
     </DropReviewProvider>
     </DownloadsProvider>
+    </TipNavContext.Provider>
     </TourContext.Provider>
   );
 };

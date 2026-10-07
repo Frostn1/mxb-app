@@ -23,6 +23,8 @@ import { open as openUrl } from "@tauri-apps/plugin-shell";
 import { getVersion } from "@tauri-apps/api/app";
 import { toast } from "sonner";
 import PaintSync from "./PaintSync";
+import PaintSyncCard from "../PaintSync/PaintSyncCard";
+import TipsSettings from "../Tips/TipsSettings";
 import SecureInstallDialog from "./SecureInstallDialog";
 import Plugins from "./Plugins";
 import Accounts from "./Accounts";
@@ -73,9 +75,6 @@ import {
   voiceStatus,
   setVoiceProximity,
   setVoiceEnabled,
-  setPaintSyncEnabled,
-  paintSyncReadiness,
-  type PaintSyncReadiness,
   setMxbsecureEnabled,
   contentSecureAvailable,
   mxbsecureUnlock,
@@ -191,6 +190,7 @@ export type SectionId =
   | "reshade"
   | "logs"
   | "paintsync"
+  | "tips"
   | "plugins"
   | "secure"
   | "supporters"
@@ -203,9 +203,9 @@ export type SectionId =
  * you to an anchor — which meant the folder settings and the version number shared a
  * scrollbar, and finding anything in the middle meant reading past everything else.
  *
- * Grouped because a dozen flat entries is its own kind of list. The groups are about where
- * a setting *lives* — the game, the app, the things you only touch when something's wrong
- * — not about how often they're used.
+ * Grouped because a dozen flat entries is its own kind of list. Features come first, most
+ * valuable at the top, then where a setting *lives* — the game, the app, the things you only
+ * touch when something's wrong.
  *
  * General is for the app's own behaviour and nothing else. Anything that belongs to a
  * feature with a section of its own goes there instead — the paint sync switch beside what
@@ -217,30 +217,38 @@ const GROUPS: {
   advanced?: boolean;
   sections: { id: SectionId; label: TKey }[];
 }[] = [
+  // What the app adds to the game, most valuable first. Paint sync leads: it is the feature
+  // that changes what every server looks like, and it spent its first months under Advanced.
+  {
+    label: "settings.groupFeatures",
+    sections: [
+      { id: "paintsync", label: "settings.paintSync" },
+      { id: "frostmod", label: "settings.frostmod" },
+      { id: "voice", label: "voice.section" },
+      { id: "overlay", label: "overlay.section" },
+    ],
+  },
   {
     label: "settings.groupSetup",
     sections: [
       { id: "game", label: "game.label" },
       { id: "folder", label: "settings.gameFolder" },
-      { id: "frostmod", label: "settings.frostmod" },
+      { id: "accounts", label: "accounts.section" },
     ],
   },
   {
     label: "settings.groupApp",
     sections: [
       { id: "general", label: "settings.general" },
-      { id: "accounts", label: "accounts.section" },
       { id: "appearance", label: "settings.appearance" },
       { id: "downloads", label: "settings.downloads" },
+      { id: "tips", label: "tips.section" },
     ],
   },
   {
     label: "settings.groupAdvanced",
     advanced: true,
     sections: [
-      { id: "overlay", label: "overlay.section" },
-      { id: "voice", label: "voice.section" },
-      { id: "paintsync", label: "settings.paintSync" },
       { id: "reshade", label: "settings.reshade" },
       { id: "plugins", label: "plugins.section" },
       { id: "secure", label: "settings.secure" },
@@ -256,15 +264,7 @@ const GROUPS: {
   },
 ];
 
-const ADVANCED_SECTIONS = new Set<SectionId>([
-  "overlay",
-  "voice",
-  "paintsync",
-  "reshade",
-  "plugins",
-  "secure",
-  "logs",
-]);
+const ADVANCED_SECTIONS = new Set<SectionId>(["reshade", "plugins", "secure", "logs"]);
 
 /** Default shown before the backend answers, so the field is never blank. */
 const FALLBACK_HOTKEY = "CommandOrControl+Shift+X";
@@ -346,7 +346,7 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
   // only survives in what the backend reports (see `release_version`), so a beta names
   // itself here. `getVersion()` covers the moment before that call lands.
   const shownVersion = experimental?.version || version;
-  const [wanted, setActive] = useState<SectionId>(initialSection ?? "folder");
+  const [wanted, setActive] = useState<SectionId>(initialSection ?? "paintsync");
   const [showAdvanced, setShowAdvanced] = useState(
     () => initialSection != null && ADVANCED_SECTIONS.has(initialSection),
   );
@@ -356,14 +356,14 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
   // capability too; unavailable controls should not be offered to the player.
   const [secureAvailable, setSecureAvailable] = useState(false);
   // FrostMod is a Win32 DLL injected into the game and has no GP Bikes build, so its
-  // section isn't there to open either — and neither is the game picker when there's only
+  // section (and paint sync, which runs through it) isn't there to open either — and neither is the game picker when there's only
   // one game to pick, nor secure content without the module behind it. A group left with
   // nothing in it drops out of the nav entirely.
   const groups = GROUPS.map((g) => ({
     ...g,
     sections: g.sections.filter(
       (s) =>
-        (s.id !== "frostmod" || (hasFrostmod && caps.frostmod)) &&
+        ((s.id !== "frostmod" && s.id !== "paintsync") || (hasFrostmod && caps.frostmod)) &&
         (s.id !== "game" || multiGame) &&
         (s.id !== "secure" || secureAvailable),
     ),
@@ -642,15 +642,6 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
   const voiceEnabled = config.voiceEnabled ?? false;
   // Off unless it was turned on, matching the backend's default.
   const paintSyncEnabled = config.paintSyncEnabled ?? false;
-  // Paint sync runs through Game Integration, so the switch is only live when that is
-  // installed and set to start. Re-asked when the section opens or the FrostMod switch moves.
-  const [syncReadiness, setSyncReadiness] = useState<PaintSyncReadiness | null>(null);
-  useEffect(() => {
-    paintSyncReadiness()
-      .then(setSyncReadiness)
-      .catch(() => {});
-  }, [active, autoRunFrostmod]);
-  const paintSyncBlocked = syncReadiness?.ready === false;
   const mxbsecureEnabled = config.mxbsecureEnabled ?? true;
   const [unlocking, setUnlocking] = useState(false);
   // A picked secured file that is outside the mods folder, waiting for "where does it go".
@@ -948,16 +939,6 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
       await reloadConfig();
     } catch (e) {
       toast.error(t("settings.updateFailed"), { description: String(e) });
-    }
-  };
-
-  const togglePaintSync = async (v: boolean) => {
-    try {
-      await setPaintSyncEnabled(v);
-      await reloadConfig();
-    } catch (e) {
-      toast.error(t("settings.updateFailed"), { description: String(e) });
-      await reloadConfig();
     }
   };
 
@@ -1794,28 +1775,28 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
 
           {active === "plugins" && <Plugins />}
 
-          {/* Paint sync: the switch, then what it has actually managed. The switch lived in
-              General and its record lived here, so turning it off meant finding one page and
-              checking it had worked meant finding another. Both halves run in the background
-              off things the player didn't ask for, so without this the only record was a log
-              file. */}
+          {active === "tips" && (
+            <Section title={t("tips.section")} desc={t("tips.sectionDesc")}>
+              <TipsSettings />
+            </Section>
+          )}
+
+          {/* Paint sync: first in the nav, and its card first on its page. It used to be a
+              switch under Advanced, greyed out until Game Integration was set up elsewhere,
+              which is why few players knew it existed. The card says what it does and what
+              is missing, and turns on everything it needs after a confirm; below it, once
+              it's on, is what it has actually managed — both halves run in the background
+              off things the player didn't ask for, so without this the only record was a
+              log file. */}
           {active === "paintsync" && (
-          <Section title={t("settings.paintSync")} desc={t("settings.paintSyncDesc")}>
-            {/* Short label and a short reason: the card's own description already says what
-                paint sync is, so repeating it here would say it twice on one screen. */}
-            <ToggleRow
-              label={t("settings.paintSyncOn")}
-              desc={
-                paintSyncBlocked
-                  ? t("settings.paintSyncNeedsFrostmod")
-                  : t("settings.paintSyncOnDesc")
-              }
-              checked={paintSyncEnabled && !paintSyncBlocked}
-              onChange={togglePaintSync}
-              disabled={paintSyncBlocked}
-            />
-            <PaintSync />
-          </Section>
+            <>
+              <PaintSyncCard />
+              {paintSyncEnabled && (
+                <Section title={t("paintSync.detailsTitle")} desc={t("settings.paintSyncDesc")}>
+                  <PaintSync />
+                </Section>
+              )}
+            </>
           )}
 
           {/* Secure content. Gated on the local packer module, which is also why the nav
