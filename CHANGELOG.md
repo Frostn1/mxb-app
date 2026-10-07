@@ -4,6 +4,7 @@
 
 ### Fixed
 - **Mod page: back button, site link, and Copy link.** A mod's page has its back arrow again, a "View on site" button for the mod's page on the catalog, and Copy link now copies that original page URL instead of an open.mxbsecure.com link.
+- **Faster Load more on mxb-mods searches.** The author lookup no longer waits behind the listing and runs beside it, with its pages fetched together and a 4 second limit.
 
 ## 2026-10-04 — v0.19.3 — Install folder fixes, OneDrive and ReShade checks, game logs in exports
 
