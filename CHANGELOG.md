@@ -2,17 +2,30 @@
 
 ## Unreleased
 
+## 2026-10-07 — v0.20.0-beta.1 — Free plugins, guided tour, FrostMod refresh by type, install fixes
+
+### Added
+- **Storage page.** Lists leftover downloads, duplicate mods, and big or unused mods, so they can be cleaned up.
+- **Download size before you install.** A mod's page and its install dialog show how big the download is, asked of the file host. Nothing is shown when the host will not say.
+- **Guided tour of the install flow.** A short walkthrough of finding a mod, installing it and seeing where it landed.
+- **FrostMod refresh by type** (FrostMod v0.49.8 and newer). The app can refresh just paints, just gear and paints, just tracks or just bikes, instead of reloading every mod. A secured bike paint asks for a bikes refresh. An older FrostMod keeps the full reload. FrostMod v0.49.8 also waits for an open bike chooser before it refreshes, which fixes a crash after a reload.
+- **Install MEGA folder shares and www.dropbox.com links.** Both host forms now install like the other download links.
+- **Where a mod landed.** After an install the app says which folder the mod went to and whether the game needs a restart.
+- **Library lists bike liveries,** so they can be uninstalled.
+- **Anonymous logging of Browse searches that find nothing,** so the catalog can fill the gaps.
+
+### Changed
+- **Plugins are free, and plugin keys are gone.** Every plugin, MXB Replay included, installs with your account. Settings → Plugins no longer has a Redeem box.
+- **Settings warns when the mods folder differs from the game's default folder.**
+
 ### Fixed
 - **Mod page: back button, site link, and Copy link.** A mod's page has its back arrow again, a "View on site" button for the mod's page on the catalog, and Copy link now copies that original page URL instead of an open.mxbsecure.com link.
 - **Mods grid fills a maximised window.** The grid keeps loading pages until the window is full instead of stopping after 24 cards, and its cards grow on large windows.
 - **Faster Load more on mxb-mods searches.** The author lookup no longer waits behind the listing and runs beside it, with its pages fetched together and a 4 second limit.
-
-### Changed
-- **Plugins are free, and plugin keys are gone.** Every plugin, MXB Replay included, installs with your account. Settings → Plugins no longer has a Redeem box.
-
-### Added
-- **Download size before you install.** A mod's page and its install dialog show how big the download is, asked of the file host. Nothing is shown when the host will not say.
-
+- **Catalog errors show up.** A rejected first page or a non-JSON answer is reported instead of leaving an empty grid.
+- **Download hosts that answer 429 or 5xx are retried,** including Google Drive's confirm step.
+- **A pack's paints folder is no longer nested inside a paints destination.**
+- **Secure paint loading.** Paint lists are rebuilt at game start, unlocked files install, and the file extension is matched in any case.
 ## 2026-10-04 — v0.19.3 — Install folder fixes, OneDrive and ReShade checks, game logs in exports
 
 ## 2026-10-04 — v0.19.2 — Friends, model-swap crash fix, other-drive installs, honest ping
