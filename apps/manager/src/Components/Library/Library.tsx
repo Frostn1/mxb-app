@@ -86,6 +86,7 @@ import {
   RIDER_SECTION_ORDER,
   categoryIcon,
 } from "./categories";
+import { countable } from "./countable";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@frost/shared/Components/ui/tooltip";
 import LibraryDetail from "./LibraryDetail";
 import { ModelSwapActions } from "../Locker/ModelSwapActions";
@@ -510,6 +511,7 @@ function buildSections(
   sort: LibrarySort,
   isStarred: (e: LibraryEntry) => boolean,
   t: TFunc<TKey>,
+  liveries = false,
 ): Section[] {
   const q = search.trim().toLowerCase();
   const filtered = q
@@ -533,7 +535,7 @@ function buildSections(
   const top: Section[] = starred.length
     ? [{ key: "__starred__", label: t("library.starred"), items: starred }]
     : [];
-  return [...top, ...groupSections(modType, rest, sort, t)];
+  return [...top, ...groupSections(modType, rest, sort, t, liveries)];
 }
 
 function groupSections(
@@ -541,6 +543,7 @@ function groupSections(
   filtered: LibraryEntry[],
   sort: LibrarySort,
   t: TFunc<TKey>,
+  liveries = false,
 ): Section[] {
   // One flat list, newest first — grouping by folder would scatter the very thing being
   // looked for across half a dozen sections.
@@ -572,7 +575,7 @@ function groupSections(
       }));
   }
 
-  const shown = countable(filtered, modType);
+  const shown = countable(filtered, modType, liveries);
   const byFolder = new Map<string, LibraryEntry[]>();
   for (const e of shown) {
     const list = byFolder.get(e.folder) ?? [];
@@ -594,6 +597,8 @@ type Pick =
   | { kind: "all" }
   | { kind: "starred" }
   | { kind: "folder"; folder: string }
+  /** Bikes only: the liveries Bikes keeps out of its grid, so they can be removed too. */
+  | { kind: "liveries" }
   | { kind: "removed" }
   /** Neither of these is about the mods tree, so both replace the grid rather than
    *  filtering it — see `Yours.tsx`. */
@@ -603,18 +608,6 @@ type Pick =
 const ALL: Pick = { kind: "all" };
 
 /** Icon per mod type, for the left list. A type we don't know gets the generic box. */
-/**
- * What the grid actually shows for a type.
- *
- * Bikes keeps liveries and model swaps out of its own list — they belong to a bike, not
- * beside it — so a count that included them would never match what is on screen.
- */
-function countable(entries: LibraryEntry[], modType: ModType): LibraryEntry[] {
-  return modType.id === "bikes"
-    ? entries.filter((e) => e.category !== "bikePaint" && e.category !== "bikeModelSwap")
-    : entries;
-}
-
 /** A group label in the left list. */
 function SideHeading({ label }: { label: string }) {
   return (
@@ -975,6 +968,14 @@ export default function Library({
     [inType, isStarred],
   );
 
+  /** Bikes keeps liveries out of its grid; this is what the Liveries row of the left list
+   *  counts, so they can be found and uninstalled. */
+  const liveryEntries = useMemo(
+    () => (modType.id === "bikes" ? entries.filter((e) => e.category === "bikePaint") : []),
+    [entries, modType.id],
+  );
+  const liveryCount = liveryEntries.length;
+
   /** The folders of this type, in the order the left list shows them. */
   const folders = useMemo(
     () => [...folderCounts.keys()].sort((a, b) => a.localeCompare(b)),
@@ -985,22 +986,25 @@ export default function Library({
   // switched off. Fall back to the whole library rather than to an empty grid.
   useEffect(() => {
     if (pick.kind === "removed" && !showRemoved) setPick(ALL);
+    if (pick.kind === "liveries" && (modType.id !== "bikes" || liveryCount === 0)) setPick(ALL);
     if (pick.kind === "folder" && entries.length > 0 && !folderCounts.has(pick.folder))
       setPick(ALL);
-  }, [pick, showRemoved, entries.length, folderCounts]);
+  }, [pick, showRemoved, entries.length, folderCounts, modType.id, liveryCount]);
 
   // The left list decides what the grid is a view of; the search box then narrows that.
   const shownEntries = useMemo(() => {
     if (pick.kind === "starred") return entries.filter(isStarred);
     if (pick.kind === "folder") return entries.filter((e) => e.folder === pick.folder);
+    if (pick.kind === "liveries") return entries.filter((e) => e.category === "bikePaint");
     if (pick.kind === "removed" || pick.kind === "owned" || pick.kind === "wishlist")
       return [];
     return entries;
   }, [entries, pick, isStarred]);
 
   const sections = useMemo(
-    () => buildSections(modType, shownEntries, search, sort, isStarred, t),
-    [modType, shownEntries, search, sort, isStarred, t],
+    () =>
+      buildSections(modType, shownEntries, search, sort, isStarred, t, pick.kind === "liveries"),
+    [modType, shownEntries, search, sort, isStarred, t, pick.kind],
   );
 
   // Installed items only — this feeds select-all and every bulk action, and a missing mod
@@ -1022,6 +1026,7 @@ export default function Library({
     if (
       !showRemoved ||
       pick.kind === "starred" ||
+      pick.kind === "liveries" ||
       pick.kind === "owned" ||
       pick.kind === "wishlist"
     )
@@ -1381,7 +1386,7 @@ export default function Library({
   const stockSection = (() => {
     // They aren't in the mods tree, so they sit in none of the left list's folders and are
     // no part of what it has lost. Starring one still works, so Favorites keeps them.
-    if (pick.kind === "folder" || pick.kind === "removed") return null;
+    if (pick.kind === "folder" || pick.kind === "removed" || pick.kind === "liveries") return null;
     const q = search.trim().toLowerCase();
     const base = pick.kind === "starred" ? stock.filter(isStarred) : stock;
     const rows = q
@@ -1645,6 +1650,15 @@ export default function Library({
             active={pick.kind === "starred"}
             onSelect={() => setPick({ kind: "starred" })}
           />
+          {liveryCount > 0 && (
+            <SideRow
+              label={t("section.bikePaint")}
+              count={liveryCount}
+              bytes={liveryEntries.reduce((n, e) => n + e.size, 0)}
+              active={pick.kind === "liveries"}
+              onSelect={() => setPick({ kind: "liveries" })}
+            />
+          )}
           {folders.map((f) => (
             <SideRow
               key={f || "__root__"}
