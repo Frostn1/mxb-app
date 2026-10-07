@@ -126,12 +126,14 @@ export default function Browse({
           </ContextBarLeft>
 
           <ContextBarRight>
-            <SearchBox
-              value={query}
-              onChange={setQuery}
-              placeholder={t("browse.searchPlaceholder", { type: t(modType.labelInline) })}
-              className="w-[210px]"
-            />
+            <span data-tour="browse-search" className="flex">
+              <SearchBox
+                value={query}
+                onChange={setQuery}
+                placeholder={t("browse.searchPlaceholder", { type: t(modType.labelInline) })}
+                className="w-[210px]"
+              />
+            </span>
             {/* The category filter was a row of pills of its own. Three bands of chrome
                 before the first mod is what this redesign set out to remove, so it folds in
                 here beside the sort it belongs with. */}

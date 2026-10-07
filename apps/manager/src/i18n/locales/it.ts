@@ -235,6 +235,16 @@ export const it: Translation = {
   "tour.locker.title": "L'armadietto",
   "tour.locker.body":
     "Cambia i modelli delle moto quando vuoi. {{app}} registra i pezzi in modo che il gioco li riconosca.",
+  "tour.search.title": "Search the catalog",
+  "tour.search.body": "Type a name to find a track, bike or paint on {{site}}. Use the tabs and the category and sort menus next to it to narrow the list.",
+  "tour.card.title": "Pick a mod",
+  "tour.card.body": "Click a card to open its page with pictures, notes and ratings. Right-click a card to install it straight away, or tick several to install them together.",
+  "tour.install.title": "Install it",
+  "tour.install.body": "On a mod's page, Add to library opens a short review: pick the file to download and the folder it goes to (usually the right one is already chosen), then confirm. {{game}} finds it in your mods folder.",
+  "tour.queue.title": "Watch the download",
+  "tour.queue.body": "While something downloads, a progress icon appears at the top right. Click it for each file's progress, or open Downloads for the full history.",
+  "tour.lockerUse.title": "Equip a bike model",
+  "tour.lockerUse.body": "Pick a bike on the left, then choose which installed model or engine sound it should use. Paints and gear are applied from Presets.",
   "tour.presets.title": "Preset",
   "tour.presets.body":
     "Salva le combinazioni di equipaggiamento e grafiche, poi applica un look completo con un clic — anche mentre stai guidando.",

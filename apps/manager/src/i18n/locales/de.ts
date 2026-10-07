@@ -242,6 +242,16 @@ export const de: Translation = {
   "tour.locker.title": "Der Spind",
   "tour.locker.body":
     "Tausche Motorradmodelle beliebig aus. {{app}} registriert die Teile, damit das Spiel sie erkennt.",
+  "tour.search.title": "Search the catalog",
+  "tour.search.body": "Type a name to find a track, bike or paint on {{site}}. Use the tabs and the category and sort menus next to it to narrow the list.",
+  "tour.card.title": "Pick a mod",
+  "tour.card.body": "Click a card to open its page with pictures, notes and ratings. Right-click a card to install it straight away, or tick several to install them together.",
+  "tour.install.title": "Install it",
+  "tour.install.body": "On a mod's page, Add to library opens a short review: pick the file to download and the folder it goes to (usually the right one is already chosen), then confirm. {{game}} finds it in your mods folder.",
+  "tour.queue.title": "Watch the download",
+  "tour.queue.body": "While something downloads, a progress icon appears at the top right. Click it for each file's progress, or open Downloads for the full history.",
+  "tour.lockerUse.title": "Equip a bike model",
+  "tour.lockerUse.body": "Pick a bike on the left, then choose which installed model or engine sound it should use. Paints and gear are applied from Presets.",
   "tour.presets.title": "Presets",
   "tour.presets.body":
     "Speichere Ausrüstungs- und Design-Kombinationen und wende einen kompletten Look mit einem Klick an — sogar während du fährst.",

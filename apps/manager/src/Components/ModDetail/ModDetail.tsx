@@ -463,7 +463,7 @@ export default function ModDetail({
           {t("modDetail.copyLink")}
         </Button>
         {primary && (
-          <Button onClick={openInstall} disabled={busy}>
+          <Button data-tour="mod-install" onClick={openInstall} disabled={busy}>
             {busy && <Loader2 className="size-4 animate-spin" />}
             {isInstalled ? t("browse.reinstall") : t("modDetail.addToLibrary")}
           </Button>
