@@ -1799,6 +1799,8 @@ export const de: Translation = {
   "install.reloadedDesc":
     "Spiel über FrostMod neu geladen — es ist jetzt aktiv.",
   "install.addedDesc": "Zu deiner Bibliothek hinzugefügt.",
+  "install.restartDesc": "Zu deiner Bibliothek hinzugefügt. Starte {{game}} neu, damit es im Spiel erscheint.",
+  "install.installedTo": "Installiert in {{path}}",
   "install.failed": "Installation fehlgeschlagen — {{title}}",
   "install.openModPage": "Die Mod-Seite öffnen",
   "install.clickToOpen": "Klicken, um die Mod-Seite zu öffnen",
