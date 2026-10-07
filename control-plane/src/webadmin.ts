@@ -30,16 +30,6 @@ import {
   totals,
 } from "./diagnosticssearch";
 import { filesData, onePaintData, oneRiderData, ridersData } from "./paintspage";
-import {
-  adminPlugins,
-  grantLicense,
-  mintKeys,
-  searchKeys,
-  searchLicenses,
-  setKeyRevoked,
-  setLicenseRevoked,
-} from "./plugins";
-import { batchCodes, keyQuery, licenseQuery } from "./pluginspage";
 import { paintThumb } from "./pntthumb";
 import { adminRiderLookup, issueRatingToken, leaderboard as ratingLeaderboard } from "./rating";
 import { adminListSeries, adminSeriesAction } from "./series";
@@ -199,24 +189,6 @@ export async function webAdminRoutes(
       case "/v1/web/admin/paints/thumb":
         return cors(await paintThumb((url.searchParams.get("sha") ?? "").toLowerCase(), env), origin);
 
-      case "/v1/web/admin/plugins/keys": {
-        const query = keyQuery(url);
-        // A batch is identified by the second it was minted in, so the codes survive a
-        // reload and a link without ever being in the address themselves.
-        const minted = Number(url.searchParams.get("minted") ?? "");
-        const [plugins, found, batch] = await Promise.all([
-          adminPlugins(env),
-          searchKeys(env, query),
-          Number.isInteger(minted) && minted > 0 ? batchCodes(env, minted) : Promise.resolve([]),
-        ]);
-        return said(200, { plugins, found, query, batch });
-      }
-      case "/v1/web/admin/plugins/licenses": {
-        const query = licenseQuery(url);
-        const [plugins, found] = await Promise.all([adminPlugins(env), searchLicenses(env, query)]);
-        return said(200, { plugins, found, query });
-      }
-
       case "/v1/web/admin/creators":
         return said(200, { creators: await listCreators(env, fetchImpl) });
 
@@ -319,46 +291,6 @@ export async function webAdminRoutes(
     return result.ok ? said(200, { ok: true }) : said(400, { error: result.error ?? "that rule was not usable" });
   }
 
-  // Everything a button on the plugin pages does. One endpoint rather than six, because they
-  // are all the same shape: a change, and what to say about it afterwards.
-  if (request.method === "POST" && path === "/v1/web/admin/plugins") {
-    const refused = refuseCrossSiteWrite(request, env);
-    if (refused) return cors(refused, origin);
-    let body: Record<string, unknown>;
-    try {
-      body = (await request.json()) as Record<string, unknown>;
-    } catch {
-      return said(400, { error: "that was not JSON" });
-    }
-    const field = (name: string) => String(body[name] ?? "");
-    switch (field("action")) {
-      case "mint": {
-        const result = await mintKeys(env, field("plugin"), Number(body.months), Number(body.count), field("note"));
-        return result.ok ? said(200, { ok: true, at: result.at }) : said(400, { error: result.error ?? "those keys were not minted" });
-      }
-      case "key-revoke":
-        await setKeyRevoked(env, field("code"), true);
-        return said(200, { ok: true });
-      case "key-restore":
-        await setKeyRevoked(env, field("code"), false);
-        return said(200, { ok: true });
-      case "license-revoke":
-        await setLicenseRevoked(env, field("account"), field("plugin"), true);
-        return said(200, { ok: true });
-      case "license-restore":
-        await setLicenseRevoked(env, field("account"), field("plugin"), false);
-        return said(200, { ok: true });
-      case "grant": {
-        const result = await grantLicense(env, field("who"), field("plugin"), Number(body.months));
-        return result.ok
-          ? said(200, { ok: true, account: result.account, expires: result.expires })
-          : said(400, { error: result.error ?? "nothing was granted" });
-      }
-      default:
-        return said(400, { error: "no such action" });
-    }
-  }
-
   // Writing the questions. The one admin write whose effect is felt by every install rather
   // than by one account: a poll saved here is on screen in the field within a flush interval,
   // so it is held to the same cross-site check as the rest and validated as strictly as the
@@ -404,7 +336,7 @@ export async function webAdminRoutes(
     }
   }
 
-  // Who may lock and sell. Same shape as the plugin buttons: one endpoint, an action each.
+  // Who may lock and sell. One endpoint, an action each.
   if (request.method === "POST" && path === "/v1/web/admin/creators") {
     const refused = refuseCrossSiteWrite(request, env);
     if (refused) return cors(refused, origin);

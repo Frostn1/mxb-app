@@ -59,11 +59,10 @@ consequences fall out of that, and they're baked into the schema:
 | GET | `/v1/web/me` | Steam sign-in | Who is signed in on mxbsecure.com, whether they are a creator, and what is left of today's lock ceiling. Never cached. |
 | POST | `/v1/web/creator` | Steam sign-in | Signing up as a creator, which is what opens `/admin/assets*`. Shut unless `MXB_CREATOR_SIGNUP` is `"open"` — see **The front door, and why it is shut**. An existing creator still gets `already: true`, never a refusal. |
 | GET | `/v1/web/lockweb/*` | Steam sign-in | The WebAssembly locker. It cannot live on the static site, which serves everything it holds to everybody. Any signed-in rider gets it: the GUID lock is for all of them. |
-| GET/POST | `/v1/web/admin/*` | Steam sign-in + `MXB_ADMIN_STEAM_IDS` | The dashboards at mxbsecure.com/admin — usage, diagnostics, paint sync, plugin keys, creators, bans |
-| GET | `/v1/plugins` | — | The paid-plugin catalogue. Public: what is on offer is not a secret. |
-| GET | `/v1/me/plugins` | bearer | What this account holds, each with a freshly signed license |
-| POST | `/v1/plugins/redeem` | bearer | Trade a key for months on a license |
-| GET | `/v1/plugins/:id/bundle` | bearer + license | The build itself, streamed rather than redirected to |
+| GET/POST | `/v1/web/admin/*` | Steam sign-in + `MXB_ADMIN_STEAM_IDS` | The dashboards at mxbsecure.com/admin — usage, diagnostics, paint sync, creators, bans, series (racing.mxbsecure.com/admin) and servers (servers.mxbsecure.com) |
+| GET | `/v1/plugins` | — | The plugin catalogue. Public. Every plugin is free. |
+| GET | `/v1/me/plugins` | bearer | A freshly signed license for every plugin |
+| GET | `/v1/plugins/:id/bundle` | bearer | The build itself, streamed rather than redirected to |
 | GET | `/v1/rating/leaderboard?class=`, `/v1/rating/classes` | — | Rider rating by class, and the classes that have one. CORS-open for mxbsecure.com/leaderboard. |
 | GET | `/v1/series`, `/v1/series/:slug` | — | Published series: standings (with each rider's rating, joined by GUID), rounds (done or dropped), the schedule, approved entries. Never a GUID. CORS-open, cached a minute. |
 | PUT/DELETE | `/v1/series/:slug` | series token | MSM publishing or unpublishing a series. Rider rows carry the GUID (stored privately for the joins); any other GUID-, Steam-ID- or UUID-shaped string refuses the whole body. |
@@ -123,28 +122,13 @@ words can't restyle the embed or ping the server. `bmac_events` records what has
 announced: BMAC retries a delivery up to four more times, and a reply it never received looks
 exactly like a failure, so without that table one coffee arrives five times.
 
-### Plugin keys and licenses
+### Plugins
 
-A paid plugin is bought in months. A **key** is a one-shot code that adds its months to an
-account's **license**, and the app runs the plugin on a short-lived signed statement it can
-check with no network — so a license is honoured for up to seven days with nobody to ask.
-
-Both halves are revocable from mxbsecure.com/admin/plugins, which is also where keys are minted:
-
-- **Revoking a key** withdraws a code that has not been spent. Redeeming it then answers
-  "revoked" rather than "already used", because those are different next steps for whoever
-  is holding it.
-- **Revoking a license** ends access without waiting for the month to run out. It takes
-  effect at the app's next check — within the grace window, not within the minute, which is
-  the cost of the plugin working on a plane. `expires_at` is left alone, so lifting the
-  revocation gives back the months that were paid for.
-
-Months never land on a revoked license: redeeming a key against one is refused rather than
-spending the code, and granting is refused rather than silently changing nothing.
-
-`Grant months` hands an account a license with no key in between — for a tester, or for
-putting someone right. `scripts/mint-plugin-key.ts` still prints SQL for a machine that
-cannot reach the page.
+Every plugin is free, so there are no keys and no license rows (migration 0055 dropped
+`plugin_keys` and `plugin_licenses`). Any signed-in account gets a signed license for each
+plugin on every check-in, good for a year and to be refreshed within seven days. The app's
+install and run checks (account, bundle hash, refresh) still run on that license. A banned
+account is refused by the ban gate before it reaches these routes.
 
 ### Is MX Bikes down, or is it you?
 

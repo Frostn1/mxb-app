@@ -974,39 +974,6 @@ pub async fn plugin_list(app: tauri::AppHandle) -> Result<Vec<PluginView>, Strin
     Ok(out)
 }
 
-/// Trade a key for months on a license.
-#[tauri::command]
-pub async fn plugin_redeem(app: tauri::AppHandle, code: String) -> Result<String, String> {
-    let tok = token(&app).map_err(|e| e.to_string())?;
-    let resp = reqwest::Client::new()
-        .post(format!(
-            "{}/v1/plugins/redeem",
-            crate::names::control_plane()
-        ))
-        .bearer_auth(&tok)
-        .json(&serde_json::json!({ "code": code }))
-        .send()
-        .await
-        .map_err(|e| format!("Couldn't reach the control plane: {e}"))?;
-    if !resp.status().is_success() {
-        return Err(plane_error(resp).await);
-    }
-
-    #[derive(Deserialize)]
-    struct Redeemed {
-        plugin: String,
-        name: String,
-        license: String,
-    }
-    let body: Redeemed = resp.json().await.map_err(|e| e.to_string())?;
-
-    let mut state = load_state(&app);
-    state.accept(&body.license).map_err(|e| e.to_string())?;
-    save_state(&app, &state).map_err(|e| e.to_string())?;
-    let _ = body.plugin;
-    Ok(body.name)
-}
-
 /// Download, verify and unpack a plugin this account holds a live license for.
 #[tauri::command]
 pub async fn plugin_install(app: tauri::AppHandle, id: String) -> Result<String, String> {

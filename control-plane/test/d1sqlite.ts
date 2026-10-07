@@ -78,8 +78,7 @@ export function d1(): Env["DB"] {
   return {
     prepare: (sql: string) => statement(sql),
     async batch(stmts: { sql: string; args: unknown[] }[]) {
-      // D1 batches are one transaction, which is the property `mintKeys` leans on: a batch
-      // that collides on a code must leave no codes behind.
+      // D1 batches are one transaction: a batch where one statement fails leaves nothing behind.
       db.exec("BEGIN");
       try {
         for (const s of stmts) rows(s.sql, s.args);

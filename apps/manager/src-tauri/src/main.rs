@@ -9216,9 +9216,8 @@ fn main() {
             ranked_profile,
             set_ranked_guid,
             enroll_account,
-            // Paid plugins: the catalogue, redeeming a key, and getting a bundle on disk.
+            // Plugins (all free): the catalogue and getting a bundle on disk.
             plugins::plugin_list,
-            plugins::plugin_redeem,
             plugins::plugin_install,
             plugins::plugin_remove,
             plugins::plugin_runtime,

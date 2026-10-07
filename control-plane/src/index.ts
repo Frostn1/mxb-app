@@ -47,7 +47,7 @@ import { pruneLockAttempts } from "./lockpermit";
 import { pruneReports, putReport } from "./diagnostics";
 import { eraseAccount } from "./erasure";
 import { stateRegions } from "./stateinvariants";
-import { listPlugins, myPlugins, pluginBundle, redeemKey } from "./plugins";
+import { listPlugins, myPlugins, pluginBundle } from "./plugins";
 import { deleteShare, publishShare, readShare, updateShare } from "./liveshare";
 import { handleFriends, pruneFriendPresence } from "./friends";
 import { leaveQueue, pruneQueue, putQueue, queueCounts } from "./serverqueue";
@@ -372,7 +372,7 @@ async function route(request: Request, env: Env): Promise<Response> {
   if (method === "POST" && path === "/admin/keys/rewrap") return rewrapKeys(request, url, env);
 
   // Secured assets and their grants, for mxbsecure.com. Same key, above the account gate for
-  // the same reason as plugin keys; the only admin routes with CORS, since the site calls them
+  // the same reason as the rest of /admin; the only admin routes with CORS, since the site calls them
   // from a browser. Every method goes in, so the preflight is answered before auth.
   if (isAssetsPath(path)) return adminAssets(request, url, env);
 
@@ -512,10 +512,9 @@ async function route(request: Request, env: Env): Promise<Response> {
   }
   if (method === "GET" && path === "/v1/voice/ice") return iceServers();
 
-  // Paid plugins. Open to every account on the same terms as voice and paint sync: holding
-  // a license is what gates the bundle, not holding an invite.
+  // Plugins. All free: open to every signed-in account on the same terms as voice and paint
+  // sync, with no invite and no key.
   if (method === "GET" && path === "/v1/me/plugins") return myPlugins(account, env);
-  if (method === "POST" && path === "/v1/plugins/redeem") return redeemKey(request, account, env);
   const bundle = /^\/v1\/plugins\/([a-z0-9-]{1,32})\/bundle$/.exec(path);
   if (bundle && method === "GET") return pluginBundle(bundle[1], account, env);
   // Linking a Steam account, and asking what it may use. Open to every account: identity

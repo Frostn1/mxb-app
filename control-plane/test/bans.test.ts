@@ -10,7 +10,6 @@ import { describe, expect, it, vi } from "vitest";
 import { APP_BLOCK_CODE, APP_BLOCK_MESSAGE, APP_SIGNIN_MESSAGE, addBan, appGate, banFor, liftBan, listBans, normalizeGuid, rememberGuid } from "../src/bans";
 import { guidFromSteamId } from "../src/steam";
 import { hashToken } from "../src/auth";
-import { mintKeys } from "../src/plugins";
 import { sealToken, SESSION_COOKIE } from "../src/websession";
 import { signVerdict, verifyVerdict, type SignedVerdict } from "../src/verdict";
 import { addAccount, d1, publishBundle } from "./d1sqlite";
@@ -117,13 +116,6 @@ async function ownedAsset(env: Env, steamId: string): Promise<string> {
 
 /** A creator's API key, in the shape `assets.ts` recognises. */
 const CREATOR_KEY = "mxbs_0123456789abcdefghijklmn";
-
-/** One plugin key for `replaycam`, and the code that redeems it. */
-async function mintOne(env: Env): Promise<string> {
-  const minted = await mintKeys(env, "replaycam", 1, 1, "ban test");
-  expect(minted.ok).toBe(true);
-  return minted.codes[0];
-}
 
 const ban = (env: Env, guid: string, reason = "unlocked and shared protected content") =>
   addBan(env, { guid, reason }, BOSS);
@@ -347,17 +339,13 @@ describe("what a ban actually refuses", () => {
     expect(mine.status).toBe(403);
   });
 
-  it("refuses the paid plugins mxbsecure sells, without spending a key or touching a license", async () => {
+  it("refuses the plugins, and gives them back when the ban is lifted", async () => {
     const env = await deployment();
     await account(env, "acc_banned", "banned-token", BUYER, GUID);
     await publishBundle(env.DB, "replaycam", "1.0.0", "abc123");
-    const code = await mintOne(env);
-    const redeem = () =>
-      call(env, req("POST", "/v1/plugins/redeem", { key: "banned-token", body: { code }, origin: null }));
     const mine = () => call(env, req("GET", "/v1/me/plugins", { key: "banned-token", origin: null }));
     const bundle = () => call(env, req("GET", "/v1/plugins/replaycam/bundle", { key: "banned-token", origin: null }));
 
-    expect((await redeem()).status).toBe(200);
     expect((await mine()).status).toBe(200);
     expect((await bundle()).status).toBe(200);
 
@@ -366,20 +354,8 @@ describe("what a ban actually refuses", () => {
       expect(res.status).toBe(403);
       expect(await res.json()).toMatchObject({ error: APP_BLOCK_MESSAGE });
     }
-    // The license row is untouched, so lifting the ban restores exactly what they had.
-    expect(
-      await env.DB.prepare("SELECT revoked_at FROM plugin_licenses WHERE account_id = 'acc_banned'").first(),
-    ).toEqual({ revoked_at: null });
     await liftBan(env, GUID, BOSS);
     expect((await mine()).status).toBe(200);
-
-    // And a key is never spent by a banned account: refused before the code is read.
-    const second = await mintOne(env);
-    await ban(env, GUID);
-    expect((await call(env, req("POST", "/v1/plugins/redeem", { key: "banned-token", body: { code: second }, origin: null }))).status).toBe(403);
-    expect(await env.DB.prepare("SELECT redeemed_by FROM plugin_keys WHERE code = ?").bind(second).first()).toEqual({
-      redeemed_by: null,
-    });
   });
 
   it("refuses the rest of the estate too — voice, paint sync, presence, the queue, servers", async () => {
