@@ -3,9 +3,9 @@
 //! These commands let a player create, publish, drive and destroy dedicated servers the control
 //! plane runs for them (each authenticated with the account's `cp_token`). They are kept here,
 //! out of the app's IPC surface, until there is a UI that uses them: none is wired into
-//! `generate_handler!`, so nothing in a shipped build can invoke them, and `provision_server`
-//! (which spins up billable infrastructure) and `cloud_servers` (which hands an agent token to
-//! the webview) are not reachable from a compromised page.
+//! `generate_handler!`, so nothing in a shipped build can invoke them, and `cloud_servers` is not
+//! reachable from a compromised page. Launching machines from here is gone: user servers are
+//! deployed on servers.mxbsecure.com now.
 //!
 //! To bring the feature back, move these `#[tauri::command]` functions into `main.rs` (or
 //! re-export them), add each to the `generate_handler!` list, and `.manage(CloudServers::default())`.
@@ -210,67 +210,6 @@ async fn claim_guid_from_roster(app: &tauri::AppHandle, server: &servers::Server
 #[tauri::command]
 async fn server_tracks(app: tauri::AppHandle, id: String) -> Result<Vec<String>, String> {
     servers::tracks(&server_by_id(&app, &id)?).await
-}
-
-/// Create a server: the control plane launches a machine for it.
-///
-/// The app never talks to AWS. A desktop binary can be unpacked, so a cloud credential
-/// inside one would let anyone create infrastructure in our account — the control plane
-/// holds the key and this asks it nicely, authenticated as this player.
-#[tauri::command]
-async fn provision_server(app: tauri::AppHandle, name: String) -> Result<serde_json::Value, String> {
-    let cfg = config::load_or_detect(&app).unwrap_or_default();
-    if cfg.cp_token.trim().is_empty() {
-        return Err("Enroll with an invite code first.".into());
-    }
-    let resp = reqwest::Client::new()
-        .post(format!("{}/v1/provision", paintsync::control_plane()))
-        .bearer_auth(&cfg.cp_token)
-        .json(&serde_json::json!({ "name": name.trim() }))
-        .send()
-        .await
-        .map_err(|e| format!("Couldn't reach the control plane: {e}"))?;
-
-    let ok = resp.status().is_success();
-    let text = resp.text().await.unwrap_or_default();
-    let body: serde_json::Value = serde_json::from_str(&text).unwrap_or(serde_json::Value::Null);
-    if !ok {
-        return Err(body
-            .get("error")
-            .and_then(|e| e.as_str())
-            .map(str::to_string)
-            .unwrap_or(text));
-    }
-    Ok(body)
-}
-
-/// What's running, and therefore what's being paid for.
-///
-/// Read from EC2 rather than from anyone's records, because that is the number that turns
-/// into a bill.
-#[tauri::command]
-async fn fleet_state(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
-    let cfg = config::load_or_detect(&app).unwrap_or_default();
-    if cfg.cp_token.trim().is_empty() {
-        return Err("Enroll with an invite code first.".into());
-    }
-    let resp = reqwest::Client::new()
-        .get(format!("{}/v1/fleet", paintsync::control_plane()))
-        .bearer_auth(&cfg.cp_token)
-        .send()
-        .await
-        .map_err(|e| format!("Couldn't reach the control plane: {e}"))?;
-    let ok = resp.status().is_success();
-    let text = resp.text().await.unwrap_or_default();
-    let body: serde_json::Value = serde_json::from_str(&text).unwrap_or(serde_json::Value::Null);
-    if !ok {
-        return Err(body
-            .get("error")
-            .and_then(|e| e.as_str())
-            .map(str::to_string)
-            .unwrap_or(text));
-    }
-    Ok(body)
 }
 
 /// Put a server the player runs into the public list, so other people can find it.

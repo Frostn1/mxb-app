@@ -4309,24 +4309,6 @@ export const SERVER_REGIONS = [
  */
 export const DEFAULT_SERVER_REGION = "us-west-2";
 
-/** An EC2 instance the control plane launched, as AWS reports it. */
-export interface FleetInstance {
-  instanceId: string;
-  state: string;
-  publicIp: string | null;
-  instanceType: string;
-  launchedAt: string | null;
-}
-
-export interface FleetState {
-  region: string;
-  /** Instances running across the whole fleet — what the cap is measured against. */
-  running: number;
-  cap: number;
-  /** Only this account's own; an instance id and IP belong to whoever pays for the box. */
-  instances: FleetInstance[];
-}
-
 /**
  * A server the control plane runs for this account.
  *
@@ -4372,21 +4354,6 @@ export function cloudServers(): Promise<CloudServer[]> {
 /** Destroy one, and stop paying for it. */
 export function destroyCloudServer(id: string): Promise<void> {
   return invoke<void>("destroy_cloud_server", { id });
-}
-
-/**
- * Create a server — the control plane launches a machine for it.
- *
- * The app holds no cloud credentials: a desktop binary can be unpacked, so the key lives in
- * the control plane and this asks it, authenticated as this player.
- */
-export function provisionServer(name: string): Promise<{ id: string; instanceId: string }> {
-  return invoke<{ id: string; instanceId: string }>("provision_server", { name });
-}
-
-/** What's running, read from EC2 — the number that turns into a bill. */
-export function fleetState(): Promise<FleetState> {
-  return invoke<FleetState>("fleet_state");
 }
 
 export interface PublishResult {

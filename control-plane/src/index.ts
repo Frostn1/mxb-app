@@ -23,22 +23,14 @@ import {
   pageResult,
   type PendingLogin,
 } from "./signin";
-import {
-  awsEnv,
-  createImage,
-  fleet,
-  imageState,
-  latestWindowsAmi,
-  REGION,
-  runInstance,
-  terminateInstance,
-} from "./aws";
 import { adminAssets, isAssetsPath } from "./assets";
 import { APP_BLOCK_CODE, APP_SIGNIN_MESSAGE, appBlocked, appGate, banFor, rememberGuid } from "./bans";
 import { signVerdict } from "./verdict";
 import { issueLease } from "./lease";
 import { deviceFromRequest, rememberDevice } from "./devices";
 import { isWebPath, landingSite, webRoutes } from "./web";
+import { hostingTick } from "./hosting";
+import { hostedRoutes, isHostedPath } from "./hostingroutes";
 import { steamResult, redirectPage } from "./page";
 import { pinGuidFromSteam, rememberLink, steamIdFor } from "./steamlink";
 import { bmacWebhook } from "./bmac";
@@ -53,11 +45,9 @@ import { handleFriends, pruneFriendPresence } from "./friends";
 import { leaveQueue, pruneQueue, putQueue, queueCounts } from "./serverqueue";
 import { generateTrack } from "./trackgen";
 import { getTracks, resolveTrackCatalog, trackArt } from "./trackcatalog";
-import { bootstrapScript, imageBootstrapScript } from "./bootstrap";
-import { bearer, hashToken, newToken, tokenMatches } from "./auth";
+import { bearer, hashToken, newToken } from "./auth";
 import {
   isBikeId,
-  isBootstrapStage,
   isContentName,
   isGuid,
   isPaintFileName,
@@ -71,7 +61,6 @@ import {
   isServerName,
   isSha256,
   isSlot,
-  MAX_BOOTSTRAP_LOG,
   MAX_PAINT_BYTES,
   PRESENCE_TTL_MS,
 } from "./validate";
@@ -135,17 +124,13 @@ export default {
   },
 
   /**
-   * The idle sweep, on a cron trigger.
-   *
-   * Servers bill by the hour whether or not anyone is on them, and nobody is watching at
-   * 3am. This is the only thing standing between "we should turn those off" and a month of
-   * charges for an empty grid.
+   * The five-minute sweep, on a cron trigger: hosted boxes moving through delivery and install,
+   * idle hosted slots, renewal-aware drains (`hosting.ts`), and the prunes.
    */
   async scheduled(_event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
     ctx.waitUntil(
       Promise.all([
-        reapIdleServers(env),
-        advanceImageBuild(env),
+        hostingTick(env),
         pruneDeviceClaims(env),
         pruneUsage(env),
         pruneSurvey(env),
@@ -174,11 +159,6 @@ async function route(request: Request, env: Env): Promise<Response> {
   const method = request.method;
 
   if (method === "GET" && path === "/health") return json(200, { ok: true });
-
-  // Unauthenticated on purpose: a freshly launched instance fetches this during boot, when
-  // it holds no credentials and has no way to be given any. The binary is not a secret —
-  // it is the same agent anyone can build from the public repository.
-  if (method === "GET" && path === "/v1/agent.exe") return artifact(env, "artifacts/mxb-agent.exe");
 
   // The bikes a provisioned server needs in order to accept the ones players ride.
   //
@@ -222,6 +202,9 @@ async function route(request: Request, env: Env): Promise<Response> {
   if (method === "GET" && path === "/v1/steam/start") return steamStart(url, env);
 
   // Steam sign-in for mxbsecure.com. Its session is a signed cookie, checked where it's used.
+  // MSM driving a hosted server, and the box install runner (`hostingroutes.ts`).
+  if (isHostedPath(path)) return hostedRoutes(request, url, env);
+
   if (isWebPath(path)) return webRoutes(request, url, env);
 
   // Self-serve signup, no invite. Voice is the reason this exists: a rider on a community
@@ -296,14 +279,6 @@ async function route(request: Request, env: Env): Promise<Response> {
     if (!k) return json(404, { error: "paint lock signing is not configured" });
     return new Response(minisignPublicKey(k), { headers: { "content-type": "text/plain; charset=utf-8" } });
   }
-
-  // A provisioned box announcing itself. Authenticated by the agent token in its own row,
-  // not by an account bearer — the machine holds no account and has no way to be given one.
-  const hello = /^\/v1\/servers\/([A-Za-z0-9._-]{1,64})\/hello$/.exec(path);
-  if (hello && method === "POST") return serverHello(request, hello[1], env);
-
-  const boot = /^\/v1\/servers\/([A-Za-z0-9._-]{1,64})\/bootstrap$/.exec(path);
-  if (boot && method === "POST") return serverBootstrap(request, boot[1], env);
 
   // Buy Me a Coffee announcing a supporter, for the Discord channel. Unauthenticated in the
   // same sense as the two above: the caller is not a player and holds no bearer token. Its
@@ -643,7 +618,7 @@ async function route(request: Request, env: Env): Promise<Response> {
   // Everything past here needs an invite. The gate is the *position* rather than a check
   // repeated on each route, so a route added below inherits it and one added above is a
   // deliberate decision to open it up. What is left below is the estate: registering a
-  // server, provisioning one, and the fleet it bills for.
+  // server and the servers you registered. Deploying one is `hosting.ts`, on the site.
   const gate = invitedOnly(account);
   if (gate) return gate;
 
@@ -654,10 +629,6 @@ async function route(request: Request, env: Env): Promise<Response> {
   if (method === "POST" && path === "/v1/roster/mine") return claimRoster(request, account.id, env);
   if (method === "POST" && path === "/v1/servers") return registerServer(request, account, env);
   if (method === "GET" && path === "/v1/servers/mine") return myServers(account, env);
-  if (method === "GET" && path === "/v1/fleet") return fleetState(account, env);
-  if (method === "POST" && path === "/v1/provision") return provision(request, account, env);
-  if (method === "POST" && path === "/v1/images/build") return buildImage(request, account, env);
-  if (method === "GET" && path === "/v1/images") return imageStatus(env);
 
   const owned = /^\/v1\/servers\/([A-Za-z0-9._-]{1,64})$/.exec(path);
   if (owned && method === "DELETE") return deleteServer(owned[1], account, env);
@@ -1768,16 +1739,6 @@ const MAX_SERVERS_PER_ACCOUNT = 5;
 const REACHABILITY_TIMEOUT_MS = 5000;
 
 /**
- * The ports a provisioned box uses.
- *
- * Fixed rather than configurable: the bootstrap writes them into `agent.json` and opens them
- * in the firewall, so anything reading them back has to agree. They were repeated as literals
- * in three places, one of which — the reaper — silently decides whether a server is reachable.
- */
-const AGENT_PORT = 8787;
-const GAME_PORT = 54210;
-
-/**
  * Register a server the player runs, so other people can find it.
  *
  * The list was hand-seeded SQL until now, which meant running a server and *having anyone
@@ -1875,419 +1836,14 @@ async function agentAnswers(agentUrl: string): Promise<boolean> {
 }
 
 /**
- * What AWS is currently charging us for.
+ * The servers this account registered. Scoped strictly to `owner_account_id`.
  *
- * Deliberately reads from EC2 rather than from our own table: the database records what we
- * believe we created, and this is what will actually appear on the bill. When a launch
- * half-fails those two disagree, and only one of them is expensive to be wrong about.
- *
- * The *count* is everyone's business — it is what the concurrency cap is measured against, and
- * hiding it from the people it constrains would be perverse. The instance list is not: an
- * instance id and public IP belong to whoever is paying for that box, so only its owner sees
- * the row. Splitting the two is what lets the panel say "1 of 2 running" without handing every
- * enrolled account the address of every server.
- */
-async function fleetState(account: Account, env: Env): Promise<Response> {
-  const aws = awsEnv(env);
-  if (!aws) return json(503, { error: "provisioning isn't configured on this deployment" });
-  try {
-    const instances = await fleet(aws);
-    const mine = await env.DB.prepare(
-      "SELECT instance_id FROM servers WHERE owner_account_id = ? AND instance_id IS NOT NULL",
-    )
-      .bind(account.id)
-      .all<{ instance_id: string }>();
-    const owned = new Set(mine.results.map((r) => r.instance_id));
-    return json(200, {
-      region: REGION,
-      running: instances.length,
-      cap: Number(env.MXB_MAX_INSTANCES ?? "2"),
-      instances: instances.filter((i) => owned.has(i.instanceId)),
-    });
-  } catch (err) {
-    console.error(JSON.stringify({ msg: "fleet", error: String(err) }));
-    return json(502, { error: String(err) });
-  }
-}
-
-/** Where the built image's id lives, and where a build in progress keeps its place. */
-const SETTING_AMI = "server_ami_id";
-const SETTING_PENDING_AMI = "pending_ami_id";
-
-async function getSetting(env: Env, key: string): Promise<string | null> {
-  const row = await env.DB.prepare("SELECT value FROM settings WHERE key = ?")
-    .bind(key)
-    .first<{ value: string }>();
-  return row?.value ?? null;
-}
-
-async function setSetting(env: Env, key: string, value: string | null): Promise<void> {
-  if (value === null) {
-    await env.DB.prepare("DELETE FROM settings WHERE key = ?").bind(key).run();
-    return;
-  }
-  await env.DB.prepare(
-    "INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?)" +
-      " ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
-  )
-    .bind(key, value, Date.now())
-    .run();
-}
-
-/**
- * Build the image every later server launches from.
- *
- * Installing the game and the bike pack takes a quarter of an hour and produces the same disk
- * every time. Doing it once and snapshotting the result is the difference between a server
- * arriving in fifteen minutes and arriving in two — and it stops getting slower as the pack
- * grows, which it just did, from 1.9 GB to 3.8.
- *
- * The builder is an ordinary provisioned instance running the ordinary bootstrap, so what gets
- * captured is exactly what a working server looks like. It is marked with a role so the idle
- * reaper leaves it alone: an instance with nobody connected is precisely what a builder is.
- */
-async function buildImage(request: Request, account: Account, env: Env): Promise<Response> {
-  void request;
-  const aws = awsEnv(env);
-  if (!aws) return json(503, { error: "provisioning isn't configured on this deployment" });
-  const securityGroupId = env.MXB_SECURITY_GROUP_ID?.trim();
-  const agentDownload = env.MXB_AGENT_DOWNLOAD_URL?.trim();
-  const gameDownload = env.MXB_GAME_DOWNLOAD_URL?.trim();
-  if (!securityGroupId || !agentDownload || !gameDownload) {
-    return json(503, { error: "provisioning isn't finished being set up yet" });
-  }
-  if (await getSetting(env, SETTING_PENDING_AMI)) {
-    return json(409, { error: "an image is already being built" });
-  }
-  const existingBuilder = await env.DB.prepare(
-    "SELECT id FROM servers WHERE role = 'builder'",
-  ).first<{ id: string }>();
-  if (existingBuilder) return json(409, { error: "a builder is already running" });
-
-  const id = crypto.randomUUID();
-  const agentToken = newToken();
-  await env.DB.prepare(
-    "INSERT INTO servers (id, name, region, address, created_at, owner_account_id, published," +
-      " agent_token, role) VALUES (?, ?, ?, '', ?, ?, 0, ?, 'builder')",
-  )
-    .bind(id, "image builder", REGION, Date.now(), account.id, agentToken)
-    .run();
-
-  try {
-    const amiId = await latestWindowsAmi(aws);
-    const instanceId = await runInstance(
-      aws,
-      {
-        name: "mxb image builder",
-        instanceType: env.MXB_INSTANCE_TYPE?.trim() || "t3.small",
-        securityGroupId,
-        userData: bootstrapScript({
-          agentToken,
-          agentUrl: agentDownload,
-          gameUrl: gameDownload,
-          serverName: "image builder",
-          gamePort: GAME_PORT,
-          agentPort: AGENT_PORT,
-          serverId: id,
-          controlPlaneUrl: new URL(request.url).origin,
-        }),
-      },
-      amiId,
-    );
-    await env.DB.prepare("UPDATE servers SET instance_id = ? WHERE id = ?")
-      .bind(instanceId, id)
-      .run();
-    return json(201, { id, instanceId, state: "building" });
-  } catch (err) {
-    await env.DB.prepare("DELETE FROM servers WHERE id = ?").bind(id).run();
-    console.error(JSON.stringify({ msg: "buildImage", error: String(err) }));
-    return json(502, { error: String(err) });
-  }
-}
-
-/** What the image situation is: none, building, baking, or ready. */
-async function imageStatus(env: Env): Promise<Response> {
-  const ami = await getSetting(env, SETTING_AMI);
-  const pending = await getSetting(env, SETTING_PENDING_AMI);
-  const builder = await env.DB.prepare(
-    "SELECT bootstrap_stage FROM servers WHERE role = 'builder'",
-  ).first<{ bootstrap_stage: string | null }>();
-  return json(200, {
-    amiId: ami,
-    pendingAmiId: pending,
-    builderStage: builder?.bootstrap_stage ?? null,
-    state: ami ? "ready" : pending ? "baking" : builder ? "building" : "none",
-  });
-}
-
-/**
- * Move a finished build along, one cron tick at a time.
- *
- * Three states, none of which can be waited on inline: the builder installing (~15 minutes),
- * EC2 baking the image (~10), and then the swap. Each run does whichever step is due.
- */
-async function advanceImageBuild(env: Env): Promise<void> {
-  const aws = awsEnv(env);
-  if (!aws) return;
-
-  const pending = await getSetting(env, SETTING_PENDING_AMI);
-  if (pending) {
-    const state = await imageState(aws, pending);
-    if (state === "available") {
-      const previous = await getSetting(env, SETTING_AMI);
-      await setSetting(env, SETTING_AMI, pending);
-      await setSetting(env, SETTING_PENDING_AMI, null);
-      console.log(JSON.stringify({ msg: "image ready", ami: pending, replaced: previous }));
-    } else if (state === "failed" || state === null) {
-      // Nothing to salvage, and leaving it pending would block every future build.
-      await setSetting(env, SETTING_PENDING_AMI, null);
-      console.error(JSON.stringify({ msg: "image failed", ami: pending, state }));
-    }
-    return;
-  }
-
-  const builder = await env.DB.prepare(
-    "SELECT id, instance_id, bootstrap_stage FROM servers WHERE role = 'builder'",
-  ).first<{ id: string; instance_id: string | null; bootstrap_stage: string | null }>();
-  if (!builder?.instance_id) return;
-
-  // An instance that is no longer there cannot finish. Without this the row sits at
-  // "building" forever and every later build is refused as one already in progress — which is
-  // exactly what happened when the reaper was killing builders as orphans.
-  const live = await fleet(aws).catch(() => []);
-  if (!live.some((i) => i.instanceId === builder.instance_id)) {
-    await env.DB.prepare("DELETE FROM servers WHERE id = ?").bind(builder.id).run();
-    console.error(
-      JSON.stringify({ msg: "image builder vanished", id: builder.id, instance: builder.instance_id }),
-    );
-    return;
-  }
-
-  if (builder.bootstrap_stage === "ready") {
-    const imageId = await createImage(aws, builder.instance_id, `mxb-server-${Date.now()}`);
-    await setSetting(env, SETTING_PENDING_AMI, imageId);
-    // CreateImage stops the instance to take a consistent disk; it is of no further use.
-    await terminateInstance(aws, builder.instance_id);
-    await env.DB.prepare("DELETE FROM servers WHERE id = ?").bind(builder.id).run();
-    console.log(JSON.stringify({ msg: "image baking", ami: imageId }));
-  } else if (builder.bootstrap_stage === "failed") {
-    await terminateInstance(aws, builder.instance_id).catch(() => {});
-    await env.DB.prepare("DELETE FROM servers WHERE id = ?").bind(builder.id).run();
-    console.error(JSON.stringify({ msg: "image build failed", id: builder.id }));
-  }
-}
-
-/**
- * Create a server: launch the machine, and record it.
- *
- * The order matters. The row is written *before* the launch, so an instance can never exist
- * without something in our database pointing at it — the reverse leaves a billing resource
- * nobody knows to turn off, which is the failure that costs money rather than time. If the
- * launch then fails, the row is removed again.
- */
-async function provision(request: Request, account: Account, env: Env): Promise<Response> {
-  const aws = awsEnv(env);
-  if (!aws) return json(503, { error: "provisioning isn't configured on this deployment" });
-  const securityGroupId = env.MXB_SECURITY_GROUP_ID?.trim();
-  const agentDownload = env.MXB_AGENT_DOWNLOAD_URL?.trim();
-  const gameDownload = env.MXB_GAME_DOWNLOAD_URL?.trim();
-  if (!securityGroupId || !agentDownload || !gameDownload) {
-    return json(503, { error: "provisioning isn't finished being set up yet" });
-  }
-
-  const body = await readJson(request);
-  if (!body) return json(400, { error: "expected a JSON body" });
-  const { name } = body as Record<string, unknown>;
-  if (!isServerName(name)) return json(400, { error: "that server name won't fit the list" });
-
-  // Counted from EC2, not from our table. This is the number that turns into a bill, and
-  // the two disagree exactly when something has already gone wrong.
-  const running = await fleet(aws);
-  const cap = Number(env.MXB_MAX_INSTANCES ?? "2");
-  if (running.length >= cap) {
-    return json(409, {
-      error: `there are already ${running.length} servers running, and the limit is ${cap}`,
-    });
-  }
-
-  const id = crypto.randomUUID();
-  const agentToken = newToken();
-  const now = Date.now();
-
-  await env.DB.prepare(
-    "INSERT INTO servers (id, name, region, address, created_at, owner_account_id, published," +
-      " agent_token) VALUES (?, ?, ?, '', ?, ?, 0, ?)",
-  )
-    .bind(id, (name as string).trim(), REGION, now, account.id, agentToken)
-    .run();
-
-  try {
-    // Launch from the prebuilt image when there is one: the game and the bike pack are
-    // already on its disk, so the server only has to write its own config and start. That is
-    // two minutes instead of fifteen, and it does not grow with the pack.
-    const built = await getSetting(env, SETTING_AMI);
-    const amiId = built ?? (await latestWindowsAmi(aws));
-    const script = built ? imageBootstrapScript : bootstrapScript;
-    const instanceId = await runInstance(
-      aws,
-      {
-        name: `mxb ${(name as string).trim()}`,
-        instanceType: env.MXB_INSTANCE_TYPE?.trim() || "t3.small",
-        securityGroupId,
-        userData: script({
-          agentToken,
-          agentUrl: agentDownload,
-          gameUrl: gameDownload,
-          serverName: (name as string).trim(),
-          gamePort: GAME_PORT,
-          agentPort: AGENT_PORT,
-          serverId: id,
-          // Taken from the request rather than configured, so a preview deployment's boxes
-          // announce themselves to that preview rather than to production.
-          controlPlaneUrl: new URL(request.url).origin,
-        }),
-      },
-      amiId,
-    );
-    await env.DB.prepare("UPDATE servers SET instance_id = ? WHERE id = ?")
-      .bind(instanceId, id)
-      .run();
-    // No address yet: EC2 assigns the public IP as the instance comes up, and the app polls
-    // for it. Publishing waits until there is something to publish.
-    return json(201, { id, instanceId, state: "pending" });
-  } catch (err) {
-    // The row would otherwise claim a server that does not exist, and the cap counts rows
-    // nobody can ever use.
-    await env.DB.prepare("DELETE FROM servers WHERE id = ?").bind(id).run();
-    console.error(JSON.stringify({ msg: "provision", error: String(err) }));
-    return json(502, { error: String(err) });
-  }
-}
-
-/**
- * A provisioned box announcing that it is up, and where it is.
- *
- * This is the one thing that made cloud servers real. A launched instance had no way to be
- * reached: its public IP exists only in EC2's view, its agent token only in this table and on
- * the box, and nothing ever wrote `address` or flipped `published` — so a server the app
- * created could never be joined, managed or even found. Now the box says so itself.
- *
- * **The address is observed, not supplied.** The IP comes from `cf-connecting-ip` rather than
- * from the request body, so a box that is compromised — or an operator poking at this by hand
- * — cannot register somebody else's address into everyone's join picker. Only the ports are
- * taken from the body, and only after the token proves the caller is that server.
- *
- * Idempotent: a bootstrap that retries, or an instance that reboots and announces itself
- * again, simply rewrites the same row.
- */
-/**
- * Prove a request came from the box a row was provisioned for.
- *
- * The agent token is the only credential that machine has — it holds no account and there is
- * no way to give it one. Shared by every route the box itself calls, so the answer to a wrong
- * token cannot drift between them: an unknown id and a bad token return the same 403, which
- * is what stops this being a way to discover which server ids exist.
- */
-async function asProvisionedServer(
-  request: Request,
-  id: string,
-  env: Env,
-): Promise<{ instance_id: string | null } | null> {
-  const row = await env.DB.prepare("SELECT agent_token, instance_id FROM servers WHERE id = ?")
-    .bind(id)
-    .first<{ agent_token: string | null; instance_id: string | null }>();
-  const presented = bearer(request.headers.get("Authorization"));
-  if (!row?.agent_token || !presented || !tokenMatches(row.agent_token, presented)) {
-    return null;
-  }
-  return { instance_id: row.instance_id };
-}
-
-/**
- * A booting instance reporting what it is doing, and why it died if it did.
- *
- * Nothing else can tell you. The box has no console and no key pair, so `C:\mxb-bootstrap.log`
- * is unreadable from outside — and the bootstrap's own failure trap shuts the machine down,
- * which terminates it and takes the log with it. Before this, a bootstrap that failed at
- * minute twelve and one still downloading looked exactly the same from here: nothing.
- *
- * Also what lets "Create a server" say `extracting the game` instead of spinning for a
- * quarter of an hour with nothing to show.
- */
-async function serverBootstrap(request: Request, id: string, env: Env): Promise<Response> {
-  if (!(await asProvisionedServer(request, id, env))) {
-    return json(403, { error: "not this server" });
-  }
-  const body = (await readJson(request)) as
-    | { stage?: unknown; ok?: unknown; log?: unknown }
-    | null;
-  if (!isBootstrapStage(body?.stage)) return json(400, { error: "that isn't a stage" });
-
-  // Kept only when something went wrong, and only the tail: this is a transcript written by a
-  // script, and there is no version of "store all of it" that ends well.
-  const log =
-    body?.ok === false && typeof body.log === "string"
-      ? body.log.slice(-MAX_BOOTSTRAP_LOG)
-      : null;
-
-  await env.DB.prepare(
-    "UPDATE servers SET bootstrap_stage = ?, bootstrap_at = ?, bootstrap_log = COALESCE(?, bootstrap_log)" +
-      " WHERE id = ?",
-  )
-    .bind((body!.stage as string).trim(), Date.now(), log, id)
-    .run();
-
-  console.log(JSON.stringify({ msg: "bootstrap", id, stage: body!.stage, failed: log !== null }));
-  return json(200, { ok: true });
-}
-
-async function serverHello(request: Request, id: string, env: Env): Promise<Response> {
-  const row = await asProvisionedServer(request, id, env);
-  if (!row) {
-    return json(403, { error: "not this server" });
-  }
-
-  const body = (await readJson(request)) as { agentPort?: unknown; gamePort?: unknown } | null;
-  const agentPort = isPort(body?.agentPort) ? body!.agentPort : AGENT_PORT;
-  const gamePort = isPort(body?.gamePort) ? body!.gamePort : GAME_PORT;
-
-  const ip = (request.headers.get("cf-connecting-ip") ?? "").trim();
-  // Behind `wrangler dev` there is no edge header and the caller is loopback; refusing that
-  // is right for production and is why the local exercise of this uses a public test address.
-  if (!isPublicGameAddress(`${ip}:${gamePort}`)) {
-    return json(400, { error: "that address isn't reachable from the internet" });
-  }
-
-  const now = Date.now();
-  await env.DB.prepare(
-    "UPDATE servers SET address = ?, agent_url = ?, checked_at = ?, published = 1 WHERE id = ?",
-  )
-    .bind(`${ip}:${gamePort}`, `http://${ip}:${agentPort}`, now, id)
-    .run();
-
-  console.log(JSON.stringify({ msg: "hello", id, instance: row.instance_id, address: ip }));
-  return json(200, { ok: true, address: `${ip}:${gamePort}` });
-}
-
-function isPort(value: unknown): value is number {
-  return typeof value === "number" && Number.isInteger(value) && value > 0 && value <= 65535;
-}
-
-/**
- * The servers this account runs, with what it takes to drive them.
- *
- * Includes `agent_token`, which the public list deliberately never carries. That is the
- * point: a box the control plane launched has no console and prints its pairing code to
- * nobody, so the owner has no other way to obtain the credential for a server they are
- * paying for. Scoped strictly to `owner_account_id`, so it is only ever the caller's own.
- *
- * `state` and `publicIp` come from EC2 rather than from this table, which is what lets the app
- * distinguish "still booting" from "up but not answering".
+ * Self-run servers only: the control plane no longer launches machines here (user server
+ * deploy lives in `hosting.ts`), so there is no instance state or agent token to hand back.
  */
 async function myServers(account: Account, env: Env): Promise<Response> {
   const rows = await env.DB.prepare(
-    "SELECT id, name, region, address, agent_url, agent_token, instance_id, published," +
-      " created_at, idle_since, bootstrap_stage, bootstrap_at, bootstrap_log" +
+    "SELECT id, name, region, address, agent_url, published, created_at" +
       " FROM servers WHERE owner_account_id = ? ORDER BY created_at",
   )
     .bind(account.id)
@@ -2297,223 +1853,37 @@ async function myServers(account: Account, env: Env): Promise<Response> {
       region: string;
       address: string;
       agent_url: string | null;
-      agent_token: string | null;
-      instance_id: string | null;
       published: number;
       created_at: number;
-      idle_since: number | null;
-      bootstrap_stage: string | null;
-      bootstrap_at: number | null;
-      bootstrap_log: string | null;
     }>();
-
-  // Only ask EC2 when at least one row is a machine we launched; a player who only runs
-  // servers on their own hardware shouldn't make this endpoint depend on AWS at all.
-  const aws = rows.results.some((r) => r.instance_id) ? awsEnv(env) : null;
-  let live = new Map<string, { state: string; publicIp: string | null }>();
-  if (aws) {
-    try {
-      live = new Map((await fleet(aws)).map((i) => [i.instanceId, i]));
-    } catch (err) {
-      // The rows are still useful without it — the panel just can't say "booting".
-      console.error(JSON.stringify({ msg: "servers/mine fleet", error: String(err) }));
-    }
-  }
-
   return json(200, {
-    servers: rows.results.map((r) => {
-      const instance = r.instance_id ? live.get(r.instance_id) : undefined;
-      return {
-        id: r.id,
-        name: r.name,
-        region: r.region,
-        address: r.address,
-        // Falls back to EC2's view for the window between the instance getting an IP and its
-        // bootstrap finishing — the agent is not up yet, but the app can already show where.
-        agentUrl:
-          r.agent_url ?? (instance?.publicIp ? `http://${instance.publicIp}:${AGENT_PORT}` : null),
-        agentToken: r.agent_token,
-        instanceId: r.instance_id,
-        published: r.published === 1,
-        createdAt: r.created_at,
-        idleSince: r.idle_since,
-        idleMinutes: Number(env.MXB_IDLE_MINUTES ?? "20"),
-        state: r.instance_id ? (instance?.state ?? "gone") : "self-hosted",
-        publicIp: instance?.publicIp ?? null,
-        // What the box last said it was doing, and why it gave up if it did. The only
-        // window into a machine with no console.
-        bootstrapStage: r.bootstrap_stage,
-        bootstrapAt: r.bootstrap_at,
-        bootstrapLog: r.bootstrap_log,
-      };
-    }),
+    servers: rows.results.map((r) => ({
+      id: r.id,
+      name: r.name,
+      region: r.region,
+      address: r.address,
+      agentUrl: r.agent_url,
+      published: r.published === 1,
+      createdAt: r.created_at,
+      state: "self-hosted",
+    })),
   });
 }
 
-/**
- * Remove a server from the list — and destroy the machine, if we made one.
- *
- * Only its owner may, and the hand-seeded rows have no owner so the API cannot touch them.
- * Termination happens before the row is dropped: losing the row while the instance lives is
- * how an orphan starts billing forever.
- */
+/** Remove a server from the list. Only its owner may; hand-seeded rows have no owner. */
 async function deleteServer(id: string, account: Account, env: Env): Promise<Response> {
-  const row = await env.DB.prepare(
-    "SELECT owner_account_id, instance_id FROM servers WHERE id = ?",
-  )
+  const row = await env.DB.prepare("SELECT owner_account_id FROM servers WHERE id = ?")
     .bind(id)
-    .first<{ owner_account_id: string | null; instance_id: string | null }>();
+    .first<{ owner_account_id: string | null }>();
   if (!row) return json(404, { error: "no such server" });
   // One message whether it is someone else's or unowned: which of the two it is isn't the
   // caller's business.
   if (row.owner_account_id !== account.id) {
     return json(403, { error: "that isn't your server" });
   }
-
-  if (row.instance_id) {
-    const aws = awsEnv(env);
-    if (!aws) return json(503, { error: "can't reach AWS to shut that server down" });
-    try {
-      await terminateInstance(aws, row.instance_id);
-    } catch (err) {
-      // Deliberately fatal. Dropping the row here would leave an instance running with
-      // nothing left pointing at it, and the reaper works from these rows.
-      console.error(JSON.stringify({ msg: "terminate", error: String(err) }));
-      return json(502, { error: `couldn't shut the server down: ${String(err)}` });
-    }
-  }
-
   await env.DB.prepare("DELETE FROM servers WHERE id = ?").bind(id).run();
-  return json(200, { ok: true, terminated: Boolean(row.instance_id) });
+  return json(200, { ok: true });
 }
-
-/**
- * Destroy servers that nobody is riding on.
- *
- * This is what makes "no unattended servers" true rather than merely intended. An idle
- * server is indistinguishable from a busy one on the bill, and the only person who would
- * notice is the one paying — long after the fact.
- *
- * A server is given a grace period rather than being killed on the first empty poll,
- * because empty is normal: between races, and while the first rider is still loading in.
- */
-async function reapIdleServers(env: Env): Promise<void> {
-  const aws = awsEnv(env);
-  if (!aws) return;
-  const idleMs = Number(env.MXB_IDLE_MINUTES ?? "20") * 60_000;
-  const maxLifeMs = Number(env.MXB_MAX_LIFETIME_MINUTES ?? "240") * 60_000;
-  const now = Date.now();
-
-  // Driven from EC2, not from our table. The instances AWS is billing for are the ones that
-  // need turning off, and a row that went missing is precisely the case where our records
-  // cannot be trusted to find them.
-  const instances = await fleet(aws);
-  const rows = await env.DB.prepare(
-    // Every row with an instance, builders included. Filtering them out here is what killed
-    // the first image build: absent from this map, the builder matched the orphan check below
-    // — "no database row points at this instance" — and was terminated within five minutes of
-    // launching. Builders are skipped at the idle check instead, which is the only part that
-    // should ignore them.
-    "SELECT id, instance_id, agent_token, idle_since, role FROM servers" +
-      " WHERE instance_id IS NOT NULL",
-  ).all<{
-    id: string;
-    instance_id: string;
-    agent_token: string | null;
-    idle_since: number | null;
-    role: string | null;
-  }>();
-  const byInstance = new Map(rows.results.map((r) => [r.instance_id, r]));
-
-  for (const instance of instances) {
-    if (instance.state !== "running" && instance.state !== "pending") continue;
-    const row = byInstance.get(instance.instanceId);
-
-    const kill = async (why: string) => {
-      try {
-        await terminateInstance(aws, instance.instanceId);
-        if (row) await env.DB.prepare("DELETE FROM servers WHERE id = ?").bind(row.id).run();
-        console.log(JSON.stringify({ msg: "reaped", instance: instance.instanceId, why }));
-      } catch (err) {
-        // Left on the list rather than forgotten — an instance we failed to kill is exactly
-        // the one that must be tried again next sweep.
-        console.error(
-          JSON.stringify({ msg: "reap", instance: instance.instanceId, why, error: String(err) }),
-        );
-      }
-    };
-
-    // An instance with no row is one whose record we already deleted, or one whose launch
-    // half-failed. Either way nothing is tracking it any more, so nothing will ever turn it
-    // off — which makes destroying it the safe direction, not the risky one.
-    if (!row) {
-      await kill("orphan: no database row points at this instance");
-      continue;
-    }
-
-    // A builder has nobody connected because nobody rides on it. Reaping one throws away a
-    // quarter of an hour of install; `advanceImageBuild` owns its lifetime instead.
-    if (row.role === "builder") continue;
-
-    // The backstop that catches everything else: a bootstrap that hung instead of trapping,
-    // an agent that never started, a failure mode nobody has thought of yet. Without this,
-    // any instance we cannot talk to bills until a human notices.
-    const age = instance.launchedAt ? now - Date.parse(instance.launchedAt) : 0;
-    if (age > maxLifeMs) {
-      await kill(`older than the ${maxLifeMs / 60_000} minute limit`);
-      continue;
-    }
-
-    // Built from EC2's view rather than a stored column: the public IP is assigned while the
-    // instance boots, long after the row was written, so the row can never have it at
-    // creation time and a server whose address we forgot to record would never be checked.
-    const agentUrl = instance.publicIp ? `http://${instance.publicIp}:${AGENT_PORT}` : null;
-    const players = await connectedCount(agentUrl, row.agent_token);
-
-    if (players === null) {
-      // Still booting, or briefly unreachable. Not fatal on its own — the age limit above
-      // is what stops "unreachable" from meaning "runs forever".
-      continue;
-    }
-    if (players > 0) {
-      if (row.idle_since !== null) {
-        await env.DB.prepare("UPDATE servers SET idle_since = NULL WHERE id = ?")
-          .bind(row.id)
-          .run();
-      }
-      continue;
-    }
-    if (row.idle_since === null) {
-      await env.DB.prepare("UPDATE servers SET idle_since = ? WHERE id = ?")
-        .bind(now, row.id)
-        .run();
-      continue;
-    }
-    if (now - row.idle_since >= idleMs) {
-      await kill(`empty for ${Math.round((now - row.idle_since) / 60_000)} minutes`);
-    }
-  }
-}
-
-/** How many riders are on a server, or null if the agent couldn't be asked. */
-async function connectedCount(
-  agentUrl: string | null,
-  agentToken: string | null,
-): Promise<number | null> {
-  if (!agentUrl || !agentToken) return null;
-  try {
-    const resp = await fetch(`${agentUrl.replace(/\/+$/, "")}/players`, {
-      headers: { authorization: `Bearer ${agentToken}` },
-      signal: AbortSignal.timeout(5000),
-    });
-    if (!resp.ok) return null;
-    const body = (await resp.json()) as { players?: unknown[] };
-    return Array.isArray(body.players) ? body.players.length : null;
-  } catch {
-    return null;
-  }
-}
-
 
 /**
  * "I am on this server."

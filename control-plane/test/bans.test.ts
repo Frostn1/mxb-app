@@ -59,7 +59,7 @@ async function deployment(overrides: Record<string, string> = {}): Promise<Env> 
     MXB_OWNER_ACCOUNT_ID: OWNER,
     MXB_WEB_SESSION_KEY: SESSION,
     MXB_SITE_ORIGIN: SITE,
-    MXB_ADMIN_STEAM_IDS: BOSS,
+    ADMIN_STEAM_IDS: BOSS,
     PLUGIN_SIGNING_KEY: await pluginSigningKey(),
     // The plugin bundle lives in the same R2 the paints do, as far as `plugins.ts` asks.
     PAINTS: { async get(key: string) { return key ? { body: "BUNDLE" } : null; } },

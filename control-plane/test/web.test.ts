@@ -582,7 +582,7 @@ describe("creators on /admin/assets", () => {
 
   it("hands the converter to granted accounts and admins, and to nobody else", async () => {
     const GRANTED = "76561198000000077";
-    const env = await deployment({ MXB_CONVERTER_STEAM_IDS: `${GRANTED}, not-a-steam-id`, MXB_ADMIN_STEAM_IDS: CREATOR });
+    const env = await deployment({ CONVERTER_STEAM_IDS: `${GRANTED}, not-a-steam-id`, ADMIN_STEAM_IDS: CREATOR });
     const file = "/v1/web/fbx2edf/fbx2edf.js";
     // Not signed in.
     expect((await web(env, req("GET", file))).status).toBe(401);
@@ -625,7 +625,7 @@ describe("creators on /admin/assets", () => {
   });
 
   it("gives the converter to nobody when no bucket is bound", async () => {
-    const env = await deployment({ MXB_ADMIN_STEAM_IDS: CREATOR });
+    const env = await deployment({ ADMIN_STEAM_IDS: CREATOR });
     delete (env as unknown as { FBX2EDF?: unknown }).FBX2EDF;
     expect((await web(env, req("GET", "/v1/web/fbx2edf/fbx2edf_bg.wasm", { cookie: await cookieFor(CREATOR) }))).status).toBe(503);
   });
@@ -733,7 +733,7 @@ describe("creator API keys", () => {
 });
 
 describe("the dashboards on the site", () => {
-  const ADMINS = { MXB_ADMIN_STEAM_IDS: CREATOR };
+  const ADMINS = { ADMIN_STEAM_IDS: CREATOR };
 
   it("is nobody's until the deployment names them", async () => {
     const env = await deployment();
@@ -744,7 +744,7 @@ describe("the dashboards on the site", () => {
   });
 
   it("drops anything in the list that isn't a SteamID64", async () => {
-    const env = await deployment({ MXB_ADMIN_STEAM_IDS: `nonsense, ${CREATOR} ${OTHER}, 12` });
+    const env = await deployment({ ADMIN_STEAM_IDS: `nonsense, ${CREATOR} ${OTHER}, 12` });
     expect(adminSteamIds(env)).toEqual([CREATOR, OTHER]);
   });
 

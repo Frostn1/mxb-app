@@ -6,7 +6,7 @@
  *                                        newest uploads (the queue a moderator reads)
  *   POST /v1/web/mods/<id>/moderate      admins: {action: hide | unhide | remove | dismiss, note}
  *
- * The admin half is gated on the Steam sign-in of the site (`MXB_ADMIN_STEAM_IDS`), like the
+ * The admin half is gated on the Steam sign-in of the site (`ADMIN_STEAM_IDS`), like the
  * racing and servers consoles, and lives under its own `/v1/web/mods/` prefix rather than
  * `/v1/web/admin/` so the moderation page can live on its own host (mods.mxbsecure.com)
  * instead of the dashboard that is being retired.
