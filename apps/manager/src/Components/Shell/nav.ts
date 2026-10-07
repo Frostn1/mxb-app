@@ -15,6 +15,7 @@ export type DashboardView =
   | "hub"
   | "library"
   | "downloads"
+  | "storage"
   | "locker"
   | "presets"
   | "manage"
@@ -99,6 +100,7 @@ export const RAIL: RailItem[] = [
     tabs: [
       { view: "library", label: "nav.library" },
       { view: "downloads", label: "nav.downloads" },
+      { view: "storage", label: "nav.storage" },
     ],
   },
   {
