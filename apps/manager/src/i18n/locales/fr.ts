@@ -2518,7 +2518,7 @@ export const fr: Translation = {
 
   // --- paid plugins ---
   "plugins.section": "Extensions",
-  "plugins.sectionDesc": "Extensions payantes pour {{app}}. Une licence est un abonnement mensuel lié à votre compte ; elle continue de fonctionner hors ligne pendant une semaine entre deux vérifications.",
+  "plugins.sectionDesc": "Extensions pour {{app}}. Les gratuites s'installent avec votre compte. Les payantes demandent une clé et fonctionnent hors ligne une semaine entre deux vérifications.",
   "plugins.keyLabel": "Utiliser une clé",
   "plugins.keyHelp": "Collez la clé qui vous a été envoyée. Pour renouveler, utilisez une autre clé : elle s'ajoute au temps restant.",
   "plugins.redeem": "Utiliser",
@@ -2536,6 +2536,9 @@ export const fr: Translation = {
   "plugins.active": "Actif",
   "plugins.activeDetail": "sous licence jusqu'au {{date}}.",
   "plugins.licensed": "Sous licence",
+  "plugins.free": "Gratuit",
+  "plugins.freeSignIn": "connectez-vous pour l'installer. Aucune clé nécessaire.",
+  "plugins.activeFreeDetail": "gratuit avec votre compte.",
   "plugins.readyToInstall": "la version {{version}} est prête à installer.",
   "plugins.noBuildYet": "il n'y a pas encore de build à installer.",
   "plugins.updateAvailable": "Mise à jour disponible",

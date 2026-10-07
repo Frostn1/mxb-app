@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 
 /**
- * The Replay Mod's half that lives outside the game: the camera paths on disk, and the
+ * MXB Replay's half that lives outside the game: the camera paths on disk, and the
  * recorder that keeps what the mod flies.
  *
  * Every command here is registered by **Frost's Studio** and by nothing else. Calling one

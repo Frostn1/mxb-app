@@ -306,7 +306,7 @@ fn main() {
             mxb_core::plugins::plugin_list_dir,
             mxb_core::plugins::plugin_delete_file,
             mxb_core::plugins::plugin_install_payload,
-            // The Replay Mod's half that lives out here: the camera paths on disk, and the
+            // MXB Replay's half that lives out here: the camera paths on disk, and the
             // recorder that keeps what the mod flies.
             replayrec::replay_status,
             replayrec::replay_check,
@@ -350,7 +350,7 @@ fn main() {
                 tracktex::set_dir(data.join("track-textures"));
                 trackground::set_dir(data.join("track-ground"));
             }
-            // Watch for a take the Replay Mod is flying, and keep it. Started here rather
+            // Watch for a take MXB Replay is flying, and keep it. Started here rather
             // than when the Replay screen opens: the point of the feature is that a rider who
             // never opens this window still comes back to the recording.
             replayrec::watch(app.handle().clone());

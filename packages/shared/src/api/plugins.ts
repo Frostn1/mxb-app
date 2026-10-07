@@ -27,6 +27,8 @@ export interface PluginView {
   version: string | null;
   /** Whether there is a build to install at all. */
   published: boolean;
+  /** Free for every signed-in account; no key needed. */
+  free: boolean;
   status: PluginStatus;
   /** Seconds since epoch. Null if this account has never held a license. */
   expires: number | null;
@@ -44,7 +46,7 @@ export interface PluginManifest {
   version: string;
   entry: string;
   minAppVersion?: string | null;
-  /** Which app the panels belong in. Absent in a manifest written before the Replay Mod
+  /** Which app the panels belong in. Absent in a manifest written before MXB Replay
    *  moved to the Studio, which reads as `"studio"` — see `PluginHost`. */
   host?: PluginHost;
   panels: { id: string; label: string; icon?: string | null }[];

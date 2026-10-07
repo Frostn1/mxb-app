@@ -284,7 +284,7 @@ pub struct Manifest {
 ///
 /// Both binaries can mount a plugin — the licence, the bundle and the file sandbox are all in
 /// this crate — so a plugin says where its panels belong rather than the answer being "the
-/// binary that happens to be running". The Replay Mod is why: cutting a replay is the same
+/// binary that happens to be running". MXB Replay is why: cutting a replay is the same
 /// errand as painting a bike or building a track, and none of it is mod management, so it
 /// belongs beside those in the Studio and not in a rail row of the mod manager.
 ///
@@ -667,7 +667,7 @@ mod tests {
 
     /// Where a plugin's panels open, when its manifest does not say.
     ///
-    /// The Replay Mod's bundle was written before the field existed and its panels belong in
+    /// MXB Replay's bundle was written before the field existed and its panels belong in
     /// the Studio, so silence has to mean Studio — reading it as Manager would put the mod
     /// back in the app the move took it out of, without a line of it changing.
     #[test]
@@ -844,8 +844,10 @@ async fn plane_error(resp: reqwest::Response) -> String {
         .unwrap_or(detail)
 }
 
-/// One row of the Plugins page.
+/// One row of the Plugins page. camelCase, because that is what `PluginView` in
+/// `packages/shared/src/api/plugins.ts` reads: snake_case left `installedVersion` undefined.
 #[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PluginView {
     pub id: String,
     pub name: String,
@@ -860,6 +862,8 @@ pub struct PluginView {
     pub installed_version: Option<String>,
     /// True when a license is live and the installed build is the one on offer.
     pub ready: bool,
+    /// Free for every signed-in account: the control plane issues the license with no key.
+    pub free: bool,
     /// Which app this plugin's panels open in, from the manifest on disk. [`Host::Studio`]
     /// until a build is installed and says otherwise — so the Plugins page can send someone
     /// to the right window before they go looking for a row that was never going to be here.
@@ -877,6 +881,9 @@ struct CataloguePlugin {
     summary: Option<String>,
     version: Option<String>,
     published: bool,
+    /// Absent from a control plane older than free plugins.
+    #[serde(default)]
+    free: bool,
 }
 
 #[derive(Deserialize)]
@@ -957,6 +964,7 @@ pub async fn plugin_list(app: tauri::AppHandle) -> Result<Vec<PluginView>, Strin
             summary: p.summary,
             version: p.version,
             published: p.published,
+            free: p.free,
             status,
             expires: expiries.get(&p.id).copied(),
             installed_version: installed.version,

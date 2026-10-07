@@ -12,7 +12,7 @@ import {
 import App from "./App";
 import "./index.css";
 
-// The recorder a paid plugin's panels are handed — the Replay Mod's **Record** button, if it
+// The recorder a paid plugin's panels are handed — MXB Replay's **Record** button, if it
 // draws one. Provided here rather than imported inside the plugin host, because this is the
 // only binary that registers those commands: the host is shared with the mod manager, where
 // they would be calls that could never work.

@@ -2513,7 +2513,7 @@ export const es: Translation = {
 
   // --- paid plugins ---
   "plugins.section": "Complementos",
-  "plugins.sectionDesc": "Complementos de pago para {{app}}. La licencia es una suscripción mensual ligada a tu cuenta y sigue funcionando sin conexión durante una semana entre comprobaciones.",
+  "plugins.sectionDesc": "Complementos para {{app}}. Los gratuitos se instalan con tu cuenta. Los de pago necesitan una clave y siguen funcionando sin conexión una semana entre comprobaciones.",
   "plugins.keyLabel": "Canjear una clave",
   "plugins.keyHelp": "Pega la clave que recibiste. Para renovar usa otra clave: se suma al tiempo que te quede.",
   "plugins.redeem": "Canjear",
@@ -2531,6 +2531,9 @@ export const es: Translation = {
   "plugins.active": "Activo",
   "plugins.activeDetail": "con licencia hasta el {{date}}.",
   "plugins.licensed": "Con licencia",
+  "plugins.free": "Gratis",
+  "plugins.freeSignIn": "inicia sesión para instalarlo. No hace falta clave.",
+  "plugins.activeFreeDetail": "gratis con tu cuenta.",
   "plugins.readyToInstall": "la versión {{version}} está lista para instalar.",
   "plugins.noBuildYet": "todavía no hay una compilación para instalar.",
   "plugins.updateAvailable": "Actualización disponible",

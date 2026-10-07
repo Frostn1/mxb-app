@@ -48,7 +48,7 @@ export interface PluginFiles {
 /**
  * The replay recorder, handed to a plugin whose panels run in the Studio.
  *
- * Here rather than left to `invoke` because it is the one thing the Replay Mod's panels
+ * Here rather than left to `invoke` because it is the one thing MXB Replay's panels
  * cannot do for themselves and the app can: a child encoder against the game's window. A
  * panel that wants a **Record** button of its own uses this; a panel that does nothing gets
  * the recording anyway, because the mod's own take signal starts one without the window

@@ -2462,7 +2462,7 @@ export const sv: Translation = {
 
   // --- paid plugins ---
   "plugins.section": "Insticksprogram",
-  "plugins.sectionDesc": "Betalade tillägg för {{app}}. En licens är en månatlig prenumeration knuten till ditt konto, och det fortsätter att arbeta offline under en vecka mellan kontroller.",
+  "plugins.sectionDesc": "Tillägg för {{app}}. Gratis tillägg installeras med ditt konto. Betalda kräver en nyckel och fungerar offline i en vecka mellan kontroller.",
   "plugins.keyLabel": "Lös in en nyckel",
   "plugins.keyHelp": "Klistra in nyckeln du skickades. Renewing är en annan nyckel — det bidrar till den tid du har kvar.",
   "plugins.redeem": "Lös in",
@@ -2480,6 +2480,9 @@ export const sv: Translation = {
   "plugins.active": "Aktiv",
   "plugins.activeDetail": "licensierad till {{date}}.",
   "plugins.licensed": "Licensierad",
+  "plugins.free": "Gratis",
+  "plugins.freeSignIn": "logga in för att installera det. Ingen nyckel behövs.",
+  "plugins.activeFreeDetail": "gratis med ditt konto.",
   "plugins.readyToInstall": "Version {{version}} är klar att installeras.",
   "plugins.noBuildYet": "Det finns ingen version att installera än.",
   "plugins.updateAvailable": "Uppdatering tillgänglig",

@@ -58,11 +58,15 @@ const r2 = {
  * A deployment with a database, a signing key and a published build — the state everything
  * below starts from, because a control plane missing any of the three has its own tests.
  */
-async function deployment(opts: { signing?: boolean } = {}) {
+async function deployment(opts: { signing?: boolean; free?: boolean } = {}) {
   const { pair, pkcs8B64 } = await keypair();
   const DB = d1();
   await addAccount(DB, "acc_1", "Frost", "76561198000000001");
   await publishBundle(DB, "replaycam", "1.0.0", "abc123");
+  // The paid path is tested on the one plugin there is; the free path opts in.
+  await DB.prepare(`UPDATE plugins SET free = ? WHERE id = 'replaycam'`)
+    .bind(opts.free ? 1 : 0)
+    .run();
   const env = {
     DB,
     PAINTS: r2,
@@ -113,6 +117,47 @@ function post(body: unknown): Request {
 }
 
 // ---------------------------------------------------------------------------
+
+describe("a free plugin", () => {
+  it("gives every account a verifiable license with no key", async () => {
+    const { env, pair } = await deployment({ free: true });
+    const res = await myPlugins(ACCOUNT, env);
+    const body = (await res.json()) as {
+      licenses: { plugin: string; active: boolean; free: boolean; license: string | null }[];
+    };
+    expect(body.licenses).toHaveLength(1);
+    const row = body.licenses[0];
+    expect(row).toMatchObject({ plugin: "replaycam", active: true, free: true });
+    const lic = await verifyLicense(row.license!, pair.publicKey);
+    expect(lic?.account).toBe("acc_1");
+    expect(lic?.bundleSha256).toBe("abc123");
+    expect(lic!.refreshAfter - lic!.issued).toBeLessThanOrEqual(GRACE_DAYS * DAY);
+  });
+
+  it("hands the bundle to an account that never redeemed anything", async () => {
+    const { env } = await deployment({ free: true });
+    const res = await pluginBundle("replaycam", ACCOUNT, env);
+    expect(res.status).toBe(200);
+  });
+
+  it("still honours a revoked license", async () => {
+    const { env } = await deployment({ free: true });
+    await grantMonths(env, Math.floor(Date.now() / 1000) + 30 * DAY);
+    await setLicenseRevoked(env, "acc_1", "replaycam", true);
+    const body = (await (await myPlugins(ACCOUNT, env)).json()) as { licenses: unknown[] };
+    expect(body.licenses).toHaveLength(0);
+    expect((await pluginBundle("replaycam", ACCOUNT, env)).status).toBe(403);
+  });
+
+  it("is free once the migration has run, and called MXB Replay", async () => {
+    const DB = d1();
+    const row = await DB.prepare(`SELECT name, free FROM plugins WHERE id = 'replaycam'`).first<{
+      name: string;
+      free: number;
+    }>();
+    expect(row).toEqual({ name: "MXB Replay", free: 1 });
+  });
+});
 
 describe("license signing", () => {
   it("round-trips through a real Ed25519 signature", async () => {

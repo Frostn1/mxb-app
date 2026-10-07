@@ -55,7 +55,7 @@ Get it from **[mxbsecure.com/app](https://mxbsecure.com/app)**, or straight from
   cues while you ride.
 - **[Frost's Studio](https://mxbsecure.com/studio)**: paints, tracks and the Designer.
 - **[FrostMod](https://mxbsecure.com/frostmod)**: the in-game companion.
-- **[Replay Mod](https://mxbsecure.com/replay)**: cameras and cuts for replays, recorded
+- **[MXB Replay](https://mxbsecure.com/replay)**: cameras and cuts for replays, recorded
   for you — its panels open in Frost's Studio.
 
 Builds are unsigned, so Windows SmartScreen / macOS Gatekeeper will warn on
@@ -152,7 +152,7 @@ Running through all of it:
 - **Plugins.** Paid add-ons load at runtime and contribute their own nav rows. A
   license is an Ed25519-signed statement the app checks locally, so a plugin keeps
   working offline for a week between checks. **Their panels open in Frost's Studio**,
-  because a plugin panel is a creator's tool — the Replay Mod is one, and cutting a
+  because a plugin panel is a creator's tool — MXB Replay is one, and cutting a
   replay is the same errand as painting a bike. This app keeps the half that is its own:
   buying the licence, installing the bundle, updating it, and an **Open in Studio**
   button on Settings → Plugins. A manifest can ask for a row here instead
@@ -194,7 +194,7 @@ Running through all of it:
 | [`packages/shared/`](packages/shared/) | Shared TypeScript: the 3D viewer, the UI primitives, the API client and the base dictionary. |
 | [`control-plane/`](control-plane/) | The Cloudflare Worker paint sync, plugin licensing and server registration talk to. |
 | [`server-agent/`](server-agent/) | Moved: mxb-agent is server code and lives in the private server repo now. |
-| [`docs/replay/`](docs/replay/) | How the Replay Mod and the Studio's recorder agree on a take — the contract the in-game DLL writes to. |
+| [`docs/replay/`](docs/replay/) | How MXB Replay and the Studio's recorder agree on a take — the contract the in-game DLL writes to. |
 | [`scripts/`](scripts/) | Release plumbing — changelog sections, Discord notes, the Linux AppImage fix-up. |
 | [`site/`](site/) | The landing page published by [`pages.yml`](.github/workflows/pages.yml). |
 

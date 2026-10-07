@@ -51,7 +51,7 @@ function Shell() {
   const [config, setConfig] = useState<Config>({ modsPath: "" });
   const [games, setGames] = useState<GameInfo[]>([MXB_FALLBACK]);
   const [view, setView] = useState<View>("designer");
-  // Paid plugins whose panels belong here — the Replay Mod, and anything else bought in MXB
+  // Plugins whose panels belong here — MXB Replay, and anything else installed in MXB
   // App. A plugin that fails to mount says so once and is then dropped: a broken add-on must
   // not take the Studio down with the work somebody has open in it.
   const plugins = usePlugins("studio", (id, message) => toast.error(`${id}: ${message}`));
@@ -173,7 +173,7 @@ function Shell() {
       { id: "track", label: t("nav.track"), group: "make" },
       // Builds a bike from parts in the rider's own Blender. MX Bikes' model layout only.
       { id: "bike", label: t("nav.bike"), group: "make", when: game.caps.viewer },
-      // Recording a replay needs an in-game mod, and the Replay Mod is an MX Bikes plugin
+      // Recording a replay needs an in-game mod, and MXB Replay is an MX Bikes plugin
       // like FrostMod — so it is gated on the same capability rather than on the game's id.
       { id: "replay", label: t("nav.replay"), group: "make", when: game.caps.frostmod },
       { id: "diagnose", label: t("nav.diagnose"), group: "check" },
