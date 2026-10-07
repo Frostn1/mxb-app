@@ -355,6 +355,18 @@ pub fn tracks_bikes_refresh_supported(tag: Option<&str>) -> bool {
     }
 }
 
+/// The oldest FrostMod that reads `texcompress=1` from `frostmod_radar.cfg` (compressed
+/// texture uploads, about 1-1.5 GB less RAM per track). An older one ignores the key.
+pub const TEXCOMPRESS_MIN_VERSION: &str = "v0.49.9";
+
+/// Does the installed FrostMod, tagged `tag`, honour `texcompress`? An unreadable tag is no.
+pub fn texcompress_supported(tag: Option<&str>) -> bool {
+    match (tag.and_then(version_parts), version_parts(TEXCOMPRESS_MIN_VERSION)) {
+        (Some(have), Some(min)) => have >= min,
+        _ => false,
+    }
+}
+
 /// Which of FrostMod's content refreshes to ask for. The smaller ones replay only some rows of
 /// its verified reload table, so they skip the slow lists:
 /// `Paints` the six paint lists; `Gear` the rider gear models and every paint list; `Tracks`
@@ -818,6 +830,15 @@ mod tests {
         assert!(!reads_command_files(Some("v0.9.11")));
         assert!(!reads_command_files(None));
         assert!(!reads_command_files(Some("nightly")));
+    }
+
+    #[test]
+    fn texcompress_needs_0_49_9() {
+        assert!(texcompress_supported(Some("v0.49.9")));
+        assert!(texcompress_supported(Some("v0.50.0")));
+        assert!(!texcompress_supported(Some("v0.49.8")));
+        assert!(!texcompress_supported(Some("v0.9.99")));
+        assert!(!texcompress_supported(None));
     }
 
     #[test]

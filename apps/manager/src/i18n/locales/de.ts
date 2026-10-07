@@ -863,6 +863,10 @@ export const de: Translation = {
   "settings.autoRunFrostmod": "Spielintegration automatisch starten",
   "settings.autoRunFrostmodDesc":
     "FrostMod im Hintergrund starten, sobald {{app}} geöffnet wird.",
+  "settings.texCompress": "Weniger RAM verwenden (komprimierte Texturen)",
+  "settings.texCompressDesc": "Lädt große Texturen komprimiert hoch, damit MX Bikes etwa 1-1,5 GB weniger RAM braucht. Manche Oberflächen können etwas blockiger aussehen. Gilt ab dem nächsten Spielstart.",
+  "settings.texCompressRunning": "Das Spiel läuft, daher gilt das ab dem nächsten Start.",
+  "settings.texCompressNeeds": "Benötigt FrostMod 0.49.9 oder neuer.",
   "settings.frostmodArgs": "Flags der Spielintegration",
   "settings.frostmodArgsDesc":
     "Zusätzliche Kommandozeile für FrostMod, so getippt wie im Terminal. Gilt ab dem nächsten Start von FrostMod. Lass das Feld leer, außer du hast ein Flag zum Ausprobieren bekommen.",

@@ -2930,6 +2930,22 @@ export function setFrostmodArgs(args: string): Promise<void> {
   return invoke<void>("set_frostmod_args", { args });
 }
 
+/** Compressed-textures opt-in: whether the installed FrostMod supports it, and if it is on. */
+export interface TexCompress {
+  supported: boolean;
+  enabled: boolean;
+  gameRunning: boolean;
+}
+
+export function texcompressState(): Promise<TexCompress> {
+  return invoke<TexCompress>("texcompress_state");
+}
+
+/** Write or remove `texcompress=1` in FrostMod's cfg. Takes effect on the next game start. */
+export function setTexcompress(enabled: boolean): Promise<void> {
+  return invoke<void>("set_texcompress", { enabled });
+}
+
 export function setInstantRefresh(enabled: boolean): Promise<void> {
   return invoke<void>("set_instant_refresh", { enabled });
 }

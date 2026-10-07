@@ -6513,6 +6513,22 @@ fn set_frostmod_args(app: tauri::AppHandle, args: String) -> Result<(), String> 
     config::save(&app, &cfg).map_err(|e| format!("{e:#}"))
 }
 
+/// Whether the compressed-textures opt-in applies to the installed FrostMod, and if it is on.
+#[tauri::command]
+fn texcompress_state(app: tauri::AppHandle) -> frostmod_manage::TexCompress {
+    frostmod_manage::texcompress_state(&app)
+}
+
+/// Write or remove `texcompress=1` in `frostmod_radar.cfg`. Off by default; FrostMod reads it
+/// at game start, so a running game picks the change up on its next launch.
+#[tauri::command]
+fn set_texcompress(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
+    if !frostmod_manage::texcompress_state(&app).supported {
+        return Err("Compressed textures need FrostMod 0.49.9 or newer".into());
+    }
+    frostmod_manage::set_texcompress(&app, enabled).map_err(|e| format!("{e:#}"))
+}
+
 #[tauri::command]
 fn set_instant_refresh(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
     let mut cfg = config::load(&app).unwrap_or_default();
@@ -9235,6 +9251,8 @@ fn main() {
             set_race_mode,
             race_mode_status,
             set_frostmod_args,
+            texcompress_state,
+            set_texcompress,
             set_instant_refresh,
             overlay_toggle,
             overlay_hide,
