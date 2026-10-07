@@ -73,6 +73,7 @@ import { useGameRunning } from "@/lib/useGameRunning";
 import { isFull, useServerQueue } from "@/lib/useServerQueue";
 import { BoundedCache } from "@/lib/boundedCache";
 import { REGION_LABEL_KEY, REGION_ORDER, canonicalRegion, type RegionKey } from "@/lib/serverRegion";
+import { serverMatchesQuery } from "@/lib/serverClasses";
 import JoinServerDialog from "../Shell/JoinServerDialog";
 import { LoadingMark } from "../Shell/LoadingMark";
 import { guessPicture, rememberGuess, useTrackGuesses, warmTracks } from "./trackGuesses";
@@ -629,13 +630,8 @@ const Servers = ({ link }: ServersProps) => {
     const q = query.trim().toLowerCase();
     let list = (servers ?? []).filter((s) => showHidden || !s.hidden);
     if (q) {
-      list = list.filter(
-        (s) =>
-          s.name.toLowerCase().includes(q) ||
-          s.track.toLowerCase().includes(q) ||
-          s.location.toLowerCase().includes(q) ||
-          s.address.toLowerCase().includes(q),
-      );
+      // Any one of a server's classes counts, so "mx2" finds a server that lists MX2 last.
+      list = list.filter((s) => serverMatchesQuery(s, q));
     }
     // Favorites ignore the region, so a starred server abroad still shows.
     if (favesOnly) list = list.filter((s) => favs.has(s.address));
