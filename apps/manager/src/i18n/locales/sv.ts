@@ -576,7 +576,7 @@ export const sv: Translation = {
   "modsVerify.timedOut": "Kontrollen på {{site}} slutfördes inte i tid. Tryck på Försök igen för att visa den igen.",
   "modDetail.copied": "Kopierad",
   "modDetail.copyLink": "Kopiera länk",
-  "modDetail.copyLinkHint": "Kopiera en länk som öppnar denna modd i {{app}}",
+  "modDetail.copyLinkHint": "Kopiera länken till denna modds sida på {{site}}",
   "modDetail.linkCopied": "Länk kopierad",
   "modDetail.copyLinkFailed": "Kunde inte kopiera länken.",
   "modDetail.copy": "Kopiera",

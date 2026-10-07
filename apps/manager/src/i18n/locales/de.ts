@@ -600,7 +600,7 @@ export const de: Translation = {
   "modsVerify.timedOut": "Die Prüfung von {{site}} wurde nicht rechtzeitig abgeschlossen. Mit „Erneut versuchen“ wird sie wieder angezeigt.",
   "modDetail.copied": "Kopiert",
   "modDetail.copyLink": "Link kopieren",
-  "modDetail.copyLinkHint": "Einen Link kopieren, der diese Mod in {{app}} öffnet",
+  "modDetail.copyLinkHint": "Den Link zur Seite dieser Mod auf {{site}} kopieren",
   "modDetail.linkCopied": "Link kopiert",
   "modDetail.copyLinkFailed": "Link konnte nicht kopiert werden.",
   "modDetail.copy": "Kopieren",

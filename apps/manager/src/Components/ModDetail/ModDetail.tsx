@@ -24,7 +24,6 @@ import {
   isLiveryContext,
   isServerOnly,
   isSoundContext,
-  modLink,
   resetModsVerification,
   riderTarget,
   routesByContent,
@@ -64,6 +63,7 @@ import {
 import { cn } from "@frost/shared/lib/utils";
 import { useConfig } from "@frost/shared/Context/Config";
 import { copyText } from "../../lib/clipboard";
+import { modSourcePageUrl } from "../../lib/modSourcePage";
 import { toast } from "sonner";
 import { ActionBar, StateChip, WishButton } from "../ModPage/ActionBar";
 import { useWishlist, wishId } from "../../lib/useWishlist";
@@ -322,14 +322,14 @@ export default function ModDetail({
     });
   };
 
-  /** The `mxb://` link that opens this page in someone else's copy of the app. */
+  /** The mod's own page on the catalog site. */
+  const sourceUrl = modSourcePageUrl(detail?.link, game.catalogDomain, slug);
+
+  /** Copies the mod's original page, which opens in any browser, not a web copy of the app. */
   const copyLink = () => {
-    void copyText(modLink({ game: game.id, modType: modType.id, slug, category: categoryId }))
-      .then((ok) =>
-        ok
-          ? toast.success(t("modDetail.linkCopied"))
-          : toast.error(t("modDetail.copyLinkFailed")),
-      );
+    void copyText(sourceUrl).then((ok) =>
+      ok ? toast.success(t("modDetail.linkCopied")) : toast.error(t("modDetail.copyLinkFailed")),
+    );
   };
 
   const copyFailedDownload = () => {
@@ -437,6 +437,8 @@ export default function ModDetail({
         image={detail.images[0] ?? null}
         title={detail.title}
         meta={[t(modType.label), detail.author, detail.version]}
+        onBack={onBack}
+        backLabel={t("common.back")}
       >
         {/* Nothing to want about a mod you already have, so the wish is offered only while
             it isn't in the library. */}
@@ -455,10 +457,19 @@ export default function ModDetail({
             }
           />
         )}
-        {/* Sharing a mod used to mean pasting the catalog URL, which opens a browser and
-            leaves the reader to find the mod again in here. This link opens the app on this
-            page instead, for anyone who has it. */}
-        <Button variant="outline" onClick={copyLink} title={t("modDetail.copyLinkHint")}>
+        <Button
+          variant="outline"
+          onClick={() => void open(sourceUrl)}
+          title={t("modDetail.viewOnSite", { site: game.catalogDomain })}
+        >
+          <ExternalLink className="size-3.5" />
+          {t("modDetail.viewOnSite", { site: game.catalogDomain })}
+        </Button>
+        <Button
+          variant="outline"
+          onClick={copyLink}
+          title={t("modDetail.copyLinkHint", { site: game.catalogDomain })}
+        >
           <Link2 className="size-3.5" />
           {t("modDetail.copyLink")}
         </Button>
