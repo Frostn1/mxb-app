@@ -844,8 +844,10 @@ async fn plane_error(resp: reqwest::Response) -> String {
         .unwrap_or(detail)
 }
 
-/// One row of the Plugins page.
+/// One row of the Plugins page. camelCase, because that is what `PluginView` in
+/// `packages/shared/src/api/plugins.ts` reads: snake_case left `installedVersion` undefined.
 #[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PluginView {
     pub id: String,
     pub name: String,
