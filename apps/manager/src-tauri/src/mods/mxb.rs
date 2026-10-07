@@ -111,7 +111,7 @@ impl Fetched {
     }
 
     fn json<T: serde::de::DeserializeOwned>(&self) -> anyhow::Result<T> {
-        Ok(serde_json::from_str(&self.body)?)
+        serde_json::from_str(&self.body).map_err(|e| not_json_error(&self.body, &e))
     }
 }
 
@@ -408,6 +408,35 @@ fn snippet(body: &str) -> String {
     format!("\"{cut}…\" ({} bytes total)", body.len())
 }
 
+/// A 200 whose body is not the JSON we asked for. Without this the user saw serde's
+/// "expected value at line 1 column 1", which names nothing they can act on. A Cloudflare
+/// page is reported as the check it is; anything else (a firewall, antivirus or captive-portal
+/// page standing in for the site) says so and points at Retry.
+fn not_json_error(body: &str, err: &serde_json::Error) -> anyhow::Error {
+    if let Some(marker) = challenge_marker(body) {
+        return challenge_error(marker, body.len());
+    }
+    log::warn!(
+        "mxb-mods answered 200 with a body that is not JSON ({err}): {}",
+        snippet(body)
+    );
+    anyhow::anyhow!(
+        "mxb-mods.com sent back something that isn't a mod listing. A firewall, antivirus, VPN          or a network login page may be intercepting the connection. Check your connection,          then hit Retry."
+    )
+}
+
+/// Whether a 400 from the listing means "past the last page". WordPress answers
+/// `rest_post_invalid_page_number` that way, but only for a page after the first: page 1 of
+/// an empty category is a 200 with `[]`, so a 400 there is a real refusal that must reach the
+/// user rather than render as an empty grid.
+fn is_end_of_listing(status: u16, page: &Page) -> bool {
+    status == 400
+        && match page {
+            Page::Number(n) => *n > 1,
+            Page::Offset { skip, .. } => *skip > 0,
+        }
+}
+
 /// The interstitial-as-a-200 case. Same handling as a 403 — it is the same refusal, just
 /// dressed as a success.
 fn challenge_error(marker: &str, html_len: usize) -> anyhow::Error {
@@ -518,11 +547,9 @@ enum Page {
 
 /// One page of the catalog in the site's own order (newest first, near enough).
 async fn listing(q: &str, category_id: u32, page: Page) -> anyhow::Result<Vec<ModSummary>> {
-    let (resp, _) = listing_response(q, category_id, page).await?;
+    let (resp, _) = listing_response(q, category_id, &page).await?;
     // WP returns 400 (rest_post_invalid_page_number) once you page past the end.
-    if resp.status == 400 {
-        // Any *other* 400 also lands here and reads to the user as "no results", so say in
-        // the log which one it was rather than letting a real error look like an empty page.
+    if is_end_of_listing(resp.status, &page) {
         log::info!(
             "catalog returned 400 — treating as the end of the listing: {}",
             snippet(&resp.body)
@@ -543,7 +570,7 @@ async fn listing(q: &str, category_id: u32, page: Page) -> anyhow::Result<Vec<Mo
 async fn listing_response(
     q: &str,
     category_id: u32,
-    page: Page,
+    page: &Page,
 ) -> anyhow::Result<(Fetched, Option<u32>)> {
     let url = format!("{}{}", mxb_session::base(), obfstr!("/wp-json/wp/v2/posts"));
     let mut params: Vec<(&str, String)> = vec![
@@ -612,7 +639,7 @@ async fn total_count(q: &str, category_id: u32) -> anyhow::Result<u32> {
         }
     }
     // One post is enough to read the header off; the body is discarded.
-    let (resp, total) = listing_response(q, category_id, Page::Offset { skip: 0, take: 1 }).await?;
+    let (resp, total) = listing_response(q, category_id, &Page::Offset { skip: 0, take: 1 }).await?;
     if !resp.is_success() {
         return Err(refusal("the catalog post count", &resp));
     }
@@ -1590,6 +1617,34 @@ mod tests {
 #[cfg(test)]
 mod client_tests {
     use super::*;
+
+    #[test]
+    fn a_400_ends_a_listing_only_past_the_first_page() {
+        assert!(is_end_of_listing(400, &Page::Number(2)));
+        assert!(!is_end_of_listing(400, &Page::Number(1)));
+        assert!(is_end_of_listing(400, &Page::Offset { skip: 24, take: 24 }));
+        assert!(!is_end_of_listing(400, &Page::Offset { skip: 0, take: 24 }));
+        assert!(!is_end_of_listing(500, &Page::Number(2)));
+    }
+
+    #[test]
+    fn an_html_body_where_json_was_expected_is_a_readable_error() {
+        let bad = |body: &str| {
+            let fetched = Fetched {
+                status: 200,
+                headers: HashMap::new(),
+                body: body.to_string(),
+                url: String::new(),
+            };
+            fetched.json::<Vec<Value>>().unwrap_err()
+        };
+        let captive = bad("<html><body>Please sign in to the network</body></html>");
+        assert!(captive.downcast_ref::<Blocked>().is_none());
+        assert!(captive.to_string().contains("firewall"));
+        assert!(!captive.to_string().contains("expected value"));
+        let cf = bad("<title>Just a moment...</title>");
+        assert!(cf.downcast_ref::<Blocked>().is_some());
+    }
 
     #[test]
     fn retries_only_the_transient_blocks() {
