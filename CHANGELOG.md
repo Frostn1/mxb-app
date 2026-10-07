@@ -4,6 +4,7 @@
 
 ### Fixed
 - **Mod page: back button, site link, and Copy link.** A mod's page has its back arrow again, a "View on site" button for the mod's page on the catalog, and Copy link now copies that original page URL instead of an open.mxbsecure.com link.
+- **Mods grid fills a maximised window.** The grid keeps loading pages until the window is full instead of stopping after 24 cards, and its cards grow on large windows.
 
 ## 2026-10-04 — v0.19.3 — Install folder fixes, OneDrive and ReShade checks, game logs in exports
 

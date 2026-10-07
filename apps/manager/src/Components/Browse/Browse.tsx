@@ -1,6 +1,7 @@
 import { useLayoutEffect, useRef } from "react";
 import { Download, X } from "lucide-react";
 import { type ModSort, type ModType } from "@frost/shared/api/mods";
+import { useFillViewport } from "../../lib/fillViewport";
 import type { InstalledIndex } from "../../lib/installedMatch";
 import type { ModListing } from "../../lib/useModListing";
 import { useT } from "@/i18n";
@@ -86,6 +87,14 @@ export default function Browse({
     // is no jump from the top.
     if (grid.current) grid.current.scrollTop = scrollTop.current;
   }, [scrollTop]);
+
+  useFillViewport(grid, {
+    itemCount: mods.length,
+    hasMore,
+    busy: loading || loadingMore,
+    blocked: Boolean(error),
+    loadMore,
+  });
 
   const { quickInstall, quickInstallMany, isInstalled, dialog } = useQuickInstall(
     modType,
@@ -189,7 +198,7 @@ export default function Browse({
             </Button>
           </div>
         ) : loading ? (
-          <div className="grid grid-cols-[repeat(auto-fill,minmax(178px,1fr))] gap-3.5">
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(clamp(178px,12vw,260px),1fr))] gap-3.5">
             {Array.from({ length: 8 }).map((_, i) => (
               <Skeleton key={i} className="aspect-[4/3] rounded-xl" />
             ))}
@@ -209,7 +218,7 @@ export default function Browse({
                 onInstall={() => quickInstall(featured)}
               />
             )}
-            <div className="grid grid-cols-[repeat(auto-fill,minmax(178px,1fr))] gap-3.5">
+            <div className="grid grid-cols-[repeat(auto-fill,minmax(clamp(178px,12vw,260px),1fr))] gap-3.5">
               {mods.filter((m) => m !== featured).map((m) => (
                 <ModCard
                   key={m.id}
