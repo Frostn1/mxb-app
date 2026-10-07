@@ -43,6 +43,14 @@ export default function SecurePrompt({
       }
       if (told.has(reason)) return;
       told.add(reason);
+      if (reason === "frostmod") {
+        toast.info(t("secure.promptFrostmodTitle"), {
+          description: t("secure.promptFrostmod"),
+          duration: 30_000,
+          action: { label: t("secure.promptEnrollBtn"), onClick: () => onOpenSettings("frostmod") },
+        });
+        return;
+      }
       const steam = reason === "steam";
       toast.info(t("secure.promptTitle", { count }), {
         description: t(steam ? "secure.promptSteam" : "secure.promptEnroll"),

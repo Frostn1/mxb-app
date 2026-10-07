@@ -77,7 +77,7 @@ fn collect_mxbsecure(app: &AppHandle, dir: &std::path::Path, out: &mut Vec<Secur
             continue;
         }
         let Some(name) = path.file_name().and_then(|n| n.to_str()) else { continue };
-        if !name.ends_with(".mxbsecure") {
+        if !mxb_core::securesource::is_secured_name(name) {
             continue; // key siblings end in .mxbsecurekey / .mxbkey, so they're skipped here
         }
         let blob_path = path.to_string_lossy().to_string();
@@ -187,6 +187,17 @@ pub fn remove_key_beside(blob_path: &str) -> bool {
             Err(e) => log::warn!("[secure] couldn't delete {path}: {e}"),
         }
     }
+    // A sibling in another letter case on a case-sensitive file system (both names at most).
+    for _ in 0..2 {
+        let Some(path) = existing_key_path(blob_path) else { break };
+        match std::fs::remove_file(&path) {
+            Ok(()) => removed = true,
+            Err(e) => {
+                log::warn!("[secure] couldn't delete {path}: {e}");
+                break;
+            }
+        }
+    }
     removed
 }
 
@@ -284,7 +295,7 @@ pub fn game_name_of(path: &std::path::Path, file_name: &str) -> String {
         }
     }
     let _ = path;
-    file_name.trim_end_matches(".mxbsecure").to_string()
+    mxb_core::securesource::strip_secured_ext(file_name).unwrap_or(file_name).to_string()
 }
 
 /// The original game filename from a blob's v2 header, or `None` for a v1 blob (no name) or an
@@ -322,7 +333,7 @@ fn collect_blobs(dir: &std::path::Path, out: &mut Vec<String>) {
             continue;
         }
         if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-            if name.ends_with(".mxbsecure") {
+            if mxb_core::securesource::is_secured_name(name) {
                 out.push(path.to_string_lossy().to_string());
             }
         }
@@ -695,9 +706,19 @@ pub fn watch(app: &AppHandle) {
         let mut decided_this_run = false;
         #[cfg_attr(not(windows), allow(unused_variables, unused_mut))]
         let mut shut_ticks: u32 = 0;
+        // How long the DLL's log was while the game was last seen shut: everything past it was
+        // written by the game process that starts next. `None` until the app has seen the game
+        // shut once (the app was opened with the game already running).
+        let mut dll_log_mark: Option<u64> = None;
         loop {
             tokio::time::sleep(std::time::Duration::from_secs(2)).await;
             if !crate::gameproc::is_game_running() {
+                dll_log_mark = Some(
+                    secure_dir(&app)
+                        .and_then(|d| std::fs::metadata(d.join(DLL_LOG)).ok())
+                        .map(|m| m.len())
+                        .unwrap_or(0),
+                );
                 // With the game shut, keep the plugin in step with what is locked: the next
                 // start is the only moment it loads. Right after the game closes, then once a
                 // minute, since the scan walks the tracks folder and must not run every tick.
@@ -727,7 +748,7 @@ pub fn watch(app: &AppHandle) {
             // Always arm when there is secured content to serve — `arm` is a no-op when the scan
             // finds nothing, so a player with no locked content pays only a config + scan and
             // never sees an injection. However the game was started — Play or Steam — like FrostMod.
-            arm(&app);
+            arm(&app, dll_log_mark.take());
         }
     });
 }
@@ -735,7 +756,9 @@ pub fn watch(app: &AppHandle) {
 /// Arm secure content for the session that just started: stage the DLL, write the manifest
 /// beside it, and inject. Best-effort and quiet on the common "nothing to secure" — a player
 /// with no locked content should see no trace of this.
-pub fn arm(app: &AppHandle) {
+pub fn arm(app: &AppHandle, dll_log_mark: Option<u64>) {
+    #[cfg(not(windows))]
+    let _ = dll_log_mark;
     let assets = scan_secured(app);
     if assets.is_empty() {
         return;
@@ -767,7 +790,11 @@ pub fn arm(app: &AppHandle) {
         match plugins_dir(app).ok_or_else(|| "the game folder isn't known".to_string())
             .and_then(|plugins| install_plugin(&plugins, &dll, &dir))
         {
-            Ok(Plugin::Current) => log::info!("[secure] game plugin serving {} asset(s)", assets.len()),
+            Ok(Plugin::Current) => {
+                log::info!("[secure] game plugin serving {} asset(s)", assets.len());
+                // The plugin was in place when this game started, so it is loading now.
+                rebuild_lists_once_ready(app, &dir, dll_log_mark, &assets);
+            }
             Ok(Plugin::Installed) => log::info!(
                 "[secure] game plugin installed for {} asset(s); it loads when the game next starts",
                 assets.len()
@@ -806,6 +833,119 @@ fn inject_and_rescan(app: &AppHandle, dll: &std::path::Path, dir: &std::path::Pa
     }
 }
 
+/// The DLL's log, in the run dir beside the manifest.
+const DLL_LOG: &str = "mxbsecure.log";
+
+/// Whether any secured asset is something other than a track.
+///
+/// MX Bikes builds every content list once at boot: tracks, bikes, rider gear and the six paint
+/// tables. On Windows the DLL loads as a plugin and unseals its keys on its own thread, so those
+/// lists are usually built before the keys are ready, and a secured file is missing from them.
+/// The DLL re-runs the track loader itself in its `Startup` export; nothing else is rebuilt there.
+/// Everything else needs a FrostMod refresh, so only ask for it when there is something other
+/// than a track to show.
+///
+/// The smallest FrostMod refresh that lists every secured asset, or `None` for tracks only.
+/// A paint (bike or rider gear, under a `paints` folder) is in one of the six paint lists, so
+/// the paint refresh covers it; other rider gear needs the gear refresh (gear models plus every
+/// paint list); a bike, or anything not recognised, needs the full reload.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn list_rebuild_kind(assets: &[SecureAsset]) -> Option<crate::frostmod::ReloadKind> {
+    use crate::frostmod::ReloadKind;
+    let mut kind: Option<ReloadKind> = None;
+    for a in assets {
+        let has = |name: &str| a.blob_path.split(['/', '\\']).any(|c| c.eq_ignore_ascii_case(name));
+        let this = if has("tracks") {
+            continue;
+        } else if has("paints") {
+            ReloadKind::Paints
+        } else if has("rider") {
+            ReloadKind::Gear
+        } else {
+            ReloadKind::Full
+        };
+        kind = Some(match (kind, this) {
+            (Some(ReloadKind::Full), _) | (_, ReloadKind::Full) => ReloadKind::Full,
+            (Some(ReloadKind::Gear), _) | (_, ReloadKind::Gear) => ReloadKind::Gear,
+            _ => ReloadKind::Paints,
+        });
+    }
+    kind
+}
+
+/// Where in the DLL's log this game's lines start, when the app did not see the game start: the
+/// last `[dll] attached` line, which the DLL writes first thing in every game process.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn last_attach_offset(log: &std::path::Path) -> u64 {
+    let bytes = std::fs::read(log).unwrap_or_default();
+    let needle = b"[dll] attached";
+    bytes
+        .windows(needle.len())
+        .rposition(|w| w == needle)
+        .map(|i| i as u64)
+        .unwrap_or(0)
+}
+
+/// Windows, once per game start: when the DLL reports its hooks (its keys and catalog are
+/// ready), ask FrostMod to rebuild the game's content lists so secured paints, gear and bikes
+/// appear: only the paint lists, or the gear and paint lists, when that is all they are
+/// ([`list_rebuild_kind`]); the full reload for a bike. This reuses FrostMod's verified content
+/// reload rows, the same full reload the Wine platforms
+/// send after injecting ([`inject_and_rescan`]) and a mid-session unlock sends
+/// ([`refresh_after_change`]). FrostMod rebuilds every list from disk and re-applies paints to
+/// riders already on track; the game's own boot scan ran before the DLL could serve them.
+///
+/// Without FrostMod nothing can rebuild those lists in the running game, so that is logged and
+/// the app shows a hint.
+#[cfg(windows)]
+fn rebuild_lists_once_ready(app: &AppHandle, dir: &std::path::Path, mark: Option<u64>, assets: &[SecureAsset]) {
+    let Some(kind) = list_rebuild_kind(assets) else {
+        return; // tracks only: the DLL rebuilds the track list itself
+    };
+    let log = dir.join(DLL_LOG);
+    let app = app.clone();
+    let count = assets.len();
+    std::thread::spawn(move || {
+        let from = mark.unwrap_or_else(|| last_attach_offset(&log));
+        // The DLL waits for its manifest and lease before installing hooks; give it a minute.
+        if !wait_for_hooks(&log, from, std::time::Duration::from_secs(60)) {
+            log::warn!(
+                "[secure] startup: the DLL never reported its hooks, so the content lists were not rebuilt; see {}",
+                log.display()
+            );
+            return;
+        }
+        // FrostMod creates its reload event as it initialises and drops any signal already set
+        // then, so wait until it is listening, then a moment more, before signalling.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        while !crate::frostmod::reload_listener_present() && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(250));
+        }
+        let outcome = if crate::frostmod::reload_listener_present() {
+            std::thread::sleep(std::time::Duration::from_secs(1));
+            // The smallest refresh that lists them: secured paints alone no longer rescan
+            // tracks and bikes. An older FrostMod gets the full reload.
+            let tag = crate::frostmod_manage::installed_version(&app);
+            crate::frostmod::signal_reload_kind(kind, tag.as_deref())
+        } else {
+            crate::frostmod::ReloadOutcome::NotRunning
+        };
+        log::info!(
+            "[secure] startup: hooks live; asked FrostMod for a {kind:?} refresh of the content lists for {count} secured asset(s): {outcome:?}"
+        );
+        if matches!(outcome, crate::frostmod::ReloadOutcome::NotRunning) {
+            log::warn!(
+                "[secure] FrostMod isn't running in the game, so secured paints, gear and bikes can't be added to the game's lists"
+            );
+            use tauri::Emitter;
+            let _ = app.emit(
+                "mxbsecure-blocked",
+                serde_json::json!({ "reason": "frostmod", "count": count }),
+            );
+        }
+    });
+}
+
 /// Bring secure-content serving in step after a key changes.
 ///
 /// A Windows game plugin is loaded only during game startup.  Waiting for the periodic watcher
@@ -839,7 +979,6 @@ pub async fn refresh_after_change(app: &AppHandle) {
 /// Wait for the DLL to finish installing its hooks. It sets up on its own thread, so
 /// `LoadLibraryW` returns first; it says when it's done in its log, past `from`. `false` on
 /// a failed install or a timeout.
-#[cfg_attr(windows, allow(dead_code))] // the Wine injection path, and its test
 fn wait_for_hooks(log: &std::path::Path, from: u64, timeout: std::time::Duration) -> bool {
     use std::io::{Read, Seek, SeekFrom};
     let deadline = std::time::Instant::now() + timeout;
@@ -848,6 +987,9 @@ fn wait_for_hooks(log: &std::path::Path, from: u64, timeout: std::time::Duration
         // hide the line we're waiting for.
         let mut bytes = Vec::new();
         if let Ok(mut f) = std::fs::File::open(log) {
+            // A log shorter than the mark was replaced since: all of it is new.
+            let len = f.metadata().map(|m| m.len()).unwrap_or(0);
+            let from = if len < from { 0 } else { from };
             if f.seek(SeekFrom::Start(from)).is_ok() {
                 let _ = f.read_to_end(&mut bytes);
             }
@@ -1235,6 +1377,84 @@ mod tests {
         let started = std::time::Instant::now();
         assert!(!wait_for_hooks(&log, from, Duration::from_secs(5)));
         assert!(started.elapsed() < Duration::from_secs(1));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn asset(blob: &str) -> SecureAsset {
+        SecureAsset { game_name: "x".into(), blob_path: blob.into(), mxbkey_path: String::new() }
+    }
+
+    #[test]
+    fn only_non_track_content_asks_for_the_list_rebuild() {
+        // The DLL rebuilds the track list itself; paints, gear and bikes need FrostMod's reload.
+        let track = asset(r"C:\G\mods\Tracks\motocross\Pine.mxbsecure");
+        let paint = asset(r"C:\G\mods\bikes\KTM450\paints\Red.mxbsecure");
+        let helmet = asset("/home/r/mods/rider/helmets/Airoh/paints/Blue.MXBSECURE");
+        assert!(list_rebuild_kind(&[track.clone()]).is_none());
+        assert!(list_rebuild_kind(&[]).is_none());
+        assert!(list_rebuild_kind(&[track, paint]).is_some());
+        assert!(list_rebuild_kind(&[helmet]).is_some());
+    }
+
+    #[test]
+    fn the_startup_refresh_is_the_smallest_that_lists_them() {
+        use crate::frostmod::ReloadKind;
+        let track = asset(r"C:\G\mods\Tracks\motocross\Pine.mxbsecure");
+        let bike_paint = asset(r"C:\G\mods\bikes\KTM450\paints\Red.mxbsecure");
+        let helmet_paint = asset("/home/r/mods/rider/helmets/Airoh/paints/Blue.MXBSECURE");
+        let helmet = asset(r"C:\G\mods\rider\helmets\Airoh\model.mxbsecure");
+        let bike = asset(r"C:\G\mods\bikes\KTM450.mxbsecure");
+        assert_eq!(list_rebuild_kind(&[track.clone()]), None);
+        assert_eq!(list_rebuild_kind(&[]), None);
+        assert_eq!(list_rebuild_kind(&[track.clone(), bike_paint.clone()]), Some(ReloadKind::Paints));
+        assert_eq!(list_rebuild_kind(&[bike_paint.clone(), helmet_paint]), Some(ReloadKind::Paints));
+        assert_eq!(list_rebuild_kind(&[bike_paint.clone(), helmet]), Some(ReloadKind::Gear));
+        assert_eq!(list_rebuild_kind(&[bike_paint, bike, track]), Some(ReloadKind::Full));
+    }
+
+    #[test]
+    fn this_games_lines_start_at_its_attach() {
+        let dir = std::env::temp_dir().join(format!("frost-secure-attach-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let log = dir.join("mxbsecure.log");
+        let _ = std::fs::remove_file(&log);
+        assert_eq!(last_attach_offset(&log), 0, "no log yet");
+        let old = "[dll] attached; log at x\n[dll] hooks installed — secured reads now served from RAM\n";
+        std::fs::write(&log, format!("{old}[dll] attached; log at x\n")).unwrap();
+        let from = last_attach_offset(&log);
+        assert_eq!(from, old.len() as u64);
+        // The previous game's success is before the mark, so it doesn't count for this one.
+        assert!(!wait_for_hooks(&log, from, Duration::from_millis(200)));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_log_replaced_since_the_mark_is_read_from_its_start() {
+        let dir = std::env::temp_dir().join(format!("frost-secure-shrunk-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let log = dir.join("mxbsecure.log");
+        std::fs::write(&log, "[dll] hooks installed\n").unwrap();
+        // The mark was taken on a longer, older log that has since been deleted.
+        assert!(wait_for_hooks(&log, 10_000, Duration::from_millis(300)));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn upper_case_blobs_are_scanned_for_unlock() {
+        let dir = std::env::temp_dir().join(format!("frost-secure-case-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let paints = dir.join("bikes").join("KTM450").join("paints");
+        std::fs::create_dir_all(&paints).unwrap();
+        std::fs::write(paints.join("Red.MXBSECURE"), b"x").unwrap();
+        std::fs::write(paints.join("Blue.mxbsecure"), b"x").unwrap();
+        std::fs::write(paints.join("Blue.mxbsecurekey"), b"k").unwrap();
+        let mut found = Vec::new();
+        collect_blobs(&dir, &mut found);
+        assert_eq!(found.len(), 2, "both blobs, no key: {found:?}");
+        assert!(found.iter().any(|p| p.ends_with("Red.MXBSECURE")));
+        let red = std::path::Path::new("Red.MXBSECURE");
+        // A v1-style name with no readable header falls back to the file name, any case.
+        assert_eq!(game_name_of(red, "Red.MXBSECURE"), "Red");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

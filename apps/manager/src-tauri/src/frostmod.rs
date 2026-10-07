@@ -74,6 +74,13 @@ fn launcher_running() -> bool {
     true
 }
 
+/// Whether FrostMod's game plugin has created its reload event yet, i.e. a signal sent now is
+/// one it will act on. FrostMod drops a signal that was already set when it initialised.
+#[cfg(windows)]
+pub fn reload_listener_present() -> bool {
+    launcher_running()
+}
+
 /// Linux and macOS: FrostMod runs inside a Wine prefix — Proton's on Linux, a
 /// CrossOver/Whisky bottle on macOS — and its reload event is a Wine kernel object we have
 /// no way to open from out here, where this app is a native process outside that prefix.
@@ -334,6 +341,43 @@ pub fn gear_refresh_supported(tag: Option<&str>) -> bool {
 /// and their paints). Callers clear [`gear_refresh_supported`] first.
 pub fn signal_refresh_gear() -> CommandOutcome {
     send_command(command_json("refresh_gear", ""))
+}
+
+/// Which of FrostMod's content refreshes to ask for. The smaller ones replay only some rows of
+/// its verified reload table, so they skip the slow lists (tracks, bikes):
+/// `Paints` the six paint lists; `Gear` the rider gear models and every paint list; `Full`
+/// everything. FrostMod has no tracks-only or bikes-only refresh (those rows are unproven).
+#[allow(dead_code)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReloadKind {
+    Paints,
+    Gear,
+    Full,
+}
+
+/// The verb for `kind`, or `None` when the installed FrostMod (tagged `tag`) can't do that
+/// refresh and should get the full reload instead. Pure, so the fallback rule is testable.
+pub fn reload_kind_verb(kind: ReloadKind, tag: Option<&str>) -> Option<&'static str> {
+    match kind {
+        ReloadKind::Paints if paint_refresh_supported(tag) => Some("refresh_paints"),
+        ReloadKind::Gear if gear_refresh_supported(tag) => Some("refresh_gear"),
+        _ => None,
+    }
+}
+
+/// Ask FrostMod for one kind of content refresh, next to [`signal_reload`] (which stays the
+/// full reload, on the reload event, for every FrostMod). A FrostMod too old for the kind, or
+/// a command that couldn't be delivered, gets the full reload instead.
+pub fn signal_reload_kind(kind: ReloadKind, tag: Option<&str>) -> ReloadOutcome {
+    let Some(verb) = reload_kind_verb(kind, tag) else {
+        return signal_reload();
+    };
+    match send_command(command_json(verb, "")) {
+        CommandOutcome::Signaled => ReloadOutcome::Signaled,
+        CommandOutcome::Unsupported => ReloadOutcome::Unsupported,
+        _ => signal_reload(),
+    }
 }
 
 /// The oldest FrostMod that filters the game's content scan by `frostmod_racemode.txt`, which
@@ -702,6 +746,17 @@ mod tests {
         assert!(paint_refresh_supported(Some("v0.40.1")));
         assert!(!paint_refresh_supported(Some("v0.38.0")));
         assert!(!paint_refresh_supported(None));
+    }
+
+    /// A kind goes out as its verb only to a FrostMod that has it; otherwise the full reload.
+    #[test]
+    fn reload_kind_falls_back_to_the_full_reload() {
+        assert_eq!(reload_kind_verb(ReloadKind::Paints, Some("v0.49.7")), Some("refresh_paints"));
+        assert_eq!(reload_kind_verb(ReloadKind::Gear, Some("v0.49.7")), Some("refresh_gear"));
+        assert_eq!(reload_kind_verb(ReloadKind::Full, Some("v0.49.7")), None);
+        assert_eq!(reload_kind_verb(ReloadKind::Gear, Some("v0.39.2")), None);
+        assert_eq!(reload_kind_verb(ReloadKind::Paints, Some("v0.38.0")), None);
+        assert_eq!(reload_kind_verb(ReloadKind::Paints, None), None);
     }
 
     use super::*;
