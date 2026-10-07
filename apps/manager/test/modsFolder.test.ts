@@ -3,9 +3,9 @@ import type { GameFolderCheck } from "@frost/shared/api/mods";
 import { defaultFolderInUse } from "../src/lib/modsFolder";
 
 const check = (over: Partial<GameFolderCheck>): GameFolderCheck => ({
-  path: "D:\Games\MXB",
+  path: "D:\\Games\\MXB",
   correction: null,
-  expected: "C:\Users\r\OneDrive\Documents\PiBoSo\MX Bikes",
+  expected: "C:\\Users\\r\\OneDrive\\Documents\\PiBoSo\\MX Bikes",
   matchesExpected: false,
   exists: true,
   hasMods: true,
@@ -17,7 +17,7 @@ const check = (over: Partial<GameFolderCheck>): GameFolderCheck => ({
 
 test("a saved folder that is not the default, with a real default folder beside it, warns", () => {
   expect(defaultFolderInUse(check({}), check({ matchesExpected: true }))).toBe(
-    "C:\Users\r\OneDrive\Documents\PiBoSo\MX Bikes",
+    "C:\\Users\\r\\OneDrive\\Documents\\PiBoSo\\MX Bikes",
   );
 });
 
