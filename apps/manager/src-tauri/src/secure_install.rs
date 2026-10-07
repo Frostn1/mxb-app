@@ -97,14 +97,22 @@ pub fn target_dir(root: &Path, segments: &[String]) -> PathBuf {
 }
 
 /// Lowercased, normal components, for a prefix test that ignores case and slash direction.
+///
+/// Split on both `/` and `\` on every platform: a Windows path reaches this from the config
+/// on Linux and macOS too (the game runs under Wine there), and `Path::components` only knows
+/// the host's separator. `..` pops, so a path cannot climb out of the root and still match.
 fn norm(p: &Path) -> Vec<String> {
-    p.components()
-        .filter_map(|c| match c {
-            std::path::Component::Normal(s) => Some(s.to_string_lossy().to_lowercase()),
-            std::path::Component::Prefix(s) => Some(s.as_os_str().to_string_lossy().to_lowercase()),
-            _ => None,
-        })
-        .collect()
+    let mut out: Vec<String> = Vec::new();
+    for seg in p.to_string_lossy().split(['/', '\\']) {
+        match seg {
+            "" | "." => {}
+            ".." => {
+                out.pop();
+            }
+            s => out.push(s.to_lowercase()),
+        }
+    }
+    out
 }
 
 /// Whether `path` is somewhere under `root`.
@@ -220,6 +228,10 @@ mod tests {
         assert!(!is_inside(root, Path::new(r"C:\Users\A\Downloads\R.mxbsecure")));
         assert!(!is_inside(root, root), "the root itself holds no content");
         assert!(!is_inside(Path::new(""), Path::new(r"C:\x")));
+        assert!(!is_inside(root, Path::new(r"C:\Users\A\Documents\PiBoSo\MX Bikes\mods\..\..\x.mxbsecure")));
+        let unix = Path::new("/home/r/.steam/steamapps/compatdata/655500/pfx/drive_c/users/steamuser/Documents/PiBoSo/MX Bikes/mods");
+        assert!(is_inside(unix, &unix.join("bikes/KTM450/paints/Red.mxbsecure")));
+        assert!(!is_inside(unix, Path::new("/home/r/Downloads/Red.mxbsecure")));
     }
 
     #[test]
