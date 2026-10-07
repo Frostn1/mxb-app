@@ -514,6 +514,15 @@ async fn download_mega_and_place(
     subpath: &str,
     dest_folder: &str,
 ) -> anyhow::Result<Placed> {
+    // The catalogue still carries the legacy `#!` / `#F!` and mega.co.nz forms, which the
+    // crate's parser refuses outright.
+    let url = normalize_mega_url(url);
+    let url = url.as_str();
+    // A folder used to stop here with "open the mod page": 13 of 32 MEGA links in a sample of
+    // the catalogue are folders, most of them paint and gear packs.
+    if is_mega_folder(url) {
+        return download_mega_folder_and_place(app, cfg, client, slug, url, subpath, dest_folder).await;
+    }
     let work = staging_dir_near(&cfg.mods_path, "dl");
     std::fs::create_dir_all(&work)?;
 
@@ -525,6 +534,184 @@ async fn download_mega_and_place(
         }
     };
     extract_and_place_blocking(app, cfg, slug, archive, work, subpath, dest_folder, Packs::Offer).await
+}
+
+/// MEGA links in the one shape the `mega` crate reads: `https://mega.nz/{file|folder}/<h>#<key>`.
+///
+/// Mod pages still carry the legacy fragment forms (`#!h!k` for a file, `#F!h!k` for a folder)
+/// and the old mega.co.nz host.
+pub(crate) fn normalize_mega_url(url: &str) -> String {
+    let trimmed = url.trim();
+    let legacy = Regex::new(r"#(F?)!([A-Za-z0-9_-]+)!([A-Za-z0-9_-]+)").unwrap();
+    if let Some(c) = legacy.captures(trimmed) {
+        let kind = if &c[1] == "F" { "folder" } else { "file" };
+        return format!("https://mega.nz/{kind}/{}#{}", &c[2], &c[3]);
+    }
+    let modern = Regex::new(r"(?i)^https?://(?:www\.)?mega(?:\.co)?\.nz/").unwrap();
+    modern.replace(trimmed, "https://mega.nz/").into_owned()
+}
+
+fn is_mega_folder(url: &str) -> bool {
+    url.starts_with("https://mega.nz/folder/")
+}
+
+/// One node of a public MEGA listing, as much as placing it needs.
+#[derive(Debug, Clone)]
+struct MegaEntry {
+    handle: String,
+    parent: Option<String>,
+    name: String,
+    is_file: bool,
+    size: u64,
+}
+
+/// A file inside a MEGA folder share: its node, and where it sits under the folder.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct MegaFile {
+    handle: String,
+    rel: String,
+    size: u64,
+}
+
+/// The folder's name and every file under it, with `/`-separated paths below the shared root.
+/// The same caps as the other hosts' folder walks.
+fn mega_folder_files(entries: &[MegaEntry]) -> (String, Vec<MegaFile>) {
+    let by_handle: std::collections::HashMap<&str, &MegaEntry> =
+        entries.iter().map(|e| (e.handle.as_str(), e)).collect();
+    let root = entries
+        .iter()
+        .find(|e| !e.is_file && e.parent.as_deref().is_none_or(|p| !by_handle.contains_key(p)));
+    let root_name = root.map(|r| r.name.clone()).unwrap_or_else(|| "mod".to_string());
+    let mut out = Vec::new();
+    for e in entries.iter().filter(|e| e.is_file) {
+        if out.len() >= FOLDER_MAX_FILES || !is_usable_filename(&e.name) {
+            continue;
+        }
+        let mut dirs = Vec::new();
+        let mut cur = e.parent.as_deref().and_then(|p| by_handle.get(p));
+        let mut too_deep = false;
+        while let Some(d) = cur {
+            if root.is_some_and(|r| r.handle == d.handle) {
+                break;
+            }
+            if dirs.len() > FOLDER_MAX_DEPTH {
+                too_deep = true;
+                break;
+            }
+            dirs.push(sanitize(&d.name));
+            cur = d.parent.as_deref().and_then(|p| by_handle.get(p));
+        }
+        if too_deep {
+            continue;
+        }
+        dirs.reverse();
+        dirs.push(e.name.clone());
+        out.push(MegaFile {
+            handle: e.handle.clone(),
+            rel: dirs.join("/"),
+            size: e.size,
+        });
+    }
+    (root_name, out)
+}
+
+/// A MEGA folder share, installed the way a MediaFire or Drive folder is: its sole archive when
+/// it has one (a track beside its readme), otherwise the whole folder as the mod.
+async fn download_mega_folder_and_place(
+    app: &AppHandle,
+    cfg: &AppConfig,
+    client: &Client,
+    slug: &str,
+    url: &str,
+    subpath: &str,
+    dest_folder: &str,
+) -> anyhow::Result<Placed> {
+    emit(app, slug, "resolving", None, None);
+    let mega = mega::Client::builder()
+        .build(client.clone())
+        .map_err(|e| anyhow::anyhow!("MEGA client init failed: {e}"))?;
+    let nodes = mega.fetch_public_nodes(url).await.map_err(|e| {
+        anyhow::anyhow!("Couldn't read the MEGA folder — it may be invalid or removed ({e}).")
+    })?;
+    let entries: Vec<MegaEntry> = nodes
+        .iter()
+        .map(|n| MegaEntry {
+            handle: n.handle().to_string(),
+            parent: n.parent().map(str::to_string),
+            name: n.name().to_string(),
+            is_file: n.kind().is_file(),
+            size: n.size(),
+        })
+        .collect();
+    let (name, mut files) = mega_folder_files(&entries);
+    if files.is_empty() {
+        anyhow::bail!(
+            "This MEGA folder has no files in it — open the mod page to download it manually."
+        );
+    }
+
+    let work = staging_dir_near(&cfg.mods_path, "dl");
+    std::fs::create_dir_all(&work)?;
+    let top: Vec<&MegaFile> = files.iter().filter(|f| !f.rel.contains('/')).collect();
+    let names: Vec<&str> = top.iter().map(|f| f.rel.as_str()).collect();
+    let archive = pick_archive(&names).map(|i| top[i].clone());
+    if let Some(one) = &archive {
+        files = vec![one.clone()];
+    }
+
+    let root = if archive.is_some() {
+        work.clone()
+    } else {
+        work.join(STAGED_DIR).join(sanitize(&name))
+    };
+    let total: u64 = files.iter().map(|f| f.size).sum();
+    let cancel = crate::cancel::token(slug);
+    let mut received = 0u64;
+    let result: anyhow::Result<()> = async {
+        for f in &files {
+            cancel.check()?;
+            let node = nodes
+                .get_node_by_handle(&f.handle)
+                .ok_or_else(|| anyhow::anyhow!("MEGA lost track of {}", f.rel))?;
+            let dest = root.join(&f.rel);
+            if let Some(parent) = dest.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            let writer = MegaProgressWriter {
+                file: File::create(&dest)?,
+                app,
+                slug,
+                total: Some(total),
+                received,
+                last_emit: received,
+                cancel: cancel.clone(),
+            };
+            if let Err(e) = mega.download_node(node, writer).await {
+                cancel.check()?;
+                anyhow::bail!("MEGA download failed for {}: {e}", f.rel);
+            }
+            received += f.size;
+        }
+        Ok(())
+    }
+    .await;
+    if let Err(e) = result {
+        let _ = std::fs::remove_dir_all(&work);
+        return Err(e);
+    }
+    emit(app, slug, "downloading", Some(total), Some(total));
+
+    if let Some(one) = archive {
+        let path = root.join(&one.rel);
+        return extract_and_place_blocking(app, cfg, slug, path, work, subpath, dest_folder, Packs::Offer)
+            .await;
+    }
+    emit(app, slug, "extracting", None, None);
+    let staged = root.clone();
+    tauri::async_runtime::spawn_blocking(move || extract_nested(&staged))
+        .await
+        .map_err(|e| anyhow::anyhow!("install task failed: {e}"))??;
+    place_staged_named(app, cfg, slug, work, subpath, dest_folder, Packs::OfferFolder, &name).await
 }
 
 pub(crate) async fn download_mega(
@@ -763,6 +950,11 @@ pub(crate) async fn resolve_share(
             return resolve_mediafire_folder(client, &folder, url).await;
         }
         Ok(Resolved::File(resolve_mediafire(client, url).await?))
+    } else if h.contains("dropbox") || u.contains("dropbox.com") {
+        // A www.dropbox.com share with `dl=0` (how authors paste them) answers with the preview
+        // page, which used to go through as "a direct file link" and fail at unpacking. `dl=1`
+        // is the file itself, or the whole folder as one zip for a folder share.
+        Ok(Resolved::File(dropbox_direct(url)))
     } else if h.contains("drive.google") || u.contains("drive.google") {
         // A folder link (…/drive/folders/ID) has no single file to fetch — look inside it.
         if is_gdrive_folder(url) {
@@ -774,6 +966,23 @@ pub(crate) async fn resolve_share(
         // Assume a direct file link.
         Ok(Resolved::File(url.to_string()))
     }
+}
+
+/// A Dropbox share link that serves bytes: `dl=1`, the `raw` switch dropped.
+pub(crate) fn dropbox_direct(url: &str) -> String {
+    let Ok(mut u) = reqwest::Url::parse(url) else {
+        return url.to_string();
+    };
+    if u.host_str().is_some_and(|h| h.ends_with("dropboxusercontent.com")) {
+        return url.to_string();
+    }
+    let kept: Vec<(String, String)> = u
+        .query_pairs()
+        .filter(|(k, _)| k != "dl" && k != "raw")
+        .map(|(k, v)| (k.into_owned(), v.into_owned()))
+        .collect();
+    u.query_pairs_mut().clear().extend_pairs(kept).append_pair("dl", "1");
+    u.to_string()
 }
 
 /// What a folder listing turned out to be.
@@ -2896,6 +3105,86 @@ fn has_root_pkz(dir: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn mega(handle: &str, parent: Option<&str>, name: &str, is_file: bool, size: u64) -> MegaEntry {
+        MegaEntry {
+            handle: handle.into(),
+            parent: parent.map(Into::into),
+            name: name.into(),
+            is_file,
+            size,
+        }
+    }
+
+    #[test]
+    fn legacy_mega_links_become_the_form_the_crate_reads() {
+        assert_eq!(normalize_mega_url("https://mega.nz/#!abc!KEY"), "https://mega.nz/file/abc#KEY");
+        assert_eq!(
+            normalize_mega_url("https://mega.co.nz/#F!abc!KEY"),
+            "https://mega.nz/folder/abc#KEY"
+        );
+        assert_eq!(
+            normalize_mega_url("https://www.mega.nz/folder/z3ZVXBjb#8D-NY0nOo7In1Re_m-OeOA"),
+            "https://mega.nz/folder/z3ZVXBjb#8D-NY0nOo7In1Re_m-OeOA"
+        );
+        assert!(is_mega_folder(&normalize_mega_url("https://mega.nz/#F!abc!KEY")));
+        assert!(!is_mega_folder("https://mega.nz/file/abc#KEY"));
+    }
+
+    #[test]
+    fn a_mega_folder_lists_every_file_under_its_root() {
+        // The shape of the Oakley Goggles Pack share in the catalogue: the files sit a few
+        // folders down, as the author's own mods folder.
+        let entries = vec![
+            mega("root", Some("outside"), "Oakley Goggles Pack", false, 0),
+            mega("mods", Some("root"), "mods", false, 0),
+            mega("gog", Some("mods"), "goggles", false, 0),
+            mega("f1", Some("gog"), "Oakley Gold.pnt", true, 26_457_739),
+            mega("f2", Some("gog"), "Oakley Blue.pnt", true, 26_433_139),
+            mega("f3", Some("root"), "readme.txt", true, 10),
+        ];
+        let (name, files) = mega_folder_files(&entries);
+        assert_eq!(name, "Oakley Goggles Pack");
+        assert_eq!(
+            files.iter().map(|f| f.rel.as_str()).collect::<Vec<_>>(),
+            ["mods/goggles/Oakley Gold.pnt", "mods/goggles/Oakley Blue.pnt", "readme.txt"]
+        );
+    }
+
+    #[test]
+    fn a_mega_folder_of_empty_folders_has_no_files() {
+        let entries = vec![
+            mega("root", None, "2024 Evoke LE", false, 0),
+            mega("a", Some("root"), "mods", false, 0),
+        ];
+        assert!(mega_folder_files(&entries).1.is_empty());
+    }
+
+    #[test]
+    fn dropbox_shares_ask_for_the_bytes() {
+        assert_eq!(
+            dropbox_direct("https://www.dropbox.com/scl/fi/v1/2020-Geico-Honda-Public.zip?rlkey=k&st=s&dl=0"),
+            "https://www.dropbox.com/scl/fi/v1/2020-Geico-Honda-Public.zip?rlkey=k&st=s&dl=1"
+        );
+        assert_eq!(
+            dropbox_direct("https://www.dropbox.com/s/abc/x.zip?raw=1"),
+            "https://www.dropbox.com/s/abc/x.zip?dl=1"
+        );
+        assert_eq!(
+            dropbox_direct("https://dl.dropboxusercontent.com/scl/fi/x/y.zip?dl=0"),
+            "https://dl.dropboxusercontent.com/scl/fi/x/y.zip?dl=0"
+        );
+    }
+
+    #[test]
+    fn parses_a_recorded_drive_folder_page() {
+        // A public folder page from the catalogue, trimmed to its listing data.
+        let html = include_str!("../tests/fixtures/gdrive-folder.html");
+        let files = parse_gdrive_folder(html, "1yo91EdY-Er74kkYxNlwjq7q3xyVNzSJ5");
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].id, "1i5R9MyH1ob2VMn1unOBPFkpdF6ZAiWpl");
+        assert_eq!(files[0].name, "!BD Valentine Husky Pub.pnt");
+    }
 
     /// The frontend's `AUTO_SUBPATH`, however it's written, and nothing else.
     #[test]
