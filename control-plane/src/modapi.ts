@@ -15,7 +15,8 @@
  * cacheable for a minute; the routes are rate-limited per address.
  */
 
-import { ASSET_TYPES, hex } from "./mirror";
+import { ASSET_TYPES, hex, LEASE_MS, type MirrorJob } from "./mirror";
+import { activeBikes, supported, touchBlob } from "./mirrorpolicy";
 import { reportAsset } from "./modreports";
 
 export const PER_PAGE = 24;
@@ -90,8 +91,9 @@ const COLUMNS = `a.id, a.source, a.title, a.author, a.type, a.bike, a.visibility
   (SELECT COUNT(*) FROM mod_files f WHERE f.version_id = v.id AND f.status = 'done') AS files,
   (SELECT COALESCE(SUM(b.size), 0) FROM mod_files f JOIN mod_blobs b ON b.sha256 = f.sha256
      WHERE f.version_id = v.id AND f.status = 'done') AS bytes`;
-const LISTABLE = `a.state = 'active' AND a.visibility = 'public' AND a.page_status <> 'gone' AND v.state = 'live'
-  AND EXISTS (SELECT 1 FROM mod_files f WHERE f.version_id = v.id AND f.status = 'done')`;
+/** The whole mirrored catalogue is listed (metadata only); an upload once its version is live. */
+const LISTABLE = `a.state = 'active' AND a.visibility = 'public' AND a.page_status <> 'gone' AND (a.source = 'mirror'
+  OR (v.state = 'live' AND EXISTS (SELECT 1 FROM mod_files f WHERE f.version_id = v.id AND f.status = 'done')))`;
 
 export async function searchAssets(url: URL, env: Env): Promise<{ status: number; body: unknown }> {
   const q = (url.searchParams.get("q") ?? "").slice(0, 200);
@@ -112,7 +114,7 @@ export async function searchAssets(url: URL, env: Env): Promise<{ status: number
   }
   const match = ftsQuery(q);
   const offset = (page - 1) * PER_PAGE;
-  const join = "JOIN mod_versions v ON v.id = a.current_version";
+  const join = "LEFT JOIN mod_versions v ON v.id = a.current_version";
 
   let from: string;
   let order: string;
@@ -170,14 +172,21 @@ async function versionOf(env: Env, assetId: number, url: URL): Promise<{ id: num
     .first<{ id: number; seq: number }>();
 }
 
+/** A mirrored post whose page hasn't been read yet has no version: shown with no files. */
+const NO_VERSION = { id: -1, seq: 0 };
+
 /** An asset anyone may see: active (public or unlisted), not a page the source dropped. */
 const VISIBLE = "a.state = 'active' AND a.page_status <> 'gone'";
 
 export async function getAsset(id: number, url: URL, env: Env): Promise<{ status: number; body: unknown }> {
-  const version = await versionOf(env, id, url);
+  const named = await versionOf(env, id, url);
+  const isMirror = !named && !url.searchParams.has("version")
+    ? await env.DB.prepare("SELECT 1 FROM mod_assets WHERE id = ? AND source = 'mirror'").bind(id).first()
+    : null;
+  const version = named ?? (isMirror ? NO_VERSION : null);
   if (!version) return { status: 404, body: { error: "no such mod" } };
   const asset = await env.DB.prepare(
-    `SELECT ${COLUMNS}, a.description, a.categories FROM mod_assets a JOIN mod_versions v ON v.id = ?
+    `SELECT ${COLUMNS}, a.description, a.categories FROM mod_assets a LEFT JOIN mod_versions v ON v.id = ?
      WHERE a.id = ? AND ${VISIBLE}`,
   )
     .bind(version.id, id)
@@ -207,14 +216,24 @@ export async function getAsset(id: number, url: URL, env: Env): Promise<{ status
       host: f.host,
       server: f.is_server === 1,
       recommended: f.is_default === 1,
-      // folder: a share whose files are the parts listed after it.
-      state: stored ? "stored" : f.status === "folder" ? "folder" : f.status === "failed" ? "unavailable" : "pending",
+      // stored: on our CDN. original: not mirrored (yet); the download goes to the source and
+      // asks for a copy. folder: a share whose files are the parts listed after it.
+      state: stored
+        ? "stored"
+        : f.status === "folder"
+          ? "folder"
+          : f.status === "failed" || f.status === "runner"
+            ? "original"
+            : f.status === "idle"
+              ? "original"
+              : "mirroring",
       filename: f.filename,
       size: f.size,
       sha256: stored ? f.sha256 : null,
       locked: f.bucket === "private",
       cdn: stored && f.bucket === "public" ? `${cdnBase(env)}/${f.r2_key}` : null,
-      download: stored ? `${url.origin}/v1/assets/${id}/download/${path}?version=${version.seq}` : null,
+      // Always a download: ours when stored, otherwise a redirect to the original link.
+      download: f.url || stored ? `${url.origin}/v1/assets/${id}/download/${path}?version=${version.seq}` : null,
       source: f.url,
     };
   });
@@ -244,13 +263,23 @@ export async function downloadAsset(
   const visible = await env.DB.prepare(`SELECT 1 FROM mod_assets a WHERE a.id = ? AND ${VISIBLE}`).bind(id).first();
   const version = visible ? await versionOf(env, id, url) : null;
   if (!version) return publicJson(404, { error: "no such mod" });
-  const row = await env.DB.prepare(
-    `SELECT b.bucket, b.r2_key, b.sha256 FROM mod_files f JOIN mod_blobs b ON b.sha256 = f.sha256
-     WHERE f.version_id = ? AND f.idx = ? AND f.part = ? AND f.status = 'done'`,
+  const file = await env.DB.prepare(
+    `SELECT f.url, f.status, a.source, a.type, a.bike, b.bucket, b.r2_key, b.sha256
+     FROM mod_files f JOIN mod_versions v ON v.id = f.version_id JOIN mod_assets a ON a.id = v.asset_id
+     LEFT JOIN mod_blobs b ON b.sha256 = f.sha256
+     WHERE f.version_id = ? AND f.idx = ? AND f.part = ?`,
   )
     .bind(version.id, idx, part)
-    .first<{ bucket: string; r2_key: string; sha256: string }>();
-  if (!row) return publicJson(404, { error: "not stored" });
+    .first<{ url: string | null; status: string; source: string; type: string; bike: string; bucket: string | null; r2_key: string | null; sha256: string | null }>();
+  if (!file) return publicJson(404, { error: "no such file" });
+  if (file.status !== "done" || !file.r2_key || !file.sha256) {
+    // Not mirrored: this download goes to the original, and asks for a copy for the next one.
+    if (!file.url) return publicJson(404, { error: "not stored" });
+    await requestMirror(env, version.id, idx, part, file, now);
+    return redirect(file.url, "no-store");
+  }
+  const row = { bucket: file.bucket, r2_key: file.r2_key, sha256: file.sha256 };
+  await touchBlob(env, row.sha256, now);
   if (row.bucket === "private") {
     const exp = Math.floor(now / 1000) + SIGNED_TTL_S;
     const sig = await signLocked(env, row.sha256, exp);
@@ -258,6 +287,30 @@ export async function downloadAsset(
     return redirect(`${url.origin}/v1/assets/locked/${row.sha256}?exp=${exp}&sig=${sig}`);
   }
   return redirect(`${cdnBase(env)}/${row.r2_key}`);
+}
+
+/**
+ * Someone wants a mirrored post's file that isn't in R2: queue it now, unless it is content the
+ * policy doesn't keep (`mirrorpolicy.ts`), already on its way, or known not to be fetchable.
+ */
+async function requestMirror(
+  env: Env,
+  version: number,
+  idx: number,
+  part: number,
+  file: { status: string; source: string; type: string; bike: string },
+  now: number,
+): Promise<void> {
+  if (file.source !== "mirror" || file.status !== "idle") return;
+  if (!supported(file, await activeBikes(env, now)).ok) return;
+  const claimed = await env.DB.prepare(
+    "UPDATE mod_files SET status = 'queued', leased_until = ? WHERE version_id = ? AND idx = ? AND part = ? AND status = 'idle'",
+  )
+    .bind(now + LEASE_MS, version, idx, part)
+    .run();
+  if (claimed.meta.changes && env.MIRROR_QUEUE) {
+    await env.MIRROR_QUEUE.send({ kind: "file", version, idx, part } satisfies MirrorJob);
+  }
 }
 
 /** Serve a locked blob to whoever holds a valid, unexpired signature for it. */
@@ -298,10 +351,10 @@ function timingSafeEqual(a: string, b: string): boolean {
   return d === 0;
 }
 
-function redirect(location: string): Response {
+function redirect(location: string, cache = "public, max-age=60"): Response {
   return new Response(null, {
     status: 302,
-    headers: { location, "access-control-allow-origin": "*", "cache-control": "public, max-age=60" },
+    headers: { location, "access-control-allow-origin": "*", "cache-control": cache },
   });
 }
 

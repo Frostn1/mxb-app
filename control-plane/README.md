@@ -607,6 +607,13 @@ one set of tables (`migrations/0056_mod_catalog.sql`):
   folder shares into one row per file, and streams each file into R2 by SHA-256. Polite by
   construction: named user agent, robots.txt honoured, 3 s between requests, a two-hour
   cooldown the moment the site refuses one. `MXB_MIRROR` off stops it.
+- **Only what is used** (`mirrorpolicy.ts`): the whole catalogue is indexed, but a file is copied
+  into R2 only when someone downloads it (the first download is redirected to the original and
+  queues the copy) or when it is a track on a live server (`track_catalog.requested_at`, stamped
+  by the Servers tab's lookups, within `MXB_LIVE_TRACK_DAYS`). Liveries and bikes for bike models
+  no rider has published a loadout for within `MXB_BIKE_ACTIVE_DAYS` are never copied;
+  `MXB_MIRROR_BIKES_ALLOW` / `_DENY` override. A copy nobody downloads for
+  `MXB_MIRROR_RETAIN_DAYS` (90) is evicted, unless a live server uses it.
 
 Search is FTS5 over title, author, bike, categories and description, bm25-ranked. Public files
 are served by `cdn.mxbsecure.com`, the custom domain on `mxb-assets`; `.mxbsecure` locked

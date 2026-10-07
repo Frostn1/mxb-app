@@ -79,6 +79,15 @@
     "MXB_ASSETS_CDN": "https://cdn.mxbsecure.com",
     // The private bucket's name, for the S3 endpoint the upload URLs are presigned against.
     "MXB_PRIVATE_BUCKET": "mxb-private",
+    // What the mirror keeps (`mirrorpolicy.ts`). Files are copied only when downloaded or used
+    // by a live server; these are the windows, in days, and Sean's own bike lists. A name in
+    // DENY is never mirrored, a name in ALLOW always may be: comma separated, any spelling
+    // ("2021 KTM 450 SX-F OEM" or "MX1OEM_2021_KTM_450_SX-F").
+    "MXB_LIVE_TRACK_DAYS": "14",
+    "MXB_MIRROR_RETAIN_DAYS": "90",
+    "MXB_BIKE_ACTIVE_DAYS": "180",
+    "MXB_MIRROR_BIKES_ALLOW": "",
+    "MXB_MIRROR_BIKES_DENY": "",
     "MXB_CONVERTER_STEAM_IDS": "76561199650233712,76561199807040854,76561198798423111,76561198937606502"
   },
 

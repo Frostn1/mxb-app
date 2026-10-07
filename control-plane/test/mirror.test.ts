@@ -172,7 +172,7 @@ describe("versions", () => {
       .all();
     expect(results).toEqual([
       { idx: 0, url: "https://a/2", status: "done", sha256: "aa" },
-      { idx: 1, url: "https://a/3", status: "pending", sha256: null },
+      { idx: 1, url: "https://a/3", status: "idle", sha256: null },
     ]);
     const cur = await e.DB.prepare("SELECT current_version FROM mod_assets WHERE id = ?").bind(a!.id).first();
     expect(cur).toEqual({ current_version: v2 });
@@ -212,7 +212,7 @@ describe("a whole run", () => {
     ]);
   }
 
-  it("discovers, reads the page, and queues the file — spaced and named", async () => {
+  it("discovers and indexes the page — spaced and named — but mirrors nothing unasked", async () => {
     const e = env();
     const waits: number[] = [];
     const f = site();
@@ -227,8 +227,8 @@ describe("a whole run", () => {
     });
     const v = await e.DB.prepare("SELECT label FROM mod_versions").first();
     expect(v).toEqual({ label: "Beta 19" });
-    expect(e.MIRROR_QUEUE.sent).toEqual([{ kind: "file", version: expect.any(Number), idx: 0, part: 0 }]);
-    expect(await e.DB.prepare("SELECT status FROM mod_files").first()).toEqual({ status: "queued" });
+    expect(e.MIRROR_QUEUE.sent).toEqual([]);
+    expect(await e.DB.prepare("SELECT status FROM mod_files").first()).toEqual({ status: "idle" });
     expect(waits.every((w) => w === 3000)).toBe(true);
     expect(f.calls.some((c) => c.includes("modified_after"))).toBe(false);
 
@@ -262,6 +262,8 @@ describe("a whole run", () => {
     const a = await e.DB.prepare("SELECT id FROM mod_assets").first<{ id: number }>();
     await e.DB.prepare("UPDATE mod_assets SET page_status = 'ok'").run();
     await writeMirrorVersion(e, a!.id, null, [{ url: "https://a/1", host: "a", label: "a", isDefault: true, isServer: false }], 0);
+    expect(await dispatch(e, 1000)).toBe(0);
+    await e.DB.prepare("UPDATE mod_files SET status = 'pending'").run();
     expect(await dispatch(e, 1000)).toBe(1);
     expect(await dispatch(e, 2000)).toBe(0);
     expect(await dispatch(e, 1000 + 46 * 60_000)).toBe(1);

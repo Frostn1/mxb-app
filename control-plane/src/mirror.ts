@@ -19,6 +19,7 @@
  */
 
 import { decodeEntities } from "./trackcatalog";
+import { evictUnused, wantLiveTracks } from "./mirrorpolicy";
 
 export const UA = "mxbsecure-mirror/1 (+https://mxbsecure.com/mods)";
 /** The product token robots.txt groups are matched against. */
@@ -676,8 +677,8 @@ export async function writeMirrorVersion(
     }
     stmts.push(
       env.DB.prepare(
-        `INSERT OR IGNORE INTO mod_files (version_id, idx, part, url, host, label, is_server, is_default)
-         VALUES (?, ?, 0, ?, ?, ?, ?, ?)`,
+        `INSERT OR IGNORE INTO mod_files (version_id, idx, part, url, host, label, is_server, is_default, status)
+         VALUES (?, ?, 0, ?, ?, ?, ?, ?, 'idle')`,
       ).bind(vid, idx, d.url, d.host, d.label.slice(0, 200), d.isServer ? 1 : 0, d.isDefault ? 1 : 0),
     );
   });
@@ -783,9 +784,11 @@ export interface RunOptions {
 /** One cron run of the sync. Never throws: a failed step is logged and the next run resumes. */
 export async function runMirror(env: Env, opts: RunOptions = {}): Promise<void> {
   const now = opts.now ?? Date.now();
-  // Dispatch runs whatever the sync's state: it only talks to the queue.
+  // Housekeeping and dispatch run whatever the sync's state: neither talks to mxb-mods.com.
   const dispatchStep = async () => {
     try {
+      await wantLiveTracks(env, now);
+      await evictUnused(env, now);
       await dispatch(env, now);
     } catch (err) {
       console.error(JSON.stringify({ msg: "mirror dispatch failed", error: String(err) }));

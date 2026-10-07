@@ -19,6 +19,15 @@ interface Env {
     R2_ACCESS_KEY_ID?: string;
     R2_SECRET_ACCESS_KEY?: string;
     R2_S3_ENDPOINT?: string;
+    /** Mod mirror policy (`mirrorpolicy.ts`), all optional with the defaults shown: days a track
+     *  counts as on a live server after an app last asked about it (14), days a mirrored file
+     *  is kept without a download (90), days a bike counts as ridden after its last loadout
+     *  (180), and comma-separated bike names always (ALLOW) or never (DENY) mirrored. */
+    MXB_LIVE_TRACK_DAYS?: string;
+    MXB_MIRROR_RETAIN_DAYS?: string;
+    MXB_BIKE_ACTIVE_DAYS?: string;
+    MXB_MIRROR_BIKES_ALLOW?: string;
+    MXB_MIRROR_BIKES_DENY?: string;
     /** HMAC key for the mod mirror's signed links to locked (`.mxbsecure`) files
      *  (`mirrorapi.ts`). Any long random string. Without it those downloads answer 503;
      *  public files are unaffected. */

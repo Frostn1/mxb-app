@@ -89,7 +89,11 @@ CREATE TABLE mod_files (
   label        TEXT,
   is_server    INTEGER NOT NULL DEFAULT 0,
   is_default   INTEGER NOT NULL DEFAULT 0,
-  -- pending | queued | done | folder | retry | runner | failed
+  -- idle | pending | queued | done | folder | retry | runner | failed
+  --   idle: indexed, not mirrored. Mirror files start here: a file is copied into R2 only once
+  --         someone downloads it or a live server uses it (`mirrorpolicy.ts`), and goes back
+  --         here when it is evicted.
+  --   pending: wanted, waiting for the queue.
   --   folder: a folder share, expanded into its parts.
   --   runner: larger than a Worker may stream (`mirrorfetch.ts` MAX_WORKER_BYTES), for the runner.
   --   failed: retries exhausted, or a permanent refusal. A changed link starts over.
@@ -115,7 +119,9 @@ CREATE TABLE mod_blobs (
   size         INTEGER NOT NULL,
   content_type TEXT,
   filename     TEXT,
-  first_seen   INTEGER NOT NULL
+  first_seen   INTEGER NOT NULL,
+  -- Last download served from it, written at most daily. What retention reads.
+  last_used_at INTEGER
 );
 
 -- An upload in flight: an R2 multipart upload the app writes to directly, through presigned
