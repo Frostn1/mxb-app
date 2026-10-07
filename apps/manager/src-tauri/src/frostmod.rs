@@ -74,6 +74,13 @@ fn launcher_running() -> bool {
     true
 }
 
+/// Whether FrostMod's game plugin has created its reload event yet, i.e. a signal sent now is
+/// one it will act on. FrostMod drops a signal that was already set when it initialised.
+#[cfg(windows)]
+pub fn reload_listener_present() -> bool {
+    launcher_running()
+}
+
 /// Linux and macOS: FrostMod runs inside a Wine prefix — Proton's on Linux, a
 /// CrossOver/Whisky bottle on macOS — and its reload event is a Wine kernel object we have
 /// no way to open from out here, where this app is a native process outside that prefix.

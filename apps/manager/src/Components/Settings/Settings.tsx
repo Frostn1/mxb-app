@@ -23,6 +23,7 @@ import { open as openUrl } from "@tauri-apps/plugin-shell";
 import { getVersion } from "@tauri-apps/api/app";
 import { toast } from "sonner";
 import PaintSync from "./PaintSync";
+import SecureInstallDialog from "./SecureInstallDialog";
 import Plugins from "./Plugins";
 import Accounts from "./Accounts";
 import {
@@ -75,6 +76,9 @@ import {
   setMxbsecureEnabled,
   contentSecureAvailable,
   mxbsecureUnlock,
+  mxbsecureInstallInfo,
+  type SecureInstallInfo,
+  type SecureInstallTarget,
   mxbsecureAutoUnlock,
   mxbsecureRepairKeys,
   steamLinkStatus,
@@ -631,6 +635,10 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
   const paintSyncBlocked = syncReadiness?.ready === false;
   const mxbsecureEnabled = config.mxbsecureEnabled ?? true;
   const [unlocking, setUnlocking] = useState(false);
+  // A picked secured file that is outside the mods folder, waiting for "where does it go".
+  const [installAsk, setInstallAsk] = useState<{ path: string; info: SecureInstallInfo } | null>(
+    null,
+  );
   const [repairing, setRepairing] = useState(false);
   const [linkedSteam, setLinkedSteam] = useState<string | null>(null);
   const [secureItems, setSecureItems] = useState<SecureStatusItem[]>([]);
@@ -955,10 +963,28 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
     });
     const path = typeof chosen === "string" ? chosen : null;
     if (!path) return;
+    // The game only reads content inside its mods folder. A file picked from anywhere else
+    // has to be put there, so ask where first; the unlock then moves it with its key.
+    try {
+      const info = await mxbsecureInstallInfo(path);
+      if (!info.inModsTree) {
+        setInstallAsk({ path, info });
+        return;
+      }
+    } catch (e) {
+      toast.error(t("settings.mxbsecureUnlockFail"), { description: String(e) });
+      return;
+    }
+    await runUnlock(path);
+  };
+
+  const runUnlock = async (path: string, target?: SecureInstallTarget) => {
     setUnlocking(true);
     try {
-      await mxbsecureUnlock(path);
-      toast.success(t("settings.mxbsecureUnlockOk"));
+      const out = await mxbsecureUnlock(path, target);
+      toast.success(t("settings.mxbsecureUnlockOk"), {
+        description: target && out.installedPath ? t("settings.secInstalledAt", { path: out.installedPath }) : undefined,
+      });
       mxbsecureStatus().then(setSecureItems).catch(() => {});
     } catch (e) {
       const msg = String(e);
@@ -2896,6 +2922,16 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
           )}
         </div>
       </div>
+
+      <SecureInstallDialog
+        info={installAsk?.info ?? null}
+        onCancel={() => setInstallAsk(null)}
+        onConfirm={(target) => {
+          const path = installAsk?.path;
+          setInstallAsk(null);
+          if (path) void runUnlock(path, target);
+        }}
+      />
 
       <AlertDialog open={cacheConfirmOpen} onOpenChange={setCacheConfirmOpen}>
         <AlertDialogContent>

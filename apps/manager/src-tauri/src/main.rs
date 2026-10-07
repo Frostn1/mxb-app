@@ -94,6 +94,7 @@ pub(crate) fn mxbsecure_machine_id() -> Option<String> {
 #[cfg(worldnet)]
 mod worldnet;
 use mxb_core::steamid;
+mod secure_install;
 mod secure_launch;
 mod server_admin;
 
@@ -1881,6 +1882,36 @@ fn set_mxbsecure_enabled(app: tauri::AppHandle, enabled: bool) -> Result<(), Str
 struct SecureProvisionOutcome {
     mxbkey_path: String,
     steam_id: String,
+    /// Where the blob is now. Differs from the picked path when Settings moved it into the mods
+    /// tree after unlocking it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    installed_path: Option<String>,
+}
+
+/// What Settings needs to know before unlocking a picked file: what it is, and whether it is
+/// already somewhere the game reads it.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SecureInstallInfo {
+    game_name: String,
+    kind: secure_install::Kind,
+    in_mods_tree: bool,
+}
+
+fn secure_mods_root(app: &tauri::AppHandle) -> Option<std::path::PathBuf> {
+    let cfg = config::load_or_detect(app)?;
+    (!cfg.mods_path.trim().is_empty()).then(|| mxb_core::library::mods_root(&cfg.mods_path))
+}
+
+/// Read a picked `.mxbsecure` file's header for what it is (paint or package) and say whether
+/// it already sits in the mods tree. Outside it, Settings asks where it goes before unlocking.
+#[tauri::command]
+fn mxbsecure_install_info(app: tauri::AppHandle, blob_path: String) -> Result<SecureInstallInfo, String> {
+    let path = std::path::Path::new(&blob_path);
+    let file_name = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+    let game_name = secure_launch::game_name_of(path, &file_name);
+    let in_mods_tree = secure_mods_root(&app).is_some_and(|root| secure_install::is_inside(&root, path));
+    Ok(SecureInstallInfo { kind: secure_install::kind_of(&game_name), game_name, in_mods_tree })
 }
 
 /// Seal a content key to this machine (the live Steam ID + the DPAPI machine layer), store the
@@ -1936,6 +1967,7 @@ async fn provision_and_record(
     Ok(SecureProvisionOutcome {
         mxbkey_path: out.to_string_lossy().to_string(),
         steam_id,
+        installed_path: None,
     })
 }
 
@@ -1953,16 +1985,66 @@ async fn provision_and_record(
 async fn mxbsecure_unlock(
     app: tauri::AppHandle,
     blob_path: String,
+    target: Option<secure_install::Target>,
 ) -> Result<SecureProvisionOutcome, String> {
     #[cfg(mxbsecure)]
     {
-        unlock_one(&app, &blob_path).await
+        unlock_and_place(&app, &blob_path, target).await
     }
     #[cfg(not(mxbsecure))]
     {
-        let _ = (app, blob_path);
+        let _ = (app, blob_path, target);
         Err("this build can't unlock secured content".into())
     }
+}
+
+/// Unlock a picked file, then make sure it is where the game reads it.
+///
+/// A file already in the mods tree is unlocked in place. One outside it (Downloads, the
+/// desktop) needs `target`, the folder the player picked, and is moved there with its key after
+/// the unlock; success is only reported once both files are in place. The target is checked
+/// before anything is unlocked, so a bad pick costs nothing.
+#[cfg(mxbsecure)]
+async fn unlock_and_place(
+    app: &tauri::AppHandle,
+    blob_path: &str,
+    target: Option<secure_install::Target>,
+) -> Result<SecureProvisionOutcome, String> {
+    let path = std::path::Path::new(blob_path);
+    let root = secure_mods_root(app);
+    if root.as_deref().is_some_and(|r| secure_install::is_inside(r, path)) {
+        let mut out = unlock_one(app, blob_path).await?;
+        out.installed_path = Some(blob_path.to_string());
+        return Ok(out);
+    }
+    let root = root.ok_or("Set your MX Bikes folder in Settings first, so the file can be put where the game reads it.")?;
+    let file_name = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+    let game_name = secure_launch::game_name_of(path, &file_name);
+    let kind = secure_install::kind_of(&game_name);
+    let target = target.ok_or("This file is outside your mods folder. Choose where it goes.")?;
+    let segments = secure_install::target_segments(kind, &target)?;
+    let dest = secure_install::target_dir(&root, &segments);
+
+    let mut out = unlock_one(app, blob_path).await?;
+    let asset_id = secure_launch::header_asset_id(path);
+    let moved = secure_install::move_into(path, &dest, |there| {
+        asset_id.is_some() && secure_launch::header_asset_id(there) == asset_id
+    })
+    .map_err(|e| format!("Unlocked, but not installed: {e}"))?;
+    let new_blob = moved.blob.to_string_lossy().to_string();
+    let new_key = moved.key.to_string_lossy().to_string();
+    secure_launch::forget_asset(app, blob_path);
+    if let Err(e) = secure_launch::record_asset(
+        app,
+        secure_launch::SecureAsset { game_name, blob_path: new_blob.clone(), mxbkey_path: new_key.clone() },
+    ) {
+        log::warn!("[secure] couldn't record the installed asset: {e}");
+    }
+    log::info!("[secure] unlocked {blob_path} and installed it at {new_blob}");
+    secure_launch::refresh_after_change(app).await;
+    out.mxbkey_path = new_key;
+    out.installed_path = Some(new_blob);
+    Ok(out)
 }
 
 /// Read only a blob's header (asset id, key id, plaintext length, original name) without pulling
@@ -2035,6 +2117,7 @@ async fn unlock_one(
                 mxbkey_path: secure_launch::existing_key_path(blob_path)
                     .unwrap_or_else(|| secure_launch::key_path_for(blob_path)),
                 steam_id: id,
+                installed_path: None,
             });
         }
     }
@@ -2635,7 +2718,7 @@ async fn mxbsecure_status(app: tauri::AppHandle) -> Result<Vec<SecureStatusItem>
                 std::path::Path::new(&blob_path)
                     .file_name()
                     .map(|n| n.to_string_lossy().to_string())
-                    .map(|n| n.strip_suffix(".mxbsecure").unwrap_or(&n).to_string())
+                    .map(|n| mxb_core::securesource::strip_secured_ext(&n).unwrap_or(&n).to_string())
                     .unwrap_or_default()
             } else {
                 orig
@@ -9042,6 +9125,7 @@ fn main() {
             content_secure_available,
             set_mxbsecure_enabled,
             mxbsecure_unlock,
+            mxbsecure_install_info,
             mxbsecure_auto_unlock,
             mxbsecure_repair_keys,
             mxbsecure_status,

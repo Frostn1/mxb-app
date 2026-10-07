@@ -480,15 +480,42 @@ export function mxbsecureOpenOffline(blobPath: string, original: string): Promis
 export interface SecureProvisionOutcome {
   mxbkeyPath: string;
   steamId: string;
+  /** Where the file is now: moved into the mods tree when it was picked from outside it. */
+  installedPath?: string;
+}
+
+/** Where a secured file picked from outside the mods tree goes. For a paint, `area` is
+ *  `bike`, `helmet`, `goggles`, `boots`, `suit` or `gloves` and `name` the bike or gear model;
+ *  for a package, `area` is `tracks`, `bikes`, `helmets`, `boots` or `riders`. */
+export interface SecureInstallTarget {
+  area: string;
+  name?: string;
+}
+
+/** What a picked secured file is (from its header) and whether it is already in the mods tree. */
+export interface SecureInstallInfo {
+  gameName: string;
+  kind: "paint" | "package";
+  inModsTree: boolean;
+}
+
+export function mxbsecureInstallInfo(blobPath: string): Promise<SecureInstallInfo> {
+  return invoke<SecureInstallInfo>("mxbsecure_install_info", { blobPath });
 }
 
 /** Unlock purchased secured content for offline play — the only way a content key reaches a
  *  machine. Reads the asset id from the blob's own header,
  *  proves entitlement at `/v1/keys/grant`, and seals the released key to THIS machine (DPAPI),
  *  so the stored `.mxbkey` is useless if copied. From then on it opens offline for up to 30
- *  days between check-ins; the app renews the key lease silently whenever it is online. */
-export function mxbsecureUnlock(blobPath: string): Promise<SecureProvisionOutcome> {
-  return invoke<SecureProvisionOutcome>("mxbsecure_unlock", { blobPath });
+ *  days between check-ins; the app renews the key lease silently whenever it is online.
+ *
+ *  A file outside the mods tree needs `target`: it is moved there with its key after the
+ *  unlock, and the call only succeeds once both are in place. */
+export function mxbsecureUnlock(
+  blobPath: string,
+  target?: SecureInstallTarget,
+): Promise<SecureProvisionOutcome> {
+  return invoke<SecureProvisionOutcome>("mxbsecure_unlock", { blobPath, target: target ?? null });
 }
 
 /** One secured file on disk and what can be shown about it without the key. */
@@ -562,10 +589,12 @@ export function steamLinkStatus(): Promise<string | null> {
   return invoke<string | null>("steam_link_status");
 }
 
-/** Why secured files on disk stayed locked, when the player can fix it here: `enroll` (no
- *  invite code yet) or `steam` (no Steam account linked). */
+/** Why secured files on disk stayed locked or out of the game, when the player can fix it
+ *  here: `enroll` (no invite code yet), `steam` (no Steam account linked) or `frostmod`
+ *  (FrostMod isn't running in the game, so secured paints, gear and bikes can't be added to
+ *  the game's lists after it starts). */
 export interface MxbsecureBlocked {
-  reason: "enroll" | "steam";
+  reason: "enroll" | "steam" | "frostmod";
   count: number;
 }
 

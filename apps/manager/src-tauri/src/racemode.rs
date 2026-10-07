@@ -119,7 +119,7 @@ const SUPPORT_WORDS: [&str; 4] = ["common", "misc", "support", "shared"];
 
 /// Extensions of secured content. The blob and the key beside it move together or not at
 /// all, and "not at all" is the only one of those that can't strand a key.
-const PROTECTED_EXTS: [&str; 2] = [".mxbsecure", ".mxbkey"];
+const PROTECTED_EXTS: [&str; 3] = [".mxbsecure", ".mxbsecurekey", ".mxbkey"];
 
 /// Normalize a rel for comparison, the way [`crate::modstate`] does: case and slash
 /// direction both vary by where the path came from.
