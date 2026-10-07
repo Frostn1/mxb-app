@@ -5,6 +5,7 @@
 ## 2026-10-07 — v0.20.0-beta.1 — Free plugins, guided tour, FrostMod refresh by type, install fixes
 
 ### Added
+- **Storage page.** Lists leftover downloads, duplicate mods, and big or unused mods, so they can be cleaned up.
 - **Download size before you install.** A mod's page and its install dialog show how big the download is, asked of the file host. Nothing is shown when the host will not say.
 - **Guided tour of the install flow.** A short walkthrough of finding a mod, installing it and seeing where it landed.
 - **FrostMod refresh by type** (FrostMod v0.49.8 and newer). The app can refresh just paints, just gear and paints, just tracks or just bikes, instead of reloading every mod. A secured bike paint asks for a bikes refresh. An older FrostMod keeps the full reload. FrostMod v0.49.8 also waits for an open bike chooser before it refreshes, which fixes a crash after a reload.
