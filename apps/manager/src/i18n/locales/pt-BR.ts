@@ -1427,6 +1427,8 @@ export const ptBR: Translation = {
     "A pasta do {{game}} em Documentos (…\\Documents\\PiBoSo\\{{game}}), com mods e profiles — não a pasta de instalação da Steam abaixo.",
   "settings.modsFolderNotGame":
     "Esta pasta não tem as pastas mods ou profiles do {{game}}. Escolha …\\Documents\\PiBoSo\\{{game}} ou use Detectar automaticamente.",
+  "settings.modsFolderElsewhere":
+    "{{game}} normalmente lê {{expected}}, que também tem arquivos de {{game}}, mas sua pasta de mods está em outro lugar. Mods instalados aqui não aparecerão no jogo, a menos que {{game}} leia esta pasta. Se não aparecerem, use a detecção automática.",
   "settings.installTitle":
     "Pasta de instalação do {{game}}",
   "settings.installHint":

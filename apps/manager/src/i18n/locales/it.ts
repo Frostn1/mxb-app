@@ -1425,6 +1425,8 @@ export const it: Translation = {
     "La cartella di {{game}} in Documenti (…\\Documents\\PiBoSo\\{{game}}), con mods e profiles — non la cartella di installazione Steam qui sotto.",
   "settings.modsFolderNotGame":
     "Questa cartella non contiene le cartelle mods o profiles di {{game}}. Scegli …\\Documents\\PiBoSo\\{{game}} o usa Rileva automaticamente.",
+  "settings.modsFolderElsewhere":
+    "{{game}} di norma legge {{expected}}, che contiene anche file di {{game}}, ma la tua cartella dei mod è altrove. I mod installati qui non compariranno nel gioco a meno che {{game}} non legga questa cartella. Se non compaiono, usa il rilevamento automatico.",
   "settings.installTitle":
     "Cartella di installazione di {{game}}",
   "settings.installHint":

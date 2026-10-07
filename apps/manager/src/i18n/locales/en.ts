@@ -1403,6 +1403,8 @@ export const en = {
     "The {{game}} folder in Documents (…\\Documents\\PiBoSo\\{{game}}), which holds mods and profiles — not the Steam install folder below.",
   "settings.modsFolderNotGame":
     "This folder doesn't hold {{game}}'s mods or profiles folders. Pick …\\Documents\\PiBoSo\\{{game}}, or use Detect automatically.",
+  "settings.modsFolderElsewhere":
+    "{{game}} normally reads {{expected}}, which also has {{game}} files, but your mods folder is somewhere else. Mods installed here won't show up in-game unless {{game}} is set up to read this folder. If they don't appear, use Detect automatically.",
   "settings.installTitle":
     "{{game}} install folder",
   "settings.installHint":
