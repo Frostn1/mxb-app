@@ -3,6 +3,7 @@ import { Lock, Users, Wifi, Palette, Star, Mountain, Hourglass, UserCheck, Bot }
 import type { CatalogTrack, MasterServer } from "@frost/shared/api/mods";
 import { cn } from "@frost/shared/lib/utils";
 import { useT } from "@/i18n";
+import { classLine } from "@/lib/serverClasses";
 
 /** Latency to colour, the steps the tile uses. */
 function pingTone(ms: number): string {
@@ -57,6 +58,7 @@ const ServerRow = memo(function ServerRow({
   onToggleFavourite,
 }: Props) {
   const t = useT();
+  const classes = classLine(s.categories);
   // The player's own copy wins; a track they lack shows what it looks like, from the store.
   // The player's own copy wins; a track they do NOT have shows what it looks like, from
   // the store. Never the other way round: a store picture for an installed track is a
@@ -179,6 +181,12 @@ const ServerRow = memo(function ServerRow({
             </span>
           </span>
         </div>
+        {/* Every class the server takes. The row showed none, and the tile only the first. */}
+        {classes && (
+          <div className="text-[10.5px] leading-snug text-faint" title={classes}>
+            {classes}
+          </div>
+        )}
       </div>
 
       <button

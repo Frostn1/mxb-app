@@ -26,6 +26,7 @@ import { useI18n } from "@/i18n";
 import { formatPrice, openShopUrl } from "../../api/shop";
 import { isFull } from "@/lib/useServerQueue";
 import { joinAction } from "./joinAction";
+import { classLine } from "@/lib/serverClasses";
 
 /** Latency to colour: close is green, far is red. */
 function pingTone(ms: number): string {
@@ -113,7 +114,8 @@ const ServerCard = memo(function ServerCard({
   const full = isFull(s);
   // A server that didn't answer has no rider count to show; "0/0" would read as an answer.
   const answered = status === undefined || status === "online";
-  const cat = s.categories[0];
+  // Every class the server takes, not just the first — a multi-class server read as MX1-only.
+  const classes = classLine(s.categories);
   const stop = (e: React.MouseEvent) => e.stopPropagation();
   // The player's own copy wins; a missing track shows what it looks like, from our server.
   // The player's own copy wins; a track they do NOT have shows what it looks like, from
@@ -284,13 +286,12 @@ const ServerCard = memo(function ServerCard({
           <span className="truncate" title={[s.track, s.trackLayout].filter(Boolean).join(" · ")}>
             {s.track || "-"}
           </span>
-          {cat && (
-            <>
-              <span className="opacity-40">·</span>
-              <span className="truncate">{cat}</span>
-            </>
-          )}
         </div>
+        {classes && (
+          <p className="text-[11px] leading-snug text-faint" title={classes}>
+            {classes}
+          </p>
+        )}
         <div className="flex flex-wrap items-center gap-1.5">
           {s.hidden && (
             <Badge variant="count" title={t("serverBrowser.hiddenBecause", { reason: s.hidden })}>

@@ -47,6 +47,7 @@ import { formatPrice, openShopUrl } from "../../api/shop";
 import { isFull } from "@/lib/useServerQueue";
 import { guessFor, rememberGuess, useTrackGuesses } from "./trackGuesses";
 import { joinAction } from "./joinAction";
+import { serverClasses } from "@/lib/serverClasses";
 
 /**
  * Everything one server publishes about itself.
@@ -575,7 +576,7 @@ const ServerDetail = ({
           title={t("serverBrowser.rules")}
           facts={[
             { label: t("serverBrowser.bikes"), value: list(s.bikes) },
-            { label: t("serverBrowser.categories"), value: list(s.categories) },
+            { label: t("serverBrowser.categories"), value: list(serverClasses(s.categories)) },
             { label: t("serverBrowser.rating"), value: s.rating },
             { label: t("serverBrowser.raceLength"), value: s.raceLength },
             { label: t("serverBrowser.changingWeather"), value: flag(s.realisticWeather) },

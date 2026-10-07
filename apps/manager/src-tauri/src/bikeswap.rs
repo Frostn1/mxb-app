@@ -373,6 +373,25 @@ engine
         ));
     }
 
+    /// A multi-class server takes a bike of ANY listed class, not only the first. The list is
+    /// the MXB server's real `[event] category` as its GETINFO reply carries it.
+    #[test]
+    fn a_multi_class_server_accepts_every_listed_class() {
+        let classes: Vec<String> = "MX1/MX1 OEM/MX2/MX2 OEM".split('/').map(String::from).collect();
+        let mk = |class: &str| BikeIdentity {
+            id: "b".into(),
+            name: "b".into(),
+            class: class.into(),
+            path: String::new(),
+        };
+        for class in ["MX1", "MX1 OEM", "MX2", "mx2 oem"] {
+            assert!(server_accepts(&mk(class), &classes, &[]), "{class} must be accepted");
+        }
+        assert!(!server_accepts(&mk("MX3 OEM"), &classes, &[]));
+        let bikes = vec![mk("MX3 OEM"), mk("MX2 OEM")];
+        assert_eq!(compatible_bike(&bikes, &classes, &[]).unwrap().class, "MX2 OEM");
+    }
+
     #[test]
     fn compatible_bike_uses_the_scan_order() {
         let mk = |id: &str, class: &str| BikeIdentity {
