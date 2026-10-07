@@ -56,6 +56,7 @@ export default function ModCard({
     <ContextMenu>
       <ContextMenuTrigger asChild>
         <button
+          data-tour="mod-card"
           onClick={onOpen}
           className={cn(
             "group relative flex h-[178px] cursor-default flex-col overflow-hidden rounded-xl bg-card text-left transition-all",

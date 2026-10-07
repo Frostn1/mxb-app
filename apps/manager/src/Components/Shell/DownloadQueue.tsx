@@ -44,6 +44,7 @@ export default function DownloadQueue({ onOpenDownloads }: { onOpenDownloads: ()
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <button
+          data-tour="download-queue"
           title={t("downloads.open")}
           aria-label={t("downloads.open")}
           className="relative grid size-[30px] cursor-default place-items-center transition-colors hover:text-foreground"

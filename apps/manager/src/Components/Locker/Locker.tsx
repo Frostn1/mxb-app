@@ -490,7 +490,7 @@ export default function Locker() {
                   {rows.length}
                 </span>
               </div>
-              <div className="min-h-0 flex-1 overflow-y-auto">
+              <div data-tour="locker-bikes" className="min-h-0 flex-1 overflow-y-auto">
                 {rows.map((r) => {
                   const on = (picked ?? rows[0]?.bike) === r.bike;
                   return (

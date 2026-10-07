@@ -7,26 +7,14 @@ import {
   useRef,
   useState,
 } from "react";
-import {
-  Snowflake,
-  Compass,
-  Library as LibraryIcon,
-  Bike,
-  Shirt,
-  RefreshCw,
-  Settings as SettingsIcon,
-  Check,
-  ArrowLeft,
-  ArrowRight,
-} from "lucide-react";
-import type { LucideIcon } from "lucide-react";
+import { ArrowLeft, ArrowRight } from "lucide-react";
 import { Button } from "@frost/shared/Components/ui/button";
 import { cn } from "@frost/shared/lib/utils";
-import { useT, type TKey } from "@/i18n";
+import { useT } from "@/i18n";
 import { useConfig } from "@frost/shared/Context/Config";
-import type { GameCaps } from "@frost/shared/types";
 import type { DashboardView } from "../Shell/nav";
 import { Plate } from "../Shell/Brand";
+import { stepsFor } from "./steps";
 
 /** Bumped when the tour changes enough to warrant showing it again. */
 export const TOUR_DONE_KEY = "mxb:tourDone:v1";
@@ -38,75 +26,6 @@ interface TourContextValue {
 
 export const TourContext = createContext<TourContextValue>({ startTour: () => {} });
 export const useTour = () => useContext(TourContext);
-
-interface Step {
-  /** View to switch to before highlighting, so the real screen sits behind the spotlight. */
-  view?: DashboardView;
-  /** CSS selector of the element to spotlight. Omit for a centered, un-anchored step. */
-  selector?: string;
-  icon: LucideIcon;
-  title: TKey;
-  body: TKey;
-  /** Capability the active game must have for this step to apply. A step that
-   *  spotlights a nav item the game doesn't show would highlight nothing. */
-  cap?: keyof GameCaps;
-}
-
-const STEPS: Step[] = [
-  {
-    icon: Snowflake,
-    title: "tour.welcomeTour.title",
-    body: "tour.welcomeTour.body",
-  },
-  {
-    view: "browse",
-    selector: '[data-tour="browse"]',
-    icon: Compass,
-    title: "tour.browse.title",
-    body: "tour.browse.body",
-  },
-  {
-    view: "library",
-    selector: '[data-tour="library"]',
-    icon: LibraryIcon,
-    title: "tour.library.title",
-    body: "tour.library.body",
-  },
-  {
-    view: "locker",
-    cap: "viewer",
-    selector: '[data-tour="locker"]',
-    icon: Bike,
-    title: "tour.locker.title",
-    body: "tour.locker.body",
-  },
-  {
-    view: "presets",
-    selector: '[data-tour="presets"]',
-    icon: Shirt,
-    title: "tour.presets.title",
-    body: "tour.presets.body",
-  },
-  {
-    selector: '[data-tour="frostmod"]',
-    icon: RefreshCw,
-    title: "tour.frostmod.title",
-    body: "tour.frostmod.body",
-    cap: "frostmod",
-  },
-  {
-    view: "settings",
-    selector: '[data-tour="settings"]',
-    icon: SettingsIcon,
-    title: "tour.settings.title",
-    body: "tour.settings.body",
-  },
-  {
-    icon: Check,
-    title: "tour.done.title",
-    body: "tour.done.body",
-  },
-];
 
 interface Rect {
   top: number;
@@ -147,10 +66,7 @@ export default function Tour({ navigate, onDone }: TourProps) {
   const { game } = useConfig();
   // Only the steps whose target this game actually shows. A spotlight on a nav entry that
   // isn't rendered dims the screen and points at nothing.
-  const steps = useMemo(
-    () => STEPS.filter((s) => !s.cap || game.caps[s.cap]),
-    [game],
-  );
+  const steps = useMemo(() => stepsFor(game.caps), [game]);
   const t = useT();
   const [index, setIndex] = useState(0);
   const [rect, setRect] = useState<Rect | null>(null);
@@ -182,11 +98,14 @@ export default function Tour({ navigate, onDone }: TourProps) {
       const r = el.getBoundingClientRect();
       setRect({ top: r.top, left: r.left, width: r.width, height: r.height });
     };
-    const timer = window.setTimeout(measure, 70);
-    window.addEventListener("resize", measure);
+    // Targets inside a list (a mod card) only exist once the catalog has answered, so a
+    // miss is retried a couple of times before the step settles for a centred bubble.
+    const timers = [70, 500, 1400].map((ms) => window.setTimeout(measure, ms));
+    const onResize = () => void measure();
+    window.addEventListener("resize", onResize);
     return () => {
-      window.clearTimeout(timer);
-      window.removeEventListener("resize", measure);
+      timers.forEach((id) => window.clearTimeout(id));
+      window.removeEventListener("resize", onResize);
     };
   }, [index, step.selector]);
 
