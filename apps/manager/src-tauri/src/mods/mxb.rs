@@ -517,24 +517,29 @@ pub async fn search(
         ModSort::Newest
     };
 
-    let items = match sort {
-        ModSort::Newest => listing(q, category_id, Page::Number(page)).await,
-        ModSort::Oldest => oldest(q, category_id, page).await,
-        // `popular_range` is Some for every remaining variant.
-        _ => popular(category_id, page, sort.popular_range().unwrap_or("all")).await,
+    let listing_fut = async {
+        match sort {
+            ModSort::Newest => listing(q, category_id, Page::Number(page)).await,
+            ModSort::Oldest => oldest(q, category_id, page).await,
+            // `popular_range` is Some for every remaining variant.
+            _ => popular(category_id, page, sort.popular_range().unwrap_or("all")).await,
+        }
     };
 
-    // The site publishes no author through its API — see `fill_authors`. Every listing gets
-    // whatever the feed has already taught us; only a date-ordered one asks it for more.
+    // The site publishes no author through its API — see `warm_feed_authors`. A date-ordered
+    // listing asks the feed for them *while* the listing is being fetched rather than after
+    // it: the feed pages depend only on which page was asked for, and waiting for them one
+    // after another behind the listing is what made "Load more" slow.
+    let items = if matches!(sort, ModSort::Newest) {
+        let (items, ()) = futures_util::join!(listing_fut, warm_feed_authors(category_id, q, page));
+        items
+    } else {
+        listing_fut.await
+    };
+
+    // Every listing gets whatever the feed has already taught us.
     let mut items = items?;
-    fill_authors(
-        &mut items,
-        category_id,
-        q,
-        page,
-        matches!(sort, ModSort::Newest),
-    )
-    .await;
+    apply_known_authors(&mut items);
     Ok(items)
 }
 
@@ -891,44 +896,60 @@ static FEED_AUTHORS: std::sync::OnceLock<std::sync::Mutex<HashMap<String, String
 /// [`PER_PAGE`] — which is why a listing needs two feed pages to cover itself.
 const FEED_PER_PAGE: u32 = 20;
 
-/// Fill in the bylines the API refuses to give.
+/// Feed pages that have already been read into [`FEED_AUTHORS`], so paging back over a
+/// listing (or a cached refresh) costs no request at all.
+static FEED_PAGES_DONE: std::sync::OnceLock<std::sync::Mutex<std::collections::HashSet<String>>> =
+    std::sync::OnceLock::new();
+
+/// How long the feed may take before the listing is returned without bylines. They decorate
+/// a card; a slow feed must not hold the cards back.
+const FEED_BUDGET: Duration = Duration::from_secs(4);
+
+/// The feed pages (first, last) that hold the posts of listing page `page`.
+fn feed_pages_for(page: u32, per: u32, feed_per: u32) -> (u32, u32) {
+    let first = page.saturating_sub(1) * per;
+    let from = first / feed_per + 1;
+    let to = (first + per).div_ceil(feed_per);
+    (from, to.max(from))
+}
+
+/// Give each item the byline the feed has taught us, if any.
+fn apply_known_authors(items: &mut [ModSummary]) {
+    let cache = FEED_AUTHORS.get_or_init(Default::default);
+    if let Ok(map) = cache.lock() {
+        for m in items.iter_mut() {
+            if m.author.is_none() {
+                m.author = map.get(&m.link).cloned();
+            }
+        }
+    }
+}
+
+/// Learn the bylines the API refuses to give.
 ///
 /// mxb-mods.com has closed everything that would name an author: `_embed=author` answers
 /// `rest_user_invalid_id`, the users endpoint is shut, `class_list` carries no author class,
 /// and `/?author=<id>` is a 500. What it does still publish is its RSS feed, and every item
 /// in that carries a `dc:creator`.
 ///
-/// So the feed is the source. One or two requests per page of results rather than one per
-/// card, matched on the post's own permalink, and remembered — scrolling the catalog warms
-/// the cache rather than paying for it again.
-///
-/// Best effort throughout: a feed that fails, or a sort the feed cannot reproduce, leaves the
-/// cards exactly as they were before this existed.
-async fn fill_authors(items: &mut [ModSummary], category_id: u32, q: &str, page: u32, fetch: bool) {
+/// So the feed is the source: one or two requests per page of results rather than one per
+/// card, matched on the post's own permalink, and remembered. The pages are requested
+/// together and within [`FEED_BUDGET`], and this runs beside the listing request — see
+/// [`search`]. Best effort throughout: a feed that fails or is slow leaves the cards as they
+/// were before this existed.
+async fn warm_feed_authors(category_id: u32, q: &str, page: u32) {
     let cache = FEED_AUTHORS.get_or_init(Default::default);
-    let known = |items: &mut [ModSummary]| {
-        if let Ok(map) = cache.lock() {
-            for m in items.iter_mut() {
-                if m.author.is_none() {
-                    m.author = map.get(&m.link).cloned();
-                }
-            }
-        }
-    };
-    known(items);
-    // The feed is date-descending and nothing else, so it can only be *asked* about a listing
-    // in that order. Every other sort still gets whatever browsing has already learned.
-    if !fetch || items.iter().all(|m| m.author.is_some()) {
-        return;
-    }
+    let done = FEED_PAGES_DONE.get_or_init(Default::default);
 
     // Which feed pages hold the posts this listing is showing.
     let per: u32 = PER_PAGE.parse().unwrap_or(24);
-    let first = page.saturating_sub(1) * per;
-    let from = first / FEED_PER_PAGE + 1;
-    let to = (first + per).div_ceil(FEED_PER_PAGE);
+    let (from, to) = feed_pages_for(page, per, FEED_PER_PAGE);
 
-    for m in from..=to.max(from) {
+    let fetches = (from..=to).filter_map(|m| {
+        let key = format!("{category_id}|{q}|{m}");
+        if done.lock().map(|d| d.contains(&key)).unwrap_or(false) {
+            return None;
+        }
         let mut params: Vec<(&str, String)> = vec![("paged", m.to_string())];
         if category_id != 0 {
             params.push(("cat", category_id.to_string()));
@@ -939,23 +960,27 @@ async fn fill_authors(items: &mut [ModSummary], category_id: u32, q: &str, page:
         // Built into the URL rather than passed alongside it: the webview path reads a page
         // by URL alone and would drop them.
         let base = format!("{}{}", mxb_session::base(), obfstr!("/feed/"));
-        let Ok(url) = reqwest::Url::parse_with_params(&base, &params) else {
-            return;
-        };
+        let url = reqwest::Url::parse_with_params(&base, &params).ok()?;
+        Some(async move {
+            let resp = get_page(url.as_str()).await.ok()?;
+            resp.is_success().then(|| (key, feed_creators(&resp.body)))
+        })
+    });
 
-        let Ok(resp) = get_page(url.as_str()).await else {
-            return;
-        };
-        if !resp.is_success() {
-            return;
-        }
+    let all = futures_util::future::join_all(fetches);
+    let Ok(results) = tokio::time::timeout(FEED_BUDGET, all).await else {
+        return;
+    };
+    for (key, creators) in results.into_iter().flatten() {
         if let Ok(mut map) = cache.lock() {
-            for (link, name) in feed_creators(&resp.body) {
+            for (link, name) in creators {
                 map.insert(link, name);
             }
         }
+        if let Ok(mut d) = done.lock() {
+            d.insert(key);
+        }
     }
-    known(items);
 }
 
 /// `(permalink, creator)` for each item of an RSS feed.
@@ -1003,7 +1028,18 @@ fn embedded_author(p: &Value) -> Option<String> {
 
 #[cfg(test)]
 mod feed_tests {
-    use super::feed_creators;
+    use super::{feed_creators, feed_pages_for};
+
+    #[test]
+    fn feed_pages_cover_a_listing_page() {
+        // 24 per listing page over a 20-per-page feed: page 1 is feed pages 1-2, page 2 is
+        // posts 24..48 so feed pages 2-3, page 3 is 48..72 so feed pages 3-4.
+        assert_eq!(feed_pages_for(1, 24, 20), (1, 2));
+        assert_eq!(feed_pages_for(2, 24, 20), (2, 3));
+        assert_eq!(feed_pages_for(3, 24, 20), (3, 4));
+        // Page 0 must not underflow.
+        assert_eq!(feed_pages_for(0, 24, 20), (1, 2));
+    }
 
     /// The shape the site's own feed comes in, down to the CDATA and the entity.
     const FEED: &str = r#"<rss><channel>

@@ -5,6 +5,7 @@
 ### Fixed
 - **Mod page: back button, site link, and Copy link.** A mod's page has its back arrow again, a "View on site" button for the mod's page on the catalog, and Copy link now copies that original page URL instead of an open.mxbsecure.com link.
 - **Mods grid fills a maximised window.** The grid keeps loading pages until the window is full instead of stopping after 24 cards, and its cards grow on large windows.
+- **Faster Load more on mxb-mods searches.** The author lookup no longer waits behind the listing and runs beside it, with its pages fetched together and a 4 second limit.
 
 ### Changed
 - **Plugins are free, and plugin keys are gone.** Every plugin, MXB Replay included, installs with your account. Settings → Plugins no longer has a Redeem box.
