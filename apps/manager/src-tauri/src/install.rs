@@ -1379,21 +1379,54 @@ fn pick_archive(names: &[&str]) -> Option<usize> {
     }
 }
 
+/// Statuses a download host answers while it is busy rather than because the file is gone:
+/// Drive in particular rate-limits with 429 and sheds load with 5xx, and both pass in seconds.
+/// Without this a single such answer failed the whole mod after zero retries.
+fn is_transient_status(status: reqwest::StatusCode) -> bool {
+    matches!(status.as_u16(), 408 | 429 | 500 | 502 | 503 | 504)
+}
+
+/// How long to wait before attempt `attempt + 1`: the host's `Retry-After` (seconds) when it
+/// gave one, capped so a huge value cannot hang the install, else a growing backoff.
+fn retry_delay(attempt: u32, retry_after: Option<&str>) -> Duration {
+    const CAP_MS: u64 = 10_000;
+    let asked = retry_after
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .map(|s| s.saturating_mul(1000));
+    Duration::from_millis(asked.unwrap_or(600 * attempt as u64).min(CAP_MS))
+}
+
 async fn get_with_retry(client: &Client, url: &str) -> anyhow::Result<reqwest::Response> {
     const ATTEMPTS: u32 = 3;
-    let mut last: Option<reqwest::Error> = None;
+    let mut last: Option<anyhow::Error> = None;
     for attempt in 1..=ATTEMPTS {
-        match client.get(url).send().await {
+        let wait = match client.get(url).send().await {
+            Ok(resp) if is_transient_status(resp.status()) => {
+                let wait = retry_delay(
+                    attempt,
+                    resp.headers()
+                        .get(reqwest::header::RETRY_AFTER)
+                        .and_then(|v| v.to_str().ok()),
+                );
+                last = Some(
+                    resp.error_for_status()
+                        .expect_err("a transient status is an error status")
+                        .into(),
+                );
+                wait
+            }
             Ok(resp) => return Ok(resp.error_for_status()?),
             Err(e) => {
-                last = Some(e);
-                if attempt < ATTEMPTS {
-                    tokio::time::sleep(Duration::from_millis(600 * attempt as u64)).await;
-                }
+                last = Some(e.into());
+                retry_delay(attempt, None)
             }
+        };
+        if attempt < ATTEMPTS {
+            tokio::time::sleep(wait).await;
         }
     }
-    Err(anyhow::Error::new(last.expect("had an error"))
+    Err(last
+        .expect("had an error")
         .context("could not reach the download host after 3 attempts"))
 }
 
@@ -1421,12 +1454,11 @@ async fn open_body(client: &Client, url: &str) -> anyhow::Result<reqwest::Respon
                     .to_string()
             }))
         })?;
-        resp = client
-            .get(&action)
-            .query(&params)
-            .send()
-            .await?
-            .error_for_status()?;
+        // The confirm form is the step Drive rate-limits hardest, so it gets the same
+        // retries as the first request.
+        let confirm = reqwest::Url::parse_with_params(&action, &params)
+            .map_err(|e| anyhow::anyhow!("Google Drive sent an unusable confirm link ({e})"))?;
+        resp = get_with_retry(client, confirm.as_str()).await?;
     }
 
     if content_type(&resp).starts_with("text/html") {
@@ -2866,6 +2898,45 @@ mod tests {
     use super::*;
 
     /// The frontend's `AUTO_SUBPATH`, however it's written, and nothing else.
+    #[test]
+    fn busy_host_statuses_are_retried_and_missing_files_are_not() {
+        use reqwest::StatusCode as S;
+        for ok in [S::TOO_MANY_REQUESTS, S::SERVICE_UNAVAILABLE, S::BAD_GATEWAY, S::INTERNAL_SERVER_ERROR] {
+            assert!(is_transient_status(ok), "{ok}");
+        }
+        for no in [S::NOT_FOUND, S::FORBIDDEN, S::UNAUTHORIZED, S::OK] {
+            assert!(!is_transient_status(no), "{no}");
+        }
+    }
+
+    #[test]
+    fn retry_after_is_honoured_but_capped() {
+        assert_eq!(retry_delay(1, Some("3")), Duration::from_secs(3));
+        assert_eq!(retry_delay(1, Some("86400")), Duration::from_secs(10));
+        assert_eq!(retry_delay(2, None), Duration::from_millis(1200));
+        assert_eq!(retry_delay(2, Some("soon")), Duration::from_millis(1200));
+    }
+
+    #[test]
+    fn confirm_form_params_become_a_query() {
+        let html = r#"<form id="download-form" action="https://drive.usercontent.google.com/download" method="get">
+            <input type="hidden" name="id" value="ABC"><input type="hidden" name="confirm" value="t">
+            <input type="hidden" name="uuid" value="u-1"></form>"#;
+        let (action, params) = parse_gdrive_confirm(html).unwrap();
+        let url = reqwest::Url::parse_with_params(&action, &params).unwrap();
+        assert_eq!(
+            url.as_str(),
+            "https://drive.usercontent.google.com/download?id=ABC&confirm=t&uuid=u-1"
+        );
+    }
+
+    #[test]
+    fn a_gdrive_quota_page_is_named() {
+        let html = "<html><head><title>Google Drive - Quota exceeded</title></head></html>";
+        assert!(gdrive_page_error(html).unwrap().contains("download limit"));
+        assert!(gdrive_page_error("<title>Hello</title>").is_none());
+    }
+
     #[test]
     fn only_the_auto_path_routes_by_content() {
         assert!(is_auto_subpath("auto"));
