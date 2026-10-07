@@ -14,7 +14,9 @@ import {
   addToLibrary,
   AUTO_SUBPATH,
   cancelInstall,
+  getModsRoot,
   importFile,
+  isGameRunning,
   mxbsecureAutoUnlock,
   onFrostmodReload,
   onInstallProgress,
@@ -27,6 +29,7 @@ import type { DownloadSource, InstallStage, ReloadOutcome } from "@frost/shared/
 import { useDownloads } from "./Downloads";
 import { useDropReview } from "./DropReview";
 import { useT } from "@/i18n";
+import { installNoteKey } from "../lib/installNote";
 
 /** Where the bytes come from — a resolvable host, a file the user picked, or something already
  *  bought on one of the two stores.
@@ -415,11 +418,23 @@ export function InstallProvider({
       patch(key, (cur) => ({ ...cur, stage: "done" }));
       remember("installed", null);
       onInstalledRef.current?.();
+      // Both answers are cheap and best-effort: a failed probe must never turn a finished
+      // install into an error, it only costs the toast its extra lines.
+      const [gameUp, root] = await Promise.all([
+        isGameRunning().catch(() => false),
+        getModsRoot().catch(() => null),
+      ]);
       toast.success(tRef.current("install.installed", { title }), {
-        description:
-          frostOutcome === "signaled"
-            ? tRef.current("install.reloadedDesc")
-            : tRef.current("install.addedDesc"),
+        description: (
+          <>
+            {tRef.current(installNoteKey(frostOutcome, gameUp))}
+            {root?.path && (
+              <span className="mt-1 block break-all font-mono text-[11px] opacity-70">
+                {tRef.current("install.installedTo", { path: root.path })}
+              </span>
+            )}
+          </>
+        ),
       });
       // Auto-retire the sidebar/detail card a few seconds after success.
       clearTimers.current.set(

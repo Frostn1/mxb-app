@@ -1741,6 +1741,8 @@ export const en = {
   "install.installed": "{{title}} installed",
   "install.reloadedDesc": "Game reloaded via FrostMod — it's live now.",
   "install.addedDesc": "Added to your library.",
+  "install.restartDesc": "Added to your library. Restart {{game}} to see it in-game.",
+  "install.installedTo": "Installed to {{path}}",
   "install.failed": "Install failed — {{title}}",
   "install.openModPage": "Open the mod's page",
   "install.clickToOpen": "Click to open the mod's page",

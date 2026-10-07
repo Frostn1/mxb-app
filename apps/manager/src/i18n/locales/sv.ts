@@ -1731,6 +1731,8 @@ export const sv: Translation = {
   "install.installed": "{{title}} installerad",
   "install.reloadedDesc": "Spelet laddas om via FrostMod — det är live nu.",
   "install.addedDesc": "Tillagd till ditt bibliotek.",
+  "install.restartDesc": "Tillagd till ditt bibliotek. Starta om {{game}} för att se det i spelet.",
+  "install.installedTo": "Installerat i {{path}}",
   "install.failed": "Installera misslyckades — {{title}}",
   "install.openModPage": "Öppna mods sida",
   "install.clickToOpen": "Klicka för att öppna mods sida",

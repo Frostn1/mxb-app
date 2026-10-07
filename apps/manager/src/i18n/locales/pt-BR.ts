@@ -1772,6 +1772,8 @@ export const ptBR: Translation = {
   "install.installed": "{{title}} instalado",
   "install.reloadedDesc": "Jogo recarregado pelo FrostMod — já está valendo.",
   "install.addedDesc": "Adicionado à sua biblioteca.",
+  "install.restartDesc": "Adicionado à sua biblioteca. Reinicie {{game}} para ver no jogo.",
+  "install.installedTo": "Instalado em {{path}}",
   "install.failed": "Falha na instalação — {{title}}",
   "install.openModPage": "Abrir a página do mod",
   "install.clickToOpen": "Clique para abrir a página do mod",
