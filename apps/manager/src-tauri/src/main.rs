@@ -432,6 +432,13 @@ async fn search_mods(
     .await
 }
 
+/// How big a mod's download is, from its host, before anything is downloaded. `None` when
+/// the host will not say; the interface then shows no size at all.
+#[tauri::command]
+async fn probe_download_size(url: String, host: String) -> Option<u64> {
+    mods::size_probe::probe(&url, &host).await
+}
+
 /// Community scores for the mods currently on screen, keyed by post id. Ids the site
 /// wouldn't answer for are left out rather than erroring — the cards just show no stars.
 #[tauri::command]
@@ -9015,6 +9022,7 @@ fn main() {
             launch_stall_reason,
             mxb_core::viewer::app_platform,
             search_mods,
+            probe_download_size,
             get_mod_detail,
             get_mod_ratings,
             mods_verify_reset,

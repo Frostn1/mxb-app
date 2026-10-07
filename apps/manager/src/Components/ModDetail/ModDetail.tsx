@@ -64,6 +64,7 @@ import { cn } from "@frost/shared/lib/utils";
 import { useConfig } from "@frost/shared/Context/Config";
 import { copyText } from "../../lib/clipboard";
 import { modSourcePageUrl } from "../../lib/modSourcePage";
+import { useDownloadSize } from "../../lib/useDownloadSize";
 import { toast } from "sonner";
 import { ActionBar, StateChip, WishButton } from "../ModPage/ActionBar";
 import { useWishlist, wishId } from "../../lib/useWishlist";
@@ -232,6 +233,8 @@ export default function ModDetail({
   // What the dialog would start on — the best playable file, so the card below the bar
   // describes the download that's actually about to run.
   const primary = mirrors[defaultMirrorIndex(mirrors)] ?? null;
+  // Asked of the host, since the catalog states no size. Blank until it answers.
+  const sizeText = useDownloadSize(primary);
   // Server builds aren't mirrors of the playable file, so they don't belong in this count.
   const mirrorNames = [
     ...new Set(mirrors.filter((m) => !m.isServer).map((m) => m.host)),
@@ -422,6 +425,7 @@ export default function ModDetail({
   const figures: Figure[] = [
     { label: t("shopCatalog.updated"), value: formatDate(detail.date) },
     ...(detail.version ? [{ label: "Version", value: detail.version }] : []),
+    ...(sizeText ? [{ label: t("modDetail.size"), value: sizeText }] : []),
     ...(detail.categories.length
       ? [{ label: t("modDetail.categoryLabel"), value: detail.categories.slice(0, 2).join(", ") }]
       : []),

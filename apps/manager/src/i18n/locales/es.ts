@@ -603,6 +603,7 @@ export const es: Translation = {
   "modsVerify.timedOut": "La verificación de {{site}} no se completó a tiempo. Pulsa Reintentar para volver a verla.",
   "modDetail.copied": "Copiado",
   "modDetail.copyLink": "Copiar enlace",
+  "modDetail.size": "Tamaño",
   "modDetail.copyLinkHint": "Copiar el enlace a la página de este mod en {{site}}",
   "modDetail.linkCopied": "Enlace copiado",
   "modDetail.copyLinkFailed": "No se pudo copiar el enlace.",

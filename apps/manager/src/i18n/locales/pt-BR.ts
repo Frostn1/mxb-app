@@ -605,6 +605,7 @@ export const ptBR: Translation = {
   "modsVerify.timedOut": "A verificação do {{site}} não foi concluída a tempo. Clique em Tentar de novo para vê-la outra vez.",
   "modDetail.copied": "Copiado",
   "modDetail.copyLink": "Copiar link",
+  "modDetail.size": "Tamanho",
   "modDetail.copyLinkHint": "Copiar o link da página deste mod em {{site}}",
   "modDetail.linkCopied": "Link copiado",
   "modDetail.copyLinkFailed": "Não foi possível copiar o link.",
