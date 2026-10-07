@@ -162,6 +162,7 @@ import UninstallSetting from "@frost/shared/Components/Uninstall/UninstallSettin
 import { cn } from "@frost/shared/lib/utils";
 import { Mxbmrp3SettingsRow } from "../Mxbmrp3/Mxbmrp3Suggestion";
 
+import { defaultFolderInUse } from "../../lib/modsFolder";
 const REPO_URL = "https://github.com/Frostn1/mxb-app";
 // Where the app comes from, as far as anyone using it is concerned. GitHub is still where the
 // files and the changelog sit, but nobody has to start there.
@@ -404,6 +405,7 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
   // The two folders are easy to mix up — the game folder in Documents and the Steam install
   // — so each is checked as it's shown, and a wrong one says what belongs there instead.
   const [modsIssue, setModsIssue] = useState<string | null>(null);
+  const [modsElsewhere, setModsElsewhere] = useState<string | null>(null);
   useEffect(() => {
     let cancelled = false;
     const path = config.modsPath?.trim();
@@ -412,11 +414,23 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
       return;
     }
     inspectGameFolder(path)
-      .then((check) => {
-        if (!cancelled) setModsIssue(check.exists && !check.usable ? check.path : null);
+      .then(async (check) => {
+        if (cancelled) return;
+        setModsIssue(check.exists && !check.usable ? check.path : null);
+        // A second look, only when the saved folder isn't where the game reads by default:
+        // is there a real game folder there too? That pair is how installs end up in a copy
+        // the game never opens.
+        const other =
+          check.usable && !check.matchesExpected && check.expected
+            ? await inspectGameFolder(check.expected).catch(() => null)
+            : null;
+        if (!cancelled) setModsElsewhere(defaultFolderInUse(check, other));
       })
       .catch(() => {
-        if (!cancelled) setModsIssue(null);
+        if (!cancelled) {
+          setModsIssue(null);
+          setModsElsewhere(null);
+        }
       });
     return () => {
       cancelled = true;
@@ -1416,6 +1430,17 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
               <p className="-mt-0.5 flex items-start gap-1.5 text-[11.5px] leading-relaxed text-warning">
                 <TriangleAlert className="mt-[2px] size-3.5 flex-none" />
                 <span>{t("settings.modsFolderNotGame", { game: game.display })}</span>
+              </p>
+            )}
+            {modsElsewhere && !modsIssue && (
+              <p className="-mt-0.5 flex items-start gap-1.5 text-[11.5px] leading-relaxed text-warning">
+                <TriangleAlert className="mt-[2px] size-3.5 flex-none" />
+                <span className="break-words">
+                  {t("settings.modsFolderElsewhere", {
+                    game: game.display,
+                    expected: modsElsewhere,
+                  })}
+                </span>
               </p>
             )}
             <button
