@@ -657,6 +657,14 @@ export function searchMods(
   return invoke<ModSummary[]>("search_mods", { query, categoryId, page, sort });
 }
 
+/**
+ * How big a download link's file is, in bytes, asked of its host. `null` when the host will
+ * not say (a web page, an encrypted share, a folder) — show nothing in that case.
+ */
+export function probeDownloadSize(url: string, host: string): Promise<number | null> {
+  return invoke<number | null>("probe_download_size", { url, host });
+}
+
 export function getModDetail(slug: string): Promise<ModDetail> {
   return invoke<ModDetail>("get_mod_detail", { slug });
 }

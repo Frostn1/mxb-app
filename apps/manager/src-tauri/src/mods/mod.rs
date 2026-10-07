@@ -3,6 +3,7 @@ pub mod hubaccount;
 pub mod mxb;
 pub mod mxbshop;
 pub mod shop_catalog;
+pub mod size_probe;
 
 use serde::{Deserialize, Serialize};
 

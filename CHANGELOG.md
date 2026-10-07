@@ -10,6 +10,9 @@
 ### Changed
 - **Plugins are free, and plugin keys are gone.** Every plugin, MXB Replay included, installs with your account. Settings → Plugins no longer has a Redeem box.
 
+### Added
+- **Download size before you install.** A mod's page and its install dialog show how big the download is, asked of the file host. Nothing is shown when the host will not say.
+
 ## 2026-10-04 — v0.19.3 — Install folder fixes, OneDrive and ReShade checks, game logs in exports
 
 ## 2026-10-04 — v0.19.2 — Friends, model-swap crash fix, other-drive installs, honest ping
