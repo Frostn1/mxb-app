@@ -89,7 +89,8 @@ import {
 } from "./roster";
 import { VoiceRoom } from "./voiceroom";
 import { PaintRoom } from "./paintroom";
-import { ingestResults, leaderboard as ratingLeaderboard, myRatings, serverForRatingToken } from "./rating";
+import { ingestResults, leaderboard as ratingLeaderboard, myRatings, ratedClasses, serverForRatingToken } from "./rating";
+import { isSeriesPath, pruneSeriesRegistrations, seriesRoutes } from "./series";
 import { viewOnlyOn, listPolicies, lockKey, minisignPublicKey, putPolicy, signedLocks, wantsViewOnly } from "./paintpolicy";
 import {
   liveKey,
@@ -153,6 +154,7 @@ export default {
         pruneQueue(env),
         pruneFriendPresence(env),
         pruneLivePaints(env),
+        pruneSeriesRegistrations(env),
         resolveTrackCatalog(env),
       ]).then(
         () => undefined,
@@ -245,6 +247,8 @@ async function route(request: Request, env: Env): Promise<Response> {
 
   // The public leaderboard: no bans, no RD/volatility, no GUIDs. Nothing here is secret, so
   // it stays above the account gate the way `/v1/servers` and `/v1/tracks` do.
+  // CORS-open because mxbsecure.com/leaderboard reads it from the browser, and nothing in it is
+  // anyone's but the public's.
   if (method === "GET" && path === "/v1/rating/leaderboard") {
     const result = await ratingLeaderboard(
       env,
@@ -252,8 +256,17 @@ async function route(request: Request, env: Env): Promise<Response> {
       Number(url.searchParams.get("limit") ?? "50"),
       false,
     );
-    return json(result.status, result.body);
+    return publicJson(result.status, result.body);
   }
+  if (method === "GET" && path === "/v1/rating/classes") {
+    const result = await ratedClasses(env);
+    return publicJson(result.status, result.body);
+  }
+
+  // Public series (`series.ts`): published standings and the registration form for
+  // mxbsecure.com/series, plus the publish and registration-review calls MSM makes with a
+  // per-series token. Above the account gate: none of it is an account's.
+  if (isSeriesPath(path)) return seriesRoutes(request, url, env);
 
   // The signed list of locked paints, for a managed mxbserver with `[paints] enforce_locks`.
   // Authenticated by the server's own rating token, like the push above; the public key that
@@ -2866,5 +2879,17 @@ function json(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
     status,
     headers: { "content-type": "application/json" },
+  });
+}
+
+/** Public, cacheable for a minute, readable from any origin. */
+function publicJson(status: number, body: unknown): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: {
+      "content-type": "application/json",
+      "access-control-allow-origin": "*",
+      "cache-control": status === 200 ? "public, max-age=60" : "no-store",
+    },
   });
 }

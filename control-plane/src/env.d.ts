@@ -141,6 +141,10 @@ interface Env {
     /** Rate limit on `/v1/friends/*`, per account and bucket (read or write). Optional so tests
      *  and a bare `wrangler dev` run without it. */
     FRIENDS_LIMITER?: RateLimit;
+    /** Rate limit on `/v1/series/{slug}/register`, per client address: the one anonymous write
+     *  on the series surface (`series.ts`). Optional so tests and a bare `wrangler dev` run
+     *  without it. */
+    REGISTER_LIMITER?: RateLimit;
     /** One paint-sync room per server key (`paintroom.ts`). Optional so tests run without it. */
     PAINT_ROOMS?: DurableObjectNamespace;
     /** How the shop's catalogue dump is authenticated: `header:<name>`, `basic:<user>`,

@@ -22,10 +22,21 @@ import { adminAllowed } from "./usage";
 import { webSession } from "./websession";
 
 /** The site's origins, allowed to call these routes from a browser. */
-export const SITE_ORIGINS = ["https://mxbsecure.com", "https://www.mxbsecure.com"];
+export const SITE_ORIGINS = [
+  "https://mxbsecure.com",
+  "https://www.mxbsecure.com",
+  // The same site, served per section on its own host (mxbsecure-web routes by hostname).
+  "https://racing.mxbsecure.com",
+  "https://app.mxbsecure.com",
+  "https://studio.mxbsecure.com",
+  "https://frostmod.mxbsecure.com",
+  "https://replay.mxbsecure.com",
+  "https://coach.mxbsecure.com",
+  "https://about.mxbsecure.com",
+];
 
 /** A local build of the site. Only with `MXB_ALLOW_DEV_ORIGINS=1`, never in production. */
-const DEV_ORIGINS = ["http://localhost:5173", "http://127.0.0.1:5173"];
+const DEV_ORIGINS = ["http://localhost:5173", "http://127.0.0.1:5173", "http://racing.localhost:5173"];
 
 export function assetOrigins(env: Env): string[] {
   return env.MXB_ALLOW_DEV_ORIGINS === "1" ? [...SITE_ORIGINS, ...DEV_ORIGINS] : SITE_ORIGINS;

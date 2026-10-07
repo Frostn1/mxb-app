@@ -64,6 +64,12 @@ consequences fall out of that, and they're baked into the schema:
 | GET | `/v1/me/plugins` | bearer | What this account holds, each with a freshly signed license |
 | POST | `/v1/plugins/redeem` | bearer | Trade a key for months on a license |
 | GET | `/v1/plugins/:id/bundle` | bearer + license | The build itself, streamed rather than redirected to |
+| GET | `/v1/rating/leaderboard?class=`, `/v1/rating/classes` | — | Rider rating by class, and the classes that have one. CORS-open for mxbsecure.com/leaderboard. |
+| GET | `/v1/series`, `/v1/series/:slug` | — | Published series: standings (with each rider's rating, joined by GUID), rounds (done or dropped), the schedule, approved entries. Never a GUID. CORS-open, cached a minute. |
+| PUT/DELETE | `/v1/series/:slug` | series token | MSM publishing or unpublishing a series. Rider rows carry the GUID (stored privately for the joins); any other GUID-, Steam-ID- or UUID-shaped string refuses the whole body. |
+| POST | `/v1/series/:slug/register`, `/v1/web/series/:slug/register` | — / Steam sign-in | A rider asking to race. Anonymous entries are unverified until the operator links a GUID; signed-in ones take the GUID from the Steam ID. Per-address limiter, daily cap and honeypot on the anonymous one. |
+| GET/POST | `/v1/series/:slug/registrations[/:id]` | series token | The operator's list and approve/reject, from MSM. |
+| GET/POST | `/v1/web/admin/series` | Steam sign-in + admin | Reserve a slug and mint its publish token (shown once), rotate, unpublish, delete. |
 
 Enrollment by invite code stands in for Steam sign-in until there's an API key. `accounts`
 already carries a nullable `steam_id`, so adding Steam is a backfill rather than a rewrite

@@ -19,6 +19,7 @@ import { converterFile, CONVERTER_PREFIX, mayConvert } from "./converter";
 import { creatorSignupOpen, makeCreator, SIGNUP_CLOSED } from "./creators";
 import { lockPermit } from "./lockpermit";
 import { repairBySteamId } from "./steamlink";
+import { isWebSeriesPath, webSeriesRoutes } from "./series";
 import { steamResult } from "./page";
 import { isWebAdmin, isWebAdminPath, webAdminRoutes } from "./webadmin";
 import { isVerified, loginUrl, steamPersonaName, verifyAssertion } from "./steam";
@@ -66,6 +67,9 @@ export async function webRoutes(
   const method = request.method;
   const origin = allowedOrigin(request, env);
   const key = env.MXB_WEB_SESSION_KEY;
+
+  // Entering a series signed in: the GUID comes from this session's Steam ID (`series.ts`).
+  if (isWebSeriesPath(path)) return webSeriesRoutes(request, url, env, origin);
 
   if (
     method === "OPTIONS" &&
