@@ -9,6 +9,7 @@ import {
 } from "@frost/shared/api/mods";
 import type { ModRating, ModSummary } from "@frost/shared/types";
 import { clearListings, listingKey, readListing, writeListing } from "./listingCache";
+import { reportSearchMiss } from "./searchMiss";
 
 /** What one set of filters answered last time, kept by `listingCache`. */
 interface CachedPage {
@@ -126,6 +127,9 @@ export function useModListing(modType: ModType, enabled = true) {
     searchMods(debounced, categoryId, 1, activeSort)
       .then((res) => {
         writeListing<CachedPage>(key, { mods: res, hasMore: res.length >= SEARCH_PAGE_SIZE });
+        // Reported even when the effect was superseded: the query settled for the 350 ms
+        // debounce and genuinely found nothing. Deduped per session, text only.
+        if (res.length === 0 && debounced) reportSearchMiss(debounced, categoryId);
         if (cancelled) return;
         setMods(res);
         setHasMore(res.length >= SEARCH_PAGE_SIZE);

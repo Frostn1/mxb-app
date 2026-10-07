@@ -57,6 +57,13 @@ account, the app version, the operating system, which game is installed, and cou
 app, which is what makes it impossible for a path, a rider name or a mod title to end up in
 one. The same applies to the one-tap surveys the app sometimes shows.
 
+**Searches that find nothing**, under the same switch as the usage counters. When a search in
+Browse returns no results, the app sends the text you searched for (lowercased, at most 80
+characters) and which game it was for, so we can see which mods and sources are missing. It is
+sent once per search per session, with no install id, no account, no Steam id and no IP address
+stored with it, and it is counted per day, not logged per person. Searches that look like they
+contain an email address, a link, a path or a long number are dropped. Kept for 90 days.
+
 **Crash reports**, when MX Bikes closes on its own. The faulting module and offset, the call
 stack as addresses, the game build, the FrostMod and app versions, the track and server you
 were on, how many riders were in the session, how long the game had been running, and your
@@ -118,6 +125,7 @@ included. The upload expires on its own after a few days.
 | Module reports | 90 days |
 | Crash reports | Rider name and GUID wiped after 30 days, the row deleted after a year |
 | Usage counters and surveys | 400 days |
+| Searches that found nothing (text only) | 90 days |
 | Per-day request counters (the IP digests) | 3 days |
 | Server addresses and who reported seeing them | 30 days |
 | Purchases | While the content exists, because they are what makes it open |

@@ -46,6 +46,7 @@ import {
   windowPoll,
 } from "./survey";
 import { collectStats, windowApp, windowDays } from "./usage";
+import { collectMisses, missWindow } from "./searchmisses";
 import { webSession } from "./websession";
 import {
   action as serverAction,
@@ -131,6 +132,10 @@ export async function webAdminRoutes(
           200,
           await collectSurvey(env, surveyDays(url), Date.now(), windowApp(url), windowPoll(url)),
         );
+
+      // Browse searches in the MXB App that found nothing, for /insights on the site.
+      case "/v1/web/admin/search-misses":
+        return said(200, await collectMisses(env, missWindow(url), Date.now()));
 
       // The overview carries the rules as well: they are four rows in the same read, and a
       // second endpoint for them would be a second round trip for a tab switch.

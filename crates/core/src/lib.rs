@@ -46,6 +46,7 @@ pub mod pkz;
 pub mod plugins;
 pub mod replay;
 pub mod scenery;
+pub mod searchmiss;
 pub mod securesource;
 pub mod steamid;
 pub mod survey;

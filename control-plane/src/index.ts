@@ -78,6 +78,7 @@ import {
 import { claimDeviceAccount, iceServers, voiceRoom } from "./voice";
 import { adminAllowed, pruneUsage, reportUsage, usageStats } from "./usage";
 import { listPolls, pruneSurvey, reportAnswer, surveyStats } from "./survey";
+import { missStats, pruneSearchMisses, reportMiss } from "./searchmisses";
 import { masterStatus, pruneMasterProbes, reportMasterProbe } from "./masterstatus";
 import {
   claimRoster,
@@ -146,6 +147,7 @@ export default {
         pruneDeviceClaims(env),
         pruneUsage(env),
         pruneSurvey(env),
+        pruneSearchMisses(env),
         pruneMasterProbes(env),
         pruneRoster(env),
         pruneReports(env),
@@ -317,6 +319,10 @@ async function route(request: Request, env: Env): Promise<Response> {
   if (method === "GET" && path === "/v1/survey/polls") return listPolls(url, env);
   if (method === "POST" && path === "/v1/survey") return reportAnswer(request, env);
 
+  // Browse searches that found nothing: query text and a per-day count, nothing else — see
+  // `searchmisses.ts`. Same posture as the survey post: unauthenticated, bounded, rate limited.
+  if (method === "POST" && path === "/v1/search-misses") return reportMiss(request, env);
+
   // One app saying whether it could reach MX Bikes' own master server, and the answer everyone's
   // reports add up to. Unauthenticated on both halves, for two different reasons.
   //
@@ -363,6 +369,7 @@ async function route(request: Request, env: Env): Promise<Response> {
   // token must never be enough to read what everybody else is doing.
   if (method === "GET" && path === "/v1/usage/stats") return usageStats(request, url, env);
   if (method === "GET" && path === "/v1/survey/stats") return surveyStats(request, url, env);
+  if (method === "GET" && path === "/v1/search-misses/stats") return missStats(request, url, env);
 
   // The dashboards live on mxbsecure.com/admin, behind Steam sign-in (`webadmin.ts`).
 

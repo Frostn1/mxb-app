@@ -769,6 +769,20 @@ describe("the dashboards on the site", () => {
     expect(Array.isArray(stats.daily)).toBe(true);
   });
 
+  it("hands an admin the searches that found nothing, and nobody else", async () => {
+    const env = await deployment(ADMINS);
+    expect((await web(env, req("GET", "/v1/web/admin/search-misses?days=30"))).status).toBe(401);
+    expect(
+      (await web(env, req("GET", "/v1/web/admin/search-misses?days=30", { cookie: await cookieFor(OTHER) }))).status,
+    ).toBe(403);
+    const res = await web(env, req("GET", "/v1/web/admin/search-misses?days=30", { cookie: await cookieFor(CREATOR) }));
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Cache-Control")).toBe("no-store");
+    const stats = (await res.json()) as { days: number; top: unknown[] };
+    expect(stats.days).toBe(30);
+    expect(Array.isArray(stats.top)).toBe(true);
+  });
+
   it("connects a managed server only through the admin and same-site gates", async () => {
     const env = await deployment({ ...ADMINS, MXB_SERVER_AGENT_HOSTS: "16-146-6-22.sslip.io" });
     const frost = await cookieFor(CREATOR);
