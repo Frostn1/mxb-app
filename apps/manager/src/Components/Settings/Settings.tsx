@@ -51,6 +51,9 @@ import {
   onRaceMode,
   type RaceModeStatus,
   setFrostmodArgs,
+  texcompressState,
+  setTexcompress,
+  type TexCompress,
   setGamePath,
   setInstantRefresh,
   setLaunchAtStartup,
@@ -613,6 +616,7 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
   const frostmodArgs = frostmodArgsDraft ?? config.frostmodArgs ?? "";
   const instantRefresh = config.instantRefresh ?? true;
   const watchModsReload = config.watchModsReload ?? true;
+  const [texCompress, setTexCompress] = useState<TexCompress | null>(null);
   const raceMode = config.raceMode ?? false;
   // What Race mode is holding aside right now. Read once and then kept current by the event,
   // since the moves happen on a join and the restore on the game's exit, neither of which
@@ -1059,6 +1063,22 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
     try {
       await setRaceMode(v);
       await reloadConfig();
+    } catch (e) {
+      toast.error(t("settings.updateFailed"), { description: String(e) });
+    }
+  };
+
+  const loadTexCompress = useCallback(() => {
+    texcompressState().then(setTexCompress).catch(() => setTexCompress(null));
+  }, []);
+  useEffect(() => {
+    loadTexCompress();
+  }, [loadTexCompress, status?.version]);
+
+  const toggleTexCompress = async (v: boolean) => {
+    try {
+      await setTexcompress(v);
+      loadTexCompress();
     } catch (e) {
       toast.error(t("settings.updateFailed"), { description: String(e) });
     }
@@ -2638,6 +2658,22 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
                   checked={watchModsReload}
                   onChange={toggleWatchModsReload}
                 />
+
+                {/* Opt-in, off unless the player turns it on; the key is only written then. */}
+                {status?.installed && texCompress && (
+                  <ToggleRow
+                    label={t("settings.texCompress")}
+                    desc={
+                      texCompress.supported
+                        ? t("settings.texCompressDesc") +
+                          (texCompress.gameRunning ? " " + t("settings.texCompressRunning") : "")
+                        : t("settings.texCompressNeeds")
+                    }
+                    checked={texCompress.enabled}
+                    onChange={toggleTexCompress}
+                    disabled={!texCompress.supported}
+                  />
+                )}
 
                 <ToggleRow
                   label={t("settings.raceMode")}

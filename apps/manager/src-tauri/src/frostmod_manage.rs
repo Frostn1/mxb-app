@@ -124,6 +124,87 @@ fn version_path(app: &AppHandle) -> PathBuf {
     frostmod_dir(app).join("version.txt")
 }
 
+/// FrostMod's own config file, next to the managed binaries. The game reads it at start.
+const RADAR_CFG_FILE: &str = "frostmod_radar.cfg";
+const TEXCOMPRESS_KEY: &str = "texcompress";
+
+fn radar_cfg_path(app: &AppHandle) -> PathBuf {
+    frostmod_dir(app).join(RADAR_CFG_FILE)
+}
+
+fn is_texcompress_line(line: &str) -> bool {
+    line.split_once('=')
+        .is_some_and(|(k, _)| k.trim().eq_ignore_ascii_case(TEXCOMPRESS_KEY))
+}
+
+/// Is `texcompress=1` set in this cfg text?
+fn texcompress_on(text: &str) -> bool {
+    text.lines()
+        .filter(|l| is_texcompress_line(l))
+        .last()
+        .and_then(|l| l.split_once('='))
+        .is_some_and(|(_, v)| v.trim() == "1")
+}
+
+/// The cfg text with `texcompress` set or removed. Every other line is kept byte for byte,
+/// including its line ending; any existing `texcompress` lines are dropped first so the key
+/// never appears twice.
+fn with_texcompress(text: &str, enabled: bool) -> String {
+    let mut out: String = text
+        .split_inclusive('\n')
+        .filter(|l| !is_texcompress_line(l))
+        .collect();
+    if enabled {
+        let eol = if text.contains("\r\n") { "\r\n" } else { "\n" };
+        if !out.is_empty() && !out.ends_with('\n') {
+            out.push_str(eol);
+        }
+        out.push_str(TEXCOMPRESS_KEY);
+        out.push_str("=1");
+        out.push_str(eol);
+    }
+    out
+}
+
+fn set_texcompress_at(path: &Path, enabled: bool) -> std::io::Result<()> {
+    let old = match std::fs::read_to_string(path) {
+        Ok(t) => Some(t),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+        Err(e) => return Err(e),
+    };
+    let new = with_texcompress(old.as_deref().unwrap_or(""), enabled);
+    match old {
+        // Turning it off must not create a file.
+        None if !enabled => Ok(()),
+        Some(o) if o == new => Ok(()),
+        _ => {
+            if let Some(dir) = path.parent() {
+                std::fs::create_dir_all(dir)?;
+            }
+            std::fs::write(path, new)
+        }
+    }
+}
+
+/// Snapshot for Settings: whether the installed FrostMod honours the key, and its state.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TexCompress {
+    pub supported: bool,
+    pub enabled: bool,
+    pub game_running: bool,
+}
+
+pub fn texcompress_state(app: &AppHandle) -> TexCompress {
+    let supported = crate::frostmod::texcompress_supported(installed_version(app).as_deref());
+    let enabled = std::fs::read_to_string(radar_cfg_path(app)).is_ok_and(|t| texcompress_on(&t));
+    TexCompress { supported, enabled, game_running: crate::gameproc::is_game_running() }
+}
+
+pub fn set_texcompress(app: &AppHandle, enabled: bool) -> std::io::Result<()> {
+    set_texcompress_at(&radar_cfg_path(app), enabled)
+}
+
 /// FrostMod's server-browser filter file (its stock default hides Kaizo).
 const SERVERFILTER_FILE: &str = "frostmod_serverfilter.yaml";
 
@@ -2615,5 +2696,53 @@ mod plugin_only_tests {
         // Not knowing the folder leaves the last one in place rather than emptying it.
         write_launcher_files(&managed, None, &[]);
         assert_eq!(std::fs::read_to_string(managed.join("frostmod_mods.txt")).unwrap(), r"D:\mods");
+    }
+}
+
+#[cfg(test)]
+mod texcompress_tests {
+    use super::*;
+
+    #[test]
+    fn adds_the_key_and_keeps_every_other_line() {
+        let out = with_texcompress("a=1\nrejoinfix=1\n# note\n", true);
+        assert_eq!(out, "a=1\nrejoinfix=1\n# note\ntexcompress=1\n");
+        assert!(texcompress_on(&out));
+    }
+
+    #[test]
+    fn removes_only_the_key() {
+        let out = with_texcompress("a=1\ntexcompress=1\nb=2\n", false);
+        assert_eq!(out, "a=1\nb=2\n");
+        assert!(!texcompress_on(&out));
+    }
+
+    #[test]
+    fn never_duplicates_and_keeps_crlf() {
+        let out = with_texcompress("a=1\r\ntexcompress=0\r\ntexcompress=1\r\nb=2", true);
+        assert_eq!(out, "a=1\r\nb=2\r\ntexcompress=1\r\n");
+    }
+
+    #[test]
+    fn empty_file_and_zero_value() {
+        assert_eq!(with_texcompress("", true), "texcompress=1\n");
+        assert!(!texcompress_on("texcompress=0\n"));
+        assert!(!texcompress_on("# texcompress=1\n"));
+    }
+
+    #[test]
+    fn file_round_trip_leaves_other_lines_and_creates_nothing_when_off() {
+        let dir = std::env::temp_dir().join(format!("frostmod-tc-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let path = dir.join(RADAR_CFG_FILE);
+        set_texcompress_at(&path, false).unwrap();
+        assert!(!path.exists());
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(&path, "keep=me\n").unwrap();
+        set_texcompress_at(&path, true).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "keep=me\ntexcompress=1\n");
+        set_texcompress_at(&path, false).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "keep=me\n");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
