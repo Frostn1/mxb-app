@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 2026-10-07 — v0.20.0-beta.2 — Use less RAM
+
+### Added
+- **Use less RAM (compressed textures).** A new switch in Settings > Game Integration, off by default. With FrostMod v0.49.9 or newer, big textures are uploaded compressed, so MX Bikes uses about 1 to 1.5 GB less RAM on a track. Some surfaces can look slightly blockier. It applies the next time the game starts.
+
 ## 2026-10-07 — v0.20.0-beta.1 — Free plugins, guided tour, FrostMod refresh by type, install fixes
 
 ### Added
