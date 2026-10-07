@@ -2265,6 +2265,19 @@ pub(crate) fn plan_placement(
     {
         type_dir.push("paints");
     }
+    // The destination is already `<Bike>/paints` and the pack carries a `paints` folder of its
+    // own beside a stray file or two (a preview image, say), so it was not unwrapped. Walking
+    // it as-is copied the folder *into* the destination, `<Bike>/paints/paints/x.pnt`, which
+    // the game never lists. The pack's own `paints` folder is what the destination names.
+    let mut unwrapped = unwrapped;
+    if type_folder.eq_ignore_ascii_case("bikes")
+        && segs.last().is_some_and(|s| s.eq_ignore_ascii_case("paints"))
+        && !has_root_pkz(&unwrapped)
+    {
+        if let Some(inner) = child_dir(&unwrapped, "paints") {
+            unwrapped = inner;
+        }
+    }
     // Extracted tracks need their own folder; loose bike paints don't.
     let wrap_loose = type_folder.eq_ignore_ascii_case("tracks");
     route(
@@ -4254,6 +4267,30 @@ mod tests {
             .join("bikes/MX1OEM_2023_KTM_450_SX-F/paints/paints")
             .exists());
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A paint pack that is a `paints/` folder with a preview image beside it. The picker offers
+    /// `<Bike>/paints`, so the folder was copied *into* it: `<Bike>/paints/paints/x.pnt`, which
+    /// the game never lists.
+    #[test]
+    fn a_paints_folder_in_the_pack_is_not_nested_under_the_paints_destination() {
+        for dest in ["MX1OEM_2023_KTM_450_SX-F/paints", "MX1OEM_2023_KTM_450_SX-F"] {
+            let root = place_tmp("paints-folder-pack");
+            let ex = root.join("ex");
+            touch(&ex.join("paints/cool.pnt"));
+            touch(&ex.join("preview.jpg"));
+            let mods = root.join("mods");
+            place_mod(&ex, &mods, "bikes", dest, "slug").unwrap();
+            assert!(
+                mods.join("bikes/MX1OEM_2023_KTM_450_SX-F/paints/cool.pnt").exists(),
+                "dest {dest}"
+            );
+            assert!(
+                !mods.join("bikes/MX1OEM_2023_KTM_450_SX-F/paints/paints").exists(),
+                "dest {dest}"
+            );
+            let _ = std::fs::remove_dir_all(&root);
+        }
     }
 
     #[test]
