@@ -311,6 +311,13 @@ async function setState(env: Env, key: string, value: unknown): Promise<void> {
 
 // ───────────────────────────── the polite client ─────────────────────────────
 
+/**
+ * The runtime's fetch, safe to store and pass around. Workers' `fetch` must be called with the
+ * global scope as `this`; held in an object and called as its method, it throws "Illegal
+ * invocation". A wrapper has no such requirement.
+ */
+export const globalFetch: typeof fetch = (input, init) => fetch(input, init);
+
 export interface Sync {
   env: Env;
   now: number;
@@ -334,7 +341,10 @@ async function modsGet(s: Sync, url: URL | string, accept = "application/json"):
   if (!robotsAllows(s.rules, u.pathname + u.search)) return null;
   if (s.sent > 0) await s.wait(SPACING_MS);
   s.sent++;
-  const res = await s.fetch(u.toString(), { headers: { "user-agent": UA, accept } });
+  // Called as a plain function, never as `s.fetch(…)`: the runtime's fetch throws "Illegal
+  // invocation" when its `this` is anything but the global scope.
+  const get = s.fetch;
+  const res = await get(u.toString(), { headers: { "user-agent": UA, accept } });
   if (res.status === 403 || res.status === 429 || res.status === 503) {
     const after = Number(res.headers.get("retry-after"));
     const wait = Math.max(COOLDOWN_MS, Number.isFinite(after) ? after * 1000 : 0);
@@ -798,7 +808,7 @@ export async function runMirror(env: Env, opts: RunOptions = {}): Promise<void> 
   const cooldown = await getState<{ until: number }>(env, "cooldown");
   if (cooldown && cooldown.until > now) return dispatchStep();
 
-  const f = opts.fetch ?? fetch;
+  const f = opts.fetch ?? globalFetch;
   const s: Sync = {
     env,
     now,

@@ -12,7 +12,7 @@
  * part, whatever the file's size.
  */
 
-import { backoff, hex, type MirrorJob } from "./mirror";
+import { backoff, globalFetch, hex, type MirrorJob } from "./mirror";
 import { verifyUpload } from "./uploadcheck";
 import { HostError, RunnerNeeded, filenameFrom, megaDecryptStream, openBody, resolveShare, hostKind, type Resolved } from "./mirrorhosts";
 
@@ -103,7 +103,7 @@ export async function mirrorFile(
   deps: FetchDeps = {},
 ): Promise<void> {
   const now = deps.now ?? Date.now();
-  const f = deps.fetch ?? fetch;
+  const f = deps.fetch ?? globalFetch;
   const row = await env.DB.prepare(
     `SELECT f.version_id, f.idx, f.part, f.rel, f.url, f.is_server, f.status, f.attempts, a.type
      FROM mod_files f JOIN mod_versions v ON v.id = f.version_id JOIN mod_assets a ON a.id = v.asset_id
