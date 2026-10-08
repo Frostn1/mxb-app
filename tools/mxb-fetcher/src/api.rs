@@ -154,6 +154,16 @@ impl Api {
         .map(|_| ())
     }
 
+    /// A discovery request's answer, status and body as the site gave them.
+    pub async fn list_result(&self, job: &str, status: u16, body: &str) -> Result<()> {
+        self.post(
+            "result",
+            json!({ "job": job, "status": status, "body": body }),
+        )
+        .await
+        .map(|_| ())
+    }
+
     pub async fn too_big(&self, job: &str) -> Result<()> {
         self.post("result", json!({ "job": job, "too_big": true }))
             .await

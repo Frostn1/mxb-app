@@ -22,6 +22,8 @@ pub const BROWSER_UA: &str =
 const PAGE_ACCEPT: &str = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8";
 /// A post page is ~150 KB; the control plane takes up to 4 MB.
 const MAX_HTML_BYTES: usize = 4 * 1024 * 1024;
+/// A listing page is 50 posts with their content; the control plane takes up to 8 MB.
+const MAX_LIST_BYTES: usize = 8 * 1024 * 1024;
 
 pub struct Ctx {
     pub api: Api,
@@ -123,6 +125,7 @@ impl Ctx {
         let result = match job.kind.as_str() {
             "page" => self.page(job).await,
             "file" => self.file(job).await,
+            "list" => self.list(job).await,
             other => Err(fail(format!("unknown job kind {other}"), true)),
         };
         match result {
@@ -238,6 +241,22 @@ impl Ctx {
             }
         }
         Ok(Some(up))
+    }
+
+    // ───────────────────────────── discovery ─────────────────────────────
+
+    /// A WordPress REST request (category tree, listing, id sweep): its status and body go back
+    /// as they came, a 400 past the end of the listing included. The control plane parses it.
+    async fn list(&self, job: &Job) -> Result<String> {
+        let res = self.get(&self.web, &job.url, "application/json").await?;
+        let status = res.status().as_u16();
+        let body = read_capped(res, MAX_LIST_BYTES)
+            .await?
+            .ok_or_else(|| fail("larger than a listing", false))?;
+        self.api
+            .list_result(&job.id, status, &String::from_utf8_lossy(&body))
+            .await?;
+        Ok(format!("listing answered {status}"))
     }
 
     // ───────────────────────────── files ─────────────────────────────

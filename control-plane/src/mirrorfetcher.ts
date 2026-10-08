@@ -38,6 +38,8 @@ import {
   PAGE_LEASE_MS,
   PAGE_REV,
   pageFailed,
+  discoveryResult,
+  nextDiscoveryJob,
   parsePage,
   sniffImage,
   thumbExt,
@@ -97,9 +99,14 @@ async function refusal(request: Request, env: Env): Promise<Response | null> {
 
 // ───────────────────────────── jobs ─────────────────────────────
 
-type JobRef = { kind: "page"; id: number } | { kind: "file"; version: number; idx: number; part: number };
+type JobRef =
+  | { kind: "page"; id: number }
+  | { kind: "file"; version: number; idx: number; part: number }
+  /** A discovery request (category tree, listing or id sweep): `seq` in the chain. */
+  | { kind: "list"; seq: number };
 
 export function jobId(j: JobRef): string {
+  if (j.kind === "list") return `list:${j.seq}`;
   return j.kind === "page" ? `page:${j.id}` : `file:${j.version}:${j.idx}:${j.part}`;
 }
 
@@ -107,6 +114,8 @@ export function parseJobId(raw: unknown): JobRef | null {
   if (typeof raw !== "string") return null;
   const page = /^page:(\d{1,12})$/.exec(raw);
   if (page) return { kind: "page", id: Number(page[1]) };
+  const list = /^list:(\d{1,12})$/.exec(raw);
+  if (list) return { kind: "list", seq: Number(list[1]) };
   const file = /^file:(\d{1,12}):(\d{1,6}):(\d{1,6})$/.exec(raw);
   if (file) return { kind: "file", version: Number(file[1]), idx: Number(file[2]), part: Number(file[3]) };
   return null;
@@ -114,7 +123,8 @@ export function parseJobId(raw: unknown): JobRef | null {
 
 export interface LeasedJob {
   id: string;
-  kind: "page" | "file";
+  /** `list`: GET the URL as JSON and hand back its status and body as they came. */
+  kind: "page" | "file" | "list";
   url: string;
   /** Files: the name the folder listing gave it, if any. */
   filename?: string | null;
@@ -179,8 +189,13 @@ export async function lease(env: Env, max: number, now: number): Promise<LeasedJ
     });
   }
 
+  if (jobs.length >= max || !pagesViaFetcher(env)) return jobs;
+  // Discovery: at most one request in flight, a round every ten minutes (`mirror.ts`).
+  const list = await nextDiscoveryJob(env, now);
+  if (list) jobs.push({ id: jobId({ kind: "list", seq: list.seq }), kind: "list", url: list.url });
+
   const room = max - jobs.length;
-  if (room <= 0 || !pagesViaFetcher(env)) return jobs;
+  if (room <= 0) return jobs;
   const due = `source = 'mirror' AND (
        (page_status IN ('due', 'retry', 'queued', 'fetcher') AND page_due_at <= ?1)
        OR (page_status = 'ok' AND page_rev < ?2))`;
@@ -367,6 +382,23 @@ async function fail(env: Env, row: FileRow, error: string, permanent: boolean, n
   return json(200, { ok: true });
 }
 
+/** A listing body is 50 posts with their content; a few MB at most. */
+const MAX_LIST_BYTES = 8 * 1024 * 1024;
+
+/** A discovery request's answer: the status and body as the site gave them, or a failure. */
+async function listResult(env: Env, seq: number, body: Json, now: number): Promise<Response> {
+  let taken: boolean;
+  if (typeof body.error === "string") {
+    taken = await discoveryResult(env, seq, { error: body.error, retryAfterMs: Number(body.retry_after_ms) || 0 }, now);
+  } else {
+    const status = Number(body.status);
+    if (!Number.isInteger(status) || typeof body.body !== "string") return json(400, { error: "status and body, or error, required" });
+    if (body.body.length > MAX_LIST_BYTES) return json(413, { error: "too large for a listing" });
+    taken = await discoveryResult(env, seq, { status, body: body.body }, now);
+  }
+  return taken ? json(200, { ok: true }) : json(409, { error: "not leased" });
+}
+
 // ───────────────────────────── uploads ─────────────────────────────
 
 /** R2's S3 endpoint and the R2_* key, against the public bucket. Absent: 503. */
@@ -442,7 +474,7 @@ async function knownBlob(env: Env, sha: string): Promise<{ r2_key: string; bucke
   return await env.DB.prepare("SELECT r2_key, bucket FROM mod_blobs WHERE sha256 = ?").bind(sha).first<{ r2_key: string; bucket: string }>();
 }
 
-async function uploadUrl(env: Env, j: JobRef, body: Json, now: number): Promise<Response> {
+async function uploadUrl(env: Env, j: Exclude<JobRef, { kind: "list" }>, body: Json, now: number): Promise<Response> {
   const up = readUpload(body);
   if (typeof up === "string") return json(400, { error: up });
   let key: string;
@@ -580,6 +612,11 @@ export async function fetcherRoutes(request: Request, url: URL, env: Env, now = 
   }
   const job = parseJobId(body.job);
   if (!job) return json(400, { error: "job must be page:<id> or file:<version>:<idx>:<part>" });
+  if (job.kind === "list") {
+    // A discovery request has a result and nothing to upload.
+    if (action !== "result") return json(400, { error: "a list job only has a result" });
+    return listResult(env, job.seq, body, now);
+  }
   switch (action) {
     case "result":
       return job.kind === "page" ? pageResult(env, job.id, body, now) : fileResult(env, job, body, now);

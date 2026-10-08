@@ -6,6 +6,8 @@ it pulls work from the control plane (`/v1/mirror/fetcher/*`, `control-plane/src
 
 Each round it leases up to two jobs and runs them side by side:
 
+- **List**: GET one WordPress REST request (category tree, listing page, id sweep) and hand
+  its status and body back. The control plane walks the catalogue with these, one at a time.
 - **Page**: GET the mxb-mods.com post with a browser User-Agent and hand the HTML back. The
   control plane parses it exactly as the Worker does and answers with the pictures it still
   needs; each is fetched, checked to be a picture by its first bytes, and PUT to R2.

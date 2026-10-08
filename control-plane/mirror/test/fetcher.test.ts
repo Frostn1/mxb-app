@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { dispatch, readPageJobs, upsertPost, writeMirrorVersion, type Category, type DownloadOption, type MirrorJob } from "../../src/mirror";
+import { dispatch, readPageJobs, runMirror, upsertPost, writeMirrorVersion, type Category, type DownloadOption, type MirrorJob } from "../../src/mirror";
 import { mirrorFile } from "../../src/mirrorfetch";
 import { FETCHER_PREFIX, fetcherRoutes, parseJobId } from "../../src/mirrorfetcher";
 import { fetcherRouter, hostIn } from "../../src/fetcherroute";
@@ -72,8 +72,15 @@ function webp(tag: string): Uint8Array {
 }
 
 async function seedPost(e: Env): Promise<number> {
+  await quietDiscovery(e);
   await upsertPost(e, POST, TREE, 0);
   return (await e.DB.prepare("SELECT id FROM mod_assets WHERE source_ref = ?").bind(POST.id).first<{ id: number }>())!.id;
+}
+
+/** Discovery's next round far off, so a lease holds only the jobs a test is about. */
+async function quietDiscovery(e: Env): Promise<void> {
+  const st = { seq: 0, phase: "idle", catPage: 1, cats: [], listed: 0, roundAt: 0, leasedUntil: 0, nextAt: NOW * 1000 };
+  await e.DB.prepare("INSERT OR REPLACE INTO mirror_state (key, value) VALUES ('fetcher_discovery', ?)").bind(JSON.stringify(st)).run();
 }
 
 /** A mirrored track whose page offers `links`, page read, files `status`. */
@@ -415,5 +422,86 @@ describe("files from the fetcher", () => {
     job = (await call(e, "lease", {})).body.jobs[0].id;
     await call(e, "result", { job, error: "MediaFire: the file no longer exists", permanent: true });
     expect(await e.DB.prepare("SELECT status FROM mod_files").first()).toEqual({ status: "failed" });
+  });
+});
+
+describe("discovery from the fetcher", () => {
+  const listJob = async (e: Env, now = NOW) =>
+    ((await call(e, "lease", { max: 10 }, { now })).body.jobs as { id: string; kind: string; url: string }[]).find((j) => j.kind === "list");
+  const answer = (e: Env, job: string, body: unknown, now = NOW, status = 200) =>
+    call(e, "result", { job, status, body: JSON.stringify(body) }, { now });
+
+  it("walks a round, one request at a time, and parses what comes back as the Worker would", async () => {
+    // The Worker's own walk…
+    const w = env({ MIRROR_FETCHER_HOSTS: "" });
+    const site = fakeFetch([
+      [/\/robots\.txt$/, () => new Response("")],
+      [/\/wp-json\/wp\/v2\/categories/, () => Response.json([...TREE.values()])],
+      [/orderby=modified/, () => Response.json([POST])],
+      [/orderby=id/, () => Response.json([{ id: POST.id }])],
+    ]);
+    await runMirror(w, { now: NOW, fetch: site, wait: async () => {} });
+
+    // …and the same answers handed in by the fetcher.
+    const e = env();
+    const cats = await listJob(e);
+    expect(cats?.url).toContain("/wp-json/wp/v2/categories");
+    // One in flight at a time.
+    expect(await listJob(e)).toBeUndefined();
+    expect((await answer(e, cats!.id, [...TREE.values()])).status).toBe(200);
+    const listing = await listJob(e);
+    expect(listing?.url).toContain("orderby=modified");
+    await answer(e, listing!.id, [POST]);
+    const sweep = await listJob(e);
+    expect(sweep?.url).toContain("orderby=id");
+    await answer(e, sweep!.id, [{ id: POST.id }]);
+    // The round is over until ten minutes after it began.
+    expect(await listJob(e, NOW + 60_000)).toBeUndefined();
+
+    // page_status aside: the Worker queued the page read, the fetcher leased it.
+    const cols = "source_ref, slug, title, type, bike, categories, description, source_url, modified, last_seen";
+    expect((await e.DB.prepare(`SELECT ${cols} FROM mod_assets`).all()).results).toEqual(
+      (await w.DB.prepare(`SELECT ${cols} FROM mod_assets`).all()).results,
+    );
+    const state = "SELECT value FROM mirror_state WHERE key = 'listing'";
+    expect(await e.DB.prepare(state).first()).toEqual(await w.DB.prepare(state).first());
+
+    // The next round: the tree is cached a day, so it starts at the listing, from the high-water mark.
+    const next = await listJob(e, NOW + 10 * 60_000);
+    expect(next?.url).toContain("modified_after=");
+  });
+
+  it("the Worker sends the site nothing while it is routed to the fetcher", async () => {
+    const e = env();
+    const f = fakeFetch([]);
+    await runMirror(e, { now: NOW, fetch: f, wait: async () => {} });
+    expect(f.calls).toEqual([]);
+  });
+
+  it("a refusal waits and asks the same step again; a late answer is refused", async () => {
+    const e = env();
+    const first = await listJob(e);
+    await call(e, "result", { job: first!.id, error: "site answered 403", status: 403, deferred: true, retry_after_ms: 1000 });
+    expect(await listJob(e, NOW + 60_000)).toBeUndefined();
+    const again = await listJob(e, NOW + 31 * 60_000);
+    expect(again?.url).toBe(first!.url);
+    expect((await answer(e, first!.id, [], NOW + 31 * 60_000)).status).toBe(409);
+    // A lease that ran out is handed out again.
+    const later = await listJob(e, NOW + 45 * 60_000);
+    expect(later?.url).toBe(first!.url);
+    expect(later?.id).not.toBe(again!.id);
+  });
+
+  it("a page past the end (400) ends the walk; a challenge page waits", async () => {
+    const e = env();
+    const cats = await listJob(e);
+    await answer(e, cats!.id, [...TREE.values()]);
+    const listing = await listJob(e);
+    await answer(e, listing!.id, { code: "rest_post_invalid_page_number" }, NOW, 400);
+    const sweep = await listJob(e);
+    expect(sweep?.url).toContain("orderby=id");
+    await call(e, "result", { job: sweep!.id, status: 200, body: "<html>Just a moment...</html>" });
+    expect(await listJob(e, NOW + 60_000)).toBeUndefined();
+    expect((await listJob(e, NOW + 31 * 60_000))?.url).toContain("orderby=id");
   });
 });
