@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## 2026-10-08 — v0.20.0-beta.4 — Install from mxbsecure.com, upload mods, shorter text
+
+### Added
+- **Install from mxbsecure.com.** Install on a mod page at mxbsecure.com/mods opens the app and installs it.
+- **Upload your mods** to the mxbsecure catalogue, and see them under My mods.
+
+### Changed
+- **Downloads use the mxbsecure mirror** when a mod is stored there.
+- **Shorter text everywhere.** Settings, tips, the tour and dialogs are cut to a heading and one line.
+
 ## 2026-10-07 — v0.20.0-beta.3 — Paint sync first, tips, 3D preset preview
 
 ### Added

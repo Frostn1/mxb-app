@@ -64,6 +64,20 @@ first launch — choose _Run anyway_ / right-click _Open_.
 You only install once: the app checks for new releases on launch (and every 6
 hours), then downloads and installs them on restart.
 
+## Screenshots
+
+| | |
+|---|---|
+| ![Mods](docs/screenshots/mods.png) | ![Library](docs/screenshots/library.png) |
+| ![Presets with 3D preview](docs/screenshots/presets-3d.png) | ![Locker](docs/screenshots/locker.png) |
+| ![Paint sync](docs/screenshots/paint-sync.png) | ![Storage](docs/screenshots/storage.png) |
+
+**Setup**
+
+| | | |
+|---|---|---|
+| ![Sign in](docs/screenshots/setup-signin.png) | ![Pick a game](docs/screenshots/setup-game.png) | ![Game integration](docs/screenshots/setup-integration.png) |
+
 ## What's in it
 
 Each of these is a tab in the app.
