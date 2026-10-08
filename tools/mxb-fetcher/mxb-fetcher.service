@@ -1,0 +1,39 @@
+# systemd unit for the mod mirror's fetcher. Install steps: README.md next to this file.
+[Unit]
+Description=MXB mod mirror fetcher
+Documentation=https://github.com/Frostn1/mxb-app/tree/main/tools/mxb-fetcher
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# MXB_FETCHER_API and MXB_FETCHER_TOKEN. Root-owned, mode 600.
+EnvironmentFile=/etc/mxb-fetcher.env
+# Files are spooled here while they are hashed: room for the largest one (up to 4.5 GiB).
+Environment=MXB_FETCHER_TMP=/var/lib/mxb-fetcher/tmp
+ExecStart=/usr/local/bin/mxb-fetcher
+Restart=always
+RestartSec=15
+
+# Its own throwaway user, and nothing on the box it doesn't need. It listens on nothing.
+DynamicUser=yes
+StateDirectory=mxb-fetcher
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+MemoryMax=512M
+
+[Install]
+WantedBy=multi-user.target

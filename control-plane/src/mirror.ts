@@ -34,6 +34,7 @@
 import { decodeEntities } from "./trackcatalog";
 import { evictUnused, wantLiveTracks } from "./mirrorpolicy";
 import { newPublicId } from "./modids";
+import { fetcherRouter, pagesViaFetcher } from "./fetcherroute";
 import { isModsHost, MAX_IMAGE_BYTES, MAX_IMAGES, parsePostBody, type PostImage } from "./modbody";
 
 export const UA = "mxbsecure-mirror/1 (+https://mxbsecure.com/mods)";
@@ -59,7 +60,7 @@ const PAGES_PER_RUN = 40;
  *  well inside the lease, so nothing is sent twice. */
 const PAGE_QUEUE_TARGET = 60;
 /** How long a queued page read stays leased before it is assumed lost and sent again. */
-const PAGE_LEASE_MS = 60 * MINUTE;
+export const PAGE_LEASE_MS = 60 * MINUTE;
 /** The page parser. A row read by an older one is read again (rows from before pictures: 0). */
 export const PAGE_REV = 1;
 /** Pages read side by side in one consumer invocation. One: the gentle rate. */
@@ -667,7 +668,7 @@ async function sweep(s: Sync): Promise<void> {
 
 // ───────────────────────────── 2. read pages ─────────────────────────────
 
-interface DueAsset {
+export interface DueAsset {
   id: number;
   source_url: string;
   thumb_src: string | null;
@@ -675,10 +676,12 @@ interface DueAsset {
   page_attempts: number;
 }
 
-const DUE_COLUMNS = "id, source_url, thumb_src, thumb_key, page_attempts";
+export const DUE_COLUMNS = "id, source_url, thumb_src, thumb_key, page_attempts";
 
 /** With no queue to hand them to (a local run), the cron reads a few pages itself. */
 async function readPages(s: Sync): Promise<void> {
+  // The fetcher leases pages itself (`mirrorfetcher.ts`).
+  if (pagesViaFetcher(s.env)) return;
   const { results } = await s.env.DB.prepare(
     `SELECT ${DUE_COLUMNS} FROM mod_assets
      WHERE source = 'mirror' AND page_status IN ('due', 'retry') AND page_due_at <= ?
@@ -702,7 +705,8 @@ async function readPages(s: Sync): Promise<void> {
  * (its message lost) is sent again.
  */
 export async function dispatchPages(env: Env, now: number, target = PAGE_QUEUE_TARGET): Promise<number> {
-  if (!env.MIRROR_QUEUE) return 0;
+  // With the pages going via the fetcher, it leases due rows itself: nothing to queue.
+  if (!env.MIRROR_QUEUE || pagesViaFetcher(env)) return 0;
   const out = await env.DB.prepare(
     "SELECT COUNT(*) AS n FROM mod_assets WHERE source = 'mirror' AND page_status = 'queued' AND page_due_at > ?",
   )
@@ -763,7 +767,9 @@ export async function readPageJobs(env: Env, ids: number[], opts: RunOptions = {
     .all<DueAsset>();
   const todo = [...results];
   const back: number[] = [];
-  let until = (env.MXB_MIRROR ?? "off") !== "on" ? now : await coolingUntil(env, now);
+  // Switched off, or the pages now go via the fetcher (a message queued before the switch):
+  // straight back to `due`, where the fetcher's lease finds them.
+  let until = (env.MXB_MIRROR ?? "off") !== "on" || pagesViaFetcher(env) ? now : await coolingUntil(env, now);
   const rules = until ? [] : await loadRobots(env, now, f);
 
   const lane = async (k: number) => {
@@ -826,32 +832,93 @@ async function readPage(s: Sync, asset: DueAsset): Promise<void> {
     return;
   }
   if (!res.ok) return pageRetry(s, asset, `page answered ${res.status}`);
-  const html = await res.text();
-  const downloads = parseDownloads(html);
-  if (downloads.length === 0 && isChallenge(html)) return pageRetry(s, asset, "challenge page");
-
+  const page = parsePage(await res.text(), asset);
+  if (!page) return pageRetry(s, asset, "challenge page");
   // The links first: they are what the page is for, and nothing after may lose them.
-  await writeMirrorVersion(s.env, asset.id, parseVersion(html), downloads, s.now);
-  const src = asset.thumb_src ?? parseImage(html);
-  const thumb = asset.thumb_key ? null : await copyThumb(s, src);
-  const body = parsePostBody(html);
-  await copyImages(s, asset.id, body.images);
-  await s.env.DB.prepare(
+  await writeMirrorVersion(s.env, asset.id, page.version, page.downloads, s.now);
+  await finishPage(s.env, asset, page, { thumb: (src) => copyThumb(s, src), image: (src) => copyImage(s, src) }, s.clock());
+}
+
+// ───────────────────────────── a page, from either source ─────────────────────────────
+
+/**
+ * What a post page offers, parsed. The HTML comes from the Worker's own read (`readPage`) or
+ * from the fetcher on our own box (`mirrorfetcher.ts`); both go through this and the two
+ * writers below, so a page reads the same whichever way it arrived.
+ */
+export interface ParsedPage {
+  downloads: DownloadOption[];
+  version: string | null;
+  author: string | null;
+  /** The thumbnail's source: the listing's, else the page's own picture. */
+  src: string | null;
+  body: ReturnType<typeof parsePostBody>;
+}
+
+/** The page, or null when it is Cloudflare's interstitial rather than the post. */
+export function parsePage(html: string, asset: Pick<DueAsset, "thumb_src">): ParsedPage | null {
+  const downloads = parseDownloads(html);
+  if (downloads.length === 0 && isChallenge(html)) return null;
+  return {
+    downloads,
+    version: parseVersion(html),
+    author: parseAuthor(html),
+    src: asset.thumb_src ?? parseImage(html),
+    body: parsePostBody(html),
+  };
+}
+
+/** Where a page's pictures come from: copied by the Worker, or uploaded by the fetcher. */
+export interface ImageSource {
+  /** The thumbnail, stored; null when it can't be had. */
+  thumb(src: string | null): Promise<Thumb | null>;
+  /** One content image's SHA-256, stored; null when it can't be had. */
+  image(src: string): Promise<string | null>;
+}
+
+/** The page's pictures, words and byline, after its links are written: the row is read. */
+export async function finishPage(
+  env: Env,
+  asset: Pick<DueAsset, "id" | "thumb_key">,
+  page: Omit<ParsedPage, "downloads" | "version">,
+  images: ImageSource,
+  readAt: number,
+): Promise<void> {
+  const thumb = asset.thumb_key ? null : await images.thumb(page.src);
+  await copyImages(env, asset.id, page.body.images, images.image);
+  await env.DB.prepare(
     `UPDATE mod_assets SET author = COALESCE(?, author), thumb_src = COALESCE(thumb_src, ?),
        thumb_sha = COALESCE(?, thumb_sha), thumb_key = COALESCE(?, thumb_key), body = ?,
        page_status = 'ok', page_attempts = 0, page_error = NULL, page_rev = ?, page_read_at = ? WHERE id = ?`,
   )
     .bind(
-      parseAuthor(html),
-      src,
+      page.author,
+      page.src,
       thumb?.sha ?? null,
       thumb?.key ?? null,
-      body.blocks.length ? JSON.stringify(body.blocks) : null,
+      page.body.blocks.length ? JSON.stringify(page.body.blocks) : null,
       PAGE_REV,
-      s.clock(),
+      readAt,
       asset.id,
     )
     .run();
+}
+
+/** The content images a post already holds, by source. */
+export async function heldImages(env: Env, assetId: number): Promise<Map<string, string>> {
+  const { results } = await env.DB.prepare("SELECT src, sha256 FROM mod_asset_images WHERE asset_id = ?")
+    .bind(assetId)
+    .all<{ src: string; sha256: string }>();
+  return new Map(results.map((r) => [r.src, r.sha256]));
+}
+
+/** A thumbnail some post already stored from this source. */
+export async function heldThumb(env: Env, src: string): Promise<Thumb | null> {
+  return await env.DB.prepare(
+    "SELECT thumb_sha AS sha, thumb_key AS key FROM mod_assets WHERE thumb_src = ? AND thumb_key IS NOT NULL LIMIT 1",
+  )
+    .bind(src)
+    .first<Thumb>();
 }
 
 /**
@@ -859,23 +926,25 @@ async function readPage(s: Sync, asset: DueAsset): Promise<void> {
  * most 12 and each at most 3 MB. A picture the post already has (same source) is not fetched
  * again. The new list replaces the old one.
  */
-async function copyImages(s: Sync, assetId: number, wanted: PostImage[]): Promise<void> {
-  if (!s.env.ASSET_MIRROR) return;
-  const { results: had } = await s.env.DB.prepare("SELECT src, sha256 FROM mod_asset_images WHERE asset_id = ?")
-    .bind(assetId)
-    .all<{ src: string; sha256: string }>();
-  const known = new Map(had.map((r) => [r.src, r.sha256]));
+async function copyImages(
+  env: Env,
+  assetId: number,
+  wanted: PostImage[],
+  copy: (src: string) => Promise<string | null>,
+): Promise<void> {
+  if (!env.ASSET_MIRROR) return;
+  const known = await heldImages(env, assetId);
   const rows: (PostImage & { sha: string })[] = [];
   for (const img of wanted.slice(0, MAX_IMAGES)) {
-    const sha = known.get(img.src) ?? (await copyImage(s, img.src));
+    const sha = known.get(img.src) ?? (await copy(img.src));
     if (sha && !rows.some((r) => r.sha === sha)) rows.push({ ...img, sha });
   }
-  if (had.length === 0 && rows.length === 0) return;
+  if (known.size === 0 && rows.length === 0) return;
   // A statement per picture, six parameters each: far under D1's 100 a statement.
-  await s.env.DB.batch([
-    s.env.DB.prepare("DELETE FROM mod_asset_images WHERE asset_id = ?").bind(assetId),
+  await env.DB.batch([
+    env.DB.prepare("DELETE FROM mod_asset_images WHERE asset_id = ?").bind(assetId),
     ...rows.map((r, idx) =>
-      s.env.DB.prepare(
+      env.DB.prepare(
         "INSERT INTO mod_asset_images (asset_id, idx, sha256, src, width, height) VALUES (?, ?, ?, ?, ?, ?)",
       ).bind(assetId, idx, r.sha, r.src.slice(0, 1000), r.width, r.height),
     ),
@@ -929,13 +998,18 @@ export async function readCapped(res: Response, cap: number): Promise<Uint8Array
   return out;
 }
 
-async function pageRetry(s: Sync, asset: DueAsset, error: string): Promise<void> {
+function pageRetry(s: Sync, asset: DueAsset, error: string): Promise<void> {
+  return pageFailed(s.env, s.now, asset, error);
+}
+
+/** A page read that failed: retried with backoff, given up on after `PAGE_MAX_ATTEMPTS`. */
+export async function pageFailed(env: Env, now: number, asset: Pick<DueAsset, "id" | "page_attempts">, error: string): Promise<void> {
   const attempts = asset.page_attempts + 1;
   const status = attempts >= PAGE_MAX_ATTEMPTS ? "gone" : "retry";
-  await s.env.DB.prepare(
+  await env.DB.prepare(
     "UPDATE mod_assets SET page_status = ?, page_attempts = ?, page_due_at = ?, page_error = ? WHERE id = ?",
   )
-    .bind(status, attempts, s.now + backoff(attempts), error.slice(0, 300), asset.id)
+    .bind(status, attempts, now + backoff(attempts), error.slice(0, 300), asset.id)
     .run();
 }
 
@@ -1026,11 +1100,7 @@ export async function writeMirrorVersion(
  */
 async function copyThumb(s: Sync, src: string | null): Promise<Thumb | null> {
   if (!src || !s.env.ASSET_MIRROR) return null;
-  const known = await s.env.DB.prepare(
-    "SELECT thumb_sha AS sha, thumb_key AS key FROM mod_assets WHERE thumb_src = ? AND thumb_key IS NOT NULL LIMIT 1",
-  )
-    .bind(src)
-    .first<Thumb>();
+  const known = await heldThumb(s.env, src);
   if (known) return known;
   try {
     const u = new URL(src);
@@ -1123,29 +1193,42 @@ export type MirrorJob =
   | { kind: "upload"; id: string }
   | { kind: "page"; id: number };
 
-/** Lease the current versions' files that are due and hand them to the queue. */
+/**
+ * Lease the current versions' files that are due and hand them to the queue. A file whose host
+ * goes via the fetcher (`fetcherroute.ts`) is marked `fetcher` instead, for its lease to find.
+ */
 export async function dispatch(env: Env, now: number, limit = DISPATCH_PER_RUN): Promise<number> {
   if (!env.MIRROR_QUEUE) return 0;
   const { results } = await env.DB.prepare(
-    `SELECT f.version_id, f.idx, f.part FROM mod_files f
+    `SELECT f.version_id, f.idx, f.part, f.url FROM mod_files f
      JOIN mod_assets a ON a.current_version = f.version_id
      WHERE a.source = 'mirror' AND a.page_status = 'ok' AND a.state = 'active' AND f.url IS NOT NULL AND (
        (f.status IN ('pending', 'retry') AND f.due_at <= ?1) OR (f.status = 'queued' AND f.leased_until < ?1))
      ORDER BY f.due_at, a.id DESC, f.idx, f.part LIMIT ?2`,
   )
     .bind(now, limit)
-    .all<{ version_id: number; idx: number; part: number }>();
+    .all<{ version_id: number; idx: number; part: number; url: string }>();
   if (results.length === 0) return 0;
-  await env.DB.batch(
-    results.map((r) =>
+  const viaFetcher = await fetcherRouter(env);
+  const fetcher = results.filter((r) => viaFetcher(r.url));
+  const queued = results.filter((r) => !viaFetcher(r.url));
+  await env.DB.batch([
+    ...queued.map((r) =>
       env.DB.prepare(
         "UPDATE mod_files SET status = 'queued', leased_until = ? WHERE version_id = ? AND idx = ? AND part = ?",
       ).bind(now + LEASE_MS, r.version_id, r.idx, r.part),
     ),
-  );
-  await env.MIRROR_QUEUE.sendBatch(
-    results.map((r) => ({ body: { kind: "file", version: r.version_id, idx: r.idx, part: r.part } satisfies MirrorJob })),
-  );
+    ...fetcher.map((r) =>
+      env.DB.prepare(
+        "UPDATE mod_files SET status = 'fetcher', due_at = ?, leased_until = 0 WHERE version_id = ? AND idx = ? AND part = ?",
+      ).bind(now, r.version_id, r.idx, r.part),
+    ),
+  ]);
+  if (queued.length) {
+    await env.MIRROR_QUEUE.sendBatch(
+      queued.map((r) => ({ body: { kind: "file", version: r.version_id, idx: r.idx, part: r.part } satisfies MirrorJob })),
+    );
+  }
   return results.length;
 }
 

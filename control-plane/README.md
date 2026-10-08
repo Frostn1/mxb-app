@@ -688,6 +688,22 @@ The CI deploy token also needs **Queues Edit** and **Workers R2 Storage Edit** n
 Scripts and D1. Files over 2 GiB, SharePoint folders and personal OneDrive links are marked
 `runner` rather than failed, for a separate runner to pick up.
 
+#### The fetcher
+
+mxb-mods.com and MediaFire answer Cloudflare Workers 403 and a normal machine 200. The hosts
+in `MIRROR_FETCHER_HOSTS` (a var in both wrangler files) are fetched by `tools/mxb-fetcher` on
+our own Linux box instead, as is any host that refuses the Worker a file. The box opens no
+ports: it leases jobs from `/v1/mirror/fetcher/*` (`src/mirrorfetcher.ts`), hands page HTML
+back to be parsed exactly as the Worker parses it, and PUTs files and pictures straight into
+`mxb-assets` through presigned URLs. Discovery (the REST listing walk) still runs in the Worker.
+
+```sh
+bunx wrangler secret put MIRROR_FETCHER_TOKEN  # 32+ random characters, the same on the box
+```
+
+The upload URLs are presigned with the `R2_*` key above, so that token needs Object Read &
+Write on `mxb-assets` as well as `mxb-private`. Empty `MIRROR_FETCHER_HOSTS` turns it all off.
+
 ## Security notes
 
 - Tokens are shown **once** at enrollment and stored only as a SHA-256 digest. Lookup is by

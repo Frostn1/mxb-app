@@ -83,6 +83,7 @@ import { PaintRoom } from "./paintroom";
 import { ingestResults, leaderboard as ratingLeaderboard, myRatings, ratedClasses, serverForRatingToken } from "./rating";
 import { isSeriesPath, pruneSeriesRegistrations, seriesRoutes } from "./series";
 import { publicModRoutes } from "./modapi";
+import { FETCHER_PREFIX, fetcherRoutes } from "./mirrorfetcher";
 import { abortUpload, completeUpload, deleteMod, editMod, myMods, openUpload, setThumb, uploadStatus } from "./uploads";
 import { internalId, UUID_RE } from "./modids";
 import { viewOnlyOn, listPolicies, lockKey, minisignPublicKey, putPolicy, signedLocks, wantsViewOnly } from "./paintpolicy";
@@ -211,6 +212,9 @@ async function route(request: Request, env: Env): Promise<Response> {
   if (isHostedPath(path)) return hostedRoutes(request, url, env);
 
   if (isWebPath(path)) return webRoutes(request, url, env);
+
+  // The mirror fetcher on our own box (`mirrorfetcher.ts`): its own bearer token, no account.
+  if (path.startsWith(FETCHER_PREFIX)) return fetcherRoutes(request, url, env);
 
   // Self-serve signup, no invite. Voice is the reason this exists: a rider on a community
   // server has nobody to talk to unless the people beside them can sign up too. The account

@@ -36,12 +36,14 @@ export type Resolved =
   /** MEGA: the bytes come encrypted, with the key to decrypt them. */
   | { kind: "mega"; url: string; size: number; name: string; key: Uint8Array; nonce: Uint8Array };
 
-/** A refusal. `permanent` ones are not retried; `retryAfterMs` asks for a longer wait. */
+/** A refusal. `permanent` ones are not retried; `retryAfterMs` asks for a longer wait. `status`
+ *  is the HTTP answer behind it, when there was one: a 401/403 hands the file to the fetcher. */
 export class HostError extends Error {
   constructor(
     message: string,
     readonly permanent = false,
     readonly retryAfterMs?: number,
+    readonly status?: number,
   ) {
     super(message);
   }
@@ -227,7 +229,7 @@ const PAGE_HEADERS = {
 async function getText(f: Fetch, url: string, headers: Record<string, string> = PAGE_HEADERS): Promise<string> {
   const res = await f(url, { headers });
   if (res.status === 404 || res.status === 410) throw new HostError(`${hostKind(url)}: ${res.status}`, true);
-  if (!res.ok) throw new HostError(`${hostKind(url)}: answered ${res.status}`);
+  if (!res.ok) throw new HostError(`${hostKind(url)}: answered ${res.status}`, false, undefined, res.status);
   return res.text();
 }
 
@@ -238,7 +240,7 @@ async function getJson(f: Fetch, url: string, init?: RequestInit): Promise<any> 
     return JSON.parse(text);
   } catch {
     if (res.status === 404) throw new HostError(`${hostKind(url)}: not found`, true);
-    throw new HostError(`${hostKind(url)}: answered ${res.status} without JSON`);
+    throw new HostError(`${hostKind(url)}: answered ${res.status} without JSON`, false, undefined, res.status);
   }
 }
 
@@ -691,7 +693,8 @@ export async function openBody(f: Fetch, url: string): Promise<Response> {
     throw new HostError(`${hostKind(url)}: answered ${res.status}`, false, Number.isFinite(after) && after > 0 ? after * 1000 : undefined);
   }
   if (res.status === 404 || res.status === 410) throw new HostError(`${hostKind(url)}: the file is gone (${res.status})`, true);
-  if (res.status === 401 || res.status === 403) throw new HostError(`${hostKind(url)}: refused (${res.status})`, isGdrive ? false : true);
+  if (res.status === 401 || res.status === 403)
+    throw new HostError(`${hostKind(url)}: refused (${res.status})`, isGdrive ? false : true, undefined, res.status);
   if (!res.ok) throw new HostError(`${hostKind(url)}: answered ${res.status}`);
 
   if (isHtml(res) && isGdrive) {

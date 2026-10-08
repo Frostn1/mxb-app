@@ -90,7 +90,14 @@
     "MXB_MIRROR_RETAIN_DAYS": "90",
     "MXB_BIKE_ACTIVE_DAYS": "180",
     "MXB_MIRROR_BIKES_ALLOW": "",
-    "MXB_MIRROR_BIKES_DENY": ""
+    "MXB_MIRROR_BIKES_DENY": "",
+    // Hosts the mirror reaches through the fetcher on our own box (`src/fetcherroute.ts`,
+    // `/v1/mirror/fetcher/*`), because they answer Workers 403. Space or comma separated; a name
+    // covers its subdomains; empty turns the fetcher off. Keep the same as in
+    // mirror/wrangler.jsonc. The fetcher authenticates with the MIRROR_FETCHER_TOKEN secret.
+    "MIRROR_FETCHER_HOSTS": "mxb-mods.com mediafire.com",
+    // The public bucket's name, for the S3 endpoint the fetcher's upload URLs are presigned against.
+    "MXB_ASSETS_BUCKET": "mxb-assets"
   },
 
   // Every five minutes: hosted boxes through delivery and install, idle slots, drains, prunes.

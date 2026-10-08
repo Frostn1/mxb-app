@@ -20,7 +20,10 @@
     "MXB_MIRROR_RETAIN_DAYS": "90",
     "MXB_BIKE_ACTIVE_DAYS": "180",
     "MXB_MIRROR_BIKES_ALLOW": "",
-    "MXB_MIRROR_BIKES_DENY": ""
+    "MXB_MIRROR_BIKES_DENY": "",
+    // Hosts reached through the fetcher on our own box instead of from here (src/fetcherroute.ts).
+    // Keep the same as in ../wrangler.jsonc. Empty turns the fetcher off.
+    "MIRROR_FETCHER_HOSTS": "mxb-mods.com mediafire.com"
   },
 
   // The sync's own run. Every 10 minutes: four listing pages and one sweep page, 3 s apart,

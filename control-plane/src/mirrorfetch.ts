@@ -14,6 +14,7 @@
 
 import { backoff, globalFetch, hex, readPageJobs, type MirrorJob } from "./mirror";
 import { verifyUpload } from "./uploadcheck";
+import { fetcherOn, learnFetcherHost } from "./fetcherroute";
 import { HostError, RunnerNeeded, filenameFrom, megaDecryptStream, openBody, resolveShare, hostKind, type Resolved } from "./mirrorhosts";
 
 /** What one Worker invocation will stream. Larger files are left for the runner. */
@@ -186,6 +187,18 @@ export async function mirrorFile(
       return;
     }
     const e = err instanceof HostError ? err : new HostError(String(err));
+    // The host turned the Worker away. With a fetcher configured, the file (and that host from
+    // now on) goes to it: it is a normal machine, which these hosts answer.
+    if ((e.status === 401 || e.status === 403) && fetcherOn(env)) {
+      await learnFetcherHost(env, row.url);
+      await env.DB.prepare(
+        `UPDATE mod_files SET status = 'fetcher', due_at = ?, error = ?, leased_until = 0
+         WHERE version_id = ? AND idx = ? AND part = ?`,
+      )
+        .bind(now, e.message.slice(0, 300), row.version_id, row.idx, row.part)
+        .run();
+      return;
+    }
     const attempts = row.attempts + 1;
     const failed = e.permanent || attempts >= MAX_ATTEMPTS;
     await env.DB.prepare(
@@ -213,21 +226,35 @@ async function setStatus(env: Env, row: FileRow, status: string, error: string |
     .run();
 }
 
-/** List a folder's files as parts of this download option; each is then fetched on its own. */
-async function expandFolder(
+/**
+ * List a folder's files as parts of this download option; each is then fetched on its own.
+ * `partStatus` is where the parts start: `pending` for the cron's dispatch, or `fetcher` when the
+ * fetcher listed the folder and will fetch its files too.
+ */
+export async function expandFolder(
   env: Env,
-  row: FileRow,
+  row: Pick<FileRow, "version_id" | "idx">,
   folder: Extract<Resolved, { kind: "folder" }>,
   now: number,
+  partStatus: "pending" | "fetcher" = "pending",
 ): Promise<void> {
   const stmts = [
     env.DB.prepare("DELETE FROM mod_files WHERE version_id = ? AND idx = ? AND part > 0").bind(row.version_id, row.idx),
     ...folder.files.map((file, i) =>
       env.DB.prepare(
-        `INSERT INTO mod_files (version_id, idx, part, rel, url, host, label, is_server, is_default, status)
-         SELECT version_id, idx, ?, ?, ?, ?, label, is_server, is_default, 'pending'
+        `INSERT INTO mod_files (version_id, idx, part, rel, url, host, label, is_server, is_default, status, due_at)
+         SELECT version_id, idx, ?, ?, ?, ?, label, is_server, is_default, ?, ?
          FROM mod_files WHERE version_id = ? AND idx = ? AND part = 0`,
-      ).bind(i + 1, `${folder.name}/${file.rel}`.slice(0, 400), file.url, hostKind(file.url), row.version_id, row.idx),
+      ).bind(
+        i + 1,
+        `${folder.name}/${file.rel}`.slice(0, 400),
+        file.url,
+        hostKind(file.url),
+        partStatus,
+        partStatus === "fetcher" ? now : 0,
+        row.version_id,
+        row.idx,
+      ),
     ),
     env.DB.prepare(
       `UPDATE mod_files SET status = 'folder', error = NULL, attempts = 0, fetched_at = ?, leased_until = 0

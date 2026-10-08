@@ -187,6 +187,29 @@ jobs:
       - name: Test
         run: bunx vitest run
 
+  # The mirror fetcher (tools/mxb-fetcher): outside the Cargo workspace, so the `rust` job
+  # above never builds it. Small, and no system libraries beyond a C compiler.
+  fetcher:
+    name: Mirror fetcher (test)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./tools/mxb-fetcher
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: tools/mxb-fetcher -> target
+
+      - name: Test
+        run: cargo test --locked
+
   # The deploy the comment above used to describe as "by hand".
   #
   # Gated on the job above, so nothing reaches api.mxbsecure.com that has not typechecked and
