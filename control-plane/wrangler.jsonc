@@ -39,6 +39,9 @@
     // The public key the box install runner logs in with (its private half is the
     // BOX_SSH_PRIVATE_KEY secret in Frostn1/mxbserver-releases). Empty blocks installs.
     "MXB_HOST_SSH_PUBLIC_KEY": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIATkwdAwpg8xnTVXg2TY5hv+N46TrjZP3wjyi5hJm7J4 mxb-box-install",
+    // Operator public keys, one per line, added to the box's login user at install so an
+    // operator can SSH in. A box gets them only when it is (re)installed.
+    "MXB_HOST_ADMIN_SSH_KEYS": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOPkrH78QbfRpnljOeL5bTDX8vgLTu2LhDq2FyQQrmIQ sean-windows-pc",
     // Paid hosting (src/billing.ts): the Stripe price ids for $5/month mxbserver and $8/month
     // Legacy, made by scripts/stripe-prices.ts. Empty leaves billing off, as do missing
     // STRIPE_SECRET_KEY / STRIPE_WEBHOOK_SECRET secrets: deploy is then invite-only and free.
