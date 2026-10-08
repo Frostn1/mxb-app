@@ -373,7 +373,7 @@ export async function mintInvite(
   )
     .bind(id, await hashToken(code), operator, steamId, quota, now + days * DAY, now)
     .run();
-  return { status: 201, body: { id, code, link: `https://servers.mxbsecure.com/?invite=${code}` } };
+  return { status: 201, body: { id, code, link: `https://servers.mxbsecure.com/invite/${code}` } };
 }
 
 export async function claimInvite(env: Env, deps: Deps, steamId: string, input: Record<string, unknown>): Promise<Result> {

@@ -96,7 +96,7 @@ describe("invites", () => {
     const d = deps(null, fakeFetch(), clock);
     const bound = await mintInvite(e, d, BOSS, { steamId: RIDER });
     const code = (bound.body as { code: string; link: string }).code;
-    expect((bound.body as { link: string }).link).toBe(`https://servers.mxbsecure.com/?invite=${code}`);
+    expect((bound.body as { link: string }).link).toBe(`https://servers.mxbsecure.com/invite/${code}`);
     expect((await claimInvite(e, d, RIDER2, { code })).status).toBe(403);
     expect((await claimInvite(e, d, RIDER, { code })).status).toBe(200);
     expect((await claimInvite(e, d, RIDER2, { code })).status).toBe(409);
