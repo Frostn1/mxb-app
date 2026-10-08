@@ -80,21 +80,22 @@ describe("ordering a VPS", () => {
     const client = new OvhClient(creds, m.fetch);
     const order = await client.orderVps({
       subsidiary: "US",
-      planCode: "vps-2025-model1-ca",
+      planCode: "vps-2027-model1-ca",
       datacenter: "SYD",
-      os: "Debian 12",
-      addons: ["option-linux-ca", "option-auto-backup-2025-1-model1-ca"],
+      os: "Ubuntu 24.04",
+      addons: ["option-linux-ca", "option-storage-local-2027-model1-ca", "option-auto-backup-2027-1-model1-ca"],
     });
     expect(order).toEqual({ orderId: 987654, price: 8.1, currency: "USD" });
     const ovh = m.calls.filter((c) => !c.url.endsWith("/auth/time")).map((c) => [c.method, c.url.replace(creds.endpoint, ""), c.body]);
     expect(ovh).toEqual([
       ["POST", "/order/cart", { ovhSubsidiary: "US" }],
       ["POST", "/order/cart/cart-1/assign", undefined],
-      ["POST", "/order/cart/cart-1/vps", { planCode: "vps-2025-model1-ca", duration: "P1M", pricingMode: "default", quantity: 1 }],
+      ["POST", "/order/cart/cart-1/vps", { planCode: "vps-2027-model1-ca", duration: "P1M", pricingMode: "default", quantity: 1 }],
       ["POST", "/order/cart/cart-1/item/42/configuration", { label: "vps_datacenter", value: "SYD" }],
-      ["POST", "/order/cart/cart-1/item/42/configuration", { label: "vps_os", value: "Debian 12" }],
+      ["POST", "/order/cart/cart-1/item/42/configuration", { label: "vps_os", value: "Ubuntu 24.04" }],
       ["POST", "/order/cart/cart-1/vps/options", { itemId: 42, planCode: "option-linux-ca", duration: "P1M", pricingMode: "default", quantity: 1 }],
-      ["POST", "/order/cart/cart-1/vps/options", { itemId: 42, planCode: "option-auto-backup-2025-1-model1-ca", duration: "P1M", pricingMode: "default", quantity: 1 }],
+      ["POST", "/order/cart/cart-1/vps/options", { itemId: 42, planCode: "option-storage-local-2027-model1-ca", duration: "P1M", pricingMode: "default", quantity: 1 }],
+      ["POST", "/order/cart/cart-1/vps/options", { itemId: 42, planCode: "option-auto-backup-2027-1-model1-ca", duration: "P1M", pricingMode: "default", quantity: 1 }],
       ["GET", "/order/cart/cart-1/checkout", undefined],
       ["POST", "/order/cart/cart-1/checkout", { autoPayWithPreferredPaymentMethod: true, waiveRetractationPeriod: false }],
     ]);
@@ -107,7 +108,7 @@ describe("ordering a VPS", () => {
     });
     const client = new OvhClient(creds, m.fetch);
     await expect(
-      client.orderVps({ subsidiary: "US", planCode: "vps-2025-model1", datacenter: "US-EAST-VA", os: "Debian 12", addons: [] }),
+      client.orderVps({ subsidiary: "US", planCode: "vps-2027-model1", datacenter: "US-EAST-VA", os: "Ubuntu 24.04", addons: [] }),
     ).rejects.toThrow(OvhError);
   });
 });

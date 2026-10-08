@@ -4,8 +4,8 @@
  * one. servers.mxbsecure.com drives it; MSM drives one server with a claimed token.
  *
  * Money is the limit, not boxes. A box is ordered only when a deploy finds no free slot in its
- * pool and region, and only if `MXB_HOST_BOX_PRICE_EUR` x (billed boxes + 1) stays within
- * `MXB_HOST_SPEND_CAP_EUR`. VPSes bill monthly, so an empty box is never cancelled here: it is
+ * pool and region, and only if `MXB_HOST_BOX_PRICE_USD` x (billed boxes + 1) stays within
+ * `MXB_HOST_SPEND_CAP_USD`. VPSes bill monthly, so an empty box is never cancelled here: it is
  * drained, then flagged near its renewal date for an operator to cancel at OVH by hand.
  *
  * Users never hold a box or slot credential. Every call to a box goes through `slotCall`, which
@@ -62,8 +62,8 @@ export const INSTALL_NOTE = "Installing the server. This usually takes a few min
 // ---- Config --------------------------------------------------------------------------------
 
 export interface HostConfig {
-  capEur: number;
-  boxPriceEur: number;
+  capUsd: number;
+  boxPriceUsd: number;
   maxBoxes: number;
   legacyMaxBoxes: number;
   slots: Record<Pool, number>;
@@ -82,8 +82,8 @@ function num(value: string | undefined, fallback: number): number {
 
 export function hostConfig(env: Env): HostConfig {
   return {
-    capEur: num(env.MXB_HOST_SPEND_CAP_EUR, 0),
-    boxPriceEur: num(env.MXB_HOST_BOX_PRICE_EUR, 7.5),
+    capUsd: num(env.MXB_HOST_SPEND_CAP_USD, 0),
+    boxPriceUsd: num(env.MXB_HOST_BOX_PRICE_USD, 5.85),
     maxBoxes: Math.floor(num(env.MXB_HOST_MAX_BOXES, 4)),
     legacyMaxBoxes: Math.floor(num(env.MXB_HOST_LEGACY_MAX_BOXES, 1)),
     slots: {
@@ -108,6 +108,7 @@ export interface BoxRow {
   datacenter: string;
   plan_code: string;
   state: string;
+  /** Column name predates the USD switch (migration 0057); the value is USD. */
   price_eur: number;
   quoted_price: number | null;
   quoted_currency: string | null;
@@ -218,9 +219,9 @@ export async function alert(
 // ---- Spend ---------------------------------------------------------------------------------
 
 export interface Spend {
-  capEur: number;
-  committedEur: number;
-  boxPriceEur: number;
+  capUsd: number;
+  committedUsd: number;
+  boxPriceUsd: number;
   maxBoxes: number;
   boxes: number;
   legacyBoxes: number;
@@ -234,9 +235,9 @@ export async function spend(env: Env, cfg: HostConfig): Promise<Spend> {
   ).all<{ pool: Pool; price_eur: number }>();
   const committed = rows.results.reduce((sum, r) => sum + r.price_eur, 0);
   return {
-    capEur: cfg.capEur,
-    committedEur: Math.round(committed * 100) / 100,
-    boxPriceEur: cfg.boxPriceEur,
+    capUsd: cfg.capUsd,
+    committedUsd: Math.round(committed * 100) / 100,
+    boxPriceUsd: cfg.boxPriceUsd,
     maxBoxes: cfg.maxBoxes,
     boxes: rows.results.length,
     legacyBoxes: rows.results.filter((r) => r.pool === "legacy").length,
@@ -245,8 +246,8 @@ export async function spend(env: Env, cfg: HostConfig): Promise<Spend> {
 
 /** Whether one more box fits, and if not, why (for the operator alert). */
 export function roomForBox(s: Spend, cfg: HostConfig, pool: Pool): string | null {
-  if (s.committedEur + cfg.boxPriceEur > cfg.capEur + 1e-9) {
-    return `the monthly spend cap (EUR ${cfg.capEur.toFixed(2)}) would be passed: EUR ${s.committedEur.toFixed(2)} committed, a box is EUR ${cfg.boxPriceEur.toFixed(2)}`;
+  if (s.committedUsd + cfg.boxPriceUsd > cfg.capUsd + 1e-9) {
+    return `the monthly spend cap (USD ${cfg.capUsd.toFixed(2)}) would be passed: USD ${s.committedUsd.toFixed(2)} committed, a box is USD ${cfg.boxPriceUsd.toFixed(2)}`;
   }
   if (s.boxes + 1 > cfg.maxBoxes) return `the box limit (${cfg.maxBoxes}) is reached`;
   if (pool === "legacy" && s.legacyBoxes + 1 > cfg.legacyMaxBoxes) {
@@ -310,7 +311,7 @@ export async function orderBox(
     `INSERT INTO host_boxes (id, pool, region, datacenter, plan_code, state, price_eur, slots_total, stage_at, created_at)
      VALUES (?, ?, ?, ?, ?, 'ordering', ?, ?, ?, ?)`,
   )
-    .bind(id, pool, region.id, region.datacenter, region.planCode, cfg.boxPriceEur, cfg.slots[pool], now, now)
+    .bind(id, pool, region.id, region.datacenter, region.planCode, cfg.boxPriceUsd, cfg.slots[pool], now, now)
     .run();
   try {
     const order = await deps.ovh.orderVps({
@@ -318,7 +319,7 @@ export async function orderBox(
       planCode: region.planCode,
       datacenter: region.datacenter,
       os: BOX_OS,
-      addons: [region.osAddon, region.backupAddon],
+      addons: [region.osAddon, region.storageAddon, region.backupAddon],
     });
     await env.DB.prepare(
       "UPDATE host_boxes SET state = 'delivering', ovh_order_id = ?, quoted_price = ?, quoted_currency = ?, stage_at = ? WHERE id = ?",
@@ -1193,7 +1194,7 @@ export async function operatorView(env: Env): Promise<Result> {
         slotsUsed: b.used,
         slotsTotal: b.slots_total,
         waiting: b.waiting,
-        priceEur: b.price_eur,
+        priceUsd: b.price_eur,
         quotedPrice: b.quoted_price,
         quotedCurrency: b.quoted_currency,
         renewsAt: b.renews_at,

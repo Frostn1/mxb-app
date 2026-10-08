@@ -5,9 +5,10 @@
  * (`GET https://api.us.ovhcloud.com/v1/order/catalog/public/vps?ovhSubsidiary=US`, 2026-10-07):
  * one OVH US account can order all five. The EU catalog has no US datacenter.
  *
- * `vps_datacenter` and the add-on plan codes differ per plan family: `vps-2025-model1` (US),
- * `-eu` and `-ca` (the latter carries SYD). The `os` and `automatedBackup` add-on families are
- * mandatory in that catalog, so both are ordered with every box.
+ * `vps_datacenter` and the add-on plan codes differ per plan family: `vps-2027-model1` (US),
+ * `-eu` and `-ca` (the latter carries SYD). The `os`, `storage` and `automatedBackup` add-on
+ * families are mandatory in that catalog, so all three are ordered with every box. The backup is the
+ * cheapest one (`option-auto-backup-2027-1-model1*`, 1 backup).
  */
 
 export type RegionId = "us-east" | "us-west" | "eu-west" | "eu-east" | "oceania";
@@ -23,6 +24,8 @@ export interface HostRegion {
   location: string;
   planCode: string;
   osAddon: string;
+  /** The mandatory `storage` family add-on (local NVMe). */
+  storageAddon: string;
   backupAddon: string;
 }
 
@@ -32,27 +35,30 @@ export const REGIONS: readonly HostRegion[] = [
     label: "US East",
     datacenter: "US-EAST-VA",
     location: "Vint Hill, Virginia",
-    planCode: "vps-2025-model1",
+    planCode: "vps-2027-model1",
     osAddon: "option-linux",
-    backupAddon: "option-auto-backup-2025-1-model1",
+    storageAddon: "option-storage-local-2027-model1",
+    backupAddon: "option-auto-backup-2027-1-model1",
   },
   {
     id: "us-west",
     label: "US West",
     datacenter: "US-WEST-OR",
     location: "Hillsboro, Oregon",
-    planCode: "vps-2025-model1",
+    planCode: "vps-2027-model1",
     osAddon: "option-linux",
-    backupAddon: "option-auto-backup-2025-1-model1",
+    storageAddon: "option-storage-local-2027-model1",
+    backupAddon: "option-auto-backup-2027-1-model1",
   },
   {
     id: "eu-west",
     label: "EU West",
     datacenter: "GRA",
     location: "Gravelines, France",
-    planCode: "vps-2025-model1-eu",
+    planCode: "vps-2027-model1-eu",
     osAddon: "option-linux-eu",
-    backupAddon: "option-auto-backup-2025-1-model1-eu",
+    storageAddon: "option-storage-local-2027-model1-eu",
+    backupAddon: "option-auto-backup-2027-1-model1-eu",
   },
   {
     // Warsaw is the only OVH VPS datacenter east of Germany.
@@ -60,18 +66,20 @@ export const REGIONS: readonly HostRegion[] = [
     label: "EU East",
     datacenter: "WAW",
     location: "Warsaw, Poland",
-    planCode: "vps-2025-model1-eu",
+    planCode: "vps-2027-model1-eu",
     osAddon: "option-linux-eu",
-    backupAddon: "option-auto-backup-2025-1-model1-eu",
+    storageAddon: "option-storage-local-2027-model1-eu",
+    backupAddon: "option-auto-backup-2027-1-model1-eu",
   },
   {
     id: "oceania",
     label: "Oceania",
     datacenter: "SYD",
     location: "Sydney, Australia",
-    planCode: "vps-2025-model1-ca",
+    planCode: "vps-2027-model1-ca",
     osAddon: "option-linux-ca",
-    backupAddon: "option-auto-backup-2025-1-model1-ca",
+    storageAddon: "option-storage-local-2027-model1-ca",
+    backupAddon: "option-auto-backup-2027-1-model1-ca",
   },
 ];
 
@@ -81,7 +89,7 @@ export const SERVER_TYPES: readonly { id: ServerType; label: string }[] = [
 ];
 
 /** The OS every box is installed with, as OVH's `vps_os` value. */
-export const BOX_OS = "Debian 12";
+export const BOX_OS = "Ubuntu 24.04";
 
 export function regionById(id: unknown): HostRegion | null {
   return REGIONS.find((r) => r.id === id) ?? null;

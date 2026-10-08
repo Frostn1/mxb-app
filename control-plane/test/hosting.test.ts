@@ -31,8 +31,8 @@ function env(vars: Record<string, string> = {}): Env {
   return {
     DB: d1(),
     ADMIN_STEAM_IDS: BOSS,
-    MXB_HOST_SPEND_CAP_EUR: "30",
-    MXB_HOST_BOX_PRICE_EUR: "7.50",
+    MXB_HOST_SPEND_CAP_USD: "30",
+    MXB_HOST_BOX_PRICE_USD: "5.85",
     MXB_HOST_MAX_BOXES: "4",
     MXB_HOST_LEGACY_MAX_BOXES: "1",
     MXB_HOST_SLOTS_NATIVE: "4",
@@ -116,7 +116,7 @@ describe("invites", () => {
 
 describe("deploy, placement and the spend cap", () => {
   it("orders nothing with no cap, and tells the user plainly", async () => {
-    const e = env({ MXB_HOST_SPEND_CAP_EUR: "0" });
+    const e = env({ MXB_HOST_SPEND_CAP_USD: "0" });
     const { ovh } = fakeOvh();
     const d = deps(ovh, fakeFetch(), { t: 1 });
     await invited(e, d, RIDER);
@@ -140,8 +140,8 @@ describe("deploy, placement and the spend cap", () => {
         subsidiary: "US",
         planCode: region.planCode,
         datacenter: region.datacenter,
-        os: "Debian 12",
-        addons: [region.osAddon, region.backupAddon],
+        os: "Ubuntu 24.04",
+        addons: [region.osAddon, region.storageAddon, region.backupAddon],
       });
       const server = (r.body as { server: { state: string; progress: { step: number; note: string } } }).server;
       expect(server.state).toBe("provisioning");
@@ -151,8 +151,8 @@ describe("deploy, placement and the spend cap", () => {
   });
 
   it("packs a second deploy onto the box already on its way, and stops at the cap", async () => {
-    // Cap 15 = two boxes at 7.50.
-    const e = env({ MXB_HOST_SPEND_CAP_EUR: "15" });
+    // Cap 12 = two boxes at 5.85.
+    const e = env({ MXB_HOST_SPEND_CAP_USD: "12" });
     const { ovh } = fakeOvh();
     const d = deps(ovh, fakeFetch(), { t: 1 });
     const riders = Array.from({ length: 10 }, (_, i) => `7656119000000010${i}`);
@@ -166,12 +166,12 @@ describe("deploy, placement and the spend cap", () => {
     const refused = await deploy(e, d, riders[5], { name: "s5", type: "mxbserver", region: "oceania" });
     expect(refused).toMatchObject({ status: 409, body: { error: "No capacity in Oceania right now." } });
     expect(ovh.orderVps).toHaveBeenCalledTimes(2);
-    const spend = ((await operatorView(e)).body as { spend: { committedEur: number; boxes: number } }).spend;
-    expect(spend).toMatchObject({ committedEur: 15, boxes: 2 });
+    const spend = ((await operatorView(e)).body as { spend: { committedUsd: number; boxes: number } }).spend;
+    expect(spend).toMatchObject({ committedUsd: 11.7, boxes: 2 });
   });
 
   it("keeps the box limit as a second guard, and Legacy to one trial box", async () => {
-    const e = env({ MXB_HOST_SPEND_CAP_EUR: "1000", MXB_HOST_MAX_BOXES: "1" });
+    const e = env({ MXB_HOST_SPEND_CAP_USD: "1000", MXB_HOST_MAX_BOXES: "1" });
     const { ovh } = fakeOvh();
     const d = deps(ovh, fakeFetch(), { t: 1 });
     await invited(e, d, RIDER);
@@ -179,7 +179,7 @@ describe("deploy, placement and the spend cap", () => {
     expect((await deploy(e, d, RIDER, { name: "a", type: "mxbserver", region: "us-east" })).status).toBe(201);
     expect((await deploy(e, d, RIDER2, { name: "b", type: "mxbserver", region: "eu-east" })).status).toBe(409);
 
-    const e2 = env({ MXB_HOST_SPEND_CAP_EUR: "1000" });
+    const e2 = env({ MXB_HOST_SPEND_CAP_USD: "1000" });
     const d2 = deps(fakeOvh().ovh, fakeFetch(), { t: 1 });
     for (const r of [RIDER, RIDER2, BOSS]) await invited(e2, d2, r);
     expect((await deploy(e2, d2, RIDER, { name: "a", type: "legacy", region: "us-east" })).status).toBe(201);
@@ -215,7 +215,7 @@ describe("a box from order to ready", () => {
     expect(ovh.rebuild).not.toHaveBeenCalled();
     deliver(101, "vps-abc.vps.ovh.us");
     await hostingTick(e, d);
-    expect(ovh.rebuild).toHaveBeenCalledWith("vps-abc.vps.ovh.us", "Debian 12", "ssh-ed25519 AAAA test");
+    expect(ovh.rebuild).toHaveBeenCalledWith("vps-abc.vps.ovh.us", "Ubuntu 24.04", "ssh-ed25519 AAAA test");
 
     clock.t += 3 * 60 * 1000;
     await hostingTick(e, d);
