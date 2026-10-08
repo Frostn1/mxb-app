@@ -33,6 +33,8 @@ const POST = {
   slug: "careless-beta",
   link: "https://mxb-mods.com/careless-beta/",
   modified: "2026-10-07T19:53:23",
+  date: "2026-10-03T08:30:00",
+  date_gmt: "2026-10-03T12:30:00",
   title: { rendered: "Careless (beta)" },
   content: { rendered: "<p>Will be adding more assets soon. I hope you enjoy!</p>" },
   categories: [301],
@@ -504,7 +506,8 @@ describe("discovery from the fetcher", () => {
     expect(await listJob(e, NOW + 60_000)).toBeUndefined();
 
     // page_status aside: the Worker queued the page read, the fetcher leased it.
-    const cols = "source_ref, slug, title, type, bike, categories, description, source_url, modified, last_seen";
+    const cols = "source_ref, slug, title, type, bike, categories, description, source_url, modified, published, last_seen";
+    expect((await e.DB.prepare("SELECT published FROM mod_assets").first())).toEqual({ published: "2026-10-03T12:30:00Z" });
     expect((await e.DB.prepare(`SELECT ${cols} FROM mod_assets`).all()).results).toEqual(
       (await w.DB.prepare(`SELECT ${cols} FROM mod_assets`).all()).results,
     );

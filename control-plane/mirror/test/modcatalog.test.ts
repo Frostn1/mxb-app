@@ -11,6 +11,8 @@ import {
   parseAuthor,
   parseDownloads,
   parseImage,
+  listingUrl,
+  publishedOf,
   restAuthor,
   runMirror,
   sniffImage,
@@ -269,5 +271,72 @@ describe("unlisted mods and old addresses", () => {
     expect((await setThumb(put(WEBP), 1, { ...RIDER, id: "acc-other" }, e)).status).toBe(404);
     const ok = await setThumb(put(WEBP), 1, RIDER, e);
     expect(ok.body).toEqual({ thumb: expect.stringMatching(/^https:\/\/cdn\.mxbsecure\.com\/thumbs\/[0-9a-f]{64}\.webp$/) });
+  });
+});
+
+describe("publish dates", () => {
+  const post = (id: number, extra: Partial<Post>): Post => ({
+    id,
+    slug: `p${id}`,
+    link: `https://mxb-mods.com/p${id}/`,
+    modified: "2026-10-07T00:00:00",
+    title: { rendered: `P ${id}` },
+    ...extra,
+  });
+
+  it("reads the post date from the listing, UTC first", () => {
+    expect(publishedOf(post(1, { date: "2026-10-03T08:30:00", date_gmt: "2026-10-03T12:30:00" }))).toBe("2026-10-03T12:30:00Z");
+    expect(publishedOf(post(1, { date: "2026-10-03T08:30:00" }))).toBe("2026-10-03T08:30:00Z");
+    expect(publishedOf(post(1, { date_gmt: "0000-00-00T00:00:00" }))).toBeNull();
+    expect(publishedOf(post(1, {}))).toBeNull();
+    expect(listingUrl({ hwm: "", walk: null }).searchParams.get("_fields")).toContain("date_gmt");
+  });
+
+  it("stores it on the mirrored row, keeps it when a later listing lacks it, and keeps modified apart", async () => {
+    const e = env();
+    await upsertPost(e, post(1, { date_gmt: "2026-10-03T12:30:00" }), TREE, 5000);
+    await upsertPost(e, post(1, { modified: "2026-10-08T00:00:00" }), TREE, 6000);
+    const row = await e.DB.prepare("SELECT published, modified, first_seen FROM mod_assets").first();
+    expect(row).toEqual({ published: "2026-10-03T12:30:00Z", modified: "2026-10-08T00:00:00", first_seen: 5000 });
+  });
+
+  it("returns published in search and detail, newest published first, with a fallback for unfilled rows", async () => {
+    const e = env();
+    await upsertPost(e, post(1, { date_gmt: "2026-01-01T00:00:00", modified: "2026-10-09T00:00:00" }), TREE, Date.parse("2026-10-01T00:00:00Z"));
+    await upsertPost(e, post(2, { date_gmt: "2026-09-01T00:00:00", modified: "2026-02-01T00:00:00" }), TREE, Date.parse("2026-10-01T00:00:00Z"));
+    // Not re-listed yet: sorts and shows by first_seen.
+    await upsertPost(e, post(3, {}), TREE, Date.parse("2026-09-15T00:00:00Z"));
+    const s = (await (await get(e, "/v1/assets/search"))!.json()) as { results: { title: string; published: string; updated: string }[] };
+    expect(s.results.map((r) => r.title)).toEqual(["P 3", "P 2", "P 1"]);
+    expect(s.results.map((r) => r.published)).toEqual(["2026-09-15T00:00:00Z", "2026-09-01T00:00:00Z", "2026-01-01T00:00:00Z"]);
+    expect(s.results[2].updated).toBe("2026-10-09T00:00:00");
+    const id = (await e.DB.prepare("SELECT public_id FROM mod_assets WHERE source_ref = 2").first<{ public_id: string }>())!.public_id;
+    const d = (await (await get(e, `/v1/assets/${id}`))!.json()) as { published: string; updated: string };
+    expect(d.published).toBe("2026-09-01T00:00:00Z");
+    expect(d.updated).toBe("2026-02-01T00:00:00");
+  });
+
+  it("stamps an upload with its upload time", async () => {
+    const { DatabaseSync } = createRequire(import.meta.url)("node:sqlite") as typeof import("node:sqlite");
+    const db = new DatabaseSync(":memory:");
+    const files = readdirSync(MIGRATIONS).filter((f) => f.endsWith(".sql")).sort();
+    const at = files.indexOf("0066_mod_published.sql");
+    expect(at).toBeGreaterThan(0);
+    for (const f of files.slice(0, at)) db.exec(readFileSync(join(MIGRATIONS, f), "utf8"));
+    const ins = db.prepare(
+      `INSERT INTO mod_assets (source, source_ref, title, type, modified, first_seen, last_seen) VALUES (?, ?, 't', 'other', '', ?, 0)`,
+    );
+    ins.run("upload", null, Date.parse("2026-10-03T12:30:00Z"));
+    ins.run("mirror", 7, 1000);
+    // A finished walk's cursor, and one in flight.
+    db.prepare("INSERT INTO mirror_state (key, value) VALUES ('listing', '{\"hwm\":\"2026-10-07T00:00:00\",\"walk\":null}'), ('sweep', '{}')").run();
+    db.exec(readFileSync(join(MIGRATIONS, files[at]), "utf8"));
+    const rows = db.prepare("SELECT source, published FROM mod_assets ORDER BY id").all();
+    expect(rows).toEqual([
+      { source: "upload", published: "2026-10-03T12:30:00Z" },
+      { source: "mirror", published: null },
+    ]);
+    // The mirrored rows are filled by a full re-list: the cursor is gone, other state is not.
+    expect(db.prepare("SELECT key FROM mirror_state").all()).toEqual([{ key: "sweep" }]);
   });
 });
