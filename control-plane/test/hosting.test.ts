@@ -32,7 +32,7 @@ function env(vars: Record<string, string> = {}): Env {
     DB: d1(),
     ADMIN_STEAM_IDS: BOSS,
     MXB_HOST_SPEND_CAP_USD: "30",
-    MXB_HOST_BOX_PRICE_USD: "5.35",
+    MXB_HOST_BOX_PRICE_USD: "5.85",
     MXB_HOST_MAX_BOXES: "4",
     MXB_HOST_LEGACY_MAX_BOXES: "1",
     MXB_HOST_SLOTS_NATIVE: "4",
@@ -151,8 +151,8 @@ describe("deploy, placement and the spend cap", () => {
   });
 
   it("packs a second deploy onto the box already on its way, and stops at the cap", async () => {
-    // Cap 11 = two boxes at 5.35.
-    const e = env({ MXB_HOST_SPEND_CAP_USD: "11" });
+    // Cap 12 = two boxes at 5.85.
+    const e = env({ MXB_HOST_SPEND_CAP_USD: "12" });
     const { ovh } = fakeOvh();
     const d = deps(ovh, fakeFetch(), { t: 1 });
     const riders = Array.from({ length: 10 }, (_, i) => `7656119000000010${i}`);
@@ -167,7 +167,7 @@ describe("deploy, placement and the spend cap", () => {
     expect(refused).toMatchObject({ status: 409, body: { error: "No capacity in Oceania right now." } });
     expect(ovh.orderVps).toHaveBeenCalledTimes(2);
     const spend = ((await operatorView(e)).body as { spend: { committedUsd: number; boxes: number } }).spend;
-    expect(spend).toMatchObject({ committedUsd: 10.7, boxes: 2 });
+    expect(spend).toMatchObject({ committedUsd: 11.7, boxes: 2 });
   });
 
   it("keeps the box limit as a second guard, and Legacy to one trial box", async () => {

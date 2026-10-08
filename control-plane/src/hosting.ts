@@ -83,7 +83,7 @@ function num(value: string | undefined, fallback: number): number {
 export function hostConfig(env: Env): HostConfig {
   return {
     capUsd: num(env.MXB_HOST_SPEND_CAP_USD, 0),
-    boxPriceUsd: num(env.MXB_HOST_BOX_PRICE_USD, 5.35),
+    boxPriceUsd: num(env.MXB_HOST_BOX_PRICE_USD, 5.85),
     maxBoxes: Math.floor(num(env.MXB_HOST_MAX_BOXES, 4)),
     legacyMaxBoxes: Math.floor(num(env.MXB_HOST_LEGACY_MAX_BOXES, 1)),
     slots: {
