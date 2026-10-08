@@ -66,6 +66,7 @@ interface AssetRow {
   thumb_sha: string | null;
   source_url: string | null;
   modified: string;
+  published: string | null;
   first_seen: number;
   last_seen: number;
   label: string | null;
@@ -76,6 +77,11 @@ interface AssetRow {
 
 export function cdnBase(env: Env): string {
   return (env.MXB_ASSETS_CDN || DEFAULT_CDN).replace(/\/+$/, "");
+}
+
+/** Publish date, ISO. A row the re-list hasn't reached yet falls back to when we first saw it. */
+function publishedAt(r: AssetRow): string {
+  return r.published ?? new Date(r.first_seen).toISOString().slice(0, 19) + "Z";
 }
 
 function summary(env: Env, r: AssetRow) {
@@ -90,6 +96,7 @@ function summary(env: Env, r: AssetRow) {
     version: r.label,
     thumb: r.thumb_key ? `${cdnBase(env)}/${r.thumb_key}` : null,
     source_url: r.source_url,
+    published: publishedAt(r),
     updated: r.modified,
     first_seen: new Date(r.first_seen).toISOString(),
     last_seen: new Date(r.last_seen).toISOString(),
@@ -99,7 +106,7 @@ function summary(env: Env, r: AssetRow) {
 }
 
 /** The current version's label and seq, and what of it is stored. */
-const COLUMNS = `a.id, a.public_id, a.thumb_key, a.source, a.title, a.author, a.type, a.bike, a.visibility, a.thumb_sha, a.source_url, a.modified,
+const COLUMNS = `a.id, a.public_id, a.thumb_key, a.source, a.title, a.author, a.type, a.bike, a.visibility, a.thumb_sha, a.source_url, a.modified, a.published,
   a.first_seen, a.last_seen, v.label, v.seq,
   (SELECT COUNT(*) FROM mod_files f WHERE f.version_id = v.id AND f.status = 'done') AS files,
   (SELECT COALESCE(SUM(b.size), 0) FROM mod_files f JOIN mod_blobs b ON b.sha256 = f.sha256
@@ -107,6 +114,9 @@ const COLUMNS = `a.id, a.public_id, a.thumb_key, a.source, a.title, a.author, a.
 /** The whole mirrored catalogue is listed (metadata only); an upload once its version is live. */
 const LISTABLE = `a.state = 'active' AND a.visibility = 'public' AND a.page_status <> 'gone' AND (a.source = 'mirror'
   OR (v.state = 'live' AND EXISTS (SELECT 1 FROM mod_files f WHERE f.version_id = v.id AND f.status = 'done')))`;
+
+/** Newest published first; a row with no date yet sorts by when we first saw it. */
+const NEWEST = "COALESCE(a.published, strftime('%Y-%m-%dT%H:%M:%SZ', a.first_seen / 1000, 'unixepoch')) DESC";
 
 export async function searchAssets(url: URL, env: Env): Promise<{ status: number; body: unknown }> {
   const q = (url.searchParams.get("q") ?? "").slice(0, 200);
@@ -134,11 +144,11 @@ export async function searchAssets(url: URL, env: Env): Promise<{ status: number
   let lead: unknown[];
   if (match) {
     from = `FROM mod_fts JOIN mod_assets a ON a.id = mod_fts.rowid ${join} WHERE mod_fts MATCH ? AND ${where.join(" AND ")}`;
-    order = `bm25(mod_fts, ${WEIGHTS}), a.modified DESC`;
+    order = `bm25(mod_fts, ${WEIGHTS}), ${NEWEST}`;
     lead = [match];
   } else {
     from = `FROM mod_assets a ${join} WHERE ${where.join(" AND ")}`;
-    order = "a.modified DESC, a.id DESC";
+    order = `${NEWEST}, a.id DESC`;
     lead = [];
   }
   const counted = await env.DB.prepare(`SELECT COUNT(*) AS n ${from}`).bind(...lead, ...args).first<{ n: number }>();

@@ -369,10 +369,10 @@ async function publicIdOf(env: Env, id: number | null): Promise<string | null> {
 async function createAsset(env: Env, who: Uploader, meta: Meta, now: number): Promise<number> {
   const row = await env.DB.prepare(
     `INSERT INTO mod_assets (public_id, source, owner_account, visibility, state, title, author, type, bike, description,
-       modified, first_seen, last_seen, page_status)
-     VALUES (?, 'upload', ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, 'ok') RETURNING id`,
+       modified, first_seen, last_seen, page_status, published)
+     VALUES (?, 'upload', ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, 'ok', ?) RETURNING id`,
   )
-    .bind(newPublicId(), who.id, meta.visibility, meta.title, who.rider_name, meta.type, meta.bike, meta.description, new Date(now).toISOString(), now, now)
+    .bind(newPublicId(), who.id, meta.visibility, meta.title, who.rider_name, meta.type, meta.bike, meta.description, new Date(now).toISOString(), now, now, new Date(now).toISOString().slice(0, 19) + "Z")
     .first<{ id: number }>();
   return row!.id;
 }
