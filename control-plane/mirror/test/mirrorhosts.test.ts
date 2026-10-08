@@ -22,8 +22,8 @@ import {
   parseMediafireLink,
   parseMegaLink,
   resolveShare,
-} from "../src/mirrorhosts";
-import { fakeFetch, fixture } from "./modfakes";
+} from "../../src/mirrorhosts";
+import { fakeFetch, fixture } from "../../test/modfakes";
 
 const json = (body: unknown) => new Response(JSON.stringify(body), { headers: { "content-type": "application/json" } });
 const html = (body: string) => new Response(body, { headers: { "content-type": "text/html; charset=utf-8" } });

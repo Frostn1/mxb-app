@@ -13,7 +13,7 @@
  */
 
 import { backoff, hex, type MirrorJob } from "./mirror";
-import { verifyUpload } from "./uploads";
+import { verifyUpload } from "./uploadcheck";
 import { HostError, RunnerNeeded, filenameFrom, megaDecryptStream, openBody, resolveShare, hostKind, type Resolved } from "./mirrorhosts";
 
 /** What one Worker invocation will stream. Larger files are left for the runner. */
@@ -67,6 +67,32 @@ export async function consumeMirror(batch: MessageBatch<MirrorJob>, env: Env, de
     } catch (err) {
       console.error(JSON.stringify({ msg: "mirror job crashed", job: msg.body, error: String(err) }));
     }
+    msg.ack();
+  }
+}
+
+/**
+ * The dead-letter queue: a message the consumer crashed on past its retries. D1 holds the
+ * schedule, so all this does is make sure the row doesn't sit leased forever and says why.
+ */
+export async function deadLetters(batch: MessageBatch<MirrorJob>, env: Env, now = Date.now()): Promise<void> {
+  for (const msg of batch.messages) {
+    const job = msg.body;
+    if (job.kind === "file") {
+      await env.DB.prepare(
+        `UPDATE mod_files SET status = 'retry', due_at = ?, leased_until = 0, error = 'dead-lettered'
+         WHERE version_id = ? AND idx = ? AND part = ? AND status = 'queued'`,
+      )
+        .bind(now + 6 * 3600_000, job.version, job.idx, job.part)
+        .run();
+    } else {
+      await env.DB.prepare(
+        "UPDATE mod_uploads SET state = 'rejected', error = 'the check could not complete', finished_at = ? WHERE id = ? AND state IN ('verifying', 'checking')",
+      )
+        .bind(now, job.id)
+        .run();
+    }
+    console.error(JSON.stringify({ msg: "mirror job dead-lettered", job }));
     msg.ack();
   }
 }

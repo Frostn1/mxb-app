@@ -16,15 +16,15 @@ import {
   urlFileName,
   writeMirrorVersion,
   type Category,
-} from "../src/mirror";
-import { d1 } from "./d1sqlite";
-import { fakeBucket, fakeFetch, fakeQueue, fixture } from "./modfakes";
+} from "../../src/mirror";
+import { d1 } from "../../test/d1sqlite";
+import { fakeBucket, fakeFetch, fakeQueue, fixture } from "../../test/modfakes";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
 const page = (name: string) =>
-  readFileSync(join(dirname(fileURLToPath(import.meta.url)), "fixtures", "mods", name), "utf8");
+  readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "..", "test", "fixtures", "mods", name), "utf8");
 
 const TREE = new Map<number, Category>(
   [

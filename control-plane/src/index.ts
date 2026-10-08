@@ -92,10 +92,8 @@ import { VoiceRoom } from "./voiceroom";
 import { PaintRoom } from "./paintroom";
 import { ingestResults, leaderboard as ratingLeaderboard, myRatings, ratedClasses, serverForRatingToken } from "./rating";
 import { isSeriesPath, pruneSeriesRegistrations, seriesRoutes } from "./series";
-import { runMirror, type MirrorJob } from "./mirror";
-import { consumeMirror } from "./mirrorfetch";
 import { publicModRoutes } from "./modapi";
-import { abortUpload, completeUpload, deleteMod, editMod, expireUploads, myMods, openUpload, uploadStatus } from "./uploads";
+import { abortUpload, completeUpload, deleteMod, editMod, myMods, openUpload, uploadStatus } from "./uploads";
 import { viewOnlyOn, listPolicies, lockKey, minisignPublicKey, putPolicy, signedLocks, wantsViewOnly } from "./paintpolicy";
 import {
   liveKey,
@@ -143,12 +141,7 @@ export default {
    * 3am. This is the only thing standing between "we should turn those off" and a month of
    * charges for an empty grid.
    */
-  async scheduled(event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
-    // The mod mirror runs on a cron of its own, so its budget never shares a run with the reaper.
-    if (event.cron === MIRROR_CRON) {
-      ctx.waitUntil(Promise.all([runMirror(env), expireUploads(env)]).then(() => undefined));
-      return;
-    }
+  async scheduled(_event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
     ctx.waitUntil(
       Promise.all([
         reapIdleServers(env),
@@ -173,15 +166,7 @@ export default {
     );
   },
 
-  /** The mod catalogue's slow work, one job a message: a mirrored file to fetch, or an upload
-   *  to check (`mirrorfetch.ts`, `uploads.ts`). */
-  async queue(batch: MessageBatch<MirrorJob>, env: Env): Promise<void> {
-    await consumeMirror(batch, env);
-  },
-} satisfies ExportedHandler<Env, MirrorJob>;
-
-/** Must match the second entry of `triggers.crons` in wrangler.jsonc. */
-const MIRROR_CRON = "*/10 * * * *";
+} satisfies ExportedHandler<Env>;
 
 async function route(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);

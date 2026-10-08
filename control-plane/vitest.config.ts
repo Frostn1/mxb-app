@@ -21,6 +21,6 @@ export default {
   test: {
     // The Worker's tests are plain unit tests over pure functions; nothing here needs the
     // workers pool.
-    include: ["test/**/*.test.ts"],
+    include: ["test/**/*.test.ts", "mirror/test/**/*.test.ts"],
   },
 };

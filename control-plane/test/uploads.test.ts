@@ -11,9 +11,9 @@ import {
   parseListParts,
   parseOpen,
   uploadStatus,
-  verifyUpload,
   type Uploader,
 } from "../src/uploads";
+import { verifyUpload } from "../src/uploadcheck";
 import { addAccount, d1 } from "./d1sqlite";
 import { fakeBucket, fakeFetch, fakePe, fakeQueue, makeZip, nodeHasher, sha256 } from "./modfakes";
 

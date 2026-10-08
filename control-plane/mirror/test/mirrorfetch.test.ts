@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { upsertPost, writeMirrorVersion, type Category, type DownloadOption } from "../src/mirror";
-import { mirrorFile, multipartFrom, placement, PART_BYTES } from "../src/mirrorfetch";
-import { megaFileKey } from "../src/mirrorhosts";
-import { d1 } from "./d1sqlite";
-import { fakeBucket, fakeFetch, fakeQueue, fixture, nodeHasher, sha256 } from "./modfakes";
+import { upsertPost, writeMirrorVersion, type Category, type DownloadOption } from "../../src/mirror";
+import { mirrorFile, multipartFrom, placement, PART_BYTES } from "../../src/mirrorfetch";
+import { megaFileKey } from "../../src/mirrorhosts";
+import { d1 } from "../../test/d1sqlite";
+import { fakeBucket, fakeFetch, fakeQueue, fixture, nodeHasher, sha256 } from "../../test/modfakes";
 
 const TREE = new Map<number, Category>([
   [29, { id: 29, name: "Bikes", parent: 0 }],

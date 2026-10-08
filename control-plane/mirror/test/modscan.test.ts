@@ -7,8 +7,8 @@ import {
   checkPntHead,
   executableMagic,
   readCentralDirectory,
-} from "../src/modscan";
-import { fakePe, makeZip, type ZipEntry } from "./modfakes";
+} from "../../src/modscan";
+import { fakePe, makeZip, type ZipEntry } from "../../test/modfakes";
 
 /** Run the full check over a zip, streamed in awkward chunk sizes. */
 async function scan(zip: Uint8Array, chunk = 997): Promise<string | null> {

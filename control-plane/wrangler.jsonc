@@ -71,18 +71,14 @@
     // Who may use the FBX -> EDF converter on mxbsecure.com, besides the admins, who always
     // may: SteamID64s, comma or space separated. Empty means the admins alone. A list here
     // rather than a table so that granting it is a reviewable diff, like the admin list above.
-    // The mod catalogue (`mirror.ts`, `uploads.ts`, `modapi.ts`). "on" lets the sync walk
-    // mxb-mods.com; anything else stops it without touching what is already mirrored. Uploads
-    // and the public API run either way.
-    "MXB_MIRROR": "on",
     // Where public mod files are served from: the custom domain on the `mxb-assets` bucket.
     "MXB_ASSETS_CDN": "https://cdn.mxbsecure.com",
     // The private bucket's name, for the S3 endpoint the upload URLs are presigned against.
     "MXB_PRIVATE_BUCKET": "mxb-private",
-    // What the mirror keeps (`mirrorpolicy.ts`). Files are copied only when downloaded or used
-    // by a live server; these are the windows, in days, and Sean's own bike lists. A name in
-    // DENY is never mirrored, a name in ALLOW always may be: comma separated, any spelling
-    // ("2021 KTM 450 SX-F OEM" or "MX1OEM_2021_KTM_450_SX-F").
+    // What the mirror keeps (`mirrorpolicy.ts`). The download route checks the bike lists before
+    // it queues a copy, and the mxb-mirror Worker reads the same names from mirror/wrangler.jsonc,
+    // so change both. A name in DENY is never mirrored, a name in ALLOW always may be: comma
+    // separated, any spelling ("2021 KTM 450 SX-F OEM" or "MX1OEM_2021_KTM_450_SX-F").
     "MXB_LIVE_TRACK_DAYS": "14",
     "MXB_MIRROR_RETAIN_DAYS": "90",
     "MXB_BIKE_ACTIVE_DAYS": "180",
@@ -94,30 +90,14 @@
   // The idle reaper. Every five minutes it asks each running server who is connected and
   // destroys the ones that have been empty long enough — the difference between "no
   // unattended servers" being a policy and being a fact.
-  // The second is the mod catalogue's own run (`MIRROR_CRON` in `src/index.ts`), kept apart so
-  // its budget never shares an invocation with the reaper.
   "triggers": {
-    "crons": ["*/5 * * * *", "*/10 * * * *"]
+    "crons": ["*/5 * * * *"]
   },
 
-  // The upload check hashes and inflates up to 2 GiB in one queue invocation; the default 30 s
-  // of CPU is too tight for the largest tracks. A ceiling, not a reservation.
-  "limits": { "cpu_ms": 300000 },
-
-  // The mod catalogue's slow work: one mirrored file to fetch, or one upload to check, per
-  // message. Two at a time, so the download hosts see a polite client.
+  // The mod catalogue's slow work belongs to the mxb-mirror Worker (mirror/wrangler.jsonc).
+  // This one only queues it: one message per file to fetch or upload to check.
   "queues": {
-    "producers": [{ "binding": "MIRROR_QUEUE", "queue": "mxb-mirror" }],
-    "consumers": [
-      {
-        "queue": "mxb-mirror",
-        "max_batch_size": 1,
-        "max_batch_timeout": 5,
-        "max_concurrency": 2,
-        "max_retries": 3,
-        "dead_letter_queue": "mxb-mirror-dlq"
-      }
-    ]
+    "producers": [{ "binding": "MIRROR_QUEUE", "queue": "mxb-mirror" }]
   },
 
   "observability": {

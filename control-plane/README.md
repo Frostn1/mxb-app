@@ -615,6 +615,14 @@ one set of tables (`migrations/0056_mod_catalog.sql`):
   `MXB_MIRROR_BIKES_ALLOW` / `_DENY` override. A copy nobody downloads for
   `MXB_MIRROR_RETAIN_DAYS` (90) is evicted, unless a live server uses it.
 
+Two Workers share this code. `mxb-control-plane` answers people (search, mod pages, download
+redirects, upload sessions and completion, reports, moderation) and only *queues* slow work.
+`mxb-mirror` (`mirror/index.ts`, `mirror/wrangler.jsonc`) does it: the mxb-mods cron, the
+`mxb-mirror` queue (downloads, MEGA decryption, Drive's confirm page, upload scanning and
+promotion), eviction and the dead-letter queue. It has no route and holds no secrets: it reads
+R2 through its bindings, and the S3 credentials for presigning stay on the control plane.
+Its tests are in `mirror/test/`; `bunx vitest run` runs both suites.
+
 Search is FTS5 over title, author, bike, categories and description, bm25-ranked. Public files
 are served by `cdn.mxbsecure.com`, the custom domain on `mxb-assets`; `.mxbsecure` locked
 content stays in `mxb-private` behind five-minute signed links. Reports come in on
