@@ -83,15 +83,22 @@ export function d1(): Env["DB"] {
     prepare: (sql: string) => statement(sql),
     async batch(stmts: { sql: string; args: unknown[] }[]) {
       // D1 batches are one transaction: a batch where one statement fails leaves nothing behind.
+      // Each result carries `meta.changes`, as D1's does, so a conditional write in a batch can
+      // be told apart from one that wrote nothing.
       db.exec("BEGIN");
+      const out: { success: true; meta: { changes: number } }[] = [];
       try {
-        for (const s of stmts) rows(s.sql, s.args);
+        for (const s of stmts) {
+          rows(s.sql, s.args);
+          const n = rows("SELECT changes() AS n", [])[0].n as number | bigint;
+          out.push({ success: true, meta: { changes: /^\s*select/i.test(s.sql) ? 0 : Number(n) } });
+        }
         db.exec("COMMIT");
       } catch (e) {
         db.exec("ROLLBACK");
         throw e;
       }
-      return stmts.map(() => ({ success: true }));
+      return out;
     },
   } as unknown as Env["DB"];
 }

@@ -290,13 +290,24 @@ async function pendingBoxWithRoom(env: Env, pool: Pool, region: string): Promise
     .first<BoxRow>();
 }
 
-/** Order one box. Returns it, or the reason it was not ordered (already alerted). */
+/** What `orderBox` returns when a box on its way in the pool and region already has room. */
+export const BOX_IN_FLIGHT = "a box is already on its way";
+
+/**
+ * Order one box, and wait `forServer` on it. Returns it, `BOX_IN_FLIGHT` (nothing ordered:
+ * another box on its way in this pool and region has room), or the reason it was not
+ * ordered (already alerted).
+ *
+ * The row goes in with one INSERT ... WHERE NOT EXISTS, batched (one transaction) with the
+ * server joining it, so two concurrent orders for one pool and region make one box.
+ */
 export async function orderBox(
   env: Env,
   deps: Deps,
   cfg: HostConfig,
   pool: Pool,
   region: HostRegion,
+  forServer: string | null = null,
 ): Promise<BoxRow | string> {
   const s = await spend(env, cfg);
   const refused = roomForBox(s, cfg, pool);
@@ -311,12 +322,25 @@ export async function orderBox(
   const now = deps.now();
   const id = crypto.randomUUID();
   // The row goes in before the order, so a box can never be billed with nothing pointing at it.
-  await env.DB.prepare(
+  const insert = env.DB.prepare(
     `INSERT INTO host_boxes (id, pool, region, datacenter, plan_code, state, price_eur, slots_total, stage_at, created_at)
-     VALUES (?, ?, ?, ?, ?, 'ordering', ?, ?, ?, ?)`,
-  )
-    .bind(id, pool, region.id, region.datacenter, region.planCode, cfg.boxPriceUsd, cfg.slots[pool], now, now)
-    .run();
+     SELECT ?, ?, ?, ?, ?, 'ordering', ?, ?, ?, ?
+      WHERE NOT EXISTS (
+        SELECT 1 FROM host_boxes b
+         WHERE b.pool = ? AND b.region = ? AND b.state IN (${inList(PENDING)})
+           AND b.slots_total > (SELECT COUNT(*) FROM host_servers v WHERE v.box_id = b.id AND v.state = 'waiting'))`,
+  ).bind(id, pool, region.id, region.datacenter, region.planCode, cfg.boxPriceUsd, cfg.slots[pool], now, now, pool, region.id);
+  const join = forServer
+    ? [
+        env.DB.prepare("UPDATE host_servers SET box_id = ? WHERE id = ? AND EXISTS (SELECT 1 FROM host_boxes WHERE id = ?)").bind(
+          id,
+          forServer,
+          id,
+        ),
+      ]
+    : [];
+  const [inserted] = await env.DB.batch([insert, ...join]);
+  if (!inserted.meta.changes) return BOX_IN_FLIGHT;
   try {
     const order = await deps.ovh.orderVps({
       subsidiary: cfg.subsidiary,
@@ -335,6 +359,7 @@ export async function orderBox(
     await env.DB.prepare("UPDATE host_boxes SET state = 'failed', last_error = ?, stage_at = ? WHERE id = ?")
       .bind(String(err).slice(0, 500), deps.now(), id)
       .run();
+    await failWaiting(env, id);
     await alert(env, deps, "order_failed", `Ordering a box in ${region.label} failed: ${String(err).slice(0, 300)}`, {
       region: region.id,
       boxId: id,
@@ -564,18 +589,38 @@ async function hasRoom(env: Env, deps: Deps, cfg: HostConfig, pool: Pool, region
   return false;
 }
 
-/** Place a pending (paid) server, as a free deploy would. `ok`, or why it could not be. */
+/** What `seatPaid` returns when another invocation already took this server from pending. */
+export const ALREADY_SEATED = "already seated";
+/** What a paid server that could not be placed shows its owner. The cause goes to operators. */
+export const PAID_FAILED_ERROR = "Couldn't start.";
+
+/**
+ * Place a pending (paid) server, as a free deploy would. `ok`, `ALREADY_SEATED`, or why it
+ * could not be (and then the row is `failed`, never left `waiting`).
+ *
+ * Stripe sends both `checkout.session.completed` and `invoice.paid` for one payment, and they
+ * can land at once in separate invocations. The pending -> waiting claim is one conditional
+ * UPDATE, so only the invocation that moved the row places it.
+ */
 export async function seatPaid(env: Env, deps: Deps, serverId: string): Promise<"ok" | string> {
   const row = await serverRow(env, serverId);
-  if (!row || row.state !== "pending") return "the server is gone";
+  if (!row || row.state !== "pending") return row && ["waiting", "ready"].includes(row.state) ? ALREADY_SEATED : "the server is gone";
   const region = regionById(row.region);
   if (!region) return "unknown region";
   const cfg = hostConfig(env);
-  await env.DB.prepare("UPDATE host_servers SET state = 'waiting', last_active_at = ? WHERE id = ?").bind(deps.now(), serverId).run();
-  const placed = await place(env, deps, cfg, serverId, poolFor(row.type), region);
+  const claimed = await env.DB.prepare("UPDATE host_servers SET state = 'waiting', last_active_at = ? WHERE id = ? AND state = 'pending'")
+    .bind(deps.now(), serverId)
+    .run();
+  if (!claimed.meta.changes) return ALREADY_SEATED;
+  let placed: string;
+  try {
+    placed = await place(env, deps, cfg, serverId, poolFor(row.type), region);
+  } catch (err) {
+    placed = `placing failed: ${String(err).slice(0, 300)}`;
+  }
   if (placed !== "ok") {
     await env.DB.prepare("UPDATE host_servers SET state = 'failed', error = ? WHERE id = ?")
-      .bind(`No capacity in ${region.label} right now. Delete it; the subscription was cancelled.`, serverId)
+      .bind(PAID_FAILED_ERROR, serverId)
       .run();
     return placed;
   }
@@ -605,14 +650,33 @@ async function place(env: Env, deps: Deps, cfg: HostConfig, serverId: string, po
     await assign(env, deps, serverId, free);
     return "ok";
   }
-  let target = await pendingBoxWithRoom(env, pool, region.id);
-  if (!target) {
-    const ordered = await orderBox(env, deps, cfg, pool, region);
+  // Join a box on its way, or order one. Both are atomic against a concurrent place in the
+  // same pool and region: joining re-checks room in the UPDATE, and ordering inserts the box
+  // only if no box on its way has room (see orderBox). Losing either race just goes round again.
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const target = await pendingBoxWithRoom(env, pool, region.id);
+    if (target) {
+      if (await joinPendingBox(env, serverId, target.id)) return "ok";
+      continue;
+    }
+    const ordered = await orderBox(env, deps, cfg, pool, region, serverId);
+    if (ordered === BOX_IN_FLIGHT) continue;
     if (typeof ordered === "string") return ordered;
-    target = ordered;
+    return "ok";
   }
-  await env.DB.prepare("UPDATE host_servers SET box_id = ? WHERE id = ?").bind(target.id, serverId).run();
-  return "ok";
+  return "no box on its way had room";
+}
+
+/** Wait on a box still on its way, if it still has room for one more waiting server. */
+async function joinPendingBox(env: Env, serverId: string, boxId: string): Promise<boolean> {
+  const joined = await env.DB.prepare(
+    `UPDATE host_servers SET box_id = ? WHERE id = ? AND box_id IS NULL
+        AND (SELECT b.slots_total FROM host_boxes b WHERE b.id = ? AND b.state IN (${inList(PENDING)}))
+          > (SELECT COUNT(*) FROM host_servers v WHERE v.box_id = ? AND v.state = 'waiting')`,
+  )
+    .bind(boxId, serverId, boxId, boxId)
+    .run();
+  return Boolean(joined.meta.changes);
 }
 
 async function assign(env: Env, deps: Deps, serverId: string, free: SlotRow): Promise<void> {

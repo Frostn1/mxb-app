@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
-import { GRACE_DAYS, billingTick, signStripePayload, stripeWebhook, verifyStripeSignature } from "../src/billing";
+import { GRACE_DAYS, REFUNDED_ERROR, REFUND_PENDING_ERROR, billingTick, signStripePayload, stripeWebhook, verifyStripeSignature } from "../src/billing";
 import {
+  ALREADY_SEATED,
   addTrack,
   claimInvite,
   deploy,
@@ -10,6 +11,7 @@ import {
   myHosting,
   operatorView,
   ownerDelete,
+  seatPaid,
   type Deps,
 } from "../src/hosting";
 import { hostingWebRoutes } from "../src/hostingroutes";
@@ -62,7 +64,7 @@ function fakeOvh() {
 }
 
 /** Stripe in test mode, plus the slots and GitHub. Records every call. */
-function fakeFetch() {
+function fakeFetch(opts: { refundFails?: boolean } = {}) {
   const calls: { url: string; method: string; body: string }[] = [];
   let sessions = 0;
   const f = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -76,7 +78,13 @@ function fakeFetch() {
       return json({ id: `cs_test_${sessions}`, url: `https://checkout.stripe.com/c/pay/cs_test_${sessions}` });
     }
     if (url.startsWith("https://api.stripe.com/v1/checkout/sessions/")) return json({ status: "expired" });
+    if (url.startsWith("https://api.stripe.com/v1/subscriptions/") && method === "GET") {
+      return json({ id: "sub_test_1", latest_invoice: { id: "in_test_1", payment_intent: "pi_test_1" } });
+    }
     if (url.startsWith("https://api.stripe.com/v1/subscriptions/")) return json({ status: "canceled" });
+    if (url === "https://api.stripe.com/v1/refunds") {
+      return opts.refundFails ? json({ error: { message: "test refund refused" } }, 400) : json({ id: "re_test_1" });
+    }
     if (url === "https://api.stripe.com/v1/billing_portal/sessions") return json({ url: "https://billing.stripe.com/p/session/test_portal" });
     if (url.startsWith("https://api.stripe.com/")) return json({ error: { message: "unexpected" } }, 400);
     if (url.startsWith("https://api.github.com/")) return new Response(null, { status: 204 });
@@ -87,10 +95,10 @@ function fakeFetch() {
   return { fetch: f as unknown as typeof fetch, calls, stripeCalls };
 }
 
-function setup(vars: Record<string, string> = BILLING) {
+function setup(vars: Record<string, string> = BILLING, opts: { refundFails?: boolean } = {}) {
   const e = env(vars);
   const { ovh, deliver } = fakeOvh();
-  const f = fakeFetch();
+  const f = fakeFetch(opts);
   const clock = { t: Date.parse("2026-10-07T10:00:00Z") };
   const d: Deps = { fetch: f.fetch, now: () => clock.t, ovh: ovh as unknown as OvhClient };
   return { e, d, f, clock, ovh, deliver };
@@ -395,6 +403,116 @@ describe("the billing state machine", () => {
     expect(s.f.stripeCalls().filter((c) => c.method === "DELETE" && c.url.endsWith("/subscriptions/sub_test_1"))).toHaveLength(1);
     const alerts = ((await operatorView(s.e)).body as { alerts: { kind: string; message: string }[] }).alerts;
     expect(alerts.find((a) => a.kind === "billing")?.message).toContain("refund");
+  });
+});
+
+describe("one payment places one server, once", () => {
+  /** Hold every OVH order until released, so concurrent placements overlap the way Workers do. */
+  function slowOrders(s: ReturnType<typeof setup>) {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    let next = 100;
+    s.ovh.orderVps.mockImplementation(async () => {
+      await gate;
+      return { orderId: ++next, price: 8.1, currency: "USD" };
+    });
+    return () => release();
+  }
+
+  async function boxCount(e: Env): Promise<number> {
+    return (await e.DB.prepare("SELECT COUNT(*) AS n FROM host_boxes").first<{ n: number }>())!.n;
+  }
+
+  async function serverOf(e: Env, id: string) {
+    return e.DB.prepare("SELECT state, box_id, error FROM host_servers WHERE id = ?")
+      .bind(id)
+      .first<{ state: string; box_id: string | null; error: string | null }>();
+  }
+
+  it("checkout.session.completed and invoice.paid landing at once order one box", async () => {
+    const s = setup();
+    const { id } = await pendingDeploy(s);
+    const release = slowOrders(s);
+    const both = Promise.all([deliver(s.e, s.d, checkoutCompleted(id)), deliver(s.e, s.d, invoice("invoice.paid", id, 1))]);
+    await new Promise((r) => setTimeout(r, 20));
+    release();
+    const [a, b] = await both;
+    expect([a.status, b.status]).toEqual([200, 200]);
+    expect(s.ovh.orderVps).toHaveBeenCalledTimes(1);
+    expect(await boxCount(s.e)).toBe(1);
+    expect(await billingOf(s.e, id)).toMatchObject({ status: "active", subscription_id: "sub_test_1" });
+    expect(await serverOf(s.e, id)).toMatchObject({ state: "waiting", error: null });
+  });
+
+  it("two concurrent seat attempts for one server: one places, the other stands down", async () => {
+    const s = setup();
+    const { id } = await pendingDeploy(s);
+    const release = slowOrders(s);
+    const both = Promise.all([seatPaid(s.e, s.d, id), seatPaid(s.e, s.d, id)]);
+    await new Promise((r) => setTimeout(r, 20));
+    release();
+    expect((await both).sort()).toEqual([ALREADY_SEATED, "ok"].sort());
+    expect(s.ovh.orderVps).toHaveBeenCalledTimes(1);
+    expect(await boxCount(s.e)).toBe(1);
+  });
+
+  it("two concurrent places in one pool and region share one box order", async () => {
+    const s = setup({});
+    await invited(s.e, s.d, RIDER, 2);
+    const release = slowOrders(s);
+    const both = Promise.all([
+      deploy(s.e, s.d, RIDER, { name: "A", type: "mxbserver", region: "us-east" }),
+      deploy(s.e, s.d, RIDER, { name: "B", type: "mxbserver", region: "us-east" }),
+    ]);
+    await new Promise((r) => setTimeout(r, 20));
+    release();
+    const [a, b] = await both;
+    expect([a.status, b.status]).toEqual([201, 201]);
+    expect(s.ovh.orderVps).toHaveBeenCalledTimes(1);
+    expect(await boxCount(s.e)).toBe(1);
+    const ids = [a, b].map((r) => (r.body as { server: { id: string } }).server.id);
+    const rows = await Promise.all(ids.map((i) => serverOf(s.e, i)));
+    expect(rows[0]!.box_id).toBeTruthy();
+    expect(rows[1]!.box_id).toBe(rows[0]!.box_id);
+  });
+
+  it("a failed order refunds, cancels, and leaves the server failed with one short line", async () => {
+    const s = setup();
+    const { id } = await pendingDeploy(s);
+    s.ovh.orderVps.mockRejectedValueOnce(new Error("OVH said no (test)"));
+    expect((await deliver(s.e, s.d, checkoutCompleted(id))).status).toBe(200);
+    const server = await serverOf(s.e, id);
+    expect(server).toMatchObject({ state: "failed", error: REFUNDED_ERROR });
+    expect(server!.error).not.toContain("OVH");
+    const calls = s.f.stripeCalls();
+    const refundAt = calls.findIndex((c) => c.url.endsWith("/refunds"));
+    expect(new URLSearchParams(calls[refundAt].body).get("payment_intent")).toBe("pi_test_1");
+    const cancelAt = calls.findIndex((c) => c.method === "DELETE" && c.url.endsWith("/subscriptions/sub_test_1"));
+    expect(cancelAt).toBeGreaterThan(refundAt);
+    const billed = await s.e.DB.prepare("SELECT status, refund_id, refunded_at FROM host_billing WHERE server_id = ?")
+      .bind(id)
+      .first<{ status: string; refund_id: string | null; refunded_at: number | null }>();
+    expect(billed).toMatchObject({ status: "ended", refund_id: "re_test_1", refunded_at: s.clock.t });
+    const alerts = ((await operatorView(s.e)).body as { alerts: { kind: string; message: string }[] }).alerts;
+    expect(alerts.some((a) => a.kind === "billing")).toBe(false);
+    expect(alerts.find((a) => a.kind === "order_failed")?.message).toContain("OVH said no");
+    // The other event for the same payment changes nothing.
+    await deliver(s.e, s.d, invoice("invoice.paid", id, 1));
+    expect(s.ovh.orderVps).toHaveBeenCalledTimes(1);
+    expect(s.f.stripeCalls().filter((c) => c.url.endsWith("/refunds"))).toHaveLength(1);
+  });
+
+  it("a refund that fails is alerted with the cause, and the owner is told it is on its way", async () => {
+    const s = setup(BILLING, { refundFails: true });
+    const { id } = await pendingDeploy(s);
+    s.ovh.orderVps.mockRejectedValueOnce(new Error("OVH said no (test)"));
+    await deliver(s.e, s.d, checkoutCompleted(id));
+    expect(await serverOf(s.e, id)).toMatchObject({ state: "failed", error: REFUND_PENDING_ERROR });
+    expect(s.f.stripeCalls().some((c) => c.method === "DELETE" && c.url.endsWith("/subscriptions/sub_test_1"))).toBe(true);
+    const alerts = ((await operatorView(s.e)).body as { alerts: { kind: string; message: string }[] }).alerts;
+    const billing = alerts.find((a) => a.kind === "billing")!.message;
+    expect(billing).toContain("the order failed");
+    expect(billing).toContain("test refund refused");
   });
 });
 

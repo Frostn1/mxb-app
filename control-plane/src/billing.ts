@@ -20,7 +20,7 @@
  */
 
 import { tokenMatches } from "./auth";
-import { alert, deleteServer, seatPaid, type Deps, type Result } from "./hosting";
+import { ALREADY_SEATED, PAID_FAILED_ERROR, alert, deleteServer, seatPaid, type Deps, type Result } from "./hosting";
 import type { ServerType } from "./hostregions";
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -65,6 +65,8 @@ export interface BillingRow {
   subscription_id: string | null;
   grace_until: number | null;
   activated_at: number | null;
+  refund_id: string | null;
+  refunded_at: number | null;
   created_at: number;
   updated_at: number;
 }
@@ -319,7 +321,79 @@ async function rowFor(env: Env, serverId: string | null, subscription: string | 
   return null;
 }
 
-/** Paid: place the server. If it can no longer be placed, stop billing and tell an operator. */
+/** User-facing text for a paid server that could not be placed. The cause stays with operators. */
+export const REFUNDED_ERROR = `${PAID_FAILED_ERROR} You've been refunded.`;
+export const REFUND_PENDING_ERROR = `${PAID_FAILED_ERROR} Your refund is on its way.`;
+
+type Invoice = {
+  id?: string;
+  payment_intent?: unknown;
+  charge?: unknown;
+};
+
+/**
+ * Refund the first payment of a subscription: its latest invoice's PaymentIntent or charge.
+ * Older API versions put those on the invoice; newer ones (2025-03-31 on) only list them under
+ * `/invoice_payments`. Returns the refund id, or why it could not be made.
+ */
+async function refundFirstPayment(
+  deps: Deps,
+  key: string,
+  serverId: string,
+  subscriptionId: string,
+): Promise<{ id: string } | { error: string }> {
+  const cfg = { secretKey: key };
+  const sub = await stripe<{ latest_invoice?: Invoice | string | null }>(
+    cfg,
+    deps,
+    "GET",
+    `/subscriptions/${encodeURIComponent(subscriptionId)}?expand[]=latest_invoice`,
+  );
+  if (!sub.ok) return { error: `reading the subscription failed (${sub.status}): ${sub.error}` };
+  const inv = sub.body.latest_invoice;
+  if (!inv || typeof inv !== "object") return { error: "the subscription has no invoice" };
+  let target: Record<string, string> | null = str(inv.payment_intent)
+    ? { payment_intent: str(inv.payment_intent)! }
+    : str(inv.charge)
+      ? { charge: str(inv.charge)! }
+      : null;
+  if (!target && inv.id) {
+    const paid = await stripe<{ data?: { status?: string; payment?: { payment_intent?: unknown; charge?: unknown } }[] }>(
+      cfg,
+      deps,
+      "GET",
+      `/invoice_payments?invoice=${encodeURIComponent(inv.id)}`,
+    );
+    if (!paid.ok) return { error: `reading the invoice payments failed (${paid.status}): ${paid.error}` };
+    for (const p of paid.body.data ?? []) {
+      if (p.status && p.status !== "paid") continue;
+      const pi = str(p.payment?.payment_intent);
+      const ch = str(p.payment?.charge);
+      target = pi ? { payment_intent: pi } : ch ? { charge: ch } : null;
+      if (target) break;
+    }
+  }
+  if (!target) return { error: "no payment found on the latest invoice" };
+  const refund = await stripe<{ id: string }>(
+    cfg,
+    deps,
+    "POST",
+    "/refunds",
+    { ...target, reason: "requested_by_customer", metadata: { server_id: serverId } },
+    `mxb-refund-${serverId}`,
+  );
+  if (!refund.ok) return { error: `the refund failed (${refund.status}): ${refund.error}` };
+  return { id: refund.body.id };
+}
+
+/**
+ * Paid: place the server. If it can no longer be placed, refund the first payment, stop
+ * billing, and tell the owner in one short line.
+ *
+ * Stripe sends `checkout.session.completed` and `invoice.paid` for the same payment, and they
+ * can arrive at once in separate invocations: the pending -> active move is one conditional
+ * UPDATE, and only the invocation that made it goes on to place the server.
+ */
 async function activate(env: Env, deps: Deps, row: BillingRow, subscription: string | null): Promise<void> {
   const subId = subscription ?? row.subscription_id;
   if (row.status === "expired" && subId && !row.subscription_id) {
@@ -329,25 +403,56 @@ async function activate(env: Env, deps: Deps, row: BillingRow, subscription: str
     await alert(env, deps, "billing", `Server ${row.server_id} was paid for after its Checkout was dropped. Its subscription was cancelled; refund the payment in Stripe.`);
     return;
   }
-  if (row.status !== "pending") {
-    if (subId && !row.subscription_id) await setRow(env, deps, row.server_id, { subscription_id: subId });
+  const now = deps.now();
+  const claimed =
+    row.status === "pending"
+      ? await env.DB.prepare(
+          `UPDATE host_billing SET status = 'active', subscription_id = COALESCE(?, subscription_id), activated_at = ?,
+                  grace_until = NULL, updated_at = ?
+            WHERE server_id = ? AND status = 'pending'`,
+        )
+          .bind(subId, now, now, row.server_id)
+          .run()
+      : null;
+  if (!claimed?.meta.changes) {
+    // Another delivery for the same payment got here first (or it was never pending).
+    if (subId) {
+      await env.DB.prepare("UPDATE host_billing SET subscription_id = ?, updated_at = ? WHERE server_id = ? AND subscription_id IS NULL")
+        .bind(subId, now, row.server_id)
+        .run();
+    }
     return;
   }
-  await setRow(env, deps, row.server_id, { status: "active", subscription_id: subId, activated_at: deps.now(), grace_until: null });
   const seated = await seatPaid(env, deps, row.server_id);
-  if (seated === "ok") {
+  if (seated === "ok" || seated === ALREADY_SEATED) {
     console.log(JSON.stringify({ msg: "billing active", server: row.server_id }));
     return;
   }
   await setRow(env, deps, row.server_id, { status: "ended" });
-  await cancelSubscription(env, deps, { ...row, subscription_id: subId }, "not placed");
-  await alert(
-    env,
-    deps,
-    "billing",
-    `Server ${row.server_id} was paid for but could not be placed (${seated}). Its subscription was cancelled; refund the first payment in Stripe.`,
-    { region: null },
-  );
+  const paidRow = { ...row, subscription_id: subId };
+  const key = env.STRIPE_SECRET_KEY?.trim();
+  const refund = !key
+    ? { error: "STRIPE_SECRET_KEY is not set" }
+    : subId
+      ? await refundFirstPayment(deps, key, row.server_id, subId)
+      : { error: "no subscription to refund" };
+  if ("id" in refund) {
+    await setRow(env, deps, row.server_id, { refund_id: refund.id, refunded_at: deps.now() });
+  }
+  await env.DB.prepare("UPDATE host_servers SET error = ? WHERE id = ? AND state = 'failed'")
+    .bind("id" in refund ? REFUNDED_ERROR : REFUND_PENDING_ERROR, row.server_id)
+    .run();
+  await cancelSubscription(env, deps, paidRow, "not placed");
+  console.log(JSON.stringify({ msg: "billing not placed", server: row.server_id, cause: seated, refunded: "id" in refund }));
+  if ("error" in refund) {
+    await alert(
+      env,
+      deps,
+      "billing",
+      `Server ${row.server_id} was paid for but could not be placed (${seated}). Refunding it failed: ${refund.error}. Refund the first payment in Stripe.`,
+      { region: null },
+    );
+  }
 }
 
 /** Into grace, from active. Keeps an earlier deadline if one is already running. */
