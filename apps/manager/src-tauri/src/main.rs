@@ -67,6 +67,8 @@ mod roster;
 /// Beta capture aid: logs the running build's fingerprint and, on request, a memory region's
 /// bytes, so a clean-install baseline can be read off the app log to arm state invariants.
 mod statedump;
+/// Uploading a rider's own mod to the mxbsecure catalogue (`/v1/uploads`).
+mod modupload;
 mod storage;
 /// What the running game's own memory says about itself — digests of named regions, compared
 /// against a per-build baseline the control plane holds. The client half of state invariants.
@@ -9169,6 +9171,17 @@ fn main() {
             storage::storage_leftovers,
             storage::storage_trash_archives,
             storage::storage_remove_mods,
+            modupload::mod_upload_inspect,
+            modupload::mod_upload_start,
+            modupload::mod_upload_jobs,
+            modupload::mod_upload_pause,
+            modupload::mod_upload_resume,
+            modupload::mod_upload_cancel,
+            modupload::mod_upload_dismiss,
+            modupload::my_mods,
+            modupload::mod_edit,
+            modupload::mod_details,
+            modupload::mod_delete,
             log_client,
             logs_info,
             share_logs,

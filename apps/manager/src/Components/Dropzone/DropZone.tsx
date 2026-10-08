@@ -4,6 +4,7 @@ import { Loader2, PackageOpen } from "lucide-react";
 import { useDropReview } from "../../Context/DropReview";
 import { useT } from "@/i18n";
 import { useImport } from "./useImport";
+import { dropClaim } from "./dropClaim";
 
 /**
  * Whole-window drop target.
@@ -32,6 +33,18 @@ export default function DropZone() {
 
     void getCurrentWebview()
       .onDragDropEvent((event) => {
+        // The upload dialog takes drops while it is open: those are files to upload, not install.
+        const claim = dropClaim();
+        if (claim) {
+          setHovering(false);
+          if (event.payload.type === "drop") {
+            claim.onOver(false);
+            claim.onDrop(event.payload.paths);
+          } else {
+            claim.onOver(event.payload.type === "over" || event.payload.type === "enter");
+          }
+          return;
+        }
         if (event.payload.type === "over") {
           setHovering(true);
         } else if (event.payload.type === "drop") {

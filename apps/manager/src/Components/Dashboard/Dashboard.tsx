@@ -50,6 +50,7 @@ const Ranked = lazy(() => import("../Ranked/Ranked"));
 const Library = lazy(() => import("../Library/Library"));
 const Downloads = lazy(() => import("../Downloads/Downloads"));
 const Storage = lazy(() => import("../Storage/Storage"));
+const MyMods = lazy(() => import("../MyMods/MyMods"));
 const Locker = lazy(() => import("../Locker/Locker"));
 const Presets = lazy(() => import("../Presets/Presets"));
 const Manage = lazy(() => import("../Manage/Manage"));
@@ -209,6 +210,14 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
     [game.id, changeType, navigate],
   );
   const clearLibraryFocus = useCallback(() => setLibraryFocus(null), []);
+
+  // "Upload a mod" from the Library opens My mods with the form up. A counter, so a second
+  // click opens it again.
+  const [uploadRequest, setUploadRequest] = useState(0);
+  const uploadMod = useCallback(() => {
+    setUploadRequest((n) => n + 1);
+    navigate("mymods");
+  }, [navigate]);
 
   // The other direction: from a mod the Library only *remembers* to the catalog page it
   // could be downloaded from again. The category comes from the tab being browsed, the same
@@ -398,6 +407,7 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
               onFocusApplied={clearLibraryFocus}
               onOpenMod={openFoundMod}
               onOpenStore={navigate}
+              onUploadMod={uploadMod}
             />
           </RetainedView>
           <RetainedView active={builtInsActive && view === "downloads"} slots={ctxSlots}>
@@ -410,6 +420,9 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
           </RetainedView>
           <RetainedView active={builtInsActive && view === "storage"} slots={ctxSlots}>
             <Storage onChanged={onInstalled} />
+          </RetainedView>
+          <RetainedView active={builtInsActive && view === "mymods"} slots={ctxSlots}>
+            <MyMods uploadRequest={uploadRequest} />
           </RetainedView>
           <RetainedView active={builtInsActive && view === "locker"} slots={ctxSlots}>
             <Locker />
