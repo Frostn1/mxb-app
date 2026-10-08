@@ -389,7 +389,7 @@ describe("the backfill", () => {
 
   it("walks four listing pages a run and resumes where it stopped", async () => {
     const e = env();
-    const posts = Array.from({ length: 300 }, (_, i) => ({
+    const posts = Array.from({ length: 600 }, (_, i) => ({
       ...POST,
       id: 1000 + i,
       slug: `w${i}`,
@@ -403,19 +403,19 @@ describe("the backfill", () => {
         /orderby=modified/,
         (req) => {
           const offset = Number(new URL(req.url).searchParams.get("offset") ?? 0);
-          return Response.json(posts.slice(offset, offset + 50));
+          return Response.json(posts.slice(offset, offset + Number(new URL(req.url).searchParams.get("per_page"))));
         },
       ],
       [/orderby=id/, () => Response.json([])],
     ]);
     await runMirror(e, { now: 1000, fetch: f, wait: async () => {} });
-    // Offsets 0, 45, 90, 135 (pages overlap by five): 185 posts.
-    expect(await e.DB.prepare("SELECT COUNT(*) AS n FROM mod_assets").first()).toEqual({ n: 185 });
+    // Pages of 100 at offsets 0, 98, 196, 294 (they overlap by two): 394 posts.
+    expect(await e.DB.prepare("SELECT COUNT(*) AS n FROM mod_assets").first()).toEqual({ n: 394 });
     expect(f.calls.filter((c) => c.includes("orderby=modified"))).toHaveLength(4);
     // The queue is only topped up to its small target.
     expect(e.MIRROR_QUEUE.sent.filter((j) => j.kind === "page")).toHaveLength(60);
     await runMirror(e, { now: 1000 + 600_000, fetch: f, wait: async () => {} });
-    expect(await e.DB.prepare("SELECT COUNT(*) AS n FROM mod_assets").first()).toEqual({ n: 300 });
+    expect(await e.DB.prepare("SELECT COUNT(*) AS n FROM mod_assets").first()).toEqual({ n: 600 });
   });
 
   it("the consumer reads a batch's pages and still runs its files, acking all", async () => {

@@ -50,7 +50,8 @@ const DAY = 24 * HOUR;
  *  run resumes it. ~290 pages of 50 cover the whole catalogue. */
 const DISCOVER_BUDGET_MS = 6 * MINUTE;
 const LIST_MAX_PAGES_PER_RUN = 4;
-const LIST_PER_PAGE = 50;
+/** Posts a listing page asks for: WordPress's maximum, so a walk is as few requests as it can be. */
+const LIST_PER_PAGE = 100;
 /** Id-sweep pages per run, 100 ids each. */
 const SWEEP_PAGES_PER_RUN = 1;
 /** Post pages read per run when there is no queue to hand them to. */
@@ -541,7 +542,7 @@ export interface Listing {
   walk: { top: string; offset: number } | null;
 }
 /** Pages overlap by this many posts, so an edit that shifts the list mid-walk skips nothing. */
-const LIST_OVERLAP = 5;
+const LIST_OVERLAP = 2;
 
 /** The post's picture at tile size, not the full upload. */
 export function thumbOf(p: Post): string | null {
@@ -576,11 +577,19 @@ export function restAuthor(p: Post): string | null {
  * however often the source edits it.
  */
 export async function upsertPost(env: Env, p: Post, tree: Map<number, Category>, now: number): Promise<void> {
+  await upsertPostStatement(env, p, tree, now).run();
+}
+
+/**
+ * The upsert as a statement, for `DB.batch`: a listing page is 100 posts, one statement each
+ * (14 bound parameters apiece, far under D1's 100 a statement), sent in one round trip.
+ */
+export function upsertPostStatement(env: Env, p: Post, tree: Map<number, Category>, now: number): D1PreparedStatement {
   const cats = p.categories ?? [];
   const title = decodeEntities(String(p.title?.rendered ?? "")).trim() || p.slug;
   const description = stripTags(String(p.content?.rendered ?? "")).slice(0, MAX_DESCRIPTION);
   const names = cats.map((c) => tree.get(c)?.name).filter((n): n is string => !!n);
-  await env.DB.prepare(
+  return env.DB.prepare(
     `INSERT INTO mod_assets (source, source_ref, slug, title, type, bike, categories, description, thumb_src,
        source_url, modified, first_seen, last_seen, page_status, page_due_at, public_id, author, published)
      VALUES ('mirror', ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?11, 'due', 0, ?12, ?13, ?14)
@@ -612,8 +621,7 @@ export async function upsertPost(env: Env, p: Post, tree: Map<number, Category>,
       newPublicId(),
       restAuthor(p),
       publishedOf(p),
-    )
-    .run();
+    );
 }
 
 /**
@@ -646,7 +654,8 @@ export function listingUrl(st: Listing): URL {
   u.searchParams.set("per_page", String(LIST_PER_PAGE));
   if (walk.offset > 0) u.searchParams.set("offset", String(walk.offset));
   u.searchParams.set("_embed", "wp:featuredmedia,author");
-  u.searchParams.set("_fields", "id,slug,link,modified,date,date_gmt,title,content,categories,_links,_embedded");
+  // Only what `upsertPost` reads. `_links` has to stay: WordPress embeds through it.
+  u.searchParams.set("_fields", "id,slug,link,modified,date_gmt,title,content,categories,_links,_embedded");
   // One second back, so posts sharing the high-water second are not skipped.
   if (st.hwm) u.searchParams.set("modified_after", minusOneSecond(st.hwm));
   return u;
@@ -662,25 +671,26 @@ export async function applyListingPage(
   posts: Post[],
   tree: Map<number, Category>,
   now: number,
+  /** The `per_page` the page was asked for: a shorter page is the end of the walk. */
+  perPage = LIST_PER_PAGE,
 ): Promise<"more" | "done"> {
   const walk = st.walk ?? { top: "", offset: 0 };
   st.walk = walk;
-  for (const p of posts) {
-    // WordPress hands back a husk for a post whose author was deleted: only `_links` and
-    // `_embedded`, no id, slug, link or date. Binding its missing fields threw in D1 and
-    // failed the whole page, every time, so discovery stuck on it. The sweep still sees the id.
-    if (!isListedPost(p)) continue;
-    await upsertPost(env, p, tree, now);
-    if (p.modified > walk.top) walk.top = p.modified;
-  }
+  // WordPress hands back a husk for a post whose author was deleted: only `_links` and
+  // `_embedded`, no id, slug, link or date. Binding its missing fields threw in D1 and
+  // failed the whole page, every time, so discovery stuck on it. The sweep still sees the id.
+  const listed = posts.filter(isListedPost);
+  // One statement per post in one batch: never a statement with more than 100 parameters.
+  if (listed.length) await env.DB.batch(listed.map((p) => upsertPostStatement(env, p, tree, now)));
+  for (const p of listed) if (p.modified > walk.top) walk.top = p.modified;
   // The page's length, husks included: it is what the offset walks by.
-  if (posts.length < LIST_PER_PAGE) {
+  if (posts.length < perPage) {
     if (walk.top > st.hwm) st.hwm = walk.top;
     st.walk = null;
     await setState(env, "listing", st);
     return "done";
   }
-  walk.offset += LIST_PER_PAGE - LIST_OVERLAP;
+  walk.offset += Math.max(1, perPage - LIST_OVERLAP);
   await setState(env, "listing", st);
   return "more";
 }
@@ -771,10 +781,19 @@ export async function applySweepPage(env: Env, st: Sweep, status: number, ids: n
 
 /**
  * With mxb-mods.com routed to the fetcher, discovery runs as a chain of single requests the
- * fetcher makes: one `list` job at a time, its JSON handed back and applied by the same steps
- * the Worker's walk uses. A round is the cron's run, request for request: the category tree when
- * it is a day old, up to `LIST_MAX_PAGES_PER_RUN` listing pages, one sweep page; then nothing
- * until `DISCOVERY_EVERY_MS` after the round began. The chain lives in `mirror_state`.
+ * fetcher on a home connection makes: one `list` job in flight at a time, its JSON handed back
+ * and applied by the same steps the Worker's walk uses. The next job is handed out as soon as
+ * the last one's answer is in, so the pace is the fetcher's own (at least 2 s a request).
+ *
+ * A round: the category tree when it is a day old, the whole modified walk (100 posts a page),
+ * then, when one is due (`SWEEP_EVERY_MS`) or under way, the whole id sweep, back to back. Then
+ * nothing until `DISCOVERY_EVERY_MS` after the round began. The first walk of ~13k posts is
+ * ~135 listing pages and the sweep ~130: well under an hour at the fetcher's pace.
+ *
+ * A refusal, a failure or a page that isn't JSON leaves the site alone on the Worker's cooldown
+ * curve (`cooldownMs`: 10 min, doubling to 2 h, Retry-After when longer), and the same step is
+ * asked again after it. Everything is compared to the time now, so a cooldown or lease that has
+ * run out never holds anything up. The chain lives in `mirror_state`.
  */
 interface FetcherDiscovery {
   /** Bumped per job handed out, so a late answer to an older one is refused. */
@@ -782,18 +801,22 @@ interface FetcherDiscovery {
   phase: "idle" | "categories" | "listing" | "sweep";
   catPage: number;
   cats: Category[];
-  /** Listing pages read this round. */
-  listed: number;
   roundAt: number;
   leasedUntil: number;
+  /** Nothing is handed out before this: the next round, or the end of a cooldown. */
   nextAt: number;
+  /** Refusals in a row, for the cooldown's doubling. */
+  strikes?: number;
+  /** The `per_page` of the listing job in flight. A job leased before pages were 100 asked for 50. */
+  perPage?: number;
 }
 
 const DISCOVERY_KEY = "fetcher_discovery";
 export const DISCOVERY_EVERY_MS = 10 * MINUTE;
-const DISCOVERY_LEASE_MS = 10 * MINUTE;
-/** How long discovery waits after the site refused the fetcher, at least. */
-const DISCOVERY_REFUSED_MS = 30 * MINUTE;
+/** A list request takes seconds; a fetcher that died holding one only blocks this long. */
+export const DISCOVERY_LEASE_MS = 2 * MINUTE;
+/** How often the id sweep runs whole (it keeps `last_seen` true and finds deleted posts). */
+export const SWEEP_EVERY_MS = 6 * HOUR;
 
 export async function discoveryState(env: Env): Promise<FetcherDiscovery> {
   return (
@@ -802,7 +825,6 @@ export async function discoveryState(env: Env): Promise<FetcherDiscovery> {
       phase: "idle",
       catPage: 1,
       cats: [],
-      listed: 0,
       roundAt: 0,
       leasedUntil: 0,
       nextAt: 0,
@@ -810,13 +832,18 @@ export async function discoveryState(env: Env): Promise<FetcherDiscovery> {
   );
 }
 
-/** The next discovery request for the fetcher, or null (one in flight, or the round is over). */
+/** Is a sweep under way, or is a whole one due? */
+async function sweepWanted(env: Env, now: number): Promise<boolean> {
+  const st = await sweepState(env, now);
+  return st.page > 1 || st.lastComplete === 0 || now - st.lastComplete >= SWEEP_EVERY_MS;
+}
+
+/** The next discovery request for the fetcher, or null (one in flight, cooling down, or between rounds). */
 export async function nextDiscoveryJob(env: Env, now: number): Promise<{ seq: number; url: string } | null> {
   const st = await discoveryState(env);
   if (st.leasedUntil > now || st.nextAt > now) return null;
   if (st.phase === "idle") {
     st.roundAt = now;
-    st.listed = 0;
     st.catPage = 1;
     st.cats = [];
     st.phase = (await cachedCategories(env, now)).stale ? "categories" : "listing";
@@ -830,21 +857,31 @@ export async function nextDiscoveryJob(env: Env, now: number): Promise<{ seq: nu
   // Robots, as the Worker's own requests honour it, from what the Worker last cached.
   const robots = await getState<{ txt: string }>(env, "robots");
   if (robots && !robotsAllows(robotsRules(robots.txt), url.pathname + url.search)) {
-    await endRound(env, st);
+    await endRound(env, st, now);
     return null;
   }
   st.seq++;
   st.leasedUntil = now + DISCOVERY_LEASE_MS;
+  if (st.phase === "listing") st.perPage = Number(url.searchParams.get("per_page")) || LIST_PER_PAGE;
   await setState(env, DISCOVERY_KEY, st);
   return { seq: st.seq, url: url.toString() };
 }
 
-async function endRound(env: Env, st: FetcherDiscovery): Promise<void> {
+async function endRound(env: Env, st: FetcherDiscovery, now: number): Promise<void> {
   st.phase = "idle";
   st.leasedUntil = 0;
-  st.nextAt = st.roundAt + DISCOVERY_EVERY_MS;
+  st.nextAt = Math.max(st.roundAt + DISCOVERY_EVERY_MS, now);
   st.cats = [];
   await setState(env, DISCOVERY_KEY, st);
+}
+
+/** The site said no (or answered nonsense): the same step again after a cooldown. */
+async function discoveryCooldown(env: Env, st: FetcherDiscovery, now: number, retryAfterMs = 0): Promise<void> {
+  const strikes = st.strikes ?? 0;
+  st.nextAt = now + cooldownMs(strikes, retryAfterMs);
+  st.strikes = Math.min(strikes + 1, 8);
+  await setState(env, DISCOVERY_KEY, st);
+  console.warn(JSON.stringify({ msg: "mirror discovery cooling down", minutes: Math.round((st.nextAt - now) / MINUTE), strikes: st.strikes }));
 }
 
 /**
@@ -861,9 +898,7 @@ export async function discoveryResult(
   if (st.seq !== seq || st.leasedUntil <= now) return false;
   st.leasedUntil = 0;
   if ("error" in answer) {
-    // Turned away, or the fetch failed: the same step again, after a wait.
-    st.nextAt = now + Math.max(DISCOVERY_REFUSED_MS, answer.retryAfterMs ?? 0);
-    await setState(env, DISCOVERY_KEY, st);
+    await discoveryCooldown(env, st, now, answer.retryAfterMs ?? 0);
     return true;
   }
   const ok = answer.status >= 200 && answer.status < 300;
@@ -873,12 +908,12 @@ export async function discoveryResult(
   } catch {
     data = null;
   }
-  if (ok && !Array.isArray(data)) {
-    // A 200 that isn't the JSON asked for (a challenge page): later.
-    st.nextAt = now + DISCOVERY_REFUSED_MS;
-    await setState(env, DISCOVERY_KEY, st);
+  if ((ok && !Array.isArray(data)) || answer.status === 403 || answer.status === 429 || answer.status === 503) {
+    // A refusal, or a 200 that isn't the JSON asked for (a challenge page).
+    await discoveryCooldown(env, st, now);
     return true;
   }
+  st.strikes = 0;
   const list = (data ?? []) as unknown[];
 
   if (st.phase === "categories") {
@@ -892,24 +927,25 @@ export async function discoveryResult(
     }
   } else if (st.phase === "listing") {
     const { tree } = await cachedCategories(env, now);
-    if (tree.size === 0 || (!ok && answer.status !== 400)) {
-      // No tree to classify by, or the listing answered wrong: the sweep, and the next round.
-      st.phase = "sweep";
-    } else {
-      const done = await applyListingPage(env, await listingState(env), list as Post[], tree, now);
-      st.listed++;
-      if (done === "done" || st.listed >= LIST_MAX_PAGES_PER_RUN) st.phase = "sweep";
+    // No tree to classify by, or the listing answered wrong: on to the sweep.
+    const done =
+      tree.size === 0 || (!ok && answer.status !== 400)
+        ? "done"
+        : await applyListingPage(env, await listingState(env), list as Post[], tree, now, st.perPage ?? 50);
+    if (done === "done") {
+      if (await sweepWanted(env, now)) st.phase = "sweep";
+      else return endRound(env, st, now).then(() => true);
     }
   } else if (st.phase === "sweep") {
     const ids = list.map((p) => Number((p as { id?: unknown })?.id)).filter((n) => Number.isInteger(n));
-    await applySweepPage(env, await sweepState(env, now), answer.status, ids, now);
-    await endRound(env, st);
-    return true;
+    if ((await applySweepPage(env, await sweepState(env, now), answer.status, ids, now)) !== "more") {
+      await endRound(env, st, now);
+      return true;
+    }
   }
   await setState(env, DISCOVERY_KEY, st);
   return true;
 }
-
 // ───────────────────────────── 2. read pages ─────────────────────────────
 
 export interface DueAsset {

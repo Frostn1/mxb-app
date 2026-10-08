@@ -214,7 +214,7 @@ describe("a whole run over the recorded post", () => {
           const u = new URL(req.url);
           const after = u.searchParams.get("modified_after") ?? "";
           const off = Number(u.searchParams.get("offset") ?? "0");
-          return Response.json(all.filter((p) => p.modified > after).slice(off, off + 50));
+          return Response.json(all.filter((p) => p.modified > after).slice(off, off + Number(u.searchParams.get("per_page"))));
         },
       ],
       [/orderby=id/, () => Response.json([])],
