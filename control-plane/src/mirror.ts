@@ -7,20 +7,33 @@
  *  1. **Discover.** Walk the REST listing of everything modified since the last finished walk
  *     (`Listing`). A new or changed post is upserted and its page marked due. A second, cheap
  *     cursor sweeps every post id so `last_seen` stays true and deleted posts drop out of search.
- *  2. **Read pages.** The download links, version and byline are only on the rendered page
- *     (the REST body has none of them), so each due page is fetched once, parsed the way the
- *     app parses it (`apps/manager/src-tauri/src/mods/mxb.rs`), and its options upserted. An
- *     unchanged link keeps its mirrored file; a changed one is fetched again.
+ *  2. **Read pages.** The download links, version, byline, description and pictures are only
+ *     on the rendered page, so each due page is read once, parsed the way the app parses it
+ *     (`apps/manager/src-tauri/src/mods/mxb.rs`), and its options upserted. An unchanged link
+ *     keeps its mirrored file; a changed one is fetched again. The post's own words become
+ *     data (`modbody.ts`) and its content images are copied to `img/<sha256>.<ext>`.
+ *     The cron doesn't read pages itself: it leases due rows and hands them to the
+ *     `mxb-mirror` queue (`dispatchPages`), whose consumer reads a batch on a few lanes at
+ *     once (`readPageJobs`). A row read by an older parser (`PAGE_REV`) is read again, after
+ *     the new ones.
  *  3. **Dispatch.** Files that are due are leased and handed to the `mxb-mirror` queue, one
  *     message per file. The consumer (`mirrorfetch.ts`) streams each into R2 by SHA-256.
  *
  * Everything sent to mxb-mods.com carries a named user agent, is spaced out, and is checked
- * against the site's robots.txt first.
+ * against the site's robots.txt first. A 403, 429 or 503 stops every lane and cools the whole
+ * sync down: at least Retry-After, ten minutes the first time, doubling while it keeps
+ * happening, up to two hours.
+ *
+ * The rate, for 13k posts: each lane spaces its requests to the site a second apart (pictures
+ * a quarter second), and a post is one page and about three pictures, ~5 s a lane. Four lanes
+ * an invocation and two invocations at most (the queue's `max_concurrency`) is ~1.6 posts a
+ * second, so the catalogue in about two and a half hours. The cron logs the measured rate.
  */
 
 import { decodeEntities } from "./trackcatalog";
 import { evictUnused, wantLiveTracks } from "./mirrorpolicy";
 import { newPublicId } from "./modids";
+import { isModsHost, MAX_IMAGE_BYTES, MAX_IMAGES, parsePostBody, type PostImage } from "./modbody";
 
 export const UA = "mxbsecure-mirror/1 (+https://mxbsecure.com/mods)";
 /** The product token robots.txt groups are matched against. */
@@ -31,21 +44,35 @@ const MINUTE = 60 * 1000;
 const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;
 
-/** Listing pages walked per run, 50 posts each. */
-const LIST_PAGES_PER_RUN = 4;
+/** The listing walk runs until it reaches the end or this long has passed (the cron has 15
+ *  minutes and comes back every 10). ~290 pages of 50 cover the whole catalogue. */
+const DISCOVER_BUDGET_MS = 6 * MINUTE;
+const LIST_MAX_PAGES_PER_RUN = 400;
 const LIST_PER_PAGE = 50;
 /** Id-sweep pages per run, 100 ids each. */
-const SWEEP_PAGES_PER_RUN = 1;
-/** Post pages read per run, every 10 minutes: ~5,700 a day, so the ~13k-post backfill takes
- *  about two and a half days, on purpose. With their thumbnails that is ~80 requests 3 s
- *  apart, four minutes of each ten. */
+const SWEEP_PAGES_PER_RUN = 3;
+/** Post pages read per run when there is no queue to hand them to. */
 const PAGES_PER_RUN = 40;
+/** Page reads kept leased on the queue: each run tops it up to this. At ~1.6 posts a second it
+ *  is fifteen minutes of work, so the queue doesn't run dry between two runs. */
+const PAGE_QUEUE_TARGET = 1500;
+/** How long a queued page read stays leased before it is assumed lost and sent again. */
+const PAGE_LEASE_MS = 60 * MINUTE;
+/** The page parser. A row read by an older one is read again (rows from before pictures: 0). */
+export const PAGE_REV = 1;
+/** Pages read side by side in one consumer invocation. */
+export const PAGE_LANES = 4;
 /** Files handed to the queue per run. The queue consumer's own concurrency is the other cap. */
 const DISPATCH_PER_RUN = 20;
-/** Pause between two requests to mxb-mods.com. A run makes up to ~90, so under five minutes. */
-const SPACING_MS = 3000;
-/** How long the sync leaves the site alone after it refuses a request. */
-const COOLDOWN_MS = 2 * HOUR;
+/** Pause between two of the cron's own requests to mxb-mods.com (listing, sweep, categories). */
+const SPACING_MS = 1500;
+/** Pause between two page requests on one lane, and between two pictures. */
+const PAGE_SPACING_MS = 1000;
+const IMAGE_SPACING_MS = 250;
+/** How long the sync leaves the site alone after it refuses a request: the first time, and
+ *  at most. Doubles while refusals keep coming. Retry-After wins when it asks for longer. */
+const COOLDOWN_MIN_MS = 10 * MINUTE;
+const COOLDOWN_MAX_MS = 2 * HOUR;
 /** How long a dispatched file stays leased before it is assumed lost and sent again. */
 export const LEASE_MS = 45 * MINUTE;
 /** A post not seen by a complete id sweep for this long is hidden from search. */
@@ -350,34 +377,79 @@ export interface Sync {
   fetch: typeof fetch;
   wait: (ms: number) => Promise<void>;
   rules: RobotsRule[];
-  /** Requests made to mxb-mods.com this run. */
+  /** Requests made this run (or on this lane). */
   sent: number;
+  /** Pictures copied this run (or on this lane). */
+  images: number;
+  /** Pause before each request after the first. */
+  spacing: number;
+  /** The time now, for budgets and cooldowns in a run that lasts minutes. */
+  clock: () => number;
 }
+
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 /** The site turned us away (403/429/503): the run stops and the next ones wait. */
 class Refused extends Error {}
 
 /**
- * One request to mxb-mods.com: robots-checked, spaced, named. `null` when robots says no.
- * A refusal puts the whole sync on a cooldown, because a site that has started saying no to
- * one request will say no to the next, and asking again is how an address gets blocked.
+ * One request: robots-checked, spaced, named. `null` when robots says no. From mxb-mods.com
+ * or its CDN, a refusal puts the whole sync on a cooldown, because a site that has started
+ * saying no to one request will say no to the next, and asking again is how an address gets
+ * blocked. Another host (a picture on GitHub) only gets its answer back.
  */
-async function modsGet(s: Sync, url: URL | string, accept = "application/json"): Promise<Response | null> {
+async function modsGet(s: Sync, url: URL | string, accept = "application/json", spacing = s.spacing): Promise<Response | null> {
   const u = typeof url === "string" ? new URL(url, MODS_BASE) : url;
-  if (!robotsAllows(s.rules, u.pathname + u.search)) return null;
-  if (s.sent > 0) await s.wait(SPACING_MS);
+  const site = isModsHost(u.hostname);
+  if (site && !robotsAllows(s.rules, u.pathname + u.search)) return null;
+  if (s.sent > 0) await s.wait(spacing);
   s.sent++;
   // Called as a plain function, never as `s.fetch(…)`: the runtime's fetch throws "Illegal
   // invocation" when its `this` is anything but the global scope.
   const get = s.fetch;
   const res = await get(u.toString(), { headers: { "user-agent": UA, accept } });
-  if (res.status === 403 || res.status === 429 || res.status === 503) {
-    const after = Number(res.headers.get("retry-after"));
-    const wait = Math.max(COOLDOWN_MS, Number.isFinite(after) ? after * 1000 : 0);
-    await setState(s.env, "cooldown", { until: s.now + wait, status: res.status });
+  if (site && (res.status === 403 || res.status === 429 || res.status === 503)) {
+    await res.body?.cancel().catch(() => {});
+    await coolDown(s.env, s.clock(), res.status, res.headers.get("retry-after"));
     throw new Refused(`mxb-mods answered ${res.status}`);
   }
   return res;
+}
+
+/** Retry-After as milliseconds: seconds or an HTTP date. 0 when absent or nonsense. */
+export function retryAfterMs(header: string | null, now: number): number {
+  if (!header?.trim()) return 0;
+  const secs = Number(header.trim());
+  if (Number.isFinite(secs)) return Math.max(0, secs * 1000);
+  const at = Date.parse(header);
+  return Number.isFinite(at) ? Math.max(0, at - now) : 0;
+}
+
+/** How long a refusal keeps the sync away: 10 min, 20, 40 … 2 h, or Retry-After if longer. */
+export function cooldownMs(strikes: number, retryAfter: number): number {
+  return Math.min(DAY, Math.max(Math.min(COOLDOWN_MIN_MS * 2 ** strikes, COOLDOWN_MAX_MS), retryAfter));
+}
+
+interface Cooldown {
+  until: number;
+  status: number;
+  strikes?: number;
+}
+
+async function coolDown(env: Env, now: number, status: number, retryAfter: string | null): Promise<void> {
+  const prev = await getState<Cooldown>(env, "cooldown");
+  // Several lanes refused at once are one refusal.
+  if (prev && prev.until > now) return;
+  // Refused again within the hour after the last cooldown ended: twice as long.
+  const strikes = prev && prev.until > now - HOUR ? Math.min((prev.strikes ?? 0) + 1, 8) : 0;
+  const wait = cooldownMs(strikes, retryAfterMs(retryAfter, now));
+  await setState(env, "cooldown", { until: now + wait, status, strikes } satisfies Cooldown);
+  console.warn(JSON.stringify({ msg: "mirror cooling down", status, minutes: Math.round(wait / MINUTE), strikes }));
+}
+
+async function coolingUntil(env: Env, now: number): Promise<number> {
+  const c = await getState<Cooldown>(env, "cooldown");
+  return c && c.until > now ? c.until : 0;
 }
 
 async function loadRobots(env: Env, now: number, f: typeof fetch): Promise<RobotsRule[]> {
@@ -502,9 +574,14 @@ export async function upsertPost(env: Env, p: Post, tree: Map<number, Category>,
     .run();
 }
 
+/**
+ * The listing walk, to its end in one run when it can. Every page is saved as it lands, so a
+ * run that reaches its time budget leaves the next one exactly where it stopped.
+ */
 async function discover(s: Sync, tree: Map<number, Category>): Promise<void> {
   const st = (await getState<Listing>(s.env, "listing")) ?? { hwm: "", walk: null };
-  for (let n = 0; n < LIST_PAGES_PER_RUN; n++) {
+  const started = s.clock();
+  for (let n = 0; n < LIST_MAX_PAGES_PER_RUN && s.clock() - started < DISCOVER_BUDGET_MS; n++) {
     const walk = st.walk ?? { top: "", offset: 0 };
     st.walk = walk;
     const u = new URL("/wp-json/wp/v2/posts", MODS_BASE);
@@ -596,9 +673,12 @@ interface DueAsset {
   page_attempts: number;
 }
 
+const DUE_COLUMNS = "id, source_url, thumb_src, thumb_key, page_attempts";
+
+/** With no queue to hand them to (a local run), the cron reads a few pages itself. */
 async function readPages(s: Sync): Promise<void> {
   const { results } = await s.env.DB.prepare(
-    `SELECT id, source_url, thumb_src, thumb_key, page_attempts FROM mod_assets
+    `SELECT ${DUE_COLUMNS} FROM mod_assets
      WHERE source = 'mirror' AND page_status IN ('due', 'retry') AND page_due_at <= ?
      ORDER BY page_due_at, id LIMIT ?`,
   )
@@ -612,6 +692,117 @@ async function readPages(s: Sync): Promise<void> {
       await pageRetry(s, asset, String(err));
     }
   }
+}
+
+/**
+ * Lease the pages that are due (new and changed posts first, then rows an older parser read)
+ * and hand them to the queue, one message each, until `target` are out. A lease that runs out
+ * (its message lost) is sent again.
+ */
+export async function dispatchPages(env: Env, now: number, target = PAGE_QUEUE_TARGET): Promise<number> {
+  if (!env.MIRROR_QUEUE) return 0;
+  const out = await env.DB.prepare(
+    "SELECT COUNT(*) AS n FROM mod_assets WHERE source = 'mirror' AND page_status = 'queued' AND page_due_at > ?",
+  )
+    .bind(now)
+    .first<{ n: number }>();
+  const room = target - (out?.n ?? 0);
+  if (room <= 0) return 0;
+  const { results } = await env.DB.prepare(
+    `SELECT id FROM mod_assets
+     WHERE source = 'mirror' AND (
+       (page_status IN ('due', 'retry', 'queued') AND page_due_at <= ?1)
+       OR (page_status = 'ok' AND page_rev < ?2))
+     ORDER BY CASE WHEN page_status = 'ok' THEN 1 ELSE 0 END, page_due_at, id DESC
+     LIMIT ?3`,
+  )
+    .bind(now, PAGE_REV, room)
+    .all<{ id: number }>();
+  if (results.length === 0) return 0;
+  const ids = results.map((r) => r.id);
+  // One JSON parameter for the ids: D1 refuses a statement with more than 100 bound parameters.
+  await env.DB.prepare(
+    "UPDATE mod_assets SET page_status = 'queued', page_due_at = ? WHERE id IN (SELECT value FROM json_each(?))",
+  )
+    .bind(now + PAGE_LEASE_MS, JSON.stringify(ids))
+    .run();
+  // A queue takes at most 100 messages a send.
+  for (let i = 0; i < ids.length; i += 100) {
+    await env.MIRROR_QUEUE.sendBatch(ids.slice(i, i + 100).map((id) => ({ body: { kind: "page", id } satisfies MirrorJob })));
+  }
+  return ids.length;
+}
+
+export interface PageBatchResult {
+  read: number;
+  images: number;
+  requests: number;
+  /** Put back for later: a cooldown began, or the sync is switched off. */
+  deferred: number;
+}
+
+/**
+ * The queue consumer's half of a page read: the batch's leased rows, read on `PAGE_LANES`
+ * lanes side by side, each lane spacing its own requests. A refusal (or a cooldown another
+ * invocation started) stops every lane; what is left goes back to `due` for after it.
+ */
+export async function readPageJobs(env: Env, ids: number[], opts: RunOptions = {}): Promise<PageBatchResult> {
+  const clock = opts.clock ?? Date.now;
+  const now = opts.now ?? clock();
+  const f = opts.fetch ?? globalFetch;
+  const wait = opts.wait ?? sleep;
+  const result: PageBatchResult = { read: 0, images: 0, requests: 0, deferred: 0 };
+  if (ids.length === 0) return result;
+  const { results } = await env.DB.prepare(
+    `SELECT ${DUE_COLUMNS} FROM mod_assets
+     WHERE source = 'mirror' AND page_status = 'queued' AND id IN (SELECT value FROM json_each(?))`,
+  )
+    .bind(JSON.stringify(ids))
+    .all<DueAsset>();
+  const todo = [...results];
+  const back: number[] = [];
+  let until = (env.MXB_MIRROR ?? "off") !== "on" ? now : await coolingUntil(env, now);
+  const rules = until ? [] : await loadRobots(env, now, f);
+
+  const lane = async (k: number) => {
+    const s: Sync = { env, now, clock, fetch: f, wait, rules, sent: 0, images: 0, spacing: PAGE_SPACING_MS };
+    // Lanes start a little apart, not all at once.
+    if (k > 0) await wait(Math.round((k * PAGE_SPACING_MS) / PAGE_LANES));
+    let asset: DueAsset | undefined;
+    while (!until && (asset = todo.shift())) {
+      const cooling = await coolingUntil(env, clock());
+      if (cooling) {
+        until = cooling;
+        back.push(asset.id);
+        break;
+      }
+      try {
+        await readPage(s, asset);
+        result.read++;
+      } catch (err) {
+        if (err instanceof Refused) {
+          until = (await coolingUntil(env, clock())) || clock();
+          back.push(asset.id);
+          break;
+        }
+        await pageRetry(s, asset, String(err));
+      }
+    }
+    result.requests += s.sent;
+    result.images += s.images;
+  };
+  await Promise.all(Array.from({ length: Math.min(PAGE_LANES, todo.length) }, (_, k) => lane(k)));
+
+  back.push(...todo.map((a) => a.id));
+  if (back.length) {
+    await env.DB.prepare(
+      "UPDATE mod_assets SET page_status = 'due', page_due_at = ? WHERE page_status = 'queued' AND id IN (SELECT value FROM json_each(?))",
+    )
+      .bind(until, JSON.stringify(back))
+      .run();
+  }
+  result.deferred = back.length;
+  return result;
 }
 
 async function readPage(s: Sync, asset: DueAsset): Promise<void> {
@@ -640,13 +831,99 @@ async function readPage(s: Sync, asset: DueAsset): Promise<void> {
   await writeMirrorVersion(s.env, asset.id, parseVersion(html), downloads, s.now);
   const src = asset.thumb_src ?? parseImage(html);
   const thumb = asset.thumb_key ? null : await copyThumb(s, src);
+  const body = parsePostBody(html);
+  await copyImages(s, asset.id, body.images);
   await s.env.DB.prepare(
     `UPDATE mod_assets SET author = COALESCE(?, author), thumb_src = COALESCE(thumb_src, ?),
-       thumb_sha = COALESCE(?, thumb_sha), thumb_key = COALESCE(?, thumb_key),
-       page_status = 'ok', page_attempts = 0, page_error = NULL WHERE id = ?`,
+       thumb_sha = COALESCE(?, thumb_sha), thumb_key = COALESCE(?, thumb_key), body = ?,
+       page_status = 'ok', page_attempts = 0, page_error = NULL, page_rev = ?, page_read_at = ? WHERE id = ?`,
   )
-    .bind(parseAuthor(html), src, thumb?.sha ?? null, thumb?.key ?? null, asset.id)
+    .bind(
+      parseAuthor(html),
+      src,
+      thumb?.sha ?? null,
+      thumb?.key ?? null,
+      body.blocks.length ? JSON.stringify(body.blocks) : null,
+      PAGE_REV,
+      s.clock(),
+      asset.id,
+    )
     .run();
+}
+
+/**
+ * The post's content images into the public bucket as `img/<sha256>.<ext>`, in page order, at
+ * most 12 and each at most 3 MB. A picture the post already has (same source) is not fetched
+ * again. The new list replaces the old one.
+ */
+async function copyImages(s: Sync, assetId: number, wanted: PostImage[]): Promise<void> {
+  if (!s.env.ASSET_MIRROR) return;
+  const { results: had } = await s.env.DB.prepare("SELECT src, sha256 FROM mod_asset_images WHERE asset_id = ?")
+    .bind(assetId)
+    .all<{ src: string; sha256: string }>();
+  const known = new Map(had.map((r) => [r.src, r.sha256]));
+  const rows: (PostImage & { sha: string })[] = [];
+  for (const img of wanted.slice(0, MAX_IMAGES)) {
+    const sha = known.get(img.src) ?? (await copyImage(s, img.src));
+    if (sha && !rows.some((r) => r.sha === sha)) rows.push({ ...img, sha });
+  }
+  if (had.length === 0 && rows.length === 0) return;
+  // A statement per picture, six parameters each: far under D1's 100 a statement.
+  await s.env.DB.batch([
+    s.env.DB.prepare("DELETE FROM mod_asset_images WHERE asset_id = ?").bind(assetId),
+    ...rows.map((r, idx) =>
+      s.env.DB.prepare(
+        "INSERT INTO mod_asset_images (asset_id, idx, sha256, src, width, height) VALUES (?, ?, ?, ?, ?, ?)",
+      ).bind(assetId, idx, r.sha, r.src.slice(0, 1000), r.width, r.height),
+    ),
+  ]);
+}
+
+/** One picture: a real image by its first bytes (never SVG), under the cap, stored by SHA-256. */
+async function copyImage(s: Sync, src: string): Promise<string | null> {
+  try {
+    const res = await modsGet(s, new URL(src), "image/avif,image/webp,image/png,image/jpeg,image/gif", IMAGE_SPACING_MS);
+    if (!res) return null;
+    if (!res.ok || Number(res.headers.get("content-length") ?? 0) > MAX_IMAGE_BYTES) {
+      await res.body?.cancel().catch(() => {});
+      return null;
+    }
+    const bytes = await readCapped(res, MAX_IMAGE_BYTES);
+    const type = bytes && bytes.byteLength > 0 ? sniffImage(bytes) : null;
+    if (!bytes || !type) return null;
+    const ext = thumbExt(type) ?? "bin";
+    s.images++;
+    const buf = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+    return await putSmallBlob(s.env, buf, type, urlFileName(src), s.now, (sha) => `img/${sha}.${ext}`);
+  } catch (err) {
+    if (err instanceof Refused) throw err;
+    return null;
+  }
+}
+
+/** A response body, or null once it passes `cap` bytes (the rest is never downloaded). */
+export async function readCapped(res: Response, cap: number): Promise<Uint8Array | null> {
+  if (!res.body) return null;
+  const reader = res.body.getReader();
+  const parts: Uint8Array[] = [];
+  let n = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    n += value.byteLength;
+    if (n > cap) {
+      await reader.cancel().catch(() => {});
+      return null;
+    }
+    parts.push(value);
+  }
+  const out = new Uint8Array(n);
+  let o = 0;
+  for (const p of parts) {
+    out.set(p, o);
+    o += p.byteLength;
+  }
+  return out;
 }
 
 async function pageRetry(s: Sync, asset: DueAsset, error: string): Promise<void> {
@@ -755,7 +1032,7 @@ async function copyThumb(s: Sync, src: string | null): Promise<Thumb | null> {
   try {
     const u = new URL(src);
     if (u.hostname !== "mxb-mods.com") return null;
-    const res = await modsGet(s, u, "image/*");
+    const res = await modsGet(s, u, "image/*", IMAGE_SPACING_MS);
     const type = (res?.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase();
     if (!res || !res.ok || !thumbExt(type)) return null;
     const bytes = await res.arrayBuffer();
@@ -837,10 +1114,11 @@ export function hex(buf: ArrayBuffer): string {
 
 // ───────────────────────────── 3. dispatch ─────────────────────────────
 
-/** A queue message: one mirrored file to fetch, or one upload to verify. */
+/** A queue message: one mirrored file to fetch, one upload to verify, or one post page to read. */
 export type MirrorJob =
   | { kind: "file"; version: number; idx: number; part: number }
-  | { kind: "upload"; id: string };
+  | { kind: "upload"; id: string }
+  | { kind: "page"; id: number };
 
 /** Lease the current versions' files that are due and hand them to the queue. */
 export async function dispatch(env: Env, now: number, limit = DISPATCH_PER_RUN): Promise<number> {
@@ -874,11 +1152,43 @@ export interface RunOptions {
   now?: number;
   fetch?: typeof fetch;
   wait?: (ms: number) => Promise<void>;
+  /** The time now, as the run goes on. `Date.now` unless a test holds the clock. */
+  clock?: () => number;
+}
+
+/**
+ * The backfill's rate, in the log: pages read in the last ten minutes and hour, what is left
+ * (due, queued, and rows an older parser read), and when that runs out at this rate.
+ */
+async function logBackfill(env: Env, now: number, dispatched: number): Promise<void> {
+  const r = await env.DB.prepare(
+    `SELECT
+       (SELECT COUNT(*) FROM mod_assets WHERE page_read_at > ?1) AS last10,
+       (SELECT COUNT(*) FROM mod_assets WHERE page_read_at > ?2) AS last60,
+       (SELECT COUNT(*) FROM mod_assets WHERE source = 'mirror'
+          AND (page_status IN ('due', 'retry', 'queued') OR (page_status = 'ok' AND page_rev < ?3))) AS remaining`,
+  )
+    .bind(now - 10 * MINUTE, now - HOUR, PAGE_REV)
+    .first<{ last10: number; last60: number; remaining: number }>();
+  if (!r) return;
+  const perMin = r.last10 / 10;
+  console.log(
+    JSON.stringify({
+      msg: "mirror backfill",
+      dispatched,
+      pages_last_10min: r.last10,
+      pages_last_hour: r.last60,
+      pages_per_min: Math.round(perMin * 10) / 10,
+      remaining: r.remaining,
+      eta_hours: perMin > 0 ? Math.round((r.remaining / perMin / 60) * 10) / 10 : null,
+    }),
+  );
 }
 
 /** One cron run of the sync. Never throws: a failed step is logged and the next run resumes. */
 export async function runMirror(env: Env, opts: RunOptions = {}): Promise<void> {
-  const now = opts.now ?? Date.now();
+  const clock = opts.clock ?? Date.now;
+  const now = opts.now ?? clock();
   // Housekeeping and dispatch run whatever the sync's state: neither talks to mxb-mods.com.
   const dispatchStep = async () => {
     try {
@@ -890,27 +1200,37 @@ export async function runMirror(env: Env, opts: RunOptions = {}): Promise<void> 
     }
   };
   if ((env.MXB_MIRROR ?? "off") !== "on") return dispatchStep();
-  const cooldown = await getState<{ until: number }>(env, "cooldown");
-  if (cooldown && cooldown.until > now) return dispatchStep();
+  if (await coolingUntil(env, now)) return dispatchStep();
 
   const f = opts.fetch ?? globalFetch;
   const s: Sync = {
     env,
     now,
+    clock: opts.now !== undefined && !opts.clock ? () => now : clock,
     fetch: f,
-    wait: opts.wait ?? ((ms) => new Promise((r) => setTimeout(r, ms))),
+    wait: opts.wait ?? sleep,
     rules: await loadRobots(env, now, f),
     sent: 0,
+    images: 0,
+    spacing: SPACING_MS,
+  };
+  // Page reads go to the queue before the walk (so the consumers have work while it runs) and
+  // after it (for what it found). Without a queue the cron reads a few itself.
+  let dispatched = 0;
+  const pages = async () => {
+    if (env.MIRROR_QUEUE) dispatched += await dispatchPages(env, s.clock());
+    else await readPages(s);
   };
   // Each step on its own: one that fails (a D1 error, a bad listing) must not keep the others
   // from running. A refusal from the site stops them all, by design.
   const steps: [string, () => Promise<void>][] = [
+    ["pages", pages],
     ["discover", async () => {
       const tree = await loadCategories(s);
       if (tree.size > 0) await discover(s, tree);
     }],
     ["sweep", () => sweep(s)],
-    ["pages", () => readPages(s)],
+    ["pages", pages],
   ];
   for (const [step, run] of steps) {
     try {
@@ -919,6 +1239,11 @@ export async function runMirror(env: Env, opts: RunOptions = {}): Promise<void> 
       console.error(JSON.stringify({ msg: "mirror sync step failed", step, error: String(err) }));
       if (err instanceof Refused) break;
     }
+  }
+  try {
+    await logBackfill(env, s.clock(), dispatched);
+  } catch (err) {
+    console.error(JSON.stringify({ msg: "mirror backfill log failed", error: String(err) }));
   }
   await dispatchStep();
 }

@@ -3,7 +3,8 @@
  * the mirror and riders' own uploads — come out of the same routes in the same shape.
  *
  *   GET  /v1/assets/search?q=&type=&bike=&source=&page=   FTS5, bm25-ranked, 24 a page
- *   GET  /v1/assets/stats                                  how many mods are listed
+ *   GET  /v1/assets/stats                                  how many mods are listed, in all
+ *                                                          and by type (one GROUP BY)
  *   GET  /v1/assets/<uuid>[?version=<seq>]                 one mod, its versions, its files
  *   GET  /v1/assets/<uuid>/download/<idx>[/<part>][?version=<seq>]
  *                                                          302 to cdn.mxbsecure.com, or to a
@@ -21,7 +22,8 @@
  * cacheable for a minute; the routes are rate-limited per address.
  */
 
-import { ASSET_TYPES, hex, LEASE_MS, type MirrorJob } from "./mirror";
+import { ASSET_TYPES, hex, LEASE_MS, type AssetType, type MirrorJob } from "./mirror";
+import { safeBlocks } from "./modbody";
 import { activeBikes, supported, touchBlob } from "./mirrorpolicy";
 import { reportAsset } from "./modreports";
 import { internalId, modSlug, UUID_RE } from "./modids";
@@ -196,11 +198,11 @@ export async function getAsset(id: number, url: URL, env: Env): Promise<{ status
   const version = named ?? (isMirror ? NO_VERSION : null);
   if (!version) return { status: 404, body: { error: "no such mod" } };
   const asset = await env.DB.prepare(
-    `SELECT ${COLUMNS}, a.description, a.categories FROM mod_assets a LEFT JOIN mod_versions v ON v.id = ?
+    `SELECT ${COLUMNS}, a.description, a.categories, a.body FROM mod_assets a LEFT JOIN mod_versions v ON v.id = ?
      WHERE a.id = ? AND ${VISIBLE}`,
   )
     .bind(version.id, id)
-    .first<AssetRow & { description: string; categories: string }>();
+    .first<AssetRow & { description: string; categories: string; body: string | null }>();
   if (!asset) return { status: 404, body: { error: "no such mod" } };
   const { results } = await env.DB.prepare(
     `SELECT f.idx, f.part, f.rel, f.url, f.host, f.label, f.is_server, f.is_default, f.status, f.sha256, f.filename,
@@ -215,6 +217,13 @@ export async function getAsset(id: number, url: URL, env: Env): Promise<{ status
   )
     .bind(id)
     .all<{ seq: number; label: string | null; notes: string | null; created_at: number }>();
+  // The post's own pictures, copied to the CDN by the sync (`mirror.ts` copyImages).
+  const images = await env.DB.prepare(
+    `SELECT b.r2_key, i.width, i.height FROM mod_asset_images i JOIN mod_blobs b ON b.sha256 = i.sha256
+     WHERE i.asset_id = ? AND b.bucket = 'public' ORDER BY i.idx`,
+  )
+    .bind(id)
+    .all<{ r2_key: string; width: number | null; height: number | null }>();
   const files = results.map((f) => {
     const stored = f.status === "done" && !!f.r2_key;
     const path = f.part > 0 ? `${f.idx}/${f.part}` : `${f.idx}`;
@@ -254,6 +263,9 @@ export async function getAsset(id: number, url: URL, env: Env): Promise<{ status
       visibility: asset.visibility,
       version_seq: version.seq,
       description: asset.description,
+      // The description as blocks (`modbody.ts`): text, marks, links, YouTube ids. Never HTML.
+      body: asset.body ? safeBlocks(asset.body) : null,
+      images: images.results.map((r) => ({ url: `${cdnBase(env)}/${r.r2_key}`, width: r.width, height: r.height })),
       categories: asset.categories ? asset.categories.split("; ") : [],
       versions: versions.results.map((v) => ({ ...v, created_at: new Date(v.created_at).toISOString() })),
       files,
@@ -460,11 +472,19 @@ const BY_SLUG = /^\/v1\/assets\/mirror\/([a-z0-9%_-]{1,200})$/i;
 const LEGACY = /^\/v1\/assets\/[0-9]{1,12}(?:\/(?:download\/.*|report))?$/;
 
 /** How many mods search lists with no filter: the site's headline number. */
-export async function assetStats(env: Env): Promise<{ total: number }> {
-  const row = await env.DB.prepare(
-    `SELECT COUNT(*) AS n FROM mod_assets a LEFT JOIN mod_versions v ON v.id = a.current_version WHERE ${LISTABLE}`,
-  ).first<{ n: number }>();
-  return { total: row?.n ?? 0 };
+/** How many mods are listed, in all and per type. One query; the route caches it a minute. */
+export async function assetStats(env: Env): Promise<{ total: number; by_type: Record<AssetType, number> }> {
+  const { results } = await env.DB.prepare(
+    `SELECT a.type, COUNT(*) AS n FROM mod_assets a LEFT JOIN mod_versions v ON v.id = a.current_version
+     WHERE ${LISTABLE} GROUP BY a.type`,
+  ).all<{ type: string; n: number }>();
+  const by_type = Object.fromEntries(ASSET_TYPES.map((t) => [t, 0])) as Record<AssetType, number>;
+  let total = 0;
+  for (const r of results) {
+    total += r.n;
+    if ((ASSET_TYPES as string[]).includes(r.type)) by_type[r.type as AssetType] = r.n;
+  }
+  return { total, by_type };
 }
 
 /** The public `/v1/assets/*` routes. `null` for anything else (the owner's writes, below the gate). */

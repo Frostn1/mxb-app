@@ -12,7 +12,7 @@
  * part, whatever the file's size.
  */
 
-import { backoff, globalFetch, hex, type MirrorJob } from "./mirror";
+import { backoff, globalFetch, hex, readPageJobs, type MirrorJob } from "./mirror";
 import { verifyUpload } from "./uploadcheck";
 import { HostError, RunnerNeeded, filenameFrom, megaDecryptStream, openBody, resolveShare, hostKind, type Resolved } from "./mirrorhosts";
 
@@ -58,9 +58,57 @@ interface FileRow {
   type: string;
 }
 
-/** The queue handler. Every message is acked: D1, not the queue, holds the retry schedule. */
-export async function consumeMirror(batch: MessageBatch<MirrorJob>, env: Env, deps: FetchDeps = {}): Promise<void> {
+/** Once a batch has spent this long on files, its other files go back on the queue. */
+const FILE_BUDGET_MS = 2 * 60_000;
+
+/**
+ * The queue handler. Every message is acked: D1, not the queue, holds the retry schedule.
+ *
+ * A batch (up to `max_batch_size`) mixes kinds. Its page reads run first, side by side on a
+ * few lanes (`readPageJobs`). Files and uploads run one after another; a file can take
+ * minutes, so once the batch has spent `FILE_BUDGET_MS` on them the rest are sent again as
+ * new messages (and acked here) rather than risk the invocation's 15 minutes.
+ */
+export async function consumeMirror(
+  batch: MessageBatch<MirrorJob>,
+  env: Env,
+  deps: FetchDeps & { wait?: (ms: number) => Promise<void>; clock?: () => number } = {},
+): Promise<void> {
+  const clock = deps.clock ?? Date.now;
+  const started = clock();
+  const pages = batch.messages.filter((m) => m.body.kind === "page");
+  if (pages.length) {
+    try {
+      const ids = pages.map((m) => (m.body as Extract<MirrorJob, { kind: "page" }>).id);
+      const r = await readPageJobs(env, ids, { now: deps.now, fetch: deps.fetch, wait: deps.wait, clock });
+      const secs = Math.max(1, (clock() - started) / 1000);
+      console.log(
+        JSON.stringify({
+          msg: "mirror pages",
+          ...r,
+          seconds: Math.round(secs),
+          pages_per_min: Math.round((r.read / secs) * 600) / 10,
+          requests_per_s: Math.round((r.requests / secs) * 10) / 10,
+        }),
+      );
+    } catch (err) {
+      console.error(JSON.stringify({ msg: "mirror page batch crashed", error: String(err) }));
+    }
+    for (const m of pages) m.ack();
+  }
+  let ran = 0;
   for (const msg of batch.messages) {
+    if (msg.body.kind === "page") continue;
+    if (ran > 0 && clock() - started > FILE_BUDGET_MS && env.MIRROR_QUEUE) {
+      try {
+        await env.MIRROR_QUEUE.send(msg.body);
+        msg.ack();
+      } catch {
+        msg.retry();
+      }
+      continue;
+    }
+    ran++;
     try {
       if (msg.body.kind === "upload") await verifyUpload(env, msg.body.id, deps);
       else await mirrorFile(env, msg.body, deps);
@@ -84,6 +132,10 @@ export async function deadLetters(batch: MessageBatch<MirrorJob>, env: Env, now 
          WHERE version_id = ? AND idx = ? AND part = ? AND status = 'queued'`,
       )
         .bind(now + 6 * 3600_000, job.version, job.idx, job.part)
+        .run();
+    } else if (job.kind === "page") {
+      await env.DB.prepare("UPDATE mod_assets SET page_status = 'due', page_due_at = ? WHERE id = ? AND page_status = 'queued'")
+        .bind(now + 3600_000, job.id)
         .run();
     } else {
       await env.DB.prepare(
