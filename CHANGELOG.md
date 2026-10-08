@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## 2026-10-07 — v0.20.0-beta.3 — Paint sync first, tips, 3D preset preview
+
+### Added
+- **3D preview of a preset.** Each preset has a 3D button that shows its bike, livery, tyres and rider gear. You can spin and zoom it; editing stays in Frost's Studio. Missing parts are named, and locked parts show as stock.
+- **Tips.** An occasional tip on the home screen, at most one per launch and never during a download or install. The first one is about paint sync. Settings > Tips lists them all and can turn them off.
+
+### Changed
+- **Settings are reorganised.** Paint sync is now the first card, with its status and one button that turns on everything it needs. Settings are grouped into Features, Setup, App, Advanced and About.
+
 ## 2026-10-07 — v0.20.0-beta.2 — Use less RAM
 
 ### Added
