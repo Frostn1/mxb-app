@@ -1,0 +1,64 @@
+{
+  "$schema": "../node_modules/wrangler/config-schema.json",
+  // The mod catalogue's background worker (see index.ts). Deployed by the control-plane job
+  // after migrations: `bunx wrangler deploy -c mirror/wrangler.jsonc` from control-plane/.
+  "name": "mxb-mirror",
+  "main": "index.ts",
+  "compatibility_date": "2026-08-08",
+  "compatibility_flags": ["nodejs_compat"],
+
+  // Nothing here serves people. No route; workers.dev off.
+  "workers_dev": false,
+
+  "vars": {
+    // "on" lets the sync walk mxb-mods.com; anything else stops it. Queue work runs either way.
+    "MXB_MIRROR": "on",
+    // What the mirror keeps (`src/mirrorpolicy.ts`): windows in days, and the bike lists (comma
+    // separated, any spelling). Keep these the same as in ../wrangler.jsonc, where the download
+    // route reads the bike lists too.
+    "MXB_LIVE_TRACK_DAYS": "14",
+    "MXB_MIRROR_RETAIN_DAYS": "90",
+    "MXB_BIKE_ACTIVE_DAYS": "180",
+    "MXB_MIRROR_BIKES_ALLOW": "",
+    "MXB_MIRROR_BIKES_DENY": ""
+  },
+
+  // The sync's own run. Every 10 minutes: ~20 pages of mxb-mods a run, 3 s apart.
+  "triggers": { "crons": ["*/10 * * * *"] },
+
+  // An upload check hashes and inflates up to 2 GiB in one invocation; a download streams as
+  // much. A ceiling, not a reservation.
+  "limits": { "cpu_ms": 300000 },
+
+  "observability": { "enabled": true, "logs": { "head_sampling_rate": 1 } },
+
+  // The control plane's database; the id is the one in ../wrangler.jsonc.
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "mxb-control-plane",
+      "database_id": "c993c497-28b4-480b-8e6e-fb61a0b18c2b"
+    }
+  ],
+
+  "r2_buckets": [
+    { "binding": "ASSET_MIRROR", "bucket_name": "mxb-assets" },
+    { "binding": "ASSET_LOCKED", "bucket_name": "mxb-private" }
+  ],
+
+  "queues": {
+    // The sync's dispatch, and re-sending an upload whose message was lost.
+    "producers": [{ "binding": "MIRROR_QUEUE", "queue": "mxb-mirror" }],
+    "consumers": [
+      {
+        "queue": "mxb-mirror",
+        "max_batch_size": 1,
+        "max_batch_timeout": 5,
+        "max_concurrency": 2,
+        "max_retries": 3,
+        "dead_letter_queue": "mxb-mirror-dlq"
+      },
+      { "queue": "mxb-mirror-dlq", "max_batch_size": 10, "max_batch_timeout": 30 }
+    ]
+  }
+}

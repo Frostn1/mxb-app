@@ -262,6 +262,18 @@ jobs:
           if [ -n "$CF_ACCOUNT" ]; then export CLOUDFLARE_ACCOUNT_ID="$CF_ACCOUNT"; fi
           bunx wrangler deploy
 
+      # The mod catalogue's background Worker (control-plane/mirror): the mxb-mods walker, the
+      # mxb-mirror queue consumer and upload checks. Same database, so it goes after the
+      # migrations above; after the control plane, so a new job shape is produced only once
+      # something reads it. It holds no secrets. The token needs Queues Edit for its consumers.
+      - name: Deploy the mirror worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CF_ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          if [ -n "$CF_ACCOUNT" ]; then export CLOUDFLARE_ACCOUNT_ID="$CF_ACCOUNT"; fi
+          bunx wrangler deploy -c mirror/wrangler.jsonc
+
   bootstrap-script:
     # The one part of this repo that runs somewhere nobody can watch.
     #

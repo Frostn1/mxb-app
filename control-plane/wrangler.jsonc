@@ -71,6 +71,19 @@
     // Who may use the FBX -> EDF converter on mxbsecure.com, besides the admins, who always
     // may: SteamID64s, comma or space separated. Empty means the admins alone. A list here
     // rather than a table so that granting it is a reviewable diff, like the admin list above.
+    // Where public mod files are served from: the custom domain on the `mxb-assets` bucket.
+    "MXB_ASSETS_CDN": "https://cdn.mxbsecure.com",
+    // The private bucket's name, for the S3 endpoint the upload URLs are presigned against.
+    "MXB_PRIVATE_BUCKET": "mxb-private",
+    // What the mirror keeps (`mirrorpolicy.ts`). The download route checks the bike lists before
+    // it queues a copy, and the mxb-mirror Worker reads the same names from mirror/wrangler.jsonc,
+    // so change both. A name in DENY is never mirrored, a name in ALLOW always may be: comma
+    // separated, any spelling ("2021 KTM 450 SX-F OEM" or "MX1OEM_2021_KTM_450_SX-F").
+    "MXB_LIVE_TRACK_DAYS": "14",
+    "MXB_MIRROR_RETAIN_DAYS": "90",
+    "MXB_BIKE_ACTIVE_DAYS": "180",
+    "MXB_MIRROR_BIKES_ALLOW": "",
+    "MXB_MIRROR_BIKES_DENY": "",
     "MXB_CONVERTER_STEAM_IDS": "76561199650233712,76561199807040854,76561198798423111,76561198937606502"
   },
 
@@ -79,6 +92,12 @@
   // unattended servers" being a policy and being a fact.
   "triggers": {
     "crons": ["*/5 * * * *"]
+  },
+
+  // The mod catalogue's slow work belongs to the mxb-mirror Worker (mirror/wrangler.jsonc).
+  // This one only queues it: one message per file to fetch or upload to check.
+  "queues": {
+    "producers": [{ "binding": "MIRROR_QUEUE", "queue": "mxb-mirror" }]
   },
 
   "observability": {
@@ -131,6 +150,18 @@
     {
       "binding": "FBX2EDF",
       "bucket_name": "mxb-fbx2edf"
+    },
+    // The mod catalogue's public files, content-addressed under paints/ bikes/ liveries/ kits/
+    // tracks/ server/ other/. Served by its custom domain cdn.mxbsecure.com, behind the cache.
+    {
+      "binding": "ASSET_MIRROR",
+      "bucket_name": "mxb-assets"
+    },
+    // Never public: `.mxbsecure` locked content (signed links only), and uploads in
+    // quarantine/ until their checks pass.
+    {
+      "binding": "ASSET_LOCKED",
+      "bucket_name": "mxb-private"
     }
   ],
 
@@ -155,6 +186,11 @@
     { "name": "FRIENDS_LIMITER", "namespace_id": "1006", "simple": { "limit": 60, "period": 60 } },
     // Series registration: anonymous, per address. Five a minute is a rider fixing a typo; the
     // daily cap in D1 (`series.ts`) is the real ceiling.
-    { "name": "REGISTER_LIMITER", "namespace_id": "1007", "simple": { "limit": 5, "period": 60 } }
+    { "name": "REGISTER_LIMITER", "namespace_id": "1007", "simple": { "limit": 5, "period": 60 } },
+    // The mod catalogue's public routes, per address: a page of search is one call, a download one
+    // more. 120 a minute is a person clicking fast.
+    { "name": "ASSETS_LIMITER", "namespace_id": "1008", "simple": { "limit": 120, "period": 60 } },
+    // Opening upload sessions, per account. The daily quotas in `uploads.ts` are the real ceiling.
+    { "name": "UPLOAD_LIMITER", "namespace_id": "1009", "simple": { "limit": 10, "period": 60 } }
   ]
 }

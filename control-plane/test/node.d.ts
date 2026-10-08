@@ -40,3 +40,10 @@ interface ImportMeta {
 declare module "node:module" {
   export function createRequire(path: string): (id: string) => unknown;
 }
+
+declare module "node:crypto" {
+  export function createHash(algorithm: string): {
+    update(data: Uint8Array | string): unknown;
+    digest(encoding: "hex"): string;
+  };
+}

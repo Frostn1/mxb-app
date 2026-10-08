@@ -587,6 +587,70 @@ database), and the ban records, with who each install was reported to be, are ke
 which holds only synthetic test values and fixed samples.
 with the rest of the evidence.
 
+### The mod catalogue
+
+Mods people can search and download from mxbsecure.com/mods and the MXB App. Two sources feed
+one set of tables (`migrations/0056_mod_catalog.sql`):
+
+- **Uploads** (`uploads.ts`): a signed-in, Steam-confirmed account opens a session, the app
+  writes the file straight to R2 through presigned multipart part URLs (resumable, up to 2 GiB),
+  and completes it. The bytes sit in `mxb-private/quarantine/` until the queue has checked the
+  declared size and SHA-256 and the archive (`modscan.ts`: no programs, scripts or libraries by
+  name or by content, no traversal, nested `.pkz`/`.zip` looked into one level), then move to
+  `mxb-assets/<type>/<sha256>`. A new upload of the same mod is a new version of it. Quotas per
+  account: 3 open sessions, 20 uploads and 10 GiB a day, 25 GiB stored.
+- **The mirror** (`mirror.ts`, `mirrorfetch.ts`, `mirrorhosts.ts`): a cron every 10 minutes
+  walks mxb-mods.com's REST listing from a cursor, reads each new or changed post's page for its
+  download links (the app's `mods/mxb.rs` parsing), and queues each link. The queue consumer
+  resolves it the way the app's `install.rs` does (MediaFire, Google Drive including the
+  virus-scan form, MEGA with in-Worker AES-CTR decryption, Dropbox, OneDrive, Pixeldrain), lists
+  folder shares into one row per file, and streams each file into R2 by SHA-256. Polite by
+  construction: named user agent, robots.txt honoured, 3 s between requests, a two-hour
+  cooldown the moment the site refuses one. `MXB_MIRROR` off stops it.
+- **Only what is used** (`mirrorpolicy.ts`): the whole catalogue is indexed, but a file is copied
+  into R2 only when someone downloads it (the first download is redirected to the original and
+  queues the copy) or when it is a track on a live server (`track_catalog.requested_at`, stamped
+  by the Servers tab's lookups, within `MXB_LIVE_TRACK_DAYS`). Liveries and bikes for bike models
+  no rider has published a loadout for within `MXB_BIKE_ACTIVE_DAYS` are never copied;
+  `MXB_MIRROR_BIKES_ALLOW` / `_DENY` override. A copy nobody downloads for
+  `MXB_MIRROR_RETAIN_DAYS` (90) is evicted, unless a live server uses it.
+
+Two Workers share this code. `mxb-control-plane` answers people (search, mod pages, download
+redirects, upload sessions and completion, reports, moderation) and only *queues* slow work.
+`mxb-mirror` (`mirror/index.ts`, `mirror/wrangler.jsonc`) does it: the mxb-mods cron, the
+`mxb-mirror` queue (downloads, MEGA decryption, Drive's confirm page, upload scanning and
+promotion), eviction and the dead-letter queue. It has no route and holds no secrets: it reads
+R2 through its bindings, and the S3 credentials for presigning stay on the control plane.
+Its tests are in `mirror/test/`; `bunx vitest run` runs both suites.
+
+Search is FTS5 over title, author, bike, categories and description, bm25-ranked. Public files
+are served by `cdn.mxbsecure.com`, the custom domain on `mxb-assets`; `.mxbsecure` locked
+content stays in `mxb-private` behind five-minute signed links. Reports come in on
+`POST /v1/assets/<id>/report`; admins hide, unhide or remove from mxbsecure.com/mods/moderate
+(`/v1/web/mods/*`); an owner can edit or delete their own.
+
+Provisioning, once, before the first deploy that carries the bindings (the deploy fails
+without them):
+
+```sh
+bunx wrangler r2 bucket create mxb-assets
+bunx wrangler r2 bucket create mxb-private
+bunx wrangler r2 bucket domain add mxb-assets --domain cdn.mxbsecure.com --zone-id <mxbsecure.com zone id>
+bunx wrangler queues create mxb-mirror
+bunx wrangler queues create mxb-mirror-dlq
+# CORS on the private bucket, so the app's PUTs to presigned URLs return their ETag:
+bunx wrangler r2 bucket cors set mxb-private --file r2-cors.json
+# An R2 API token with Object Read & Write on mxb-private only, then:
+bunx wrangler secret put R2_ACCESS_KEY_ID
+bunx wrangler secret put R2_SECRET_ACCESS_KEY
+bunx wrangler secret put R2_S3_ENDPOINT        # https://<account id>.r2.cloudflarestorage.com
+bunx wrangler secret put MXB_ASSET_URL_KEY     # any long random string
+```
+
+The CI deploy token also needs **Queues Edit** and **Workers R2 Storage Edit** next to Workers
+Scripts and D1. Files over 2 GiB, SharePoint folders and personal OneDrive links are marked
+`runner` rather than failed, for a separate runner to pick up.
+
 ## Security notes
 
 - Tokens are shown **once** at enrollment and stored only as a SHA-256 digest. Lookup is by
