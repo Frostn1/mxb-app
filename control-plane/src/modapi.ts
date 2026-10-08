@@ -118,13 +118,27 @@ const LISTABLE = `a.state = 'active' AND a.visibility = 'public' AND a.page_stat
 /** Newest published first; a row with no date yet sorts by when we first saw it. */
 const NEWEST = "COALESCE(a.published, strftime('%Y-%m-%dT%H:%M:%SZ', a.first_seen / 1000, 'unixepoch')) DESC";
 
+/**
+ * The orders `sort=` names. Each ends on the id so a page never repeats or skips a row.
+ * `updated`, `name` and the default read the indexes of migration 0067; `size` is the sum of the
+ * current version's stored files, so it sorts what the query already computes.
+ */
+const SORTS: Record<string, string> = {
+  newest: `${NEWEST}, a.id DESC`,
+  updated: "a.modified DESC, a.id DESC",
+  name: "a.title COLLATE NOCASE ASC, a.id ASC",
+  size: "bytes DESC, a.id DESC",
+};
+
 export async function searchAssets(url: URL, env: Env): Promise<{ status: number; body: unknown }> {
   const q = (url.searchParams.get("q") ?? "").slice(0, 200);
   const type = url.searchParams.get("type") ?? "";
   const source = url.searchParams.get("source") ?? "";
   const bike = (url.searchParams.get("bike") ?? "").trim().slice(0, 60);
+  const sort = url.searchParams.get("sort") ?? "";
   const page = Math.min(MAX_PAGE, Math.max(1, Math.floor(Number(url.searchParams.get("page") ?? "1")) || 1));
   if (type && !ASSET_TYPES.includes(type as never)) return { status: 400, body: { error: "unknown type" } };
+  if (sort && !Object.hasOwn(SORTS, sort)) return { status: 400, body: { error: "unknown sort" } };
   if (source && source !== "mirror" && source !== "upload") return { status: 400, body: { error: "unknown source" } };
 
   const where: string[] = [LISTABLE];
@@ -144,11 +158,12 @@ export async function searchAssets(url: URL, env: Env): Promise<{ status: number
   let lead: unknown[];
   if (match) {
     from = `FROM mod_fts JOIN mod_assets a ON a.id = mod_fts.rowid ${join} WHERE mod_fts MATCH ? AND ${where.join(" AND ")}`;
-    order = `bm25(mod_fts, ${WEIGHTS}), ${NEWEST}`;
+    // A search with no sort named ranks by relevance; naming one orders the matches by it.
+    order = sort ? SORTS[sort] : `bm25(mod_fts, ${WEIGHTS}), ${NEWEST}, a.id DESC`;
     lead = [match];
   } else {
     from = `FROM mod_assets a ${join} WHERE ${where.join(" AND ")}`;
-    order = `${NEWEST}, a.id DESC`;
+    order = SORTS[sort || "newest"];
     lead = [];
   }
   const counted = await env.DB.prepare(`SELECT COUNT(*) AS n ${from}`).bind(...lead, ...args).first<{ n: number }>();
