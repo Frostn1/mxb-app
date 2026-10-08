@@ -590,6 +590,7 @@ mod tests {
             log_path: "/opt/mxbserver/logs/mxbserver.log".into(),
             local: false,
             local_command: None,
+            hosted_id: None,
         }
     }
 

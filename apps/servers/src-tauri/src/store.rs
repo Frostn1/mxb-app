@@ -12,6 +12,9 @@ const KEYCHAIN_SERVICE: &str = "com.frost.mxbservers";
 pub enum ServerKind {
     Native,
     Legacy,
+    /// A server hosted by mxbsecure: driven through the control plane's `/v1/hosted/*` routes
+    /// with a token claimed from servers.mxbsecure.com. No SSH and no agent.
+    Hosted,
 }
 
 fn default_server_kind() -> ServerKind {
@@ -53,6 +56,9 @@ pub struct Server {
     /// binary and restart it after a change. Written by `server-manager-local.ps1`.
     #[serde(default)]
     pub local_command: Option<LocalCommand>,
+    /// For a hosted server: its id in the control plane.
+    #[serde(default)]
+    pub hosted_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -79,6 +85,12 @@ pub fn validate(server: &Server) -> Result<(), String> {
     let name = server.name.trim();
     if name.is_empty() || name.chars().count() > 64 {
         return Err("Name must be 1 to 64 characters.".into());
+    }
+    if server.kind == ServerKind::Hosted {
+        return match &server.hosted_id {
+            Some(id) if valid_hosted_id(id) => Ok(()),
+            _ => Err("This hosted server has no valid id. Add it again from servers.mxbsecure.com.".into()),
+        };
     }
     if server.observe_port == 0 || server.admin_port == Some(0) {
         return Err("Ports must be 1 to 65535.".into());
@@ -129,6 +141,20 @@ pub fn validate(server: &Server) -> Result<(), String> {
         return Err("Log path must be an absolute path of letters, digits, / . _ -".into());
     }
     Ok(())
+}
+
+/// A control-plane server id: a UUID, which is all that ever goes into a hosted route's path.
+pub fn valid_hosted_id(id: &str) -> bool {
+    id.len() == 36
+        && id.chars().enumerate().all(|(i, c)| match i {
+            8 | 13 | 18 | 23 => c == '-',
+            _ => c.is_ascii_hexdigit(),
+        })
+}
+
+/// A one-time claim code from servers.mxbsecure.com, as the control plane mints it.
+pub fn valid_claim_code(code: &str) -> bool {
+    (16..=128).contains(&code.len()) && code.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_'))
 }
 
 /// Absolute, and only characters that need no quoting in a remote shell command.
@@ -197,6 +223,23 @@ impl Store {
             .find(|s| s.id == id)
             .ok_or_else(|| "No such server.".to_string())
     }
+
+    /// A server this app reaches itself (SSH, this PC or an agent). Hosted servers are only
+    /// driven through the control plane, so every direct command refuses them here.
+    pub fn managed(&self, id: &str) -> Result<Server, String> {
+        let server = self.get(id)?;
+        if server.kind == ServerKind::Hosted {
+            return Err("Hosted servers are managed through mxbsecure.".into());
+        }
+        Ok(server)
+    }
+
+    /// The saved hosted server already linked to this control-plane id, if any.
+    pub fn by_hosted_id(&self, hosted_id: &str) -> Option<Server> {
+        self.load()
+            .into_iter()
+            .find(|s| s.kind == ServerKind::Hosted && s.hosted_id.as_deref() == Some(hosted_id))
+    }
 }
 
 fn entry(id: &str) -> Result<keyring::Entry, String> {
@@ -256,7 +299,52 @@ mod tests {
             log_path: default_log_path(),
             local: false,
             local_command: None,
+            hosted_id: None,
         }
+    }
+
+    #[test]
+    fn a_hosted_server_needs_only_a_name_and_a_uuid() {
+        let hosted = Server {
+            kind: ServerKind::Hosted,
+            host: String::new(),
+            user: String::new(),
+            admin_port: None,
+            hosted_id: Some("0f8fad5b-d9cb-469f-a165-70867728950e".into()),
+            ..server()
+        };
+        assert_eq!(validate(&hosted), Ok(()));
+        for bad in [None, Some("../v1/web/admin"), Some("0f8fad5b-d9cb-469f-a165-70867728950"), Some("0f8fad5b/d9cb-469f-a165-70867728950e")] {
+            let s = Server { hosted_id: bad.map(String::from), ..hosted.clone() };
+            assert!(validate(&s).is_err(), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn claim_codes_are_plain_tokens() {
+        assert!(valid_claim_code("abcdefghijklmnop_-0123"));
+        assert!(!valid_claim_code("short"));
+        assert!(!valid_claim_code("abcdefghijklmnop&x=1"));
+        assert!(!valid_claim_code(&"a".repeat(129)));
+    }
+
+    #[test]
+    fn direct_commands_refuse_hosted_servers() {
+        let dir = std::env::temp_dir().join(format!("mxb-servers-{}", new_id()));
+        let store = Store::new(dir.clone());
+        store.upsert(server()).unwrap();
+        let hosted = Server {
+            id: "h".into(),
+            kind: ServerKind::Hosted,
+            hosted_id: Some("0f8fad5b-d9cb-469f-a165-70867728950e".into()),
+            ..server()
+        };
+        store.upsert(hosted).unwrap();
+        assert!(store.managed("a").is_ok());
+        assert!(store.managed("h").is_err());
+        assert_eq!(store.by_hosted_id("0f8fad5b-d9cb-469f-a165-70867728950e").unwrap().id, "h");
+        assert!(store.by_hosted_id("x").is_none());
+        fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

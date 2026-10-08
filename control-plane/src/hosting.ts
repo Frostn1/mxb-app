@@ -373,7 +373,7 @@ export async function mintInvite(
   )
     .bind(id, await hashToken(code), operator, steamId, quota, now + days * DAY, now)
     .run();
-  return { status: 201, body: { id, code, link: `https://servers.mxbsecure.com/?invite=${code}` } };
+  return { status: 201, body: { id, code, link: `https://servers.mxbsecure.com/invite/${code}` } };
 }
 
 export async function claimInvite(env: Env, deps: Deps, steamId: string, input: Record<string, unknown>): Promise<Result> {
@@ -856,7 +856,7 @@ export async function msmLink(env: Env, deps: Deps, steamId: string, id: string)
   await env.DB.prepare("INSERT INTO host_claims (code_hash, server_id, steam_id, expires_at) VALUES (?, ?, ?, ?)")
     .bind(await hashToken(code), id, steamId, expiresAt)
     .run();
-  return { status: 200, body: { url: `mxbservers://connect?claim=${code}`, expiresAt } };
+  return { status: 200, body: { code, url: `mxbservers://hosted/claim?code=${code}`, expiresAt } };
 }
 
 export async function msmClaim(env: Env, deps: Deps, input: Record<string, unknown>): Promise<Result> {

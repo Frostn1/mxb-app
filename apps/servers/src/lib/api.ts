@@ -6,7 +6,7 @@ import type { ReloadChange } from "./reload";
 export interface Server {
   id: string;
   name: string;
-  kind: "native" | "legacy";
+  kind: "native" | "legacy" | "hosted";
   host: string;
   agentTls: boolean;
   sshPort: number;
@@ -17,6 +17,8 @@ export interface Server {
   logPath: string;
   /** On this PC: ports used directly on 127.0.0.1, the log read as a local file, no SSH. */
   local: boolean;
+  /** Hosted by mxbsecure: the server's id in the control plane. */
+  hostedId?: string | null;
 }
 
 export interface ServerView extends Server {
@@ -97,6 +99,7 @@ export const blankServer = (): Server => ({
   adminPort: null,
   logPath: "/opt/mxbserver/logs/mxbserver.log",
   local: false,
+  hostedId: null,
 });
 
 export const listServers = () => invoke<ServerView[]>("servers_list");

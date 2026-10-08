@@ -96,7 +96,7 @@ describe("invites", () => {
     const d = deps(null, fakeFetch(), clock);
     const bound = await mintInvite(e, d, BOSS, { steamId: RIDER });
     const code = (bound.body as { code: string; link: string }).code;
-    expect((bound.body as { link: string }).link).toBe(`https://servers.mxbsecure.com/?invite=${code}`);
+    expect((bound.body as { link: string }).link).toBe(`https://servers.mxbsecure.com/invite/${code}`);
     expect((await claimInvite(e, d, RIDER2, { code })).status).toBe(403);
     expect((await claimInvite(e, d, RIDER, { code })).status).toBe(200);
     expect((await claimInvite(e, d, RIDER2, { code })).status).toBe(409);
@@ -350,9 +350,10 @@ describe("what an owner may change", () => {
 describe("MSM", () => {
   it("swaps a one-time claim for a bearer that drives that server only", async () => {
     const { e, d, id } = await readyServer();
-    const link = (await msmLink(e, d, RIDER, id)).body as { url: string };
-    expect(link.url).toMatch(/^mxbservers:\/\/connect\?claim=[A-Za-z0-9_-]{16,128}$/);
-    const claim = new URL(link.url).searchParams.get("claim")!;
+    const link = (await msmLink(e, d, RIDER, id)).body as { url: string; code: string };
+    expect(link.url).toMatch(/^mxbservers:\/\/hosted\/claim\?code=[A-Za-z0-9_-]{16,128}$/);
+    const claim = new URL(link.url).searchParams.get("code")!;
+    expect(claim).toBe(link.code);
     const first = await msmClaim(e, d, { claim });
     expect(first.status).toBe(200);
     expect((await msmClaim(e, d, { claim })).status).toBe(404);
