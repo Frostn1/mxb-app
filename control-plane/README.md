@@ -688,6 +688,31 @@ The CI deploy token also needs **Queues Edit** and **Workers R2 Storage Edit** n
 Scripts and D1. Files over 2 GiB, SharePoint folders and personal OneDrive links are marked
 `runner` rather than failed, for a separate runner to pick up.
 
+#### The fetcher
+
+mxb-mods.com and MediaFire answer Cloudflare Workers 403 and a normal machine 200. The hosts
+in `MIRROR_FETCHER_HOSTS` (a var in both wrangler files) are fetched by `tools/mxb-fetcher` on
+our own Linux box instead, as is any host that refuses the Worker a file. The box opens no
+ports: it leases jobs from `/v1/mirror/fetcher/*` (`src/mirrorfetcher.ts`), hands page HTML
+back to be parsed exactly as the Worker parses it, and uploads files and pictures through the
+control plane's own `ASSET_MIRROR` binding as R2 multipart uploads (32 MiB parts, the whole
+file's SHA-256 checked as they pass, aborted on any mismatch). With mxb-mods.com routed there, discovery goes too: the
+category tree, listing walk and id sweep become one `list` job at a time (a round every ten
+minutes, as the cron ran them), whose JSON is applied by the same steps, and the Worker sends
+the site nothing.
+
+```sh
+bunx wrangler secret put MIRROR_FETCHER_TOKEN  # 32+ random characters, the same on the box
+```
+
+No S3 credentials are involved. Empty `MIRROR_FETCHER_HOSTS` turns it all off.
+
+mxb-mods.com also blocks datacenter addresses, so each fetcher says which hosts it serves
+(`hosts` on the lease; `MXB_FETCHER_HOSTS` on the fetcher). The Linux box runs
+`* -mxb-mods.com`, and a fetcher on a home connection runs `mxb-mods.com` (Windows scheduled
+task or systemd: `tools/mxb-fetcher/README.md`). Until that one runs, mxb-mods.com's jobs wait
+in D1 and nothing is sent to the site.
+
 ## Security notes
 
 - Tokens are shown **once** at enrollment and stored only as a SHA-256 digest. Lookup is by

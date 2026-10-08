@@ -72,6 +72,9 @@ docs/guides/tools/uidrive
 AGENTS.md
 CLAUDE.md
 
-# Local livery development tooling and dump harness
-tools/
+# Local livery development tooling and dump harness. `tools/*` rather than `tools/`, so the
+# one tool that is tracked (the mirror fetcher) can be let back in.
+tools/*
+!tools/mxb-fetcher/
+tools/mxb-fetcher/target/
 apps/manager/src-tauri/src/liverydump.rs

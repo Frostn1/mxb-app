@@ -34,6 +34,7 @@
 import { decodeEntities } from "./trackcatalog";
 import { evictUnused, wantLiveTracks } from "./mirrorpolicy";
 import { newPublicId } from "./modids";
+import { fetcherRouter, pagesViaFetcher } from "./fetcherroute";
 import { isModsHost, MAX_IMAGE_BYTES, MAX_IMAGES, parsePostBody, type PostImage } from "./modbody";
 
 export const UA = "mxbsecure-mirror/1 (+https://mxbsecure.com/mods)";
@@ -59,7 +60,7 @@ const PAGES_PER_RUN = 40;
  *  well inside the lease, so nothing is sent twice. */
 const PAGE_QUEUE_TARGET = 60;
 /** How long a queued page read stays leased before it is assumed lost and sent again. */
-const PAGE_LEASE_MS = 60 * MINUTE;
+export const PAGE_LEASE_MS = 60 * MINUTE;
 /** The page parser. A row read by an older one is read again (rows from before pictures: 0). */
 export const PAGE_REV = 1;
 /** Pages read side by side in one consumer invocation. One: the gentle rate. */
@@ -474,20 +475,43 @@ async function loadCategories(s: Sync): Promise<Map<number, Category>> {
   const cached = await getState<{ at: number; cats: Category[] }>(s.env, "categories");
   if (cached && s.now - cached.at < CATEGORY_TTL_MS) return new Map(cached.cats.map((c) => [c.id, c]));
   const cats: Category[] = [];
-  for (let page = 1; page <= 10; page++) {
-    const u = new URL("/wp-json/wp/v2/categories", MODS_BASE);
-    u.searchParams.set("per_page", "100");
-    u.searchParams.set("page", String(page));
-    u.searchParams.set("_fields", "id,name,parent");
-    const res = await modsGet(s, u);
+  for (let page = 1; page <= CATEGORY_MAX_PAGES; page++) {
+    const res = await modsGet(s, categoriesUrl(page));
     if (!res || !res.ok) break;
     const list = (await res.json()) as { id: number; name: string; parent: number }[];
-    for (const c of list) cats.push({ id: c.id, name: decodeEntities(c.name), parent: c.parent });
+    cats.push(...readCategories(list));
     if (list.length < 100) break;
   }
   if (cats.length === 0) return new Map((cached?.cats ?? []).map((c) => [c.id, c]));
-  await setState(s.env, "categories", { at: s.now, cats });
+  await saveCategories(s.env, cats, s.now);
   return new Map(cats.map((c) => [c.id, c]));
+}
+
+const CATEGORY_MAX_PAGES = 10;
+
+export function categoriesUrl(page: number): URL {
+  const u = new URL("/wp-json/wp/v2/categories", MODS_BASE);
+  u.searchParams.set("per_page", "100");
+  u.searchParams.set("page", String(page));
+  u.searchParams.set("_fields", "id,name,parent");
+  return u;
+}
+
+function readCategories(list: unknown): Category[] {
+  if (!Array.isArray(list)) return [];
+  return list
+    .filter((c) => c && Number.isInteger(c.id) && typeof c.name === "string")
+    .map((c) => ({ id: c.id, name: decodeEntities(c.name), parent: Number(c.parent) || 0 }));
+}
+
+async function saveCategories(env: Env, cats: Category[], now: number): Promise<void> {
+  await setState(env, "categories", { at: now, cats });
+}
+
+/** The cached category tree, and whether it is due a refresh. */
+async function cachedCategories(env: Env, now: number): Promise<{ tree: Map<number, Category>; stale: boolean }> {
+  const cached = await getState<{ at: number; cats: Category[] }>(env, "categories");
+  return { tree: new Map((cached?.cats ?? []).map((c) => [c.id, c])), stale: !cached || now - cached.at >= CATEGORY_TTL_MS };
 }
 
 // ───────────────────────────── 1. discover ─────────────────────────────
@@ -509,7 +533,7 @@ export interface Post {
  * modified since `hwm` (the newest `modified` a finished walk saw) and only moves `hwm` once
  * the walk reaches the end. The first walk has no `hwm` and covers the whole catalogue.
  */
-interface Listing {
+export interface Listing {
   hwm: string;
   walk: { top: string; offset: number } | null;
 }
@@ -581,38 +605,63 @@ export async function upsertPost(env: Env, p: Post, tree: Map<number, Category>,
  * run that reaches its time budget leaves the next one exactly where it stopped.
  */
 async function discover(s: Sync, tree: Map<number, Category>): Promise<void> {
-  const st = (await getState<Listing>(s.env, "listing")) ?? { hwm: "", walk: null };
+  const st = await listingState(s.env);
   const started = s.clock();
   for (let n = 0; n < LIST_MAX_PAGES_PER_RUN && s.clock() - started < DISCOVER_BUDGET_MS; n++) {
-    const walk = st.walk ?? { top: "", offset: 0 };
-    st.walk = walk;
-    const u = new URL("/wp-json/wp/v2/posts", MODS_BASE);
-    u.searchParams.set("orderby", "modified");
-    u.searchParams.set("order", "desc");
-    u.searchParams.set("per_page", String(LIST_PER_PAGE));
-    if (walk.offset > 0) u.searchParams.set("offset", String(walk.offset));
-    u.searchParams.set("_embed", "wp:featuredmedia,author");
-    u.searchParams.set("_fields", "id,slug,link,modified,title,content,categories,_links,_embedded");
-    // One second back, so posts sharing the high-water second are not skipped.
-    if (st.hwm) u.searchParams.set("modified_after", minusOneSecond(st.hwm));
-    const res = await modsGet(s, u);
+    const res = await modsGet(s, listingUrl(st));
     if (!res) return;
     // WordPress answers an offset past the end with 400: the walk is done.
     const posts = res.status === 400 ? [] : res.ok ? ((await res.json()) as Post[]) : null;
     if (!posts) throw new Error(`listing answered ${res.status}`);
-    for (const p of posts) {
-      await upsertPost(s.env, p, tree, s.now);
-      if (p.modified > walk.top) walk.top = p.modified;
-    }
-    if (posts.length < LIST_PER_PAGE) {
-      if (walk.top > st.hwm) st.hwm = walk.top;
-      st.walk = null;
-      await setState(s.env, "listing", st);
-      return;
-    }
-    walk.offset += LIST_PER_PAGE - LIST_OVERLAP;
-    await setState(s.env, "listing", st);
+    if ((await applyListingPage(s.env, st, posts, tree, s.now)) === "done") return;
   }
+}
+
+async function listingState(env: Env): Promise<Listing> {
+  return (await getState<Listing>(env, "listing")) ?? { hwm: "", walk: null };
+}
+
+/** The listing page the walk stands at. */
+export function listingUrl(st: Listing): URL {
+  const walk = st.walk ?? { top: "", offset: 0 };
+  const u = new URL("/wp-json/wp/v2/posts", MODS_BASE);
+  u.searchParams.set("orderby", "modified");
+  u.searchParams.set("order", "desc");
+  u.searchParams.set("per_page", String(LIST_PER_PAGE));
+  if (walk.offset > 0) u.searchParams.set("offset", String(walk.offset));
+  u.searchParams.set("_embed", "wp:featuredmedia,author");
+  u.searchParams.set("_fields", "id,slug,link,modified,title,content,categories,_links,_embedded");
+  // One second back, so posts sharing the high-water second are not skipped.
+  if (st.hwm) u.searchParams.set("modified_after", minusOneSecond(st.hwm));
+  return u;
+}
+
+/**
+ * One listing page, however it was fetched: its posts upserted and the walk moved on (and
+ * saved). "done" once the walk reaches the end, which moves the high-water mark.
+ */
+export async function applyListingPage(
+  env: Env,
+  st: Listing,
+  posts: Post[],
+  tree: Map<number, Category>,
+  now: number,
+): Promise<"more" | "done"> {
+  const walk = st.walk ?? { top: "", offset: 0 };
+  st.walk = walk;
+  for (const p of posts) {
+    await upsertPost(env, p, tree, now);
+    if (p.modified > walk.top) walk.top = p.modified;
+  }
+  if (posts.length < LIST_PER_PAGE) {
+    if (walk.top > st.hwm) st.hwm = walk.top;
+    st.walk = null;
+    await setState(env, "listing", st);
+    return "done";
+  }
+  walk.offset += LIST_PER_PAGE - LIST_OVERLAP;
+  await setState(env, "listing", st);
+  return "more";
 }
 
 export function minusOneSecond(local: string): string {
@@ -623,51 +672,214 @@ export function minusOneSecond(local: string): string {
 
 /** Walk every post id, a page a run, so `last_seen` means something and deletions surface. */
 async function sweep(s: Sync): Promise<void> {
-  const st = (await getState<{ page: number; started: number; lastComplete: number }>(s.env, "sweep")) ?? {
-    page: 1,
-    started: s.now,
-    lastComplete: 0,
-  };
+  const st = await sweepState(s.env, s.now);
   for (let n = 0; n < SWEEP_PAGES_PER_RUN; n++) {
-    const u = new URL("/wp-json/wp/v2/posts", MODS_BASE);
-    u.searchParams.set("orderby", "id");
-    u.searchParams.set("order", "asc");
-    u.searchParams.set("per_page", "100");
-    u.searchParams.set("page", String(st.page));
-    u.searchParams.set("_fields", "id");
-    const res = await modsGet(s, u);
+    const res = await modsGet(s, sweepUrl(st));
     if (!res) return;
     const ids = res.ok ? ((await res.json()) as { id: number }[]).map((p) => p.id) : [];
-    if (res.ok && ids.length > 0) {
-      // One JSON parameter, not one per id: D1 refuses a statement with more than 100 bound
-      // parameters, and a page is 100 ids plus the time. That refusal used to stop every run
-      // here, before a single page was read.
-      await s.env.DB.prepare(
-        `UPDATE mod_assets SET last_seen = ? WHERE source = 'mirror' AND source_ref IN (SELECT value FROM json_each(?))`,
-      )
-        .bind(s.now, JSON.stringify(ids))
-        .run();
-    }
-    if (res.status === 400 || (res.ok && ids.length < 100)) {
-      // A whole sweep done: anything it didn't see, and nothing has seen for a fortnight, is gone.
-      await s.env.DB.prepare(
-        `UPDATE mod_assets SET page_status = 'gone'
-         WHERE source = 'mirror' AND last_seen < ? AND last_seen < ? AND page_status <> 'gone'`,
-      )
-        .bind(st.started, s.now - GONE_AFTER_MS)
-        .run();
-      await setState(s.env, "sweep", { page: 1, started: s.now, lastComplete: s.now });
-      return;
-    }
-    if (!res.ok) return;
-    st.page++;
-    await setState(s.env, "sweep", st);
+    if ((await applySweepPage(s.env, st, res.status, ids, s.now)) !== "more") return;
   }
+}
+
+export interface Sweep {
+  page: number;
+  started: number;
+  lastComplete: number;
+}
+
+async function sweepState(env: Env, now: number): Promise<Sweep> {
+  return (await getState<Sweep>(env, "sweep")) ?? { page: 1, started: now, lastComplete: 0 };
+}
+
+export function sweepUrl(st: Sweep): URL {
+  const u = new URL("/wp-json/wp/v2/posts", MODS_BASE);
+  u.searchParams.set("orderby", "id");
+  u.searchParams.set("order", "asc");
+  u.searchParams.set("per_page", "100");
+  u.searchParams.set("page", String(st.page));
+  u.searchParams.set("_fields", "id");
+  return u;
+}
+
+/**
+ * One id-sweep page, however it was fetched. "done" when the sweep reached the end (and
+ * hid what it no longer saw), "stop" on an answer that isn't a page, else "more".
+ */
+export async function applySweepPage(env: Env, st: Sweep, status: number, ids: number[], now: number): Promise<"more" | "done" | "stop"> {
+  const ok = status >= 200 && status < 300;
+  if (ok && ids.length > 0) {
+    // One JSON parameter, not one per id: D1 refuses a statement with more than 100 bound
+    // parameters, and a page is 100 ids plus the time. That refusal used to stop every run
+    // here, before a single page was read.
+    await env.DB.prepare(
+      `UPDATE mod_assets SET last_seen = ? WHERE source = 'mirror' AND source_ref IN (SELECT value FROM json_each(?))`,
+    )
+      .bind(now, JSON.stringify(ids))
+      .run();
+  }
+  if (status === 400 || (ok && ids.length < 100)) {
+    // A whole sweep done: anything it didn't see, and nothing has seen for a fortnight, is gone.
+    await env.DB.prepare(
+      `UPDATE mod_assets SET page_status = 'gone'
+       WHERE source = 'mirror' AND last_seen < ? AND last_seen < ? AND page_status <> 'gone'`,
+    )
+      .bind(st.started, now - GONE_AFTER_MS)
+      .run();
+    await setState(env, "sweep", { page: 1, started: now, lastComplete: now });
+    return "done";
+  }
+  if (!ok) return "stop";
+  st.page++;
+  await setState(env, "sweep", st);
+  return "more";
+}
+
+// ───────────────────────────── discovery via the fetcher ─────────────────────────────
+
+/**
+ * With mxb-mods.com routed to the fetcher, discovery runs as a chain of single requests the
+ * fetcher makes: one `list` job at a time, its JSON handed back and applied by the same steps
+ * the Worker's walk uses. A round is the cron's run, request for request: the category tree when
+ * it is a day old, up to `LIST_MAX_PAGES_PER_RUN` listing pages, one sweep page; then nothing
+ * until `DISCOVERY_EVERY_MS` after the round began. The chain lives in `mirror_state`.
+ */
+interface FetcherDiscovery {
+  /** Bumped per job handed out, so a late answer to an older one is refused. */
+  seq: number;
+  phase: "idle" | "categories" | "listing" | "sweep";
+  catPage: number;
+  cats: Category[];
+  /** Listing pages read this round. */
+  listed: number;
+  roundAt: number;
+  leasedUntil: number;
+  nextAt: number;
+}
+
+const DISCOVERY_KEY = "fetcher_discovery";
+export const DISCOVERY_EVERY_MS = 10 * MINUTE;
+const DISCOVERY_LEASE_MS = 10 * MINUTE;
+/** How long discovery waits after the site refused the fetcher, at least. */
+const DISCOVERY_REFUSED_MS = 30 * MINUTE;
+
+export async function discoveryState(env: Env): Promise<FetcherDiscovery> {
+  return (
+    (await getState<FetcherDiscovery>(env, DISCOVERY_KEY)) ?? {
+      seq: 0,
+      phase: "idle",
+      catPage: 1,
+      cats: [],
+      listed: 0,
+      roundAt: 0,
+      leasedUntil: 0,
+      nextAt: 0,
+    }
+  );
+}
+
+/** The next discovery request for the fetcher, or null (one in flight, or the round is over). */
+export async function nextDiscoveryJob(env: Env, now: number): Promise<{ seq: number; url: string } | null> {
+  const st = await discoveryState(env);
+  if (st.leasedUntil > now || st.nextAt > now) return null;
+  if (st.phase === "idle") {
+    st.roundAt = now;
+    st.listed = 0;
+    st.catPage = 1;
+    st.cats = [];
+    st.phase = (await cachedCategories(env, now)).stale ? "categories" : "listing";
+  }
+  const url =
+    st.phase === "categories"
+      ? categoriesUrl(st.catPage)
+      : st.phase === "listing"
+        ? listingUrl(await listingState(env))
+        : sweepUrl(await sweepState(env, now));
+  // Robots, as the Worker's own requests honour it, from what the Worker last cached.
+  const robots = await getState<{ txt: string }>(env, "robots");
+  if (robots && !robotsAllows(robotsRules(robots.txt), url.pathname + url.search)) {
+    await endRound(env, st);
+    return null;
+  }
+  st.seq++;
+  st.leasedUntil = now + DISCOVERY_LEASE_MS;
+  await setState(env, DISCOVERY_KEY, st);
+  return { seq: st.seq, url: url.toString() };
+}
+
+async function endRound(env: Env, st: FetcherDiscovery): Promise<void> {
+  st.phase = "idle";
+  st.leasedUntil = 0;
+  st.nextAt = st.roundAt + DISCOVERY_EVERY_MS;
+  st.cats = [];
+  await setState(env, DISCOVERY_KEY, st);
+}
+
+/**
+ * The fetcher's answer to a discovery job: the HTTP status and body it got, or a failure.
+ * Returns false for a job that is not the one in flight (late, or its lease ran out).
+ */
+export async function discoveryResult(
+  env: Env,
+  seq: number,
+  answer: { status: number; body: string } | { error: string; retryAfterMs?: number },
+  now: number,
+): Promise<boolean> {
+  const st = await discoveryState(env);
+  if (st.seq !== seq || st.leasedUntil <= now) return false;
+  st.leasedUntil = 0;
+  if ("error" in answer) {
+    // Turned away, or the fetch failed: the same step again, after a wait.
+    st.nextAt = now + Math.max(DISCOVERY_REFUSED_MS, answer.retryAfterMs ?? 0);
+    await setState(env, DISCOVERY_KEY, st);
+    return true;
+  }
+  const ok = answer.status >= 200 && answer.status < 300;
+  let data: unknown = null;
+  try {
+    data = ok ? JSON.parse(answer.body) : null;
+  } catch {
+    data = null;
+  }
+  if (ok && !Array.isArray(data)) {
+    // A 200 that isn't the JSON asked for (a challenge page): later.
+    st.nextAt = now + DISCOVERY_REFUSED_MS;
+    await setState(env, DISCOVERY_KEY, st);
+    return true;
+  }
+  const list = (data ?? []) as unknown[];
+
+  if (st.phase === "categories") {
+    st.cats.push(...readCategories(list));
+    if (ok && list.length >= 100 && st.catPage < CATEGORY_MAX_PAGES) {
+      st.catPage++;
+    } else {
+      if (st.cats.length > 0) await saveCategories(env, st.cats, now);
+      st.cats = [];
+      st.phase = "listing";
+    }
+  } else if (st.phase === "listing") {
+    const { tree } = await cachedCategories(env, now);
+    if (tree.size === 0 || (!ok && answer.status !== 400)) {
+      // No tree to classify by, or the listing answered wrong: the sweep, and the next round.
+      st.phase = "sweep";
+    } else {
+      const done = await applyListingPage(env, await listingState(env), list as Post[], tree, now);
+      st.listed++;
+      if (done === "done" || st.listed >= LIST_MAX_PAGES_PER_RUN) st.phase = "sweep";
+    }
+  } else if (st.phase === "sweep") {
+    const ids = list.map((p) => Number((p as { id?: unknown })?.id)).filter((n) => Number.isInteger(n));
+    await applySweepPage(env, await sweepState(env, now), answer.status, ids, now);
+    await endRound(env, st);
+    return true;
+  }
+  await setState(env, DISCOVERY_KEY, st);
+  return true;
 }
 
 // ───────────────────────────── 2. read pages ─────────────────────────────
 
-interface DueAsset {
+export interface DueAsset {
   id: number;
   source_url: string;
   thumb_src: string | null;
@@ -675,10 +887,12 @@ interface DueAsset {
   page_attempts: number;
 }
 
-const DUE_COLUMNS = "id, source_url, thumb_src, thumb_key, page_attempts";
+export const DUE_COLUMNS = "id, source_url, thumb_src, thumb_key, page_attempts";
 
 /** With no queue to hand them to (a local run), the cron reads a few pages itself. */
 async function readPages(s: Sync): Promise<void> {
+  // The fetcher leases pages itself (`mirrorfetcher.ts`).
+  if (pagesViaFetcher(s.env)) return;
   const { results } = await s.env.DB.prepare(
     `SELECT ${DUE_COLUMNS} FROM mod_assets
      WHERE source = 'mirror' AND page_status IN ('due', 'retry') AND page_due_at <= ?
@@ -702,7 +916,8 @@ async function readPages(s: Sync): Promise<void> {
  * (its message lost) is sent again.
  */
 export async function dispatchPages(env: Env, now: number, target = PAGE_QUEUE_TARGET): Promise<number> {
-  if (!env.MIRROR_QUEUE) return 0;
+  // With the pages going via the fetcher, it leases due rows itself: nothing to queue.
+  if (!env.MIRROR_QUEUE || pagesViaFetcher(env)) return 0;
   const out = await env.DB.prepare(
     "SELECT COUNT(*) AS n FROM mod_assets WHERE source = 'mirror' AND page_status = 'queued' AND page_due_at > ?",
   )
@@ -763,7 +978,9 @@ export async function readPageJobs(env: Env, ids: number[], opts: RunOptions = {
     .all<DueAsset>();
   const todo = [...results];
   const back: number[] = [];
-  let until = (env.MXB_MIRROR ?? "off") !== "on" ? now : await coolingUntil(env, now);
+  // Switched off, or the pages now go via the fetcher (a message queued before the switch):
+  // straight back to `due`, where the fetcher's lease finds them.
+  let until = (env.MXB_MIRROR ?? "off") !== "on" || pagesViaFetcher(env) ? now : await coolingUntil(env, now);
   const rules = until ? [] : await loadRobots(env, now, f);
 
   const lane = async (k: number) => {
@@ -826,32 +1043,93 @@ async function readPage(s: Sync, asset: DueAsset): Promise<void> {
     return;
   }
   if (!res.ok) return pageRetry(s, asset, `page answered ${res.status}`);
-  const html = await res.text();
-  const downloads = parseDownloads(html);
-  if (downloads.length === 0 && isChallenge(html)) return pageRetry(s, asset, "challenge page");
-
+  const page = parsePage(await res.text(), asset);
+  if (!page) return pageRetry(s, asset, "challenge page");
   // The links first: they are what the page is for, and nothing after may lose them.
-  await writeMirrorVersion(s.env, asset.id, parseVersion(html), downloads, s.now);
-  const src = asset.thumb_src ?? parseImage(html);
-  const thumb = asset.thumb_key ? null : await copyThumb(s, src);
-  const body = parsePostBody(html);
-  await copyImages(s, asset.id, body.images);
-  await s.env.DB.prepare(
+  await writeMirrorVersion(s.env, asset.id, page.version, page.downloads, s.now);
+  await finishPage(s.env, asset, page, { thumb: (src) => copyThumb(s, src), image: (src) => copyImage(s, src) }, s.clock());
+}
+
+// ───────────────────────────── a page, from either source ─────────────────────────────
+
+/**
+ * What a post page offers, parsed. The HTML comes from the Worker's own read (`readPage`) or
+ * from the fetcher on our own box (`mirrorfetcher.ts`); both go through this and the two
+ * writers below, so a page reads the same whichever way it arrived.
+ */
+export interface ParsedPage {
+  downloads: DownloadOption[];
+  version: string | null;
+  author: string | null;
+  /** The thumbnail's source: the listing's, else the page's own picture. */
+  src: string | null;
+  body: ReturnType<typeof parsePostBody>;
+}
+
+/** The page, or null when it is Cloudflare's interstitial rather than the post. */
+export function parsePage(html: string, asset: Pick<DueAsset, "thumb_src">): ParsedPage | null {
+  const downloads = parseDownloads(html);
+  if (downloads.length === 0 && isChallenge(html)) return null;
+  return {
+    downloads,
+    version: parseVersion(html),
+    author: parseAuthor(html),
+    src: asset.thumb_src ?? parseImage(html),
+    body: parsePostBody(html),
+  };
+}
+
+/** Where a page's pictures come from: copied by the Worker, or uploaded by the fetcher. */
+export interface ImageSource {
+  /** The thumbnail, stored; null when it can't be had. */
+  thumb(src: string | null): Promise<Thumb | null>;
+  /** One content image's SHA-256, stored; null when it can't be had. */
+  image(src: string): Promise<string | null>;
+}
+
+/** The page's pictures, words and byline, after its links are written: the row is read. */
+export async function finishPage(
+  env: Env,
+  asset: Pick<DueAsset, "id" | "thumb_key">,
+  page: Omit<ParsedPage, "downloads" | "version">,
+  images: ImageSource,
+  readAt: number,
+): Promise<void> {
+  const thumb = asset.thumb_key ? null : await images.thumb(page.src);
+  await copyImages(env, asset.id, page.body.images, images.image);
+  await env.DB.prepare(
     `UPDATE mod_assets SET author = COALESCE(?, author), thumb_src = COALESCE(thumb_src, ?),
        thumb_sha = COALESCE(?, thumb_sha), thumb_key = COALESCE(?, thumb_key), body = ?,
        page_status = 'ok', page_attempts = 0, page_error = NULL, page_rev = ?, page_read_at = ? WHERE id = ?`,
   )
     .bind(
-      parseAuthor(html),
-      src,
+      page.author,
+      page.src,
       thumb?.sha ?? null,
       thumb?.key ?? null,
-      body.blocks.length ? JSON.stringify(body.blocks) : null,
+      page.body.blocks.length ? JSON.stringify(page.body.blocks) : null,
       PAGE_REV,
-      s.clock(),
+      readAt,
       asset.id,
     )
     .run();
+}
+
+/** The content images a post already holds, by source. */
+export async function heldImages(env: Env, assetId: number): Promise<Map<string, string>> {
+  const { results } = await env.DB.prepare("SELECT src, sha256 FROM mod_asset_images WHERE asset_id = ?")
+    .bind(assetId)
+    .all<{ src: string; sha256: string }>();
+  return new Map(results.map((r) => [r.src, r.sha256]));
+}
+
+/** A thumbnail some post already stored from this source. */
+export async function heldThumb(env: Env, src: string): Promise<Thumb | null> {
+  return await env.DB.prepare(
+    "SELECT thumb_sha AS sha, thumb_key AS key FROM mod_assets WHERE thumb_src = ? AND thumb_key IS NOT NULL LIMIT 1",
+  )
+    .bind(src)
+    .first<Thumb>();
 }
 
 /**
@@ -859,23 +1137,25 @@ async function readPage(s: Sync, asset: DueAsset): Promise<void> {
  * most 12 and each at most 3 MB. A picture the post already has (same source) is not fetched
  * again. The new list replaces the old one.
  */
-async function copyImages(s: Sync, assetId: number, wanted: PostImage[]): Promise<void> {
-  if (!s.env.ASSET_MIRROR) return;
-  const { results: had } = await s.env.DB.prepare("SELECT src, sha256 FROM mod_asset_images WHERE asset_id = ?")
-    .bind(assetId)
-    .all<{ src: string; sha256: string }>();
-  const known = new Map(had.map((r) => [r.src, r.sha256]));
+async function copyImages(
+  env: Env,
+  assetId: number,
+  wanted: PostImage[],
+  copy: (src: string) => Promise<string | null>,
+): Promise<void> {
+  if (!env.ASSET_MIRROR) return;
+  const known = await heldImages(env, assetId);
   const rows: (PostImage & { sha: string })[] = [];
   for (const img of wanted.slice(0, MAX_IMAGES)) {
-    const sha = known.get(img.src) ?? (await copyImage(s, img.src));
+    const sha = known.get(img.src) ?? (await copy(img.src));
     if (sha && !rows.some((r) => r.sha === sha)) rows.push({ ...img, sha });
   }
-  if (had.length === 0 && rows.length === 0) return;
+  if (known.size === 0 && rows.length === 0) return;
   // A statement per picture, six parameters each: far under D1's 100 a statement.
-  await s.env.DB.batch([
-    s.env.DB.prepare("DELETE FROM mod_asset_images WHERE asset_id = ?").bind(assetId),
+  await env.DB.batch([
+    env.DB.prepare("DELETE FROM mod_asset_images WHERE asset_id = ?").bind(assetId),
     ...rows.map((r, idx) =>
-      s.env.DB.prepare(
+      env.DB.prepare(
         "INSERT INTO mod_asset_images (asset_id, idx, sha256, src, width, height) VALUES (?, ?, ?, ?, ?, ?)",
       ).bind(assetId, idx, r.sha, r.src.slice(0, 1000), r.width, r.height),
     ),
@@ -929,13 +1209,18 @@ export async function readCapped(res: Response, cap: number): Promise<Uint8Array
   return out;
 }
 
-async function pageRetry(s: Sync, asset: DueAsset, error: string): Promise<void> {
+function pageRetry(s: Sync, asset: DueAsset, error: string): Promise<void> {
+  return pageFailed(s.env, s.now, asset, error);
+}
+
+/** A page read that failed: retried with backoff, given up on after `PAGE_MAX_ATTEMPTS`. */
+export async function pageFailed(env: Env, now: number, asset: Pick<DueAsset, "id" | "page_attempts">, error: string): Promise<void> {
   const attempts = asset.page_attempts + 1;
   const status = attempts >= PAGE_MAX_ATTEMPTS ? "gone" : "retry";
-  await s.env.DB.prepare(
+  await env.DB.prepare(
     "UPDATE mod_assets SET page_status = ?, page_attempts = ?, page_due_at = ?, page_error = ? WHERE id = ?",
   )
-    .bind(status, attempts, s.now + backoff(attempts), error.slice(0, 300), asset.id)
+    .bind(status, attempts, now + backoff(attempts), error.slice(0, 300), asset.id)
     .run();
 }
 
@@ -1026,11 +1311,7 @@ export async function writeMirrorVersion(
  */
 async function copyThumb(s: Sync, src: string | null): Promise<Thumb | null> {
   if (!src || !s.env.ASSET_MIRROR) return null;
-  const known = await s.env.DB.prepare(
-    "SELECT thumb_sha AS sha, thumb_key AS key FROM mod_assets WHERE thumb_src = ? AND thumb_key IS NOT NULL LIMIT 1",
-  )
-    .bind(src)
-    .first<Thumb>();
+  const known = await heldThumb(s.env, src);
   if (known) return known;
   try {
     const u = new URL(src);
@@ -1123,29 +1404,42 @@ export type MirrorJob =
   | { kind: "upload"; id: string }
   | { kind: "page"; id: number };
 
-/** Lease the current versions' files that are due and hand them to the queue. */
+/**
+ * Lease the current versions' files that are due and hand them to the queue. A file whose host
+ * goes via the fetcher (`fetcherroute.ts`) is marked `fetcher` instead, for its lease to find.
+ */
 export async function dispatch(env: Env, now: number, limit = DISPATCH_PER_RUN): Promise<number> {
   if (!env.MIRROR_QUEUE) return 0;
   const { results } = await env.DB.prepare(
-    `SELECT f.version_id, f.idx, f.part FROM mod_files f
+    `SELECT f.version_id, f.idx, f.part, f.url FROM mod_files f
      JOIN mod_assets a ON a.current_version = f.version_id
      WHERE a.source = 'mirror' AND a.page_status = 'ok' AND a.state = 'active' AND f.url IS NOT NULL AND (
        (f.status IN ('pending', 'retry') AND f.due_at <= ?1) OR (f.status = 'queued' AND f.leased_until < ?1))
      ORDER BY f.due_at, a.id DESC, f.idx, f.part LIMIT ?2`,
   )
     .bind(now, limit)
-    .all<{ version_id: number; idx: number; part: number }>();
+    .all<{ version_id: number; idx: number; part: number; url: string }>();
   if (results.length === 0) return 0;
-  await env.DB.batch(
-    results.map((r) =>
+  const viaFetcher = await fetcherRouter(env);
+  const fetcher = results.filter((r) => viaFetcher(r.url));
+  const queued = results.filter((r) => !viaFetcher(r.url));
+  await env.DB.batch([
+    ...queued.map((r) =>
       env.DB.prepare(
         "UPDATE mod_files SET status = 'queued', leased_until = ? WHERE version_id = ? AND idx = ? AND part = ?",
       ).bind(now + LEASE_MS, r.version_id, r.idx, r.part),
     ),
-  );
-  await env.MIRROR_QUEUE.sendBatch(
-    results.map((r) => ({ body: { kind: "file", version: r.version_id, idx: r.idx, part: r.part } satisfies MirrorJob })),
-  );
+    ...fetcher.map((r) =>
+      env.DB.prepare(
+        "UPDATE mod_files SET status = 'fetcher', due_at = ?, leased_until = 0 WHERE version_id = ? AND idx = ? AND part = ?",
+      ).bind(now, r.version_id, r.idx, r.part),
+    ),
+  ]);
+  if (queued.length) {
+    await env.MIRROR_QUEUE.sendBatch(
+      queued.map((r) => ({ body: { kind: "file", version: r.version_id, idx: r.idx, part: r.part } satisfies MirrorJob })),
+    );
+  }
   return results.length;
 }
 
@@ -1203,6 +1497,16 @@ export async function runMirror(env: Env, opts: RunOptions = {}): Promise<void> 
     }
   };
   if ((env.MXB_MIRROR ?? "off") !== "on") return dispatchStep();
+  // mxb-mods.com goes via the fetcher: discovery and page reads are its jobs
+  // (`nextDiscoveryJob`, `mirrorfetcher.ts`), so the Worker sends the site nothing.
+  if (pagesViaFetcher(env)) {
+    try {
+      await logBackfill(env, now, 0);
+    } catch (err) {
+      console.error(JSON.stringify({ msg: "mirror backfill log failed", error: String(err) }));
+    }
+    return dispatchStep();
+  }
   if (await coolingUntil(env, now)) return dispatchStep();
 
   const f = opts.fetch ?? globalFetch;

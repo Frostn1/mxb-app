@@ -27,6 +27,7 @@ import { safeBlocks } from "./modbody";
 import { activeBikes, supported, touchBlob } from "./mirrorpolicy";
 import { reportAsset } from "./modreports";
 import { internalId, modSlug, UUID_RE } from "./modids";
+import { fetcherRouter } from "./fetcherroute";
 
 export const PER_PAGE = 24;
 const MAX_PAGE = 200;
@@ -320,11 +321,20 @@ async function requestMirror(
   version: number,
   idx: number,
   part: number,
-  file: { status: string; source: string; type: string; bike: string },
+  file: { status: string; source: string; type: string; bike: string; url: string | null },
   now: number,
 ): Promise<void> {
   if (file.source !== "mirror" || file.status !== "idle") return;
   if (!supported(file, await activeBikes(env, now)).ok) return;
+  // A host that refuses Workers goes to the fetcher on our own box, which leases it from D1.
+  if (file.url && (await fetcherRouter(env))(file.url)) {
+    await env.DB.prepare(
+      "UPDATE mod_files SET status = 'fetcher', due_at = ?, leased_until = 0 WHERE version_id = ? AND idx = ? AND part = ? AND status = 'idle'",
+    )
+      .bind(now, version, idx, part)
+      .run();
+    return;
+  }
   const claimed = await env.DB.prepare(
     "UPDATE mod_files SET status = 'queued', leased_until = ? WHERE version_id = ? AND idx = ? AND part = ? AND status = 'idle'",
   )
@@ -385,7 +395,9 @@ export async function prepareFile(
       .first<{ status: string }>();
     file.status = after?.status ?? file.status;
   }
-  if (file.status === "queued" || file.status === "pending") return { status: 200, body: { state: "mirroring" } };
+  if (file.status === "queued" || file.status === "pending" || file.status === "fetcher") {
+    return { status: 200, body: { state: "mirroring" } };
+  }
   return { status: 200, body: { state: "original", source: file.url } };
 }
 
