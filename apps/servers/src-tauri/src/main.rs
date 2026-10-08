@@ -10,6 +10,7 @@
 //! internet for this.
 
 mod config;
+mod hosted;
 mod local;
 mod ssh;
 mod store;
@@ -204,6 +205,8 @@ struct App {
     http: reqwest::Client,
     /// Admin API ports found in each SSH server's config, by server id.
     admin_ports: std::sync::Mutex<std::collections::HashMap<String, u16>>,
+    /// The claim code of the last `mxbservers://` link, until the screen takes it.
+    pending_claim: std::sync::Mutex<Option<String>>,
 }
 
 /// A server as the UI sees it: the stored fields and whether a token is in the keychain.
@@ -312,6 +315,30 @@ fn servers_save(app: State<'_, App>, request: SaveRequest) -> Result<ServerView,
         .filter(|k| !k.is_empty());
     if server.id.is_empty() {
         server.id = store::new_id();
+    }
+    // A hosted server is added only by a claim, and only its name can change here.
+    let saved_hosted = app
+        .store
+        .get(&server.id)
+        .ok()
+        .filter(|saved| saved.kind == ServerKind::Hosted);
+    match saved_hosted {
+        Some(saved) => {
+            if request.token.is_some() {
+                return Err("A hosted server's link can't be edited. Open it again from servers.mxbsecure.com.".into());
+            }
+            server = Server {
+                name: server.name,
+                ..saved
+            };
+            store::validate(&server)?;
+            app.store.upsert(server.clone())?;
+            return Ok(view(server));
+        }
+        None if server.kind == ServerKind::Hosted => {
+            return Err("Add a hosted server with its code.".into())
+        }
+        None => {}
     }
     store::validate(&server)?;
     match request.token.as_deref().map(str::trim) {
@@ -517,7 +544,7 @@ struct StatusReport {
 
 #[tauri::command]
 async fn server_status(app: State<'_, App>, id: String) -> Result<StatusReport, String> {
-    let server = app.store.get(&id)?;
+    let server = app.store.managed(&id)?;
     let report = |state, detail: String| StatusReport {
         state,
         detail,
@@ -749,7 +776,7 @@ async fn admin_get_optional(app: &App, server: &Server, path: &str) -> Result<Va
 /// The admin `/v1/cuts`: cut detection settings, the penalties, and per track the outline and zones.
 #[tauri::command]
 async fn server_cuts(app: State<'_, App>, id: String) -> Result<Value, String> {
-    let server = app.store.get(&id)?;
+    let server = app.store.managed(&id)?;
     if server.kind == ServerKind::Legacy {
         return Ok(serde_json::json!({ "supported": false }));
     }
@@ -771,7 +798,7 @@ fn query_value(text: &str) -> String {
 /// "unknown_track"}` when the server has no package for that track.
 #[tauri::command]
 async fn server_cut_outline(app: State<'_, App>, id: String, track: String) -> Result<Value, String> {
-    let server = app.store.get(&id)?;
+    let server = app.store.managed(&id)?;
     if server.kind == ServerKind::Legacy {
         return Ok(serde_json::json!({ "supported": false }));
     }
@@ -803,7 +830,7 @@ async fn server_cut_outline(app: State<'_, App>, id: String, track: String) -> R
 /// The admin `/v1/events` (its `cuts.recent` feeds the cut map).
 #[tauri::command]
 async fn server_cut_events(app: State<'_, App>, id: String) -> Result<Value, String> {
-    let server = app.store.get(&id)?;
+    let server = app.store.managed(&id)?;
     if server.kind == ServerKind::Legacy {
         return Ok(serde_json::json!({ "supported": false }));
     }
@@ -813,7 +840,7 @@ async fn server_cut_events(app: State<'_, App>, id: String) -> Result<Value, Str
 /// config reload (changes nothing) tells whether it also has the `control` scope.
 #[tauri::command]
 async fn server_test_token(app: State<'_, App>, id: String) -> Result<TokenCheck, String> {
-    let server = app.store.get(&id)?;
+    let server = app.store.managed(&id)?;
     let fail = |message: String| Ok(TokenCheck { ok: false, message });
     if server.kind == ServerKind::Legacy {
         return match legacy_request(&app, &server, reqwest::Method::GET, "/capabilities", None)
@@ -864,7 +891,7 @@ async fn server_test_token(app: State<'_, App>, id: String) -> Result<TokenCheck
 
 #[tauri::command]
 async fn server_riders(app: State<'_, App>, id: String) -> Result<Value, String> {
-    let server = app.store.get(&id)?;
+    let server = app.store.managed(&id)?;
     if server.kind == ServerKind::Legacy {
         let (code, body) =
             legacy_request(&app, &server, reqwest::Method::GET, "/players", None).await?;
@@ -928,7 +955,7 @@ fn read_config(out: &ssh::ScriptOutput) -> Result<(String, String), String> {
 
 #[tauri::command]
 async fn server_tracks(app: State<'_, App>, id: String) -> Result<TrackState, String> {
-    let server = app.store.get(&id)?;
+    let server = app.store.managed(&id)?;
     if server.kind == ServerKind::Legacy {
         let (tracks_code, tracks_body) =
             legacy_request(&app, &server, reqwest::Method::GET, "/tracks", None).await?;
@@ -1273,7 +1300,7 @@ async fn apply_tracks(
 }
 #[tauri::command]
 async fn server_set_track(app: State<'_, App>, id: String, track: String) -> Result<Value, String> {
-    let server = app.store.get(&id)?;
+    let server = app.store.managed(&id)?;
     if server.kind == ServerKind::Legacy {
         let payload = serde_json::json!({ "track": track.trim() });
         let (code, body) = legacy_request(
@@ -1299,7 +1326,7 @@ async fn server_set_rotation(
     tracks: Vec<String>,
     restart: Option<bool>,
 ) -> Result<Value, String> {
-    let server = app.store.get(&id)?;
+    let server = app.store.managed(&id)?;
     if server.kind == ServerKind::Legacy {
         return Err(
             "The official dedicated server has no live track rotation. Select one track at a time."
@@ -1364,7 +1391,7 @@ async fn install_version(
 
 #[tauri::command]
 async fn server_update_github(app: State<'_, App>, id: String) -> Result<Value, String> {
-    let server = app.store.get(&id)?;
+    let server = app.store.managed(&id)?;
     if server.kind == ServerKind::Legacy {
         return Err("GitHub updates are only for mxbserver.".into());
     }
@@ -1426,7 +1453,7 @@ async fn server_session(
     action: String,
     to: Option<String>,
 ) -> Result<Value, String> {
-    let server = app.store.get(&id)?;
+    let server = app.store.managed(&id)?;
     if server.kind == ServerKind::Legacy {
         return Err("The official dedicated server does not expose live session controls.".into());
     }
@@ -1465,7 +1492,7 @@ async fn server_session(
 /// server) and wait until it answers again.
 #[tauri::command]
 async fn server_restart_service(app: State<'_, App>, id: String) -> Result<Value, String> {
-    let server = app.store.get(&id)?;
+    let server = app.store.managed(&id)?;
     if server.kind == ServerKind::Legacy {
         return Err("Use the Restart button of the official server's controls.".into());
     }
@@ -1494,7 +1521,7 @@ async fn server_upload(
     path: String,
     version: Option<String>,
 ) -> Result<Value, String> {
-    let server = app.store.get(&id)?;
+    let server = app.store.managed(&id)?;
     if server.kind == ServerKind::Legacy {
         return Err("Legacy connecting uses tracks and game versions already installed on the official server host.".into());
     }
@@ -1622,7 +1649,7 @@ async fn upload_start(
     id: String,
     path: String,
 ) -> Result<uploads::UploadInfo, String> {
-    let server = app.store.get(&id)?;
+    let server = app.store.managed(&id)?;
     if server.kind == ServerKind::Legacy {
         return Err("Legacy connecting uses tracks and game versions already installed on the official server host.".into());
     }
@@ -2019,7 +2046,7 @@ async fn inspect_track_upload(path: String) -> Result<TrackUploadCheck, String> 
 
 #[tauri::command]
 async fn server_logs(app: State<'_, App>, id: String, lines: u32) -> Result<Vec<String>, String> {
-    let server = app.store.get(&id)?;
+    let server = app.store.managed(&id)?;
     if server.kind == ServerKind::Legacy {
         let (code, body) =
             legacy_request(&app, &server, reqwest::Method::GET, "/logs", None).await?;
@@ -2056,7 +2083,7 @@ async fn server_logs(app: State<'_, App>, id: String, lines: u32) -> Result<Vec<
 /// GUIDs). The Events tab diffs it into lap finishes and time checks.
 #[tauri::command]
 async fn server_timing(app: State<'_, App>, id: String) -> Result<Value, String> {
-    let server = app.store.get(&id)?;
+    let server = app.store.managed(&id)?;
     if server.kind == ServerKind::Legacy {
         return Ok(serde_json::json!({ "available": false }));
     }
@@ -2068,7 +2095,7 @@ async fn server_timing(app: State<'_, App>, id: String) -> Result<Value, String>
 
 #[tauri::command]
 async fn legacy_config(app: State<'_, App>, id: String) -> Result<Value, String> {
-    let server = app.store.get(&id)?;
+    let server = app.store.managed(&id)?;
     if server.kind != ServerKind::Legacy {
         return Err("This server does not use Legacy connecting.".into());
     }
@@ -2084,7 +2111,7 @@ async fn legacy_config_save(
     track: String,
     max_clients: u32,
 ) -> Result<Value, String> {
-    let server = app.store.get(&id)?;
+    let server = app.store.managed(&id)?;
     if server.kind != ServerKind::Legacy {
         return Err("This server does not use Legacy connecting.".into());
     }
@@ -2112,7 +2139,7 @@ async fn legacy_config_save(
 
 #[tauri::command]
 async fn legacy_process(app: State<'_, App>, id: String, action: String) -> Result<Value, String> {
-    let server = app.store.get(&id)?;
+    let server = app.store.managed(&id)?;
     if server.kind != ServerKind::Legacy || !matches!(action.as_str(), "start" | "stop" | "restart")
     {
         return Err("Unknown Legacy connecting action.".into());
@@ -2172,7 +2199,7 @@ async fn blocking<T: Send + 'static>(
 
 #[tauri::command]
 async fn config_load(app: State<'_, App>, id: String) -> Result<ConfigState, String> {
-    let server = app.store.get(&id)?;
+    let server = app.store.managed(&id)?;
     let (text, path, mode) = if server.local {
         let (text, path) = blocking(move || local::read(&server)).await?;
         (text, path.display().to_string(), "local".to_string())
@@ -2237,7 +2264,7 @@ struct Checked {
 /// on side ports, where the live config is.
 #[tauri::command]
 async fn config_validate(app: State<'_, App>, id: String, text: String) -> Result<Checked, String> {
-    let server = app.store.get(&id)?;
+    let server = app.store.managed(&id)?;
     if server.local {
         let (ok, output) = blocking(move || local::validate(&server, &text)).await?;
         return Ok(Checked { ok, output });
@@ -2274,7 +2301,7 @@ async fn config_apply(
     base_sha: String,
     text: String,
 ) -> Result<ApplyResult, String> {
-    let server = app.store.get(&id)?;
+    let server = app.store.managed(&id)?;
     if !base_sha.chars().all(|c| c.is_ascii_hexdigit()) || base_sha.len() != 64 {
         return Err("bad config hash".into());
     }
@@ -2331,7 +2358,7 @@ async fn config_apply_live(
     text: String,
     skip_check: Option<bool>,
 ) -> Result<LiveApply, String> {
-    let server = app.store.get(&id)?;
+    let server = app.store.managed(&id)?;
     write_and_reload(&app, &server, &base_sha, &text, skip_check.unwrap_or(false)).await
 }
 
@@ -2426,7 +2453,7 @@ async fn write_and_reload(
 #[tauri::command]
 async fn config_check(app: State<'_, App>, id: String, text: String) -> Result<Value, String> {
     let unchecked = || serde_json::json!({ "checked": false });
-    let server = app.store.get(&id)?;
+    let server = app.store.managed(&id)?;
     if server.kind == ServerKind::Legacy {
         return Ok(unchecked());
     }
@@ -2469,7 +2496,7 @@ async fn config_check(app: State<'_, App>, id: String, text: String) -> Result<V
 /// key's class. Nothing is written. `{"supported": false}` from a server too old to say.
 #[tauri::command]
 async fn config_classify(app: State<'_, App>, id: String, text: String) -> Result<Value, String> {
-    let server = app.store.get(&id)?;
+    let server = app.store.managed(&id)?;
     if server.kind == ServerKind::Legacy {
         return Ok(serde_json::json!({ "supported": false }));
     }
@@ -2485,10 +2512,88 @@ async fn config_classify(app: State<'_, App>, id: String, text: String) -> Resul
     .await
 }
 
+// ---- Hosted servers ------------------------------------------------------------------------
+
+/// Swap a claim code from servers.mxbsecure.com for a saved hosted server.
+#[tauri::command]
+async fn hosted_claim(app: State<'_, App>, code: String) -> Result<ServerView, String> {
+    let server = hosted::claim(&app.http, &app.store, &code).await?;
+    Ok(view(server))
+}
+
+/// The claim code of an `mxbservers://` link that arrived, once.
+#[tauri::command]
+fn hosted_take_pending(app: State<'_, App>) -> Option<String> {
+    app.pending_claim.lock().ok().and_then(|mut p| p.take())
+}
+
+#[tauri::command]
+async fn hosted_server(app: State<'_, App>, id: String) -> Result<Value, String> {
+    let server = app.store.get(&id)?;
+    hosted::get(&app.http, &server).await
+}
+
+#[tauri::command]
+async fn hosted_settings(app: State<'_, App>, id: String, settings: Value) -> Result<Value, String> {
+    let server = app.store.get(&id)?;
+    hosted::settings(&app.http, &server, &settings).await
+}
+
+#[tauri::command]
+async fn hosted_restart(app: State<'_, App>, id: String) -> Result<Value, String> {
+    let server = app.store.get(&id)?;
+    hosted::restart(&app.http, &server).await
+}
+
+/// The event the screen listens on when an `mxbservers://` link arrives.
+const HOSTED_LINK_EVENT: &str = "hosted-claim";
+
+fn raise(handle: &tauri::AppHandle) {
+    if let Some(window) = handle.get_webview_window("main") {
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+}
+
+/// Keep the code of the first link we answer, bring the window up, and tell the screen.
+fn handle_links<I: IntoIterator<Item = String>>(handle: &tauri::AppHandle, urls: I) {
+    let urls: Vec<String> = urls.into_iter().collect();
+    let Some(code) = urls.iter().find_map(|u| hosted::parse_link(u)) else {
+        if !urls.is_empty() {
+            log::warn!("[deep-link] ignored a link this app doesn't answer");
+        }
+        return;
+    };
+    if let Some(app) = handle.try_state::<App>() {
+        if let Ok(mut pending) = app.pending_claim.lock() {
+            *pending = Some(code);
+        }
+    }
+    raise(handle);
+    let _ = handle.emit(HOSTED_LINK_EVENT, ());
+}
+
 fn main() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    // Windows delivers an `mxbservers://` link by starting the app with the URL as an argument;
+    // with the app already open, that second start lands here and hands the link over.
+    #[cfg(not(debug_assertions))]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+        raise(app);
+        #[cfg(any(windows, target_os = "linux"))]
+        {
+            use tauri_plugin_deep_link::DeepLinkExt;
+            app.deep_link().handle_cli_arguments(argv.iter());
+        }
+        #[cfg(not(any(windows, target_os = "linux")))]
+        let _ = argv;
+    }));
+    builder
         .plugin(tauri_plugin_log::Builder::new().build())
         .plugin(tauri_plugin_dialog::init())
+        // `mxbservers://hosted/claim?code=...`, opened by "Open in MSM" on servers.mxbsecure.com.
+        .plugin(tauri_plugin_deep_link::init())
         .setup(|app| {
             let dir = app.path().app_data_dir()?;
             let http = reqwest::Client::builder()
@@ -2502,7 +2607,24 @@ fn main() {
                 uploads: Arc::default(),
                 http,
                 admin_ports: Default::default(),
+                pending_claim: Default::default(),
             });
+            {
+                use tauri_plugin_deep_link::DeepLinkExt;
+                // Registered at runtime too, so a build run from a folder still answers the scheme.
+                #[cfg(any(windows, target_os = "linux"))]
+                if let Err(e) = app.deep_link().register_all() {
+                    log::warn!("[deep-link] couldn't register mxbservers://: {e}");
+                }
+                // A link that started the app.
+                if let Ok(Some(urls)) = app.deep_link().get_current() {
+                    handle_links(app.handle(), urls.iter().map(|u| u.to_string()));
+                }
+                let handle = app.handle().clone();
+                app.deep_link().on_open_url(move |event| {
+                    handle_links(&handle, event.urls().iter().map(|u| u.to_string()));
+                });
+            }
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -2552,6 +2674,11 @@ fn main() {
             config_apply_live,
             config_classify,
             config_check,
+            hosted_claim,
+            hosted_take_pending,
+            hosted_server,
+            hosted_settings,
+            hosted_restart,
         ])
         .build(tauri::generate_context!())
         .expect("error while building MXB Servers")

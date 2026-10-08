@@ -1,8 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
+import { listen } from "@tauri-apps/api/event";
 import { Monitor, Moon, Plus, Server as ServerIcon, Sun } from "lucide-react";
 import { useTheme, type ThemeChoice } from "@frost/mxbsecure-ui";
 import { errorText, listServers, removeServer, type ServerView } from "@/lib/api";
+import { hostedTakePending } from "@/lib/hosted";
 import { FleetCard } from "@/components/FleetCard";
+import { HostedAdd } from "@/components/HostedAdd";
+import { HostedDetail } from "@/components/HostedDetail";
 import { ServerDetail } from "@/components/ServerDetail";
 import { ServerForm } from "@/components/ServerForm";
 import { Button, ErrorLine, type MenuItem } from "@/components/ui";
@@ -12,7 +16,8 @@ import { WindowControls } from "@/components/WindowControls";
 type View =
   | { kind: "fleet" }
   | { kind: "server"; id: string }
-  | { kind: "form"; id: string | null; focusToken?: boolean };
+  | { kind: "form"; id: string | null; focusToken?: boolean }
+  | { kind: "hosted-add"; code?: string };
 
 const themeIcons: Record<ThemeChoice, typeof Sun> = { light: Sun, dark: Moon, system: Monitor };
 const nextTheme: Record<ThemeChoice, ThemeChoice> = { system: "light", light: "dark", dark: "system" };
@@ -35,16 +40,32 @@ export default function App() {
     void reload();
   }, [reload]);
 
+  // An `mxbservers://hosted/claim?code=...` link: one that started the app, then any that follow.
+  useEffect(() => {
+    const take = () =>
+      void hostedTakePending()
+        .then((code) => {
+          if (code) setView({ kind: "hosted-add", code });
+        })
+        .catch(() => {});
+    take();
+    const off = listen("hosted-claim", take);
+    return () => void off.then((stop) => stop());
+  }, []);
+
   const selected = view.kind === "server" || view.kind === "form" ? servers.find((s) => s.id === view.id) ?? null : null;
   const ThemeIcon = themeIcons[theme];
 
   // The ⋯ menu for a server: on its card and on its page. Remove confirms in the menu.
   const menu = (server: ServerView): MenuItem[] => [
-    { label: "Edit", onSelect: () => setView({ kind: "form", id: server.id }) },
+    ...(server.kind === "hosted" ? [] : [{ label: "Edit", onSelect: () => setView({ kind: "form", id: server.id }) }]),
     {
       label: "Remove",
       danger: true,
-      confirm: `Remove ${server.name} from this app? Its saved admin token is deleted from this PC too. The server itself is not touched.`,
+      confirm:
+        server.kind === "hosted"
+          ? `Remove ${server.name} from this app? The server keeps running.`
+          : `Remove ${server.name} from this app? Its saved admin token is deleted from this PC too. The server itself is not touched.`,
       onSelect: () => void remove(server),
     },
   ];
@@ -79,6 +100,7 @@ export default function App() {
         </nav>
         <div data-tauri-drag-region className="min-w-4 flex-1" />
         <UploadsIndicator />
+        <Button variant="ghost" className="mr-1 shrink-0" onClick={() => setView({ kind: "hosted-add" })}>Add hosted server</Button>
         <Button variant="primary" className="mr-2 shrink-0" onClick={() => setView({ kind: "form", id: null })}><Plus className="size-4" /> Add server</Button>
         <button type="button" onClick={() => setTheme(nextTheme[theme])} aria-label={`Theme: ${theme}`} title={`Theme: ${theme}`} className="grid size-9 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-accent"><ThemeIcon className="size-4" /></button>
         <div className="ml-2 h-5 border-l" />
@@ -106,12 +128,24 @@ export default function App() {
             )}
           </div>
         )}
-        {view.kind === "server" && selected && (
+        {view.kind === "server" && selected && selected.kind === "hosted" && <HostedDetail key={selected.id} server={selected} menu={menu(selected)} />}
+        {view.kind === "server" && selected && selected.kind !== "hosted" && (
           <ServerDetail
             key={selected.id}
             server={selected}
             menu={menu(selected)}
             onSetUpToken={() => setView({ kind: "form", id: selected.id, focusToken: true })}
+          />
+        )}
+        {view.kind === "hosted-add" && (
+          <HostedAdd
+            key={view.code ?? "paste"}
+            code={view.code}
+            onCancel={() => setView({ kind: "fleet" })}
+            onSaved={(saved) => {
+              void reload();
+              setView({ kind: "server", id: saved.id });
+            }}
           />
         )}
         {view.kind === "form" && (

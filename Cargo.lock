@@ -3864,8 +3864,10 @@ dependencies = [
  "similar",
  "tauri",
  "tauri-build",
+ "tauri-plugin-deep-link",
  "tauri-plugin-dialog",
  "tauri-plugin-log",
+ "tauri-plugin-single-instance",
  "toml_edit 0.22.27",
 ]
 
