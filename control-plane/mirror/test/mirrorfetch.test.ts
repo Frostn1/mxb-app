@@ -115,6 +115,23 @@ describe("mirroring one file", () => {
     expect(await e.DB.prepare("SELECT COUNT(*) AS n FROM mod_blobs").first()).toEqual({ n: 1 });
   });
 
+  it("reaches the global fetch without detaching it", async () => {
+    const e = env();
+    const v = await seed(e, ["https://x.example/a.zip"]);
+    const inner = fakeFetch([[/./, () => file(new Uint8Array([1, 2, 3]), "a.zip")]]);
+    const real = globalThis.fetch;
+    globalThis.fetch = function (this: unknown, input: RequestInfo | URL, init?: RequestInit) {
+      if (this !== undefined && this !== globalThis) throw new TypeError("Illegal invocation");
+      return inner(input, init);
+    } as typeof fetch;
+    try {
+      await mirrorFile(e, { kind: "file", version: v, idx: 0, part: 0 }, { hasher: nodeHasher });
+    } finally {
+      globalThis.fetch = real;
+    }
+    expect(await e.DB.prepare("SELECT status FROM mod_files").first()).toEqual({ status: "done" });
+  });
+
   it("is idempotent: a duplicate delivery does nothing", async () => {
     const e = env();
     const v = await seed(e, ["https://x.example/a.zip"]);

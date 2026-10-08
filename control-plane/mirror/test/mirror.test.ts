@@ -239,6 +239,33 @@ describe("a whole run", () => {
     expect(g.calls.some((c) => c.includes("careless-beta/"))).toBe(false);
   });
 
+  /** The runtime's fetch: it refuses to run with any `this` but the global scope. */
+  function workersFetch(inner: typeof fetch): typeof fetch {
+    return function (this: unknown, input: RequestInfo | URL, init?: RequestInit) {
+      if (this !== undefined && this !== globalThis) {
+        throw new TypeError("Illegal invocation: function called with incorrect this reference");
+      }
+      return inner(input, init);
+    } as typeof fetch;
+  }
+
+  it("calls fetch the way the runtime insists on, handed in or global", async () => {
+    const handed = env();
+    await runMirror(handed, { now: 10_000, fetch: workersFetch(site()), wait: async () => {} });
+    expect(await handed.DB.prepare("SELECT page_status FROM mod_assets").first()).toEqual({ page_status: "ok" });
+
+    // No fetch handed in: the sync must reach the global one without detaching it.
+    const real = globalThis.fetch;
+    globalThis.fetch = workersFetch(site());
+    try {
+      const bare = env();
+      await runMirror(bare, { now: 10_000, wait: async () => {} });
+      expect(await bare.DB.prepare("SELECT page_status FROM mod_assets").first()).toEqual({ page_status: "ok" });
+    } finally {
+      globalThis.fetch = real;
+    }
+  });
+
   it("stops and cools down when the site refuses", async () => {
     const e = env();
     const f = site([[/orderby=modified/, () => new Response("blocked", { status: 403 })]]);
