@@ -143,10 +143,21 @@ export interface Scans {
   riderProfiles: string[];
   ridingStyles: string[]; // installed `mods/rider/animations` styles
   tyres: string[];
+  /**
+   * Every `.mxbsecure` item installed, by bare lowercase name (no `.mxbsecure`, no
+   * `.pnt`/`.pkz`). Locked content is only ever opened inside the game, so a preview can
+   * show where one is worn but never what it looks like. See {@link previewIssues}.
+   */
+  secured: string[];
 }
 
 function stripExt(name: string): string {
   return name.replace(/\.(pnt|pkz|zip)$/i, "");
+}
+
+/** `Kit.pnt.mxbsecure` → `kit`: the name a preset would write for a secured item. */
+export function securedName(name: string): string {
+  return stripExt(name.replace(/\.mxbsecure$/i, "")).toLowerCase();
 }
 
 function push(map: Record<string, string[]>, key: string, val: string) {
@@ -181,6 +192,7 @@ export async function loadScans(): Promise<Scans> {
     riderProfiles: [...targets.profiles],
     ridingStyles: [...targets.animations],
     tyres: [],
+    secured: [],
   };
 
   for (const e of bikes) {
@@ -220,6 +232,9 @@ export async function loadScans(): Promise<Scans> {
     }
   }
   for (const e of tyres) s.tyres.push(stripExt(e.name));
+  for (const e of [...bikes, ...rider, ...tyres]) {
+    if (e.secured) s.secured.push(securedName(e.name));
+  }
 
   const tidy = (a: string[]) => [...new Set(a)].sort((x, y) => x.localeCompare(y));
   s.helmets = tidy(s.helmets);
@@ -229,6 +244,7 @@ export async function loadScans(): Promise<Scans> {
   s.riderProfiles = tidy(s.riderProfiles);
   s.ridingStyles = tidy(s.ridingStyles);
   s.tyres = tidy(s.tyres);
+  s.secured = tidy(s.secured);
   for (const m of [s.bikePaints, s.helmetPaints, s.goggles, s.bootPaints, s.protectionPaints, s.outfits])
     for (const k of Object.keys(m)) m[k] = tidy(m[k]);
 
@@ -415,4 +431,65 @@ export function loadoutSummary(loadout: Loadout): string {
   if (loadout.paint) parts.push(loadout.paint);
   if (loadout.suitPaint) parts.push(loadout.suitPaint);
   return parts.slice(0, 3).join(" · ") || "Stock look";
+}
+
+/**
+ * The slots a preset preview actually draws, in the order its notes are listed. Fonts,
+ * riding style and race number never reach the model, so they can't go missing from it.
+ */
+export const PREVIEW_SLOTS: SlotDef["key"][] = [
+  "modelSwap",
+  "paint",
+  "tyres",
+  "rider",
+  "suitPaint",
+  "glovesPaint",
+  "helmet",
+  "helmetPaint",
+  "gogglesPaint",
+  "boots",
+  "bootsPaint",
+  "protection",
+  "protectionPaint",
+];
+
+/** A slot a preview can't show as the preset names it, and why. */
+export interface PreviewIssue {
+  slot: SlotDef;
+  /** `missing`: nothing installed answers to it. `locked`: it's `.mxbsecure` content. */
+  kind: "missing" | "locked";
+}
+
+/**
+ * What a 3D preview of `loadout` on `bikeid` will have to leave out, slot by slot.
+ *
+ * The viewer quietly falls back to stock for anything it can't load, which on its own reads
+ * as "this preset is a stock helmet". Listing the gaps is what lets the preview say "Helmet
+ * paint not found" instead. Locked content is named as locked rather than missing: it is
+ * installed, it just only opens inside the game.
+ *
+ * `missing` is the caller's answer for a slot, so the paints a model packs (which the scan
+ * can't see) count as installed — see `useGearPaints`.
+ */
+export function previewIssues(
+  loadout: Loadout,
+  scans: Scans | null,
+  missing: (slot: SlotDef) => boolean,
+): PreviewIssue[] {
+  if (!scans) return [];
+  const secured = new Set(scans.secured);
+  const out: PreviewIssue[] = [];
+  for (const key of PREVIEW_SLOTS) {
+    const slot = SLOTS.find((s) => s.key === key);
+    const val = loadout[key];
+    if (!slot || !val) continue;
+    if (secured.has(securedName(val))) out.push({ slot, kind: "locked" });
+    else if (missing(slot)) out.push({ slot, kind: "missing" });
+  }
+  return out;
+}
+
+/** Whether `bikeid` itself is installed only as locked content. */
+export function bikeLocked(bikeid: string, scans: Scans | null): boolean {
+  return !!scans && !!bikeid && scans.secured.includes(securedName(bikeid));
 }

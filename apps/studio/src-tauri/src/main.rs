@@ -173,7 +173,7 @@ fn main() {
             recheck_gate,
             gate_verdict,
             // The studio's own: making a track, packing a paint, sealing content.
-            preview_model_swap,
+            mxb_core::viewer::preview_model_swap,
             log_client,
             set_preview_tyres,
             scan_model_swaps,
@@ -2653,29 +2653,6 @@ fn presets_save(app: tauri::AppHandle, preset: presets::Preset) -> Result<(), St
     presets::save_preset(&dir, preset).map_err(|e| format!("{e:#}"))?;
     usage::track("preset.save");
     Ok(())
-}
-
-/// Draw a bike as one of its model swaps, for the shared viewer.
-///
-/// Same resolution as the manager's, from the same `modelswap` in core. Nothing on disk
-/// moves: `preview_set` only works out which files the variant would put on the bike.
-#[tauri::command]
-async fn preview_model_swap(
-    app: tauri::AppHandle,
-    bike: String,
-    variant: String,
-    tyres: Option<String>,
-) -> Result<mxb_core::viewer::BikeModel, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
-        let set = modelswap::preview_set(&cfg.mods_path, &bike, &variant)
-            .map_err(|e| format!("{e:#}"))?;
-        let label = format!("{bike} · {variant}");
-        let tyre_dir = library::mods_subdir(&cfg.mods_path, "mods/tyres");
-        viewer::load_preview_blocking(&set, &label, tyre_dir, tyres)
-    })
-    .await
-    .map_err(|e| format!("preview_model_swap task failed: {e}"))?
 }
 
 /// Frontend log lines, into the same file the Rust side writes.

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import {
   RefreshCw,
   Loader2,
@@ -16,6 +16,7 @@ import {
   Pencil,
   CopyPlus,
   X,
+  Box,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@frost/shared/lib/utils";
@@ -99,6 +100,9 @@ import {
 import { useGearPaints } from "@frost/shared/lib/useGearPaints";
 import { copyText } from "../../lib/clipboard";
 import { DownloadBar, PRESET_BUNDLE_SLUG, UploadBar } from "../Share/TransferBar";
+
+// Its own chunk: the 3D viewer brings three.js with it, and the list mustn't wait on that.
+const PresetPreview = lazy(() => import("./PresetPreview"));
 
 function humanSize(bytes: number): string {
   if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
@@ -185,6 +189,8 @@ export default function Presets({
   const [confirmOpen, setConfirmOpen] = useState(false);
 
   const [sharePreset, setSharePreset] = useState<Preset | null>(null);
+  /** The saved preset open in the 3D preview, if any. */
+  const [previewing, setPreviewing] = useState<Preset | null>(null);
   const [importOpen, setImportOpen] = useState(false);
   /** Which half of a rider's setup this page is showing: the look, or the feel. */
   const [mode, setMode] = useState<"look" | "feel">("look");
@@ -758,6 +764,7 @@ export default function Presets({
                   onViewInRider={
                     onOpenInRider ? () => onOpenInRider(p.loadout, bike) : undefined
                   }
+                  onPreview3d={() => setPreviewing(p)}
                 />
               ))
             )}
@@ -765,6 +772,18 @@ export default function Presets({
             </div>
           </RetainedPane>
         </>
+      )}
+
+      {previewing && (
+        <Suspense fallback={null}>
+          <PresetPreview
+            key={previewing.name}
+            preset={previewing}
+            bike={bike}
+            scans={scans}
+            onClose={() => setPreviewing(null)}
+          />
+        </Suspense>
       )}
 
       <ConfirmSaveDialog
@@ -828,6 +847,7 @@ function PresetCard({
   onShare,
   onDelete,
   onViewInRider,
+  onPreview3d,
 }: {
   preset: Preset;
   applying: boolean;
@@ -840,6 +860,7 @@ function PresetCard({
   onShare: () => void;
   onDelete: () => void;
   onViewInRider?: () => void;
+  onPreview3d: () => void;
 }) {
   const t = useT();
   return (
@@ -870,6 +891,9 @@ function PresetCard({
           </div>
         </button>
         <div className="flex flex-none items-center gap-0.5">
+          <IconBtn title={t("presets.preview3d", { name: preset.name })} onClick={onPreview3d}>
+            <Box className="size-3.5" />
+          </IconBtn>
           {onViewInRider && (
             <IconBtn title={t("presets.viewOnRider")} onClick={onViewInRider}>
               <User className="size-3.5" />

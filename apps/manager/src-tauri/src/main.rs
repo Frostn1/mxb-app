@@ -14,7 +14,6 @@ mod trashbin;
 
 pub(crate) use mxb_core::cloudfiles;
 pub(crate) use mxb_core::config;
-pub(crate) use mxb_core::viewer;
 pub(crate) use mxb_core::{antidebug, appgate as gate};
 mod cookie_session;
 mod crashreports;
@@ -135,7 +134,6 @@ use frostmod::ReloadOutcome;
 use frostmod_manage::{FrostmodProcess, FrostmodStatus, InstallReport};
 use library::InstalledMod;
 use modwatch::ModWatcher;
-use mxb_core::viewer::BikeModel;
 use paintwatch::{LookWatcher, PaintWatcher, SourceWatcher};
 use serverwatch::CachedServers;
 // Decoding a paint's textures is per-texture CPU work over no shared state, and every path
@@ -1156,39 +1154,6 @@ async fn disable_all_model_swaps(
 // both halves of that: images in (`paint_studio_save`), sheets out as editable TGA
 // templates (`paint_studio_extract`), and the texture names a destination expects
 // (`paint_studio_hints`) so a new paint binds to the same parts as the ones already there.
-
-/// Draw `bike` as the model-swap variant `variant` would leave it, without applying the
-/// swap. The file set is assembled in memory (see `gather_preview_files`) — nothing on
-/// disk moves, so this is safe to run with the game open.
-#[tauri::command]
-async fn preview_model_swap(
-    app: tauri::AppHandle,
-    bike: String,
-    variant: String,
-    tyres: Option<String>,
-) -> Result<BikeModel, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        preview_model_swap_blocking(app, bike, variant, tyres)
-    })
-    .await
-    .map_err(|e| format!("preview_model_swap task failed: {e}"))?
-}
-
-fn preview_model_swap_blocking(
-    app: tauri::AppHandle,
-    bike: String,
-    variant: String,
-    pick: Option<String>,
-) -> Result<BikeModel, String> {
-    let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
-    // Working out which files a variant would park is swap business and stays here; turning
-    // the answer into a model is the viewer's, and does not need to know what a swap is.
-    let set =
-        modelswap::preview_set(&cfg.mods_path, &bike, &variant).map_err(|e| format!("{e:#}"))?;
-    let label = format!("{bike} · {variant}");
-    let tyres = library::mods_subdir(&cfg.mods_path, "mods/tyres");
-    viewer::load_preview_blocking(&set, &label, tyres, pick)
-}
 
 /// Download a mod and install it.
 ///
@@ -9143,7 +9108,7 @@ fn main() {
             recheck_gate,
             gate_verdict,
             mxb_core::viewer::load_bike_model,
-            preview_model_swap,
+            mxb_core::viewer::preview_model_swap,
             mxb_core::viewer::load_rider_model,
             mxb_core::viewer::load_rider_body_model,
             mxb_core::viewer::load_gear_model,
