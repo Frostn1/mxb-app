@@ -45,7 +45,9 @@ export interface Deps {
 
 export function defaultDeps(env: Env, fetchImpl: typeof fetch = fetch): Deps {
   const creds = ovhCredentials(env);
-  return { fetch: fetchImpl, now: () => Date.now(), ovh: creds ? new OvhClient(creds, fetchImpl) : null };
+  // Called as `deps.fetch(...)`, the Workers fetch throws "Illegal invocation"; keep it unbound.
+  const call: typeof fetch = (input, init) => fetchImpl(input, init);
+  return { fetch: call, now: () => Date.now(), ovh: creds ? new OvhClient(creds, call) : null };
 }
 
 const DAY = 24 * 60 * 60 * 1000;

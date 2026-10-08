@@ -67,7 +67,7 @@ export class OvhClient {
 
   constructor(
     private readonly creds: OvhCredentials,
-    private readonly fetchImpl: typeof fetch = fetch,
+    private readonly fetchImpl: typeof fetch = (input, init) => fetch(input, init),
     private readonly now: () => number = () => Date.now(),
   ) {}
 
