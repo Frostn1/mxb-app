@@ -11,6 +11,7 @@ import {
   nativeConfig,
   operatorBox,
   operatorView,
+  rememberHostName,
   ownerDelete,
   updateSettings,
   addTrack,
@@ -111,6 +112,28 @@ describe("invites", () => {
     const d = deps(fakeOvh().ovh, fakeFetch(), { t: 1 });
     const r = await deploy(e, d, RIDER, { name: "x", type: "mxbserver", region: "us-east" });
     expect(r.status).toBe(403);
+  });
+});
+
+describe("operator view names", () => {
+  it("names owners by Steam name, never by SteamID, and returns claim and poll times", async () => {
+    const e = env();
+    const d = deps(fakeOvh().ovh, fakeFetch(), { t: Date.now() });
+    await invited(e, d, RIDER);
+    await rememberHostName(e, RIDER, "Rider One");
+    await e.DB.prepare(
+      "INSERT INTO host_servers (id, steam_id, name, type, region, state, max_riders, last_active_at, created_at, polled_at) VALUES ('s1', ?, 'Club', 'mxbserver', 'x', 'ready', 8, 1, 1, 777)",
+    ).bind(RIDER).run();
+    const view = (await operatorView(e)).body as {
+      users: { name: string }[];
+      servers: { ownerName: string; polledAt: number }[];
+      invites: { claimedByName: string; claimedAt: number }[];
+    };
+    expect(view.users[0].name).toBe("Rider One");
+    expect(view.servers[0]).toMatchObject({ ownerName: "Rider One", polledAt: 777 });
+    expect(view.invites[0].claimedByName).toBe("Rider One");
+    expect(view.invites[0].claimedAt).toBeGreaterThan(0);
+    expect(JSON.stringify(view)).not.toContain(RIDER);
   });
 });
 
