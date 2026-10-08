@@ -141,6 +141,7 @@ async function customerFor(env: Env, deps: Deps, cfg: BillingConfig, steamId: st
   );
   if (!made.ok) {
     console.error(JSON.stringify({ msg: "billing customer", status: made.status, error: made.error }));
+    await alert(env, deps, "billing", `Stripe refused to create a customer (${made.status}): ${made.error}`);
     return null;
   }
   await env.DB.prepare(
@@ -208,6 +209,7 @@ export async function openCheckout(
   const session = await createCheckout(deps, cfg, { ...input, customerId });
   if (!session.ok) {
     console.error(JSON.stringify({ msg: "billing checkout", status: session.status, error: session.error }));
+    await alert(env, deps, "billing", `Stripe refused the checkout (${session.status}): ${session.error}`);
     return { error: "Payment couldn't be started. Try again." };
   }
   const now = deps.now();
