@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  adminSshKeys,
   claimInvite,
   deploy,
   enrollBox,
@@ -245,7 +246,9 @@ describe("a box from order to ready", () => {
     const dispatch = f.calls.find((c) => c.url.includes("api.github.com"))!;
     expect(dispatch.url).toBe("https://api.github.com/repos/Frostn1/mxbserver-releases/actions/workflows/box-install.yml/dispatches");
     const inputs = JSON.parse(String(dispatch.init!.body)).inputs;
-    expect(inputs).toMatchObject({ ip: "51.81.10.18", pool: "native", slots: "4" });
+    expect(inputs).toMatchObject({ ip: "51.81.10.18", pool: "native", slots: "4", user: "ubuntu", admin_keys: "" });
+    const opBox = ((await operatorView(e)).body as { boxes: { ip: string; sshUser: string }[] }).boxes[0];
+    expect(opBox).toMatchObject({ ip: "51.81.10.18", sshUser: "ubuntu" });
     const view = (await myHosting(e, RIDER, false)).body as { servers: { state: string; progress: { step: number } }[] };
     expect(view.servers[0]).toMatchObject({ state: "installing", progress: { step: 2 } });
 
@@ -264,6 +267,24 @@ describe("a box from order to ready", () => {
     expect(JSON.parse(String(write.init!.body)).content).toContain('package = "/etc/mxbserver/tracks/n-club-mx.pkz"');
     expect(JSON.stringify(ready)).not.toContain("ffff");
     expect(JSON.stringify((await operatorView(e)).body)).not.toContain("ffff");
+  });
+
+  it("hands the operator SSH keys to the installer", async () => {
+    const keys = "ssh-ed25519 AAAAone a@b\n\n  not a key\r\nssh-rsa AAAAtwo==\n";
+    const e = env({ MXB_HOST_ADMIN_SSH_KEYS: keys });
+    expect(adminSshKeys(e)).toEqual(["ssh-ed25519 AAAAone a@b", "ssh-rsa AAAAtwo=="]);
+    const { ovh, deliver } = fakeOvh();
+    const f = fakeFetch();
+    const clock = { t: Date.parse("2026-10-07T10:00:00Z") };
+    const d = deps(ovh, f, clock);
+    await invited(e, d, RIDER);
+    await deploy(e, d, RIDER, { name: "k", type: "mxbserver", region: "us-east" });
+    deliver(101, "vps-k.vps.ovh.us");
+    await hostingTick(e, d);
+    clock.t += 3 * 60 * 1000;
+    await hostingTick(e, d);
+    const dispatch = f.calls.find((c) => c.url.includes("api.github.com"))!;
+    expect(JSON.parse(String(dispatch.init!.body)).inputs.admin_keys).toBe("ssh-ed25519 AAAAone a@b\nssh-rsa AAAAtwo==");
   });
 
   it("fails the waiting servers and alerts when the install fails", async () => {
