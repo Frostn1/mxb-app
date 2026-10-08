@@ -521,6 +521,9 @@ export interface Post {
   slug: string;
   link: string;
   modified: string;
+  /** Publish time, site-local; `date_gmt` is the same instant in UTC. */
+  date?: string;
+  date_gmt?: string;
   title?: { rendered?: string };
   content?: { rendered?: string };
   categories?: number[];
@@ -550,6 +553,17 @@ export function thumbOf(p: Post): string | null {
   return typeof media?.source_url === "string" && media.source_url.startsWith("https://") ? media.source_url : null;
 }
 
+/** When the post was published, as a UTC ISO time; null when the listing didn't carry it. */
+export function publishedOf(p: Post): string | null {
+  const iso = (v: unknown, z: string) => {
+    if (typeof v !== "string" || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(v)) return null;
+    const t = Date.parse(v.slice(0, 19) + z);
+    return Number.isFinite(t) && t > 0 ? new Date(t).toISOString().slice(0, 19) + "Z" : null;
+  };
+  // date_gmt is exact. `date` is site-local with no offset: used as is, as UTC, when it is all we have.
+  return iso(p.date_gmt, "Z") ?? iso(p.date, "Z");
+}
+
 /** The post's author from the REST listing's embedded user. */
 export function restAuthor(p: Post): string | null {
   const name = p._embedded?.author?.[0]?.name;
@@ -568,14 +582,15 @@ export async function upsertPost(env: Env, p: Post, tree: Map<number, Category>,
   const names = cats.map((c) => tree.get(c)?.name).filter((n): n is string => !!n);
   await env.DB.prepare(
     `INSERT INTO mod_assets (source, source_ref, slug, title, type, bike, categories, description, thumb_src,
-       source_url, modified, first_seen, last_seen, page_status, page_due_at, public_id, author)
-     VALUES ('mirror', ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?11, 'due', 0, ?12, ?13)
+       source_url, modified, first_seen, last_seen, page_status, page_due_at, public_id, author, published)
+     VALUES ('mirror', ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?11, 'due', 0, ?12, ?13, ?14)
      ON CONFLICT (source_ref) DO UPDATE SET
        slug = excluded.slug, title = excluded.title, type = excluded.type, bike = excluded.bike,
        categories = excluded.categories, description = excluded.description,
        author = COALESCE(mod_assets.author, excluded.author),
        thumb_src = COALESCE(excluded.thumb_src, mod_assets.thumb_src), source_url = excluded.source_url,
        last_seen = excluded.last_seen,
+       published = COALESCE(excluded.published, mod_assets.published),
        page_status = CASE WHEN mod_assets.modified = excluded.modified AND mod_assets.page_status <> 'gone'
                           THEN mod_assets.page_status ELSE 'due' END,
        page_attempts = CASE WHEN mod_assets.modified = excluded.modified THEN mod_assets.page_attempts ELSE 0 END,
@@ -596,6 +611,7 @@ export async function upsertPost(env: Env, p: Post, tree: Map<number, Category>,
       now,
       newPublicId(),
       restAuthor(p),
+      publishedOf(p),
     )
     .run();
 }
@@ -630,7 +646,7 @@ export function listingUrl(st: Listing): URL {
   u.searchParams.set("per_page", String(LIST_PER_PAGE));
   if (walk.offset > 0) u.searchParams.set("offset", String(walk.offset));
   u.searchParams.set("_embed", "wp:featuredmedia,author");
-  u.searchParams.set("_fields", "id,slug,link,modified,title,content,categories,_links,_embedded");
+  u.searchParams.set("_fields", "id,slug,link,modified,date,date_gmt,title,content,categories,_links,_embedded");
   // One second back, so posts sharing the high-water second are not skipped.
   if (st.hwm) u.searchParams.set("modified_after", minusOneSecond(st.hwm));
   return u;
