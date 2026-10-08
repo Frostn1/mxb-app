@@ -24,10 +24,11 @@
  * sync down: at least Retry-After, ten minutes the first time, doubling while it keeps
  * happening, up to two hours.
  *
- * The rate, for 13k posts: each lane spaces its requests to the site a second apart (pictures
- * a quarter second), and a post is one page and about three pictures, ~5 s a lane. Four lanes
- * an invocation and two invocations at most (the queue's `max_concurrency`) is ~1.6 posts a
- * second, so the catalogue in about two and a half hours. The cron logs the measured rate.
+ * The rate is the gentle one: one lane, one message a batch, one consumer invocation at a time
+ * (the queue's `max_batch_size` and `max_concurrency`), and every request to the site at least
+ * 3 s after the one before, pictures included, an invocation's first too. A post is one page
+ * and about three pictures, ~12 s, so ~300 posts an hour. The cron walks four listing pages
+ * and one sweep page a run, 3 s apart. The cron logs the measured rate.
  */
 
 import { decodeEntities } from "./trackcatalog";
@@ -44,31 +45,32 @@ const MINUTE = 60 * 1000;
 const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;
 
-/** The listing walk runs until it reaches the end or this long has passed (the cron has 15
- *  minutes and comes back every 10). ~290 pages of 50 cover the whole catalogue. */
+/** The listing walk stops after this many pages or this long, whichever comes first; the next
+ *  run resumes it. ~290 pages of 50 cover the whole catalogue. */
 const DISCOVER_BUDGET_MS = 6 * MINUTE;
-const LIST_MAX_PAGES_PER_RUN = 400;
+const LIST_MAX_PAGES_PER_RUN = 4;
 const LIST_PER_PAGE = 50;
 /** Id-sweep pages per run, 100 ids each. */
-const SWEEP_PAGES_PER_RUN = 3;
+const SWEEP_PAGES_PER_RUN = 1;
 /** Post pages read per run when there is no queue to hand them to. */
 const PAGES_PER_RUN = 40;
-/** Page reads kept leased on the queue: each run tops it up to this. At ~1.6 posts a second it
- *  is fifteen minutes of work, so the queue doesn't run dry between two runs. */
-const PAGE_QUEUE_TARGET = 1500;
+/** Page reads kept leased on the queue: each run tops it up to this. At ~5 posts a minute it
+ *  is about twelve minutes of work: the queue doesn't run dry between two runs, and it drains
+ *  well inside the lease, so nothing is sent twice. */
+const PAGE_QUEUE_TARGET = 60;
 /** How long a queued page read stays leased before it is assumed lost and sent again. */
 const PAGE_LEASE_MS = 60 * MINUTE;
 /** The page parser. A row read by an older one is read again (rows from before pictures: 0). */
 export const PAGE_REV = 1;
-/** Pages read side by side in one consumer invocation. */
-export const PAGE_LANES = 4;
+/** Pages read side by side in one consumer invocation. One: the gentle rate. */
+export const PAGE_LANES = 1;
 /** Files handed to the queue per run. The queue consumer's own concurrency is the other cap. */
 const DISPATCH_PER_RUN = 20;
 /** Pause between two of the cron's own requests to mxb-mods.com (listing, sweep, categories). */
-const SPACING_MS = 1500;
-/** Pause between two page requests on one lane, and between two pictures. */
-const PAGE_SPACING_MS = 1000;
-const IMAGE_SPACING_MS = 250;
+const SPACING_MS = 3000;
+/** Pause before every page request on a lane, and between two pictures. */
+export const PAGE_SPACING_MS = 3000;
+const IMAGE_SPACING_MS = 3000;
 /** How long the sync leaves the site alone after it refuses a request: the first time, and
  *  at most. Doubles while refusals keep coming. Retry-After wins when it asks for longer. */
 const COOLDOWN_MIN_MS = 10 * MINUTE;
@@ -766,8 +768,9 @@ export async function readPageJobs(env: Env, ids: number[], opts: RunOptions = {
 
   const lane = async (k: number) => {
     const s: Sync = { env, now, clock, fetch: f, wait, rules, sent: 0, images: 0, spacing: PAGE_SPACING_MS };
-    // Lanes start a little apart, not all at once.
-    if (k > 0) await wait(Math.round((k * PAGE_SPACING_MS) / PAGE_LANES));
+    // A lane's first request waits too: a batch is one message, so without this two
+    // invocations back to back would reach the site with no gap. Lanes also start apart.
+    if (!until) await wait(PAGE_SPACING_MS + Math.round((k * PAGE_SPACING_MS) / PAGE_LANES));
     let asset: DueAsset | undefined;
     while (!until && (asset = todo.shift())) {
       const cooling = await coolingUntil(env, clock());

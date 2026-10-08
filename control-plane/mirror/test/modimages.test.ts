@@ -12,6 +12,7 @@ import {
   dispatchPages,
   PAGE_LANES,
   PAGE_REV,
+  PAGE_SPACING_MS,
   readPageJobs,
   retryAfterMs,
   runMirror,
@@ -328,9 +329,10 @@ describe("the backfill", () => {
     const r = await drainPages(e, { now: 1000, fetch: f, wait: async (ms) => void waits.push(ms) });
     expect(r).toMatchObject({ read: 12, deferred: 0 });
     expect(peak).toBe(PAGE_LANES);
-    // Each lane: three pages, a second apart (its first needs no pause); thumbnails a quarter.
-    expect(waits.filter((w) => w === 1000)).toHaveLength(12 - PAGE_LANES);
-    expect(waits.every((w) => w === 1000 || w === 250 || w < 1000)).toBe(true);
+    // Every request to the site, a lane's first included, waits at least 3 s.
+    const sent = f.calls.filter((c) => !c.endsWith("/robots.txt"));
+    expect(waits).toHaveLength(sent.length);
+    expect(waits.every((w) => w >= PAGE_SPACING_MS && w >= 3000)).toBe(true);
   });
 
   it("stops every lane on a 429, honours Retry-After, and puts the rest back for after it", async () => {
@@ -385,9 +387,9 @@ describe("the backfill", () => {
     expect(retryAfterMs("soon", 0)).toBe(0);
   });
 
-  it("walks the whole listing in one run", async () => {
+  it("walks four listing pages a run and resumes where it stopped", async () => {
     const e = env();
-    const posts = Array.from({ length: 160 }, (_, i) => ({
+    const posts = Array.from({ length: 300 }, (_, i) => ({
       ...POST,
       id: 1000 + i,
       slug: `w${i}`,
@@ -407,8 +409,13 @@ describe("the backfill", () => {
       [/orderby=id/, () => Response.json([])],
     ]);
     await runMirror(e, { now: 1000, fetch: f, wait: async () => {} });
-    expect(await e.DB.prepare("SELECT COUNT(*) AS n FROM mod_assets").first()).toEqual({ n: 160 });
-    expect(e.MIRROR_QUEUE.sent.filter((j) => j.kind === "page")).toHaveLength(160);
+    // Offsets 0, 45, 90, 135 (pages overlap by five): 185 posts.
+    expect(await e.DB.prepare("SELECT COUNT(*) AS n FROM mod_assets").first()).toEqual({ n: 185 });
+    expect(f.calls.filter((c) => c.includes("orderby=modified"))).toHaveLength(4);
+    // The queue is only topped up to its small target.
+    expect(e.MIRROR_QUEUE.sent.filter((j) => j.kind === "page")).toHaveLength(60);
+    await runMirror(e, { now: 1000 + 600_000, fetch: f, wait: async () => {} });
+    expect(await e.DB.prepare("SELECT COUNT(*) AS n FROM mod_assets").first()).toEqual({ n: 300 });
   });
 
   it("the consumer reads a batch's pages and still runs its files, acking all", async () => {
