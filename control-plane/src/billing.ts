@@ -159,7 +159,7 @@ async function createCheckout(
   cfg: BillingConfig,
   input: { serverId: string; customerId: string; type: ServerType; name: string },
 ): Promise<StripeResult<{ id: string; url: string }>> {
-  const back = (outcome: string) => `${SITE}/?checkout=${outcome}&server=${input.serverId}`;
+  const back = (outcome: string) => `${SITE}/mine?checkout=${outcome}&server=${input.serverId}`;
   return stripe<{ id: string; url: string }>(cfg, deps, "POST", "/checkout/sessions", {
     mode: "subscription",
     customer: input.customerId,

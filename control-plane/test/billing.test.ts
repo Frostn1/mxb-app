@@ -257,7 +257,7 @@ describe("deploy is gated only when billing is configured", () => {
     expect(form.get("line_items[0][price]")).toBe("price_test_mxbserver");
     expect(form.get("line_items[0][quantity]")).toBe("1");
     expect(form.get("subscription_data[metadata][server_id]")).toBe(id);
-    expect(form.get("success_url")).toBe(`https://servers.mxbsecure.com/?checkout=done&server=${id}`);
+    expect(form.get("success_url")).toBe(`https://servers.mxbsecure.com/mine?checkout=done&server=${id}`);
     // The pending server counts against the quota.
     expect((await deploy(s.e, s.d, RIDER, { name: "Two", type: "mxbserver", region: "us-east" })).status).toBe(403);
   });
