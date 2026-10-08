@@ -106,7 +106,7 @@ export const BIKE_SETS: readonly { id: string; name: string }[] = [
 ];
 
 /** The rider cap a slot can be set to. The capacity figures are for 20-rider lobbies. */
-export const MAX_RIDERS = 20;
+export const MAX_RIDERS = 30;
 
 /** Slot `i` (1-based) on a box. Fixed: `box-install.sh` lays the box out the same way. */
 export function slotPorts(index: number): { gamePort: number; adminPort: number } {

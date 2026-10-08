@@ -342,7 +342,7 @@ describe("what an owner may change", () => {
   it("renders a name that can't break out of its TOML string", () => {
     const toml = nativeConfig({ name: 'a"b', index: 2, maxRiders: 99, track: "t", bikeSet: null });
     expect(toml).toContain('name = "a\\"b"');
-    expect(toml).toContain("max_clients = 20");
+    expect(toml).toContain("max_clients = 30");
     expect(toml).toContain('listen = "0.0.0.0:54211"');
   });
 });
