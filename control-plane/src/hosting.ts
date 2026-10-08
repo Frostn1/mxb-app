@@ -14,6 +14,7 @@
  */
 
 import { bearer, hashToken, newToken, tokenMatches } from "./auth";
+import { PAYING_SQL, billingConfig, billingServerGone, billingTick, openCheckout } from "./billing";
 import {
   BIKE_SETS,
   BOX_OS,
@@ -144,7 +145,8 @@ export interface ServerRow {
   region: string;
   box_id: string | null;
   slot_id: string | null;
-  state: "waiting" | "ready" | "failed" | "deleted";
+  /** `pending`: paid hosting, waiting on Stripe Checkout (`billing.ts`); holds no slot. */
+  state: "pending" | "waiting" | "ready" | "failed" | "deleted";
   track: string | null;
   bike_set: string | null;
   max_riders: number;
@@ -426,6 +428,9 @@ export async function serverView(env: Env, cfg: HostConfig, row: ServerRow): Pro
   } else if (row.state === "failed") {
     state = "failed";
     step = 0;
+  } else if (row.state === "pending") {
+    state = "awaiting_payment";
+    step = 0;
   } else if (!b || PENDING.slice(0, 3).includes(b.state)) {
     state = "provisioning";
     step = 1;
@@ -504,7 +509,7 @@ export async function deploy(env: Env, deps: Deps, steamId: string, input: Recor
   if (!region) return { status: 400, body: { error: "Pick a region." } };
 
   const active = await env.DB.prepare(
-    "SELECT COUNT(*) AS n FROM host_servers WHERE steam_id = ? AND state IN ('waiting', 'ready')",
+    "SELECT COUNT(*) AS n FROM host_servers WHERE steam_id = ? AND state IN ('pending', 'waiting', 'ready')",
   )
     .bind(steamId)
     .first<{ n: number }>();
@@ -516,12 +521,26 @@ export async function deploy(env: Env, deps: Deps, steamId: string, input: Recor
   const now = deps.now();
   const id = crypto.randomUUID();
   const tracks = await tracksFor(env, pool);
+  // Paid hosting (billing.ts): checked for room up front, written as pending, placed once paid.
+  const billing = billingConfig(env);
+  if (billing && !(await hasRoom(env, deps, cfg, pool, region))) {
+    return { status: 409, body: { code: "no_capacity", error: `No capacity in ${region.label} right now.` } };
+  }
   await env.DB.prepare(
     `INSERT INTO host_servers (id, steam_id, name, type, region, state, track, bike_set, max_riders, last_active_at, created_at)
-     VALUES (?, ?, ?, ?, ?, 'waiting', ?, ?, ?, ?, ?)`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   )
-    .bind(id, steamId, name, type, region.id, tracks[0]?.id ?? null, type === "mxbserver" ? BIKE_SETS[0].id : null, MAX_RIDERS, now, now)
+    .bind(id, steamId, name, type, region.id, billing ? "pending" : "waiting", tracks[0]?.id ?? null, type === "mxbserver" ? BIKE_SETS[0].id : null, MAX_RIDERS, now, now)
     .run();
+  if (billing) {
+    const checkout = await openCheckout(env, deps, billing, { serverId: id, steamId, type, name });
+    if ("error" in checkout) {
+      await env.DB.prepare("DELETE FROM host_servers WHERE id = ?").bind(id).run();
+      return { status: 502, body: { code: "payment", error: checkout.error } };
+    }
+    console.log(JSON.stringify({ msg: "hosting deploy pending payment", server: id, type, region: region.id }));
+    return { status: 201, body: { server: await serverView(env, cfg, (await serverRow(env, id))!), checkoutUrl: checkout.url } };
+  }
 
   const placed = await place(env, deps, cfg, id, pool, region);
   if (placed !== "ok") {
@@ -531,6 +550,35 @@ export async function deploy(env: Env, deps: Deps, steamId: string, input: Recor
   console.log(JSON.stringify({ msg: "hosting deploy", server: id, steamId, type, region: region.id }));
   if (cfg.preprovision) await maybePreprovision(env, deps, cfg, pool, region);
   return { status: 201, body: { server: await serverView(env, cfg, (await serverRow(env, id))!) } };
+}
+
+/** Whether `place` would find a home without being refused: checked before taking payment. */
+async function hasRoom(env: Env, deps: Deps, cfg: HostConfig, pool: Pool, region: HostRegion): Promise<boolean> {
+  if (await bestFitSlot(env, pool, region.id, ["ready", "draining", "flagged"])) return true;
+  if (await pendingBoxWithRoom(env, pool, region.id)) return true;
+  const refused = roomForBox(await spend(env, cfg), cfg, pool) ?? (deps.ovh ? null : "the OVH credentials are not set");
+  if (!refused) return true;
+  await alert(env, deps, "capacity", `No box ordered in ${region.label} (${pool}): ${refused}.`, { region: region.id });
+  return false;
+}
+
+/** Place a pending (paid) server, as a free deploy would. `ok`, or why it could not be. */
+export async function seatPaid(env: Env, deps: Deps, serverId: string): Promise<"ok" | string> {
+  const row = await serverRow(env, serverId);
+  if (!row || row.state !== "pending") return "the server is gone";
+  const region = regionById(row.region);
+  if (!region) return "unknown region";
+  const cfg = hostConfig(env);
+  await env.DB.prepare("UPDATE host_servers SET state = 'waiting', last_active_at = ? WHERE id = ?").bind(deps.now(), serverId).run();
+  const placed = await place(env, deps, cfg, serverId, poolFor(row.type), region);
+  if (placed !== "ok") {
+    await env.DB.prepare("UPDATE host_servers SET state = 'failed', error = ? WHERE id = ?")
+      .bind(`No capacity in ${region.label} right now. Delete it; the subscription was cancelled.`, serverId)
+      .run();
+    return placed;
+  }
+  if (cfg.preprovision) await maybePreprovision(env, deps, cfg, poolFor(row.type), region);
+  return "ok";
 }
 
 /**
@@ -785,6 +833,7 @@ export async function deleteServer(env: Env, deps: Deps, id: string, why: string
   const now = deps.now();
   await env.DB.prepare("UPDATE host_servers SET state = 'deleted', deleted_at = ?, slot_id = NULL WHERE id = ?").bind(now, id).run();
   await env.DB.prepare("UPDATE host_tokens SET revoked_at = ? WHERE server_id = ? AND revoked_at IS NULL").bind(now, id).run();
+  await billingServerGone(env, deps, id);
   console.log(JSON.stringify({ msg: "hosting delete", server: id, why }));
   return { status: 200, body: { ok: true } };
 }
@@ -1061,7 +1110,7 @@ async function pollRiders(env: Env, deps: Deps): Promise<void> {
 /** Free slots whose server nobody has ridden on for `idleDays`. */
 async function reclaimIdle(env: Env, deps: Deps, cfg: HostConfig): Promise<void> {
   const cutoff = deps.now() - cfg.idleDays * DAY;
-  const idle = await env.DB.prepare("SELECT id FROM host_servers WHERE state = 'ready' AND last_active_at < ?")
+  const idle = await env.DB.prepare(`SELECT id FROM host_servers WHERE state = 'ready' AND last_active_at < ? AND id NOT IN (${PAYING_SQL})`)
     .bind(cutoff)
     .all<{ id: string }>();
   for (const row of idle.results) await deleteServer(env, deps, row.id, `idle ${cfg.idleDays} days`);
@@ -1138,6 +1187,7 @@ export async function hostingTick(env: Env, deps: Deps = defaultDeps(env)): Prom
     ["riders", () => pollRiders(env, deps)],
     ["idle", () => reclaimIdle(env, deps, cfg)],
     ["scale", () => scaleDown(env, deps, cfg)],
+    ["billing", () => billingTick(env, deps)],
   ];
   for (const [name, step] of steps) {
     try {
