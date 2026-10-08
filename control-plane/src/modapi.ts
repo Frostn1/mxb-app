@@ -8,6 +8,10 @@
  *   GET  /v1/assets/<uuid>/download/<idx>[/<part>][?version=<seq>]
  *                                                          302 to cdn.mxbsecure.com, or to a
  *                                                          signed link for locked content
+ *   POST /v1/assets/<uuid>/prepare/<idx>[/<part>][?version=<seq>]
+ *                                                          queue the copy if it isn't stored, and
+ *                                                          say where it stands; polled until ready
+ *   GET  /v1/assets/mirror/<mxb-mods slug>                 one mirrored mod by its source's slug
  *   GET  /v1/assets/locked/<sha>?exp=&sig=                 the signed link itself
  *   POST /v1/assets/<uuid>/report                          `modreports.ts`
  *
@@ -319,6 +323,70 @@ async function requestMirror(
   }
 }
 
+/** Where a file stands for a client waiting on it (`POST …/prepare/<idx>[/<part>]`). */
+export type PrepareState =
+  /** On our CDN: `download` serves it. */
+  | { state: "stored"; download: string }
+  /** A copy is queued or on its way: ask again shortly. */
+  | { state: "mirroring" }
+  /** A share whose files are listed as parts: read the mod again. */
+  | { state: "folder" }
+  /** Not ours and not coming (a host refusal, a quota, too big, policy): use `source`. */
+  | { state: "original"; source: string | null };
+
+/**
+ * Queue the copy of a file that isn't stored, and say where it stands.
+ *
+ * What mxbsecure.com's Download button and the MXB App poll instead of being sent to the
+ * original host: idempotent, so asking again only reports. A file the mirror gave up on, or is
+ * backing off from (a Drive quota answers like that), is `original` at once rather than a wait.
+ */
+export async function prepareFile(
+  id: number,
+  idx: number,
+  part: number,
+  url: URL,
+  env: Env,
+  now = Date.now(),
+): Promise<{ status: number; body: PrepareState | { error: string } }> {
+  const visible = await env.DB.prepare(`SELECT 1 FROM mod_assets a WHERE a.id = ? AND ${VISIBLE}`).bind(id).first();
+  const version = visible ? await versionOf(env, id, url) : null;
+  if (!version) return { status: 404, body: { error: "no such mod" } };
+  const file = await env.DB.prepare(
+    `SELECT f.url, f.status, a.public_id, a.source, a.type, a.bike, b.r2_key
+     FROM mod_files f JOIN mod_versions v ON v.id = f.version_id JOIN mod_assets a ON a.id = v.asset_id
+     LEFT JOIN mod_blobs b ON b.sha256 = f.sha256
+     WHERE f.version_id = ? AND f.idx = ? AND f.part = ?`,
+  )
+    .bind(version.id, idx, part)
+    .first<{ url: string | null; status: string; public_id: string; source: string; type: string; bike: string; r2_key: string | null }>();
+  if (!file) return { status: 404, body: { error: "no such file" } };
+  if (file.status === "done" && file.r2_key) {
+    const path = part > 0 ? `${idx}/${part}` : `${idx}`;
+    return { status: 200, body: { state: "stored", download: `${url.origin}/v1/assets/${file.public_id}/download/${path}?version=${version.seq}` } };
+  }
+  if (file.status === "folder") return { status: 200, body: { state: "folder" } };
+  if (file.status === "idle") {
+    await requestMirror(env, version.id, idx, part, file, now);
+    const after = await env.DB.prepare("SELECT status FROM mod_files WHERE version_id = ? AND idx = ? AND part = ?")
+      .bind(version.id, idx, part)
+      .first<{ status: string }>();
+    file.status = after?.status ?? file.status;
+  }
+  if (file.status === "queued" || file.status === "pending") return { status: 200, body: { state: "mirroring" } };
+  return { status: 200, body: { state: "original", source: file.url } };
+}
+
+/** A mirrored mod by its source post's slug: how the MXB App, which browses mxb-mods, finds our copy. */
+async function mirroredBySlug(env: Env, slug: string): Promise<number | null> {
+  const row = await env.DB.prepare(
+    "SELECT id FROM mod_assets WHERE source = 'mirror' AND slug = ? AND state = 'active' ORDER BY id DESC LIMIT 1",
+  )
+    .bind(slug)
+    .first<{ id: number }>();
+  return row?.id ?? null;
+}
+
 /** Serve a locked blob to whoever holds a valid, unexpired signature for it. */
 export async function lockedAsset(sha: string, url: URL, env: Env, now = Date.now()): Promise<Response> {
   const exp = Number(url.searchParams.get("exp"));
@@ -364,6 +432,14 @@ function redirect(location: string, cache = "public, max-age=60"): Response {
   });
 }
 
+/** A state that changes from one poll to the next: never cached. */
+function noStoreJson(status: number, body: unknown): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "content-type": "application/json", "access-control-allow-origin": "*", "cache-control": "no-store" },
+  });
+}
+
 function publicJson(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -378,6 +454,9 @@ function publicJson(status: number, body: unknown): Response {
 const ONE = new RegExp(`^/v1/assets/(${UUID_RE.source})$`, "i");
 const DOWNLOAD = new RegExp(`^/v1/assets/(${UUID_RE.source})/download/([0-9]{1,4})(?:/([0-9]{1,4}))?$`, "i");
 const REPORT = new RegExp(`^/v1/assets/(${UUID_RE.source})/report$`, "i");
+const PREPARE = new RegExp(`^/v1/assets/(${UUID_RE.source})/prepare/([0-9]{1,4})(?:/([0-9]{1,4}))?$`, "i");
+/** mxb-mods slugs: lowercase words and dashes (WordPress also percent-encodes non-ASCII ones). */
+const BY_SLUG = /^\/v1\/assets\/mirror\/([a-z0-9%_-]{1,200})$/i;
 const LEGACY = /^\/v1\/assets\/[0-9]{1,12}(?:\/(?:download\/.*|report))?$/;
 
 /** How many mods search lists with no filter: the site's headline number. */
@@ -398,8 +477,10 @@ export async function publicModRoutes(request: Request, url: URL, env: Env): Pro
   const dl = DOWNLOAD.exec(path);
   const locked = /^\/v1\/assets\/locked\/([0-9a-f]{64})$/.exec(path);
   const report = REPORT.exec(path);
+  const prepare = PREPARE.exec(path);
+  const bySlug = BY_SLUG.exec(path);
   const reading = m === "GET" || m === "HEAD";
-  if (m === "OPTIONS" && report) {
+  if (m === "OPTIONS" && (report || prepare)) {
     return new Response(null, {
       status: 204,
       headers: {
@@ -411,7 +492,7 @@ export async function publicModRoutes(request: Request, url: URL, env: Env): Pro
   }
   // The old integer addresses name nothing now: a plain 404, not the account gate's 401.
   if ((reading || m === "POST") && LEGACY.test(path)) return publicJson(404, { error: "no such mod" });
-  if (!(reading && (isSearch || isStats || one || dl || locked)) && !(m === "POST" && report)) return null;
+  if (!(reading && (isSearch || isStats || one || dl || locked || bySlug)) && !(m === "POST" && (report || prepare))) return null;
 
   const ip = request.headers.get("CF-Connecting-IP") ?? "unknown";
   if (env.ASSETS_LIMITER && !(await env.ASSETS_LIMITER.limit({ key: ip })).success) {
@@ -422,13 +503,23 @@ export async function publicModRoutes(request: Request, url: URL, env: Env): Pro
     return publicJson(r.status, r.body);
   }
   if (isStats) return publicJson(200, await assetStats(env));
-  const named = one?.[1] ?? dl?.[1] ?? report?.[1];
+  if (bySlug) {
+    const id = await mirroredBySlug(env, bySlug[1].toLowerCase());
+    if (id === null) return publicJson(404, { error: "no such mod" });
+    const r = await getAsset(id, url, env);
+    return publicJson(r.status, r.body);
+  }
+  const named = one?.[1] ?? dl?.[1] ?? report?.[1] ?? prepare?.[1];
   if (named) {
     const id = await internalId(env, named);
     if (id === null) return publicJson(404, { error: "no such mod" });
     if (report) {
       const r = await reportAsset(request, id, env);
       return publicJson(r.status, r.body);
+    }
+    if (prepare) {
+      const r = await prepareFile(id, Number(prepare[2]), Number(prepare[3] ?? "0"), url, env);
+      return noStoreJson(r.status, r.body);
     }
     if (one) {
       const r = await getAsset(id, url, env);

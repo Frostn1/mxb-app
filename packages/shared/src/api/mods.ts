@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { preferMirror } from "./catalog";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
   SharePreview,
@@ -2506,57 +2507,14 @@ export async function resolveQuickInstall(
   // they want, which is exactly the answer this refusal could not guess.
   if (primary.isServer && !prefs.preferServer)
     return { ok: false, reason: "serverOnly", title: detail.title };
-  if (isBlockedDownload(primary))
-    return { ok: false, reason: "blocked", title: detail.title, host: primary.host };
 
-  const livery = isLiveryContext(modType, categoryId);
-
-  if (modType.id === "rider") {
-    const target = riderTarget(game, modType, categoryId);
-    const targets = await scanRiderTargets().catch(() => EMPTY_RIDER_TARGETS);
-    const { options, guess, derived } = buildRiderDestinations(
-      game,
-      targets,
-      detail.title,
-      detail.categories,
-      target,
-    );
-    return {
-      ok: true,
-      params: {
-        slug,
-        title: detail.title,
-        subpath: modType.installSubpath,
-        destFolder: resolveInitialFolder(game, modType, options, guess, false, false, {
-          target,
-          derived,
-        }),
-        url: primary.url,
-        host: primary.host,
-      },
-    };
-  }
-
-  let installed: InstalledMod[] = [];
-  let bikeTargets: string[] = [];
-  try {
-    installed = (await Promise.all(scanSubpaths(modType).map((s) => getInstalledMods(s)))).flat();
-  } catch {
-    installed = [];
-  }
-  if (modType.id === "bikes") {
-    bikeTargets = await scanBikeTargets().catch(() => []);
-  }
-  const { options, guess } = buildDestinations(
+  const { destFolder, installed, bikeTargets } = await quickDestination(
+    game,
     modType,
+    categoryId,
     detail.title,
-    installed,
-    livery,
-    false,
     detail.categories,
-    bikeTargets,
   );
-  const destFolder = resolveInitialFolder(game, modType, options, guess, livery);
 
   // A page with a file per bike has no single "the download": one click otherwise installs
   // the 250's paint into the folder it just picked for the 125. The file follows the folder.
@@ -2567,7 +2525,8 @@ export async function resolveQuickInstall(
   const match = variants.perBike
     ? variantForBike(mirrors, variants, bikeOfDest(destFolder))
     : null;
-  const file = match ?? primary;
+  // Our copy of the same file, when the mirror holds one: a blocked host stops mattering then.
+  const file = await preferMirror(game.id, slug, match ?? primary);
   if (isBlockedDownload(file))
     return { ok: false, reason: "blocked", title: detail.title, host: file.host };
 
@@ -2582,6 +2541,43 @@ export async function resolveQuickInstall(
       host: file.host,
     },
   };
+}
+
+/**
+ * The folder a one-click install puts a mod in, from what is on disk now: what the install
+ * dialog would preselect. Shared by the Browse grid's quick install and the catalog's install
+ * link. The installed list and bike folders come back too, for a per-bike file pick.
+ */
+export async function quickDestination(
+  game: GameInfo,
+  modType: ModType,
+  categoryId: number | null | undefined,
+  title: string,
+  categories: string[],
+): Promise<{ destFolder: string; installed: InstalledMod[]; bikeTargets: string[] }> {
+  if (modType.id === "rider") {
+    const target = riderTarget(game, modType, categoryId);
+    const targets = await scanRiderTargets().catch(() => EMPTY_RIDER_TARGETS);
+    const { options, guess, derived } = buildRiderDestinations(game, targets, title, categories, target);
+    return {
+      destFolder: resolveInitialFolder(game, modType, options, guess, false, false, { target, derived }),
+      installed: [],
+      bikeTargets: [],
+    };
+  }
+  let installed: InstalledMod[] = [];
+  let bikeTargets: string[] = [];
+  try {
+    installed = (await Promise.all(scanSubpaths(modType).map((s) => getInstalledMods(s)))).flat();
+  } catch {
+    installed = [];
+  }
+  if (modType.id === "bikes") {
+    bikeTargets = await scanBikeTargets().catch(() => []);
+  }
+  const livery = isLiveryContext(modType, categoryId);
+  const { options, guess } = buildDestinations(modType, title, installed, livery, false, categories, bikeTargets);
+  return { destFolder: resolveInitialFolder(game, modType, options, guess, livery), installed, bikeTargets };
 }
 
 export function onInstallProgress(
@@ -4240,6 +4236,7 @@ export function serverProbe(url: string, token: string): Promise<ServerStatus> {
  * - `mxb://enroll?code=…` — enrollment, with the invite code filled in
  * - `mxb://server?addr=1.2.3.4:54210` — the join dialog, on that address
  * - `mxb://mod?game=mxb&type=tracks&slug=…&cat=12` — that mod's page
+ * - `mxb://install?id=<uuid>` — the install prompt for an mxbsecure.com catalog mod
  *
  * Every field has already been checked by the backend. None of them acts on its own: a
  * link fills a form in or opens a page, and joining, enrolling and installing stay behind
@@ -4257,7 +4254,8 @@ export type DeepLink =
       modType: string;
       /** The browse category it was shared from, when the sharer's page knew one. */
       category: number | null;
-    };
+    }
+  | { kind: "install"; /** The catalog mod's public id, a lowercase UUID. */ id: string };
 
 /** An `mxb://` link was opened. */
 export function onDeepLink(cb: (link: DeepLink) => void): Promise<UnlistenFn> {

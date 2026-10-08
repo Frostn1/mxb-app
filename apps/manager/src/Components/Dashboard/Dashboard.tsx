@@ -33,6 +33,7 @@ import { DropReviewProvider } from "../../Context/DropReview";
 import { ShareProvider } from "../../Context/Share";
 import { useConfig } from "@frost/shared/Context/Config";
 import { useT } from "@/i18n";
+import { CatalogInstall } from "./CatalogInstall";
 import { modTypesFor, onDeepLink, routesByContent, setIntroSeen } from "@frost/shared/api/mods";
 import { useModBrowsing } from "../../lib/useModBrowsing";
 import { displayName } from "@frost/shared/lib/mods";
@@ -233,6 +234,9 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
   // The server an `mxb://server` link named, handed to the Servers tab. A fresh object
   // every time, so the same address shared twice still opens the dialog.
   const [serverLink, setServerLink] = useState<{ address: string } | null>(null);
+  // The catalog mod an `mxb://install` link named, for its install prompt.
+  const [installLink, setInstallLink] = useState<{ id: string } | null>(null);
+  const closeInstallLink = useCallback(() => setInstallLink(null), []);
 
   // Links shared between players: a server address, or a mod's page. Both only ever open
   // the screen with the fields filled in — the backend has already checked the link, and
@@ -242,6 +246,16 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
       if (link.kind === "server") {
         setServerLink({ address: link.address });
         navigate("servers");
+        return;
+      }
+      if (link.kind === "install") {
+        // mxbsecure.com's catalog is MX Bikes content.
+        if (game.id !== "mxb") {
+          const other = games.find((g) => g.id === "mxb");
+          toast.info(t("deepLink.otherGame", { game: other?.display ?? "MX Bikes" }));
+          return;
+        }
+        setInstallLink({ id: link.id });
         return;
       }
       if (link.kind !== "mod") return;
@@ -312,6 +326,7 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
           there is nowhere to install to before the MX Bikes folder is known. The overlay
           window renders its own tree and deliberately gets no drop target. */}
       <DropZone />
+      <CatalogInstall link={installLink} onClose={closeInstallLink} />
       {/* Nothing on screen: it watches a store the app just opened in the browser and queues
           whatever turns up as a new purchase. Here because it needs the install queue and has
           to outlive every view a store link can be clicked from. */}

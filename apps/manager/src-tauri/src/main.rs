@@ -3287,6 +3287,16 @@ enum DeepLink {
         mod_type: String,
         category: Option<u32>,
     },
+    /// `mxb://install?id=<uuid>` — a mod in the mxbsecure.com catalog, by its public id. Opens
+    /// the install prompt for it; nothing is downloaded until the player confirms.
+    Install { id: String },
+}
+
+/// Whether a value is a catalog mod's public id: a UUID, lowercase or not, and nothing else.
+fn plain_uuid(value: &str) -> bool {
+    let groups: Vec<&str> = value.split('-').collect();
+    groups.len() == 5
+        && groups.iter().zip([8, 4, 4, 4, 12]).all(|(g, n)| g.len() == n && g.chars().all(|c| c.is_ascii_hexdigit()))
 }
 
 /// One parameter out of a link's query string, undecoded.
@@ -3383,14 +3393,18 @@ fn parse_deep_link(url: &str) -> Option<DeepLink> {
             category,
         });
     }
+    if route.eq_ignore_ascii_case("install") {
+        let id = link_param(query, "id")?;
+        return plain_uuid(id).then(|| DeepLink::Install { id: id.to_ascii_lowercase() });
+    }
     None
 }
 
 /// Bring the window up and hand the frontend what the link asked for.
 ///
 /// Nothing here acts on the player's behalf: enrollment still needs the button, a server
-/// link opens the join dialog rather than launching the game, and a mod link opens the
-/// mod's page rather than installing it. A URL a website can open must not be able to do
+/// link opens the join dialog rather than launching the game, a mod link opens the mod's
+/// page, and an install link asks before it downloads anything. A URL a website can open must not be able to do
 /// any of those by itself.
 fn handle_deep_link(app: &tauri::AppHandle, urls: &[String]) {
     let Some(link) = urls.iter().find_map(|u| parse_deep_link(u)) else {
@@ -10178,6 +10192,34 @@ mod deep_link_tests {
             "mxb://mod?type=tracks&slug=../../etc",
             "mxb://mod?type=../x&slug=some-track",
             "mxb://mod?type=tracks&slug=a&cat=abc",
+        ] {
+            assert!(parse_deep_link(bad).is_none(), "{bad:?} must be refused");
+        }
+    }
+
+    #[test]
+    fn reads_an_install_link() {
+        assert_eq!(
+            parse_deep_link("mxb://install?id=4DA58750-e032-431b-977d-d086e5fffd31"),
+            Some(DeepLink::Install { id: "4da58750-e032-431b-977d-d086e5fffd31".into() })
+        );
+        assert_eq!(
+            parse_deep_link("mxb://install/?id=4da58750-e032-431b-977d-d086e5fffd31"),
+            Some(DeepLink::Install { id: "4da58750-e032-431b-977d-d086e5fffd31".into() })
+        );
+    }
+
+    #[test]
+    fn refuses_an_install_link_that_is_not_a_catalog_id() {
+        for bad in [
+            "mxb://install?id=",
+            "mxb://install?id=12345",
+            "mxb://install?id=4da58750-e032-431b-977d-d086e5fffd3",
+            "mxb://install?id=4da58750-e032-431b-977d-d086e5fffd31x",
+            "mxb://install?id=4da58750e032-431b-977d-d086e5fffd31-",
+            "mxb://install?id=zzzzzzzz-e032-431b-977d-d086e5fffd31",
+            "mxb://install?id=../4da58750-e032-431b-977d-d086e5fffd31",
+            "mxb://install?url=https://example.com/x.pkz",
         ] {
             assert!(parse_deep_link(bad).is_none(), "{bad:?} must be refused");
         }
