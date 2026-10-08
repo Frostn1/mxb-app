@@ -42,8 +42,8 @@
     // Paid hosting (src/billing.ts): the Stripe price ids for $5/month mxbserver and $8/month
     // Legacy, made by scripts/stripe-prices.ts. Empty leaves billing off, as do missing
     // STRIPE_SECRET_KEY / STRIPE_WEBHOOK_SECRET secrets: deploy is then invite-only and free.
-    "STRIPE_PRICE_MXBSERVER": "",
-    "STRIPE_PRICE_LEGACY": "",
+    "STRIPE_PRICE_MXBSERVER": "price_1UO8nGQtWT6uElJ8RYkyqste",
+    "STRIPE_PRICE_LEGACY": "price_1UO8nGQtWT6uElJ8hXkmdpFr",
     // PiBoSo's own installer, for Legacy boxes. Nothing of theirs is rehosted.
     "MXB_GAME_DOWNLOAD_URL": "https://mx-bikes.com/downloads/mxbikes-beta21e.exe",
     // The account every asset made from mxbsecure.com is created under. Empty disables
