@@ -18,6 +18,7 @@ import { PAYING_SQL, billingConfig, billingServerGone, billingTick, openCheckout
 import {
   BIKE_SETS,
   BOX_OS,
+  BOX_USER,
   MAX_RIDERS,
   REGIONS,
   SERVER_TYPES,
@@ -1183,6 +1184,17 @@ export async function runnerTracks(env: Env, url: URL): Promise<Result> {
 
 // ---- The cron tick -------------------------------------------------------------------------
 
+/**
+ * `MXB_HOST_ADMIN_SSH_KEYS`: operator public keys, one per line, that the installer adds to the
+ * box's login user next to the install key. Anything that isn't a public key line is dropped.
+ */
+export function adminSshKeys(env: Env): string[] {
+  return (env.MXB_HOST_ADMIN_SSH_KEYS ?? "")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => /^(ssh-(ed25519|rsa)|ecdsa-sha2-nistp(256|384|521)|sk-[a-z0-9@.-]+) [A-Za-z0-9+/=]+( .*)?$/.test(line));
+}
+
 async function dispatchInstall(env: Env, deps: Deps, cfg: HostConfig, b: BoxRow): Promise<boolean> {
   const token = env.MXB_GH_DISPATCH_TOKEN?.trim();
   if (!token || !b.ip) {
@@ -1209,6 +1221,8 @@ async function dispatchInstall(env: Env, deps: Deps, cfg: HostConfig, b: BoxRow)
           pool: b.pool,
           slots: String(b.slots_total),
           game_url: b.pool === "legacy" ? env.MXB_GAME_DOWNLOAD_URL ?? "" : "",
+          user: BOX_USER,
+          admin_keys: adminSshKeys(env).join("\n"),
         },
       }),
     },
@@ -1459,6 +1473,7 @@ export async function operatorView(env: Env, fetchImpl: typeof fetch | null = nu
         state: b.state,
         ovhService: b.ovh_service,
         ip: b.ip,
+        sshUser: BOX_USER,
         slotsUsed: b.used,
         slotsTotal: b.slots_total,
         waiting: b.waiting,
