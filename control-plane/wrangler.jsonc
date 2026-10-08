@@ -44,6 +44,8 @@
     // STRIPE_SECRET_KEY / STRIPE_WEBHOOK_SECRET secrets: deploy is then invite-only and free.
     "STRIPE_PRICE_MXBSERVER": "price_1UO8nGQtWT6uElJ8RYkyqste",
     "STRIPE_PRICE_LEGACY": "price_1UO8nGQtWT6uElJ8hXkmdpFr",
+    // Customer Portal configuration for hosting (bpc_...). Empty uses the account default.
+    "STRIPE_PORTAL_CONFIG": "",
     // PiBoSo's own installer, for Legacy boxes. Nothing of theirs is rehosted.
     "MXB_GAME_DOWNLOAD_URL": "https://mx-bikes.com/downloads/mxbikes-beta21e.exe",
     // The account every asset made from mxbsecure.com is created under. Empty disables

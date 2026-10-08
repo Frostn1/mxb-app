@@ -66,6 +66,8 @@ interface Env {
      *  both are set and so are the `STRIPE_PRICE_*` vars; otherwise deploy is invite-only and free. */
     STRIPE_SECRET_KEY?: string;
     STRIPE_WEBHOOK_SECRET?: string;
+    /** Optional: the Customer Portal configuration (`bpc_...`) for hosting. Empty uses the account default. */
+    STRIPE_PORTAL_CONFIG?: string;
     /** Buy Me a Coffee's webhook signing secret. Without it `/v1/bmac/webhook` answers 503. */
     BMAC_WEBHOOK_SECRET?: string;
     /** Discord webhook the supporter announcements are posted to. A credential in itself:

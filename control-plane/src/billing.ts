@@ -525,6 +525,7 @@ export async function portalLink(env: Env, deps: Deps, steamId: string): Promise
   const session = await stripe<{ url: string }>(cfg, deps, "POST", "/billing_portal/sessions", {
     customer: customer.customer_id,
     return_url: `${SITE}/`,
+    ...(env.STRIPE_PORTAL_CONFIG?.trim() ? { configuration: env.STRIPE_PORTAL_CONFIG.trim() } : {}),
   });
   if (!session.ok) return { status: 502, body: { error: "Billing couldn't be opened. Try again." } };
   return { status: 200, body: { url: session.body.url } };
