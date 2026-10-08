@@ -38,7 +38,7 @@
     "MXB_HOST_PREPROVISION": "0",
     // The public key the box install runner logs in with (its private half is the
     // BOX_SSH_PRIVATE_KEY secret in Frostn1/mxbserver-releases). Empty blocks installs.
-    "MXB_HOST_SSH_PUBLIC_KEY": "",
+    "MXB_HOST_SSH_PUBLIC_KEY": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIATkwdAwpg8xnTVXg2TY5hv+N46TrjZP3wjyi5hJm7J4 mxb-box-install",
     // PiBoSo's own installer, for Legacy boxes. Nothing of theirs is rehosted.
     "MXB_GAME_DOWNLOAD_URL": "https://mx-bikes.com/downloads/mxbikes-beta21e.exe",
     // The account every asset made from mxbsecure.com is created under. Empty disables
