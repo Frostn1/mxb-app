@@ -326,7 +326,7 @@ describe("what an owner may change", () => {
   it("takes a track from the box set, a bike set and a rider cap, and nothing else", async () => {
     const { e, d, f, id } = await readyServer();
     expect((await updateSettings(e, d, RIDER, id, { track: "nope" })).status).toBe(400);
-    expect((await updateSettings(e, d, RIDER, id, { maxRiders: 21 })).status).toBe(400);
+    expect((await updateSettings(e, d, RIDER, id, { maxRiders: 31 })).status).toBe(400);
     expect((await updateSettings(e, d, RIDER, id, { bikeSet: "shop-85" })).status).toBe(400);
     expect((await updateSettings(e, d, RIDER2, id, { maxRiders: 10 })).status).toBe(404);
     const ok = await updateSettings(e, d, RIDER, id, { track: "n-sand", bikeSet: "oem-mx1", maxRiders: 12 });
