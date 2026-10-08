@@ -18,6 +18,7 @@ import { PAYING_SQL, billingConfig, billingServerGone, billingTick, openCheckout
 import {
   BIKE_SETS,
   BOX_OS,
+  BOX_USER,
   MAX_RIDERS,
   REGIONS,
   SERVER_TYPES,
@@ -60,6 +61,9 @@ const BILLED = ["ordering", "delivering", "rebuilding", "installing", "ready", "
 const PENDING = ["ordering", "delivering", "rebuilding", "installing"];
 
 export const PROGRESS_STEPS = ["Provisioning", "Installing", "Ready"];
+/** Where a server is on the way to ready, finer than `state`. `failedAt` names the stage it failed in. */
+export type ProgressStage = "ordering" | "delivering" | "installing" | "starting" | "ready" | "awaiting_payment" | "failed";
+
 export const NEW_BOX_NOTE = "A new server can take from a few minutes up to a day.";
 export const INSTALL_NOTE = "Installing the server. This usually takes a few minutes.";
 
@@ -148,8 +152,11 @@ export interface ServerRow {
   region: string;
   box_id: string | null;
   slot_id: string | null;
-  /** `pending`: paid hosting, waiting on Stripe Checkout (`billing.ts`); holds no slot. */
-  state: "pending" | "waiting" | "ready" | "failed" | "deleted";
+  /**
+   * `pending`: paid hosting, waiting on Stripe Checkout (`billing.ts`); holds no slot.
+   * `frozen`: billing ran out; unloaded from its box, no slot, every setting kept for Resume.
+   */
+  state: "pending" | "waiting" | "ready" | "failed" | "frozen" | "deleted";
   track: string | null;
   bike_set: string | null;
   max_riders: number;
@@ -161,6 +168,9 @@ export interface ServerRow {
   created_at: number;
   ready_at: number | null;
   deleted_at: number | null;
+  frozen_at: number | null;
+  /** JSON: what the box held that D1 does not (see `boxSnapshot`), put back when it is placed again. */
+  saved_state: string | null;
 }
 
 async function box(env: Env, id: string | null): Promise<BoxRow | null> {
@@ -459,6 +469,10 @@ export async function serverView(env: Env, cfg: HostConfig, row: ServerRow): Pro
   } else if (row.state === "pending") {
     state = "awaiting_payment";
     step = 0;
+  } else if (row.state === "frozen") {
+    state = "frozen";
+    step = 0;
+    since = row.frozen_at ?? row.created_at;
   } else if (!b || PENDING.slice(0, 3).includes(b.state)) {
     state = "provisioning";
     step = 1;
@@ -470,6 +484,29 @@ export async function serverView(env: Env, cfg: HostConfig, row: ServerRow): Pro
     note = INSTALL_NOTE;
     since = b.stage_at;
   }
+  let stage: ProgressStage;
+  let failedAt: ProgressStage | null = null;
+  let stageSince = since;
+  if (row.state === "ready") {
+    stage = "ready";
+  } else if (row.state === "pending") {
+    stage = "awaiting_payment";
+  } else if (row.state === "failed") {
+    stage = "failed";
+    failedAt = !b || b.state === "ordering" || !b.ovh_order_id ? "ordering" : b.install_log || b.state === "installing" ? "installing" : "delivering";
+  } else if (!b || b.state === "ordering") {
+    stage = "ordering";
+    stageSince = b?.created_at ?? row.created_at;
+  } else if (b.state === "delivering" || b.state === "rebuilding") {
+    stage = "delivering";
+    stageSince = b.stage_at;
+  } else if (b.state === "installing") {
+    stage = "installing";
+    stageSince = b.stage_at;
+  } else {
+    stage = "starting";
+    stageSince = b.stage_at;
+  }
   return {
     id: row.id,
     name: row.name,
@@ -477,7 +514,7 @@ export async function serverView(env: Env, cfg: HostConfig, row: ServerRow): Pro
     region: row.region,
     regionLabel: region?.label ?? row.region,
     state,
-    progress: { step, steps: PROGRESS_STEPS, since, note },
+    progress: { step, steps: PROGRESS_STEPS, since, note, stage, failedAt, stageSince },
     address: row.state === "ready" && b?.ip && s ? `${b.ip}:${s.game_port}` : null,
     settings: { track: row.track, bikeSet: row.type === "mxbserver" ? row.bike_set : null, maxRiders: row.max_riders },
     options: {
@@ -554,7 +591,7 @@ export async function deploy(env: Env, deps: Deps, steamId: string, input: Recor
   if (!region) return { status: 400, body: { error: "Pick a region." } };
 
   const active = await env.DB.prepare(
-    "SELECT COUNT(*) AS n FROM host_servers WHERE steam_id = ? AND state IN ('pending', 'waiting', 'ready')",
+    "SELECT COUNT(*) AS n FROM host_servers WHERE steam_id = ? AND state IN ('pending', 'waiting', 'ready', 'frozen')",
   )
     .bind(steamId)
     .first<{ n: number }>();
@@ -607,14 +644,23 @@ async function hasRoom(env: Env, deps: Deps, cfg: HostConfig, pool: Pool, region
   return false;
 }
 
+/** Whether a frozen server could be placed again in its own pool and region now. */
+export async function roomToPlace(env: Env, deps: Deps, serverId: string): Promise<boolean> {
+  const row = await serverRow(env, serverId);
+  const region = row ? regionById(row.region) : null;
+  if (!row || !region) return false;
+  return hasRoom(env, deps, hostConfig(env), poolFor(row.type), region);
+}
+
 /** What `seatPaid` returns when another invocation already took this server from pending. */
 export const ALREADY_SEATED = "already seated";
 /** What a paid server that could not be placed shows its owner. The cause goes to operators. */
 export const PAID_FAILED_ERROR = "Couldn't start.";
 
 /**
- * Place a pending (paid) server, as a free deploy would. `ok`, `ALREADY_SEATED`, or why it
- * could not be (and then the row is `failed`, never left `waiting`).
+ * Place a pending (paid) or frozen (paid again) server, as a free deploy would. `ok`,
+ * `ALREADY_SEATED`, or why it could not be: then a new server is `failed`, a frozen one goes
+ * back to `frozen` with its settings; never left `waiting`.
  *
  * Stripe sends both `checkout.session.completed` and `invoice.paid` for one payment, and they
  * can land at once in separate invocations. The pending -> waiting claim is one conditional
@@ -622,12 +668,17 @@ export const PAID_FAILED_ERROR = "Couldn't start.";
  */
 export async function seatPaid(env: Env, deps: Deps, serverId: string): Promise<"ok" | string> {
   const row = await serverRow(env, serverId);
-  if (!row || row.state !== "pending") return row && ["waiting", "ready"].includes(row.state) ? ALREADY_SEATED : "the server is gone";
+  if (!row || (row.state !== "pending" && row.state !== "frozen")) {
+    return row && ["waiting", "ready"].includes(row.state) ? ALREADY_SEATED : "the server is gone";
+  }
   const region = regionById(row.region);
   if (!region) return "unknown region";
   const cfg = hostConfig(env);
-  const claimed = await env.DB.prepare("UPDATE host_servers SET state = 'waiting', last_active_at = ? WHERE id = ? AND state = 'pending'")
-    .bind(deps.now(), serverId)
+  const was = row.state;
+  const claimed = await env.DB.prepare(
+    "UPDATE host_servers SET state = 'waiting', box_id = NULL, slot_id = NULL, error = NULL, last_active_at = ? WHERE id = ? AND state = ?",
+  )
+    .bind(deps.now(), serverId, was)
     .run();
   if (!claimed.meta.changes) return ALREADY_SEATED;
   let placed: string;
@@ -637,11 +688,12 @@ export async function seatPaid(env: Env, deps: Deps, serverId: string): Promise<
     placed = `placing failed: ${String(err).slice(0, 300)}`;
   }
   if (placed !== "ok") {
-    await env.DB.prepare("UPDATE host_servers SET state = 'failed', error = ? WHERE id = ?")
-      .bind(PAID_FAILED_ERROR, serverId)
+    await env.DB.prepare("UPDATE host_servers SET state = ?, box_id = NULL, error = ? WHERE id = ?")
+      .bind(was === "frozen" ? "frozen" : "failed", PAID_FAILED_ERROR, serverId)
       .run();
     return placed;
   }
+  if (was === "frozen") console.log(JSON.stringify({ msg: "hosting unfrozen", server: serverId }));
   if (cfg.preprovision) await maybePreprovision(env, deps, cfg, poolFor(row.type), region);
   return "ok";
 }
@@ -707,7 +759,10 @@ async function assign(env: Env, deps: Deps, serverId: string, free: SlotRow): Pr
     .run();
   await env.DB.prepare("UPDATE host_boxes SET empty_since = NULL WHERE id = ?").bind(free.box_id).run();
   const row = await serverRow(env, serverId);
-  if (row) await applySettings(env, deps, row);
+  if (row) {
+    await applySettings(env, deps, row);
+    if (row.saved_state) await restoreSnapshot(env, deps, row);
+  }
 }
 
 async function maybePreprovision(env: Env, deps: Deps, cfg: HostConfig, pool: Pool, region: HostRegion): Promise<void> {
@@ -843,6 +898,90 @@ async function resetSlot(env: Env, deps: Deps, s: SlotRow): Promise<void> {
     }
   }
   await env.DB.prepare("UPDATE host_slots SET server_id = NULL WHERE id = ?").bind(s.id).run();
+}
+
+// ---- Freeze --------------------------------------------------------------------------------
+
+/**
+ * What a slot holds that D1 does not. Name, track, bike set and rider cap are D1's (the box
+ * config is written from them); a native server's permanent bans live only on the box.
+ */
+interface BoxSnapshot {
+  bans?: { kind: string; value: string; reason: string }[];
+  /** A Legacy slot's config as its agent reports it, kept for operators. */
+  legacy?: Record<string, unknown>;
+}
+
+async function boxSnapshot(deps: Deps, b: BoxRow, s: SlotRow): Promise<BoxSnapshot | null> {
+  if (b.pool === "native") {
+    const res = await slotCall(deps, b, s, "/v1/bans", { method: "GET" });
+    if (!res.ok) return null;
+    const runtime = (res.body as { runtime?: unknown } | null)?.runtime;
+    const bans = (Array.isArray(runtime) ? (runtime as Record<string, unknown>[]) : [])
+      .filter((x) => x && typeof x.kind === "string" && typeof x.value === "string")
+      // Timed bans would run out while frozen; only permanent ones are kept.
+      .filter((x) => x.seconds_left === null || x.seconds_left === undefined)
+      .slice(0, 500)
+      .map((x) => ({
+        kind: x.kind as string,
+        value: (x.value as string).slice(0, 200),
+        reason: typeof x.reason === "string" ? x.reason.slice(0, 200) : "",
+      }));
+    return { bans };
+  }
+  const res = await slotCall(deps, b, s, "/config", { method: "GET" });
+  return res.ok && res.body && typeof res.body === "object" ? { legacy: res.body as Record<string, unknown> } : null;
+}
+
+/** Put the snapshot back on the server's new slot. Kept until it all lands. */
+async function restoreSnapshot(env: Env, deps: Deps, row: ServerRow): Promise<void> {
+  const b = await box(env, row.box_id);
+  const s = await slot(env, row.slot_id);
+  if (!b || !s || !row.saved_state) return;
+  let snap: BoxSnapshot;
+  try {
+    snap = JSON.parse(row.saved_state) as BoxSnapshot;
+  } catch {
+    snap = {};
+  }
+  let ok = true;
+  if (b.pool === "native") {
+    for (const ban of snap.bans ?? []) {
+      const res = await slotCall(deps, b, s, "/v1/bans", { method: "POST", body: ban });
+      ok = ok && res.ok;
+    }
+  }
+  if (ok) await env.DB.prepare("UPDATE host_servers SET saved_state = NULL WHERE id = ?").bind(row.id).run();
+  else console.error(JSON.stringify({ msg: "hosting restore incomplete", server: row.id }));
+}
+
+/**
+ * Billing ran out: stop the server and unload it from its box (the slot is freed the way a
+ * delete frees it), but keep the row and every setting so Resume can place it again. What
+ * only the box held is pulled off first. A frozen server holds no slot and no box.
+ */
+export async function freezeServer(env: Env, deps: Deps, id: string, why: string): Promise<Result> {
+  const row = await serverRow(env, id);
+  if (!row) return { status: 404, body: { error: "No such server." } };
+  if (row.state === "frozen") return { status: 200, body: { ok: true } };
+  const b = await box(env, row.box_id);
+  const s = await slot(env, row.slot_id);
+  let saved = row.saved_state;
+  if (b && s && s.server_id === row.id) {
+    if (row.state === "ready") {
+      const snap = await boxSnapshot(deps, b, s);
+      if (snap) saved = JSON.stringify(snap);
+      else console.error(JSON.stringify({ msg: "hosting freeze snapshot failed", server: id }));
+    }
+    await resetSlot(env, deps, s);
+  }
+  await env.DB.prepare(
+    "UPDATE host_servers SET state = 'frozen', frozen_at = ?, box_id = NULL, slot_id = NULL, riders = NULL, applied = 0, saved_state = ? WHERE id = ?",
+  )
+    .bind(deps.now(), saved, id)
+    .run();
+  console.log(JSON.stringify({ msg: "hosting freeze", server: id, why }));
+  return { status: 200, body: { ok: true } };
 }
 
 // ---- Owner actions -------------------------------------------------------------------------
@@ -1089,6 +1228,17 @@ export async function runnerTracks(env: Env, url: URL): Promise<Result> {
 
 // ---- The cron tick -------------------------------------------------------------------------
 
+/**
+ * `MXB_HOST_ADMIN_SSH_KEYS`: operator public keys, one per line, that the installer adds to the
+ * box's login user next to the install key. Anything that isn't a public key line is dropped.
+ */
+export function adminSshKeys(env: Env): string[] {
+  return (env.MXB_HOST_ADMIN_SSH_KEYS ?? "")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => /^(ssh-(ed25519|rsa)|ecdsa-sha2-nistp(256|384|521)|sk-[a-z0-9@.-]+) [A-Za-z0-9+/=]+( .*)?$/.test(line));
+}
+
 async function dispatchInstall(env: Env, deps: Deps, cfg: HostConfig, b: BoxRow): Promise<boolean> {
   const token = env.MXB_GH_DISPATCH_TOKEN?.trim();
   if (!token || !b.ip) {
@@ -1115,6 +1265,8 @@ async function dispatchInstall(env: Env, deps: Deps, cfg: HostConfig, b: BoxRow)
           pool: b.pool,
           slots: String(b.slots_total),
           game_url: b.pool === "legacy" ? env.MXB_GAME_DOWNLOAD_URL ?? "" : "",
+          user: BOX_USER,
+          admin_keys: adminSshKeys(env).join("\n"),
         },
       }),
     },
@@ -1366,6 +1518,7 @@ export async function operatorView(env: Env, fetchImpl: typeof fetch | null = nu
         state: b.state,
         ovhService: b.ovh_service,
         ip: b.ip,
+        sshUser: BOX_USER,
         slotsUsed: b.used,
         slotsTotal: b.slots_total,
         waiting: b.waiting,

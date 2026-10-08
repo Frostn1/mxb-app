@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  adminSshKeys,
   claimInvite,
   deploy,
   enrollBox,
@@ -170,6 +171,7 @@ describe("deploy, placement and the spend cap", () => {
       const server = (r.body as { server: { state: string; progress: { step: number; note: string } } }).server;
       expect(server.state).toBe("provisioning");
       expect(server.progress.step).toBe(1);
+      expect(server.progress).toMatchObject({ stage: "delivering", failedAt: null });
       expect(server.progress.note).toBe("A new server can take from a few minutes up to a day.");
     }
   });
@@ -236,6 +238,8 @@ describe("a box from order to ready", () => {
     const id = await serverId(await deploy(e, d, RIDER, { name: "Sean's", type: "mxbserver", region: "us-east" }));
 
     await hostingTick(e, d); // not delivered yet
+    const waiting = (await myHosting(e, RIDER, false)).body as { servers: { progress: { stage: string; stageSince: number } }[] };
+    expect(waiting.servers[0].progress.stage).toBe("delivering");
     expect(ovh.rebuild).not.toHaveBeenCalled();
     deliver(101, "vps-abc.vps.ovh.us");
     await hostingTick(e, d);
@@ -246,9 +250,11 @@ describe("a box from order to ready", () => {
     const dispatch = f.calls.find((c) => c.url.includes("api.github.com"))!;
     expect(dispatch.url).toBe("https://api.github.com/repos/Frostn1/mxbserver-releases/actions/workflows/box-install.yml/dispatches");
     const inputs = JSON.parse(String(dispatch.init!.body)).inputs;
-    expect(inputs).toMatchObject({ ip: "51.81.10.18", pool: "native", slots: "4" });
+    expect(inputs).toMatchObject({ ip: "51.81.10.18", pool: "native", slots: "4", user: "ubuntu", admin_keys: "" });
+    const opBox = ((await operatorView(e)).body as { boxes: { ip: string; sshUser: string }[] }).boxes[0];
+    expect(opBox).toMatchObject({ ip: "51.81.10.18", sshUser: "ubuntu" });
     const view = (await myHosting(e, RIDER, false)).body as { servers: { state: string; progress: { step: number } }[] };
-    expect(view.servers[0]).toMatchObject({ state: "installing", progress: { step: 2 } });
+    expect(view.servers[0]).toMatchObject({ state: "installing", progress: { step: 2, stage: "installing", failedAt: null } });
 
     const boxId = inputs.box_id as string;
     const tokens = [1, 2, 3, 4].map((i) => ({ index: i, gamePort: 54209 + i, token: `cp-s${i}.${"f".repeat(64)}` }));
@@ -257,7 +263,7 @@ describe("a box from order to ready", () => {
     expect((await enrollBox(e, d, boxId, { slots: tokens })).status).toBe(200);
 
     const ready = (await myHosting(e, RIDER, false)).body as { servers: Record<string, unknown>[] };
-    expect(ready.servers[0]).toMatchObject({ id, state: "ready", address: "51.81.10.18:54210", progress: { step: 3 } });
+    expect(ready.servers[0]).toMatchObject({ id, state: "ready", address: "51.81.10.18:54210", progress: { step: 3, stage: "ready" } });
     // The settings went to the slot through Caddy, with the slot's own token, and no token
     // ever comes back out.
     const write = f.calls.find((c) => c.url === "https://51-81-10-18.sslip.io/s1/v1/config/write")!;
@@ -265,6 +271,24 @@ describe("a box from order to ready", () => {
     expect(JSON.parse(String(write.init!.body)).content).toContain('package = "/etc/mxbserver/tracks/n-club-mx.pkz"');
     expect(JSON.stringify(ready)).not.toContain("ffff");
     expect(JSON.stringify((await operatorView(e)).body)).not.toContain("ffff");
+  });
+
+  it("hands the operator SSH keys to the installer", async () => {
+    const keys = "ssh-ed25519 AAAAone a@b\n\n  not a key\r\nssh-rsa AAAAtwo==\n";
+    const e = env({ MXB_HOST_ADMIN_SSH_KEYS: keys });
+    expect(adminSshKeys(e)).toEqual(["ssh-ed25519 AAAAone a@b", "ssh-rsa AAAAtwo=="]);
+    const { ovh, deliver } = fakeOvh();
+    const f = fakeFetch();
+    const clock = { t: Date.parse("2026-10-07T10:00:00Z") };
+    const d = deps(ovh, f, clock);
+    await invited(e, d, RIDER);
+    await deploy(e, d, RIDER, { name: "k", type: "mxbserver", region: "us-east" });
+    deliver(101, "vps-k.vps.ovh.us");
+    await hostingTick(e, d);
+    clock.t += 3 * 60 * 1000;
+    await hostingTick(e, d);
+    const dispatch = f.calls.find((c) => c.url.includes("api.github.com"))!;
+    expect(JSON.parse(String(dispatch.init!.body)).inputs.admin_keys).toBe("ssh-ed25519 AAAAone a@b\nssh-rsa AAAAtwo==");
   });
 
   it("fails the waiting servers and alerts when the install fails", async () => {
@@ -288,8 +312,9 @@ describe("a box from order to ready", () => {
       d,
     );
     expect(res.status).toBe(200);
-    const view = (await myHosting(e, RIDER, false)).body as { servers: { state: string; error: string }[] };
+    const view = (await myHosting(e, RIDER, false)).body as { servers: { state: string; error: string; progress: unknown }[] };
     expect(view.servers[0].state).toBe("failed");
+    expect(view.servers[0].progress).toMatchObject({ stage: "failed", failedAt: "installing" });
     const op = (await operatorView(e)).body as { alerts: { kind: string }[]; spend: { boxes: number } };
     expect(op.alerts.map((a) => a.kind)).toContain("install_failed");
     expect(op.spend.boxes).toBe(1); // delivered, so still billed until cancelled at OVH

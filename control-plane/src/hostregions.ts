@@ -91,6 +91,9 @@ export const SERVER_TYPES: readonly { id: ServerType; label: string }[] = [
 /** The OS every box is installed with, as OVH's `vps_os` value. */
 export const BOX_OS = "Ubuntu 24.04";
 
+/** The sudo user OVH creates on a `BOX_OS` image: the one the installer and an operator log in as. */
+export const BOX_USER = "ubuntu";
+
 export function regionById(id: unknown): HostRegion | null {
   return REGIONS.find((r) => r.id === id) ?? null;
 }
