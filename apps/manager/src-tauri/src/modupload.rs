@@ -9,8 +9,11 @@
 //!   POST   /v1/uploads/<id>/complete   uploads.ts:310  part ETags in; queued for checking
 //!   DELETE /v1/uploads/<id>            uploads.ts:367  abandon
 //!   GET    /v1/me/mods                 uploads.ts:378  the rider's mods, open uploads, quota
-//!   PATCH  /v1/assets/<id>             uploads.ts:395  edit title/description/bike/visibility
-//!   DELETE /v1/assets/<id>             uploads.ts:419  delete
+//!   PATCH  /v1/assets/<uuid>           uploads.ts      edit title/description/bike/visibility
+//!   PUT    /v1/assets/<uuid>/thumb     uploads.ts      set the mod's picture
+//!   DELETE /v1/assets/<uuid>           uploads.ts      delete
+//!
+//! A mod is named by its public UUID (`control-plane/src/modids.ts`), never a number.
 //!
 //! A session is written to `mod-uploads.json` as soon as it is opened and after every part, so
 //! a pause or an app restart resumes from what R2 already holds (`GET /v1/uploads/<id>` lists
@@ -123,9 +126,34 @@ pub struct UploadMeta {
     pub version: Option<String>,
     #[serde(default)]
     pub notes: Option<String>,
-    /// A new version of this mod of yours; none for a new mod.
+    /// A new version of this mod of yours (its public id); none for a new mod.
+    #[serde(default, deserialize_with = "public_id")]
+    pub asset_id: Option<String>,
+    /// A picture to set on the mod once the upload is in. Optional.
     #[serde(default)]
-    pub asset_id: Option<i64>,
+    pub thumb_path: Option<String>,
+}
+
+/// A mod's public id, or none. Jobs saved by an older build hold a number there, which no
+/// longer names anything: read as none rather than failing to load the saved list.
+fn public_id<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
+    let v = Option::<serde_json::Value>::deserialize(d)?;
+    Ok(v.and_then(|v| v.as_str().map(str::to_string)))
+}
+
+/// The largest picture the control plane takes (`mirror.ts` `MAX_THUMB_BYTES`).
+pub const MAX_THUMB_BYTES: u64 = 2 * 1024 * 1024;
+
+/// The picture's content type by its first bytes, as the control plane checks it.
+pub fn image_type(bytes: &[u8]) -> Option<&'static str> {
+    match bytes {
+        [0xff, 0xd8, 0xff, ..] => Some("image/jpeg"),
+        [0x89, b'P', b'N', b'G', ..] => Some("image/png"),
+        [b'R', b'I', b'F', b'F', _, _, _, _, b'W', b'E', b'B', b'P', ..] => Some("image/webp"),
+        [b'G', b'I', b'F', b'8', ..] => Some("image/gif"),
+        [_, _, _, _, b'f', b't', b'y', b'p', b'a', b'v', b'i', b'f' | b's', ..] => Some("image/avif"),
+        _ => None,
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
@@ -154,8 +182,8 @@ pub struct Status {
     pub state: String,
     #[serde(default)]
     pub error: Option<String>,
-    #[serde(default)]
-    pub asset_id: Option<i64>,
+    #[serde(default, deserialize_with = "public_id")]
+    pub asset_id: Option<String>,
     #[serde(default)]
     pub uploaded: Option<Vec<HeldPart>>,
     #[serde(default)]
@@ -166,23 +194,28 @@ pub struct Status {
 #[derive(Clone, Debug, Deserialize)]
 pub struct Completed {
     pub state: String,
-    #[serde(default)]
-    pub asset_id: Option<i64>,
+    #[serde(default, deserialize_with = "public_id")]
+    pub asset_id: Option<String>,
 }
 
 /// One of the rider's mods (`uploads.ts:380`).
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MyMod {
-    pub id: i64,
+    /// The public id (a UUID).
+    pub id: String,
     pub title: String,
     #[serde(rename(deserialize = "type"))]
     pub mod_type: String,
     pub visibility: String,
     pub state: String,
     pub modified: String,
-    #[serde(default, alias = "current_version")]
-    pub current_version: Option<i64>,
+    /// A version has been published.
+    #[serde(default)]
+    pub live: bool,
+    /// The picture on the CDN, if it has one.
+    #[serde(default)]
+    pub thumb: Option<String>,
     #[serde(default)]
     pub reports: i64,
 }
@@ -192,8 +225,8 @@ pub struct MyMod {
 #[serde(rename_all = "camelCase")]
 pub struct MyUpload {
     pub id: String,
-    #[serde(default, alias = "asset_id")]
-    pub asset_id: Option<i64>,
+    #[serde(default, alias = "asset_id", deserialize_with = "public_id")]
+    pub asset_id: Option<String>,
     pub filename: String,
     pub size: u64,
     pub state: String,
@@ -330,7 +363,7 @@ impl Api {
         if let Some(n) = meta.notes.as_deref().filter(|n| !n.trim().is_empty()) {
             body["notes"] = n.trim().into();
         }
-        if let Some(id) = meta.asset_id {
+        if let Some(id) = meta.asset_id.as_deref() {
             body["asset_id"] = id.into();
         }
         self.call(self.client.post(self.url("/v1/uploads")).json(&body)).await
@@ -358,18 +391,30 @@ impl Api {
         self.call(self.client.get(self.url("/v1/me/mods"))).await
     }
 
-    pub async fn edit(&self, asset_id: i64, edit: &ModEdit) -> Result<serde_json::Value, ApiError> {
+    pub async fn edit(&self, asset_id: &str, edit: &ModEdit) -> Result<serde_json::Value, ApiError> {
         self.call(self.client.patch(self.url(&format!("/v1/assets/{asset_id}"))).json(edit)).await
     }
 
     /// The public page's description and bikes (`modapi.ts:181` `getAsset`), to fill the edit
     /// form. Only a mod with a live version answers.
-    pub async fn details(&self, asset_id: i64) -> Result<ModDetails, ApiError> {
+    pub async fn details(&self, asset_id: &str) -> Result<ModDetails, ApiError> {
         self.call(self.client.get(self.url(&format!("/v1/assets/{asset_id}")))).await
     }
 
-    pub async fn delete(&self, asset_id: i64) -> Result<serde_json::Value, ApiError> {
+    pub async fn delete(&self, asset_id: &str) -> Result<serde_json::Value, ApiError> {
         self.call(self.client.delete(self.url(&format!("/v1/assets/{asset_id}")))).await
+    }
+
+    /// Set the mod's picture: the image file's bytes as the body (`uploads.ts` `setThumb`).
+    pub async fn set_thumb(&self, asset_id: &str, bytes: Vec<u8>) -> Result<serde_json::Value, ApiError> {
+        let Some(kind) = image_type(&bytes) else {
+            return Err(ApiError::Refused(415, "the picture must be a JPEG, PNG, WebP, GIF or AVIF".into()));
+        };
+        if bytes.len() as u64 > MAX_THUMB_BYTES {
+            return Err(ApiError::Refused(413, "the picture is larger than 2 MB".into()));
+        }
+        let req = self.client.put(self.url(&format!("/v1/assets/{asset_id}/thumb"))).header("content-type", kind).body(bytes);
+        self.call(req).await
     }
 }
 
@@ -611,8 +656,8 @@ pub struct Job {
     pub sent: u64,
     #[serde(default)]
     pub error: Option<String>,
-    #[serde(default)]
-    pub asset_id: Option<i64>,
+    #[serde(default, deserialize_with = "public_id")]
+    pub asset_id: Option<String>,
     pub started_at: u64,
 }
 
@@ -755,9 +800,10 @@ async fn drive_inner(
     sink.update(job);
     match api.complete(&id, &job.etags).await {
         Ok(c) => {
-            job.asset_id = c.asset_id.or(job.asset_id);
+            job.asset_id = c.asset_id.or(job.asset_id.take());
             job.phase = if c.state == "live" { Phase::Live } else { Phase::Checking };
             sink.update(job);
+            send_thumb(api, job).await;
             Ok(())
         }
         // The control plane rejects a completion whose parts don't add up (`uploads.ts:336`).
@@ -766,9 +812,23 @@ async fn drive_inner(
     }
 }
 
+/// The picture the rider picked, onto the mod the upload made. A picture that can't be read or
+/// is refused doesn't fail the upload: the rider can set one later from My mods.
+async fn send_thumb(api: &Api, job: &Job) {
+    let (Some(path), Some(id)) = (job.meta.thumb_path.as_deref(), job.asset_id.as_deref()) else { return };
+    match tokio::fs::read(path).await {
+        Ok(bytes) => {
+            if let Err(e) = api.set_thumb(id, bytes).await {
+                log::warn!("[mods] the picture for {id} was not set: {e}");
+            }
+        }
+        Err(e) => log::warn!("[mods] couldn't read the picture {path}: {e}"),
+    }
+}
+
 /// A session that is over: expired, aborted, or already decided.
 fn settled(job: &mut Job, s: &Status) -> Option<Result<(), Stop>> {
-    job.asset_id = s.asset_id.or(job.asset_id);
+    job.asset_id = s.asset_id.clone().or(job.asset_id.take());
     match s.state.as_str() {
         "live" => {
             job.phase = Phase::Live;
@@ -786,7 +846,7 @@ pub async fn poll_once(api: &Api, job: &mut Job) -> bool {
     let Some(id) = job.upload_id.clone() else { return true };
     match api.status(&id).await {
         Ok(s) => {
-            job.asset_id = s.asset_id.or(job.asset_id);
+            job.asset_id = s.asset_id.clone().or(job.asset_id.take());
             match s.state.as_str() {
                 "live" => {
                     job.phase = Phase::Live;
@@ -1125,18 +1185,29 @@ pub async fn my_mods(app: tauri::AppHandle) -> Result<MyMods, String> {
 }
 
 #[tauri::command]
-pub async fn mod_edit(app: tauri::AppHandle, asset_id: i64, edit: ModEdit) -> Result<(), String> {
-    api(&app)?.edit(asset_id, &edit).await.map(|_| ()).map_err(|e| e.to_string())
+pub async fn mod_edit(app: tauri::AppHandle, asset_id: String, edit: ModEdit) -> Result<(), String> {
+    api(&app)?.edit(&asset_id, &edit).await.map(|_| ()).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub async fn mod_details(app: tauri::AppHandle, asset_id: i64) -> Result<ModDetails, String> {
-    api(&app)?.details(asset_id).await.map_err(|e| e.to_string())
+pub async fn mod_details(app: tauri::AppHandle, asset_id: String) -> Result<ModDetails, String> {
+    api(&app)?.details(&asset_id).await.map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub async fn mod_delete(app: tauri::AppHandle, asset_id: i64) -> Result<(), String> {
-    api(&app)?.delete(asset_id).await.map(|_| ()).map_err(|e| e.to_string())
+pub async fn mod_delete(app: tauri::AppHandle, asset_id: String) -> Result<(), String> {
+    api(&app)?.delete(&asset_id).await.map(|_| ()).map_err(|e| e.to_string())
+}
+
+/// Set a mod's picture from a file the rider picked.
+#[tauri::command]
+pub async fn mod_set_thumb(app: tauri::AppHandle, asset_id: String, path: String) -> Result<(), String> {
+    let len = tokio::fs::metadata(&path).await.map_err(|e| e.to_string())?.len();
+    if len > MAX_THUMB_BYTES {
+        return Err("the picture is larger than 2 MB".into());
+    }
+    let bytes = tokio::fs::read(&path).await.map_err(|e| e.to_string())?;
+    api(&app)?.set_thumb(&asset_id, bytes).await.map(|_| ()).map_err(|e| e.to_string())
 }
 
 #[cfg(test)]
@@ -1416,12 +1487,12 @@ mod tests {
                     let missing: Vec<u32> = (1..=parts).filter(|n| !holds.contains(n)).collect();
                     let uploaded: Vec<_> = holds.iter().map(|n| serde_json::json!({ "part": n, "etag": format!("\"held{n}\""), "size": part_size })).collect();
                     json(200, serde_json::json!({
-                        "id": id, "state": "open", "error": null, "asset_id": null, "version_id": null,
+                        "id": id, "state": "open", "error": null, "asset_id": null,
                         "part_size": part_size, "uploaded": uploaded, "parts": urls(missing)
                     }))
                 }
                 ("POST", p) if p == format!("/v1/uploads/{id}/complete") => {
-                    json(202, serde_json::json!({ "id": id, "state": "verifying", "asset_id": 42, "version_id": 7 }))
+                    json(202, serde_json::json!({ "id": id, "state": "verifying", "asset_id": "3f2b6c1e-8d4a-4b7f-9c2e-1a5d7e9f0b3c" }))
                 }
                 ("PUT", p) if p.starts_with("/r2/") => {
                     if fails.load(Relaxed) > 0 {
@@ -1449,7 +1520,7 @@ mod tests {
         let sink = Record(Mutex::new(Vec::new()));
         drive(&api_at(&base), &mut job, &quick(), no_cancel(), &sink).await;
         assert_eq!(job.phase, Phase::Checking, "{:?}", job.error);
-        assert_eq!(job.asset_id, Some(42));
+        assert_eq!(job.asset_id.as_deref(), Some("3f2b6c1e-8d4a-4b7f-9c2e-1a5d7e9f0b3c"));
         assert_eq!(job.etags.len(), 3);
         let seen = seen.lock().unwrap();
         let open: serde_json::Value = serde_json::from_slice(&seen[0].body).unwrap();
@@ -1535,7 +1606,7 @@ mod tests {
         let (base, _) = serve(Arc::new(move |_: &Seen| {
             let st = *s.lock().unwrap();
             let error = if st == "rejected" { "an executable inside" } else { "" };
-            json(200, serde_json::json!({ "id": "x", "state": st, "error": error, "asset_id": 9 }))
+            json(200, serde_json::json!({ "id": "x", "state": st, "error": error, "asset_id": "9d1e2f3a-4b5c-4d6e-8f70-8192a3b4c5d6" }))
         }));
         let api = api_at(&base);
         let mut job = job_for(Path::new("x"), 1);
@@ -1544,7 +1615,7 @@ mod tests {
         assert!(!poll_once(&api, &mut job).await);
         *state.lock().unwrap() = "live";
         assert!(poll_once(&api, &mut job).await);
-        assert_eq!((job.phase, job.asset_id), (Phase::Live, Some(9)));
+        assert_eq!((job.phase, job.asset_id.as_deref()), (Phase::Live, Some("9d1e2f3a-4b5c-4d6e-8f70-8192a3b4c5d6")));
         *state.lock().unwrap() = "rejected";
         job.phase = Phase::Checking;
         assert!(poll_once(&api, &mut job).await);
@@ -1555,21 +1626,40 @@ mod tests {
     #[test]
     fn my_mods_reads_the_control_planes_shape() {
         let body = serde_json::json!({
-            "mods": [{ "id": 3, "title": "Track", "type": "tracks", "visibility": "unlisted", "state": "active",
-                       "modified": "2026-10-07T00:00:00.000Z", "current_version": 5, "reports": 1 }],
-            "uploads": [{ "id": "ab", "asset_id": 3, "version_id": null, "filename": "t.pkz", "size": 10,
+            "mods": [{ "id": "3f2b6c1e-8d4a-4b7f-9c2e-1a5d7e9f0b3c", "title": "Track", "type": "tracks", "visibility": "unlisted", "state": "active",
+                       "modified": "2026-10-07T00:00:00.000Z", "live": true, "thumb": null, "reports": 1 }],
+            "uploads": [{ "id": "ab", "asset_id": "3f2b6c1e-8d4a-4b7f-9c2e-1a5d7e9f0b3c", "filename": "t.pkz", "size": 10,
                           "state": "rejected", "error": "not a pkz archive", "created_at": 1 }],
             "quota": { "openSessions": 3, "uploadsPerDay": 20, "bytesPerDay": 10737418240u64, "storageBytes": 26843545600u64 }
         });
         let m: MyMods = serde_json::from_value(body).unwrap();
         assert_eq!(m.mods[0].mod_type, "tracks");
-        assert_eq!(m.mods[0].current_version, Some(5));
+        assert_eq!(m.mods[0].id, "3f2b6c1e-8d4a-4b7f-9c2e-1a5d7e9f0b3c");
+        assert_eq!(m.uploads[0].asset_id.as_deref(), Some("3f2b6c1e-8d4a-4b7f-9c2e-1a5d7e9f0b3c"));
         assert_eq!(m.uploads[0].error.as_deref(), Some("not a pkz archive"));
         assert_eq!(m.quota.uploads_per_day, 20);
         // And out to the webview in camelCase.
         let out = serde_json::to_value(&m).unwrap();
         assert_eq!(out["mods"][0]["modType"], "tracks");
         assert_eq!(out["quota"]["storageBytes"], 26843545600u64);
+    }
+
+    #[test]
+    fn a_saved_job_from_before_public_ids_still_loads() {
+        let meta: UploadMeta = serde_json::from_value(serde_json::json!({
+            "title": "t", "type": "tracks", "visibility": "public", "assetId": 42
+        }))
+        .unwrap();
+        assert_eq!(meta.asset_id, None);
+        assert_eq!(meta.thumb_path, None);
+    }
+
+    #[test]
+    fn knows_a_picture_by_its_bytes() {
+        assert_eq!(image_type(b"RIFF\x08\0\0\0WEBPVP8 "), Some("image/webp"));
+        assert_eq!(image_type(&[0xff, 0xd8, 0xff, 0xe0]), Some("image/jpeg"));
+        assert_eq!(image_type(b"\x89PNG\r\n"), Some("image/png"));
+        assert_eq!(image_type(b"<html>"), None);
     }
 
     #[test]

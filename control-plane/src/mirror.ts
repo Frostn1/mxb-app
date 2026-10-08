@@ -4,9 +4,9 @@
  * Three steps, each with its own budget per cron run so one run can never blow the Worker's
  * CPU or subrequest limits, and each resumable from D1 alone:
  *
- *  1. **Discover.** Walk the REST listing in `modified` order from a stored cursor. A new or
- *     changed post is upserted and its page marked due. A second, cheap cursor sweeps every
- *     post id so `last_seen` stays true and deleted posts drop out of search.
+ *  1. **Discover.** Walk the REST listing of everything modified since the last finished walk
+ *     (`Listing`). A new or changed post is upserted and its page marked due. A second, cheap
+ *     cursor sweeps every post id so `last_seen` stays true and deleted posts drop out of search.
  *  2. **Read pages.** The download links, version and byline are only on the rendered page
  *     (the REST body has none of them), so each due page is fetched once, parsed the way the
  *     app parses it (`apps/manager/src-tauri/src/mods/mxb.rs`), and its options upserted. An
@@ -20,6 +20,7 @@
 
 import { decodeEntities } from "./trackcatalog";
 import { evictUnused, wantLiveTracks } from "./mirrorpolicy";
+import { newPublicId } from "./modids";
 
 export const UA = "mxbsecure-mirror/1 (+https://mxbsecure.com/mods)";
 /** The product token robots.txt groups are matched against. */
@@ -31,16 +32,17 @@ const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;
 
 /** Listing pages walked per run, 50 posts each. */
-const LIST_PAGES_PER_RUN = 2;
+const LIST_PAGES_PER_RUN = 4;
 const LIST_PER_PAGE = 50;
 /** Id-sweep pages per run, 100 ids each. */
 const SWEEP_PAGES_PER_RUN = 1;
-/** Post pages read per run, every 10 minutes: ~2,900 a day, so the ~13k-post backfill takes
- *  about five days, on purpose. Thumbnails count against the same spacing. */
-const PAGES_PER_RUN = 20;
+/** Post pages read per run, every 10 minutes: ~5,700 a day, so the ~13k-post backfill takes
+ *  about two and a half days, on purpose. With their thumbnails that is ~80 requests 3 s
+ *  apart, four minutes of each ten. */
+const PAGES_PER_RUN = 40;
 /** Files handed to the queue per run. The queue consumer's own concurrency is the other cap. */
 const DISPATCH_PER_RUN = 20;
-/** Pause between two requests to mxb-mods.com. A run makes ~25, so ~75 s of a 15 min budget. */
+/** Pause between two requests to mxb-mods.com. A run makes up to ~90, so under five minutes. */
 const SPACING_MS = 3000;
 /** How long the sync leaves the site alone after it refuses a request. */
 const COOLDOWN_MS = 2 * HOUR;
@@ -52,7 +54,8 @@ const ROBOTS_TTL_MS = DAY;
 const CATEGORY_TTL_MS = DAY;
 const PAGE_MAX_ATTEMPTS = 6;
 const MAX_DESCRIPTION = 4000;
-const MAX_THUMB_BYTES = 4 * 1024 * 1024;
+/** A thumbnail larger than this is not copied. */
+export const MAX_THUMB_BYTES = 2 * 1024 * 1024;
 
 export type AssetType = "paints" | "bikes" | "liveries" | "kits" | "tracks" | "other";
 export const ASSET_TYPES: AssetType[] = ["paints", "bikes", "liveries", "kits", "tracks", "other"];
@@ -209,13 +212,36 @@ export function parseVersion(html: string): string | null {
   return text || null;
 }
 
-/** The byline above the title. Scoped to the post header: every comment names an author too. */
+/**
+ * The byline above the title. Scoped to the post header: every comment names an author too.
+ * Then the theme's `#authorName`, then the page's JSON-LD `Person`, then `author` meta.
+ */
 export function parseAuthor(html: string): string | null {
-  const header = /class="post-header"[\s\S]{0,4000}?<\/p>/i.exec(html)?.[0] ?? "";
+  const header = /<[a-z]+\b[^>]*class="[^"]*\bpost-header\b[^"]*"[\s\S]{0,4000}?<\/p>/i.exec(html)?.[0] ?? "";
   const linked = /<a\b[^>]*href="[^"]*\/author\/[^"]*"[^>]*>([\s\S]*?)<\/a>/i.exec(header);
   const byId = /<b\b[^>]*id="authorName"[^>]*>([\s\S]*?)<\/b>/i.exec(html);
-  const name = stripTags(linked?.[1] ?? byId?.[1] ?? "");
-  return name || null;
+  const ld = /"author":\s*\{[^{}]*?"@type":\s*"Person"[^{}]*?"name":\s*"([^"]{1,120})"/.exec(html);
+  const meta = /<meta\s+name="author"\s+content="([^"]{1,120})"/i.exec(html);
+  for (const raw of [linked?.[1], byId?.[1], ld?.[1], meta?.[1]]) {
+    const name = raw ? stripTags(raw).trim() : "";
+    if (name) return name.slice(0, 120);
+  }
+  return null;
+}
+
+/** The page's own picture: `og:image`, else the first image in the post body. */
+export function parseImage(html: string): string | null {
+  const og =
+    /<meta\s+property="og:image"\s+content="([^"]+)"/i.exec(html)?.[1] ??
+    /<meta\s+content="([^"]+)"\s+property="og:image"/i.exec(html)?.[1];
+  const body = /<div\b[^>]*class="[^"]*\bentry-content\b[^"]*"[^>]*>([\s\S]*)/i.exec(html)?.[1] ?? "";
+  const first = /<img\b[^>]*\bsrc="(https:\/\/[^"]+)"/i.exec(body)?.[1];
+  for (const raw of [og, first]) {
+    if (!raw) continue;
+    const url = decodeEntities(raw.trim());
+    if (/^https:\/\//i.test(url)) return url;
+  }
+  return null;
 }
 
 /** Whether a fetched page is Cloudflare's interstitial rather than the post. */
@@ -403,20 +429,33 @@ export interface Post {
   _embedded?: Record<string, any>;
 }
 
-interface Cursor {
-  modified: string;
-  id: number;
-  page: number;
+/**
+ * Where the listing walk stands. mxb-mods.com ignores `order` and `orderby` and always answers
+ * newest-modified first, so the walk doesn't rely on any order: it pages through everything
+ * modified since `hwm` (the newest `modified` a finished walk saw) and only moves `hwm` once
+ * the walk reaches the end. The first walk has no `hwm` and covers the whole catalogue.
+ */
+interface Listing {
+  hwm: string;
+  walk: { top: string; offset: number } | null;
 }
+/** Pages overlap by this many posts, so an edit that shifts the list mid-walk skips nothing. */
+const LIST_OVERLAP = 5;
 
 /** The post's picture at tile size, not the full upload. */
-function thumbOf(p: Post): string | null {
+export function thumbOf(p: Post): string | null {
   const media = p._embedded?.["wp:featuredmedia"]?.[0];
   for (const size of ["medium_large", "medium", "large", "full"]) {
     const src = media?.media_details?.sizes?.[size]?.source_url;
     if (typeof src === "string" && src.startsWith("https://")) return src;
   }
   return typeof media?.source_url === "string" && media.source_url.startsWith("https://") ? media.source_url : null;
+}
+
+/** The post's author from the REST listing's embedded user. */
+export function restAuthor(p: Post): string | null {
+  const name = p._embedded?.author?.[0]?.name;
+  return typeof name === "string" && name.trim() ? decodeEntities(name).trim().slice(0, 120) : null;
 }
 
 /**
@@ -431,12 +470,14 @@ export async function upsertPost(env: Env, p: Post, tree: Map<number, Category>,
   const names = cats.map((c) => tree.get(c)?.name).filter((n): n is string => !!n);
   await env.DB.prepare(
     `INSERT INTO mod_assets (source, source_ref, slug, title, type, bike, categories, description, thumb_src,
-       source_url, modified, first_seen, last_seen, page_status, page_due_at)
-     VALUES ('mirror', ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?11, 'due', 0)
+       source_url, modified, first_seen, last_seen, page_status, page_due_at, public_id, author)
+     VALUES ('mirror', ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?11, 'due', 0, ?12, ?13)
      ON CONFLICT (source_ref) DO UPDATE SET
        slug = excluded.slug, title = excluded.title, type = excluded.type, bike = excluded.bike,
        categories = excluded.categories, description = excluded.description,
-       thumb_src = excluded.thumb_src, source_url = excluded.source_url, last_seen = excluded.last_seen,
+       author = COALESCE(mod_assets.author, excluded.author),
+       thumb_src = COALESCE(excluded.thumb_src, mod_assets.thumb_src), source_url = excluded.source_url,
+       last_seen = excluded.last_seen,
        page_status = CASE WHEN mod_assets.modified = excluded.modified AND mod_assets.page_status <> 'gone'
                           THEN mod_assets.page_status ELSE 'due' END,
        page_attempts = CASE WHEN mod_assets.modified = excluded.modified THEN mod_assets.page_attempts ELSE 0 END,
@@ -455,49 +496,44 @@ export async function upsertPost(env: Env, p: Post, tree: Map<number, Category>,
       p.link,
       p.modified,
       now,
+      newPublicId(),
+      restAuthor(p),
     )
     .run();
 }
 
 async function discover(s: Sync, tree: Map<number, Category>): Promise<void> {
-  let cursor = (await getState<Cursor>(s.env, "cursor")) ?? { modified: "", id: 0, page: 1 };
+  const st = (await getState<Listing>(s.env, "listing")) ?? { hwm: "", walk: null };
   for (let n = 0; n < LIST_PAGES_PER_RUN; n++) {
+    const walk = st.walk ?? { top: "", offset: 0 };
+    st.walk = walk;
     const u = new URL("/wp-json/wp/v2/posts", MODS_BASE);
     u.searchParams.set("orderby", "modified");
-    u.searchParams.set("order", "asc");
+    u.searchParams.set("order", "desc");
     u.searchParams.set("per_page", String(LIST_PER_PAGE));
-    u.searchParams.set("page", String(cursor.page));
-    u.searchParams.set("_embed", "wp:featuredmedia");
+    if (walk.offset > 0) u.searchParams.set("offset", String(walk.offset));
+    u.searchParams.set("_embed", "wp:featuredmedia,author");
     u.searchParams.set("_fields", "id,slug,link,modified,title,content,categories,_links,_embedded");
-    // One second back from the cursor, so posts sharing its timestamp are not skipped; the
-    // (modified, id) check below drops the ones already taken.
-    if (cursor.modified) u.searchParams.set("modified_after", minusOneSecond(cursor.modified));
+    // One second back, so posts sharing the high-water second are not skipped.
+    if (st.hwm) u.searchParams.set("modified_after", minusOneSecond(st.hwm));
     const res = await modsGet(s, u);
     if (!res) return;
-    // WordPress answers a page past the end with 400.
-    if (res.status === 400) {
-      if (cursor.page > 1) await setState(s.env, "cursor", { ...cursor, page: 1 });
+    // WordPress answers an offset past the end with 400: the walk is done.
+    const posts = res.status === 400 ? [] : res.ok ? ((await res.json()) as Post[]) : null;
+    if (!posts) throw new Error(`listing answered ${res.status}`);
+    for (const p of posts) {
+      await upsertPost(s.env, p, tree, s.now);
+      if (p.modified > walk.top) walk.top = p.modified;
+    }
+    if (posts.length < LIST_PER_PAGE) {
+      if (walk.top > st.hwm) st.hwm = walk.top;
+      st.walk = null;
+      await setState(s.env, "listing", st);
       return;
     }
-    if (!res.ok) throw new Error(`listing answered ${res.status}`);
-    const posts = (await res.json()) as Post[];
-    const fresh = posts.filter((p) => after(p, cursor));
-    for (const p of fresh) await upsertPost(s.env, p, tree, s.now);
-    if (fresh.length > 0) {
-      const last = fresh[fresh.length - 1];
-      cursor = { modified: last.modified, id: last.id, page: 1 };
-    } else if (posts.length === LIST_PER_PAGE) {
-      // A full page of posts all at the cursor's second: step past it by page.
-      cursor = { ...cursor, page: cursor.page + 1 };
-    }
-    await setState(s.env, "cursor", cursor);
-    if (posts.length < LIST_PER_PAGE) return;
+    walk.offset += LIST_PER_PAGE - LIST_OVERLAP;
+    await setState(s.env, "listing", st);
   }
-}
-
-function after(p: Post, c: Cursor): boolean {
-  if (!c.modified) return true;
-  return p.modified > c.modified || (p.modified === c.modified && p.id > c.id);
 }
 
 export function minusOneSecond(local: string): string {
@@ -524,10 +560,13 @@ async function sweep(s: Sync): Promise<void> {
     if (!res) return;
     const ids = res.ok ? ((await res.json()) as { id: number }[]).map((p) => p.id) : [];
     if (res.ok && ids.length > 0) {
+      // One JSON parameter, not one per id: D1 refuses a statement with more than 100 bound
+      // parameters, and a page is 100 ids plus the time. That refusal used to stop every run
+      // here, before a single page was read.
       await s.env.DB.prepare(
-        `UPDATE mod_assets SET last_seen = ? WHERE source = 'mirror' AND source_ref IN (${ids.map(() => "?").join(",")})`,
+        `UPDATE mod_assets SET last_seen = ? WHERE source = 'mirror' AND source_ref IN (SELECT value FROM json_each(?))`,
       )
-        .bind(s.now, ...ids)
+        .bind(s.now, JSON.stringify(ids))
         .run();
     }
     if (res.status === 400 || (res.ok && ids.length < 100)) {
@@ -553,12 +592,13 @@ interface DueAsset {
   id: number;
   source_url: string;
   thumb_src: string | null;
+  thumb_key: string | null;
   page_attempts: number;
 }
 
 async function readPages(s: Sync): Promise<void> {
   const { results } = await s.env.DB.prepare(
-    `SELECT id, source_url, thumb_src, page_attempts FROM mod_assets
+    `SELECT id, source_url, thumb_src, thumb_key, page_attempts FROM mod_assets
      WHERE source = 'mirror' AND page_status IN ('due', 'retry') AND page_due_at <= ?
      ORDER BY page_due_at, id LIMIT ?`,
   )
@@ -596,15 +636,17 @@ async function readPage(s: Sync, asset: DueAsset): Promise<void> {
   const downloads = parseDownloads(html);
   if (downloads.length === 0 && isChallenge(html)) return pageRetry(s, asset, "challenge page");
 
-  const thumbSha = await copyThumb(s, asset);
-  const version = parseVersion(html);
+  // The links first: they are what the page is for, and nothing after may lose them.
+  await writeMirrorVersion(s.env, asset.id, parseVersion(html), downloads, s.now);
+  const src = asset.thumb_src ?? parseImage(html);
+  const thumb = asset.thumb_key ? null : await copyThumb(s, src);
   await s.env.DB.prepare(
-    `UPDATE mod_assets SET author = ?, thumb_sha = COALESCE(?, thumb_sha), page_status = 'ok', page_attempts = 0,
-       page_error = NULL WHERE id = ?`,
+    `UPDATE mod_assets SET author = COALESCE(?, author), thumb_src = COALESCE(thumb_src, ?),
+       thumb_sha = COALESCE(?, thumb_sha), thumb_key = COALESCE(?, thumb_key),
+       page_status = 'ok', page_attempts = 0, page_error = NULL WHERE id = ?`,
   )
-    .bind(parseAuthor(html), thumbSha, asset.id)
+    .bind(parseAuthor(html), src, thumb?.sha ?? null, thumb?.key ?? null, asset.id)
     .run();
-  await writeMirrorVersion(s.env, asset.id, version, downloads, s.now);
 }
 
 async function pageRetry(s: Sync, asset: DueAsset, error: string): Promise<void> {
@@ -697,40 +739,83 @@ export async function writeMirrorVersion(
   return vid;
 }
 
-/** The featured image, into the public bucket by SHA-256 under `other/`. */
-async function copyThumb(s: Sync, asset: DueAsset): Promise<string | null> {
-  if (!asset.thumb_src || !s.env.ASSET_MIRROR) return null;
+/**
+ * The featured image, copied into the public bucket as `thumbs/<sha256>.<ext>`. A Worker has no
+ * image library, so it isn't resized here: the sync asks WordPress for its 768-wide size
+ * (`thumbOf`) and anything over the cap is skipped.
+ */
+async function copyThumb(s: Sync, src: string | null): Promise<Thumb | null> {
+  if (!src || !s.env.ASSET_MIRROR) return null;
   const known = await s.env.DB.prepare(
-    "SELECT thumb_sha FROM mod_assets WHERE thumb_src = ? AND thumb_sha IS NOT NULL LIMIT 1",
+    "SELECT thumb_sha AS sha, thumb_key AS key FROM mod_assets WHERE thumb_src = ? AND thumb_key IS NOT NULL LIMIT 1",
   )
-    .bind(asset.thumb_src)
-    .first<{ thumb_sha: string }>();
-  if (known) return known.thumb_sha;
+    .bind(src)
+    .first<Thumb>();
+  if (known) return known;
   try {
-    const u = new URL(asset.thumb_src);
+    const u = new URL(src);
     if (u.hostname !== "mxb-mods.com") return null;
     const res = await modsGet(s, u, "image/*");
-    const type = res?.headers.get("content-type") ?? "";
-    if (!res || !res.ok || !type.startsWith("image/")) return null;
+    const type = (res?.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase();
+    if (!res || !res.ok || !thumbExt(type)) return null;
     const bytes = await res.arrayBuffer();
     if (bytes.byteLength === 0 || bytes.byteLength > MAX_THUMB_BYTES) return null;
-    return await putSmallBlob(s.env, bytes, type, urlFileName(asset.thumb_src), s.now);
+    return await putThumb(s.env, bytes, type, urlFileName(src), s.now);
   } catch (err) {
     if (err instanceof Refused) throw err;
     return null;
   }
 }
 
-/** A small buffer (a picture) into the public bucket under `other/<sha256>`. */
+export interface Thumb {
+  sha: string;
+  key: string;
+}
+
+/** The picture types a thumbnail may be, and the extension each is stored under. */
+const THUMB_TYPES: Record<string, string> = {
+  "image/jpeg": "jpg",
+  "image/png": "png",
+  "image/webp": "webp",
+  "image/gif": "gif",
+  "image/avif": "avif",
+};
+export function thumbExt(type: string): string | null {
+  return THUMB_TYPES[type] ?? null;
+}
+
+/** Does the start of the file match the type it claims? A renamed file is not a picture. */
+export function sniffImage(bytes: Uint8Array): string | null {
+  const b = bytes;
+  const at = (i: number, s: string) => [...s].every((c, j) => b[i + j] === c.charCodeAt(0));
+  if (b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return "image/jpeg";
+  if (b[0] === 0x89 && at(1, "PNG")) return "image/png";
+  if (at(0, "RIFF") && at(8, "WEBP")) return "image/webp";
+  if (at(0, "GIF8")) return "image/gif";
+  if (at(4, "ftypavif") || at(4, "ftypavis")) return "image/avif";
+  return null;
+}
+
+/** A picture into the public bucket as `thumbs/<sha256>.<ext>`, once per distinct file. */
+export async function putThumb(env: Env, bytes: ArrayBuffer, type: string, filename: string, now: number): Promise<Thumb> {
+  const ext = thumbExt(type) ?? "bin";
+  const sha = await putSmallBlob(env, bytes, type, filename, now, (s) => `thumbs/${s}.${ext}`);
+  // The same bytes stored earlier keep the key they were stored under.
+  const row = await env.DB.prepare("SELECT r2_key FROM mod_blobs WHERE sha256 = ?").bind(sha).first<{ r2_key: string }>();
+  return { sha, key: row?.r2_key ?? `thumbs/${sha}.${ext}` };
+}
+
+/** A small buffer (a picture) into the public bucket, by default under `other/<sha256>`. */
 export async function putSmallBlob(
   env: Env,
   bytes: ArrayBuffer,
   type: string,
   filename: string,
   now: number,
+  keyOf: (sha: string) => string = (sha) => `other/${sha}`,
 ): Promise<string> {
   const sha = hex(await crypto.subtle.digest("SHA-256", bytes));
-  const key = `other/${sha}`;
+  const key = keyOf(sha);
   const have = await env.DB.prepare("SELECT 1 FROM mod_blobs WHERE sha256 = ?").bind(sha).first();
   if (!have) {
     await env.ASSET_MIRROR.put(key, bytes, {
@@ -817,13 +902,23 @@ export async function runMirror(env: Env, opts: RunOptions = {}): Promise<void> 
     rules: await loadRobots(env, now, f),
     sent: 0,
   };
-  try {
-    const tree = await loadCategories(s);
-    if (tree.size > 0) await discover(s, tree);
-    await sweep(s);
-    await readPages(s);
-  } catch (err) {
-    console.error(JSON.stringify({ msg: "mirror sync stopped", error: String(err) }));
+  // Each step on its own: one that fails (a D1 error, a bad listing) must not keep the others
+  // from running. A refusal from the site stops them all, by design.
+  const steps: [string, () => Promise<void>][] = [
+    ["discover", async () => {
+      const tree = await loadCategories(s);
+      if (tree.size > 0) await discover(s, tree);
+    }],
+    ["sweep", () => sweep(s)],
+    ["pages", () => readPages(s)],
+  ];
+  for (const [step, run] of steps) {
+    try {
+      await run();
+    } catch (err) {
+      console.error(JSON.stringify({ msg: "mirror sync step failed", step, error: String(err) }));
+      if (err instanceof Refused) break;
+    }
   }
   await dispatchStep();
 }

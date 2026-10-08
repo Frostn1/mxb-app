@@ -59,7 +59,11 @@ export function d1(): Env["DB"] {
   const statement = (sql: string, args: unknown[] = []) => ({
     sql,
     args,
-    bind: (...next: unknown[]) => statement(sql, next),
+    bind: (...next: unknown[]) => {
+      // D1's own limit, which SQLite doesn't have: a statement binds at most 100 parameters.
+      if (next.length > 100) throw new Error("D1_ERROR: too many SQL variables");
+      return statement(sql, next);
+    },
     async first<T>() {
       return (rows(sql, args)[0] ?? null) as T | null;
     },

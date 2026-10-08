@@ -16,9 +16,26 @@ export const MAX_BIKE = 120;
 export const MAX_VERSION = 40;
 export const MAX_NOTES = 2000;
 
-/** Where a live mod's page is (mxbsecure-web `pages/mods.tsx`). */
-export function modPageUrl(assetId: number): string {
-  return `https://mxbsecure.com/mods?mod=${assetId}`;
+/** The size limit for a mod's picture (`control-plane/src/mirror.ts` `MAX_THUMB_BYTES`). */
+export const MAX_THUMB_BYTES = 2 * 1024 ** 2;
+export const THUMB_EXTENSIONS = ["jpg", "jpeg", "png", "webp", "gif", "avif"];
+
+/** "2026 RedBull KTM — Factory!" → "2026-redbull-ktm-factory" (`control-plane/src/modids.ts` `modSlug`). */
+export function modSlug(title: string): string {
+  const s = title
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 60)
+    .replace(/-+$/, "");
+  return s || "mod";
+}
+
+/** Where a mod's page is: mxbsecure.com/mods/<slug>-<public id> (mxbsecure-web `pages/mods.tsx`). */
+export function modPageUrl(title: string, assetId: string): string {
+  return `https://mxbsecure.com/mods/${modSlug(title)}-${assetId}`;
 }
 
 /** Types whose files are made for one bike, so the bike is asked for. */
@@ -106,8 +123,10 @@ export interface UploadForm {
   visibility: UploadMeta["visibility"];
   version: string;
   notes: string;
-  /** A new version of this mod; null for a new one. */
-  assetId: number | null;
+  /** A new version of this mod (its public id); null for a new one. */
+  assetId: string | null;
+  /** A picture to set once the mod is up; null for none. */
+  thumbPath: string | null;
 }
 
 export const EMPTY_FORM: UploadForm = {
@@ -119,6 +138,7 @@ export const EMPTY_FORM: UploadForm = {
   version: "",
   notes: "",
   assetId: null,
+  thumbPath: null,
 };
 
 /** Every field problem, in form order. A new version may leave title and type to the mod. */
@@ -149,6 +169,7 @@ export function toMeta(form: UploadForm): UploadMeta {
     version: form.version.trim() || null,
     notes: form.assetId !== null ? form.notes.trim() || null : null,
     assetId: form.assetId,
+    thumbPath: form.thumbPath,
   };
 }
 

@@ -1,10 +1,10 @@
 /**
  * Reports and moderation for the mod catalogue.
  *
- *   POST /v1/assets/<id>/report          anyone: {reason, details}. Capped per address a day.
+ *   POST /v1/assets/<uuid>/report         anyone: {reason, details}. Capped per address a day.
  *   GET  /v1/web/mods/queue              admins: reported mods, most-reported first, plus the
  *                                        newest uploads (the queue a moderator reads)
- *   POST /v1/web/mods/<id>/moderate      admins: {action: hide | unhide | remove | dismiss, note}
+ *   POST /v1/web/mods/<uuid>/moderate     admins: {action: hide | unhide | remove | dismiss, note}
  *
  * The admin half is gated on the Steam sign-in of the site (`ADMIN_STEAM_IDS`), like the
  * racing and servers consoles, and lives under its own `/v1/web/mods/` prefix rather than
@@ -19,6 +19,7 @@ import { cors, refuseCrossSiteWrite } from "./assets";
 import { freeBlobs } from "./uploads";
 import { ipDigest } from "./voice";
 import { webSession } from "./websession";
+import { internalId, UUID_RE } from "./modids";
 import { isWebAdmin } from "./webadmin";
 
 export const REPORT_REASONS = ["broken", "stolen", "malware", "offensive", "other"] as const;
@@ -60,7 +61,7 @@ export function isWebModsPath(path: string): boolean {
 
 export async function moderationQueue(env: Env): Promise<Result> {
   const reported = await env.DB.prepare(
-    `SELECT a.id, a.source, a.title, a.type, a.state, a.visibility, a.owner_account, a.author, a.reports_open,
+    `SELECT a.public_id AS id, a.source, a.title, a.type, a.state, a.visibility, a.author, a.reports_open,
        (SELECT json_group_array(json_object('reason', r.reason, 'details', r.details, 'at', r.created_at))
           FROM (SELECT * FROM mod_reports r WHERE r.asset_id = a.id AND r.resolved_at IS NULL
                 ORDER BY r.created_at DESC LIMIT 20) r) AS reports
@@ -68,12 +69,13 @@ export async function moderationQueue(env: Env): Promise<Result> {
      ORDER BY a.reports_open DESC, a.id DESC LIMIT 100`,
   ).all<Record<string, unknown> & { reports: string }>();
   const fresh = await env.DB.prepare(
-    `SELECT a.id, a.title, a.type, a.state, a.visibility, a.author, a.first_seen
+    `SELECT a.public_id AS id, a.title, a.type, a.state, a.visibility, a.author, a.first_seen
      FROM mod_assets a WHERE a.source = 'upload' AND a.state IN ('active', 'hidden')
      ORDER BY a.first_seen DESC LIMIT 50`,
   ).all();
   const rejected = await env.DB.prepare(
-    `SELECT u.id, u.asset_id, u.filename, u.size, u.error, u.created_at FROM mod_uploads u
+    `SELECT u.id, (SELECT a.public_id FROM mod_assets a WHERE a.id = u.asset_id) AS asset_id, u.filename, u.size, u.error,
+       u.created_at FROM mod_uploads u
      WHERE u.state = 'rejected' ORDER BY u.created_at DESC LIMIT 50`,
   ).all();
   return {
@@ -128,6 +130,8 @@ export async function moderate(
   return { status: 200, body: { ok: true } };
 }
 
+const MODERATE = new RegExp(`^/v1/web/mods/(${UUID_RE.source})/moderate$`, "i");
+
 export async function webModRoutes(request: Request, url: URL, env: Env, origin: string | null): Promise<Response> {
   const say = (status: number, body: unknown) => {
     const res = cors(
@@ -149,11 +153,13 @@ export async function webModRoutes(request: Request, url: URL, env: Env, origin:
     const r = await moderationQueue(env);
     return say(r.status, r.body);
   }
-  const m = /^\/v1\/web\/mods\/(\d{1,12})\/moderate$/.exec(url.pathname);
+  const m = MODERATE.exec(url.pathname);
   if (m && request.method === "POST") {
+    const id = await internalId(env, m[1]);
+    if (id === null) return say(404, { error: "no such mod" });
     const b = ((await request.json().catch(() => null)) ?? {}) as Record<string, unknown>;
     const r = await moderate(
-      Number(m[1]),
+      id,
       String(b.action ?? ""),
       typeof b.note === "string" ? b.note.slice(0, 500) : null,
       `steam:${session.steamId}`,

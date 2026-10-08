@@ -15,6 +15,7 @@ import {
 } from "../src/uploads";
 import { verifyUpload } from "../src/uploadcheck";
 import { addAccount, d1 } from "./d1sqlite";
+import { internalId } from "../src/modids";
 import { fakeBucket, fakeFetch, fakePe, fakeQueue, makeZip, nodeHasher, sha256 } from "./modfakes";
 
 const RIDER: Uploader = { id: "acc-rider", rider_name: "Frosty", steam_id: "steam-rider" };
@@ -190,11 +191,11 @@ describe("checking an upload", () => {
     const e = await env();
     const a = await upload(e, await makeZip([{ name: "a.pnt", data: "PNT\0one" }]));
     await verifyUpload(e, a.id, { hasher: nodeHasher });
-    const assetId = (a.done.body as { asset_id: number }).asset_id;
+    const assetId = (a.done.body as { asset_id: string }).asset_id;
     const b = await upload(e, await makeZip([{ name: "a.pnt", data: "PNT\0two" }]), { asset_id: assetId, version: "v2", title: undefined });
     await verifyUpload(e, b.id, { hasher: nodeHasher });
     expect((await e.DB.prepare("SELECT COUNT(*) AS n FROM mod_assets").first())).toEqual({ n: 1 });
-    const got = (await getAsset(assetId, new URL("https://api/x"), e)).body as { version: string; version_seq: number; versions: unknown[] };
+    const got = (await getAsset((await internalId(e, assetId))!, new URL("https://api/x"), e)).body as { version: string; version_seq: number; versions: unknown[] };
     expect(got).toMatchObject({ version: "v2", version_seq: 2 });
     expect(got.versions).toHaveLength(2);
     // Someone else can't add a version to it.
@@ -207,8 +208,10 @@ describe("owners, visibility and moderation", () => {
   async function published(e: Awaited<ReturnType<typeof env>>, meta: Record<string, unknown> = {}) {
     const u = await upload(e, await makeZip([{ name: "a.pnt", data: `PNT\0${JSON.stringify(meta)}` }]), meta);
     await verifyUpload(e, u.id, { hasher: nodeHasher });
-    return (u.done.body as { asset_id: number }).asset_id;
+    return (await internalId(e, (u.done.body as { asset_id: string }).asset_id))!;
   }
+  const publicId = async (e: Env, id: number) =>
+    (await e.DB.prepare("SELECT public_id FROM mod_assets WHERE id = ?").bind(id).first<{ public_id: string }>())!.public_id;
   const search = async (e: Env, q = "") =>
     ((await searchAssets(new URL(`https://x/v1/assets/search?q=${q}`), e)).body as { total: number }).total;
 
@@ -240,8 +243,8 @@ describe("owners, visibility and moderation", () => {
       reportAsset(new Request("https://x", { method: "POST", headers: { "CF-Connecting-IP": "1.2.3.4" }, body: JSON.stringify({ reason }) }), id, e);
     expect((await report("nonsense")).status).toBe(400);
     expect((await report("stolen")).status).toBe(201);
-    const q = (await moderationQueue(e)).body as { reported: { id: number; reports_open: number; reports: { reason: string }[] }[] };
-    expect(q.reported).toMatchObject([{ id, reports_open: 1, reports: [{ reason: "stolen" }] }]);
+    const q = (await moderationQueue(e)).body as { reported: { id: string; reports_open: number; reports: { reason: string }[] }[] };
+    expect(q.reported).toMatchObject([{ id: await publicId(e, id), reports_open: 1, reports: [{ reason: "stolen" }] }]);
 
     await moderate(id, "hide", "checking with the author", "steam:admin", e);
     expect(await search(e)).toBe(0);
@@ -271,13 +274,13 @@ describe("the public routes", () => {
     const zip = await makeZip([{ name: "a.pnt", data: "PNT\0" }]);
     const u = await upload(e, zip, { title: "Monster Energy Kawasaki", bike: "Kawasaki; KX450F" });
     await verifyUpload(e, u.id, { hasher: nodeHasher });
-    const id = (u.done.body as { asset_id: number }).asset_id;
+    const id = (u.done.body as { asset_id: string }).asset_id;
     const get = (path: string) => publicModRoutes(new Request(`https://api.mxbsecure.com${path}`), new URL(`https://api.mxbsecure.com${path}`), e);
 
     const s = await get("/v1/assets/search?q=monst%20kawa&type=liveries&bike=kx450");
     expect(s!.status).toBe(200);
     expect(s!.headers.get("access-control-allow-origin")).toBe("*");
-    const body = (await s!.json()) as { results: { id: number; bike: string[] }[] };
+    const body = (await s!.json()) as { results: { id: string; bike: string[] }[] };
     expect(body.results.map((r) => r.id)).toEqual([id]);
     expect(body.results[0].bike).toEqual(["Kawasaki", "KX450F"]);
 

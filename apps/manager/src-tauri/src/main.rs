@@ -9182,6 +9182,7 @@ fn main() {
             modupload::mod_edit,
             modupload::mod_details,
             modupload::mod_delete,
+            modupload::mod_set_thumb,
             log_client,
             logs_info,
             share_logs,

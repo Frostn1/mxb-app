@@ -5,7 +5,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { open as pickFile } from "@tauri-apps/plugin-dialog";
 import { toast } from "sonner";
-import { FileArchive, Loader2, Upload } from "lucide-react";
+import { FileArchive, ImageIcon, Loader2, Upload, X } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -39,6 +39,7 @@ import {
   fileProblem,
   MAX_DESCRIPTION,
   needsBike,
+  THUMB_EXTENSIONS,
   toMeta,
   type FieldProblem,
   type FileProblem,
@@ -174,9 +175,14 @@ export default function UploadDialog({
     setSending(false);
   };
 
+  const browsePicture = async () => {
+    const picked = await pickFile({ multiple: false, filters: [{ name: "Image", extensions: THUMB_EXTENSIONS }] });
+    if (typeof picked === "string") set("thumbPath", picked);
+  };
+
   const pickVersionOf = (v: string) => {
     if (v === NEW_MOD) return setForm({ ...EMPTY_FORM });
-    const m = mods.find((x) => String(x.id) === v);
+    const m = mods.find((x) => x.id === v);
     if (m) setForm((f) => ({ ...f, assetId: m.id, title: m.title, type: m.modType as ModKind, visibility: m.visibility }));
   };
 
@@ -219,14 +225,14 @@ export default function UploadDialog({
 
           {!versionOf && editable.length > 0 && (
             <Field label={t("upload.fieldVersionOf")}>
-              <Select value={form.assetId === null ? NEW_MOD : String(form.assetId)} onValueChange={pickVersionOf}>
+              <Select value={form.assetId === null ? NEW_MOD : form.assetId} onValueChange={pickVersionOf}>
                 <SelectTrigger className="h-9">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value={NEW_MOD}>{t("upload.fieldNewMod")}</SelectItem>
                   {editable.map((m) => (
-                    <SelectItem key={m.id} value={String(m.id)}>
+                    <SelectItem key={m.id} value={m.id}>
                       {m.title}
                     </SelectItem>
                   ))}
@@ -277,6 +283,22 @@ export default function UploadDialog({
               rows={4}
               className="w-full resize-y rounded-lg border border-input bg-transparent px-3 py-2 text-[13px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
             />
+          </Field>
+
+          <Field label={t("upload.fieldPicture")}>
+            <div className="flex items-center gap-2">
+              <Button type="button" variant="outline" size="sm" onClick={() => void browsePicture()}>
+                <ImageIcon className="size-3.5" /> {t("upload.pickPicture")}
+              </Button>
+              {form.thumbPath && (
+                <>
+                  <span className="min-w-0 truncate text-[12px] text-muted-foreground">{form.thumbPath.split(/[\\/]/).pop()}</span>
+                  <Button type="button" variant="ghost" size="icon" className="h-7 w-7" onClick={() => set("thumbPath", null)}>
+                    <X className="size-3.5" />
+                  </Button>
+                </>
+              )}
+            </div>
           </Field>
 
           <div className="flex gap-3">

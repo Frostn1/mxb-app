@@ -9,8 +9,11 @@
  *                                      for checking (`verifying`)
  *   DELETE /v1/uploads/<id>            abandon it
  *   GET    /v1/me/mods                 the caller's own mods, every state
- *   PATCH  /v1/assets/<id>             the owner edits title/description/bike/visibility
- *   DELETE /v1/assets/<id>             the owner deletes their mod
+ *   PATCH  /v1/assets/<uuid>           the owner edits title/description/bike/visibility
+ *   PUT    /v1/assets/<uuid>/thumb     the owner sets the mod's picture (the image as the body)
+ *   DELETE /v1/assets/<uuid>           the owner deletes their mod
+ *
+ * A mod is named by its public UUID here as everywhere outside D1 (`modids.ts`).
  *
  * The bytes land in the private bucket under `quarantine/`, which nothing serves. The mirror
  * worker (`uploadcheck.ts` `verifyUpload`, run by `mirror/index.ts`) then checks the size and SHA-256 the app declared, the archive's
@@ -27,6 +30,9 @@ import { AwsClient } from "aws4fetch";
 import { ASSET_TYPES, hex, type AssetType, type MirrorJob } from "./mirror";
 import { ScanError, MAX_PNT_BYTES } from "./modscan";
 import { reject } from "./uploadcheck";
+import { isPublicId, newPublicId } from "./modids";
+import { MAX_THUMB_BYTES, putThumb, sniffImage, thumbExt } from "./mirror";
+import { cdnBase } from "./modapi";
 
 export const MAX_UPLOAD_BYTES = 2 * 1024 ** 3;
 export const PART_BYTES = 32 * 1024 * 1024;
@@ -94,7 +100,7 @@ export function kindOf(filename: string): Kind | null {
 }
 
 /** The session request, checked. A string is the reason it was refused. */
-export function parseOpen(body: unknown): { meta: Meta; filename: string; size: number; sha256: string; kind: Kind; assetId: number | null } | string {
+export function parseOpen(body: unknown): { meta: Meta; filename: string; size: number; sha256: string; kind: Kind; assetId: string | null } | string {
   const b = (body ?? {}) as Record<string, unknown>;
   const filename = str(b.filename, 200);
   if (!filename) return "filename is required";
@@ -106,8 +112,8 @@ export function parseOpen(body: unknown): { meta: Meta; filename: string; size: 
   if (size > max) return `the file is larger than the ${max} byte limit`;
   const sha256 = typeof b.sha256 === "string" ? b.sha256.toLowerCase() : "";
   if (!/^[0-9a-f]{64}$/.test(sha256)) return "sha256 must be 64 hex characters";
-  const assetId = b.asset_id === undefined || b.asset_id === null ? null : Number(b.asset_id);
-  if (assetId !== null && !Number.isInteger(assetId)) return "asset_id must be a number";
+  const assetId = b.asset_id === undefined || b.asset_id === null ? null : String(b.asset_id).toLowerCase();
+  if (assetId !== null && !isPublicId(assetId)) return "asset_id must be a mod's id";
   const title = str(b.title, 120);
   const type = typeof b.type === "string" && ASSET_TYPES.includes(b.type as AssetType) ? (b.type as AssetType) : null;
   // A new version may leave the asset's own fields alone.
@@ -227,12 +233,14 @@ export async function openUpload(request: Request, who: Uploader, env: Env, now 
   const parsed = parseOpen(await request.json().catch(() => null));
   if (typeof parsed === "string") return { status: 400, body: { error: parsed } };
 
+  let assetId: number | null = null;
   if (parsed.assetId !== null) {
-    const asset = await env.DB.prepare("SELECT owner_account, state, source FROM mod_assets WHERE id = ?")
+    const asset = await env.DB.prepare("SELECT id, owner_account, state, source FROM mod_assets WHERE public_id = ?")
       .bind(parsed.assetId)
-      .first<{ owner_account: string | null; state: string; source: string }>();
+      .first<{ id: number; owner_account: string | null; state: string; source: string }>();
     if (!asset || asset.source !== "upload" || asset.owner_account !== who.id || asset.state === "deleted" || asset.state === "removed")
       return { status: 404, body: { error: "no such mod of yours" } };
+    assetId = asset.id;
   }
   const refusal = await quotaRefusal(env, who.id, parsed.size, now);
   if (refusal) return { status: 429, body: { error: refusal } };
@@ -255,7 +263,7 @@ export async function openUpload(request: Request, who: Uploader, env: Env, now 
     .bind(
       id,
       who.id,
-      parsed.assetId,
+      assetId,
       key,
       mp.uploadId,
       parsed.filename,
@@ -293,8 +301,7 @@ export async function uploadStatus(id: string, who: Uploader, env: Env, now = Da
     id: row.id,
     state: row.state,
     error: row.error,
-    asset_id: row.asset_id,
-    version_id: row.version_id,
+    asset_id: await publicIdOf(env, row.asset_id),
   };
   if (row.state === "open" && row.expires_at > now && s3(env)) {
     const have = await listParts(env, row, f);
@@ -350,16 +357,22 @@ export async function completeUpload(
     .first<{ id: number }>();
   await env.DB.prepare("UPDATE mod_uploads SET asset_id = ?, version_id = ? WHERE id = ?").bind(assetId, v!.id, id).run();
   await env.MIRROR_QUEUE.send({ kind: "upload", id } satisfies MirrorJob);
-  return { status: 202, body: { id, state: "verifying", asset_id: assetId, version_id: v!.id } };
+  return { status: 202, body: { id, state: "verifying", asset_id: await publicIdOf(env, assetId) } };
+}
+
+async function publicIdOf(env: Env, id: number | null): Promise<string | null> {
+  if (id === null) return null;
+  const row = await env.DB.prepare("SELECT public_id FROM mod_assets WHERE id = ?").bind(id).first<{ public_id: string }>();
+  return row?.public_id ?? null;
 }
 
 async function createAsset(env: Env, who: Uploader, meta: Meta, now: number): Promise<number> {
   const row = await env.DB.prepare(
-    `INSERT INTO mod_assets (source, owner_account, visibility, state, title, author, type, bike, description,
+    `INSERT INTO mod_assets (public_id, source, owner_account, visibility, state, title, author, type, bike, description,
        modified, first_seen, last_seen, page_status)
-     VALUES ('upload', ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, 'ok') RETURNING id`,
+     VALUES (?, 'upload', ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, 'ok') RETURNING id`,
   )
-    .bind(who.id, meta.visibility, meta.title, who.rider_name, meta.type, meta.bike, meta.description, new Date(now).toISOString(), now, now)
+    .bind(newPublicId(), who.id, meta.visibility, meta.title, who.rider_name, meta.type, meta.bike, meta.description, new Date(now).toISOString(), now, now)
     .first<{ id: number }>();
   return row!.id;
 }
@@ -377,19 +390,53 @@ export async function abortUpload(id: string, who: Uploader, env: Env, now = Dat
 
 export async function myMods(who: Uploader, env: Env): Promise<Result> {
   const { results } = await env.DB.prepare(
-    `SELECT a.id, a.title, a.type, a.visibility, a.state, a.modified, a.current_version,
+    `SELECT a.public_id AS id, a.title, a.type, a.visibility, a.state, a.modified, a.thumb_key, a.current_version,
        (SELECT COUNT(*) FROM mod_reports r WHERE r.asset_id = a.id AND r.resolved_at IS NULL) AS reports
      FROM mod_assets a WHERE a.owner_account = ? AND a.state <> 'deleted' ORDER BY a.modified DESC LIMIT 200`,
   )
     .bind(who.id)
-    .all();
+    .all<Record<string, unknown> & { thumb_key: string | null; current_version: number | null }>();
   const uploads = await env.DB.prepare(
-    `SELECT id, asset_id, version_id, filename, size, state, error, created_at FROM mod_uploads
-     WHERE account_id = ? AND state IN ('open', 'verifying', 'rejected') ORDER BY created_at DESC LIMIT 50`,
+    `SELECT u.id, a.public_id AS asset_id, u.filename, u.size, u.state, u.error, u.created_at FROM mod_uploads u
+     LEFT JOIN mod_assets a ON a.id = u.asset_id
+     WHERE u.account_id = ? AND u.state IN ('open', 'verifying', 'rejected') ORDER BY u.created_at DESC LIMIT 50`,
   )
     .bind(who.id)
     .all();
-  return { status: 200, body: { mods: results, uploads: uploads.results, quota: QUOTA } };
+  // `live`: a version has been published. The version's own id stays inside D1.
+  const mods = results.map(({ thumb_key, current_version, ...m }) => ({
+    ...m,
+    live: current_version !== null,
+    thumb: thumb_key ? `${cdnBase(env)}/${thumb_key}` : null,
+  }));
+  return { status: 200, body: { mods, uploads: uploads.results, quota: QUOTA } };
+}
+
+/**
+ * The owner sets their mod's picture: the image itself as the request body, JPEG, PNG, WebP,
+ * GIF or AVIF, at most `MAX_THUMB_BYTES`. Checked by its first bytes, not by what it claims.
+ * Stored like a mirrored post's picture, `thumbs/<sha256>.<ext>` in the public bucket.
+ */
+export async function setThumb(request: Request, assetId: number, who: Uploader, env: Env, now = Date.now()): Promise<Result> {
+  const owned = await env.DB.prepare(
+    "SELECT 1 FROM mod_assets WHERE id = ? AND owner_account = ? AND state IN ('active', 'hidden')",
+  )
+    .bind(assetId, who.id)
+    .first();
+  if (!owned) return { status: 404, body: { error: "no such mod of yours" } };
+  const tooBig = { status: 413, body: { error: `the picture is larger than ${MAX_THUMB_BYTES} bytes` } };
+  if (Number(request.headers.get("content-length") ?? "0") > MAX_THUMB_BYTES) return tooBig;
+  const bytes = await request.arrayBuffer();
+  if (bytes.byteLength === 0) return { status: 400, body: { error: "the picture is empty" } };
+  if (bytes.byteLength > MAX_THUMB_BYTES) return tooBig;
+  const type = sniffImage(new Uint8Array(bytes));
+  const ext = type ? thumbExt(type) : null;
+  if (!type || !ext) return { status: 415, body: { error: "the picture must be a JPEG, PNG, WebP, GIF or AVIF" } };
+  const thumb = await putThumb(env, bytes, type, `thumb.${ext}`, now);
+  await env.DB.prepare("UPDATE mod_assets SET thumb_sha = ?, thumb_key = ?, thumb_src = NULL WHERE id = ?")
+    .bind(thumb.sha, thumb.key, assetId)
+    .run();
+  return { status: 200, body: { thumb: `${cdnBase(env)}/${thumb.key}` } };
 }
 
 export async function editMod(request: Request, assetId: number, who: Uploader, env: Env, now = Date.now()): Promise<Result> {
