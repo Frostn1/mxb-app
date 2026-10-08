@@ -33,8 +33,8 @@ function env(vars: Record<string, string> = {}): Env {
   return {
     DB: d1(),
     ADMIN_STEAM_IDS: BOSS,
-    MXB_HOST_SPEND_CAP_EUR: "30",
-    MXB_HOST_BOX_PRICE_EUR: "7.50",
+    MXB_HOST_SPEND_CAP_USD: "30",
+    MXB_HOST_BOX_PRICE_USD: "5.85",
     MXB_HOST_MAX_BOXES: "4",
     MXB_HOST_LEGACY_MAX_BOXES: "1",
     MXB_HOST_SLOTS_NATIVE: "4",
@@ -273,7 +273,7 @@ describe("deploy is gated only when billing is configured", () => {
   });
 
   it("refuses before payment when there is no capacity", async () => {
-    const s = setup({ ...BILLING, MXB_HOST_SPEND_CAP_EUR: "0" });
+    const s = setup({ ...BILLING, MXB_HOST_SPEND_CAP_USD: "0" });
     await invited(s.e, s.d, RIDER);
     const r = await deploy(s.e, s.d, RIDER, { name: "x", type: "mxbserver", region: "us-east" });
     expect(r).toMatchObject({ status: 409, body: { code: "no_capacity" } });
