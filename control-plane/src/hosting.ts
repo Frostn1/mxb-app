@@ -28,6 +28,7 @@ import {
   type Pool,
   type ServerType,
 } from "./hostregions";
+import { pruneMsmLogins } from "./hostedauth";
 import { OvhClient, ovhCredentials } from "./ovh";
 import { isSteamId64, steamPersonaName } from "./steam";
 
@@ -513,6 +514,23 @@ export async function myHosting(env: Env, steamId: string, operator: boolean): P
       types: SERVER_TYPES,
     },
   };
+}
+
+/** An owner's servers for MSM's signed-in list (`GET /v1/hosted/me/servers`). */
+export async function ownedServers(env: Env, steamId: string): Promise<Result> {
+  const cfg = hostConfig(env);
+  const rows = await env.DB.prepare("SELECT * FROM host_servers WHERE steam_id = ? AND state != 'deleted' ORDER BY created_at")
+    .bind(steamId)
+    .all<ServerRow>();
+  const servers = [];
+  for (const row of rows.results) servers.push(await serverView(env, cfg, row));
+  return { status: 200, body: { servers } };
+}
+
+/** Whether a live (not deleted) server belongs to this Steam account. */
+export async function ownsServer(env: Env, steamId: string, id: string): Promise<boolean> {
+  const row = await serverRow(env, id);
+  return !!row && row.steam_id === steamId && row.state !== "deleted";
 }
 
 // ---- Deploy --------------------------------------------------------------------------------
@@ -1260,6 +1278,7 @@ export async function hostingTick(env: Env, deps: Deps = defaultDeps(env)): Prom
     ["idle", () => reclaimIdle(env, deps, cfg)],
     ["scale", () => scaleDown(env, deps, cfg)],
     ["billing", () => billingTick(env, deps)],
+    ["msm-logins", () => pruneMsmLogins(env, deps.now())],
   ];
   for (const [name, step] of steps) {
     try {

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   claimInvite,
   deploy,
@@ -17,6 +17,7 @@ import {
   addTrack,
   type Deps,
 } from "../src/hosting";
+import { pkceChallenge } from "../src/hostedauth";
 import { hostedRoutes } from "../src/hostingroutes";
 import { REGIONS } from "../src/hostregions";
 import type { OvhClient } from "../src/ovh";
@@ -371,6 +372,139 @@ describe("MSM", () => {
 
     expect((await ownerDelete(e, d, RIDER, id)).status).toBe(200);
     expect((await get(`/v1/hosted/servers/${id}`, token)).status).toBe(401);
+  });
+});
+
+describe("MSM sign in with Steam", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  // Steam: every check_authentication says yes; the profile has a name.
+  function steamSaysYes() {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) =>
+        String(input).includes("/openid/login")
+          ? new Response("ns:http://specs.openid.net/auth/2.0\nis_valid:true\n")
+          : new Response("<profile><steamID><![CDATA[Rider One]]></steamID></profile>"),
+      ),
+    );
+  }
+
+  const call = (e: Env, d: Deps, method: string, path: string, opts: { token?: string; body?: unknown } = {}) =>
+    hostedRoutes(
+      new Request(`https://api${path}`, {
+        method,
+        headers: opts.token ? { Authorization: `Bearer ${opts.token}` } : {},
+        body: opts.body === undefined ? undefined : JSON.stringify(opts.body),
+      }),
+      new URL(`https://api${path}`),
+      e,
+      d,
+    );
+
+  function assertion(loginId: string, steamId: string): string {
+    const q = new URLSearchParams({
+      "openid.ns": "http://specs.openid.net/auth/2.0",
+      "openid.mode": "id_res",
+      "openid.op_endpoint": "https://steamcommunity.com/openid/login",
+      "openid.return_to": `https://api/v1/hosted/auth/return?login=${loginId}`,
+      "openid.claimed_id": `https://steamcommunity.com/openid/id/${steamId}`,
+      "openid.identity": `https://steamcommunity.com/openid/id/${steamId}`,
+      "openid.response_nonce": "2026-10-08T00:00:00Zabc",
+      "openid.signed": "signed,op_endpoint,claimed_id,identity,return_to,response_nonce,assoc_handle",
+    });
+    return `/v1/hosted/auth/return?login=${loginId}&${q}`;
+  }
+
+  /** MSM starts a sign-in, the browser goes through Steam, and the page hands back the link. */
+  async function throughSteam(e: Env, d: Deps, steamId: string, verifier: string, state = "state_ABC_1234567890") {
+    const login = await call(e, d, "POST", "/v1/hosted/auth/login", { body: { challenge: await pkceChallenge(verifier), state } });
+    expect(login.status).toBe(200);
+    const url = new URL(((await login.json()) as { url: string }).url);
+    expect(url.pathname).toBe("/v1/hosted/auth/start");
+    const loginId = url.searchParams.get("login")!;
+    const start = await call(e, d, "GET", `${url.pathname}${url.search}`);
+    expect(start.status).toBe(200);
+    expect(await start.text()).toContain("steamcommunity.com/openid/login");
+    const back = await call(e, d, "GET", assertion(loginId, steamId));
+    expect(back.status).toBe(200);
+    const link = /mxbservers:\/\/auth\?code=([A-Za-z0-9_-]+)&amp;state=([A-Za-z0-9_-]+)/.exec(await back.text());
+    expect(link).not.toBeNull();
+    expect(link![2]).toBe(state);
+    return { loginId, code: link![1] };
+  }
+
+  const VERIFIER = "v".repeat(20) + "-._~" + "a1".repeat(12);
+  const swap = (e: Env, d: Deps, code: string, verifier = VERIFIER) => call(e, d, "POST", "/v1/hosted/auth/token", { body: { code, verifier } });
+  const tokenFor = async (e: Env, d: Deps, steamId: string) =>
+    ((await (await swap(e, d, (await throughSteam(e, d, steamId, VERIFIER)).code)).json()) as { token: string }).token;
+
+  it("refuses a malformed request before Steam", async () => {
+    const { e, d } = await readyServer();
+    expect((await call(e, d, "POST", "/v1/hosted/auth/login", { body: { challenge: "short", state: "state_ABC_1234567890" } })).status).toBe(400);
+    expect((await call(e, d, "POST", "/v1/hosted/auth/login", { body: { challenge: "a".repeat(43), state: "x" } })).status).toBe(400);
+    expect((await call(e, d, "GET", `/v1/hosted/auth/start?login=${crypto.randomUUID()}`)).status).toBe(303);
+  });
+
+  it("swaps a one-time code only with the PKCE verifier, once, within two minutes", async () => {
+    steamSaysYes();
+    const { e, d, clock } = await readyServer();
+    // The return mints one code; a reloaded return mints nothing.
+    const first = await throughSteam(e, d, RIDER, VERIFIER);
+    expect((await call(e, d, "GET", assertion(first.loginId, RIDER))).status).toBe(303);
+
+    // Wrong verifier: refused, and the code is spent.
+    expect((await swap(e, d, first.code, "w".repeat(43))).status).toBe(403);
+    expect((await swap(e, d, first.code)).status).toBe(404);
+
+    // Too late.
+    const late = await throughSteam(e, d, RIDER, VERIFIER);
+    clock.t += 2 * 60 * 1000 + 1;
+    expect((await swap(e, d, late.code)).status).toBe(404);
+
+    // Right verifier, in time: a token, and the code cannot be used again.
+    const ok = await throughSteam(e, d, RIDER, VERIFIER);
+    const swapped = await swap(e, d, ok.code);
+    expect(swapped.status).toBe(200);
+    const body = (await swapped.json()) as { token: string; name: string };
+    expect(body.token.length).toBeGreaterThanOrEqual(32);
+    expect(body.name).toBe("Rider One");
+    expect(JSON.stringify(body)).not.toContain(RIDER);
+    expect((await swap(e, d, ok.code)).status).toBe(404);
+  });
+
+  it("lists and drives only the signed-in account's servers, and stops on sign-out", async () => {
+    steamSaysYes();
+    const { e, d, id } = await readyServer();
+    const token = await tokenFor(e, d, RIDER);
+    const other = await tokenFor(e, d, RIDER2);
+
+    const mine = await call(e, d, "GET", "/v1/hosted/me/servers", { token });
+    expect(mine.status).toBe(200);
+    expect(((await mine.json()) as { servers: { id: string }[] }).servers.map((s) => s.id)).toEqual([id]);
+    const theirs = await call(e, d, "GET", "/v1/hosted/me/servers", { token: other });
+    expect(((await theirs.json()) as { servers: unknown[] }).servers).toEqual([]);
+    expect((await call(e, d, "GET", "/v1/hosted/me/servers")).status).toBe(401);
+    expect((await call(e, d, "GET", "/v1/hosted/me/servers", { token: "nope" })).status).toBe(401);
+
+    // Ownership on every call.
+    expect((await call(e, d, "GET", `/v1/hosted/servers/${id}`, { token })).status).toBe(200);
+    expect((await call(e, d, "PUT", `/v1/hosted/servers/${id}/settings`, { token, body: { maxRiders: 9 } })).status).toBe(200);
+    expect((await call(e, d, "POST", `/v1/hosted/servers/${id}/restart`, { token })).status).toBe(200);
+    expect((await call(e, d, "GET", `/v1/hosted/servers/${id}`, { token: other })).status).toBe(404);
+    expect((await call(e, d, "PUT", `/v1/hosted/servers/${id}/settings`, { token: other, body: { maxRiders: 9 } })).status).toBe(404);
+    expect((await call(e, d, "POST", `/v1/hosted/servers/${id}/restart`, { token: other })).status).toBe(404);
+
+    // Sign-out revokes that token only.
+    expect((await call(e, d, "POST", "/v1/hosted/auth/revoke", { token: other })).status).toBe(200);
+    expect((await call(e, d, "GET", "/v1/hosted/me/servers", { token: other })).status).toBe(401);
+    expect((await call(e, d, "GET", `/v1/hosted/servers/${id}`, { token: other })).status).toBe(401);
+    expect((await call(e, d, "GET", "/v1/hosted/me/servers", { token })).status).toBe(200);
+
+    // A deleted server drops out of the list and out of reach.
+    expect((await ownerDelete(e, d, RIDER, id)).status).toBe(200);
+    expect(((await (await call(e, d, "GET", "/v1/hosted/me/servers", { token })).json()) as { servers: unknown[] }).servers).toEqual([]);
+    expect((await call(e, d, "GET", `/v1/hosted/servers/${id}`, { token })).status).toBe(404);
   });
 });
 
