@@ -6510,6 +6510,22 @@ fn set_texcompress(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
     frostmod_manage::set_texcompress(&app, enabled).map_err(|e| format!("{e:#}"))
 }
 
+/// Whether the NaN crash trap applies to the installed FrostMod, and if it is on.
+#[tauri::command]
+fn nantrap_state(app: tauri::AppHandle) -> frostmod_manage::NanTrap {
+    frostmod_manage::nantrap_state(&app)
+}
+
+/// Write or remove `nantrap=1` in `frostmod_radar.cfg`. Off by default; FrostMod reads it
+/// at game start.
+#[tauri::command]
+fn set_nantrap(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
+    if !frostmod_manage::nantrap_state(&app).supported {
+        return Err("The NaN crash trap needs FrostMod 0.49.10 or newer".into());
+    }
+    frostmod_manage::set_nantrap(&app, enabled).map_err(|e| format!("{e:#}"))
+}
+
 #[tauri::command]
 fn set_instant_refresh(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
     let mut cfg = config::load(&app).unwrap_or_default();
@@ -9246,6 +9262,8 @@ fn main() {
             set_frostmod_args,
             texcompress_state,
             set_texcompress,
+            nantrap_state,
+            set_nantrap,
             set_instant_refresh,
             overlay_toggle,
             overlay_hide,

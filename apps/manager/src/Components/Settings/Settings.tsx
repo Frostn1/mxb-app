@@ -56,6 +56,9 @@ import {
   texcompressState,
   setTexcompress,
   type TexCompress,
+  nantrapState,
+  setNantrap,
+  type NanTrap,
   setGamePath,
   setInstantRefresh,
   setLaunchAtStartup,
@@ -617,6 +620,7 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
   const instantRefresh = config.instantRefresh ?? true;
   const watchModsReload = config.watchModsReload ?? true;
   const [texCompress, setTexCompress] = useState<TexCompress | null>(null);
+  const [nanTrap, setNanTrap] = useState<NanTrap | null>(null);
   const raceMode = config.raceMode ?? false;
   // What Race mode is holding aside right now. Read once and then kept current by the event,
   // since the moves happen on a join and the restore on the game's exit, neither of which
@@ -1060,6 +1064,22 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
     try {
       await setTexcompress(v);
       loadTexCompress();
+    } catch (e) {
+      toast.error(t("settings.updateFailed"), { description: String(e) });
+    }
+  };
+
+  const loadNanTrap = useCallback(() => {
+    nantrapState().then(setNanTrap).catch(() => setNanTrap(null));
+  }, []);
+  useEffect(() => {
+    loadNanTrap();
+  }, [loadNanTrap, status?.version]);
+
+  const toggleNanTrap = async (v: boolean) => {
+    try {
+      await setNantrap(v);
+      loadNanTrap();
     } catch (e) {
       toast.error(t("settings.updateFailed"), { description: String(e) });
     }
@@ -2653,6 +2673,22 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
                     checked={texCompress.enabled}
                     onChange={toggleTexCompress}
                     disabled={!texCompress.supported}
+                  />
+                )}
+
+                {/* Opt-in, off unless the player turns it on; the key is only written then. */}
+                {status?.installed && nanTrap && (
+                  <ToggleRow
+                    label={t("settings.nanTrap")}
+                    desc={
+                      nanTrap.supported
+                        ? t("settings.nanTrapDesc") +
+                          (nanTrap.gameRunning ? " " + t("settings.texCompressRunning") : "")
+                        : t("settings.nanTrapNeeds")
+                    }
+                    checked={nanTrap.enabled}
+                    onChange={toggleNanTrap}
+                    disabled={!nanTrap.supported}
                   />
                 )}
 

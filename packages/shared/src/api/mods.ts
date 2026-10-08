@@ -2942,6 +2942,22 @@ export function setTexcompress(enabled: boolean): Promise<void> {
   return invoke<void>("set_texcompress", { enabled });
 }
 
+/** NaN crash trap opt-in: whether the installed FrostMod supports it, and if it is on. */
+export interface NanTrap {
+  supported: boolean;
+  enabled: boolean;
+  gameRunning: boolean;
+}
+
+export function nantrapState(): Promise<NanTrap> {
+  return invoke<NanTrap>("nantrap_state");
+}
+
+/** Write or remove `nantrap=1` in FrostMod's cfg. Takes effect on the next game start. */
+export function setNantrap(enabled: boolean): Promise<void> {
+  return invoke<void>("set_nantrap", { enabled });
+}
+
 export function setInstantRefresh(enabled: boolean): Promise<void> {
   return invoke<void>("set_instant_refresh", { enabled });
 }

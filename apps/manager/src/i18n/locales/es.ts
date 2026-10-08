@@ -860,6 +860,9 @@ export const es: Translation = {
   "settings.texCompressDesc": "Ahorra entre 1 y 1,5 GB de RAM. Se aplica al iniciar el juego.",
   "settings.texCompressRunning": "Se aplica al iniciar el juego.",
   "settings.texCompressNeeds": "Requiere FrostMod 0.49.9 o posterior.",
+  "settings.nanTrap": "NaN crash trap",
+  "settings.nanTrapDesc": "Logs where a physics NaN starts.",
+  "settings.nanTrapNeeds": "Requiere FrostMod 0.49.10 o posterior.",
   "settings.frostmodArgs": "Flags de la integración con el juego",
   "settings.frostmodArgsDesc":
     "Déjalo vacío salvo que soporte te lo pida.",
