@@ -496,15 +496,15 @@ export default function Presets({
         <div className="flex flex-1 flex-col items-center justify-center gap-3 px-7 text-center">
           <div className="max-w-[440px] text-[13px] leading-relaxed text-muted-foreground">
             {profilesDir && !profilesDir.exists
-              ? "No profiles folder here — this folder doesn’t exist:"
+              ? "This folder doesn’t exist:"
               : "No MX Bikes profiles found in:"}
             <div className="mt-2 break-all rounded-lg bg-card px-3 py-2 font-mono text-[11.5px] text-foreground/80">
               {profilesDir?.dir || "your MX Bikes folder"}
             </div>
             <p className="mt-2.5">
               {profilesDir && !profilesDir.exists
-                ? "If you moved your mods folder (mxbikes.ini), your profiles stayed in Documents\\PiBoSo\\MX Bikes\\profiles — point the app at them in Settings."
-                : "Launch the game once so it creates a profile, then refresh — or point the app at the folder that holds your profiles."}
+                ? "Set your profiles folder in Settings."
+                : "Launch the game once, then refresh."}
             </p>
           </div>
           <div className="flex items-center gap-2">
