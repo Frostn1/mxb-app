@@ -133,6 +133,61 @@ describe("mirror on demand", () => {
   });
 });
 
+describe("prepare: the Download button's wait", () => {
+  const prep = (e: Env, asset: string, path = "0") => {
+    const u = `https://api.mxbsecure.com/v1/assets/${asset}/prepare/${path}`;
+    return publicModRoutes(new Request(u, { method: "POST" }), new URL(u), e);
+  };
+  const body = async (r: Response | null) => (await r!.json()) as { state: string; download?: string; source?: string | null };
+
+  it("queues the copy once, says mirroring, then hands over our download", async () => {
+    const e = env();
+    const { pub, version } = await post(e, 1, "hills-mx", [22]);
+    const first = await prep(e, pub);
+    expect(first!.headers.get("cache-control")).toBe("no-store");
+    expect(await body(first)).toEqual({ state: "mirroring" });
+    expect(await body(await prep(e, pub))).toEqual({ state: "mirroring" });
+    expect(e.MIRROR_QUEUE.sent).toEqual([{ kind: "file", version, idx: 0, part: 0 }]);
+
+    const f = fakeFetch([[/x\.example/, () => new Response("PK", { headers: { "content-length": "4" } })]]);
+    await mirrorFile(e, { kind: "file", version, idx: 0, part: 0 }, { fetch: f, hasher: nodeHasher, now: NOW });
+    const done = await body(await prep(e, pub));
+    expect(done).toEqual({ state: "stored", download: `https://api.mxbsecure.com/v1/assets/${pub}/download/0?version=1` });
+  });
+
+  it("falls back to the original when the host refuses, or the policy won't keep it", async () => {
+    const e = env();
+    const { pub, version } = await post(e, 1, "quota-mx", [22]);
+    await e.DB.prepare("UPDATE mod_files SET status = 'retry', error = 'quota' WHERE version_id = ?").bind(version).run();
+    expect(await body(await prep(e, pub))).toEqual({ state: "original", source: "https://x.example/quota-mx.zip" });
+
+    const old = await post(e, 2, "old-ktm", [37, 102, 108]);
+    expect(await body(await prep(e, old.pub))).toEqual({ state: "original", source: "https://x.example/old-ktm.zip" });
+    expect(e.MIRROR_QUEUE.sent).toEqual([]);
+  });
+
+  it("answers 404 for a file the mod doesn't have", async () => {
+    const e = env();
+    const { pub } = await post(e, 1, "hills-mx", [22]);
+    expect((await prep(e, pub, "3"))!.status).toBe(404);
+  });
+});
+
+describe("a mirrored mod by its source slug", () => {
+  it("finds the post the app browses, with its files", async () => {
+    const e = env();
+    const { pub } = await post(e, 7, "hillsford-mx-park", [22]);
+    const u = "https://api.mxbsecure.com/v1/assets/mirror/hillsford-mx-park";
+    const r = await publicModRoutes(new Request(u), new URL(u), e);
+    expect(r!.status).toBe(200);
+    const d = (await r!.json()) as { id: string; files: { source: string }[] };
+    expect(d.id).toBe(pub);
+    expect(d.files[0].source).toBe("https://x.example/hillsford-mx-park.zip");
+    const miss = "https://api.mxbsecure.com/v1/assets/mirror/nope";
+    expect((await publicModRoutes(new Request(miss), new URL(miss), e))!.status).toBe(404);
+  });
+});
+
 describe("live-server tracks", () => {
   async function seen(e: Env, slug: string, at: number, exact = 1) {
     await e.DB.prepare(

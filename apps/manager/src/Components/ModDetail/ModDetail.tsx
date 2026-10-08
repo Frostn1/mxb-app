@@ -49,6 +49,7 @@ import InstallDialog, { type InstallChoice } from "./InstallDialog";
 import { useInstall } from "../../Context/Install";
 import type { InstalledIndex } from "../../lib/installedMatch";
 import { displayName, formatDate } from "@frost/shared/lib/mods";
+import { preferMirror } from "@frost/shared/api/catalog";
 import { Button } from "@frost/shared/Components/ui/button";
 import {
   AlertDialog,
@@ -160,7 +161,7 @@ export default function ModDetail({
   // so a user the catalog refused once had no way back short of leaving the page.
   const [reloadKey, setReloadKey] = useState(0);
 
-  const { activeFor, startInstall, startImport } = useInstall();
+  const { activeFor, startPendingInstall, startImport } = useInstall();
   const myActive = activeFor(slug);
 
   useEffect(() => {
@@ -294,14 +295,24 @@ export default function ModDetail({
       // pre-remember the chosen folder for the import step
       localStorage.setItem(destKey, destFolder);
     } else if (detail) {
-      startInstall({
+      const title = detail.title;
+      // Resolved in the queue: our copy of the same file, when the mirror holds one.
+      startPendingInstall({
         slug,
-        title: detail.title,
+        title,
         subpath: modType.installSubpath,
-        destFolder,
-        categoryId,
-        url: mirror.url,
-        host: mirror.host,
+        resolve: async () => {
+          const link = await preferMirror(game.id, slug, mirror);
+          return {
+            slug,
+            title,
+            subpath: modType.installSubpath,
+            destFolder,
+            categoryId,
+            url: link.url,
+            host: link.host,
+          };
+        },
       });
     }
   };
