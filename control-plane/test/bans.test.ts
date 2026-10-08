@@ -23,7 +23,7 @@ const SESSION = "session-secret";
 const OWNER = "acc_owner";
 const SITE = "https://mxbsecure.com";
 /** The Steam account the dashboards are open to, and the one they are not. */
-const BOSS = "76561198174305985";
+const BOSS = "76561197960265730";
 const BUYER = "76561198000000042";
 const CLEAN = "76561198000000077";
 /**

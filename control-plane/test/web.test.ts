@@ -20,7 +20,7 @@ import {
 import { addAccount, d1 } from "./d1sqlite";
 
 const KEY = "session-secret";
-const CREATOR = "76561198174305985";
+const CREATOR = "76561197960265730";
 const OTHER = "76561198000000043";
 const SITE = "https://mxbsecure.com";
 const API = "https://api.mxbsecure.com";

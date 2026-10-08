@@ -21,7 +21,7 @@ const { default: worker } = await import("../src/index");
 const OWNER = "acc_owner";
 /** Two Steam accounts, and the GUIDs they derive to. */
 const ALICE = "76561197984950104";
-const BOB = "76561198174305985";
+const BOB = "76561197960265730";
 const ALICE_GUID = guidFromSteamId(ALICE)!;
 const BOB_GUID = guidFromSteamId(BOB)!;
 

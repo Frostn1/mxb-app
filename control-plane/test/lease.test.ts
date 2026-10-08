@@ -15,7 +15,7 @@ vi.mock("cloudflare:workers", () => ({ DurableObject: class {} }));
 const { default: worker } = await import("../src/index");
 
 const OWNER = "acc_owner";
-const BOSS = "76561198174305985";
+const BOSS = "76561197960265730";
 const BUYER = "76561198000000042";
 const CLEAN = "76561198000000077";
 /** Synthetic, and not one of the GUIDs the deployment ships banned. */
