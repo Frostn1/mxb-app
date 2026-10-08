@@ -9,6 +9,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import type { Hasher } from "../src/mirrorfetch";
+import { readPageJobs, type MirrorJob, type PageBatchResult } from "../src/mirror";
 
 const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), "fixtures", "hosts");
 
@@ -227,4 +228,24 @@ export function fakePe(): Uint8Array {
   new DataView(b.buffer).setUint32(0x3c, 0x80, true);
   b.set([0x50, 0x45, 0, 0], 0x80);
   return b;
+}
+
+/**
+ * What the queue consumer does with the page reads the cron sent: take them off the fake
+ * queue and read them (`readPageJobs`), as one batch.
+ */
+export async function drainPages(
+  env: Env,
+  opts: { now?: number; fetch?: typeof fetch; wait?: (ms: number) => Promise<void>; clock?: () => number } = {},
+): Promise<PageBatchResult & { ids: number[] }> {
+  const q = (env.MIRROR_QUEUE as unknown as { sent: MirrorJob[] }).sent;
+  const ids: number[] = [];
+  for (let i = q.length - 1; i >= 0; i--) {
+    const j = q[i];
+    if (j.kind === "page") {
+      ids.unshift(j.id);
+      q.splice(i, 1);
+    }
+  }
+  return { ...(await readPageJobs(env, ids, opts)), ids };
 }

@@ -18,7 +18,7 @@ import {
   type Category,
 } from "../../src/mirror";
 import { d1 } from "../../test/d1sqlite";
-import { fakeBucket, fakeFetch, fakeQueue, fixture } from "../../test/modfakes";
+import { drainPages, fakeBucket, fakeFetch, fakeQueue, fixture } from "../../test/modfakes";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
@@ -217,6 +217,11 @@ describe("a whole run", () => {
     const waits: number[] = [];
     const f = site();
     await runMirror(e, { now: 10_000, fetch: f, wait: async (ms) => void waits.push(ms) });
+    // The cron hands the page to the queue rather than reading it.
+    expect(e.MIRROR_QUEUE.sent).toEqual([{ kind: "page", id: expect.any(Number) }]);
+    expect(waits.every((w) => w === 1500)).toBe(true);
+    waits.length = 0;
+    expect(await drainPages(e, { now: 11_000, fetch: f, wait: async (ms) => void waits.push(ms) })).toMatchObject({ read: 1, deferred: 0 });
     const asset = await e.DB.prepare("SELECT type, author, page_status, title, description FROM mod_assets").first();
     expect(asset).toEqual({
       type: "tracks",
@@ -229,13 +234,14 @@ describe("a whole run", () => {
     expect(v).toEqual({ label: "Beta 19" });
     expect(e.MIRROR_QUEUE.sent).toEqual([]);
     expect(await e.DB.prepare("SELECT status FROM mod_files").first()).toEqual({ status: "idle" });
-    expect(waits.every((w) => w === 3000)).toBe(true);
+    expect(waits.every((w) => w === 1000 || w === 250)).toBe(true);
     expect(f.calls.some((c) => c.includes("modified_after"))).toBe(false);
 
     // The next run asks only for what changed since, and re-reads nothing.
     const g = site();
     await runMirror(e, { now: 20_000, fetch: g, wait: async () => {} });
     expect(g.calls.find((c) => c.includes("orderby=modified"))).toContain("modified_after=2026-10-07T19%3A53%3A22");
+    expect(e.MIRROR_QUEUE.sent).toEqual([]);
     expect(g.calls.some((c) => c.includes("careless-beta/"))).toBe(false);
   });
 
@@ -252,6 +258,7 @@ describe("a whole run", () => {
   it("calls fetch the way the runtime insists on, handed in or global", async () => {
     const handed = env();
     await runMirror(handed, { now: 10_000, fetch: workersFetch(site()), wait: async () => {} });
+    await drainPages(handed, { now: 10_000, fetch: workersFetch(site()), wait: async () => {} });
     expect(await handed.DB.prepare("SELECT page_status FROM mod_assets").first()).toEqual({ page_status: "ok" });
 
     // No fetch handed in: the sync must reach the global one without detaching it.
@@ -260,6 +267,7 @@ describe("a whole run", () => {
     try {
       const bare = env();
       await runMirror(bare, { now: 10_000, wait: async () => {} });
+      await drainPages(bare, { now: 10_000, wait: async () => {} });
       expect(await bare.DB.prepare("SELECT page_status FROM mod_assets").first()).toEqual({ page_status: "ok" });
     } finally {
       globalThis.fetch = real;

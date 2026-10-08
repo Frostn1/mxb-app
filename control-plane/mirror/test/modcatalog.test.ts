@@ -22,7 +22,7 @@ import {
 import { isPublicId, modPath, modSlug, newPublicId } from "../../src/modids";
 import { publicModRoutes } from "../../src/modapi";
 import { addAccount, d1 } from "../../test/d1sqlite";
-import { fakeBucket, fakeFetch, fakeQueue } from "../../test/modfakes";
+import { drainPages, fakeBucket, fakeFetch, fakeQueue } from "../../test/modfakes";
 import { setThumb, type Uploader } from "../../src/uploads";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -160,7 +160,9 @@ describe("a whole run over the recorded post", () => {
 
   it("records the files, the byline and a stored picture, and serves them by public id", async () => {
     const e = env();
-    await runMirror(e, { now: 10_000, fetch: site(), wait: async () => {} });
+    const f = site();
+    await runMirror(e, { now: 10_000, fetch: f, wait: async () => {} });
+    await drainPages(e, { now: 10_000, fetch: f, wait: async () => {} });
     const a = await e.DB.prepare("SELECT public_id, author, thumb_key, page_status FROM mod_assets").first<{
       public_id: string;
       author: string;
@@ -183,7 +185,10 @@ describe("a whole run over the recorded post", () => {
     expect(body.files.map((f) => f.download)).toEqual([0, 1].map((i) => expect.stringContaining(`/v1/assets/${a!.public_id}/download/${i}`)));
     const search = (await (await get(e, "/v1/assets/search?q=surron"))!.json()) as { results: { id: string; author: string; thumb: string }[] };
     expect(search.results).toEqual([expect.objectContaining({ id: a!.public_id, author: "yourboyquinn361", thumb: body.thumb })]);
-    expect(await (await get(e, "/v1/assets/stats"))!.json()).toEqual({ total: 1 });
+    expect(await (await get(e, "/v1/assets/stats"))!.json()).toEqual({
+      total: 1,
+      by_type: { paints: 0, bikes: 1, liveries: 0, kits: 0, tracks: 0, other: 0 },
+    });
   });
 
   it("walks the listing whatever order the site answers in, then asks only for what changed", async () => {

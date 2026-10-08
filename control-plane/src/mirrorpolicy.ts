@@ -121,6 +121,7 @@ export async function evictUnused(env: Env, now: number): Promise<number> {
                        JOIN mod_assets a ON a.id = v.asset_id
                        WHERE f.sha256 = b.sha256 AND a.source = 'upload')
        AND NOT EXISTS (SELECT 1 FROM mod_assets a WHERE a.thumb_sha = b.sha256)
+       AND NOT EXISTS (SELECT 1 FROM mod_asset_images i WHERE i.sha256 = b.sha256)
        AND NOT EXISTS (SELECT 1 FROM mod_files f JOIN mod_assets a ON a.current_version = f.version_id
                        WHERE f.sha256 = b.sha256 AND a.id IN (${LIVE_TRACKS.replace("?", "?2")}))
      LIMIT ?3`,
