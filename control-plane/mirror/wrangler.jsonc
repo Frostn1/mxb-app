@@ -23,8 +23,8 @@
     "MXB_MIRROR_BIKES_DENY": ""
   },
 
-  // The sync's own run. Every 10 minutes: walks the listing (up to 6 min) and tops up the
-  // queue's page reads (src/mirror.ts).
+  // The sync's own run. Every 10 minutes: four listing pages and one sweep page, 3 s apart,
+  // and tops up the queue's page reads (src/mirror.ts).
   "triggers": { "crons": ["*/10 * * * *"] },
 
   // An upload check hashes and inflates up to 2 GiB in one invocation; a download streams as
@@ -52,13 +52,12 @@
     "producers": [{ "binding": "MIRROR_QUEUE", "queue": "mxb-mirror" }],
     "consumers": [
       {
-        // Up to 8 messages a batch: page reads run 4 side by side (src/mirror.ts readPageJobs),
-        // files one at a time with a time budget (src/mirrorfetch.ts). Two invocations at most,
-        // so never more than 8 requests to mxb-mods.com in flight.
+        // The gentle rate: one message a batch and one invocation at a time, so one request to
+        // mxb-mods.com in flight, each at least 3 s after the last (src/mirror.ts readPageJobs).
         "queue": "mxb-mirror",
-        "max_batch_size": 8,
+        "max_batch_size": 1,
         "max_batch_timeout": 5,
-        "max_concurrency": 2,
+        "max_concurrency": 1,
         "max_retries": 3,
         "dead_letter_queue": "mxb-mirror-dlq"
       },

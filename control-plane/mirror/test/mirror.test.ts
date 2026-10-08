@@ -219,7 +219,7 @@ describe("a whole run", () => {
     await runMirror(e, { now: 10_000, fetch: f, wait: async (ms) => void waits.push(ms) });
     // The cron hands the page to the queue rather than reading it.
     expect(e.MIRROR_QUEUE.sent).toEqual([{ kind: "page", id: expect.any(Number) }]);
-    expect(waits.every((w) => w === 1500)).toBe(true);
+    expect(waits.every((w) => w === 3000)).toBe(true);
     waits.length = 0;
     expect(await drainPages(e, { now: 11_000, fetch: f, wait: async (ms) => void waits.push(ms) })).toMatchObject({ read: 1, deferred: 0 });
     const asset = await e.DB.prepare("SELECT type, author, page_status, title, description FROM mod_assets").first();
@@ -234,7 +234,8 @@ describe("a whole run", () => {
     expect(v).toEqual({ label: "Beta 19" });
     expect(e.MIRROR_QUEUE.sent).toEqual([]);
     expect(await e.DB.prepare("SELECT status FROM mod_files").first()).toEqual({ status: "idle" });
-    expect(waits.every((w) => w === 1000 || w === 250)).toBe(true);
+    expect(waits.length).toBeGreaterThan(0);
+    expect(waits.every((w) => w >= 3000)).toBe(true);
     expect(f.calls.some((c) => c.includes("modified_after"))).toBe(false);
 
     // The next run asks only for what changed since, and re-reads nothing.
