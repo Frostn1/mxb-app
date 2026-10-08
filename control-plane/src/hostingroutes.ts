@@ -24,6 +24,7 @@ import {
   myHosting,
   operatorBox,
   operatorView,
+  rememberHostName,
   ownerDelete,
   restartServer,
   runnerAuthorized,
@@ -86,8 +87,15 @@ export async function hostingWebRoutes(
     return said(await operatorRoute(request, path, method, env, deps, steamId));
   }
 
-  if (method === "GET" && path === "/v1/web/hosting/me") return said(await myHosting(env, steamId, operator));
-  if (method === "POST" && path === "/v1/web/hosting/claim") return said(await claimInvite(env, deps, steamId, await body(request)));
+  if (method === "GET" && path === "/v1/web/hosting/me") {
+    await rememberHostName(env, steamId, session.name);
+    return said(await myHosting(env, steamId, operator));
+  }
+  if (method === "POST" && path === "/v1/web/hosting/claim") {
+    const claimed = await claimInvite(env, deps, steamId, await body(request));
+    await rememberHostName(env, steamId, session.name);
+    return said(claimed);
+  }
   if (method === "POST" && path === "/v1/web/hosting/servers") return said(await deploy(env, deps, steamId, await body(request)));
 
   let m = path.match(new RegExp(`^/v1/web/hosting/servers/${ID}$`, "i"));
@@ -110,7 +118,7 @@ async function operatorRoute(
   deps: Deps,
   steamId: string,
 ): Promise<Result> {
-  if (method === "GET" && path === "/v1/web/admin/hosting") return operatorView(env);
+  if (method === "GET" && path === "/v1/web/admin/hosting") return operatorView(env, deps.fetch);
   if (method === "POST" && path === "/v1/web/admin/hosting/invites") {
     const result = await mintInvite(env, deps, steamId, await body(request));
     console.log(JSON.stringify({ msg: "hosting invite minted", admin: steamId, status: result.status }));

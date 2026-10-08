@@ -28,7 +28,7 @@ import {
   type ServerType,
 } from "./hostregions";
 import { OvhClient, ovhCredentials } from "./ovh";
-import { isSteamId64 } from "./steam";
+import { isSteamId64, steamPersonaName } from "./steam";
 
 export interface Result {
   status: number;
@@ -1150,7 +1150,34 @@ export async function hostingTick(env: Env, deps: Deps = defaultDeps(env)): Prom
 
 // ---- Operator ------------------------------------------------------------------------------
 
-export async function operatorView(env: Env): Promise<Result> {
+/** Names for the SteamIDs that have none stored yet, looked up at Steam and kept. Best effort. */
+async function hostNames(env: Env, ids: string[], fetchImpl: typeof fetch | null): Promise<Map<string, string>> {
+  const names = new Map<string, string>();
+  const rows = await env.DB.prepare("SELECT steam_id, display_name FROM host_users").all<{ steam_id: string; display_name: string | null }>();
+  for (const r of rows.results) if (r.display_name) names.set(r.steam_id, r.display_name);
+  if (!fetchImpl) return names;
+  const missing = [...new Set(ids)].filter((id) => !names.has(id)).slice(0, 10);
+  await Promise.all(
+    missing.map(async (id) => {
+      const name = await steamPersonaName(id, fetchImpl);
+      if (!name) return;
+      names.set(id, name);
+      await env.DB.prepare("UPDATE host_users SET display_name = ? WHERE steam_id = ? AND display_name IS NULL").bind(name, id).run();
+    }),
+  );
+  return names;
+}
+
+/** Keep the Steam name a signed-in host has now, so the operator page can say who they are. */
+export async function rememberHostName(env: Env, steamId: string, name: string): Promise<void> {
+  const clean = name.trim().slice(0, 64);
+  if (!clean) return;
+  await env.DB.prepare("UPDATE host_users SET display_name = ? WHERE steam_id = ? AND COALESCE(display_name, '') != ?")
+    .bind(clean, steamId, clean)
+    .run();
+}
+
+export async function operatorView(env: Env, fetchImpl: typeof fetch | null = null): Promise<Result> {
   const cfg = hostConfig(env);
   const regionLabel = (id: string) => regionById(id)?.label ?? id;
   const boxes = await env.DB.prepare(
@@ -1177,6 +1204,13 @@ export async function operatorView(env: Env): Promise<Result> {
   const tracks = await env.DB.prepare("SELECT * FROM host_tracks ORDER BY pool, name").all<{
     id: string; pool: string; name: string; url: string; sha256: string; created_at: number;
   }>();
+  // Owners go out by Steam name only; the SteamID stays on the server.
+  const names = await hostNames(
+    env,
+    [...users.results.map((u) => u.steam_id), ...servers.results.map((v) => v.steam_id), ...invites.results.flatMap((i) => (i.claimed_by ? [i.claimed_by] : []))],
+    fetchImpl,
+  );
+  const who = (id: string | null) => (id ? (names.get(id) ?? "Unnamed") : null);
   return {
     status: 200,
     body: {
@@ -1209,13 +1243,13 @@ export async function operatorView(env: Env): Promise<Result> {
       })),
       // The code itself is never stored, so it can't be shown again; only the link at minting.
       invites: invites.results.map((i) => ({
-        id: i.id, steamId: i.steam_id, quota: i.quota, used: i.claimed_by !== null, claimedBy: i.claimed_by,
-        expiresAt: i.expires_at, revokedAt: i.revoked_at, createdAt: i.created_at,
+        id: i.id, forOneAccount: i.steam_id !== null, quota: i.quota, used: i.claimed_by !== null, claimedByName: who(i.claimed_by),
+        claimedAt: i.claimed_at, expiresAt: i.expires_at, revokedAt: i.revoked_at, createdAt: i.created_at,
       })),
-      users: users.results.map((u) => ({ steamId: u.steam_id, quota: u.quota, suspended: u.suspended === 1, createdAt: u.created_at })),
+      users: users.results.map((u) => ({ name: who(u.steam_id), quota: u.quota, suspended: u.suspended === 1, createdAt: u.created_at })),
       servers: servers.results.map((v) => ({
-        id: v.id, ownerSteamId: v.steam_id, name: v.name, type: v.type, region: v.region, regionLabel: regionLabel(v.region),
-        boxId: v.box_id, state: v.state, riders: v.riders, lastActiveAt: v.last_active_at, createdAt: v.created_at,
+        id: v.id, ownerName: who(v.steam_id), name: v.name, type: v.type, region: v.region, regionLabel: regionLabel(v.region),
+        boxId: v.box_id, state: v.state, riders: v.riders, polledAt: v.polled_at, lastActiveAt: v.last_active_at, createdAt: v.created_at,
       })),
       tracks: tracks.results.map((t) => ({ id: t.id, pool: t.pool, name: t.name, url: t.url, sha256: t.sha256, createdAt: t.created_at })),
     },
