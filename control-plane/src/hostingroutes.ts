@@ -3,7 +3,8 @@
  *
  * - `/v1/web/hosting/*`        servers.mxbsecure.com, the signed-in Steam account's own servers
  * - `/v1/web/admin/hosting*`   servers.mxbsecure.com, operators (the admin Steam list)
- * - `/v1/hosted/*`             MSM, with a bearer claimed through a one-time link
+ * - `/v1/hosted/*`             MSM, with a bearer claimed through a one-time link, or the
+ *                              per-user token from signing in with Steam (`hostedauth.ts`)
  * - `/v1/hosting/*`            the box install runner, with `MXB_BOX_ENROLL_KEY`
  */
 
@@ -23,6 +24,8 @@ import {
   msmClaim,
   msmLink,
   myHosting,
+  ownedServers,
+  ownsServer,
   operatorBox,
   operatorView,
   rememberHostName,
@@ -34,6 +37,7 @@ import {
   type Deps,
   type Result,
 } from "./hosting";
+import { msmLogin, msmReturn, msmRevoke, msmStart, msmToken, touchUserToken, userTokenOwner } from "./hostedauth";
 import { isWebAdmin } from "./webadmin";
 import { webSession } from "./websession";
 
@@ -172,9 +176,41 @@ export async function hostedRoutes(request: Request, url: URL, env: Env, deps: D
   }
 
   if (method === "POST" && path === "/v1/hosted/claim") return out(await msmClaim(env, deps, await body(request)));
+
+  // Sign in with Steam (`hostedauth.ts`). Steam is asked from the Worker, so the fetch stays
+  // unbound: a stored `fetch` called as a method throws "Illegal invocation".
+  const steamFetch: typeof fetch = (input, init) => fetch(input, init);
+  if (path.startsWith("/v1/hosted/auth/")) {
+    if (path !== "/v1/hosted/auth/revoke" && env.SIGNIN_LIMITER) {
+      const ip = request.headers.get("CF-Connecting-IP") ?? "unknown";
+      if (!(await env.SIGNIN_LIMITER.limit({ key: ip })).success) return json(429, { error: "Too many sign-ins. Try again in a minute." });
+    }
+    const now = deps.now();
+    if (method === "POST" && path === "/v1/hosted/auth/login") return out(await msmLogin(env, url.origin, await body(request), now));
+    if (method === "GET" && path === "/v1/hosted/auth/start") return msmStart(env, url, now);
+    if (method === "GET" && path === "/v1/hosted/auth/return") return msmReturn(env, url, now, steamFetch);
+    if (method === "POST" && path === "/v1/hosted/auth/token") return out(await msmToken(env, await body(request), now, steamFetch));
+    if (method === "POST" && path === "/v1/hosted/auth/revoke") return out(await msmRevoke(env, request, now));
+    return json(404, { error: "no such endpoint" });
+  }
+  if (path === "/v1/hosted/me/servers") {
+    if (method !== "GET") return json(404, { error: "no such endpoint" });
+    const steamId = await userTokenOwner(env, request);
+    if (!steamId) return json(401, { error: "Signed out. Sign in again." });
+    await touchUserToken(env, request, deps.now());
+    return out(await ownedServers(env, steamId));
+  }
+
   const m = path.match(new RegExp(`^/v1/hosted/servers/${ID}(?:/(settings|restart))?$`, "i"));
   if (!m) return json(404, { error: "no such endpoint" });
-  const owner = await hostedOwner(env, request, m[1]);
+  // A claimed per-server bearer, else the signed-in account's token, which reaches only the
+  // servers that account owns (checked here and again by each owner action).
+  let owner = await hostedOwner(env, request, m[1]);
+  if (!owner) {
+    const user = await userTokenOwner(env, request);
+    if (user && !(await ownsServer(env, user, m[1]))) return json(404, { error: "No such server." });
+    owner = user;
+  }
   if (!owner) return json(401, { error: "This server is no longer linked. Open it again from servers.mxbsecure.com." });
   if (!m[2] && method === "GET") return out(await getServer(env, owner, m[1]));
   if (m[2] === "settings" && method === "PUT") return out(await updateSettings(env, deps, owner, m[1], await body(request)));
