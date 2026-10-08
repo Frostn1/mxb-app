@@ -422,7 +422,12 @@ export async function stripeWebhook(request: Request, env: Env, deps: Deps): Pro
   const reply = (status: number, body: unknown) =>
     new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
   const cfg = billingConfig(env);
-  if (!cfg) return reply(503, { error: "billing is not configured" });
+  if (!cfg) {
+    const missing = (["STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET", "STRIPE_PRICE_MXBSERVER", "STRIPE_PRICE_LEGACY"] as const).filter(
+      (k) => !env[k]?.trim(),
+    );
+    return reply(503, { error: "billing is not configured", missing });
+  }
   const raw = await request.text();
   if (raw.length > 512 * 1024) return reply(413, { error: "too large" });
   if (!(await verifyStripeSignature(raw, request.headers.get("Stripe-Signature"), cfg.webhookSecret, deps.now()))) {
