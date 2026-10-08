@@ -13,6 +13,7 @@ import {
   operatorView,
   ownerDelete,
   seatPaid,
+  updateSettings,
   type Deps,
 } from "../src/hosting";
 import { hostingWebRoutes } from "../src/hostingroutes";
@@ -70,7 +71,7 @@ function fakeOvh() {
 function fakeFetch(opts: { refundFails?: boolean } = {}) {
   const calls: { url: string; method: string; body: string }[] = [];
   let sessions = 0;
-  const stripeState = { cancelAtPeriodEnd: false };
+  const stripeState: { cancelAtPeriodEnd: boolean; liveStatus?: string } = { cancelAtPeriodEnd: false };
   // The 2025 shape: the period end is on the subscription item.
   const subscription = () => ({
     id: "sub_test_1",
@@ -91,7 +92,7 @@ function fakeFetch(opts: { refundFails?: boolean } = {}) {
     }
     if (url.startsWith("https://api.stripe.com/v1/checkout/sessions/")) return json({ status: "expired" });
     if (url.startsWith("https://api.stripe.com/v1/subscriptions/") && method === "GET") {
-      return json({ id: "sub_test_1", latest_invoice: { id: "in_test_1", payment_intent: "pi_test_1" } });
+      return json({ id: "sub_test_1", status: stripeState.liveStatus, cancel_at_period_end: stripeState.cancelAtPeriodEnd, latest_invoice: { id: "in_test_1", payment_intent: "pi_test_1" } });
     }
     if (url.startsWith("https://api.stripe.com/v1/subscriptions/") && method === "POST") {
       const flag = new URLSearchParams(typeof init?.body === "string" ? init.body : "").get("cancel_at_period_end");
@@ -115,11 +116,21 @@ function fakeFetch(opts: { refundFails?: boolean } = {}) {
     if (url === "https://api.stripe.com/v1/billing_portal/sessions") return json({ url: "https://billing.stripe.com/p/session/test_portal" });
     if (url.startsWith("https://api.stripe.com/")) return json({ error: { message: "unexpected" } }, 400);
     if (url.startsWith("https://api.github.com/")) return new Response(null, { status: 204 });
+    // A native slot's bans: one permanent, one timed (gone by the time a frozen server is back).
+    if (url.endsWith("/v1/bans") && method === "GET") {
+      return json({
+        persistent: false,
+        runtime: [
+          { kind: "name", value: "Rammer", reason: "test ban", added_by: "t", added_at: 1, seconds_left: null },
+          { kind: "ip", value: "203.0.113.9", reason: "timed", added_by: "t", added_at: 1, seconds_left: 600 },
+        ],
+      });
+    }
     if (url.endsWith("/v1/riders")) return json({ riders: [] });
     return json({ ok: true });
   });
   const stripeCalls = () => calls.filter((c) => c.url.startsWith("https://api.stripe.com/"));
-  return { fetch: f as unknown as typeof fetch, calls, stripeCalls };
+  return { fetch: f as unknown as typeof fetch, calls, stripeCalls, stripeState };
 }
 
 function setup(vars: Record<string, string> = BILLING, opts: { refundFails?: boolean } = {}) {
@@ -184,6 +195,19 @@ async function pendingDeploy(s: ReturnType<typeof setup>, type = "mxbserver") {
   expect(r.status).toBe(201);
   const body = r.body as { server: { id: string; state: string }; checkoutUrl: string };
   return { id: body.server.id, body };
+}
+
+/** A signed-in request to the site's hosting routes. */
+async function call(e: Env, d: Deps, method: string, path: string, steamId = RIDER) {
+  const { sealToken, SESSION_COOKIE } = await import("../src/websession");
+  const cookie = `${SESSION_COOKIE}=${await sealToken({ t: "session", steamId, name: "R", exp: Date.now() + 60_000 }, "session-secret")}`;
+  const req = new Request(`https://api.mxbsecure.com${path}`, {
+    method,
+    headers: { Cookie: cookie, Origin: "https://servers.mxbsecure.com", ...(method === "GET" ? {} : { "Content-Type": "application/json" }) },
+    body: method === "GET" ? undefined : "{}",
+  });
+  const res = await hostingWebRoutes(req, new URL(req.url), e, "https://servers.mxbsecure.com", d);
+  return { status: res.status, body: (await res.json()) as Record<string, unknown> };
 }
 
 /** Pay, then bring the ordered box all the way to ready so the server holds a slot. */
@@ -339,7 +363,7 @@ describe("the billing state machine", () => {
     expect(s.ovh.orderVps).toHaveBeenCalledTimes(1);
   });
 
-  it("past due: keeps the server for the grace, then suspends, frees the slot and cancels", async () => {
+  it("past due: keeps the server for the grace, then freezes it (not deleted), frees the slot and cancels", async () => {
     const s = setup();
     const { id } = await activeOnSlot(s);
     expect(await usedSlots(s.e)).toBe(1);
@@ -356,8 +380,8 @@ describe("the billing state machine", () => {
     expect((await billingOf(s.e, id))!.status).toBe("suspended");
     expect(await usedSlots(s.e)).toBe(0);
     expect(s.f.stripeCalls().filter((c) => c.method === "DELETE" && c.url.endsWith("/subscriptions/sub_test_1"))).toHaveLength(1);
-    const mine = (await myHosting(s.e, RIDER, false)).body as { servers: unknown[] };
-    expect(mine.servers).toHaveLength(0);
+    const mine = (await myHosting(s.e, RIDER, false)).body as { servers: { id: string; state: string; address: string | null }[] };
+    expect(mine.servers).toEqual([expect.objectContaining({ id, state: "frozen", address: null })]);
   });
 
   it("a payment inside the grace puts it back to active", async () => {
@@ -432,7 +456,7 @@ describe("the billing state machine", () => {
     expect(s.f.stripeCalls().filter((c) => c.method === "DELETE" && c.url.endsWith("/subscriptions/sub_test_1"))).toHaveLength(1);
   });
 
-  it("an owner's cancellation running out deletes the server, with no grace", async () => {
+  it("an owner's cancellation running out freezes the server, with no grace", async () => {
     const s = setup();
     const { id } = await activeOnSlot(s);
     await deliver(s.e, s.d, {
@@ -448,9 +472,11 @@ describe("the billing state machine", () => {
         },
       },
     });
-    expect((await billingOf(s.e, id))!.status).toBe("ended");
+    expect((await billingOf(s.e, id))!.status).toBe("suspended");
     expect(await usedSlots(s.e)).toBe(0);
-    expect(((await myHosting(s.e, RIDER, false)).body as { servers: unknown[] }).servers).toHaveLength(0);
+    expect(((await myHosting(s.e, RIDER, false)).body as { servers: { state: string }[] }).servers).toEqual([
+      expect.objectContaining({ id, state: "frozen" }),
+    ]);
     expect(s.f.stripeCalls().filter((c) => c.method === "DELETE")).toHaveLength(0);
   });
 
@@ -465,6 +491,114 @@ describe("the billing state machine", () => {
     expect(s.f.stripeCalls().filter((c) => c.method === "DELETE" && c.url.endsWith("/subscriptions/sub_test_1"))).toHaveLength(1);
     const alerts = ((await operatorView(s.e)).body as { alerts: { kind: string; message: string }[] }).alerts;
     expect(alerts.find((a) => a.kind === "billing")?.message).toContain("refund");
+  });
+});
+
+describe("frozen servers", () => {
+  async function serverOf(e: Env, id: string) {
+    return e.DB.prepare("SELECT * FROM host_servers WHERE id = ?").bind(id).first<Record<string, unknown>>();
+  }
+
+  /** Active on a slot with its own settings, then the grace runs out unpaid. */
+  async function frozenWithSettings(s: ReturnType<typeof setup>) {
+    const { id, boxId } = await activeOnSlot(s);
+    await addTrack(s.e, s.d, { pool: "native", name: "Zz Sand", url: "https://example.com/z.pkz", sha256: "b".repeat(64) });
+    const tracks = (await s.e.DB.prepare("SELECT id, name FROM host_tracks ORDER BY name").all<{ id: string; name: string }>()).results;
+    const sand = tracks.find((t) => t.name === "Zz Sand")!.id;
+    expect((await updateSettings(s.e, s.d, RIDER, id, { track: sand, maxRiders: 12 })).status).toBe(200);
+    await deliver(s.e, s.d, invoice("invoice.payment_failed", id, 7));
+    s.clock.t += GRACE_DAYS * DAY + 1;
+    await billingTick(s.e, s.d);
+    return { id, boxId, sand };
+  }
+
+  it("grace end freezes: kept with its settings and the box's bans, holding no slot", async () => {
+    const s = setup();
+    const { id, sand } = await frozenWithSettings(s);
+    const row = (await serverOf(s.e, id))!;
+    expect(row).toMatchObject({ state: "frozen", name: "Paid", region: "us-east", type: "mxbserver", track: sand, max_riders: 12, slot_id: null, box_id: null, deleted_at: null });
+    expect(row.frozen_at).toBe(s.clock.t);
+    expect(JSON.parse(row.saved_state as string)).toEqual({ bans: [{ kind: "name", value: "Rammer", reason: "test ban" }] });
+    expect(await usedSlots(s.e)).toBe(0);
+    expect((await billingOf(s.e, id))!.status).toBe("suspended");
+    // Unloaded through the free path: the slot was written back to a free default.
+    const reset = s.f.calls.filter((c) => c.url.endsWith("/v1/config/write")).at(-1)!;
+    expect(JSON.parse(reset.body).content).toContain("Free slot");
+    // Still counts against the invite (quota 1), but not against capacity.
+    const again = await deploy(s.e, s.d, RIDER, { name: "Another", type: "mxbserver", region: "us-east" });
+    expect(again).toMatchObject({ status: 403, body: { code: "quota" } });
+  });
+
+  it("Resume opens a Checkout; paid, it is placed again with the same settings and bans", async () => {
+    const s = setup({ ...BILLING, MXB_WEB_SESSION_KEY: "session-secret" });
+    const { id, boxId, sand } = await frozenWithSettings(s);
+    const resumed = await call(s.e, s.d, "POST", `/v1/web/hosting/billing/servers/${id}/reactivate`);
+    expect(resumed.status).toBe(200);
+    expect(resumed.body.url).toMatch(/^https:\/\/checkout\.stripe\.com\//);
+    expect(await billingOf(s.e, id)).toMatchObject({ status: "pending", subscription_id: null });
+    // Waiting on payment it is still frozen, and a day-old row is not dropped at once.
+    await billingTick(s.e, s.d);
+    expect((await serverOf(s.e, id))!.state).toBe("frozen");
+    expect((await billingOf(s.e, id))!.status).toBe("pending");
+
+    const before = s.f.calls.length;
+    const n = Number(String(resumed.body.url).split("cs_test_")[1]);
+    expect((await deliver(s.e, s.d, checkoutCompleted(id, n))).status).toBe(200);
+    const row = (await serverOf(s.e, id))!;
+    expect(row).toMatchObject({ state: "ready", box_id: boxId, track: sand, max_riders: 12, name: "Paid", saved_state: null, error: null });
+    expect(await usedSlots(s.e)).toBe(1);
+    expect(s.ovh.orderVps).toHaveBeenCalledTimes(1);
+    expect(await billingOf(s.e, id)).toMatchObject({ status: "active", subscription_id: "sub_test_1" });
+    const after = s.f.calls.slice(before);
+    const config = JSON.parse(after.find((c) => c.url.endsWith("/v1/config/write"))!.body).content as string;
+    expect(config).toContain('name = "Paid"');
+    expect(config).toContain("max_clients = 12");
+    expect(config).toContain(`/tracks/${sand}.pkz`);
+    const bans = after.filter((c) => c.url.endsWith("/v1/bans") && c.method === "POST").map((c) => JSON.parse(c.body));
+    expect(bans).toEqual([{ kind: "name", value: "Rammer", reason: "test ban" }]);
+    // The same payment's other event changes nothing.
+    await deliver(s.e, s.d, invoice("invoice.paid", id, 8));
+    expect(await usedSlots(s.e)).toBe(1);
+  });
+
+  it("an unpaid Resume Checkout leaves it frozen, never deleted", async () => {
+    const s = setup({ ...BILLING, MXB_WEB_SESSION_KEY: "session-secret" });
+    const { id } = await frozenWithSettings(s);
+    await call(s.e, s.d, "POST", `/v1/web/hosting/billing/servers/${id}/reactivate`);
+    s.clock.t += DAY + 1;
+    await billingTick(s.e, s.d);
+    expect((await serverOf(s.e, id))!.state).toBe("frozen");
+    expect((await billingOf(s.e, id))!.status).toBe("suspended");
+  });
+
+  it("a subscription still live at Stripe is kept, and the server is placed at once", async () => {
+    const s = setup({ ...BILLING, MXB_WEB_SESSION_KEY: "session-secret" });
+    const { id } = await frozenWithSettings(s);
+    s.f.stripeState.liveStatus = "active";
+    s.f.stripeState.cancelAtPeriodEnd = true;
+    const sessions = s.f.stripeCalls().filter((c) => c.url.endsWith("/checkout/sessions")).length;
+    const resumed = await call(s.e, s.d, "POST", `/v1/web/hosting/billing/servers/${id}/reactivate`);
+    expect(resumed).toEqual({ status: 200, body: { placed: true } });
+    expect(s.f.stripeCalls().filter((c) => c.url.endsWith("/checkout/sessions"))).toHaveLength(sessions);
+    expect(s.f.stripeState.cancelAtPeriodEnd).toBe(false);
+    expect((await serverOf(s.e, id))!.state).toBe("ready");
+    expect(await billingOf(s.e, id)).toMatchObject({ status: "active", subscription_id: "sub_test_1" });
+  });
+
+  it("another account can't resume it, and a frozen server can still be deleted", async () => {
+    const s = setup({ ...BILLING, MXB_WEB_SESSION_KEY: "session-secret" });
+    const { id } = await frozenWithSettings(s);
+    expect((await call(s.e, s.d, "POST", `/v1/web/hosting/billing/servers/${id}/reactivate`, OTHER)).status).toBe(404);
+    expect((await call(s.e, s.d, "DELETE", `/v1/web/hosting/servers/${id}`)).status).toBe(200);
+    expect((await serverOf(s.e, id))!.state).toBe("deleted");
+    expect(await usedSlots(s.e)).toBe(0);
+  });
+
+  it("the operator view lists frozen servers", async () => {
+    const s = setup();
+    const { id } = await frozenWithSettings(s);
+    const op = (await operatorView(s.e)).body as { servers: { id: string; state: string }[] };
+    expect(op.servers.find((v) => v.id === id)).toMatchObject({ state: "frozen" });
   });
 });
 
@@ -579,18 +713,6 @@ describe("one payment places one server, once", () => {
 });
 
 describe("site and operator routes", () => {
-  async function call(e: Env, d: Deps, method: string, path: string, steamId = RIDER) {
-    const { sealToken, SESSION_COOKIE } = await import("../src/websession");
-    const cookie = `${SESSION_COOKIE}=${await sealToken({ t: "session", steamId, name: "R", exp: Date.now() + 60_000 }, "session-secret")}`;
-    const req = new Request(`https://api.mxbsecure.com${path}`, {
-      method,
-      headers: { Cookie: cookie, Origin: "https://servers.mxbsecure.com", ...(method === "GET" ? {} : { "Content-Type": "application/json" }) },
-      body: method === "GET" ? undefined : "{}",
-    });
-    const res = await hostingWebRoutes(req, new URL(req.url), e, "https://servers.mxbsecure.com", d);
-    return { status: res.status, body: (await res.json()) as Record<string, unknown> };
-  }
-
   it("shows prices, status and a portal link to the owner, and MRR to operators", async () => {
     const s = setup({ ...BILLING, MXB_WEB_SESSION_KEY: "session-secret" });
     const { id } = await pendingDeploy(s);

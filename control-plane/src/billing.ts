@@ -11,8 +11,10 @@
  *      `payment_status: paid`, or `invoice.paid`), through the same placement a free deploy uses.
  *
  * A failed renewal (`invoice.payment_failed`) or an ended subscription starts a grace of
- * `GRACE_DAYS`. Unpaid at the end of it, the server is deleted through the same path the idle
- * sweep uses (its slot is freed) and the subscription is cancelled. Deleting a paid server any
+ * `GRACE_DAYS`. Unpaid at the end of it, or when a plan the owner cancelled reaches its end
+ * date, the server is frozen (`freezeServer`): unloaded from its box and its slot freed, but
+ * kept with all its settings. Resume pays again (a new Checkout, or the old subscription if it
+ * is still live) and places it again through `seatPaid`. Deleting a paid server any
  * other way (operator, idle) cancels its subscription too; an owner's delete stops it renewing
  * at the end of the paid month instead. Owners can also cancel (at period end) and resume.
  *
@@ -21,7 +23,7 @@
  */
 
 import { tokenMatches } from "./auth";
-import { ALREADY_SEATED, PAID_FAILED_ERROR, alert, deleteServer, seatPaid, type Deps, type Result } from "./hosting";
+import { ALREADY_SEATED, PAID_FAILED_ERROR, alert, deleteServer, freezeServer, roomToPlace, seatPaid, type Deps, type Result } from "./hosting";
 import type { ServerType } from "./hostregions";
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -68,6 +70,8 @@ export interface BillingRow {
   activated_at: number | null;
   refund_id: string | null;
   refunded_at: number | null;
+  /** When the open Checkout was made; a resumed server's row is older than its Checkout. */
+  checkout_at: number | null;
   created_at: number;
   updated_at: number;
 }
@@ -418,7 +422,7 @@ async function refundFirstPayment(
  */
 async function activate(env: Env, deps: Deps, row: BillingRow, subscription: string | null): Promise<void> {
   const subId = subscription ?? row.subscription_id;
-  if (row.status === "expired" && subId && !row.subscription_id) {
+  if ((row.status === "expired" || row.status === "suspended") && subId && !row.subscription_id) {
     // Paid at the moment it was dropped: nothing to put it on, so stop billing and say so.
     await setRow(env, deps, row.server_id, { subscription_id: subId });
     await cancelSubscription(env, deps, { ...row, subscription_id: subId }, "paid after it was dropped");
@@ -450,7 +454,9 @@ async function activate(env: Env, deps: Deps, row: BillingRow, subscription: str
     console.log(JSON.stringify({ msg: "billing active", server: row.server_id }));
     return;
   }
-  await setRow(env, deps, row.server_id, { status: "ended" });
+  // A frozen server that could not be placed again stays frozen, and can be resumed later.
+  const frozen = await env.DB.prepare("SELECT 1 AS f FROM host_servers WHERE id = ? AND state = 'frozen'").bind(row.server_id).first();
+  await setRow(env, deps, row.server_id, { status: frozen ? "suspended" : "ended" });
   const paidRow = { ...row, subscription_id: subId };
   const key = env.STRIPE_SECRET_KEY?.trim();
   const refund = !key
@@ -461,7 +467,7 @@ async function activate(env: Env, deps: Deps, row: BillingRow, subscription: str
   if ("id" in refund) {
     await setRow(env, deps, row.server_id, { refund_id: refund.id, refunded_at: deps.now() });
   }
-  await env.DB.prepare("UPDATE host_servers SET error = ? WHERE id = ? AND state = 'failed'")
+  await env.DB.prepare("UPDATE host_servers SET error = ? WHERE id = ? AND state IN ('failed', 'frozen')")
     .bind("id" in refund ? REFUNDED_ERROR : REFUND_PENDING_ERROR, row.server_id)
     .run();
   await cancelSubscription(env, deps, paidRow, "not placed");
@@ -503,8 +509,7 @@ export async function applyEvent(env: Env, deps: Deps, event: StripeEvent): Prom
     case "checkout.session.expired": {
       const row = await rowFor(env, str(meta(obj.metadata).server_id) ?? str(obj.client_reference_id), null);
       if (!row || row.status !== "pending" || row.checkout_session_id !== str(obj.id)) return;
-      await setRow(env, deps, row.server_id, { status: "expired" });
-      await deleteServer(env, deps, row.server_id, "checkout expired");
+      await dropCheckout(env, deps, row, "checkout expired");
       return;
     }
     case "invoice.paid": {
@@ -539,10 +544,10 @@ export async function applyEvent(env: Env, deps: Deps, event: StripeEvent): Prom
     case "customer.subscription.deleted": {
       const row = await rowFor(env, str(meta(obj.metadata).server_id), str(obj.id));
       if (!row) return;
-      // The owner cancelled and the paid month ran out: the server goes now, no grace.
+      // The owner cancelled and the paid month ran out: frozen now, no grace.
       if (meta(obj.cancellation_details).reason === "cancellation_requested" && ["active", "past_due", "canceled"].includes(row.status)) {
-        await setRow(env, deps, row.server_id, { status: "ended", grace_until: null });
-        await deleteServer(env, deps, row.server_id, "billing: cancelled by owner");
+        await setRow(env, deps, row.server_id, { status: "suspended", grace_until: null });
+        await freezeServer(env, deps, row.server_id, "billing: cancelled by owner");
         return;
       }
       await startGrace(env, deps, row, "canceled");
@@ -593,7 +598,18 @@ export async function stripeWebhook(request: Request, env: Env, deps: Deps): Pro
 
 // ---- The cron tick -------------------------------------------------------------------------
 
-/** Suspends servers whose grace ran out, and drops Checkouts nobody paid. */
+/**
+ * An unpaid Checkout is dropped: a new server goes with it, a frozen one being resumed stays
+ * frozen (`suspended`).
+ */
+async function dropCheckout(env: Env, deps: Deps, row: BillingRow, why: string): Promise<void> {
+  const frozen = await env.DB.prepare("SELECT 1 AS f FROM host_servers WHERE id = ? AND state = 'frozen'").bind(row.server_id).first();
+  await setRow(env, deps, row.server_id, { status: frozen ? "suspended" : "expired", checkout_at: null });
+  await expireCheckout(env, deps, row);
+  if (!frozen) await deleteServer(env, deps, row.server_id, why);
+}
+
+/** Freezes servers whose grace ran out, and drops Checkouts nobody paid. */
 export async function billingTick(env: Env, deps: Deps): Promise<void> {
   const now = deps.now();
   const due = await env.DB.prepare(
@@ -604,17 +620,13 @@ export async function billingTick(env: Env, deps: Deps): Promise<void> {
   for (const row of due.results) {
     await setRow(env, deps, row.server_id, { status: "suspended", grace_until: null });
     if (row.status === "past_due") await cancelSubscription(env, deps, row, "unpaid");
-    await deleteServer(env, deps, row.server_id, "billing: unpaid");
+    await freezeServer(env, deps, row.server_id, "billing: unpaid");
     console.log(JSON.stringify({ msg: "billing suspended", server: row.server_id, was: row.status }));
   }
-  const stale = await env.DB.prepare("SELECT * FROM host_billing WHERE status = 'pending' AND created_at < ?")
+  const stale = await env.DB.prepare("SELECT * FROM host_billing WHERE status = 'pending' AND COALESCE(checkout_at, created_at) < ?")
     .bind(now - PENDING_TTL_MS)
     .all<BillingRow>();
-  for (const row of stale.results) {
-    await setRow(env, deps, row.server_id, { status: "expired" });
-    await expireCheckout(env, deps, row);
-    await deleteServer(env, deps, row.server_id, "checkout not paid");
-  }
+  for (const row of stale.results) await dropCheckout(env, deps, row, "checkout not paid");
 }
 
 // ---- The site ------------------------------------------------------------------------------
@@ -704,7 +716,7 @@ export async function myBilling(env: Env, deps: Deps, steamId: string): Promise<
     .first<{ customer_id: string }>();
   const rows = await env.DB.prepare(
     `SELECT b.*, s.name AS name, s.region AS region FROM host_billing b LEFT JOIN host_servers s ON s.id = b.server_id
-      WHERE b.steam_id = ? AND (b.status IN ('pending', 'active', 'past_due', 'canceled') OR (b.status = 'suspended' AND b.updated_at > ?))
+      WHERE b.steam_id = ? AND (b.status IN ('pending', 'active', 'past_due', 'canceled') OR (b.status = 'suspended' AND (s.state = 'frozen' OR b.updated_at > ?)))
       ORDER BY b.created_at`,
   )
     .bind(steamId, deps.now() - 30 * DAY)
@@ -779,14 +791,74 @@ export async function resumeCheckout(env: Env, deps: Deps, steamId: string, serv
   const row = await billingRow(env, serverId);
   if (!row || row.steam_id !== steamId) return { status: 404, body: { error: "No such server." } };
   if (row.status !== "pending") return { status: 409, body: { error: "This server is already paid." } };
-  const server = await env.DB.prepare("SELECT name FROM host_servers WHERE id = ? AND state = 'pending'")
+  const server = await env.DB.prepare("SELECT name FROM host_servers WHERE id = ? AND state IN ('pending', 'frozen')")
     .bind(serverId)
     .first<{ name: string }>();
   if (!server) return { status: 404, body: { error: "No such server." } };
   await expireCheckout(env, deps, row);
   const session = await createCheckout(deps, cfg, { serverId, customerId: row.customer_id, type: row.type, name: server.name });
   if (!session.ok) return { status: 502, body: { error: "Payment couldn't be started. Try again." } };
-  await setRow(env, deps, serverId, { checkout_session_id: session.body.id });
+  await setRow(env, deps, serverId, { checkout_session_id: session.body.id, checkout_at: deps.now() });
+  return { status: 200, body: { url: session.body.url } };
+}
+
+/**
+ * `POST /v1/web/hosting/billing/servers/:id/reactivate`: Resume a frozen server. If its old
+ * subscription is still live at Stripe it is kept (and un-cancelled) and the server is placed
+ * now; otherwise a new Checkout, and the server is placed once paid. Either way it goes back in
+ * its region with its saved settings, through `seatPaid`.
+ */
+export async function reactivate(env: Env, deps: Deps, steamId: string, serverId: string): Promise<Result> {
+  const server = await env.DB.prepare("SELECT name, steam_id, state FROM host_servers WHERE id = ? AND state != 'deleted'")
+    .bind(serverId)
+    .first<{ name: string; steam_id: string; state: string }>();
+  if (!server || server.steam_id !== steamId) return { status: 404, body: { error: "No such server." } };
+  if (server.state !== "frozen") return { status: 409, body: { error: "This server isn't frozen." } };
+  const cfg = billingConfig(env);
+  if (!cfg) {
+    // Billing was switched off since: free again, as any deploy would be.
+    const seated = await seatPaid(env, deps, serverId);
+    return seated === "ok" || seated === ALREADY_SEATED
+      ? { status: 200, body: { placed: true } }
+      : { status: 409, body: { code: "no_capacity", error: "No room right now. Try again later." } };
+  }
+  const row = await billingRow(env, serverId);
+  if (!row || row.steam_id !== steamId) return { status: 404, body: { error: "No such server." } };
+  if (row.status === "pending" && row.checkout_session_id) {
+    // A Resume Checkout is already open: a fresh one replaces it.
+    return resumeCheckout(env, deps, steamId, serverId);
+  }
+  if (!(await roomToPlace(env, deps, serverId))) {
+    return { status: 409, body: { code: "no_capacity", error: "No room right now. Try again later." } };
+  }
+  if (row.subscription_id) {
+    const sub = await stripe<StripeSubscription>(cfg, deps, "GET", `/subscriptions/${encodeURIComponent(row.subscription_id)}`);
+    if (sub.ok && (sub.body.status === "active" || sub.body.status === "trialing")) {
+      if (sub.body.cancel_at_period_end) {
+        const kept = await stripe<StripeSubscription>(cfg, deps, "POST", `/subscriptions/${encodeURIComponent(row.subscription_id)}`, {
+          cancel_at_period_end: false,
+        });
+        if (!kept.ok) return { status: 502, body: { error: "Couldn't resume. Try again." } };
+      }
+      await setRow(env, deps, serverId, { status: "active", grace_until: null });
+      const seated = await seatPaid(env, deps, serverId);
+      if (seated === "ok" || seated === ALREADY_SEATED) return { status: 200, body: { placed: true } };
+      await setRow(env, deps, serverId, { status: "suspended" });
+      return { status: 409, body: { code: "no_capacity", error: "No room right now. Try again later." } };
+    }
+  }
+  const session = await createCheckout(deps, cfg, { serverId, customerId: row.customer_id, type: row.type, name: server.name });
+  if (!session.ok) return { status: 502, body: { error: "Payment couldn't be started. Try again." } };
+  await setRow(env, deps, serverId, {
+    status: "pending",
+    checkout_session_id: session.body.id,
+    checkout_at: deps.now(),
+    subscription_id: null,
+    grace_until: null,
+    price_id: cfg.prices[row.type],
+    amount_cents: PRICE_CENTS[row.type],
+  });
+  console.log(JSON.stringify({ msg: "billing resume checkout", server: serverId }));
   return { status: 200, body: { url: session.body.url } };
 }
 
@@ -795,10 +867,11 @@ export async function billingWebRoute(env: Env, deps: Deps, steamId: string, met
   if (!path.startsWith("/v1/web/hosting/billing")) return null;
   if (method === "GET" && path === "/v1/web/hosting/billing") return myBilling(env, deps, steamId);
   if (method === "POST" && path === "/v1/web/hosting/billing/portal") return portalLink(env, deps, steamId);
-  const m = path.match(/^\/v1\/web\/hosting\/billing\/servers\/([0-9a-f-]{36})\/(checkout|cancel|resume)$/i);
+  const m = path.match(/^\/v1\/web\/hosting\/billing\/servers\/([0-9a-f-]{36})\/(checkout|cancel|resume|reactivate)$/i);
   if (m && method === "POST") {
     const action = m[2].toLowerCase();
     if (action === "checkout") return resumeCheckout(env, deps, steamId, m[1]);
+    if (action === "reactivate") return reactivate(env, deps, steamId, m[1]);
     return setRenewal(env, deps, steamId, m[1], action === "resume");
   }
   return { status: 404, body: { error: "no such endpoint" } };
