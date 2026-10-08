@@ -520,12 +520,23 @@ export async function putReport(request: Request, account: Account, env: Env): P
   // Tie the report to the player, not just the install. The game already publishes this GUID
   // to every server the player joins, so it is the identity the rest of the system keys on.
   // Fill-only: a GUID claimed elsewhere (a server log, the app) is left as it stands.
+  //
+  // Side bookkeeping, never the report's gate. `accounts.guid` is unique, so this loses to
+  // another account that already holds the GUID (a second install of the same player, or two
+  // first uploads racing). That is a normal outcome, not an error: `NOT EXISTS` skips the
+  // common case, the catch covers the race, and either way the report below is still stored.
   if (isGuid(guid) && !(account.guid ?? "").trim()) {
-    await env.DB.prepare(
-      "UPDATE accounts SET guid = ? WHERE id = ? AND (guid IS NULL OR guid = '')",
-    )
-      .bind((guid as string).trim(), account.id)
-      .run();
+    const claim = (guid as string).trim();
+    try {
+      await env.DB.prepare(
+        "UPDATE accounts SET guid = ? WHERE id = ? AND (guid IS NULL OR guid = '')" +
+          " AND NOT EXISTS (SELECT 1 FROM accounts WHERE guid = ?)",
+      )
+        .bind(claim, account.id, claim)
+        .run();
+    } catch (err) {
+      console.error(JSON.stringify({ msg: "diagnostics guid fill skipped", error: String(err) }));
+    }
   }
   // The sighting is recorded whether or not the column was filled. Fill-only is right for the
   // column — one account, one current GUID — but every GUID an account has ever reported is
