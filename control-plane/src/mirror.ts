@@ -650,9 +650,14 @@ export async function applyListingPage(
   const walk = st.walk ?? { top: "", offset: 0 };
   st.walk = walk;
   for (const p of posts) {
+    // WordPress hands back a husk for a post whose author was deleted: only `_links` and
+    // `_embedded`, no id, slug, link or date. Binding its missing fields threw in D1 and
+    // failed the whole page, every time, so discovery stuck on it. The sweep still sees the id.
+    if (!isListedPost(p)) continue;
     await upsertPost(env, p, tree, now);
     if (p.modified > walk.top) walk.top = p.modified;
   }
+  // The page's length, husks included: it is what the offset walks by.
   if (posts.length < LIST_PER_PAGE) {
     if (walk.top > st.hwm) st.hwm = walk.top;
     st.walk = null;
@@ -662,6 +667,18 @@ export async function applyListingPage(
   walk.offset += LIST_PER_PAGE - LIST_OVERLAP;
   await setState(env, "listing", st);
   return "more";
+}
+
+/** A listing entry with what `upsertPost` binds. */
+export function isListedPost(p: unknown): p is Post {
+  const q = p as Partial<Post> | null;
+  return (
+    !!q &&
+    Number.isSafeInteger(q.id) &&
+    typeof q.slug === "string" &&
+    typeof q.link === "string" &&
+    typeof q.modified === "string"
+  );
 }
 
 export function minusOneSecond(local: string): string {
