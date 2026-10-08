@@ -19,13 +19,13 @@
     // View-only/locked paints are pulled until the memory-only version lands. "on" restores them.
     "VIEW_ONLY_MODE": "off",
     // User server deploy (src/hosting.ts). Money is the limit: a box is ordered only while
-    // MXB_HOST_BOX_PRICE_EUR x (billed boxes + 1) stays within MXB_HOST_SPEND_CAP_EUR. "0" orders
+    // MXB_HOST_BOX_PRICE_USD x (billed boxes + 1) stays within MXB_HOST_SPEND_CAP_USD. "0" orders
     // nothing at all, which is the safe default until Sean sets a cap. The box count is a second
     // safety limit; Legacy (Wine) is held to one box for its trial.
-    "MXB_HOST_SPEND_CAP_EUR": "0",
-    // One OVH VPS-1 on an OVH US account: $7.60/month plus the mandatory $0.50 backup add-on
-    // (public catalog, 2026-10-07), counted here in EUR.
-    "MXB_HOST_BOX_PRICE_EUR": "7.50",
+    "MXB_HOST_SPEND_CAP_USD": "0",
+    // One OVH VPS-1 2027 on an OVH US account: $5.35/month, no commitment (pricing mode default),
+    // 2 vCore / 4 GB / 40 GB NVMe (public catalog). Cap and price are both USD.
+    "MXB_HOST_BOX_PRICE_USD": "5.35",
     "MXB_HOST_MAX_BOXES": "4",
     "MXB_HOST_LEGACY_MAX_BOXES": "1",
     "MXB_HOST_SLOTS_NATIVE": "4",

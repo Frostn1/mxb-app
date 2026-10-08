@@ -89,8 +89,8 @@ keyed `(account_id, bike_id, slot)`, and the app publishes all of them together.
 Invited Steam accounts deploy a server of their own on servers.mxbsecure.com: `mxbserver` or
 Legacy, in US East, US West, EU West, EU East or Oceania. Each lands in a slot on an OVH VPS
 (`src/hosting.ts`, `src/hostregions.ts`, `src/ovh.ts`). Boxes are ordered only when a deploy
-finds no free slot in its pool and region, and only while `MXB_HOST_BOX_PRICE_EUR` x (billed
-boxes + 1) stays within `MXB_HOST_SPEND_CAP_EUR`; otherwise the user sees "No capacity in
+finds no free slot in its pool and region, and only while `MXB_HOST_BOX_PRICE_USD` x (billed
+boxes + 1) stays within `MXB_HOST_SPEND_CAP_USD`; otherwise the user sees "No capacity in
 <region> right now." and operators get an alert. Nothing is ever cancelled here: an empty box
 drains, then is flagged near its renewal for a person to cancel at OVH.
 
