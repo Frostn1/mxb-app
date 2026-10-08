@@ -269,6 +269,41 @@ pub async fn load_bike_model(source: String, tyres: Option<String>) -> Result<Bi
         .map_err(|e| format!("load_bike_model task failed: {e}"))?
 }
 
+/// Draw `bike` as the model-swap variant `variant` would leave it, without applying the
+/// swap. The file set is assembled in memory (see [`gather_preview_files`]) — nothing on
+/// disk moves, so this is safe to run with the game open.
+///
+/// One command for every app that draws a bike beside a rider: MXB App's Locker and Presets
+/// previews and the Studio's Rider tab all call it, and each app used to carry its own copy.
+#[tauri::command]
+pub async fn preview_model_swap(
+    app: tauri::AppHandle,
+    bike: String,
+    variant: String,
+    tyres: Option<String>,
+) -> Result<BikeModel, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+        preview_model_swap_blocking(&cfg.mods_path, &bike, &variant, tyres)
+    })
+    .await
+    .map_err(|e| format!("preview_model_swap task failed: {e}"))?
+}
+
+pub fn preview_model_swap_blocking(
+    mods_path: &str,
+    bike: &str,
+    variant: &str,
+    tyres: Option<String>,
+) -> Result<BikeModel, String> {
+    // Working out which files a variant would park is swap business; turning the answer into
+    // a model is the viewer's, and does not need to know what a swap is.
+    let set =
+        crate::modelswap::preview_set(mods_path, bike, variant).map_err(|e| format!("{e:#}"))?;
+    let label = format!("{bike} · {variant}");
+    let tyre_dir = library::mods_subdir(mods_path, "mods/tyres");
+    load_preview_blocking(&set, &label, tyre_dir, tyres)
+}
 
 /// Draw the bike a [`PreviewSet`] describes.
 ///

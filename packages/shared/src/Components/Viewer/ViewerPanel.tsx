@@ -72,6 +72,18 @@ interface ViewerPanelProps {
   onRiderRig?: (rig: PosableRig | null) => void;
   /** Handed the way to take a photo of whichever canvas is on screen. */
   onCaptureReady?: (capture: CaptureFn | null) => void;
+  /**
+   * Look, don't touch: orbit and zoom only. No pose or placement panels, no tyre picker and
+   * no expand button — for a preview that sits inside a dialog of its own, like a saved
+   * preset's, where moving anything would suggest the preset itself was being changed.
+   */
+  readOnly?: boolean;
+  /**
+   * The tyre pack to fit, overriding the remembered preview pick. A preset names its own
+   * tyres, and showing it on whatever pack the Viewer was last left on would be showing a
+   * different preset. Empty means the bike's own.
+   */
+  tyres?: string;
   className?: string;
 }
 
@@ -138,6 +150,8 @@ export function ViewerPanel({
   photo = false,
   onRiderRig,
   onCaptureReady,
+  readOnly = false,
+  tyres: fixedTyres,
   className,
 }: ViewerPanelProps) {
   const t = useT();
@@ -158,6 +172,7 @@ export function ViewerPanel({
   // installed for it, so switching livery is a pick out of this and not another resolve.
   const [bikeModel, setBikeModel] = useState<BikeModel | null>(null);
   const tyresPick = useTyresPick();
+  const tyres = fixedTyres ?? tyresPick.tyres;
   const [bikeLoading, setBikeLoading] = useState(false);
   const [bikeError, setBikeError] = useState<string | null>(null);
   const bikeFirst = useRef(true);
@@ -250,7 +265,7 @@ export function ViewerPanel({
     const timer = setTimeout(() => {
       // "Stock" is the fallback the backend understands for a bike whose active variant the
       // caller couldn't name — the model packed in the archive.
-      previewModelSwap(bikeId!, bikeVariant || "Stock", tyresPick.tyres)
+      previewModelSwap(bikeId!, bikeVariant || "Stock", tyres)
         .then((m) => {
           if (!alive) return;
           setBikeModel(m);
@@ -274,7 +289,7 @@ export function ViewerPanel({
       clearTimeout(timer);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [withBike, bikeId, bikeVariant, tyresPick.tyres]);
+  }, [withBike, bikeId, bikeVariant, tyres]);
 
   // The rig the ready-made moves are stated against, and the bike they reach for. Read here
   // because this is where both models are: the studio next door only ever sees a loadout.
@@ -410,7 +425,7 @@ export function ViewerPanel({
             {t("viewer.preview3d")}
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            {withBike && <TyresPicker pick={tyresPick} />}
+            {withBike && !readOnly && <TyresPicker pick={tyresPick} />}
             {!riderOnly && (
               <ModeToggle
                 mode={mode}
@@ -419,15 +434,17 @@ export function ViewerPanel({
                 onChange={setMode}
               />
             )}
-            <Button
-              variant="chip"
-              size="icon"
-              className="h-7 w-7"
-              title={t("viewer.expand")}
-              onClick={() => setExpanded(true)}
-            >
-              <Maximize2 className="h-4 w-4" />
-            </Button>
+            {!readOnly && (
+              <Button
+                variant="chip"
+                size="icon"
+                className="h-7 w-7"
+                title={t("viewer.expand")}
+                onClick={() => setExpanded(true)}
+              >
+                <Maximize2 className="h-4 w-4" />
+              </Button>
+            )}
           </div>
         </div>
         <div className="relative min-h-[280px] flex-1">
@@ -439,8 +456,8 @@ export function ViewerPanel({
             onRiderPose={onRiderPose}
             onPoseGrab={onPoseGrab}
             onCaptureReady={takeInline}
-            poseControls
-            placeControls
+            poseControls={!readOnly}
+            placeControls={!readOnly}
             className="absolute inset-0"
           />
           {overlay}
