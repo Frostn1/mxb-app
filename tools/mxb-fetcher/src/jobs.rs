@@ -1,8 +1,9 @@
 //! One leased job, start to finish: a post page (and the pictures it asks for), or a file.
 //!
 //! Files are streamed to a temporary file on disk while they are hashed, never held in RAM,
-//! then PUT to R2 from disk with their length known: R2's presigned PUT needs a
-//! Content-Length, and hashing first means a file the mirror already holds is never uploaded.
+//! then sent to the control plane from disk one multipart part at a time (it writes them to R2
+//! through its own binding and checks the whole SHA-256). Hashing first means a file the
+//! mirror already holds is never uploaded.
 
 use crate::api::{self, Api, Failure, Job, Uploaded, WantedImage};
 use crate::mediafire;
@@ -14,7 +15,7 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::path::PathBuf;
 use std::time::Duration;
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 /// What a browser sends, near enough: these sites vary what they serve on it.
 pub const BROWSER_UA: &str =
@@ -31,8 +32,7 @@ pub struct Ctx {
     pub web: Client,
     /// File bodies: no transparent decompression, so the bytes counted are the bytes stored.
     pub files: Client,
-    /// PUTs to R2.
-    pub put: Client,
+
     pub pacer: Pacer,
     pub tmp: PathBuf,
 }
@@ -222,24 +222,7 @@ impl Ctx {
             src: Some(w.src.clone()),
             purpose: Some(w.purpose.clone()),
         };
-        let target = self.api.upload_url(&job.id, &up).await?;
-        if !target.have {
-            let url = target
-                .url
-                .as_deref()
-                .ok_or_else(|| anyhow!("no upload URL"))?;
-            let mut req = self
-                .put
-                .put(url)
-                .header(header::CONTENT_LENGTH, bytes.len());
-            for (k, v) in &target.headers {
-                req = req.header(k.as_str(), v.as_str());
-            }
-            let res = req.body(bytes).send().await?;
-            if !res.status().is_success() {
-                return Err(anyhow!("R2 answered {} to the PUT", res.status().as_u16()));
-            }
-        }
+        self.send(&job.id, &up, Body::Bytes(&bytes)).await?;
         Ok(Some(up))
     }
 
@@ -471,26 +454,82 @@ impl Ctx {
                 src: None,
                 purpose: None,
             };
-            let target = self.api.upload_url(&job.id, &up).await?;
-            if !target.have {
-                let url = target
-                    .url
-                    .as_deref()
-                    .ok_or_else(|| anyhow!("no upload URL"))?;
-                put_file(&self.put, url, &target.headers, &tmp, size).await?;
-            }
+            let held = self.send(&job.id, &up, Body::File(&tmp)).await?;
             self.api.file_done(&job.id, &up).await?;
             Ok(format!(
                 "{} ({} bytes{})",
                 up.filename,
                 size,
-                if target.have { ", already held" } else { "" }
+                if held { ", already held" } else { "" }
             ))
         }
         .await;
         let _ = tokio::fs::remove_file(&tmp).await;
         result
     }
+}
+
+/// What an upload's bytes come from.
+enum Body<'a> {
+    Bytes(&'a [u8]),
+    /// A spooled file, read a part at a time.
+    File(&'a PathBuf),
+}
+
+impl Ctx {
+    /// Upload through the control plane: start (true when it holds these bytes already), the
+    /// parts in order, complete. Anything failing aborts the upload there.
+    async fn send(&self, job: &str, up: &Uploaded, body: Body<'_>) -> Result<bool> {
+        let start = self.api.upload_start(job, up).await?;
+        if start.have {
+            return Ok(true);
+        }
+        let id = start
+            .upload
+            .ok_or_else(|| anyhow!("the control plane opened no upload"))?;
+        let part = start
+            .part_bytes
+            .filter(|n| *n > 0)
+            .unwrap_or(32 * 1024 * 1024);
+        let sent = self.send_parts(&id, up.size, part, body).await;
+        if let Err(e) = sent {
+            let _ = self.api.upload_abort(&id).await;
+            return Err(e);
+        }
+        Ok(false)
+    }
+
+    async fn send_parts(&self, id: &str, size: u64, part: u64, body: Body<'_>) -> Result<()> {
+        let mut file = match body {
+            Body::File(path) => Some(tokio::fs::File::open(path).await?),
+            Body::Bytes(_) => None,
+        };
+        for (n, (at, len)) in (1u32..).zip(part_ranges(size, part)) {
+            let chunk = match (&body, file.as_mut()) {
+                (Body::Bytes(b), _) => b[at as usize..(at + len) as usize].to_vec(),
+                (Body::File(_), Some(f)) => {
+                    // One part in memory at a time, read straight off the disk.
+                    let mut buf = vec![0u8; len as usize];
+                    f.read_exact(&mut buf).await?;
+                    buf
+                }
+                _ => unreachable!("a file body has its file open"),
+            };
+            self.api.upload_part(id, n, chunk).await?;
+        }
+        self.api.upload_complete(id).await
+    }
+}
+/// Where each part starts and how long it is: all `part` long but the last.
+pub fn part_ranges(size: u64, part: u64) -> Vec<(u64, u64)> {
+    let mut out = Vec::new();
+    let mut at = 0;
+    while at < size {
+        let len = part.min(size - at);
+        out.push((at, len));
+        at += len;
+    }
+    out
 }
 
 fn deferred(left: Duration) -> anyhow::Error {
@@ -522,32 +561,6 @@ async fn spool(res: Response, path: &PathBuf, max: u64) -> Result<Option<(String
     }
     out.flush().await?;
     Ok(Some((hex(&hash.finalize()), size)))
-}
-
-/// A PUT streamed from disk, with the headers the presigned URL was signed with.
-async fn put_file(
-    client: &Client,
-    url: &str,
-    headers: &std::collections::HashMap<String, String>,
-    path: &PathBuf,
-    size: u64,
-) -> Result<()> {
-    let file = tokio::fs::File::open(path).await?;
-    let stream = tokio_util::io::ReaderStream::with_capacity(file, 256 * 1024);
-    let mut req = client.put(url).header(header::CONTENT_LENGTH, size);
-    for (k, v) in headers {
-        req = req.header(k.as_str(), v.as_str());
-    }
-    let res = req.body(reqwest::Body::wrap_stream(stream)).send().await?;
-    if !res.status().is_success() {
-        let status = res.status().as_u16();
-        let text = res.text().await.unwrap_or_default();
-        return Err(anyhow!(
-            "R2 answered {status} to the PUT: {}",
-            text.chars().take(200).collect::<String>()
-        ));
-    }
-    Ok(())
 }
 
 /// A response body, or None once it passes `cap` bytes.
@@ -701,6 +714,21 @@ mod tests {
             Some("a_.._b.zip".into())
         );
         assert_eq!(disposition_name("inline"), None);
+    }
+
+    #[test]
+    fn parts_are_equal_but_the_last() {
+        let mib = 1024 * 1024;
+        assert_eq!(
+            part_ranges(70 * mib, 32 * mib),
+            vec![(0, 32 * mib), (32 * mib, 32 * mib), (64 * mib, 6 * mib)]
+        );
+        assert_eq!(
+            part_ranges(64 * mib, 32 * mib),
+            vec![(0, 32 * mib), (32 * mib, 32 * mib)]
+        );
+        assert_eq!(part_ranges(5, 32 * mib), vec![(0, 5)]);
+        assert!(part_ranges(0, 32 * mib).is_empty());
     }
 
     #[test]

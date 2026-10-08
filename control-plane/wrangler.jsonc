@@ -95,9 +95,7 @@
     // `/v1/mirror/fetcher/*`), because they answer Workers 403. Space or comma separated; a name
     // covers its subdomains; empty turns the fetcher off. Keep the same as in
     // mirror/wrangler.jsonc. The fetcher authenticates with the MIRROR_FETCHER_TOKEN secret.
-    "MIRROR_FETCHER_HOSTS": "mxb-mods.com mediafire.com",
-    // The public bucket's name, for the S3 endpoint the fetcher's upload URLs are presigned against.
-    "MXB_ASSETS_BUCKET": "mxb-assets"
+    "MIRROR_FETCHER_HOSTS": "mxb-mods.com mediafire.com"
   },
 
   // Every five minutes: hosted boxes through delivery and install, idle slots, drains, prunes.

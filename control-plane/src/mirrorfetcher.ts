@@ -5,10 +5,18 @@
  *
  *   POST /v1/mirror/fetcher/lease       up to `max` jobs: post pages to read, files to fetch
  *   POST /v1/mirror/fetcher/result      a page's HTML, a folder's listing, or why a job failed
- *   POST /v1/mirror/fetcher/upload-url  a presigned R2 PUT for one file or picture, by SHA-256
- *   POST /v1/mirror/fetcher/done        the upload is in R2: record it
+ *   POST /v1/mirror/fetcher/upload/start     a file or picture by SHA-256: `have`, or an upload id
+ *   PUT  /v1/mirror/fetcher/upload/part      ?upload=&n= one part's raw bytes (32 MiB, in order)
+ *   POST /v1/mirror/fetcher/upload/complete  assembled, then checked: size and SHA-256
+ *   POST /v1/mirror/fetcher/upload/abort     the box gave up on it
+ *   POST /v1/mirror/fetcher/done             the job's upload is in R2: finish the row
  *
  * Every call carries `Authorization: Bearer <MIRROR_FETCHER_TOKEN>`.
+ *
+ * Uploads go through this Worker's own `ASSET_MIRROR` binding as R2 multipart uploads, so no S3
+ * credentials are involved. The whole file's SHA-256 is computed here as the parts pass
+ * (`sha256state.ts`, state kept in `mirror_state` as `fetcher-upload:<id>`), so an object only
+ * lands under `<prefix>/<sha256>` when its bytes really hash to that.
  *
  * A job is a row in D1, as it is for the queue: a page is `mod_assets.page_status = 'fetcher'`
  * with `page_due_at` as the lease's end; a file is `mod_files.status = 'fetcher'` with
@@ -22,11 +30,10 @@
  * meanwhile waits in `mirror_state` as `fetcher-page:<id>`.
  *
  * A file goes to `<prefix>/<sha256>` in mxb-assets, the key the Worker would have given it
- * (`mirrorfetch.ts` `placement`). The box hashes it before asking for the URL, so a file we
+ * (`mirrorfetch.ts` `placement`). The box hashes it before it starts the upload, so a file we
  * already hold is never uploaded twice. Locked (`.mxbsecure`) content never goes this way.
  */
 
-import { AwsClient } from "aws4fetch";
 import {
   backoff,
   DUE_COLUMNS,
@@ -53,15 +60,19 @@ import { MAX_IMAGE_BYTES, MAX_IMAGES } from "./modbody";
 import { expandFolder, placement } from "./mirrorfetch";
 import { pagesViaFetcher } from "./fetcherroute";
 import { FOLDER_MAX_FILES } from "./mirrorhosts";
+import { sha256Digest, sha256Init, sha256Update, type Sha256State } from "./sha256state";
 
 export const FETCHER_PREFIX = "/v1/mirror/fetcher/";
 /** Jobs one lease may hand out. */
 const MAX_LEASE = 10;
 const DEFAULT_LEASE = 2;
-/** How long a presigned URL stays good: long enough for a 4 GB PUT on a slow line. */
-const URL_TTL_S = 6 * 3600;
-/** R2 takes at most 5 GiB in one PUT; the box sends one PUT a file. Larger is the runner's. */
+/** The largest file the fetcher mirrors; larger is the runner's. */
 export const FETCHER_MAX_BYTES = 4.5 * 1024 ** 3;
+/**
+ * One multipart part. A Workers request body may be 100 MB; a part is buffered once here and
+ * hashed, so it stays well inside both that and the Worker's 128 MB of memory.
+ */
+export const UPLOAD_PART_BYTES = 32 * 1024 * 1024;
 const FILE_MAX_ATTEMPTS = 8;
 /** A post page is ~150 KB; anything far past that is not one. */
 const MAX_HTML_BYTES = 4 * 1024 * 1024;
@@ -401,34 +412,7 @@ async function listResult(env: Env, seq: number, body: Json, now: number): Promi
 
 // ───────────────────────────── uploads ─────────────────────────────
 
-/** R2's S3 endpoint and the R2_* key, against the public bucket. Absent: 503. */
-function s3(env: Env): { aws: AwsClient; base: string } | null {
-  if (!env.R2_ACCESS_KEY_ID || !env.R2_SECRET_ACCESS_KEY || !env.R2_S3_ENDPOINT) return null;
-  const bucket = env.MXB_ASSETS_BUCKET || "mxb-assets";
-  return {
-    aws: new AwsClient({ accessKeyId: env.R2_ACCESS_KEY_ID, secretAccessKey: env.R2_SECRET_ACCESS_KEY, service: "s3", region: "auto" }),
-    base: `${env.R2_S3_ENDPOINT.replace(/\/+$/, "")}/${bucket}`,
-  };
-}
-
 const IMMUTABLE = "public, max-age=31536000, immutable";
-
-/**
- * A presigned PUT for `key`. The headers it returns are part of the signature (bar
- * content-type), so the box must send exactly them.
- */
-export async function presignPut(
-  env: Env,
-  key: string,
-  headers: Record<string, string>,
-): Promise<{ url: string; headers: Record<string, string> } | null> {
-  const c = s3(env);
-  if (!c) return null;
-  const u = new URL(`${c.base}/${key.split("/").map(encodeURIComponent).join("/")}`);
-  u.searchParams.set("X-Amz-Expires", String(URL_TTL_S));
-  const signed = await c.aws.sign(new Request(u, { method: "PUT", headers }), { aws: { signQuery: true } });
-  return { url: signed.url, headers };
-}
 
 interface Upload {
   sha: string;
@@ -474,42 +458,191 @@ async function knownBlob(env: Env, sha: string): Promise<{ r2_key: string; bucke
   return await env.DB.prepare("SELECT r2_key, bucket FROM mod_blobs WHERE sha256 = ?").bind(sha).first<{ r2_key: string; bucket: string }>();
 }
 
-async function uploadUrl(env: Env, j: Exclude<JobRef, { kind: "list" }>, body: Json, now: number): Promise<Response> {
-  const up = readUpload(body);
-  if (typeof up === "string") return json(400, { error: up });
-  let key: string;
-  const headers: Record<string, string> = { "cache-control": IMMUTABLE, "content-type": up.type };
+/**
+ * Where an upload goes, and how it is stored, once the job and the bytes it describes check
+ * out; or the answer to give instead.
+ */
+async function uploadTarget(
+  env: Env,
+  j: Exclude<JobRef, { kind: "list" }>,
+  body: Json,
+  up: Upload,
+  now: number,
+): Promise<{ key: string; meta: R2HTTPMetadata; picture: boolean } | Response> {
+  const meta: R2HTTPMetadata = { contentType: up.type, cacheControl: IMMUTABLE };
   if (j.kind === "page") {
     if (!(await leasedPage(env, j.id, now))) return json(409, { error: "not leased" });
     const pending = await getPending(env, j.id);
     if (!pending || !pageWants(pending, body.purpose, body.src)) return json(409, { error: "the page didn't ask for that picture" });
     const where = imageKey(body.purpose, up);
     if (typeof where === "string") return json(400, { error: where });
-    key = where.key;
-  } else {
-    const row = await leasedFile(env, j, now);
-    if (!row) return json(409, { error: "not leased" });
-    if (up.size > FETCHER_MAX_BYTES) return json(413, { error: "too big for one PUT" });
-    const where = placement(row.type, row.is_server === 1, nameOf(row, up));
-    if (where.bucket !== "public") {
-      // Locked content belongs in the private bucket, which the fetcher never writes to.
-      await env.DB.prepare(
-        "UPDATE mod_files SET status = 'runner', error = 'locked content: not via the fetcher', leased_until = 0 WHERE version_id = ? AND idx = ? AND part = ?",
-      )
-        .bind(row.version_id, row.idx, row.part)
-        .run();
-      return json(422, { error: "locked content is not mirrored through the fetcher" });
-    }
-    key = `${where.prefix}/${up.sha}`;
-    headers["content-disposition"] = `attachment; filename*=UTF-8''${encodeURIComponent(nameOf(row, up))}`;
+    return { key: where.key, meta, picture: true };
   }
-  const have = await knownBlob(env, up.sha);
-  if (have) return json(200, { have: true, key: have.r2_key });
-  const signed = await presignPut(env, key, headers);
-  if (!signed) return json(503, { error: "uploads are not configured" });
-  return json(200, { have: false, key, method: "PUT", url: signed.url, headers: signed.headers, expires_in: URL_TTL_S });
+  const row = await leasedFile(env, j, now);
+  if (!row) return json(409, { error: "not leased" });
+  if (up.size > FETCHER_MAX_BYTES) return json(413, { error: "larger than the fetcher takes" });
+  const where = placement(row.type, row.is_server === 1, nameOf(row, up));
+  if (where.bucket !== "public") {
+    // Locked content belongs in the private bucket, which the fetcher never writes to.
+    await env.DB.prepare(
+      "UPDATE mod_files SET status = 'runner', error = 'locked content: not via the fetcher', leased_until = 0 WHERE version_id = ? AND idx = ? AND part = ?",
+    )
+      .bind(row.version_id, row.idx, row.part)
+      .run();
+    return json(422, { error: "locked content is not mirrored through the fetcher" });
+  }
+  meta.contentDisposition = `attachment; filename*=UTF-8''${encodeURIComponent(nameOf(row, up))}`;
+  return { key: `${where.prefix}/${up.sha}`, meta, picture: false };
 }
 
+/** An upload in flight: an R2 multipart upload on mxb-assets, and the hash of what it holds. */
+interface UploadSession {
+  job: string;
+  key: string;
+  r2: string;
+  up: Upload;
+  picture: boolean;
+  parts: R2UploadedPart[];
+  hash: Sha256State;
+  started: number;
+}
+
+const sessionKey = (id: string) => `fetcher-upload:${id}`;
+
+async function getSession(env: Env, id: string): Promise<UploadSession | null> {
+  if (!/^[0-9a-f]{32}$/.test(id)) return null;
+  const row = await env.DB.prepare("SELECT value FROM mirror_state WHERE key = ?").bind(sessionKey(id)).first<{ value: string }>();
+  return row ? (JSON.parse(row.value) as UploadSession) : null;
+}
+
+async function putSession(env: Env, id: string, s: UploadSession): Promise<void> {
+  await env.DB.prepare(
+    "INSERT INTO mirror_state (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+  )
+    .bind(sessionKey(id), JSON.stringify(s))
+    .run();
+}
+
+/** Give an upload up: R2's parts dropped, the session forgotten. */
+async function abortSession(env: Env, id: string, s: UploadSession): Promise<void> {
+  await env.ASSET_MIRROR.resumeMultipartUpload(s.key, s.r2).abort().catch(() => {});
+  await env.DB.prepare("DELETE FROM mirror_state WHERE key = ?").bind(sessionKey(id)).run();
+}
+
+/** `POST upload/start`: a multipart upload opened, or `have` when the blob is already held. */
+async function uploadStart(env: Env, j: Exclude<JobRef, { kind: "list" }>, body: Json, now: number): Promise<Response> {
+  const up = readUpload(body);
+  if (typeof up === "string") return json(400, { error: up });
+  const target = await uploadTarget(env, j, body, up, now);
+  if (target instanceof Response) return target;
+  const have = await knownBlob(env, up.sha);
+  if (have) return json(200, { have: true });
+  if (!env.ASSET_MIRROR) return json(503, { error: "the asset bucket is not bound" });
+  const r2 = await env.ASSET_MIRROR.createMultipartUpload(target.key, { httpMetadata: target.meta });
+  const id = [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, "0")).join("");
+  await putSession(env, id, {
+    job: jobId(j),
+    key: target.key,
+    r2: r2.uploadId,
+    up,
+    picture: target.picture,
+    parts: [],
+    hash: sha256Init(),
+    started: now,
+  });
+  return json(200, { have: false, upload: id, part_bytes: UPLOAD_PART_BYTES });
+}
+
+/**
+ * `PUT upload/part?upload=<id>&n=<n>`: the next part, in order. Every part but the last is
+ * exactly `part_bytes` (R2 wants equal parts). The bytes are hashed on their way to R2.
+ */
+async function uploadPart(request: Request, url: URL, env: Env): Promise<Response> {
+  const id = url.searchParams.get("upload") ?? "";
+  const n = Number(url.searchParams.get("n"));
+  const s = await getSession(env, id);
+  if (!s) return json(404, { error: "no such upload" });
+  if (n !== s.parts.length + 1) return json(409, { error: `expected part ${s.parts.length + 1}` });
+  const left = s.up.size - s.hash.length;
+  const want = Math.min(UPLOAD_PART_BYTES, left);
+  const declared = Number(request.headers.get("content-length"));
+  if (want <= 0 || (Number.isFinite(declared) && declared > 0 && declared !== want)) {
+    await abortSession(env, id, s);
+    return json(400, { error: `part ${n} must be ${want} bytes` });
+  }
+  const bytes = await readExactly(request, want);
+  if (!bytes) {
+    await abortSession(env, id, s);
+    return json(400, { error: `part ${n} must be ${want} bytes` });
+  }
+  try {
+    const part = await env.ASSET_MIRROR.resumeMultipartUpload(s.key, s.r2).uploadPart(n, bytes);
+    s.parts.push({ partNumber: part.partNumber, etag: part.etag });
+  } catch (err) {
+    await abortSession(env, id, s);
+    return json(502, { error: `R2 refused the part: ${String(err)}` });
+  }
+  s.hash = sha256Update(s.hash, bytes);
+  await putSession(env, id, s);
+  return json(200, { ok: true, received: s.hash.length });
+}
+
+/** The request body, if it is exactly `size` bytes; read into one buffer of that size. */
+async function readExactly(request: Request, size: number): Promise<Uint8Array | null> {
+  if (!request.body) return null;
+  const out = new Uint8Array(size);
+  let at = 0;
+  const reader = request.body.getReader();
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (at + value.length > size) {
+      await reader.cancel().catch(() => {});
+      return null;
+    }
+    out.set(value, at);
+    at += value.length;
+  }
+  return at === size ? out : null;
+}
+
+/**
+ * `POST upload/complete`: every byte there and hashing to what the fetcher said, then the
+ * object assembled, checked again in R2 (size; a picture by its first bytes) and recorded.
+ * Anything wrong aborts the upload.
+ */
+async function uploadComplete(env: Env, body: Json, now: number): Promise<Response> {
+  const id = typeof body.upload === "string" ? body.upload : "";
+  const s = await getSession(env, id);
+  if (!s) return json(404, { error: "no such upload" });
+  if (s.hash.length !== s.up.size) {
+    await abortSession(env, id, s);
+    return json(409, { error: `received ${s.hash.length} of ${s.up.size} bytes` });
+  }
+  const sha = sha256Digest(s.hash);
+  if (sha !== s.up.sha) {
+    await abortSession(env, id, s);
+    return json(409, { error: "the bytes don't hash to the sha256 given" });
+  }
+  try {
+    await env.ASSET_MIRROR.resumeMultipartUpload(s.key, s.r2).complete(s.parts);
+  } catch (err) {
+    await abortSession(env, id, s);
+    return json(502, { error: `R2 refused to complete: ${String(err)}` });
+  }
+  await env.DB.prepare("DELETE FROM mirror_state WHERE key = ?").bind(sessionKey(id)).run();
+  const bad = await registerUpload(env, s.key, s.up, s.picture, now);
+  if (bad) return json(409, { error: bad });
+  return json(200, { ok: true, key: s.key });
+}
+
+/** `POST upload/abort`: the fetcher gave up on it. */
+async function uploadAbort(env: Env, body: Json): Promise<Response> {
+  const id = typeof body.upload === "string" ? body.upload : "";
+  const s = await getSession(env, id);
+  if (s) await abortSession(env, id, s);
+  return json(200, { ok: true });
+}
 /**
  * Check what the box says it uploaded: there, the size it said, and for a picture, a picture by
  * its first bytes (never SVG). A bad object is deleted. Recorded in `mod_blobs` when good.
@@ -598,12 +731,17 @@ async function pageDone(env: Env, id: number, body: Json, now: number): Promise<
 // ───────────────────────────── the routes ─────────────────────────────
 
 export async function fetcherRoutes(request: Request, url: URL, env: Env, now = Date.now()): Promise<Response> {
-  if (request.method !== "POST") return json(405, { error: "POST only" });
+  const action = url.pathname.slice(FETCHER_PREFIX.length);
+  const isPart = action === "upload/part";
+  if (request.method !== (isPart ? "PUT" : "POST")) return json(405, { error: isPart ? "PUT only" : "POST only" });
   const denied = await refusal(request, env);
   if (denied) return denied;
+  // A part is raw bytes, up to 32 MiB; everything else is a small JSON object.
+  if (isPart) return uploadPart(request, url, env);
   const body = (await request.json().catch(() => null)) as Json | null;
   if (!body || typeof body !== "object" || Array.isArray(body)) return json(400, { error: "a JSON object is required" });
-  const action = url.pathname.slice(FETCHER_PREFIX.length);
+  if (action === "upload/complete") return uploadComplete(env, body, now);
+  if (action === "upload/abort") return uploadAbort(env, body);
 
   if (action === "lease") {
     const max = Math.min(MAX_LEASE, Math.max(1, Math.floor(Number(body.max) || DEFAULT_LEASE)));
@@ -620,8 +758,8 @@ export async function fetcherRoutes(request: Request, url: URL, env: Env, now = 
   switch (action) {
     case "result":
       return job.kind === "page" ? pageResult(env, job.id, body, now) : fileResult(env, job, body, now);
-    case "upload-url":
-      return uploadUrl(env, job, body, now);
+    case "upload/start":
+      return uploadStart(env, job, body, now);
     case "done":
       return job.kind === "page" ? pageDone(env, job.id, body, now) : fileDone(env, job, body, now);
     default:

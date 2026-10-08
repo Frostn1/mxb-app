@@ -10,11 +10,16 @@ Each round it leases up to two jobs and runs them side by side:
   its status and body back. The control plane walks the catalogue with these, one at a time.
 - **Page**: GET the mxb-mods.com post with a browser User-Agent and hand the HTML back. The
   control plane parses it exactly as the Worker does and answers with the pictures it still
-  needs; each is fetched, checked to be a picture by its first bytes, and PUT to R2.
+  needs; each is fetched, checked to be a picture by its first bytes, and uploaded.
 - **File**: MediaFire file links are resolved the way the MXB App does it (page first, API
   second); MediaFire folders are listed through the API and handed back as parts. The body is
-  streamed to a temp file while it is hashed (never held in memory), then PUT to a presigned
-  R2 URL with its length known. A file the mirror already holds (same SHA-256) is not uploaded.
+  streamed to a temp file while it is hashed (never held in memory), then uploaded from disk.
+  A file the mirror already holds (same SHA-256) is not uploaded.
+
+Uploads go to the control plane (`upload/start`, `upload/part`, `upload/complete`), which
+writes them into R2 as a multipart upload through its own bucket binding: 32 MiB parts, one in
+memory at a time, in order. It hashes the parts as they arrive and aborts the upload if the
+bytes don't match the SHA-256 the box sent. The box needs no R2 credentials.
 
 Requests to one site are at least 2 s apart. A 403 or 429 backs that site off (Retry-After,
 else 2 min doubling to 2 h) and hands its jobs back without counting an attempt.

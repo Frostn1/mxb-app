@@ -4,7 +4,7 @@
 //! opens no ports, and pulls work from the control plane (`/v1/mirror/fetcher/*`): it leases
 //! a couple of jobs, fetches each politely (a browser's User-Agent, at least 2 s between
 //! requests to one site, at most 2 jobs at once, backing a site off on 403/429), hands page HTML
-//! back to be parsed, streams files to R2 through presigned PUTs, and reports.
+//! back to be parsed, uploads files to R2 through the control plane in parts, and reports.
 //!
 //! Configuration, from the environment:
 //!   MXB_FETCHER_API     the control plane, e.g. https://api.mxbsecure.com
@@ -60,15 +60,10 @@ fn build() -> Result<(Ctx, Duration)> {
         // A body may take a long time; a stalled one may not.
         .read_timeout(Duration::from_secs(120))
         .build()?;
-    let put = reqwest::Client::builder()
-        .connect_timeout(Duration::from_secs(20))
-        .read_timeout(Duration::from_secs(300))
-        .build()?;
     let ctx = Ctx {
         api: api::Api::new(&base, &token)?,
         web,
         files,
-        put,
         pacer: pacing::Pacer::new(SITE_SPACING),
         tmp,
     };

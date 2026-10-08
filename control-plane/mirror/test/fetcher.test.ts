@@ -1,6 +1,6 @@
 /**
  * The mirror fetcher's control-plane side (`src/mirrorfetcher.ts`): auth, leases, page HTML
- * parsed exactly as the Worker parses it, presigned uploads, and the Worker handing hosts that
+ * parsed exactly as the Worker parses it, multipart uploads through the binding, and the Worker handing hosts that
  * refuse it to the fetcher. Against the whole recorded careless-beta page.
  */
 import { describe, expect, it } from "vitest";
@@ -9,7 +9,8 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { dispatch, readPageJobs, runMirror, upsertPost, writeMirrorVersion, type Category, type DownloadOption, type MirrorJob } from "../../src/mirror";
 import { mirrorFile } from "../../src/mirrorfetch";
-import { FETCHER_PREFIX, fetcherRoutes, parseJobId } from "../../src/mirrorfetcher";
+import { FETCHER_PREFIX, fetcherRoutes, parseJobId, UPLOAD_PART_BYTES } from "../../src/mirrorfetcher";
+import { sha256Digest, sha256Init, sha256Update } from "../../src/sha256state";
 import { fetcherRouter, hostIn } from "../../src/fetcherroute";
 import { d1 } from "../../test/d1sqlite";
 import { fakeBucket, fakeFetch, fakeQueue, nodeHasher, sha256 } from "../../test/modfakes";
@@ -49,10 +50,6 @@ function env(extra: Record<string, unknown> = {}): TestEnv {
     MXB_ASSETS_CDN: "https://cdn.mxbsecure.com",
     MIRROR_FETCHER_TOKEN: TOKEN,
     MIRROR_FETCHER_HOSTS: "mxb-mods.com mediafire.com",
-    R2_ACCESS_KEY_ID: "test-key",
-    R2_SECRET_ACCESS_KEY: "test-secret",
-    R2_S3_ENDPOINT: "https://account.r2.example",
-    MXB_ASSETS_BUCKET: "mxb-assets",
     ...extra,
   } as unknown as TestEnv;
 }
@@ -64,6 +61,25 @@ async function call(e: Env, action: string, body: unknown, opts: { token?: strin
   if (token !== null) headers.authorization = `Bearer ${token}`;
   const res = await fetcherRoutes(new Request(url, { method: "POST", headers, body: JSON.stringify(body) }), new URL(url), e, opts.now ?? NOW);
   return { status: res.status, body: (await res.json()) as any };
+}
+
+async function putPart(e: Env, upload: string, n: number, bytes: Uint8Array, token: string | null = TOKEN, method = "PUT") {
+  const url = `https://api.mxbsecure.com${FETCHER_PREFIX}upload/part?upload=${upload}&n=${n}`;
+  const headers: Record<string, string> = { "content-type": "application/octet-stream" };
+  if (token !== null) headers.authorization = `Bearer ${token}`;
+  const res = await fetcherRoutes(new Request(url, { method, headers, body: bytes }), new URL(url), e, NOW);
+  return { status: res.status, body: (await res.json()) as any };
+}
+
+/** The box's whole upload: start, the parts in order, complete. */
+async function upload(e: Env, start: Record<string, unknown>, bytes: Uint8Array) {
+  const s = await call(e, "upload/start", start);
+  if (s.status !== 200 || s.body.have) return { start: s, complete: null };
+  for (let off = 0, n = 1; off < bytes.length; off += s.body.part_bytes, n++) {
+    const p = await putPart(e, s.body.upload, n, bytes.subarray(off, off + s.body.part_bytes));
+    if (p.status !== 200) return { start: s, complete: p };
+  }
+  return { start: s, complete: await call(e, "upload/complete", { upload: s.body.upload }) };
 }
 
 function webp(tag: string): Uint8Array {
@@ -229,10 +245,9 @@ describe("pages from the fetcher", () => {
     for (const img of res.body.images) {
       const bytes = webp(img.src);
       const up = { job, purpose: img.purpose, src: img.src, sha256: await sha256(bytes), size: bytes.length, content_type: "image/webp" };
-      const u = await call(e, "upload-url", up);
-      expect(u.status).toBe(200);
-      expect(u.body.key).toMatch(img.purpose === "thumb" ? /^thumbs\/[0-9a-f]{64}\.webp$/ : /^img\/[0-9a-f]{64}\.webp$/);
-      e.ASSET_MIRROR.objects.set(u.body.key, { bytes });
+      const u = await upload(e, up, bytes);
+      expect(u.complete?.status).toBe(200);
+      expect(u.complete?.body.key).toMatch(img.purpose === "thumb" ? /^thumbs\/[0-9a-f]{64}\.webp$/ : /^img\/[0-9a-f]{64}\.webp$/);
       uploaded.push(up);
     }
     expect((await call(e, "done", { job, images: uploaded })).body).toEqual({ ok: true, rejected: [] });
@@ -251,26 +266,21 @@ describe("pages from the fetcher", () => {
     expect(await e.DB.prepare("SELECT COUNT(*) AS n FROM mirror_state WHERE key LIKE 'fetcher-page:%'").first()).toEqual({ n: 0 });
   });
 
-  it("presigns a PUT against mxb-assets, signed with the headers the box must send", async () => {
+  it("takes only the pictures the page asked for, of a type we keep, under the cap", async () => {
     const e = env();
     const { job } = await leased(e);
     const { body } = await call(e, "result", { job, html: CARELESS });
     const img = body.images[1];
+    expect((await call(e, "upload/start", { job, purpose: "image", src: "https://evil.example/x.png", sha256: "a".repeat(64), size: 9, content_type: "image/png" })).status).toBe(409);
+    expect((await call(e, "upload/start", { job, purpose: "image", src: img.src, sha256: "a".repeat(64), size: 9, content_type: "image/svg+xml" })).status).toBe(400);
+    expect((await call(e, "upload/start", { job, purpose: "image", src: img.src, sha256: "a".repeat(64), size: 50 * 1024 ** 2, content_type: "image/webp" })).status).toBe(400);
+    // Stored with what the CDN serves it with.
     const bytes = webp("x");
-    const u = await call(e, "upload-url", { job, purpose: "image", src: img.src, sha256: await sha256(bytes), size: bytes.length, content_type: "image/webp" });
-    const url = new URL(u.body.url);
-    expect(url.origin + url.pathname).toBe(`https://account.r2.example/mxb-assets/${u.body.key}`);
-    expect(url.searchParams.get("X-Amz-Signature")).toMatch(/^[0-9a-f]{64}$/);
-    expect(url.searchParams.get("X-Amz-SignedHeaders")).toContain("cache-control");
-    expect(u.body).toMatchObject({ method: "PUT", headers: { "cache-control": "public, max-age=31536000, immutable", "content-type": "image/webp" } });
-    // Only the pictures the page asked for, of a type we keep, under the cap.
-    expect((await call(e, "upload-url", { job, purpose: "image", src: "https://evil.example/x.png", sha256: "a".repeat(64), size: 9, content_type: "image/png" })).status).toBe(409);
-    expect((await call(e, "upload-url", { job, purpose: "image", src: img.src, sha256: "a".repeat(64), size: 9, content_type: "image/svg+xml" })).status).toBe(400);
-    expect((await call(e, "upload-url", { job, purpose: "image", src: img.src, sha256: "a".repeat(64), size: 50 * 1024 ** 2, content_type: "image/webp" })).status).toBe(400);
-    // Without the R2 credentials there is nothing to presign with.
-    const bare = env({ R2_S3_ENDPOINT: undefined });
-    bare.DB = e.DB;
-    expect((await call(bare, "upload-url", { job, purpose: "image", src: img.src, sha256: await sha256(bytes), size: bytes.length, content_type: "image/webp" })).status).toBe(503);
+    const u = await upload(e, { job, purpose: "image", src: img.src, sha256: await sha256(bytes), size: bytes.length, content_type: "image/webp" }, bytes);
+    expect(e.ASSET_MIRROR.objects.get(u.complete!.body.key)?.httpMetadata).toMatchObject({
+      contentType: "image/webp",
+      cacheControl: "public, max-age=31536000, immutable",
+    });
   });
 
   it("drops a picture that isn't one, and still finishes the page", async () => {
@@ -280,11 +290,11 @@ describe("pages from the fetcher", () => {
     const img = body.images[1];
     const fake = new TextEncoder().encode("<svg onload=alert(1)>");
     const up = { purpose: "image", src: img.src, sha256: await sha256(fake), size: fake.length, content_type: "image/webp" };
-    const u = await call(e, "upload-url", { job, ...up });
-    e.ASSET_MIRROR.objects.set(u.body.key, { bytes: fake });
+    const u = await upload(e, { job, ...up }, fake);
+    expect(u.complete?.body).toEqual({ error: "not the picture it claims to be" });
+    expect(e.ASSET_MIRROR.objects.size).toBe(0);
     const done = await call(e, "done", { job, images: [up] });
-    expect(done.body.rejected).toEqual([{ src: img.src, error: "not the picture it claims to be" }]);
-    expect(e.ASSET_MIRROR.objects.has(u.body.key)).toBe(false);
+    expect(done.body.rejected).toEqual([{ src: img.src, error: "not in R2" }]);
     expect(await e.DB.prepare("SELECT page_status FROM mod_assets WHERE id = ?").bind(id).first()).toEqual({ page_status: "ok" });
     expect(await e.DB.prepare("SELECT COUNT(*) AS n FROM mod_asset_images").first()).toEqual({ n: 0 });
   });
@@ -331,45 +341,80 @@ describe("files from the fetcher", () => {
     const e = env();
     const v = await seedFiles(e, [MF], "fetcher");
     const job = (await call(e, "lease", {})).body.jobs[0].id;
-    const bytes = new TextEncoder().encode("a track archive");
+    // Two and a bit parts, each hashed on its way through.
+    const bytes = new Uint8Array(2 * UPLOAD_PART_BYTES + 12345);
+    for (let i = 0; i < bytes.length; i += 4096) bytes[i] = (i / 4096) % 251;
     const up = { job, sha256: await sha256(bytes), size: bytes.length, filename: "Careless.pkz", content_type: "application/octet-stream" };
-    const u = await call(e, "upload-url", up);
-    expect(u.body).toMatchObject({ have: false, key: `tracks/${up.sha256}`, method: "PUT" });
-    expect(u.body.headers["content-disposition"]).toBe("attachment; filename*=UTF-8''Careless.pkz");
-    expect(new URL(u.body.url).searchParams.get("X-Amz-SignedHeaders")).toContain("content-disposition");
 
     // Done before the bytes are there: refused.
     expect((await call(e, "done", up)).body).toEqual({ error: "not in R2" });
-    e.ASSET_MIRROR.objects.set(u.body.key, { bytes });
+    const u = await upload(e, up, bytes);
+    expect(u.start.body).toEqual({ have: false, upload: expect.stringMatching(/^[0-9a-f]{32}$/), part_bytes: UPLOAD_PART_BYTES });
+    expect(u.complete?.body).toEqual({ ok: true, key: `tracks/${up.sha256}` });
+    expect(e.ASSET_MIRROR.partSizes).toEqual([UPLOAD_PART_BYTES, UPLOAD_PART_BYTES, 12345]);
+    const stored = e.ASSET_MIRROR.objects.get(`tracks/${up.sha256}`)!;
+    expect(stored.bytes.length).toBe(bytes.length);
+    expect(stored.httpMetadata?.contentDisposition).toBe("attachment; filename*=UTF-8''Careless.pkz");
+    expect(await e.DB.prepare("SELECT COUNT(*) AS n FROM mirror_state WHERE key LIKE 'fetcher-upload:%'").first()).toEqual({ n: 0 });
+
     expect((await call(e, "done", up)).body).toEqual({ ok: true });
     expect(await e.DB.prepare("SELECT status, sha256, filename FROM mod_files WHERE version_id = ?").bind(v).first()).toEqual({
       status: "done",
       sha256: up.sha256,
       filename: "Careless.pkz",
     });
-    expect(await e.DB.prepare("SELECT bucket, r2_key, size FROM mod_blobs").first()).toEqual({ bucket: "public", r2_key: u.body.key, size: bytes.length });
+    expect(await e.DB.prepare("SELECT bucket, r2_key, size FROM mod_blobs").first()).toEqual({ bucket: "public", r2_key: `tracks/${up.sha256}`, size: bytes.length });
   });
 
-  it("never uploads a file we already hold, and refuses a size that doesn't match", async () => {
+  it("never uploads a file we already hold", async () => {
     const e = env();
-    await seedFiles(e, [MF, "https://www.mediafire.com/file/bbbbbbbbbbb/b.pkz/file"], "fetcher");
+    await seedFiles(e, [MF], "fetcher");
     await e.DB.prepare("INSERT INTO mod_blobs (sha256, bucket, r2_key, size, first_seen) VALUES (?, 'public', ?, 3, 0)").bind("b".repeat(64), `tracks/${"b".repeat(64)}`).run();
-    const [one, two] = (await call(e, "lease", { max: 2 })).body.jobs.map((j: { id: string }) => j.id);
-    const have = await call(e, "upload-url", { job: one, sha256: "b".repeat(64), size: 3, filename: "x.pkz" });
-    expect(have.body).toEqual({ have: true, key: `tracks/${"b".repeat(64)}` });
-    expect((await call(e, "done", { job: one, sha256: "b".repeat(64), size: 3, filename: "x.pkz" })).body).toEqual({ ok: true });
+    const job = (await call(e, "lease", {})).body.jobs[0].id;
+    expect((await call(e, "upload/start", { job, sha256: "b".repeat(64), size: 3, filename: "x.pkz" })).body).toEqual({ have: true });
+    expect((await call(e, "done", { job, sha256: "b".repeat(64), size: 3, filename: "x.pkz" })).body).toEqual({ ok: true });
+    expect(e.ASSET_MIRROR.uploads.size).toBe(0);
+  });
 
-    const u = await call(e, "upload-url", { job: two, sha256: "c".repeat(64), size: 10, filename: "b.pkz" });
-    e.ASSET_MIRROR.objects.set(u.body.key, { bytes: new Uint8Array(4) });
-    expect((await call(e, "done", { job: two, sha256: "c".repeat(64), size: 10, filename: "b.pkz" })).body).toEqual({ error: "R2 holds 4 bytes, not 10" });
-    expect(e.ASSET_MIRROR.objects.has(u.body.key)).toBe(false);
+  it("aborts an upload whose bytes don't hash to what the box said", async () => {
+    const e = env();
+    await seedFiles(e, [MF], "fetcher");
+    const job = (await call(e, "lease", {})).body.jobs[0].id;
+    const bytes = new TextEncoder().encode("a track archive");
+    const u = await upload(e, { job, sha256: "c".repeat(64), size: bytes.length, filename: "b.pkz" }, bytes);
+    expect(u.complete?.body).toEqual({ error: "the bytes don't hash to the sha256 given" });
+    expect(e.ASSET_MIRROR.uploads.size).toBe(0);
+    expect(e.ASSET_MIRROR.objects.size).toBe(0);
+    expect(await e.DB.prepare("SELECT COUNT(*) AS n FROM mirror_state WHERE key LIKE 'fetcher-upload:%'").first()).toEqual({ n: 0 });
+    expect((await call(e, "done", { job, sha256: "c".repeat(64), size: bytes.length, filename: "b.pkz" })).body).toEqual({ error: "not in R2" });
+  });
+
+  it("takes parts in order and at their size, and aborts on a short one", async () => {
+    const e = env();
+    await seedFiles(e, [MF], "fetcher");
+    const job = (await call(e, "lease", {})).body.jobs[0].id;
+    const bytes = new TextEncoder().encode("ten bytes!");
+    const start = await call(e, "upload/start", { job, sha256: await sha256(bytes), size: 20, filename: "b.pkz" });
+    const id = start.body.upload;
+    expect((await putPart(e, id, 2, bytes)).status).toBe(409);
+    expect((await putPart(e, id, 1, bytes, null)).status).toBe(401);
+    expect((await putPart(e, id, 1, bytes, TOKEN, "POST")).status).toBe(405);
+    // Twenty bytes promised, ten sent and called complete: aborted.
+    expect((await putPart(e, id, 1, bytes)).status).toBe(400);
+    expect(e.ASSET_MIRROR.uploads.size).toBe(0);
+    expect((await putPart(e, id, 1, new Uint8Array(20))).status).toBe(404);
+
+    const again = await call(e, "upload/start", { job, sha256: await sha256(bytes), size: bytes.length, filename: "b.pkz" });
+    expect((await call(e, "upload/abort", { upload: again.body.upload })).body).toEqual({ ok: true });
+    expect(e.ASSET_MIRROR.uploads.size).toBe(0);
+    expect((await call(e, "upload/complete", { upload: again.body.upload })).status).toBe(404);
   });
 
   it("locked content never goes this way", async () => {
     const e = env();
     await seedFiles(e, [MF], "fetcher");
     const job = (await call(e, "lease", {})).body.jobs[0].id;
-    expect((await call(e, "upload-url", { job, sha256: "d".repeat(64), size: 5, filename: "x.mxbsecure" })).status).toBe(422);
+    expect((await call(e, "upload/start", { job, sha256: "d".repeat(64), size: 5, filename: "x.mxbsecure" })).status).toBe(422);
     expect(await e.DB.prepare("SELECT status FROM mod_files").first()).toEqual({ status: "runner" });
   });
 
@@ -503,5 +548,22 @@ describe("discovery from the fetcher", () => {
     await call(e, "result", { job: sweep!.id, status: 200, body: "<html>Just a moment...</html>" });
     expect(await listJob(e, NOW + 60_000)).toBeUndefined();
     expect((await listJob(e, NOW + 31 * 60_000))?.url).toContain("orderby=id");
+  });
+});
+
+describe("resumable SHA-256", () => {
+  it("matches WebCrypto over any split, carried as JSON between parts", async () => {
+    const data = new Uint8Array(1000);
+    for (let i = 0; i < data.length; i++) data[i] = (i * 31) & 0xff;
+    for (const cuts of [[0], [1, 63, 64, 65], [55, 56, 57], [128, 500, 999]]) {
+      let st = sha256Init();
+      let at = 0;
+      for (const c of [...cuts, data.length]) {
+        st = JSON.parse(JSON.stringify(sha256Update(st, data.subarray(at, c))));
+        at = c;
+      }
+      expect(sha256Digest(st)).toBe(await sha256(data));
+    }
+    expect(sha256Digest(sha256Init())).toBe(await sha256(new Uint8Array(0)));
   });
 });

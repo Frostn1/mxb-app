@@ -21,8 +21,8 @@ interface Env {
     R2_S3_ENDPOINT?: string;
     /** The mirror fetcher's bearer token (`mirrorfetcher.ts`, `tools/mxb-fetcher`): the box that
      *  fetches what answers Workers 403. Any long random string, the same on the box. Without
-     *  it `/v1/mirror/fetcher/*` answers 503. Its upload URLs are presigned with the R2_* key
-     *  above against `mxb-assets`, so that key needs Object Read & Write on `mxb-assets` too. */
+     *  it `/v1/mirror/fetcher/*` answers 503. Its uploads go through the `ASSET_MIRROR` binding,
+     *  so it needs no S3 credentials. At least 32 characters. */
     MIRROR_FETCHER_TOKEN?: string;
     /** Mod mirror policy (`mirrorpolicy.ts`), all optional with the defaults shown: days a track
      *  counts as on a live server after an app last asked about it (14), days a mirrored file

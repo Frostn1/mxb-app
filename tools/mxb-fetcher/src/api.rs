@@ -3,7 +3,6 @@
 use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::collections::HashMap;
 use std::time::Duration;
 
 #[derive(Debug, Clone, Deserialize)]
@@ -38,14 +37,15 @@ struct PageAnswer {
     images: Vec<WantedImage>,
 }
 
-/// Where to PUT an upload, or that the control plane holds it already.
+/// An upload opened on the control plane, or word that it holds those bytes already.
 #[derive(Debug, Deserialize)]
-pub struct UploadUrl {
+pub struct UploadStart {
     pub have: bool,
     #[serde(default)]
-    pub url: Option<String>,
+    pub upload: Option<String>,
+    /// Every part but the last is exactly this long.
     #[serde(default)]
-    pub headers: HashMap<String, String>,
+    pub part_bytes: Option<u64>,
 }
 
 /// What we uploaded, as `done` takes it.
@@ -181,14 +181,48 @@ impl Api {
         self.post("result", body).await.map(|_| ())
     }
 
-    pub async fn upload_url(&self, job: &str, up: &Uploaded) -> Result<UploadUrl> {
+    /// `upload/start`: by SHA-256, so a blob the mirror holds is never sent again.
+    pub async fn upload_start(&self, job: &str, up: &Uploaded) -> Result<UploadStart> {
         let mut body = serde_json::to_value(up)?;
         body["job"] = json!(job);
         Ok(serde_json::from_value(
-            self.post("upload-url", body).await?,
+            self.post("upload/start", body).await?,
         )?)
     }
 
+    /// One part's raw bytes. Parts go in order; the control plane hashes them as they pass.
+    pub async fn upload_part(&self, upload: &str, n: u32, bytes: Vec<u8>) -> Result<()> {
+        let res = self
+            .http
+            .put(format!("{}/v1/mirror/fetcher/upload/part", self.base))
+            .query(&[("upload", upload), ("n", &n.to_string())])
+            .bearer_auth(&self.token)
+            .header(reqwest::header::CONTENT_TYPE, "application/octet-stream")
+            // 32 MiB on a slow uplink takes a while; the client's default is for small calls.
+            .timeout(Duration::from_secs(600))
+            .body(bytes)
+            .send()
+            .await
+            .with_context(|| format!("PUT upload part {n}"))?;
+        let status = res.status().as_u16();
+        if !(200..300).contains(&status) {
+            let body = res.json().await.unwrap_or(Value::Null);
+            return Err(Refused { status, body }.into());
+        }
+        Ok(())
+    }
+
+    pub async fn upload_complete(&self, upload: &str) -> Result<()> {
+        self.post("upload/complete", json!({ "upload": upload }))
+            .await
+            .map(|_| ())
+    }
+
+    pub async fn upload_abort(&self, upload: &str) -> Result<()> {
+        self.post("upload/abort", json!({ "upload": upload }))
+            .await
+            .map(|_| ())
+    }
     pub async fn file_done(&self, job: &str, up: &Uploaded) -> Result<()> {
         let mut body = serde_json::to_value(up)?;
         body["job"] = json!(job);

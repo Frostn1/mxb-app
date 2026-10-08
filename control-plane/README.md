@@ -694,8 +694,9 @@ mxb-mods.com and MediaFire answer Cloudflare Workers 403 and a normal machine 20
 in `MIRROR_FETCHER_HOSTS` (a var in both wrangler files) are fetched by `tools/mxb-fetcher` on
 our own Linux box instead, as is any host that refuses the Worker a file. The box opens no
 ports: it leases jobs from `/v1/mirror/fetcher/*` (`src/mirrorfetcher.ts`), hands page HTML
-back to be parsed exactly as the Worker parses it, and PUTs files and pictures straight into
-`mxb-assets` through presigned URLs. With mxb-mods.com routed there, discovery goes too: the
+back to be parsed exactly as the Worker parses it, and uploads files and pictures through the
+control plane's own `ASSET_MIRROR` binding as R2 multipart uploads (32 MiB parts, the whole
+file's SHA-256 checked as they pass, aborted on any mismatch). With mxb-mods.com routed there, discovery goes too: the
 category tree, listing walk and id sweep become one `list` job at a time (a round every ten
 minutes, as the cron ran them), whose JSON is applied by the same steps, and the Worker sends
 the site nothing.
@@ -704,8 +705,7 @@ the site nothing.
 bunx wrangler secret put MIRROR_FETCHER_TOKEN  # 32+ random characters, the same on the box
 ```
 
-The upload URLs are presigned with the `R2_*` key above, so that token needs Object Read &
-Write on `mxb-assets` as well as `mxb-private`. Empty `MIRROR_FETCHER_HOSTS` turns it all off.
+No S3 credentials are involved. Empty `MIRROR_FETCHER_HOSTS` turns it all off.
 
 ## Security notes
 
