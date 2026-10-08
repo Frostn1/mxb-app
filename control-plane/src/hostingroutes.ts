@@ -8,6 +8,7 @@
  */
 
 import { cors, refuseCrossSiteWrite } from "./assets";
+import { billingWebRoute, withOperatorBilling } from "./billing";
 import {
   addTrack,
   boxStage,
@@ -87,6 +88,8 @@ export async function hostingWebRoutes(
     return said(await operatorRoute(request, path, method, env, deps, steamId));
   }
 
+  const billed = await billingWebRoute(env, deps, steamId, method, path);
+  if (billed) return said(billed);
   if (method === "GET" && path === "/v1/web/hosting/me") {
     await rememberHostName(env, steamId, session.name);
     return said(await myHosting(env, steamId, operator));
@@ -118,7 +121,7 @@ async function operatorRoute(
   deps: Deps,
   steamId: string,
 ): Promise<Result> {
-  if (method === "GET" && path === "/v1/web/admin/hosting") return operatorView(env, deps.fetch);
+  if (method === "GET" && path === "/v1/web/admin/hosting") return withOperatorBilling(env, await operatorView(env, deps.fetch));
   if (method === "POST" && path === "/v1/web/admin/hosting/invites") {
     const result = await mintInvite(env, deps, steamId, await body(request));
     console.log(JSON.stringify({ msg: "hosting invite minted", admin: steamId, status: result.status }));

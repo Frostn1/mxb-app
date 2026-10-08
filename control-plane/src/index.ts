@@ -29,8 +29,9 @@ import { signVerdict } from "./verdict";
 import { issueLease } from "./lease";
 import { deviceFromRequest, rememberDevice } from "./devices";
 import { isWebPath, landingSite, webRoutes } from "./web";
-import { hostingTick } from "./hosting";
+import { defaultDeps, hostingTick } from "./hosting";
 import { hostedRoutes, isHostedPath } from "./hostingroutes";
+import { stripeWebhook } from "./billing";
 import { steamResult, redirectPage } from "./page";
 import { pinGuidFromSteam, rememberLink, steamIdFor } from "./steamlink";
 import { bmacWebhook } from "./bmac";
@@ -288,6 +289,8 @@ async function route(request: Request, env: Env): Promise<Response> {
   // same sense as the two above: the caller is not a player and holds no bearer token. Its
   // credential is the HMAC signature over the body, checked before the body is parsed.
   if (method === "POST" && path === "/v1/bmac/webhook") return bmacWebhook(request, env);
+  // Stripe, for paid hosting (`billing.ts`). Same posture: the Stripe-Signature HMAC is the credential.
+  if (method === "POST" && path === "/v1/stripe/webhook") return stripeWebhook(request, env, defaultDeps(env));
 
   // The plugin catalogue, before there is anyone to authenticate. What is on offer is not a
   // secret and the app lists it on a first run, with no account and nothing enrolled.

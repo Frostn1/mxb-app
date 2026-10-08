@@ -44,6 +44,8 @@ consequences fall out of that, and they're baked into the schema:
 | GET/POST/DELETE | `/v1/web/admin/hosting*` | Steam sign-in + `ADMIN_STEAM_IDS` | Operators: spend, boxes, alerts, invites, tracks |
 | POST, GET/PUT/POST | `/v1/hosted/claim`, `/v1/hosted/servers/:id[/settings\|/restart]` | one-time claim, then bearer | MSM driving one hosted server |
 | GET/POST | `/v1/hosting/*` | `MXB_BOX_ENROLL_KEY` | The box install runner: stages, enroll, the track manifest |
+| GET/POST | `/v1/web/hosting/billing[/portal\|/servers/:id/checkout]` | Steam sign-in | Paid hosting: prices, each server's billing status, the Stripe Customer Portal, a fresh Checkout — see **Paid hosting** |
+| POST | `/v1/stripe/webhook` | Stripe-Signature HMAC | Stripe events for paid hosting |
 | PUT/GET | `/v1/paints/:sha256` | bearer | Content-addressed paint blobs |
 | POST | `/v1/bmac/webhook` | HMAC signature | Buy Me a Coffee announcing a supporter. Posted on to Discord. |
 | POST | `/v1/usage` | — | Anonymous usage counters from an install. Unauthenticated because most people who run the app never claim an invite; bounded by body size, event count and a per-address daily cap. |
@@ -104,6 +106,30 @@ bunx wrangler secret put MXB_GH_DISPATCH_TOKEN    # Actions: write on Frostn1/mx
 bunx wrangler secret put MXB_BOX_ENROLL_KEY       # same value as that repo's MXB_BOX_ENROLL_KEY
 bunx wrangler secret put MXB_HOST_ALERT_WEBHOOK_URL   # optional
 ```
+
+#### Paid hosting
+
+One Stripe subscription per hosted server, on Creste LLC's Stripe account (`src/billing.ts`):
+$5/month for `mxbserver`, $8/month for Legacy. Invites still decide who may deploy. With billing
+on, a deploy writes the server as pending and returns a Stripe Checkout URL; the server is placed
+(slot, or a box ordered) only when the webhook says it is paid. A failed renewal or an ended
+subscription gives 3 days' grace, then the server is deleted through the idle path (slot freed)
+and the subscription cancelled. A paid server is not reclaimed for idling.
+
+Billing is off, and deploy is free and invite-only as before, unless all four are set:
+
+```sh
+STRIPE_SECRET_KEY=sk_test_... bun scripts/stripe-prices.ts   # prints the two price ids
+# put them in wrangler.jsonc as STRIPE_PRICE_MXBSERVER and STRIPE_PRICE_LEGACY
+bunx wrangler secret put STRIPE_SECRET_KEY        # sk_live_... (or a restricted key)
+bunx wrangler secret put STRIPE_WEBHOOK_SECRET    # whsec_... of the endpoint below
+```
+
+In the Stripe dashboard add the endpoint `https://api.mxbsecure.com/v1/stripe/webhook` with
+`checkout.session.completed`, `checkout.session.async_payment_succeeded`,
+`checkout.session.expired`, `invoice.paid`, `invoice.payment_failed`,
+`customer.subscription.updated` and `customer.subscription.deleted`, and turn on the Customer
+Portal (Settings, Billing, Customer portal).
 
 ### Donations in Discord
 
