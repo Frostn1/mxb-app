@@ -4,6 +4,7 @@ import {
   ALREADY_SEATED,
   addTrack,
   claimInvite,
+  deleteServer,
   deploy,
   enrollBox,
   hostingTick,
@@ -21,8 +22,10 @@ import { d1 } from "./d1sqlite";
 // Test-mode style values only. No real Steam ids, keys or Stripe objects.
 const BOSS = "76561190000000001";
 const RIDER = "76561190000000002";
+const OTHER = "76561190000000003";
 const WHSEC = "whsec_test_0123456789abcdef";
 const DAY = 24 * 60 * 60 * 1000;
+const PERIOD_END_S = Math.floor(Date.parse("2026-11-07T10:00:00Z") / 1000);
 
 const BILLING = {
   STRIPE_SECRET_KEY: "sk_test_fixture",
@@ -67,6 +70,15 @@ function fakeOvh() {
 function fakeFetch(opts: { refundFails?: boolean } = {}) {
   const calls: { url: string; method: string; body: string }[] = [];
   let sessions = 0;
+  const stripeState = { cancelAtPeriodEnd: false };
+  // The 2025 shape: the period end is on the subscription item.
+  const subscription = () => ({
+    id: "sub_test_1",
+    status: "active",
+    cancel_at_period_end: stripeState.cancelAtPeriodEnd,
+    cancel_at: stripeState.cancelAtPeriodEnd ? PERIOD_END_S : null,
+    items: { data: [{ current_period_end: PERIOD_END_S }] },
+  });
   const f = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     const method = init?.method ?? "GET";
@@ -81,7 +93,22 @@ function fakeFetch(opts: { refundFails?: boolean } = {}) {
     if (url.startsWith("https://api.stripe.com/v1/subscriptions/") && method === "GET") {
       return json({ id: "sub_test_1", latest_invoice: { id: "in_test_1", payment_intent: "pi_test_1" } });
     }
+    if (url.startsWith("https://api.stripe.com/v1/subscriptions/") && method === "POST") {
+      const flag = new URLSearchParams(typeof init?.body === "string" ? init.body : "").get("cancel_at_period_end");
+      if (flag) stripeState.cancelAtPeriodEnd = flag === "true";
+      return json(subscription());
+    }
     if (url.startsWith("https://api.stripe.com/v1/subscriptions/")) return json({ status: "canceled" });
+    if (url.startsWith("https://api.stripe.com/v1/subscriptions?customer=cus_test_rider")) return json({ data: [subscription()] });
+    if (url.startsWith("https://api.stripe.com/v1/invoices?customer=cus_test_rider")) {
+      return json({
+        data: [
+          { id: "in_test_2", number: "TEST-0002", created: PERIOD_END_S - 30 * 86400, total: 500, currency: "usd", status: "paid", invoice_pdf: "https://pay.stripe.com/invoice/acct_test/in_test_2/pdf" },
+          { id: "in_test_3", created: PERIOD_END_S, total: 500, currency: "usd", status: "draft", invoice_pdf: null },
+          { id: "in_test_4", created: PERIOD_END_S - 60 * 86400, total: 500, currency: "usd", status: "open", invoice_pdf: "https://evil.example.com/pdf" },
+        ],
+      });
+    }
     if (url === "https://api.stripe.com/v1/refunds") {
       return opts.refundFails ? json({ error: { message: "test refund refused" } }, 400) : json({ id: "re_test_1" });
     }
@@ -381,7 +408,7 @@ describe("the billing state machine", () => {
     expect(s.f.stripeCalls().some((c) => c.url.endsWith("/checkout/sessions/cs_test_1/expire"))).toBe(true);
   });
 
-  it("deleting a paid server cancels its subscription; idling does not reclaim it", async () => {
+  it("an owner deleting a paid server ends it at period end, no refund; idling does not reclaim it", async () => {
     const s = setup({ ...BILLING, MXB_HOST_IDLE_DAYS: "1" });
     const { id } = await activeOnSlot(s);
     s.clock.t += 5 * DAY;
@@ -389,7 +416,42 @@ describe("the billing state machine", () => {
     expect(await usedSlots(s.e)).toBe(1);
     expect((await ownerDelete(s.e, s.d, RIDER, id)).status).toBe(200);
     expect((await billingOf(s.e, id))!.status).toBe("ended");
+    expect(await usedSlots(s.e)).toBe(0);
+    const calls = s.f.stripeCalls();
+    const ended = calls.filter((c) => c.method === "POST" && c.url.endsWith("/subscriptions/sub_test_1"));
+    expect(ended).toHaveLength(1);
+    expect(new URLSearchParams(ended[0].body).get("cancel_at_period_end")).toBe("true");
+    expect(calls.filter((c) => c.method === "DELETE")).toHaveLength(0);
+    expect(calls.filter((c) => c.url.endsWith("/refunds"))).toHaveLength(0);
+  });
+
+  it("an operator delete still cancels the subscription at once", async () => {
+    const s = setup();
+    const { id } = await activeOnSlot(s);
+    expect((await deleteServer(s.e, s.d, id, "operator test")).status).toBe(200);
     expect(s.f.stripeCalls().filter((c) => c.method === "DELETE" && c.url.endsWith("/subscriptions/sub_test_1"))).toHaveLength(1);
+  });
+
+  it("an owner's cancellation running out deletes the server, with no grace", async () => {
+    const s = setup();
+    const { id } = await activeOnSlot(s);
+    await deliver(s.e, s.d, {
+      id: "evt_test_sub_deleted_owner",
+      type: "customer.subscription.deleted",
+      data: {
+        object: {
+          id: "sub_test_1",
+          object: "subscription",
+          status: "canceled",
+          cancellation_details: { reason: "cancellation_requested" },
+          metadata: { server_id: id },
+        },
+      },
+    });
+    expect((await billingOf(s.e, id))!.status).toBe("ended");
+    expect(await usedSlots(s.e)).toBe(0);
+    expect(((await myHosting(s.e, RIDER, false)).body as { servers: unknown[] }).servers).toHaveLength(0);
+    expect(s.f.stripeCalls().filter((c) => c.method === "DELETE")).toHaveLength(0);
   });
 
   it("a payment for a server deleted meanwhile cancels the subscription and alerts", async () => {
@@ -558,6 +620,116 @@ describe("site and operator routes", () => {
       id,
       billingStatus: "active",
       mrrCents: 500,
+    });
+  });
+
+  it("shows the next bill date and invoices; cancel shows the end date, resume takes it back", async () => {
+    const s = setup({ ...BILLING, MXB_WEB_SESSION_KEY: "session-secret" });
+    const { id } = await activeOnSlot(s);
+    let mine = await call(s.e, s.d, "GET", "/v1/web/hosting/billing");
+    expect((mine.body.servers as unknown[])[0]).toMatchObject({
+      serverId: id,
+      status: "active",
+      amountCents: 500,
+      nextBillAt: PERIOD_END_S * 1000,
+      cancelAtPeriodEnd: false,
+      endsAt: null,
+    });
+    // Drafts are left out; a PDF link that isn't Stripe's is dropped.
+    expect(mine.body.invoices).toEqual([
+      { id: "in_test_2", number: "TEST-0002", date: (PERIOD_END_S - 30 * 86400) * 1000, amountCents: 500, currency: "usd", status: "paid", pdf: "https://pay.stripe.com/invoice/acct_test/in_test_2/pdf" },
+      { id: "in_test_4", number: null, date: (PERIOD_END_S - 60 * 86400) * 1000, amountCents: 500, currency: "usd", status: "open", pdf: null },
+    ]);
+
+    const cancelled = await call(s.e, s.d, "POST", `/v1/web/hosting/billing/servers/${id}/cancel`);
+    expect(cancelled).toEqual({ status: 200, body: { serverId: id, nextBillAt: null, cancelAtPeriodEnd: true, endsAt: PERIOD_END_S * 1000 } });
+    const sent = s.f.stripeCalls().filter((c) => c.method === "POST" && c.url.endsWith("/subscriptions/sub_test_1"));
+    expect(new URLSearchParams(sent.at(-1)!.body).get("cancel_at_period_end")).toBe("true");
+    expect(s.f.stripeCalls().filter((c) => c.method === "DELETE" || c.url.endsWith("/refunds"))).toHaveLength(0);
+    mine = await call(s.e, s.d, "GET", "/v1/web/hosting/billing");
+    expect((mine.body.servers as unknown[])[0]).toMatchObject({ status: "active", cancelAtPeriodEnd: true, endsAt: PERIOD_END_S * 1000 });
+    // Still running until then.
+    expect(await usedSlots(s.e)).toBe(1);
+
+    const resumed = await call(s.e, s.d, "POST", `/v1/web/hosting/billing/servers/${id}/resume`);
+    expect(resumed.body).toEqual({ serverId: id, nextBillAt: PERIOD_END_S * 1000, cancelAtPeriodEnd: false, endsAt: null });
+    expect(new URLSearchParams(s.f.stripeCalls().at(-1)!.body).get("cancel_at_period_end")).toBe("false");
+  });
+
+  it("cancel and resume need an active plan", async () => {
+    const s = setup({ ...BILLING, MXB_WEB_SESSION_KEY: "session-secret" });
+    const { id } = await pendingDeploy(s);
+    expect((await call(s.e, s.d, "POST", `/v1/web/hosting/billing/servers/${id}/cancel`)).status).toBe(409);
+    expect((await call(s.e, s.d, "POST", `/v1/web/hosting/billing/servers/${id}/resume`)).status).toBe(409);
+  });
+
+  it("another account gets 404 for someone else's server, and nothing changes", async () => {
+    const s = setup({ ...BILLING, MXB_WEB_SESSION_KEY: "session-secret" });
+    const { id } = await activeOnSlot(s);
+    const before = s.f.stripeCalls().length;
+    for (const [method, path] of [
+      ["POST", `/v1/web/hosting/billing/servers/${id}/cancel`],
+      ["POST", `/v1/web/hosting/billing/servers/${id}/resume`],
+      ["POST", `/v1/web/hosting/billing/servers/${id}/checkout`],
+      ["DELETE", `/v1/web/hosting/servers/${id}`],
+    ] as const) {
+      expect((await call(s.e, s.d, method, path, OTHER)).status).toBe(404);
+    }
+    expect(s.f.stripeCalls().length).toBe(before);
+    expect((await billingOf(s.e, id))!.status).toBe("active");
+    expect(await usedSlots(s.e)).toBe(1);
+    // Nor does their billing list it.
+    const theirs = await call(s.e, s.d, "GET", "/v1/web/hosting/billing", OTHER);
+    expect(theirs.body).toMatchObject({ servers: [], invoices: [], portal: false });
+  });
+
+  describe("DELETE /v1/web/hosting/servers/:id, in each state", () => {
+    const del = (s: ReturnType<typeof setup>, id: string) => call(s.e, s.d, "DELETE", `/v1/web/hosting/servers/${id}`);
+    const gone = async (s: ReturnType<typeof setup>) => ((await myHosting(s.e, RIDER, false)).body as { servers: unknown[] }).servers;
+
+    it("pending: drops the Checkout and the server", async () => {
+      const s = setup({ ...BILLING, MXB_WEB_SESSION_KEY: "session-secret" });
+      const { id } = await pendingDeploy(s);
+      expect((await del(s, id)).status).toBe(200);
+      expect(await gone(s)).toHaveLength(0);
+      expect((await billingOf(s.e, id))!.status).toBe("expired");
+      expect(s.f.stripeCalls().some((c) => c.url.endsWith("/checkout/sessions/cs_test_1/expire"))).toBe(true);
+      expect(s.f.stripeCalls().filter((c) => c.url.includes("/subscriptions") || c.url.endsWith("/refunds"))).toHaveLength(0);
+    });
+
+    it("failed and refunded: just removes it, no second refund or cancel", async () => {
+      const s = setup({ ...BILLING, MXB_WEB_SESSION_KEY: "session-secret" });
+      const { id } = await pendingDeploy(s);
+      s.ovh.orderVps.mockRejectedValueOnce(new Error("OVH said no (test)"));
+      await deliver(s.e, s.d, checkoutCompleted(id));
+      const before = s.f.stripeCalls().length;
+      expect((await del(s, id)).status).toBe(200);
+      expect(await gone(s)).toHaveLength(0);
+      expect(s.f.stripeCalls().length).toBe(before);
+      expect((await billingOf(s.e, id))!.status).toBe("ended");
+    });
+
+    it("active: frees the slot and stops renewal at period end", async () => {
+      const s = setup({ ...BILLING, MXB_WEB_SESSION_KEY: "session-secret" });
+      const { id } = await activeOnSlot(s);
+      expect((await del(s, id)).status).toBe(200);
+      expect(await gone(s)).toHaveLength(0);
+      expect(await usedSlots(s.e)).toBe(0);
+      const last = s.f.stripeCalls().at(-1)!;
+      expect(last).toMatchObject({ method: "POST", url: "https://api.stripe.com/v1/subscriptions/sub_test_1" });
+      expect(new URLSearchParams(last.body).get("cancel_at_period_end")).toBe("true");
+      // Deleting it again is a 404, not a second cancel.
+      expect((await del(s, id)).status).toBe(404);
+    });
+
+    it("free (billing off): just removes it", async () => {
+      const s = setup({ MXB_WEB_SESSION_KEY: "session-secret" });
+      await invited(s.e, s.d, RIDER);
+      const r = await deploy(s.e, s.d, RIDER, { name: "Free", type: "mxbserver", region: "us-east" });
+      const id = (r.body as { server: { id: string } }).server.id;
+      expect((await del(s, id)).status).toBe(200);
+      expect(await gone(s)).toHaveLength(0);
+      expect(s.f.stripeCalls()).toHaveLength(0);
     });
   });
 

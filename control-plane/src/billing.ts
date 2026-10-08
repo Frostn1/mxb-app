@@ -13,7 +13,8 @@
  * A failed renewal (`invoice.payment_failed`) or an ended subscription starts a grace of
  * `GRACE_DAYS`. Unpaid at the end of it, the server is deleted through the same path the idle
  * sweep uses (its slot is freed) and the subscription is cancelled. Deleting a paid server any
- * other way (owner, operator, idle) cancels its subscription too.
+ * other way (operator, idle) cancels its subscription too; an owner's delete stops it renewing
+ * at the end of the paid month instead. Owners can also cancel (at period end) and resume.
  *
  * Workers have no Stripe SDK, so this calls Stripe's REST API with `fetch`, and checks the
  * webhook signature with Web Crypto.
@@ -224,13 +225,34 @@ export async function openCheckout(
   return { url: session.body.url };
 }
 
-/** Called from `deleteServer`: whatever deleted a paid server, its billing stops with it. */
-export async function billingServerGone(env: Env, deps: Deps, serverId: string): Promise<void> {
+/** Stops renewal but keeps the paid month: no refund, no proration. */
+async function cancelAtPeriodEnd(env: Env, deps: Deps, row: BillingRow, why: string): Promise<void> {
+  if (!row.subscription_id) return;
+  const key = env.STRIPE_SECRET_KEY?.trim();
+  const done: StripeResult<unknown> = key
+    ? await stripe({ secretKey: key }, deps, "POST", `/subscriptions/${encodeURIComponent(row.subscription_id)}`, {
+        cancel_at_period_end: true,
+      })
+    : { ok: false, status: 0, error: "STRIPE_SECRET_KEY is not set" };
+  if (!done.ok && done.status !== 404) {
+    await alert(env, deps, "billing", `Ending the subscription for server ${row.server_id} (${why}) failed: ${done.error}. Cancel it in Stripe.`);
+  }
+}
+
+/**
+ * Called from `deleteServer`: whatever deleted a paid server, its billing stops with it.
+ * `periodEnd` (an owner's delete): an active subscription runs out its paid month instead of
+ * ending now. Never a refund here; a server that failed was already refunded and is `ended`.
+ */
+export async function billingServerGone(env: Env, deps: Deps, serverId: string, opts: { periodEnd?: boolean } = {}): Promise<void> {
   const row = await billingRow(env, serverId);
   if (!row) return;
   if (row.status === "pending") {
     await setRow(env, deps, serverId, { status: "expired" });
     await expireCheckout(env, deps, row);
+  } else if (row.status === "active" && opts.periodEnd) {
+    await setRow(env, deps, serverId, { status: "ended", grace_until: null });
+    await cancelAtPeriodEnd(env, deps, row, "server deleted");
   } else if (row.status === "active" || row.status === "past_due") {
     await setRow(env, deps, serverId, { status: "ended", grace_until: null });
     await cancelSubscription(env, deps, row, "server deleted");
@@ -516,7 +538,14 @@ export async function applyEvent(env: Env, deps: Deps, event: StripeEvent): Prom
     }
     case "customer.subscription.deleted": {
       const row = await rowFor(env, str(meta(obj.metadata).server_id), str(obj.id));
-      if (row) await startGrace(env, deps, row, "canceled");
+      if (!row) return;
+      // The owner cancelled and the paid month ran out: the server goes now, no grace.
+      if (meta(obj.cancellation_details).reason === "cancellation_requested" && ["active", "past_due", "canceled"].includes(row.status)) {
+        await setRow(env, deps, row.server_id, { status: "ended", grace_until: null });
+        await deleteServer(env, deps, row.server_id, "billing: cancelled by owner");
+        return;
+      }
+      await startGrace(env, deps, row, "canceled");
       return;
     }
     default:
@@ -594,9 +623,82 @@ export function priceList(): { type: ServerType; cents: number; currency: "usd" 
   return (Object.keys(PRICE_CENTS) as ServerType[]).map((type) => ({ type, cents: PRICE_CENTS[type], currency: "usd" }));
 }
 
-/** `GET /v1/web/hosting/billing`: prices, and each of this account's paid servers. */
+/** A subscription as Stripe returns it, trimmed to what the site shows. */
+interface StripeSubscription {
+  id: string;
+  status?: string;
+  cancel_at_period_end?: boolean;
+  cancel_at?: number | null;
+  /** Before API 2025-03-31 the period is on the subscription; after, on its items. */
+  current_period_end?: number;
+  items?: { data?: { current_period_end?: number }[] };
+}
+
+interface StripeInvoice {
+  id: string;
+  number?: string | null;
+  created?: number;
+  total?: number;
+  amount_due?: number;
+  currency?: string;
+  status?: string | null;
+  invoice_pdf?: string | null;
+}
+
+/** When a subscription bills next, and when it ends if it was cancelled. Epoch ms. */
+export function subscriptionDates(sub: StripeSubscription): { nextBillAt: number | null; cancelAtPeriodEnd: boolean; endsAt: number | null } {
+  const periodEnd = sub.current_period_end ?? sub.items?.data?.[0]?.current_period_end ?? null;
+  const ends = sub.cancel_at ?? (sub.cancel_at_period_end ? periodEnd : null);
+  const live = sub.status !== "canceled" && sub.status !== "incomplete_expired";
+  return {
+    nextBillAt: live && !ends && periodEnd ? periodEnd * 1000 : null,
+    cancelAtPeriodEnd: live && Boolean(ends),
+    endsAt: live && ends ? ends * 1000 : null,
+  };
+}
+
+/** Only Stripe's own invoice PDFs are handed to the browser. */
+function stripePdf(url: unknown): string | null {
+  if (typeof url !== "string") return null;
+  try {
+    const u = new URL(url);
+    return u.protocol === "https:" && (u.hostname === "pay.stripe.com" || u.hostname === "invoice.stripe.com") ? url : null;
+  } catch {
+    return null;
+  }
+}
+
+/** This account's subscriptions and invoices, read live from Stripe (nothing is kept). */
+async function stripeAccount(
+  deps: Deps,
+  cfg: BillingConfig,
+  customerId: string,
+): Promise<{ subs: Map<string, StripeSubscription>; invoices: Record<string, unknown>[] }> {
+  const c = encodeURIComponent(customerId);
+  const [subs, invoices] = await Promise.all([
+    stripe<{ data?: StripeSubscription[] }>(cfg, deps, "GET", `/subscriptions?customer=${c}&status=all&limit=100`),
+    stripe<{ data?: StripeInvoice[] }>(cfg, deps, "GET", `/invoices?customer=${c}&limit=24`),
+  ]);
+  return {
+    subs: new Map((subs.ok ? (subs.body.data ?? []) : []).map((s) => [s.id, s])),
+    invoices: (invoices.ok ? (invoices.body.data ?? []) : [])
+      .filter((i) => i.status && i.status !== "draft")
+      .map((i) => ({
+        id: i.id,
+        number: i.number ?? null,
+        date: (i.created ?? 0) * 1000,
+        amountCents: i.total ?? i.amount_due ?? 0,
+        currency: i.currency ?? "usd",
+        status: i.status,
+        pdf: stripePdf(i.invoice_pdf),
+      })),
+  };
+}
+
+/** `GET /v1/web/hosting/billing`: prices, each of this account's paid servers, and its invoices. */
 export async function myBilling(env: Env, deps: Deps, steamId: string): Promise<Result> {
-  const enabled = billingConfig(env) !== null;
+  const cfg = billingConfig(env);
+  const enabled = cfg !== null;
   const customer = await env.DB.prepare("SELECT customer_id FROM host_billing_customers WHERE steam_id = ?")
     .bind(steamId)
     .first<{ customer_id: string }>();
@@ -607,23 +709,50 @@ export async function myBilling(env: Env, deps: Deps, steamId: string): Promise<
   )
     .bind(steamId, deps.now() - 30 * DAY)
     .all<BillingRow & { name: string | null; region: string | null }>();
+  const live = cfg && customer ? await stripeAccount(deps, cfg, customer.customer_id) : null;
   return {
     status: 200,
     body: {
       enabled,
       prices: enabled ? priceList() : [],
       portal: enabled && Boolean(customer),
-      servers: rows.results.map((r) => ({
-        serverId: r.server_id,
-        name: r.name,
-        type: r.type,
-        region: r.region,
-        status: r.status,
-        amountCents: r.amount_cents,
-        graceUntil: r.grace_until,
-      })),
+      servers: rows.results.map((r) => {
+        const sub = r.subscription_id ? live?.subs.get(r.subscription_id) : undefined;
+        return {
+          serverId: r.server_id,
+          name: r.name,
+          type: r.type,
+          region: r.region,
+          status: r.status,
+          amountCents: r.amount_cents,
+          graceUntil: r.grace_until,
+          ...(sub ? subscriptionDates(sub) : { nextBillAt: null, cancelAtPeriodEnd: false, endsAt: null }),
+        };
+      }),
+      invoices: live?.invoices ?? [],
     },
   };
+}
+
+/**
+ * `POST /v1/web/hosting/billing/servers/:id/cancel|resume`: stop renewing at the end of the
+ * paid month, or take that back while the month is still running. No refund either way.
+ */
+export async function setRenewal(env: Env, deps: Deps, steamId: string, serverId: string, renew: boolean): Promise<Result> {
+  const cfg = billingConfig(env);
+  if (!cfg) return { status: 404, body: { error: "Billing is off." } };
+  const row = await billingRow(env, serverId);
+  if (!row || row.steam_id !== steamId) return { status: 404, body: { error: "No such server." } };
+  if (row.status !== "active" || !row.subscription_id) return { status: 409, body: { error: "This server has no active plan." } };
+  const sub = await stripe<StripeSubscription>(cfg, deps, "POST", `/subscriptions/${encodeURIComponent(row.subscription_id)}`, {
+    cancel_at_period_end: !renew,
+  });
+  if (!sub.ok) {
+    console.error(JSON.stringify({ msg: "billing renewal", status: sub.status, error: sub.error }));
+    return { status: 502, body: { error: renew ? "Couldn't resume. Try again." : "Couldn't cancel. Try again." } };
+  }
+  console.log(JSON.stringify({ msg: renew ? "billing resumed" : "billing cancel at period end", server: serverId }));
+  return { status: 200, body: { serverId, ...subscriptionDates(sub.body) } };
 }
 
 /** `POST /v1/web/hosting/billing/portal`: a Stripe Customer Portal session to manage billing. */
@@ -666,8 +795,12 @@ export async function billingWebRoute(env: Env, deps: Deps, steamId: string, met
   if (!path.startsWith("/v1/web/hosting/billing")) return null;
   if (method === "GET" && path === "/v1/web/hosting/billing") return myBilling(env, deps, steamId);
   if (method === "POST" && path === "/v1/web/hosting/billing/portal") return portalLink(env, deps, steamId);
-  const m = path.match(/^\/v1\/web\/hosting\/billing\/servers\/([0-9a-f-]{36})\/checkout$/i);
-  if (m && method === "POST") return resumeCheckout(env, deps, steamId, m[1]);
+  const m = path.match(/^\/v1\/web\/hosting\/billing\/servers\/([0-9a-f-]{36})\/(checkout|cancel|resume)$/i);
+  if (m && method === "POST") {
+    const action = m[2].toLowerCase();
+    if (action === "checkout") return resumeCheckout(env, deps, steamId, m[1]);
+    return setRenewal(env, deps, steamId, m[1], action === "resume");
+  }
   return { status: 404, body: { error: "no such endpoint" } };
 }
 
