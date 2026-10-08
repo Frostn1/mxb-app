@@ -60,6 +60,9 @@ const BILLED = ["ordering", "delivering", "rebuilding", "installing", "ready", "
 const PENDING = ["ordering", "delivering", "rebuilding", "installing"];
 
 export const PROGRESS_STEPS = ["Provisioning", "Installing", "Ready"];
+/** Where a server is on the way to ready, finer than `state`. `failedAt` names the stage it failed in. */
+export type ProgressStage = "ordering" | "delivering" | "installing" | "starting" | "ready" | "awaiting_payment" | "failed";
+
 export const NEW_BOX_NOTE = "A new server can take from a few minutes up to a day.";
 export const INSTALL_NOTE = "Installing the server. This usually takes a few minutes.";
 
@@ -470,6 +473,29 @@ export async function serverView(env: Env, cfg: HostConfig, row: ServerRow): Pro
     note = INSTALL_NOTE;
     since = b.stage_at;
   }
+  let stage: ProgressStage;
+  let failedAt: ProgressStage | null = null;
+  let stageSince = since;
+  if (row.state === "ready") {
+    stage = "ready";
+  } else if (row.state === "pending") {
+    stage = "awaiting_payment";
+  } else if (row.state === "failed") {
+    stage = "failed";
+    failedAt = !b || b.state === "ordering" || !b.ovh_order_id ? "ordering" : b.install_log || b.state === "installing" ? "installing" : "delivering";
+  } else if (!b || b.state === "ordering") {
+    stage = "ordering";
+    stageSince = b?.created_at ?? row.created_at;
+  } else if (b.state === "delivering" || b.state === "rebuilding") {
+    stage = "delivering";
+    stageSince = b.stage_at;
+  } else if (b.state === "installing") {
+    stage = "installing";
+    stageSince = b.stage_at;
+  } else {
+    stage = "starting";
+    stageSince = b.stage_at;
+  }
   return {
     id: row.id,
     name: row.name,
@@ -477,7 +503,7 @@ export async function serverView(env: Env, cfg: HostConfig, row: ServerRow): Pro
     region: row.region,
     regionLabel: region?.label ?? row.region,
     state,
-    progress: { step, steps: PROGRESS_STEPS, since, note },
+    progress: { step, steps: PROGRESS_STEPS, since, note, stage, failedAt, stageSince },
     address: row.state === "ready" && b?.ip && s ? `${b.ip}:${s.game_port}` : null,
     settings: { track: row.track, bikeSet: row.type === "mxbserver" ? row.bike_set : null, maxRiders: row.max_riders },
     options: {
