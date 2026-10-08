@@ -35,7 +35,7 @@ async function signingPair(): Promise<{ secret: string; publicKey: CryptoKey; pr
 async function deployment(overrides: Record<string, string> = {}): Promise<Env> {
   const DB = d1();
   await addAccount(DB, OWNER, "Owner");
-  return { DB, MXB_OWNER_ACCOUNT_ID: OWNER, MXB_ADMIN_STEAM_IDS: BOSS, ...overrides } as unknown as Env;
+  return { DB, MXB_OWNER_ACCOUNT_ID: OWNER, ADMIN_STEAM_IDS: BOSS, ...overrides } as unknown as Env;
 }
 
 /** An app account with a bearer token, the way every client arrives. */

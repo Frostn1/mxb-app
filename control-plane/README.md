@@ -24,10 +24,8 @@ consequences fall out of that, and they're baked into the schema:
 | Method | Path | Auth | Purpose |
 |---|---|---|---|
 | GET | `/health` | — | Liveness |
-| GET | `/v1/agent.exe` | — | The agent binary. Unauthenticated by necessity: a booting instance fetches it before it holds any credential. |
 | POST | `/v1/enroll` | invite code | Trade an invite for an account and a bearer token |
 | GET | `/v1/servers` | — | Server registry. Public: it is the app's join picker, and the people who most need it are the ones with no account yet. `agent_url` is not returned. |
-| POST | `/v1/servers/:id/hello` | agent token | A provisioned box announcing that it is up. Its address is taken from `cf-connecting-ip`, never from the body, so a box cannot register somebody else's. |
 | GET | `/v1/me` | bearer | Account, and a per-bike summary of what is stored for it. Looks ordinary to a banned install on purpose — see below. |
 | GET | `/v1/app/gate` | bearer | The desktop apps' startup gate. `{status:"ok"}` to run; `{status:"signin"}` when `MXB_REQUIRE_STEAM` is on and the account has no confirmed Steam link (the app shows a sign-in wall); `{status:"unsupported"}` for a banned install (a mundane untruth, never the word "ban"). With `MXB_VERDICT_SIGNING_KEY` set, each answer also carries `signed: {payload, sig}` — see **Signed verdicts, and the offline policy**. Reads the optional `X-MXB-Device` header — see **Device links** under **Banning a rider**. |
 | POST | `/v1/keys/lease` | bearer | A signed 30-day lease for the caller's Valve-confirmed Steam account, which the DLL needs beside a `.mxbkey` before it unseals it. 403 `code: "blocked"` for a banned account, 409 with no Steam link, 503 without `MXB_VERDICT_SIGNING_KEY` — see **Key leases, and the 30-day offline window** under **Banning a rider**. |
@@ -40,10 +38,12 @@ consequences fall out of that, and they're baked into the schema:
 | POST | `/v1/paintsync/leave` | bearer | Leave a server; the room is told. |
 | GET | `/v1/paintsync/room?server=<key>` | bearer (WebSocket) | Pushes `joined`/`left` for the server; `{t:"ping"}` every 5 min keeps presence. |
 | POST | `/v1/servers` | bearer | Publish a server you run. Five per account, one per address. |
-| DELETE | `/v1/servers/:id` | bearer + owner | Remove it, terminating the instance if we launched it |
-| GET | `/v1/servers/mine` | bearer | Your own servers, **with their agent tokens** — the only way to drive a box that has no console |
-| GET | `/v1/fleet` | bearer | What is running. The count is everyone's (it is what the cap measures); the instance list is only yours. |
-| POST | `/v1/provision` | bearer | Launch a server. Capped, and reaped when idle. |
+| DELETE | `/v1/servers/:id` | bearer + owner | Remove it from the list |
+| GET | `/v1/servers/mine` | bearer | The servers you registered |
+| GET/POST/PUT/DELETE | `/v1/web/hosting/*` | Steam sign-in | servers.mxbsecure.com: claim an invite, deploy a server (type, region), its progress, settings, restart, delete, the MSM link — see **User server deploy** |
+| GET/POST/DELETE | `/v1/web/admin/hosting*` | Steam sign-in + `ADMIN_STEAM_IDS` | Operators: spend, boxes, alerts, invites, tracks |
+| POST, GET/PUT/POST | `/v1/hosted/claim`, `/v1/hosted/servers/:id[/settings\|/restart]` | one-time claim, then bearer | MSM driving one hosted server |
+| GET/POST | `/v1/hosting/*` | `MXB_BOX_ENROLL_KEY` | The box install runner: stages, enroll, the track manifest |
 | PUT/GET | `/v1/paints/:sha256` | bearer | Content-addressed paint blobs |
 | POST | `/v1/bmac/webhook` | HMAC signature | Buy Me a Coffee announcing a supporter. Posted on to Discord. |
 | POST | `/v1/usage` | — | Anonymous usage counters from an install. Unauthenticated because most people who run the app never claim an invite; bounded by body size, event count and a per-address daily cap. |
@@ -61,7 +61,7 @@ consequences fall out of that, and they're baked into the schema:
 | GET | `/v1/web/me` | Steam sign-in | Who is signed in on mxbsecure.com, whether they are a creator, and what is left of today's lock ceiling. Never cached. |
 | POST | `/v1/web/creator` | Steam sign-in | Signing up as a creator, which is what opens `/admin/assets*`. Shut unless `MXB_CREATOR_SIGNUP` is `"open"` — see **The front door, and why it is shut**. An existing creator still gets `already: true`, never a refusal. |
 | GET | `/v1/web/lockweb/*` | Steam sign-in | The WebAssembly locker. It cannot live on the static site, which serves everything it holds to everybody. Any signed-in rider gets it: the GUID lock is for all of them. |
-| GET/POST | `/v1/web/admin/*` | Steam sign-in + `MXB_ADMIN_STEAM_IDS` | The dashboards at mxbsecure.com/admin — usage, diagnostics, paint sync, creators, bans, series (racing.mxbsecure.com/admin) and servers (servers.mxbsecure.com) |
+| GET/POST | `/v1/web/admin/*` | Steam sign-in + `ADMIN_STEAM_IDS` | The dashboards at mxbsecure.com/admin — usage, diagnostics, paint sync, creators, bans, series (racing.mxbsecure.com/admin) and servers (servers.mxbsecure.com) |
 | GET | `/v1/plugins` | — | The plugin catalogue. Public. Every plugin is free. |
 | GET | `/v1/me/plugins` | bearer | A freshly signed license for every plugin |
 | GET | `/v1/plugins/:id/bundle` | bearer | The build itself, streamed rather than redirected to |
@@ -84,15 +84,26 @@ meant publishing a second bike deleted the first, so a rider appeared correctly 
 bike the app last touched and in default livery on every other. `loadout_paints` is therefore
 keyed `(account_id, bike_id, slot)`, and the app publishes all of them together.
 
-### How a provisioned server becomes joinable
+### User server deploy
 
-Its public IP exists only in EC2's view, assigned while the instance boots — long after the
-`servers` row was written — and its agent token exists only in that row and on the box. So the
-box says so itself: the bootstrap reads its own address from IMDSv2, waits for the agent's
-`/health`, and calls `POST /v1/servers/:id/hello`. That one call fills in `address` and
-`agent_url` and flips `published`, which is what puts the server in everyone's join picker.
-Its owner then gets the agent token from `/v1/servers/mine`, which is what makes Start, Stop
-and Set track work on a machine nobody has a console for.
+Invited Steam accounts deploy a server of their own on servers.mxbsecure.com: `mxbserver` or
+Legacy, in US East, US West, EU West, EU East or Oceania. Each lands in a slot on an OVH VPS
+(`src/hosting.ts`, `src/hostregions.ts`, `src/ovh.ts`). Boxes are ordered only when a deploy
+finds no free slot in its pool and region, and only while `MXB_HOST_BOX_PRICE_EUR` x (billed
+boxes + 1) stays within `MXB_HOST_SPEND_CAP_EUR`; otherwise the user sees "No capacity in
+<region> right now." and operators get an alert. Nothing is ever cancelled here: an empty box
+drains, then is flagged near its renewal for a person to cancel at OVH.
+
+Secrets, all optional (without them no box is ordered or installed):
+
+```sh
+bunx wrangler secret put OVH_APPLICATION_KEY      # OVH US account application
+bunx wrangler secret put OVH_APPLICATION_SECRET
+bunx wrangler secret put OVH_CONSUMER_KEY         # limited to the routes in src/env.d.ts
+bunx wrangler secret put MXB_GH_DISPATCH_TOKEN    # Actions: write on Frostn1/mxbserver-releases
+bunx wrangler secret put MXB_BOX_ENROLL_KEY       # same value as that repo's MXB_BOX_ENROLL_KEY
+bunx wrangler secret put MXB_HOST_ALERT_WEBHOOK_URL   # optional
+```
 
 ### Donations in Discord
 
@@ -109,7 +120,7 @@ bunx wrangler secret put BMAC_WEBHOOK_SECRET          # shown by BMAC when the w
 bunx wrangler secret put DISCORD_DONATION_WEBHOOK_URL # the channel webhook — a credential itself
 ```
 
-Without them the route answers 503, the same way provisioning does without its AWS key.
+Without them the route answers 503.
 
 Only money-in events are announced (`donation.created`, `membership.started`,
 `recurring_donation.started`, `extra_purchase.created`, `commission_order.created`,
@@ -222,7 +233,7 @@ opens the track studio" and "one person lives in it" are different answers. Rows
 400 days are swept on the same cron as the idle servers.
 
 Read them at mxbsecure.com/admin, signed in with a Steam account listed in
-`MXB_ADMIN_STEAM_IDS` (`wrangler.jsonc`). Scripts use `GET /v1/usage/stats` with `ADMIN_KEY`:
+`ADMIN_STEAM_IDS` (a Worker secret). Scripts use `GET /v1/usage/stats` with `ADMIN_KEY`:
 
 ```sh
 bunx wrangler secret put ADMIN_KEY   # without it /v1/usage/stats answers 503, not 401

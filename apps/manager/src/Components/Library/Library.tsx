@@ -37,6 +37,7 @@ import {
   Search as SearchIcon,
   Star,
   HardDrive,
+  Upload,
   type LucideIcon,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -681,6 +682,8 @@ interface LibraryProps {
   /** Go to a store. What the Owned list points at: the purchase itself lives there, and
    *  installing one is that screen's job, not this one's. */
   onOpenStore?: (store: StoreId) => void;
+  /** Open the mod upload form (My mods). */
+  onUploadMod?: () => void;
 }
 
 export default function Library({
@@ -692,6 +695,7 @@ export default function Library({
   onFocusApplied,
   onOpenMod,
   onOpenStore,
+  onUploadMod,
 }: LibraryProps) {
   const viewActive = useViewActive();
   const t = useT();
@@ -1597,6 +1601,11 @@ export default function Library({
           </TooltipTrigger>
           <TooltipContent side="top">{t("library.openGameFolder")}</TooltipContent>
         </Tooltip>
+        {onUploadMod && (
+          <Button variant="outline" size="sm" onClick={onUploadMod}>
+            <Upload className="size-3.5" /> {t("myMods.upload")}
+          </Button>
+        )}
         <HelpHint title={t("nav.library")} description={t("library.help")} />
       </ContextBarRight>
 

@@ -6,9 +6,9 @@
  * (`lockweb` in `web.ts`) it therefore lives in R2 rather than on the static site, and is
  * served here, the one host that can see the `__Host-` session cookie.
  *
- * The permission is a list of SteamID64s in `MXB_CONVERTER_STEAM_IDS`, the same shape as
- * `MXB_ADMIN_STEAM_IDS`: granting it is a reviewable diff, and an unset var means nobody but
- * the admins. Admins always have it. A ban takes it away, as it takes away everything else.
+ * The permission is a list of SteamID64s in the `CONVERTER_STEAM_IDS` secret, the same shape as
+ * `ADMIN_STEAM_IDS`. Both are secrets so the public repo carries no Steam IDs; unset means nobody
+ * but the admins. Admins always have it. A ban takes it away, as it takes away everything else.
  *
  * Only the gate is here. The converter's code is private and never enters this repository —
  * the bucket holds its build, uploaded by the private repo's own deploy.
@@ -27,7 +27,7 @@ export const CONVERTER_NOT_GRANTED = "The converter is invite-only for now. Ask 
 
 /** The Steam accounts granted the converter, besides the admins. Anything else is dropped. */
 export function converterSteamIds(env: Env): string[] {
-  return (env.MXB_CONVERTER_STEAM_IDS ?? "").split(/[,\s]+/).filter(isSteamId64);
+  return (env.CONVERTER_STEAM_IDS ?? "").split(/[,\s]+/).filter(isSteamId64);
 }
 
 /** Whether this Steam account may use the converter. Says nothing about bans; see the route. */

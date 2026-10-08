@@ -3,10 +3,10 @@
  *
  * `ADMIN_KEY` is the credential for a script, and the wrong one for a person: a key in a
  * dashboard URL ends up in a browser history, a screenshot and a support thread. So the
- * dashboards live only on the site, and gate on the Steam sign-in instead. `MXB_ADMIN_STEAM_IDS` names the
- * accounts; the session cookie proves one. A list in config rather than a column on `accounts`
- * is deliberate — this is the credential that reads everybody's numbers, so granting it should
- * be a deploy that leaves a diff, not an UPDATE that leaves none.
+ * dashboards live only on the site, and gate on the Steam sign-in instead. The `ADMIN_STEAM_IDS`
+ * secret names the accounts; the session cookie proves one. A Worker secret rather than a column
+ * on `accounts`, so granting it is a deliberate `wrangler secret put` rather than an UPDATE, and
+ * rather than a config var, so the public repo carries no Steam IDs.
  *
  * Unset means nobody is an admin. A deployment that was never given the list has no admin
  * surface here, which is the same default `ADMIN_KEY` takes.
@@ -62,7 +62,7 @@ export function isWebAdminPath(path: string): boolean {
 
 /** The Steam accounts that may read the dashboards. Anything that isn't a SteamID64 is dropped. */
 export function adminSteamIds(env: Env): string[] {
-  return (env.MXB_ADMIN_STEAM_IDS ?? "").split(/[,\s]+/).filter(isSteamId64);
+  return (env.ADMIN_STEAM_IDS ?? "").split(/[,\s]+/).filter(isSteamId64);
 }
 
 export function isWebAdmin(steamId: string, env: Env): boolean {
