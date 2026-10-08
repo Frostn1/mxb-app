@@ -227,7 +227,7 @@ describe("the GUID derived from a Steam identity", () => {
   it("is FF + the SteamID64 as sixteen uppercase hex digits", () => {
     // The rider whose page the app's fixture came from — the game derives the same string.
     expect(guidFromSteamId("76561197984950104")).toBe("FF011000010178A758");
-    expect(guidFromSteamId("76561198174305985")).toBe("FF011000010CC1FEC1");
+    expect(guidFromSteamId("76561197960265730")).toBe("FF0110000100000002");
   });
 
   it("matches the game's own derivation for the base account", () => {

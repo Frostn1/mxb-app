@@ -521,7 +521,7 @@ describe("key grant rate limit", () => {
 
 describe("takedown", () => {
   it("is set and cleared only with a key, and a creator's restore doesn't lift it", async () => {
-    const CREATOR = "76561198174305985";
+    const CREATOR = "76561197960265730";
     const env = await deployment({ MXB_WEB_SESSION_KEY: "session-secret" });
     await addAccount(env.DB, "acc_creator", "Creator", CREATOR);
     await env.DB.prepare("UPDATE accounts SET creator_at = 1 WHERE id = 'acc_creator'").run();
@@ -575,7 +575,7 @@ describe("takedown", () => {
 });
 
 describe("removal", () => {
-  const CREATOR = "76561198174305985";
+  const CREATOR = "76561197960265730";
 
   /** A creator on the site, their asset, and a buyer holding it. */
   async function sold(title = "Pine Hill") {

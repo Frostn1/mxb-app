@@ -3,7 +3,7 @@ import { rememberLink, repairBySteamId, steamIdFor } from "../src/steamlink";
 import { addAccount, d1 } from "./d1sqlite";
 
 const FROST = "76561199164505734";
-const OTHER = "76561198174305985";
+const OTHER = "76561197960265730";
 
 async function deployment(): Promise<Env> {
   const DB = d1();

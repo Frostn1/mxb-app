@@ -9,7 +9,7 @@ FF0110000199999999 # synthetic test value
 FF011000010178A758 # sample: UI placeholder, rider-profile fixture and steamid tests
 FF0110000108D7CFE3 # sample: procmods test
 FF011000010A22A002 # sample: assets test
-FF011000010CC1FEC1 # sample: steam test
+FF0110000100000002 # sample: steam test
 FF011000013A7C2E91 # sample: crashes and erasure tests
 FF0110000000000A01 # sample: series GUID-join tests
 FF0110000000000B02 # sample: series GUID-join tests
