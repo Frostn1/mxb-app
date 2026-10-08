@@ -188,10 +188,15 @@ jobs:
         run: bunx vitest run
 
   # The mirror fetcher (tools/mxb-fetcher): outside the Cargo workspace, so the `rust` job
-  # above never builds it. Small, and no system libraries beyond a C compiler.
+  # above never builds it. Small, and no system libraries beyond a C compiler. Windows too:
+  # the mxb-mods.com fetcher runs on a home Windows machine.
   fetcher:
-    name: Mirror fetcher (test)
-    runs-on: ubuntu-latest
+    name: Mirror fetcher (test) — ${{ matrix.platform }}
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.platform }}
     defaults:
       run:
         working-directory: ./tools/mxb-fetcher

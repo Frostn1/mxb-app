@@ -38,6 +38,19 @@ export function hostIn(host: string, list: string[]): boolean {
   return !!host && list.some((h) => host === h || host.endsWith(`.${h}`));
 }
 
+/**
+ * Does a fetcher whose own filter is `filter` take jobs on `host`? Each fetcher says which hosts
+ * it serves (its `MXB_FETCHER_HOSTS`): names, `*` for any, and `-name` to leave one out, which
+ * wins. A box in a datacenter runs `* -mxb-mods.com` (that site blocks datacenter addresses); a
+ * fetcher on a home connection runs `mxb-mods.com`.
+ */
+export function fetcherTakes(filter: string[], host: string): boolean {
+  const list = filter.map((h) => h.trim().toLowerCase().replace(/^(-?)www\./, "$1")).filter(Boolean);
+  const out = list.filter((h) => h.startsWith("-")).map((h) => h.slice(1));
+  if (hostIn(host, out)) return false;
+  return list.includes("*") || hostIn(host, list.filter((h) => !h.startsWith("-") && h !== "*"));
+}
+
 /** The configured hosts plus the learnt ones. */
 async function allHosts(env: Env): Promise<string[]> {
   const conf = configuredFetcherHosts(env);

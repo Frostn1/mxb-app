@@ -100,8 +100,8 @@ impl Api {
             .timeout(Duration::from_secs(60))
             .build()?;
         Ok(Self {
-            base: base.trim_end_matches('/').to_string(),
-            token: token.to_string(),
+            base: base.trim().trim_end_matches('/').to_string(),
+            token: token.trim().to_string(),
             http,
         })
     }
@@ -127,8 +127,13 @@ impl Api {
         Ok(value)
     }
 
-    pub async fn lease(&self, max: usize) -> Result<Vec<Job>> {
-        let v = self.post("lease", json!({ "max": max })).await?;
+    /// Up to `max` jobs, only on the hosts this fetcher serves (empty: any).
+    pub async fn lease(&self, max: usize, hosts: &[String]) -> Result<Vec<Job>> {
+        let mut body = json!({ "max": max });
+        if !hosts.is_empty() {
+            body["hosts"] = json!(hosts);
+        }
+        let v = self.post("lease", body).await?;
         Ok(serde_json::from_value::<Lease>(v)?.jobs)
     }
 
@@ -241,6 +246,8 @@ pub fn refused_status(err: &anyhow::Error) -> Option<u16> {
 }
 
 pub fn require(v: Option<String>, what: &str) -> Result<String> {
-    v.filter(|s| !s.trim().is_empty())
+    // Trimmed: a value pasted from a Windows terminal can carry a trailing CR/LF.
+    v.map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
         .ok_or_else(|| anyhow!("{what} is not set"))
 }

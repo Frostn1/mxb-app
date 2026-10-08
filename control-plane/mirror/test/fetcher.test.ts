@@ -11,7 +11,7 @@ import { dispatch, readPageJobs, runMirror, upsertPost, writeMirrorVersion, type
 import { mirrorFile } from "../../src/mirrorfetch";
 import { FETCHER_PREFIX, fetcherRoutes, parseJobId, UPLOAD_PART_BYTES } from "../../src/mirrorfetcher";
 import { sha256Digest, sha256Init, sha256Update } from "../../src/sha256state";
-import { fetcherRouter, hostIn } from "../../src/fetcherroute";
+import { fetcherRouter, fetcherTakes, hostIn } from "../../src/fetcherroute";
 import { d1 } from "../../test/d1sqlite";
 import { fakeBucket, fakeFetch, fakeQueue, nodeHasher, sha256 } from "../../test/modfakes";
 
@@ -565,5 +565,43 @@ describe("resumable SHA-256", () => {
       expect(sha256Digest(st)).toBe(await sha256(data));
     }
     expect(sha256Digest(sha256Init())).toBe(await sha256(new Uint8Array(0)));
+  });
+});
+
+describe("which fetcher takes what", () => {
+  it("trims a token set with a trailing CR/LF", async () => {
+    expect((await call(env({ MIRROR_FETCHER_TOKEN: `${TOKEN}\r\n` }), "lease", {})).status).toBe(200);
+  });
+
+  it("reads a host filter: names, * for any, -name to leave one out", () => {
+    const box = ["*", "-mxb-mods.com"];
+    expect(fetcherTakes(box, "download9.mediafire.com")).toBe(true);
+    expect(fetcherTakes(box, "files.example.net")).toBe(true);
+    expect(fetcherTakes(box, "mxb-mods.com")).toBe(false);
+    const home = ["mxb-mods.com"];
+    expect(fetcherTakes(home, "mxb-mods.com")).toBe(true);
+    expect(fetcherTakes(home, "www.mediafire.com")).toBe(false);
+    expect(fetcherTakes([" MediaFire.com "], "mediafire.com")).toBe(true);
+    expect(fetcherTakes([], "mediafire.com")).toBe(false);
+  });
+
+  it("a datacenter box takes MediaFire only; mxb-mods.com waits, untouched, for a home fetcher", async () => {
+    const e = env();
+    const v = await seedFiles(e, ["https://www.mediafire.com/file/abcdefghijk/t.pkz/file"], "fetcher");
+    await upsertPost(e, { ...POST, id: 5, slug: "five", link: "https://mxb-mods.com/five/" }, TREE, 0);
+    await e.DB.prepare("DELETE FROM mirror_state WHERE key = 'fetcher_discovery'").run();
+
+    const box = { max: 10, hosts: ["*", "-mxb-mods.com"] };
+    expect((await call(e, "lease", box)).body.jobs.map((j: { id: string }) => j.id)).toEqual([`file:${v}:0:0`]);
+    // Again and again: nothing for the box, and nothing about the waiting rows changes.
+    const before = (await e.DB.prepare("SELECT id, page_status, page_due_at, page_attempts FROM mod_assets ORDER BY id").all()).results;
+    for (let i = 1; i <= 3; i++) expect((await call(e, "lease", box, { now: NOW + i * 600_000 })).body.jobs).toEqual([]);
+    expect((await e.DB.prepare("SELECT id, page_status, page_due_at, page_attempts FROM mod_assets ORDER BY id").all()).results).toEqual(before);
+    expect(await e.DB.prepare("SELECT COUNT(*) AS n FROM mirror_state WHERE key = 'fetcher_discovery'").first()).toEqual({ n: 0 });
+
+    // The home fetcher takes the site's work and not MediaFire's.
+    const home = (await call(e, "lease", { max: 10, hosts: ["mxb-mods.com"] }, { now: NOW + 4 * 3600_000 })).body.jobs;
+    expect(home.map((j: { kind: string }) => j.kind).sort()).toEqual(["list", "page"]);
+    expect(home.every((j: { url: string }) => j.url.startsWith("https://mxb-mods.com/"))).toBe(true);
   });
 });

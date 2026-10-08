@@ -707,6 +707,12 @@ bunx wrangler secret put MIRROR_FETCHER_TOKEN  # 32+ random characters, the same
 
 No S3 credentials are involved. Empty `MIRROR_FETCHER_HOSTS` turns it all off.
 
+mxb-mods.com also blocks datacenter addresses, so each fetcher says which hosts it serves
+(`hosts` on the lease; `MXB_FETCHER_HOSTS` on the fetcher). The Linux box runs
+`* -mxb-mods.com`, and a fetcher on a home connection runs `mxb-mods.com` (Windows scheduled
+task or systemd: `tools/mxb-fetcher/README.md`). Until that one runs, mxb-mods.com's jobs wait
+in D1 and nothing is sent to the site.
+
 ## Security notes
 
 - Tokens are shown **once** at enrollment and stored only as a SHA-256 digest. Lookup is by

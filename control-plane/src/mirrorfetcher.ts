@@ -58,7 +58,7 @@ import {
 } from "./mirror";
 import { MAX_IMAGE_BYTES, MAX_IMAGES } from "./modbody";
 import { expandFolder, placement } from "./mirrorfetch";
-import { pagesViaFetcher } from "./fetcherroute";
+import { fetcherTakes, hostname, pagesViaFetcher } from "./fetcherroute";
 import { FOLDER_MAX_FILES } from "./mirrorhosts";
 import { sha256Digest, sha256Init, sha256Update, type Sha256State } from "./sha256state";
 
@@ -101,7 +101,8 @@ async function sameSecret(a: string, b: string): Promise<boolean> {
 }
 
 async function refusal(request: Request, env: Env): Promise<Response | null> {
-  const want = env.MIRROR_FETCHER_TOKEN ?? "";
+  // Trimmed: a secret pasted from a Windows terminal can carry a trailing CR/LF.
+  const want = (env.MIRROR_FETCHER_TOKEN ?? "").trim();
   if (want.length < MIN_TOKEN) return json(503, { error: "the fetcher is not configured" });
   const got = /^Bearer\s+(\S+)\s*$/i.exec(request.headers.get("authorization") ?? "")?.[1] ?? "";
   if (!got || !(await sameSecret(got, want))) return json(401, { error: "unauthorised" });
@@ -173,16 +174,25 @@ async function leasedPage(env: Env, id: number, now: number): Promise<DueAsset |
     .first<DueAsset>();
 }
 
-/** Files first (someone is usually waiting on one), then pages: new and changed, then re-reads. */
-export async function lease(env: Env, max: number, now: number): Promise<LeasedJob[]> {
+/** Due files looked at per lease, to find `max` a fetcher's host filter takes. */
+const FILE_SCAN = 200;
+
+/**
+ * Files first (someone is usually waiting on one), then pages: new and changed, then re-reads.
+ * `takes` is the asking fetcher's own host filter (`fetcherroute.ts` `fetcherTakes`): a box in a
+ * datacenter takes MediaFire and leaves mxb-mods.com, which blocks datacenter addresses, to a
+ * fetcher on a home connection. A job no running fetcher takes simply waits in D1.
+ */
+export async function lease(env: Env, max: number, now: number, takes: (host: string) => boolean = () => true): Promise<LeasedJob[]> {
   const jobs: LeasedJob[] = [];
-  const { results: files } = await env.DB.prepare(
+  const { results: dueFiles } = await env.DB.prepare(
     `SELECT version_id, idx, part, rel, url FROM mod_files
      WHERE status = 'fetcher' AND due_at <= ?1 AND leased_until < ?1 AND url IS NOT NULL
      ORDER BY due_at, version_id DESC, idx, part LIMIT ?2`,
   )
-    .bind(now, max)
+    .bind(now, FILE_SCAN)
     .all<{ version_id: number; idx: number; part: number; rel: string | null; url: string }>();
+  const files = dueFiles.filter((f) => takes(hostname(f.url))).slice(0, max);
   for (const f of files) {
     const took = await env.DB.prepare(
       `UPDATE mod_files SET leased_until = ? WHERE version_id = ? AND idx = ? AND part = ? AND status = 'fetcher' AND leased_until < ?`,
@@ -200,7 +210,7 @@ export async function lease(env: Env, max: number, now: number): Promise<LeasedJ
     });
   }
 
-  if (jobs.length >= max || !pagesViaFetcher(env)) return jobs;
+  if (jobs.length >= max || !pagesViaFetcher(env) || !takes("mxb-mods.com")) return jobs;
   // Discovery: at most one request in flight, a round every ten minutes (`mirror.ts`).
   const list = await nextDiscoveryJob(env, now);
   if (list) jobs.push({ id: jobId({ kind: "list", seq: list.seq }), kind: "list", url: list.url });
@@ -745,7 +755,9 @@ export async function fetcherRoutes(request: Request, url: URL, env: Env, now = 
 
   if (action === "lease") {
     const max = Math.min(MAX_LEASE, Math.max(1, Math.floor(Number(body.max) || DEFAULT_LEASE)));
-    const jobs = await lease(env, max, now);
+    // The fetcher's own host filter, e.g. ["*", "-mxb-mods.com"]; absent means everything.
+    const hosts = Array.isArray(body.hosts) ? body.hosts.filter((h): h is string => typeof h === "string").slice(0, 50) : null;
+    const jobs = await lease(env, max, now, hosts ? (h) => fetcherTakes(hosts, h) : undefined);
     return json(200, { jobs, lease_seconds: Math.floor(Math.min(LEASE_MS, PAGE_LEASE_MS) / 1000) });
   }
   const job = parseJobId(body.job);

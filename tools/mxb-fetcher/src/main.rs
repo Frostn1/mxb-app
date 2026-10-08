@@ -1,18 +1,24 @@
 //! mxb-fetcher: the mod mirror's hands on a normal machine.
 //!
-//! mxb-mods.com and MediaFire answer Cloudflare Workers 403. This runs on our own Linux box,
-//! opens no ports, and pulls work from the control plane (`/v1/mirror/fetcher/*`): it leases
+//! mxb-mods.com and MediaFire answer Cloudflare Workers 403, and mxb-mods.com answers any
+//! datacenter address 403 as well. This runs on our own Linux box (MediaFire and the rest) and on
+//! a home connection, Windows or Linux (mxb-mods.com), opens no ports, and pulls work from the
+//! control plane (`/v1/mirror/fetcher/*`): it leases
 //! a couple of jobs, fetches each politely (a browser's User-Agent, at least 2 s between
 //! requests to one site, at most 2 jobs at once, backing a site off on 403/429), hands page HTML
 //! back to be parsed, uploads files to R2 through the control plane in parts, and reports.
 //!
-//! Configuration, from the environment:
+//! Configuration, from the environment or a `KEY=VALUE` file named by the first argument
+//! (or `MXB_FETCHER_CONFIG`):
 //!   MXB_FETCHER_API     the control plane, e.g. https://api.mxbsecure.com
 //!   MXB_FETCHER_TOKEN   the control plane's MIRROR_FETCHER_TOKEN
+//!   MXB_FETCHER_HOSTS   which hosts this fetcher serves: names, `*`, `-name` (default: all).
+//!                       A datacenter box: `* -mxb-mods.com`. A home machine: `mxb-mods.com`.
 //!   MXB_FETCHER_TMP     where files are spooled while hashed (default: the system temp dir)
 //!   MXB_FETCHER_IDLE    seconds to wait when there is no work (default 30)
 
 mod api;
+mod config;
 mod jobs;
 mod mediafire;
 mod pacing;
@@ -26,13 +32,12 @@ const CONCURRENCY: usize = 2;
 /// Requests to one site at least this far apart.
 const SITE_SPACING: Duration = Duration::from_secs(2);
 
-fn env(name: &str) -> Option<String> {
-    std::env::var(name).ok()
-}
-
-fn build() -> Result<(Ctx, Duration)> {
+fn build() -> Result<(Ctx, Duration, Vec<String>)> {
+    let cfg = config::Config::load()?;
+    let env = |name: &str| cfg.get(name);
     let base = api::require(env("MXB_FETCHER_API"), "MXB_FETCHER_API")?;
     let token = api::require(env("MXB_FETCHER_TOKEN"), "MXB_FETCHER_TOKEN")?;
+    let hosts = config::hosts(env("MXB_FETCHER_HOSTS").as_deref());
     let tmp = env("MXB_FETCHER_TMP")
         .map(Into::into)
         .unwrap_or_else(|| std::env::temp_dir().join("mxb-fetcher"));
@@ -67,7 +72,7 @@ fn build() -> Result<(Ctx, Duration)> {
         pacer: pacing::Pacer::new(SITE_SPACING),
         tmp,
     };
-    Ok((ctx, idle))
+    Ok((ctx, idle, hosts))
 }
 
 fn log(job: &api::Job, outcome: &Outcome) {
@@ -84,15 +89,15 @@ fn log(job: &api::Job, outcome: &Outcome) {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let (ctx, idle) = build()?;
+    let (ctx, idle, hosts) = build()?;
     println!(
         "{}",
-        serde_json::json!({ "msg": "mxb-fetcher started", "version": env!("CARGO_PKG_VERSION") })
+        serde_json::json!({ "msg": "mxb-fetcher started", "version": env!("CARGO_PKG_VERSION"), "hosts": hosts })
     );
     // No shutdown handling to speak of: a job cut off by a stop is leased out again once its
     // lease runs out, and nothing on the box is left half-written but a temp file.
     loop {
-        let jobs = match ctx.api.lease(CONCURRENCY).await {
+        let jobs = match ctx.api.lease(CONCURRENCY, &hosts).await {
             Ok(j) => j,
             Err(e) => {
                 eprintln!(
