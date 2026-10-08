@@ -38,9 +38,29 @@ interface Env {
     VIEW_ONLY_MODE?: string;
     /** Paint download authorisation: unset = enforced, `log` = serve but log what would be refused, `off` = unchecked. A rollback lever, not a setting. */
     PAINT_AUTHZ_MODE?: string;
-    /** IAM key scoped to launching and managing `mxb:managed` instances in one region. */
-    AWS_ACCESS_KEY_ID?: string;
-    AWS_SECRET_ACCESS_KEY?: string;
+    /** OVHcloud API credentials for user server deploy (`ovh.ts`, `hosting.ts`), from an OVH US
+     *  account. The consumer key is limited to GET/POST /order/cart, GET/POST /order/cart/*,
+     *  GET /me/order/*, GET /vps, GET /vps/* and POST /vps/*\/rebuild — no termination: boxes are
+     *  cancelled by hand. Without all three, no box is ordered and a deploy that needs one answers
+     *  "No capacity". */
+    OVH_APPLICATION_KEY?: string;
+    OVH_APPLICATION_SECRET?: string;
+    OVH_CONSUMER_KEY?: string;
+    /** Overrides the OVH API base (default https://api.us.ovhcloud.com/1.0). */
+    OVH_ENDPOINT?: string;
+    /** OVH subsidiary the cart is opened for. Default `US`. */
+    MXB_HOST_OVH_SUBSIDIARY?: string;
+    /** Fine-grained GitHub token with Actions: write on the install repo only, to start
+     *  `box-install.yml` for a freshly delivered box. Without it boxes stop before install. */
+    MXB_GH_DISPATCH_TOKEN?: string;
+    /** Where `box-install.yml` lives. Default `Frostn1/mxbserver-releases`. */
+    MXB_HOST_INSTALL_REPO?: string;
+    /** Shared with the install runner (a GitHub Actions secret of the same name): authorises
+     *  `/v1/hosting/*`, where the runner reports stages and enrolls a box's slot tokens. At
+     *  least 32 characters; without it those routes refuse everything. */
+    MXB_BOX_ENROLL_KEY?: string;
+    /** Optional Discord-style webhook that hosting alerts are also posted to. */
+    MXB_HOST_ALERT_WEBHOOK_URL?: string;
     /** Buy Me a Coffee's webhook signing secret. Without it `/v1/bmac/webhook` answers 503. */
     BMAC_WEBHOOK_SECRET?: string;
     /** Discord webhook the supporter announcements are posted to. A credential in itself:
@@ -115,10 +135,13 @@ interface Env {
      *  secret. `ADMIN_KEY` still works on those routes too. */
     MXB_ASSETS_KEY?: string;
     /** The Steam accounts (SteamID64, comma or space separated) that may read the dashboards
-     *  at mxbsecure.com/admin. Not a secret — a var in `wrangler.jsonc`, so granting admin is
-     *  a reviewable diff. Unset means nobody is an admin; `ADMIN_KEY` still opens the rendered
-     *  `/admin` pages on this host either way. */
-    MXB_ADMIN_STEAM_IDS?: string;
+     *  and operate servers.mxbsecure.com. A secret, so the public repo carries no Steam IDs;
+     *  set with `wrangler secret put ADMIN_STEAM_IDS`. Unset means nobody is an admin;
+     *  `ADMIN_KEY` still opens the rendered `/admin` pages on this host either way. */
+    ADMIN_STEAM_IDS?: string;
+    /** Who may use the FBX -> EDF converter besides the admins (SteamID64s, comma or space
+     *  separated). A secret for the same reason; unset means the admins alone. */
+    CONVERTER_STEAM_IDS?: string;
     /** Public HTTPS hostnames the admin server manager may call, comma or space separated.
      * Empty is fail-closed. Exact names only; the browser never receives their URLs or tokens. */
     MXB_SERVER_AGENT_HOSTS?: string;

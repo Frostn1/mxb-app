@@ -14,29 +14,32 @@
 
   // Provisioning settings. Not secrets — none of these is worth hiding, and having them in
   // config means a change is a reviewable diff rather than an invisible dashboard edit.
-  // The AWS key itself is a secret; see `src/env.d.ts`.
+  // The credentials (OVH, GitHub dispatch, enroll key) are secrets; see `src/env.d.ts`.
   "vars": {
     // View-only/locked paints are pulled until the memory-only version lands. "on" restores them.
     "VIEW_ONLY_MODE": "off",
-    // The hard ceiling on concurrent servers. This, and the idle reaper below, are what
-    // keep an hourly-billed resource from turning into an open-ended bill.
-    "MXB_MAX_INSTANCES": "2",
-    // Minutes a server may sit with nobody on it before it is destroyed.
-    "MXB_IDLE_MINUTES": "20",
-    // The backstop. Nothing lives longer than this, whatever else has gone wrong — a hung
-    // bootstrap, an agent that never started, a failure nobody has thought of. Any instance
-    // we cannot talk to would otherwise bill until someone happened to look.
-    "MXB_MAX_LIFETIME_MINUTES": "240",
-    "MXB_INSTANCE_TYPE": "t3.small",
-    // Opens the game's UDP port and the agent's TCP port. Empty disables launching.
-    "MXB_SECURITY_GROUP_ID": "sg-0d17867610872ce20",
-    // Where a fresh instance fetches the agent and the dedicated server from. Both must be
-    // reachable without credentials, because the instance has none.
-    "MXB_AGENT_DOWNLOAD_URL": "https://api.mxbsecure.com/v1/agent.exe",
-    // PiBoSo's own installer. There is no separate dedicated-server package — the server
-    // is inside this, and the bootstrap runs it with `-extract` to unpack it. Pointing at
-    // the official URL means nothing of theirs is rehosted, at the cost of a 2 GB download
-    // on every launch. Baking an AMI is the obvious way to remove that later.
+    // User server deploy (src/hosting.ts). Money is the limit: a box is ordered only while
+    // MXB_HOST_BOX_PRICE_EUR x (billed boxes + 1) stays within MXB_HOST_SPEND_CAP_EUR. "0" orders
+    // nothing at all, which is the safe default until Sean sets a cap. The box count is a second
+    // safety limit; Legacy (Wine) is held to one box for its trial.
+    "MXB_HOST_SPEND_CAP_EUR": "0",
+    // One OVH VPS-1 on an OVH US account: $7.60/month plus the mandatory $0.50 backup add-on
+    // (public catalog, 2026-10-07), counted here in EUR.
+    "MXB_HOST_BOX_PRICE_EUR": "7.50",
+    "MXB_HOST_MAX_BOXES": "4",
+    "MXB_HOST_LEGACY_MAX_BOXES": "1",
+    "MXB_HOST_SLOTS_NATIVE": "4",
+    "MXB_HOST_SLOTS_LEGACY": "2",
+    // A hosted server nobody rides on for this long is deleted and its slot freed.
+    "MXB_HOST_IDLE_DAYS": "7",
+    // A box empty this long is flagged for cancelling at OVH shortly before it renews.
+    "MXB_HOST_EMPTY_DAYS": "7",
+    // "1" orders a box ahead when a region fills up and saw 2+ deploys in a week, inside the cap.
+    "MXB_HOST_PREPROVISION": "0",
+    // The public key the box install runner logs in with (its private half is the
+    // BOX_SSH_PRIVATE_KEY secret in Frostn1/mxbserver-releases). Empty blocks installs.
+    "MXB_HOST_SSH_PUBLIC_KEY": "",
+    // PiBoSo's own installer, for Legacy boxes. Nothing of theirs is rehosted.
     "MXB_GAME_DOWNLOAD_URL": "https://mx-bikes.com/downloads/mxbikes-beta21e.exe",
     // The account every asset made from mxbsecure.com is created under. Empty disables
     // `/admin/assets`.
@@ -47,11 +50,8 @@
     // until signed builds are the ones in the field — turning it on early drops everybody's
     // numbers and says nothing. The key itself is a secret; see `src/env.d.ts`.
     "MXB_USAGE_REQUIRE_SIGNATURE": "0",
-    // The Steam accounts that may read the dashboards at mxbsecure.com/admin, comma
-    // separated. Empty means nobody, which is the right default: this is the credential that
-    // reads everybody's numbers, so granting it should be a diff. `ADMIN_KEY` still opens the
-    // rendered /admin pages on this host either way.
-    "MXB_ADMIN_STEAM_IDS": "76561198174305985",
+    // The admin and converter Steam accounts are Worker secrets now (ADMIN_STEAM_IDS,
+    // CONVERTER_STEAM_IDS; see src/env.d.ts), so this public file carries no Steam IDs.
     // Exact public HTTPS names the admin server manager may call. Empty keeps connection
     // disabled until an operator deliberately adds the reverse-proxied agent host here.
     "MXB_SERVER_AGENT_HOSTS": "16-146-6-22.sslip.io",
@@ -68,9 +68,6 @@
     // new Steam account and one click. Anything but "open" is closed; flip it to "open" to
     // take signups again.
     "MXB_CREATOR_SIGNUP": "closed",
-    // Who may use the FBX -> EDF converter on mxbsecure.com, besides the admins, who always
-    // may: SteamID64s, comma or space separated. Empty means the admins alone. A list here
-    // rather than a table so that granting it is a reviewable diff, like the admin list above.
     // Where public mod files are served from: the custom domain on the `mxb-assets` bucket.
     "MXB_ASSETS_CDN": "https://cdn.mxbsecure.com",
     // The private bucket's name, for the S3 endpoint the upload URLs are presigned against.
@@ -83,13 +80,10 @@
     "MXB_MIRROR_RETAIN_DAYS": "90",
     "MXB_BIKE_ACTIVE_DAYS": "180",
     "MXB_MIRROR_BIKES_ALLOW": "",
-    "MXB_MIRROR_BIKES_DENY": "",
-    "MXB_CONVERTER_STEAM_IDS": "76561199650233712,76561199807040854,76561198798423111,76561198937606502"
+    "MXB_MIRROR_BIKES_DENY": ""
   },
 
-  // The idle reaper. Every five minutes it asks each running server who is connected and
-  // destroys the ones that have been empty long enough — the difference between "no
-  // unattended servers" being a policy and being a fact.
+  // Every five minutes: hosted boxes through delivery and install, idle slots, drains, prunes.
   "triggers": {
     "crons": ["*/5 * * * *"]
   },

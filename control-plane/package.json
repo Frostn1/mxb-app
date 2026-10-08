@@ -8,8 +8,7 @@
     "deploy": "wrangler deploy",
     "typecheck": "tsc --noEmit",
     "types": "wrangler types",
-    "test": "vitest run",
-    "render:bootstrap": "tsx scripts/render-bootstrap.ts"
+    "test": "vitest run"
   },
   "engines": {
     "node": ">=22.13"

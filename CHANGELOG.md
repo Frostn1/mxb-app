@@ -40,6 +40,21 @@
 - **Download hosts that answer 429 or 5xx are retried,** including Google Drive's confirm step.
 - **A pack's paints folder is no longer nested inside a paints destination.**
 - **Secure paint loading.** Paint lists are rebuilt at game start, unlocked files install, and the file extension is matched in any case.
+### Added
+- **User server deploy (control plane).** Invited Steam accounts can deploy an mxbserver or
+  Legacy server in US East, US West, EU West, EU East or Oceania from servers.mxbsecure.com, and
+  open it in MXB Servers. Servers go into slots on OVH VPSes ordered on demand under a monthly
+  EUR spend cap; empty boxes are drained and flagged for cancelling by hand. Migration 0057
+  (additive), `/v1/web/hosting/*`, `/v1/web/admin/hosting*`, `/v1/hosted/*`, `/v1/hosting/*`.
+
+### Removed
+- The old EC2 "Create a server" flow: `/v1/provision`, `/v1/fleet`, `/v1/images*`,
+  `/v1/servers/:id/hello|bootstrap`, `/v1/agent.exe`, the idle reaper and the AWS code.
+
+### Changed
+- The admin and converter Steam ID lists moved from `wrangler.jsonc` to the Worker secrets
+  `ADMIN_STEAM_IDS` and `CONVERTER_STEAM_IDS`.
+
 ## 2026-10-04 — v0.19.3 — Install folder fixes, OneDrive and ReShade checks, game logs in exports
 
 ## 2026-10-04 — v0.19.2 — Friends, model-swap crash fix, other-drive installs, honest ping
