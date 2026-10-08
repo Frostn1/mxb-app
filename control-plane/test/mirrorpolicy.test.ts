@@ -42,10 +42,10 @@ async function post(e: Env, id: number, slug: string, cats: number[], url = `htt
     TREE,
     NOW - 10 * DAY,
   );
-  const a = await e.DB.prepare("SELECT id FROM mod_assets WHERE source_ref = ?").bind(id).first<{ id: number }>();
+  const a = await e.DB.prepare("SELECT id, public_id FROM mod_assets WHERE source_ref = ?").bind(id).first<{ id: number; public_id: string }>();
   await e.DB.prepare("UPDATE mod_assets SET page_status = 'ok' WHERE id = ?").bind(a!.id).run();
   const v = await writeMirrorVersion(e, a!.id, null, [{ url, host: "x", label: "x", isDefault: true, isServer: false }], NOW);
-  return { asset: a!.id, version: v };
+  return { asset: a!.id, pub: a!.public_id, version: v };
 }
 
 async function ride(e: Env, bikeId: string, at = NOW - DAY) {
@@ -88,26 +88,26 @@ describe("the supported-bike rule", () => {
 });
 
 describe("mirror on demand", () => {
-  const dl = (e: Env, asset: number) => {
+  const dl = (e: Env, asset: string) => {
     const u = `https://api.mxbsecure.com/v1/assets/${asset}/download/0`;
     return publicModRoutes(new Request(u), new URL(u), e);
   };
 
   it("lists the whole catalogue, unmirrored, with the original link", async () => {
     const e = env();
-    const { asset } = await post(e, 1, "red-bull-ktm", [37, 102, 900]);
+    const { asset, pub } = await post(e, 1, "red-bull-ktm", [37, 102, 900]);
     const s = (await searchAssets(new URL("https://x/v1/assets/search?q=red"), e)).body as { total: number };
     expect(s.total).toBe(1);
     const d = (await getAsset(asset, new URL("https://api/x"), e)).body as { files: { state: string; download: string; source: string }[] };
     expect(d.files[0]).toMatchObject({ state: "original", source: "https://x.example/red-bull-ktm.zip" });
-    expect(d.files[0].download).toContain(`/v1/assets/${asset}/download/0`);
+    expect(d.files[0].download).toContain(`/v1/assets/${pub}/download/0`);
   });
 
   it("a first download goes to the original and queues a copy; the next one comes from the CDN", async () => {
     const e = env();
     // The route reads the clock itself, so this rider is "recent" by the real one.
     await ride(e, "MX1OEM_2023_KTM_450_SX-F", Date.now());
-    const { asset, version } = await post(e, 1, "red-bull-ktm", [37, 102, 900]);
+    const { pub: asset, version } = await post(e, 1, "red-bull-ktm", [37, 102, 900]);
     const first = await dl(e, asset);
     expect(first!.status).toBe(302);
     expect(first!.headers.get("location")).toBe("https://x.example/red-bull-ktm.zip");
@@ -125,7 +125,7 @@ describe("mirror on demand", () => {
 
   it("never copies a livery for a bike nobody rides; the download still works", async () => {
     const e = env();
-    const { asset, version } = await post(e, 2, "old-ktm", [37, 102, 108]);
+    const { pub: asset, version } = await post(e, 2, "old-ktm", [37, 102, 108]);
     const r = await dl(e, asset);
     expect(r!.headers.get("location")).toBe("https://x.example/old-ktm.zip");
     expect(e.MIRROR_QUEUE.sent).toEqual([]);

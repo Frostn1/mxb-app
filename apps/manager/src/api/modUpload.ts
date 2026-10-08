@@ -22,8 +22,10 @@ export interface UploadMeta {
   visibility: Visibility;
   version: string | null;
   notes: string | null;
-  /** A new version of this mod of yours; null for a new mod. */
-  assetId: number | null;
+  /** A new version of this mod of yours (its public id); null for a new mod. */
+  assetId: string | null;
+  /** A picture to set on the mod once it is uploaded. */
+  thumbPath?: string | null;
 }
 
 export interface PickedFile {
@@ -55,20 +57,24 @@ export interface UploadJob {
   /** Bytes sent (or hashed, while `hashing`). */
   sent: number;
   error: string | null;
-  assetId: number | null;
+  assetId: string | null;
   startedAt: number;
 }
 
 /** One of the rider's mods (`uploads.ts:378` `myMods`). */
 export interface MyMod {
-  id: number;
+  /** The public id (a UUID). */
+  id: string;
   title: string;
   modType: string;
   visibility: Visibility;
   /** `active` | `hidden` (moderation) | `removed` (moderation). */
   state: string;
   modified: string;
-  currentVersion: number | null;
+  /** A version has been published. */
+  live: boolean;
+  /** The picture on the CDN. */
+  thumb: string | null;
   /** Open reports. */
   reports: number;
 }
@@ -76,7 +82,7 @@ export interface MyMod {
 /** An upload the control plane has open, checking or rejected. */
 export interface MyUpload {
   id: string;
-  assetId: number | null;
+  assetId: string | null;
   filename: string;
   size: number;
   state: string;
@@ -113,11 +119,13 @@ export const resumeUpload = (key: string) => invoke<void>("mod_upload_resume", {
 export const cancelUpload = (key: string) => invoke<void>("mod_upload_cancel", { key });
 export const dismissUpload = (key: string) => invoke<void>("mod_upload_dismiss", { key });
 export const myMods = () => invoke<MyMods>("my_mods");
-export const editMod = (assetId: number, edit: ModEdit) => invoke<void>("mod_edit", { assetId, edit });
+export const editMod = (assetId: string, edit: ModEdit) => invoke<void>("mod_edit", { assetId, edit });
 /** The public page's description and bikes, to fill the edit form. Fails until a version is live. */
-export const modDetails = (assetId: number) =>
+export const modDetails = (assetId: string) =>
   invoke<{ description: string; bike: string[] }>("mod_details", { assetId });
-export const deleteMod =(assetId: number) => invoke<void>("mod_delete", { assetId });
+export const deleteMod = (assetId: string) => invoke<void>("mod_delete", { assetId });
+/** Set a mod's picture from a file (JPEG, PNG, WebP, GIF or AVIF, at most 2 MB). */
+export const setModThumb = (assetId: string, path: string) => invoke<void>("mod_set_thumb", { assetId, path });
 
 export function onUploadProgress(cb: (job: UploadJob) => void): Promise<UnlistenFn> {
   return listen<UploadJob>("mod-upload", (e) => cb(e.payload));

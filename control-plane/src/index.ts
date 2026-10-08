@@ -82,7 +82,8 @@ import { PaintRoom } from "./paintroom";
 import { ingestResults, leaderboard as ratingLeaderboard, myRatings, ratedClasses, serverForRatingToken } from "./rating";
 import { isSeriesPath, pruneSeriesRegistrations, seriesRoutes } from "./series";
 import { publicModRoutes } from "./modapi";
-import { abortUpload, completeUpload, deleteMod, editMod, myMods, openUpload, uploadStatus } from "./uploads";
+import { abortUpload, completeUpload, deleteMod, editMod, myMods, openUpload, setThumb, uploadStatus } from "./uploads";
+import { internalId, UUID_RE } from "./modids";
 import { viewOnlyOn, listPolicies, lockKey, minisignPublicKey, putPolicy, signedLocks, wantsViewOnly } from "./paintpolicy";
 import {
   liveKey,
@@ -95,6 +96,9 @@ import {
   ridersOn,
   withoutViewOnly,
 } from "./paintsync";
+
+/** An owner's own mod, by its public UUID: PATCH/DELETE it, PUT its picture. */
+const OWNED_MOD = new RegExp(`^/v1/assets/(${UUID_RE.source})(/thumb)?$`, "i");
 
 interface Account {
   id: string;
@@ -501,10 +505,18 @@ async function route(request: Request, env: Env): Promise<Response> {
     const r = await myMods(account, env);
     return json(r.status, r.body);
   }
-  const ownedMod = /^\/v1\/assets\/(\d{1,12})$/.exec(path);
-  if (ownedMod && (method === "PATCH" || method === "DELETE")) {
+  // The owner's own mod, named by its public UUID (`modids.ts`).
+  const ownedMod = OWNED_MOD.exec(path);
+  const owning = ownedMod && (ownedMod[2] ? method === "PUT" : method === "PATCH" || method === "DELETE");
+  if (ownedMod && owning) {
+    const id = await internalId(env, ownedMod[1]);
+    if (id === null) return json(404, { error: "no such mod of yours" });
     const r =
-      method === "PATCH" ? await editMod(request, Number(ownedMod[1]), account, env) : await deleteMod(Number(ownedMod[1]), account, env);
+      method === "PUT"
+        ? await setThumb(request, id, account, env)
+        : method === "PATCH"
+          ? await editMod(request, id, account, env)
+          : await deleteMod(id, account, env);
     return json(r.status, r.body);
   }
   if (method === "PUT" && path === "/v1/me/guid") return putGuid(request, account, env);

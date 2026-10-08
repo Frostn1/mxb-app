@@ -6,7 +6,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { open as openUrl } from "@tauri-apps/plugin-shell";
-import { ExternalLink, Flag, Loader2, Pause, Pencil, Play, RotateCw, Trash2, Upload, X } from "lucide-react";
+import { open as pickFile } from "@tauri-apps/plugin-dialog";
+import { ExternalLink, Flag, ImageIcon, Loader2, Pause, Pencil, Play, RotateCw, Trash2, Upload, X } from "lucide-react";
 import { Button } from "@frost/shared/Components/ui/button";
 import {
   AlertDialog,
@@ -28,6 +29,7 @@ import { useSteamLink } from "../../lib/useSteamLink";
 import {
   cancelUpload,
   deleteMod,
+  setModThumb,
   dismissUpload,
   myMods,
   onUploadProgress,
@@ -45,6 +47,7 @@ import {
   accountProblem,
   MAX_UPLOAD_BYTES,
   modPageUrl,
+  THUMB_EXTENSIONS,
   progressOf,
   type AccountState,
 } from "../../lib/modUpload";
@@ -153,6 +156,18 @@ export default function MyMods({ uploadRequest }: { uploadRequest: number }) {
       toast.error(t(failKey), { description: String(e) });
     }
     setJobs(await uploadJobs().catch(() => jobs));
+  };
+
+  const choosePicture = async (m: MyMod) => {
+    const picked = await pickFile({ multiple: false, filters: [{ name: "Image", extensions: THUMB_EXTENSIONS }] });
+    if (typeof picked !== "string") return;
+    try {
+      await setModThumb(m.id, picked);
+      toast.success(t("myMods.pictureSet"));
+    } catch (e) {
+      toast.error(t("myMods.pictureFailed"), { description: String(e) });
+    }
+    await load();
   };
 
   const confirmDelete = async () => {
@@ -264,11 +279,12 @@ export default function MyMods({ uploadRequest }: { uploadRequest: number }) {
                     key={m.id}
                     mod={m}
                     checking={checkingAssets.has(m.id) || pending?.state === "verifying"}
-                    rejected={m.currentVersion === null ? (rejected?.error ?? null) : null}
+                    rejected={!m.live ? (rejected?.error ?? null) : null}
                     canUpload={problem === null}
                     onEdit={() => setEditing(m)}
                     onDelete={() => setDeleting(m)}
                     onNewVersion={() => openUpload(m)}
+                    onPicture={() => void choosePicture(m)}
                   />
                 );
               })
@@ -343,7 +359,7 @@ function JobRow({
           </div>
         </div>
         {job.phase === "live" && job.assetId !== null && (
-          <Button variant="outline" size="sm" onClick={() => void openUrl(modPageUrl(job.assetId!))}>
+          <Button variant="outline" size="sm" onClick={() => void openUrl(modPageUrl(job.meta.title || job.filename, job.assetId!))}>
             <ExternalLink className="size-3.5" /> {t("myMods.view")}
           </Button>
         )}
@@ -391,6 +407,7 @@ function ModRow({
   onEdit,
   onDelete,
   onNewVersion,
+  onPicture,
 }: {
   mod: MyMod;
   checking: boolean;
@@ -399,9 +416,10 @@ function ModRow({
   onEdit: () => void;
   onDelete: () => void;
   onNewVersion: () => void;
+  onPicture: () => void;
 }) {
   const t = useT();
-  const live = mod.currentVersion !== null && mod.state === "active";
+  const live = mod.live && mod.state === "active";
   const status: { key: TKey; tone: string } =
     mod.state === "removed"
       ? { key: "myMods.stateRemoved", tone: "text-destructive" }
@@ -418,6 +436,13 @@ function ModRow({
   const kind = KIND_LABEL[mod.modType as ModKind];
   return (
     <div className="flex items-center gap-3 rounded-xl border border-white/[0.07] bg-card p-3">
+      {mod.thumb ? (
+        <img src={mod.thumb} alt="" className="h-10 w-16 shrink-0 rounded-md object-cover" loading="lazy" />
+      ) : (
+        <div className="flex h-10 w-16 shrink-0 items-center justify-center rounded-md bg-white/[0.04] text-muted-foreground">
+          <ImageIcon className="size-4" />
+        </div>
+      )}
       <div className="min-w-0 flex-1">
         <div className="truncate text-[13px] font-semibold">{mod.title}</div>
         <div className="flex flex-wrap items-center gap-x-1.5 text-[11.5px] text-muted-foreground">
@@ -438,7 +463,7 @@ function ModRow({
         {rejected && <p className="select-text text-[11.5px] text-destructive">{rejected}</p>}
       </div>
       {live && (
-        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => void openUrl(modPageUrl(mod.id))} title={t("myMods.view")}>
+        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => void openUrl(modPageUrl(mod.title, mod.id))} title={t("myMods.view")}>
           <ExternalLink className="size-4" />
         </Button>
       )}
@@ -449,6 +474,9 @@ function ModRow({
           </Button>
           <Button variant="ghost" size="icon" className="h-8 w-8" onClick={onEdit} title={t("myMods.edit")}>
             <Pencil className="size-4" />
+          </Button>
+          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={onPicture} title={t("myMods.setPicture")}>
+            <ImageIcon className="size-4" />
           </Button>
         </>
       )}

@@ -3,21 +3,24 @@
  * the mirror and riders' own uploads — come out of the same routes in the same shape.
  *
  *   GET  /v1/assets/search?q=&type=&bike=&source=&page=   FTS5, bm25-ranked, 24 a page
- *   GET  /v1/assets/<id>[?version=<seq>]                   one mod, its versions, its files
- *   GET  /v1/assets/<id>/download/<idx>[/<part>][?version=<seq>]
+ *   GET  /v1/assets/stats                                  how many mods are listed
+ *   GET  /v1/assets/<uuid>[?version=<seq>]                 one mod, its versions, its files
+ *   GET  /v1/assets/<uuid>/download/<idx>[/<part>][?version=<seq>]
  *                                                          302 to cdn.mxbsecure.com, or to a
  *                                                          signed link for locked content
  *   GET  /v1/assets/locked/<sha>?exp=&sig=                 the signed link itself
- *   POST /v1/assets/<id>/report                            `modreports.ts`
+ *   POST /v1/assets/<uuid>/report                          `modreports.ts`
  *
  * Only active, public mods whose current version is live and has a stored file are listed.
- * An unlisted mod answers by id. Everything here is catalogue data, open to any origin and
+ * A mod is named by its public UUID (`modids.ts`); the integer id never leaves D1. An unlisted
+ * mod answers only to its UUID. Everything here is catalogue data, open to any origin and
  * cacheable for a minute; the routes are rate-limited per address.
  */
 
 import { ASSET_TYPES, hex, LEASE_MS, type MirrorJob } from "./mirror";
 import { activeBikes, supported, touchBlob } from "./mirrorpolicy";
 import { reportAsset } from "./modreports";
+import { internalId, modSlug, UUID_RE } from "./modids";
 
 export const PER_PAGE = 24;
 const MAX_PAGE = 200;
@@ -45,6 +48,8 @@ export function ftsQuery(q: string): string | null {
 
 interface AssetRow {
   id: number;
+  public_id: string;
+  thumb_key: string | null;
   source: string;
   title: string;
   author: string | null;
@@ -68,14 +73,15 @@ export function cdnBase(env: Env): string {
 
 function summary(env: Env, r: AssetRow) {
   return {
-    id: r.id,
+    id: r.public_id,
+    slug: modSlug(r.title),
     source: r.source,
     title: r.title,
     author: r.author,
     type: r.type,
     bike: r.bike ? r.bike.split("; ") : [],
     version: r.label,
-    thumb: r.thumb_sha ? `${cdnBase(env)}/other/${r.thumb_sha}` : null,
+    thumb: r.thumb_key ? `${cdnBase(env)}/${r.thumb_key}` : null,
     source_url: r.source_url,
     updated: r.modified,
     first_seen: new Date(r.first_seen).toISOString(),
@@ -86,7 +92,7 @@ function summary(env: Env, r: AssetRow) {
 }
 
 /** The current version's label and seq, and what of it is stored. */
-const COLUMNS = `a.id, a.source, a.title, a.author, a.type, a.bike, a.visibility, a.thumb_sha, a.source_url, a.modified,
+const COLUMNS = `a.id, a.public_id, a.thumb_key, a.source, a.title, a.author, a.type, a.bike, a.visibility, a.thumb_sha, a.source_url, a.modified,
   a.first_seen, a.last_seen, v.label, v.seq,
   (SELECT COUNT(*) FROM mod_files f WHERE f.version_id = v.id AND f.status = 'done') AS files,
   (SELECT COALESCE(SUM(b.size), 0) FROM mod_files f JOIN mod_blobs b ON b.sha256 = f.sha256
@@ -233,7 +239,7 @@ export async function getAsset(id: number, url: URL, env: Env): Promise<{ status
       locked: f.bucket === "private",
       cdn: stored && f.bucket === "public" ? `${cdnBase(env)}/${f.r2_key}` : null,
       // Always a download: ours when stored, otherwise a redirect to the original link.
-      download: f.url || stored ? `${url.origin}/v1/assets/${id}/download/${path}?version=${version.seq}` : null,
+      download: f.url || stored ? `${url.origin}/v1/assets/${asset.public_id}/download/${path}?version=${version.seq}` : null,
       source: f.url,
     };
   });
@@ -369,15 +375,29 @@ function publicJson(status: number, body: unknown): Response {
   });
 }
 
+const ONE = new RegExp(`^/v1/assets/(${UUID_RE.source})$`, "i");
+const DOWNLOAD = new RegExp(`^/v1/assets/(${UUID_RE.source})/download/([0-9]{1,4})(?:/([0-9]{1,4}))?$`, "i");
+const REPORT = new RegExp(`^/v1/assets/(${UUID_RE.source})/report$`, "i");
+const LEGACY = /^\/v1\/assets\/[0-9]{1,12}(?:\/(?:download\/.*|report))?$/;
+
+/** How many mods search lists with no filter: the site's headline number. */
+export async function assetStats(env: Env): Promise<{ total: number }> {
+  const row = await env.DB.prepare(
+    `SELECT COUNT(*) AS n FROM mod_assets a LEFT JOIN mod_versions v ON v.id = a.current_version WHERE ${LISTABLE}`,
+  ).first<{ n: number }>();
+  return { total: row?.n ?? 0 };
+}
+
 /** The public `/v1/assets/*` routes. `null` for anything else (the owner's writes, below the gate). */
 export async function publicModRoutes(request: Request, url: URL, env: Env): Promise<Response | null> {
   const path = url.pathname;
   const m = request.method;
   const isSearch = path === "/v1/assets/search";
-  const one = /^\/v1\/assets\/(\d{1,12})$/.exec(path);
-  const dl = /^\/v1\/assets\/(\d{1,12})\/download\/(\d{1,4})(?:\/(\d{1,4}))?$/.exec(path);
+  const isStats = path === "/v1/assets/stats";
+  const one = ONE.exec(path);
+  const dl = DOWNLOAD.exec(path);
   const locked = /^\/v1\/assets\/locked\/([0-9a-f]{64})$/.exec(path);
-  const report = /^\/v1\/assets\/(\d{1,12})\/report$/.exec(path);
+  const report = REPORT.exec(path);
   const reading = m === "GET" || m === "HEAD";
   if (m === "OPTIONS" && report) {
     return new Response(null, {
@@ -389,24 +409,32 @@ export async function publicModRoutes(request: Request, url: URL, env: Env): Pro
       },
     });
   }
-  if (!(reading && (isSearch || one || dl || locked)) && !(m === "POST" && report)) return null;
+  // The old integer addresses name nothing now: a plain 404, not the account gate's 401.
+  if ((reading || m === "POST") && LEGACY.test(path)) return publicJson(404, { error: "no such mod" });
+  if (!(reading && (isSearch || isStats || one || dl || locked)) && !(m === "POST" && report)) return null;
 
   const ip = request.headers.get("CF-Connecting-IP") ?? "unknown";
   if (env.ASSETS_LIMITER && !(await env.ASSETS_LIMITER.limit({ key: ip })).success) {
     return publicJson(429, { error: "slow down" });
   }
-  if (report) {
-    const r = await reportAsset(request, Number(report[1]), env);
-    return publicJson(r.status, r.body);
-  }
   if (isSearch) {
     const r = await searchAssets(url, env);
     return publicJson(r.status, r.body);
   }
-  if (one) {
-    const r = await getAsset(Number(one[1]), url, env);
-    return publicJson(r.status, r.body);
+  if (isStats) return publicJson(200, await assetStats(env));
+  const named = one?.[1] ?? dl?.[1] ?? report?.[1];
+  if (named) {
+    const id = await internalId(env, named);
+    if (id === null) return publicJson(404, { error: "no such mod" });
+    if (report) {
+      const r = await reportAsset(request, id, env);
+      return publicJson(r.status, r.body);
+    }
+    if (one) {
+      const r = await getAsset(id, url, env);
+      return publicJson(r.status, r.body);
+    }
+    return downloadAsset(id, Number(dl![2]), Number(dl![3] ?? "0"), url, env);
   }
-  if (dl) return downloadAsset(Number(dl[1]), Number(dl[2]), Number(dl[3] ?? "0"), url, env);
   return lockedAsset(locked![1], url, env);
 }
