@@ -891,7 +891,13 @@ export async function restartServer(env: Env, deps: Deps, steamId: string, id: s
   return result.ok ? { status: 200, body: { ok: true } } : { status: 502, body: { error: "The server didn't restart." } };
 }
 
-export async function deleteServer(env: Env, deps: Deps, id: string, why: string): Promise<Result> {
+export async function deleteServer(
+  env: Env,
+  deps: Deps,
+  id: string,
+  why: string,
+  opts: { billingAtPeriodEnd?: boolean } = {},
+): Promise<Result> {
   const row = await serverRow(env, id);
   if (!row) return { status: 404, body: { error: "No such server." } };
   const s = await slot(env, row.slot_id);
@@ -899,7 +905,7 @@ export async function deleteServer(env: Env, deps: Deps, id: string, why: string
   const now = deps.now();
   await env.DB.prepare("UPDATE host_servers SET state = 'deleted', deleted_at = ?, slot_id = NULL WHERE id = ?").bind(now, id).run();
   await env.DB.prepare("UPDATE host_tokens SET revoked_at = ? WHERE server_id = ? AND revoked_at IS NULL").bind(now, id).run();
-  await billingServerGone(env, deps, id);
+  await billingServerGone(env, deps, id, { periodEnd: opts.billingAtPeriodEnd });
   console.log(JSON.stringify({ msg: "hosting delete", server: id, why }));
   return { status: 200, body: { ok: true } };
 }
@@ -907,7 +913,7 @@ export async function deleteServer(env: Env, deps: Deps, id: string, why: string
 export async function ownerDelete(env: Env, deps: Deps, steamId: string, id: string): Promise<Result> {
   const row = await serverRow(env, id);
   if (!row || row.steam_id !== steamId) return { status: 404, body: { error: "No such server." } };
-  return deleteServer(env, deps, id, "owner");
+  return deleteServer(env, deps, id, "owner", { billingAtPeriodEnd: true });
 }
 
 // ---- MSM -----------------------------------------------------------------------------------
