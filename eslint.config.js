@@ -51,6 +51,7 @@ export default tseslint.config(
       "packages/shared/src/Components/Viewer/ModelViewer.tsx",
       "packages/shared/src/Components/Viewer/PoseHandles.tsx",
       "packages/shared/src/Components/Viewer/TrackViewer.tsx",
+      "apps/studio/src/Components/Studio/Gfx/GfxMarkers.tsx",
     ],
     rules: { "react/no-unknown-property": "off" },
   },

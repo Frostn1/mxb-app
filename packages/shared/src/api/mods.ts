@@ -1293,7 +1293,7 @@ export function unpackPkz(path: string, outDir: string): Promise<string[]> {
  * Walks the payload rather than naming a path into it, because five commands return meshes
  * under four different shapes, and a sixth would otherwise arrive silently broken.
  */
-function reviveMesh<T>(value: T): T {
+export function reviveMesh<T>(value: T): T {
   const seen = new Set<object>();
   const walk = (v: unknown): void => {
     if (v === null || typeof v !== "object") return;

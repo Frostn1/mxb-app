@@ -168,114 +168,18 @@ pub fn is_running() -> bool {
 // A verb the running FrostMod predates is logged as unknown and dropped, which
 // looks exactly like success from this side — see `supports_model_refresh`.
 // ===========================================================================
-
-/// Name of FrostMod's command event. Must match frostmod.cpp exactly.
-#[cfg(windows)]
-const COMMAND_EVENT_NAME: &[u8] = b"Local\\FrostModCommand\0";
-
-/// Where a build outside the Wine prefix leaves commands: FrostMod's own folder, which
-/// this app owns and which FrostMod (v0.13.0+) reads as well as `%TEMP%`.
-///
-/// Set once at startup rather than passed in, because the senders below are called from
-/// folder watchers and install jobs that hold no Tauri handle to resolve a data dir with,
-/// and threading one through every caller would buy nothing: there is only ever one
-/// FrostMod folder per run.
+// The file, its path, its JSON and the event live in `mxb_core::frostmodcmd`, so the Studio
+// writes exactly the document this app does. Only *whether* to send stays here.
+pub use mxb_core::frostmodcmd::CommandOutcome;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
-static COMMAND_DIR: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+pub use mxb_core::frostmodcmd::set_command_dir;
+use mxb_core::frostmodcmd::command_json;
+#[cfg(test)]
+use mxb_core::frostmodcmd::command_json_at;
 
-/// Tell the sender where FrostMod is installed. Called once, from setup.
-#[cfg(any(target_os = "linux", target_os = "macos"))]
-pub fn set_command_dir(dir: std::path::PathBuf) {
-    let _ = COMMAND_DIR.set(dir);
-}
-
-/// Command file FrostMod reads when the command event fires. Same temp dir the
-/// DLL uses — `std::env::temp_dir()` resolves to the `%TEMP%` that FrostMod's
-/// `GetTempPathA` returns.
-#[cfg(not(any(target_os = "linux", target_os = "macos")))]
-fn command_file_path() -> std::path::PathBuf {
-    std::env::temp_dir().join("frostmod_cmd.json")
-}
-
-/// Outside the prefix: FrostMod's folder, not our temp dir. `/tmp` here is not the `%TEMP%`
-/// a program inside the Wine prefix resolves, and FrostMod's folder is one directory both
-/// sides can name — it reads the file beside its own module, which is `Z:\…` from in there.
-#[cfg(any(target_os = "linux", target_os = "macos"))]
-fn command_file_path() -> std::path::PathBuf {
-    COMMAND_DIR
-        .get()
-        .cloned()
-        .unwrap_or_else(std::env::temp_dir)
-        .join("frostmod_cmd.json")
-}
-
-/// Serialize a command. Kept pure (no I/O) so it can be unit-tested and so the
-/// on-disk contract with frostmod.cpp is exercised without a game.
-///
-/// `at` is what makes two identical commands two different documents. It costs nothing on
-/// Windows, where an event says "read this now" — but off it the file *is* the signal,
-/// and FrostMod decides a command is new by comparing what it last acted on with what is
-/// on disk now. Without a stamp, pressing Reload twice would write the same bytes twice
-/// and the second press would be indistinguishable from no press at all.
-fn command_json_at(verb: &str, bike_id: &str, at: u128) -> String {
-    serde_json::json!({ "verb": verb, "bikeId": bike_id, "at": at.to_string() }).to_string()
-}
-
-fn command_json(verb: &str, bike_id: &str) -> String {
-    command_json_at(verb, bike_id, now_millis())
-}
-
-/// Milliseconds since the epoch, or 0 from a clock we can't read — a stamp that never
-/// moves is no worse than the no-stamp behaviour it replaced.
-fn now_millis() -> u128 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis())
-        .unwrap_or(0)
-}
-
-#[allow(dead_code)]
-#[derive(Debug, Clone, Copy, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum CommandOutcome {
-    /// Command file written and FrostMod signalled.
-    Signaled,
-    /// FrostMod isn't running (the command event doesn't exist).
-    NotRunning,
-    /// The command file couldn't be written.
-    WriteFailed,
-    /// Non-Windows dev build — can't talk to FrostMod.
-    Unsupported,
-    /// Deliberately not sent: the installed FrostMod isn't one we'll hand this verb to
-    /// (too old to understand it, or old enough to mishandle it — see
-    /// `MODEL_REFRESH_MIN_VERSION`), or its version couldn't be read at all. Only the
-    /// caller knows which verb it wanted and which release made it safe, so this is
-    /// never produced by `send_command` itself.
-    Withheld,
-}
-
-/// Write the command file (so it's there before FrostMod wakes), then pulse the
-/// command event. Best-effort: FrostMod decides whether to act.
 #[cfg(windows)]
 fn send_command(json: String) -> CommandOutcome {
-    if std::fs::write(command_file_path(), json).is_err() {
-        return CommandOutcome::WriteFailed;
-    }
-    // SAFETY: valid NUL-terminated ANSI name; null return means the event doesn't
-    // exist (FrostMod not running) or access was denied.
-    let handle =
-        unsafe { ffi::OpenEventA(ffi::EVENT_MODIFY_STATE, 0, COMMAND_EVENT_NAME.as_ptr()) };
-    if handle.is_null() {
-        return CommandOutcome::NotRunning;
-    }
-    // SAFETY: `handle` is a valid event we just opened and close below.
-    let ok = unsafe { ffi::SetEvent(handle) } != 0;
-    unsafe { ffi::CloseHandle(handle) };
-    if ok {
-        CommandOutcome::Signaled
-    } else {
-        CommandOutcome::NotRunning
-    }
+    mxb_core::frostmodcmd::write_and_signal(json)
 }
 
 /// Linux and macOS: the file is the whole signal. There is no event to pulse —
@@ -289,20 +193,13 @@ fn send_command(json: String) -> CommandOutcome {
     if !is_running() {
         return CommandOutcome::NotRunning;
     }
-    let path = command_file_path();
-    match std::fs::write(&path, json) {
-        Ok(()) => CommandOutcome::Signaled,
-        Err(e) => {
-            log::warn!("couldn't write the FrostMod command file {}: {e}", path.display());
-            CommandOutcome::WriteFailed
-        }
-    }
+    mxb_core::frostmodcmd::write_command_file(&json)
 }
 
 #[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
 fn send_command(json: String) -> CommandOutcome {
     // Still write the command file on dev builds so the contract can be inspected.
-    let _ = std::fs::write(command_file_path(), json);
+    let _ = mxb_core::frostmodcmd::write_command_file(&json);
     CommandOutcome::Unsupported
 }
 

@@ -509,6 +509,10 @@ export interface BikeRig {
    * same frame as the axles above, which is what lets the viewer stand a rider on it.
    */
   seat: Vec3 | null;
+  /** Add to a chassis-frame point (x mirrored) to land it on the drawn bike. */
+  chassisOrigin: Vec3;
+  /** A steer-frame point (x mirrored) turned by `rake` about x, plus this. */
+  steerOrigin: Vec3;
 }
 
 export interface BikeModel {

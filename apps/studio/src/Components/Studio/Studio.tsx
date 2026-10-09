@@ -12,6 +12,7 @@ import ReplayStudio from "../Replay/ReplayStudio";
 import TrackStudio from "./TrackStudio/TrackStudio";
 import BikeBuilder from "./BikeBuilder/BikeBuilder";
 import Convert from "./Convert/Convert";
+import GfxEditor from "./Gfx/GfxEditor";
 import RiderKitProvider from "../Rider/RiderKit";
 
 /**
@@ -35,6 +36,7 @@ export type StudioTab =
   | "track"
   | "bike"
   | "convert"
+  | "gfx"
   | "replay"
   | "diagnose";
 
@@ -100,6 +102,11 @@ export default function Studio({
       {visited.has("convert") && (
         <Pane active={tab === "convert"}>
           <Convert />
+        </Pane>
+      )}
+      {visited.has("gfx") && (
+        <Pane active={tab === "gfx"}>
+          <GfxEditor />
         </Pane>
       )}
       {visited.has("replay") && (

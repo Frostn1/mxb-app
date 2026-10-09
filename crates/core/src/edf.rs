@@ -436,6 +436,13 @@ pub struct BikeRig {
     /// of where the seat is and it is written in the same frame as every mount above — which
     /// is what lets the viewer stand a rider on it instead of guessing at a height.
     pub seat: Option<[f32; 3]>,
+    /// Where a point written in the chassis' own frame lands: add this to it (after the
+    /// mirror). `gfx.cfg` places the exhaust and the chain's engine point in that frame.
+    pub chassis_origin: [f32; 3],
+    /// Where the steer part's own origin lands. A point in the steer's frame (`gfx.cfg`'s
+    /// grips) is turned by `rake` about x and then moved by this, exactly as the steer
+    /// mesh's vertices were.
+    pub steer_origin: [f32; 3],
 }
 
 impl BikeRig {
@@ -447,6 +454,8 @@ impl BikeRig {
         self.front_axle = self.front_axle.map(|p| v_sub(p, c));
         self.rear_axle = self.rear_axle.map(|p| v_sub(p, c));
         self.seat = self.seat.map(|p| v_sub(p, c));
+        self.chassis_origin = v_sub(self.chassis_origin, c);
+        self.steer_origin = v_sub(self.steer_origin, c);
     }
 
     /// Follow the mesh into three.js' frame — see [`to_right_handed`], which must have been
@@ -467,6 +476,8 @@ impl BikeRig {
         if let Some(p) = self.seat.as_mut() {
             p[0] = -p[0];
         }
+        self.chassis_origin[0] = -self.chassis_origin[0];
+        self.steer_origin[0] = -self.steer_origin[0];
     }
 }
 
@@ -503,6 +514,8 @@ pub fn assemble_bike(nodes: &mut [EdfNode], geom_bytes: &[u8]) -> Option<BikeRig
         // In the chassis' own frame, like `chassis_steer` and `chassis_rsusp_min` beside it,
         // so it needs no carrying down a fork or a swingarm the way the axles do.
         seat: g.get("seat_height_ref").copied(),
+        chassis_origin: [0.0; 3],
+        steer_origin: v_sub(head, rot_x(steer_joint, rake)),
     };
 
     for n in nodes.iter_mut() {
@@ -2410,6 +2423,25 @@ seat_height_ref = 0, 0.9115, -0.1674\n";
             rig.pivot,
             vertex(&nodes[1], 0)
         );
+    }
+
+    /// `gfx.cfg` writes grips in the steer's frame and the exhaust in the chassis'. The rig's
+    /// two origins have to carry such a point to the exact spot the matching vertex went, or
+    /// the editor's markers float off the bars.
+    #[test]
+    fn part_origins_follow_their_vertices() {
+        let grip = [-0.33f32, 0.22, -0.025];
+        let exhaust = [0.13f32, 0.9, -0.8];
+        let mut nodes = [
+            mount_node("chassis", &[[0.0, 0.0, 0.0], [0.0, 1.2, 0.9], exhaust]),
+            mount_node("steer", &[grip]),
+        ];
+        let mut rig = assemble_bike(&mut nodes, CR250_GEOM).expect("assembled");
+        to_right_handed(&mut nodes);
+        rig.to_right_handed();
+        let m = |p: [f32; 3]| [-p[0], p[1], p[2]];
+        assert!(close(vertex(&nodes[0], 2), v_add(m(exhaust), rig.chassis_origin), 1e-5));
+        assert!(close(vertex(&nodes[1], 0), v_add(rot_x(m(grip), rig.rake), rig.steer_origin), 1e-5));
     }
 
     /// Where a rider sits. The .geom is the only thing that says — nothing in the mesh marks
