@@ -79,6 +79,7 @@ pub async fn bike_build(app: tauri::AppHandle) -> Result<BuildReport, String> {
         let mut notes = Vec::new();
         let mut job_parts = Vec::new();
         let mut groups: BTreeMap<&str, [[f64; 4]; 4]> = BTreeMap::new();
+        let mut root_turns: BTreeMap<&str, f64> = BTreeMap::new();
         for placed in &assembly.placed {
             let part = &parts[&placed.role];
             let Some(group) = placed.group else {
@@ -92,6 +93,7 @@ pub async fn bike_build(app: tauri::AppHandle) -> Result<BuildReport, String> {
                 return Err(format!("{}'s file is gone: {}", part.name, part.source));
             }
             groups.insert(group.name(), template.frames.into_part(group));
+            root_turns.insert(group.name(), group.root_turn());
             job_parts.push(json!({
                 "source": part.source,
                 "role": placed.role,
@@ -107,6 +109,7 @@ pub async fn bike_build(app: tauri::AppHandle) -> Result<BuildReport, String> {
                 "op": "assemble",
                 "parts": job_parts,
                 "groups": groups,
+                "rootTurns": root_turns,
                 "fbx": work.join("model.fbx"),
                 "shadowFbx": work.join("model_shadow.fbx"),
                 "shadowTris": 600,
@@ -246,19 +249,21 @@ mod real {
 
         // Built.
         let mut groups = BTreeMap::new();
+        let mut root_turns = BTreeMap::new();
         let job_parts: Vec<Value> = assembly
             .placed
             .iter()
             .filter_map(|p| {
                 let g = p.group?;
                 groups.insert(g.name(), frames.into_part(g));
+                root_turns.insert(g.name(), g.root_turn());
                 Some(json!({ "source": parts[&p.role].source, "role": p.role, "group": g.name(), "offset": p.offset }))
             })
             .collect();
         let out = root.join("out");
         std::fs::create_dir_all(&out).unwrap();
         let built = blender::job(&exe, &cache, "assemble", |_| {
-            json!({ "op": "assemble", "parts": job_parts, "groups": groups,
+            json!({ "op": "assemble", "parts": job_parts, "groups": groups, "rootTurns": root_turns,
                     "fbx": out.join("model.fbx"), "shadowFbx": out.join("model_shadow.fbx"), "shadowTris": 600 })
         })
         .expect("assemble");
