@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## 2026-10-09 — Frost's Studio v0.7.0 — Convert FBX to EDF
+
+### Added
+- **Convert tab.** Turns FBX files into EDF on your PC. Pick files or folders and convert them in one go.
+
+### Changed
+- **Converter output matches fbx2edf.exe 1.32.** Textures from .fbm folders, scale, rotation, merge, normals and bike parts now come out the same.
+
+### Fixed
+- **Bike builds no longer come out rotated or mirrored.**
+
 ## 2026-10-08 — v0.20.0-beta.6 — Tyre folder warning
 
 ### Added
