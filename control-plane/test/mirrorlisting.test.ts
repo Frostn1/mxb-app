@@ -22,7 +22,8 @@ describe("fetcher listing result", () => {
     const n = await e.DB.prepare("SELECT COUNT(*) AS n FROM mod_assets WHERE source = 'mirror'").first<{ n: number }>();
     expect(n?.n).toBe(49);
     const listing = await e.DB.prepare("SELECT value FROM mirror_state WHERE key = 'listing'").first<{ value: string }>();
-    // The walk moves by the page's length, husk included.
-    expect(JSON.parse(listing!.value).walk.offset).toBe(2025 + 45);
+    // A job leased before pages were 100 asked for 50: the walk moves by the 50 it asked for,
+    // husk included, less the overlap, and a full 50-post answer is not the end of the walk.
+    expect(JSON.parse(listing!.value).walk.offset).toBe(2025 + 48);
   });
 });

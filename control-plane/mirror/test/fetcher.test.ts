@@ -608,3 +608,136 @@ describe("which fetcher takes what", () => {
     expect(home.every((j: { url: string }) => j.url.startsWith("https://mxb-mods.com/"))).toBe(true);
   });
 });
+describe("fast discovery through the home fetcher", () => {
+  const HOME = { hosts: ["mxb-mods.com"] };
+
+  /** A catalogue of `n` posts as mxb-mods.com's REST API serves it: newest-modified first. */
+  function catalogue(n: number) {
+    const posts = Array.from({ length: n }, (_, i) => ({
+      id: 5000 + i,
+      slug: `c${i}`,
+      link: `https://mxb-mods.com/c${i}/`,
+      modified: new Date(Date.UTC(2026, 9, 1) - i * 60_000).toISOString().slice(0, 19),
+      date_gmt: "2026-01-01T00:00:00",
+      title: { rendered: `C ${i}` },
+      content: { rendered: "<p>x</p>" },
+      categories: [301],
+    }));
+    const answer = (url: string): { status: number; body: string } => {
+      const u = new URL(url);
+      const per = Number(u.searchParams.get("per_page"));
+      if (u.pathname.endsWith("/categories")) return { status: 200, body: JSON.stringify([...TREE.values()]) };
+      if (u.searchParams.get("orderby") === "id") {
+        const page = Number(u.searchParams.get("page"));
+        const ids = [...posts].sort((a, b) => a.id - b.id).slice((page - 1) * per, page * per);
+        return ids.length ? { status: 200, body: JSON.stringify(ids.map((p) => ({ id: p.id }))) } : { status: 400, body: "{}" };
+      }
+      const after = u.searchParams.get("modified_after") ?? "";
+      const off = Number(u.searchParams.get("offset") ?? 0);
+      const list = posts.filter((p) => p.modified > after);
+      return off >= list.length && off > 0 ? { status: 400, body: "{}" } : { status: 200, body: JSON.stringify(list.slice(off, off + per)) };
+    };
+    return { posts, answer };
+  }
+
+  /** The home fetcher's loop: lease, answer each list job, ~3 s a request. Returns what it saw. */
+  async function homeFetcher(e: Env, answer: (url: string) => { status: number; body: string }, start: number, maxRounds = 400) {
+    let now = start;
+    const lists: string[] = [];
+    let pagesLeased = 0;
+    for (let i = 0; i < maxRounds; i++) {
+      const jobs = (await call(e, "lease", { max: 2, ...HOME }, { now })).body.jobs as { id: string; kind: string; url: string }[];
+      pagesLeased += jobs.filter((j) => j.kind === "page").length;
+      const list = jobs.find((j) => j.kind === "list");
+      if (!list) break;
+      lists.push(list.url);
+      now += 3000;
+      expect((await call(e, "result", { job: list.id, ...answer(list.url) }, { now })).status).toBe(200);
+    }
+    return { lists, pagesLeased, now };
+  }
+
+  it("discovers a whole catalogue in one go, 100 posts a request, sweep straight after", async () => {
+    const e = env();
+    const { posts, answer } = catalogue(450);
+    const run = await homeFetcher(e, answer, NOW);
+    // The category tree, five listing pages (0, 98, 196, 294, 392), five sweep pages.
+    expect(run.lists.filter((u) => u.includes("/categories"))).toHaveLength(1);
+    const walk = run.lists.filter((u) => u.includes("orderby=modified"));
+    expect(walk.map((u) => Number(new URL(u).searchParams.get("offset") ?? 0))).toEqual([0, 98, 196, 294, 392]);
+    expect(walk.every((u) => new URL(u).searchParams.get("per_page") === "100")).toBe(true);
+    expect(run.lists.filter((u) => u.includes("orderby=id"))).toHaveLength(5);
+    // About half a minute at the fetcher's pace, not a round per ten minutes.
+    expect(run.now - NOW).toBeLessThan(60_000);
+    expect(await e.DB.prepare("SELECT COUNT(*) AS n FROM mod_assets").first()).toEqual({ n: posts.length });
+    const sweep = await e.DB.prepare("SELECT value FROM mirror_state WHERE key = 'sweep'").first<{ value: string }>();
+    expect(JSON.parse(sweep!.value)).toMatchObject({ page: 1, lastComplete: expect.any(Number) });
+    // Page reads went out alongside, from the first listing on.
+    expect(run.pagesLeased).toBeGreaterThan(0);
+    const due = await e.DB.prepare("SELECT COUNT(*) AS n FROM mod_assets WHERE page_status IN ('due', 'fetcher')").first<{ n: number }>();
+    expect(due!.n).toBe(posts.length);
+
+    // Then quiet until the next round, which asks only for what changed and skips the sweep.
+    expect((await homeFetcher(e, answer, run.now + 60_000)).lists).toEqual([]);
+    const next = await homeFetcher(e, answer, NOW + 11 * 60_000);
+    expect(next.lists).toHaveLength(1);
+    expect(next.lists[0]).toContain("modified_after=");
+  });
+
+  it("asks only for the fields it reads", async () => {
+    const e = env();
+    const { answer } = catalogue(5);
+    const run = await homeFetcher(e, answer, NOW);
+    const walk = new URL(run.lists.find((u) => u.includes("orderby=modified"))!);
+    expect(walk.searchParams.get("_fields")!.split(",").sort()).toEqual(
+      ["_embedded", "_links", "categories", "content", "date_gmt", "id", "link", "modified", "slug", "title"].sort(),
+    );
+  });
+
+  it("an expired cooldown, lease or wait never holds a lease up", async () => {
+    const e = env();
+    const set = (k: string, v: unknown) =>
+      e.DB.prepare("INSERT OR REPLACE INTO mirror_state (key, value) VALUES (?, ?)").bind(k, JSON.stringify(v)).run();
+    // Like the live row: a Worker cooldown that ended long ago, five strikes in.
+    await set("cooldown", { until: NOW - 3600_000, status: 403, strikes: 5 });
+    await set("fetcher_discovery", { seq: 9, phase: "listing", catPage: 1, cats: [], roundAt: 0, leasedUntil: NOW - 1, nextAt: NOW - 1, strikes: 5 });
+    await set("categories", { at: NOW, cats: [...TREE.values()] });
+    await set("listing", { hwm: "", walk: { top: "", offset: 540 } });
+    await upsertPost(e, POST, TREE, 0);
+    const jobs = (await call(e, "lease", { max: 2, ...HOME })).body.jobs as { kind: string; url: string }[];
+    expect(jobs.map((j) => j.kind).sort()).toEqual(["list", "page"]);
+    // The walk carries on from where it stood, at the new page size.
+    const u = new URL(jobs.find((j) => j.kind === "list")!.url);
+    expect([u.searchParams.get("offset"), u.searchParams.get("per_page")]).toEqual(["540", "100"]);
+  });
+
+  it("keeps the cooldown: 10 min after a refusal, doubling while they continue, reset by an answer", async () => {
+    const e = env();
+    const { answer } = catalogue(250);
+    const lease = async (now: number) =>
+      ((await call(e, "lease", { max: 1, ...HOME }, { now })).body.jobs as { id: string; kind: string; url: string }[]).find((j) => j.kind === "list");
+    let job = await lease(NOW);
+    await call(e, "result", { job: job!.id, error: "site answered 403", status: 403, deferred: true });
+    expect(await lease(NOW + 9 * 60_000)).toBeUndefined();
+    job = await lease(NOW + 10 * 60_000);
+    expect(job).toBeDefined();
+    await call(e, "result", { job: job!.id, status: 429, body: "slow down" }, { now: NOW + 10 * 60_000 });
+    expect(await lease(NOW + 29 * 60_000)).toBeUndefined();
+    job = await lease(NOW + 30 * 60_000);
+    // A real answer resets the doubling.
+    await call(e, "result", { job: job!.id, ...answer(job!.url) }, { now: NOW + 30 * 60_000 });
+    job = await lease(NOW + 30 * 60_000 + 3000);
+    await call(e, "result", { job: job!.id, status: 200, body: "<html>Just a moment...</html>" }, { now: NOW + 31 * 60_000 });
+    expect(await lease(NOW + 40 * 60_000)).toBeUndefined();
+    expect(await lease(NOW + 41 * 60_000)).toBeDefined();
+  });
+
+  it("a fetcher that dies holding a list job blocks discovery for two minutes, not ten", async () => {
+    const e = env();
+    const lease = async (now: number) =>
+      ((await call(e, "lease", { max: 1, ...HOME }, { now })).body.jobs as { kind: string }[]).find((j) => j.kind === "list");
+    expect(await lease(NOW)).toBeDefined();
+    expect(await lease(NOW + 60_000)).toBeUndefined();
+    expect(await lease(NOW + 2 * 60_000 + 1)).toBeDefined();
+  });
+});
