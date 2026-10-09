@@ -183,6 +183,8 @@ function Shell() {
       { id: "bike", label: t("nav.bike"), group: "make", when: game.caps.viewer },
       // FBX to EDF, the converter mxbsecure.com/convert runs, here without the upload.
       { id: "convert", label: t("nav.convert"), group: "make", when: canConvert },
+      // A bike's gfx.cfg on the model: grips, chain, exhaust, levers.
+      { id: "gfx", label: t("nav.gfx"), group: "make", when: game.caps.viewer },
       // Recording a replay needs an in-game mod, and MXB Replay is an MX Bikes plugin
       // like FrostMod — so it is gated on the same capability rather than on the game's id.
       { id: "replay", label: t("nav.replay"), group: "make", when: game.caps.frostmod },
