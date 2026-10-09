@@ -2426,6 +2426,8 @@ export interface ModelViewerProps {
   loading?: boolean;
   noStandIn?: boolean;
   className?: string;
+  /** Drawn in the bike's own frame, beside a lone bike: markers, handles. */
+  bikeOverlay?: React.ReactNode;
 }
 
 export function ModelViewer({
@@ -2453,6 +2455,7 @@ export function ModelViewer({
   noStandIn = false,
   className,
   grounded = true,
+  bikeOverlay,
 }: ModelViewerProps) {
   // Photo mode takes the dots away by not handing the rider anything to write a pose back
   // through — the handles exist only where a caller asked to edit one.
@@ -2619,6 +2622,7 @@ export function ModelViewer({
                     rig={rig}
                     pose={pose}
                   />
+                  {bikeOverlay}
                 </Placed>
               </Tilted>
             ) : hasRider ? (

@@ -28,6 +28,8 @@ mod edfwrite;
 mod gearrepair;
 /// Convert: FBX files to the `.edf` the game loads.
 mod modelconvert;
+// The Gfx tab: gfx.cfg on the model, saved and reloaded in-game.
+mod gfxedit;
 mod paintstudio;
 /// Recording a replay the mod is flying, so nobody has to run OBS beside the game.
 mod replayrec;
@@ -323,6 +325,9 @@ fn main() {
             replayrec::replay_fetch_ffmpeg,
             modelconvert::fbx_convert_available,
             modelconvert::fbx_scan,
+            gfxedit::gfx_open,
+            gfxedit::gfx_preview,
+            gfxedit::gfx_save,
             modelconvert::fbx_part_names,
             modelconvert::fbx_read_text,
             modelconvert::fbx_convert,
