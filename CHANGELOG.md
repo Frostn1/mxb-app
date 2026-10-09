@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 2026-10-08 — v0.20.0-beta.5 — NaN crash trap
+
+### Added
+- **NaN crash trap.** Settings toggle, off by default. Logs where a physics NaN starts and sends it with crash reports. Needs FrostMod 0.49.10.
+
 ## 2026-10-08 — v0.20.0-beta.4 — Install from mxbsecure.com, upload mods, shorter text
 
 ### Added
