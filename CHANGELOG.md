@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Added
+- **.shd files in Convert.** Writes a .shd for each texture that has `_n`, `_r` or `_s` maps, so normal maps, spec and reflection show in game. Existing .shd files are kept unless you tick Overwrite.
+
+### Fixed
+- **Shaders on embedded textures.** A .shd beside the FBX or in its .fbm folder is now used when the FBX embeds its textures.
+- **Reflection and spec masks** are read from the map's alpha, as fbx2edf.exe reads them.
+
 ## 2026-10-09 — Frost's Studio v0.7.0 — Convert FBX to EDF
 
 ### Added

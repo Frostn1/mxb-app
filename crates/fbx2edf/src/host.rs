@@ -118,6 +118,63 @@ pub fn part_names(_fbx: &Path) -> Result<Vec<String>, String> {
     Err(MISSING.into())
 }
 
+/// A material's colour picture and the folders its `.shd` is read from, best first. The
+/// converter reads `<name>.shd` there before converting, and the maps the `.shd` names beside it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ShdSite {
+    /// The picture's file name without its extension.
+    pub name: String,
+    pub ext: Option<String>,
+    pub dirs: Vec<PathBuf>,
+    /// The `.shd` the converter reads for it now, if there is one.
+    pub shd: Option<PathBuf>,
+}
+
+/// Each colour picture the FBX's materials use, and where its `.shd` goes.
+#[cfg(fbx2edf)]
+pub fn shd_sites(fbx: &Path) -> Result<Vec<ShdSite>, String> {
+    use crate::params::Params;
+    let bytes = std::fs::read(fbx).map_err(|e| format!("{}: {e}", fbx.display()))?;
+    let files = crate::files::DiskFiles::for_fbx(fbx);
+    let s = crate::session::Session::prepare(&bytes, &files, &Params::default()).map_err(|e| format!("{e:#}"))?;
+    Ok(s.sites()
+        .iter()
+        .map(|x| {
+            let mut dirs: Vec<PathBuf> = Vec::new();
+            let mut push = |d: PathBuf| {
+                if !dirs.contains(&d) {
+                    dirs.push(d);
+                }
+            };
+            match &x.file {
+                // A file: only its own folder, as the converter reads only that one.
+                Some(f) => push(Path::new(f).parent().map(Path::to_path_buf).unwrap_or_else(|| files.root.clone())),
+                // Embedded: where a file of its name would be found, in the converter's order.
+                None => {
+                    for r in &x.recorded {
+                        let p = PathBuf::from(r.replace('\\', std::path::MAIN_SEPARATOR_STR));
+                        let p = if p.is_absolute() { p } else { files.root.join(p) };
+                        if let Some(d) = p.parent() {
+                            push(d.to_path_buf());
+                        }
+                    }
+                    push(files.root.clone());
+                    if let Some(fbm) = &files.fbm {
+                        push(fbm.clone());
+                    }
+                    push(files.root.join("textures"));
+                }
+            }
+            ShdSite { name: x.name.clone(), ext: x.ext.clone(), dirs, shd: x.shd.as_ref().map(PathBuf::from) }
+        })
+        .collect())
+}
+
+#[cfg(not(fbx2edf))]
+pub fn shd_sites(_fbx: &Path) -> Result<Vec<ShdSite>, String> {
+    Err(MISSING.into())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -129,6 +186,7 @@ mod tests {
         }
         assert!(convert(&[], &Options::default(), &mut |_| {}).unwrap_err().contains("isn't in this build"));
         assert!(part_names(Path::new("x.fbx")).is_err());
+        assert!(shd_sites(Path::new("x.fbx")).is_err());
     }
 
     #[test]

@@ -41,6 +41,8 @@ interface Settings {
   scale: string;
   fast: boolean;
   script: string;
+  shd: boolean;
+  overwriteShd: boolean;
 }
 
 // The browser converter's defaults, which are fbx2edf.exe's own dialog's.
@@ -56,6 +58,8 @@ const DEFAULTS: Settings = {
   scale: "1",
   fast: true,
   script: "",
+  shd: true,
+  overwriteShd: false,
 };
 
 const REMEMBER = "studio.convert";
@@ -215,6 +219,7 @@ export default function Convert() {
         batch.map((j) => ({ input: j.input, output: j.output })),
         o,
         true,
+        { make: s.shd, overwrite: s.shd && s.overwriteShd },
       );
       setJobs((js) => js && js.map((j, i) => ({ ...j, status: { state: "done", outcome: results[i] } })));
     } catch (e) {
@@ -320,6 +325,19 @@ export default function Convert() {
             <input type="checkbox" checked={s.fast} onChange={(e) => set("fast", e.target.checked)} />
             {t("convert.fast")}
           </label>
+
+          <Field label={t("convert.shaders")}>
+            <div className="grid gap-1.5 text-[12.5px]">
+              <label className="flex items-center gap-2">
+                <input type="checkbox" checked={s.shd} onChange={(e) => set("shd", e.target.checked)} />
+                {t("convert.makeShd")}
+              </label>
+              <label className={cn("flex items-center gap-2", !s.shd && "opacity-50")}>
+                <input type="checkbox" disabled={!s.shd} checked={s.overwriteShd} onChange={(e) => set("overwriteShd", e.target.checked)} />
+                {t("convert.overwriteShd")}
+              </label>
+            </div>
+          </Field>
 
           <Field
             label={t("convert.script")}
@@ -499,6 +517,15 @@ function Row({
       </div>
       {st?.state === "working" && st.total > 0 && <Progress className="mt-2" value={(st.done / st.total) * 100} />}
       {outcome?.error && <p className="mt-1 select-text pl-[26px] text-destructive">{outcome.error}</p>}
+      {outcome && !report && outcome.shd.length > 0 && (
+        <div className="mt-1 grid gap-0.5 pl-[26px] text-[11.5px] text-muted-foreground">
+          {outcome.shd.map((line) => (
+            <p key={line} className="select-text truncate">
+              {line}
+            </p>
+          ))}
+        </div>
+      )}
       {report && (
         <div className="mt-1 grid gap-0.5 pl-[26px] text-[11.5px] text-muted-foreground">
           <p className="truncate" title={job!.output}>
@@ -507,6 +534,11 @@ function Row({
             {" · "}
             {report.objects.map((o) => `${o.name || t("convert.mainObject")} ${o.triangles.toLocaleString()}`).join(" · ")}
           </p>
+          {outcome!.shd.map((line) => (
+            <p key={line} className="select-text truncate">
+              {line}
+            </p>
+          ))}
           {report.warnings.map((w, i) => (
             <p key={i} className="select-text text-amber-600 dark:text-amber-400">
               {w}
