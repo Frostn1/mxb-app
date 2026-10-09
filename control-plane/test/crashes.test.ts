@@ -2,10 +2,13 @@ import { describe, expect, it } from "vitest";
 import { d1 } from "./d1sqlite";
 import {
   crashDetail,
+  crashRing,
   crashSites,
+  MAX_RING_BYTES,
   IDENTIFY_DAYS,
   isSite,
   parseCrash,
+  parseRing,
   pruneCrashes,
   putCrash,
   recentCrashes,
@@ -197,6 +200,90 @@ describe("storing one", () => {
     const DB = d1();
     const res = await putCrash(put({ fault: { site: "nope" } }), ACCOUNT, { DB });
     expect(res.status).toBe(400);
+  });
+});
+
+describe("the nantrap tyre ring", () => {
+  const NAME = "frostmod-nan-ring-20260916-145929-crash.csv";
+  const CSV =
+    "# frostmod nan ring: reason=crash frostmod=0.50.0 when=2026-09-16T13:59:29Z track=trial\n" +
+    "t_ms,step,dt_ms\n-2,1,2\n0,2,2\n";
+
+  it("takes the CSV the report names", () => {
+    const ring = parseRing(report({ nanRing: NAME, nanRingCsv: CSV }));
+    expect(ring).toEqual({ name: NAME, csv: CSV, bytes: CSV.length });
+  });
+
+  it("refuses a ring that is not one of FrostMod's", () => {
+    expect(parseRing(report())).toBeNull();
+    expect(parseRing(report({ nanRing: NAME }))).toBeNull();
+    expect(parseRing(report({ nanRing: "../../etc/passwd", nanRingCsv: CSV }))).toBeNull();
+    expect(parseRing(report({ nanRing: NAME, nanRingCsv: "a,b,c\n" }))).toBeNull();
+    expect(parseRing(report({ nanRing: NAME, nanRingCsv: 42 }))).toBeNull();
+  });
+
+  it("caps it at about 2 MB, in bytes rather than characters", () => {
+    const big = CSV + "x".repeat(MAX_RING_BYTES - CSV.length);
+    expect(parseRing(report({ nanRing: NAME, nanRingCsv: big }))).not.toBeNull();
+    expect(parseRing(report({ nanRing: NAME, nanRingCsv: big + "x" }))).toBeNull();
+    // Two bytes a character: half as many fit.
+    const wide = CSV + "é".repeat(MAX_RING_BYTES / 2);
+    expect(parseRing(report({ nanRing: NAME, nanRingCsv: wide }))).toBeNull();
+  });
+
+  it("is stored with the crash and read back by the admin view", async () => {
+    const DB = d1();
+    await addAccount(DB, ACCOUNT.id, ACCOUNT.rider_name);
+    const res = await putCrash(put(report({ nanRing: NAME, nanRingCsv: CSV })), ACCOUNT, { DB });
+    expect(res.status).toBe(200);
+
+    const detail = await crashDetail(DB, "mxbikes.exe+0x11D753");
+    expect(detail?.reports).toHaveLength(1);
+    const row = detail!.reports[0];
+    expect(row.ringBytes).toBe(CSV.length);
+    expect(await crashRing(DB, row.id)).toEqual({ name: NAME, csv: CSV, bytes: CSV.length });
+  });
+
+  it("a report without one still stores, and has none", async () => {
+    const DB = d1();
+    await addAccount(DB, ACCOUNT.id, ACCOUNT.rider_name);
+    await putCrash(put(report()), ACCOUNT, { DB });
+    const row = (await crashDetail(DB, "mxbikes.exe+0x11D753"))!.reports[0];
+    expect(row.ringBytes).toBeNull();
+    expect(await crashRing(DB, row.id)).toBeNull();
+  });
+
+  it("a bad ring costs the ring, not the crash", async () => {
+    const DB = d1();
+    await addAccount(DB, ACCOUNT.id, ACCOUNT.rider_name);
+    const res = await putCrash(put(report({ nanRing: NAME, nanRingCsv: "nope" })), ACCOUNT, { DB });
+    expect(res.status).toBe(200);
+    const row = (await crashDetail(DB, "mxbikes.exe+0x11D753"))!.reports[0];
+    expect(row.ringBytes).toBeNull();
+  });
+
+  it("a retried report keeps one ring", async () => {
+    const DB = d1();
+    await addAccount(DB, ACCOUNT.id, ACCOUNT.rider_name);
+    await putCrash(put(report({ nanRing: NAME, nanRingCsv: CSV })), ACCOUNT, { DB });
+    await putCrash(put(report({ nanRing: NAME, nanRingCsv: CSV })), ACCOUNT, { DB });
+    const n = await DB.prepare("SELECT COUNT(*) AS n FROM client_crash_rings").first<{ n: number }>();
+    expect(n?.n).toBe(1);
+  });
+
+  it("goes with its crash when the row is swept", async () => {
+    const DB = d1();
+    await addAccount(DB, ACCOUNT.id, ACCOUNT.rider_name);
+    await putCrash(put(report({ nanRing: NAME, nanRingCsv: CSV })), ACCOUNT, { DB });
+    await DB.prepare("DELETE FROM client_crashes").run();
+    const n = await DB.prepare("SELECT COUNT(*) AS n FROM client_crash_rings").first<{ n: number }>();
+    expect(n?.n).toBe(0);
+  });
+
+  it("refuses an id that is not one", async () => {
+    const DB = d1();
+    expect(await crashRing(DB, Number.NaN)).toBeNull();
+    expect(await crashRing(DB, -1)).toBeNull();
   });
 });
 

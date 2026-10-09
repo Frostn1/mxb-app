@@ -16,7 +16,9 @@
 //!
 //! **What is not sent.** The minidump beside it. That is megabytes and a copy of process
 //! memory, and it stays on the machine unless someone asks for it by name through Send logs.
-//! This sends the small JSON and nothing else.
+//! This sends the small JSON, plus one attachment when the report names it: FrostMod's
+//! nantrap=1 tyre ring (`nanRing`), the last two seconds of the bike's physics as a CSV of a
+//! few hundred KB. Numbers and a track folder, nothing that says who the player is.
 //!
 //! A sent report is renamed to `.sent` rather than deleted: the player keeps their own copy,
 //! a bug in this module cannot destroy evidence, and the rename is what stops a second send.
@@ -34,6 +36,49 @@ const MAX_PER_PASS: usize = 10;
 
 /// Refuse anything absurd. A report is a couple of kilobytes; one this big is not one of ours.
 const MAX_REPORT_BYTES: u64 = 512 * 1024;
+
+/// The tyre ring's ceiling: about 2 MB, the control plane's own cap. FrostMod's is ~400 KB.
+const MAX_RING_BYTES: u64 = 1_900_000;
+
+/// What FrostMod names a ring: `frostmod-nan-ring-20261008-180509-crash.csv`. A leaf in the
+/// FrostMod folder and nothing else, so a report cannot point the app at another file.
+fn is_ring_name(name: &str) -> bool {
+    let Some(rest) = name.strip_prefix("frostmod-nan-ring-") else { return false };
+    let Some(stem) = rest.strip_suffix(".csv") else { return false };
+    let mut parts = stem.splitn(3, '-');
+    let (Some(date), Some(time), Some(reason)) = (parts.next(), parts.next(), parts.next()) else {
+        return false;
+    };
+    date.len() == 8
+        && date.bytes().all(|b| b.is_ascii_digit())
+        && time.len() == 6
+        && time.bytes().all(|b| b.is_ascii_digit())
+        && !reason.is_empty()
+        && reason.len() <= 16
+        && reason.bytes().all(|b| b.is_ascii_lowercase())
+}
+
+/// Put the tyre ring the report names into it as `nanRingCsv`, when the file is there, is one
+/// of FrostMod's and is under the cap. Otherwise the report goes as it is: a missing or odd
+/// attachment never holds up the crash it came with.
+fn attach_ring(report: &mut serde_json::Map<String, serde_json::Value>, frostmod_dir: &Path) {
+    let Some(name) = report.get("nanRing").and_then(|v| v.as_str()).map(str::to_owned) else {
+        return;
+    };
+    if !is_ring_name(&name) {
+        return;
+    }
+    let path = frostmod_dir.join(&name);
+    let Ok(meta) = std::fs::metadata(&path) else { return };
+    if !meta.is_file() || meta.len() > MAX_RING_BYTES {
+        return;
+    }
+    let Ok(csv) = std::fs::read_to_string(&path) else { return };
+    if !csv.starts_with("# frostmod nan ring:") {
+        return;
+    }
+    report.insert("nanRingCsv".into(), serde_json::Value::String(csv));
+}
 
 fn is_report(name: &str) -> bool {
     let lower = name.to_ascii_lowercase();
@@ -81,7 +126,14 @@ fn mark_sent(path: &Path) {
 /// FrostMod knows what faulted; it does not know which app version is installed, which
 /// account this is, or which game build the exe on disk is. Those are merged in here rather
 /// than plumbed into the DLL, where they would be three more things to keep in step.
-async fn send(token: &str, app_version: &str, guid: &str, build: &str, body: &str) -> anyhow::Result<()> {
+async fn send(
+    token: &str,
+    app_version: &str,
+    guid: &str,
+    build: &str,
+    body: &str,
+    frostmod_dir: &Path,
+) -> anyhow::Result<()> {
     // The file is the client's own JSON. It is re-parsed rather than concatenated so a
     // truncated report — the game died mid-write, which is exactly when this file is written —
     // is caught here instead of becoming a 400 the player never sees.
@@ -96,6 +148,7 @@ async fn send(token: &str, app_version: &str, guid: &str, build: &str, body: &st
     if !build.is_empty() {
         object.insert("build".into(), serde_json::Value::String(build.to_string()));
     }
+    attach_ring(object, frostmod_dir);
 
     let res = reqwest::Client::new()
         .put(format!("{}/v1/diagnostics/crash", crate::paintsync::control_plane()))
@@ -138,7 +191,7 @@ pub async fn flush(app_version: &str, cfg: &AppConfig, frostmod_dir: &Path, buil
 
     for path in waiting.into_iter().take(MAX_PER_PASS) {
         let Ok(body) = std::fs::read_to_string(&path) else { continue };
-        match send(token, app_version, cfg.cp_guid.trim(), build, &body).await {
+        match send(token, app_version, cfg.cp_guid.trim(), build, &body, frostmod_dir).await {
             Ok(()) => {
                 mark_sent(&path);
                 log::info!("crash reports: sent {}", path.display());
@@ -275,6 +328,73 @@ mod tests {
         assert!(dumps_waiting(&d).is_empty());
         // And the dump is still theirs.
         assert!(d.join("frostmod-crash-20260916-145929.dmp").exists());
+    }
+
+    const RING: &str = "frostmod-nan-ring-20260916-145929-crash.csv";
+    const CSV: &str = "# frostmod nan ring: reason=crash frostmod=0.50.0\nt_ms,step\n0,1\n";
+
+    fn named(name: &str) -> serde_json::Map<String, serde_json::Value> {
+        let mut m = serde_json::Map::new();
+        m.insert("nanRing".into(), serde_json::Value::String(name.into()));
+        m
+    }
+
+    #[test]
+    fn sends_the_tyre_ring_the_report_names() {
+        let d = dir("ring");
+        fs::write(d.join(RING), CSV).unwrap();
+        let mut report = named(RING);
+        attach_ring(&mut report, &d);
+        assert_eq!(report.get("nanRingCsv").and_then(|v| v.as_str()), Some(CSV));
+    }
+
+    #[test]
+    fn a_report_without_a_ring_goes_as_it_is() {
+        let d = dir("noring");
+        let mut report = serde_json::Map::new();
+        attach_ring(&mut report, &d);
+        assert!(report.is_empty());
+        // Named but not there: the crash still goes, without it.
+        let mut report = named(RING);
+        attach_ring(&mut report, &d);
+        assert!(report.get("nanRingCsv").is_none());
+    }
+
+    #[test]
+    fn only_reads_a_ring_file_in_the_frostmod_folder() {
+        let d = dir("ringname");
+        fs::write(d.join("frostmod.log"), CSV).unwrap();
+        for name in [
+            "frostmod.log",
+            "../frostmod-nan-ring-20260916-145929-crash.csv",
+            "frostmod-nan-ring-2026091-145929-crash.csv",
+            "frostmod-nan-ring-20260916-145929-.csv",
+            "frostmod-nan-ring-20260916-145929-Crash.csv",
+            "frostmod-nan-ring-20260916-145929-crash.txt",
+        ] {
+            assert!(!is_ring_name(name), "{name}");
+            let mut report = named(name);
+            attach_ring(&mut report, &d);
+            assert!(report.get("nanRingCsv").is_none(), "{name}");
+        }
+        assert!(is_ring_name(RING));
+        assert!(is_ring_name("frostmod-nan-ring-20261008-180509-refusal.csv"));
+    }
+
+    #[test]
+    fn skips_a_ring_that_is_too_big_or_not_one() {
+        let d = dir("ringbad");
+        let mut big = CSV.as_bytes().to_vec();
+        big.resize((MAX_RING_BYTES + 1) as usize, b'x');
+        fs::write(d.join(RING), big).unwrap();
+        let mut report = named(RING);
+        attach_ring(&mut report, &d);
+        assert!(report.get("nanRingCsv").is_none());
+
+        fs::write(d.join(RING), "a,b,c\n").unwrap();
+        let mut report = named(RING);
+        attach_ring(&mut report, &d);
+        assert!(report.get("nanRingCsv").is_none());
     }
 
     #[test]

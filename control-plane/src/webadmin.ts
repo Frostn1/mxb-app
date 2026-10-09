@@ -16,7 +16,7 @@ import { cors, refuseCrossSiteWrite } from "./assets";
 import { addBan, liftBan, listBans } from "./bans";
 import { addCreator, listCreators, removeCreator } from "./creators";
 import { addRule, collectAdminView, deleteRule } from "./diagnostics";
-import { crashDetail, crashSites, recentCrashes } from "./crashes";
+import { crashDetail, crashRing, crashSites, recentCrashes } from "./crashes";
 import {
   clampDays,
   fileDetail,
@@ -162,6 +162,11 @@ export async function webAdminRoutes(
       case "/v1/web/admin/crashes/site": {
         const detail = await crashDetail(env.DB, url.searchParams.get("site") ?? "");
         return detail ? said(200, detail) : said(404, { error: "no such crash site" });
+      }
+      // The nantrap tyre ring sent with one crash report (`ringBytes` in the site detail).
+      case "/v1/web/admin/crashes/ring": {
+        const ring = await crashRing(env.DB, Number(url.searchParams.get("id") ?? ""));
+        return ring ? said(200, ring) : said(404, { error: "no ring for that crash" });
       }
 
       case "/v1/web/admin/diagnostics/files": {
