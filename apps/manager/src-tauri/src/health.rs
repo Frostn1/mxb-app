@@ -1,6 +1,7 @@
-//! Two health checks the Home screen shows and the log export records.
+//! The health checks the Home screen shows and the log export records. The tyre check has its
+//! own story in [`crate::tyres`].
 //!
-//! Both come from the same report: a player who crashed joining busy public servers but never
+//! OneDrive and ReShade come from the same report: a player who crashed joining busy public servers but never
 //! riding alone. Joining loads every other rider's bikes, paints and textures at once on the
 //! game's main thread, and two things on his PC made that fragile:
 //!
@@ -21,12 +22,19 @@ use serde::Serialize;
 pub struct Report {
     pub onedrive: crate::cloudfiles::CloudHealth,
     pub reshade: crate::reshade::Health,
+    /// Empty or stock-replacing folders in `mods/tyres`. See [`crate::tyres`].
+    pub tyres: crate::tyres::TyreHealth,
 }
 
 impl Report {
-    /// The two lines `summary.txt` carries, so support sees both without asking.
+    /// The lines `summary.txt` carries, so support sees them without asking.
     pub fn summary_lines(&self) -> String {
-        format!("{}\n{}\n", self.onedrive.summary_line(), self.reshade.summary_line())
+        format!(
+            "{}\n{}\n{}\n",
+            self.onedrive.summary_line(),
+            self.reshade.summary_line(),
+            self.tyres.summary_line()
+        )
     }
 }
 
@@ -46,6 +54,7 @@ pub fn check(cfg: &AppConfig) -> Report {
     Report {
         onedrive: crate::cloudfiles::check(&mods_root, &profiles, std::path::Path::new(install.trim())),
         reshade: crate::reshade::health(&cfg.reshade_dir()),
+        tyres: crate::tyres::check(cfg),
     }
 }
 
@@ -70,5 +79,6 @@ mod tests {
         let lines = r.summary_lines();
         assert!(lines.contains("onedrive: "));
         assert!(lines.contains("reshade: "));
+        assert!(lines.contains("tyres: ok"));
     }
 }

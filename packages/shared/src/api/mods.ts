@@ -3154,6 +3154,12 @@ export function onPinProgress(
   return listen<{ done: number; total: number }>("onedrive-pin-progress", (e) => cb(e.payload));
 }
 
+/** Move empty folders out of `mods/tyres` into `mxbapp_moved/tyres`. Returns where each went.
+ *  Refused while the game runs. */
+export function moveEmptyTyreFolders(): Promise<string[]> {
+  return invoke<string[]>("move_empty_tyre_folders");
+}
+
 /** Turn ReShade off (`opengl32.dll` → `opengl32.dll.off`) or back on. Refused while the game runs. */
 export function setReshadeEnabled(enabled: boolean): Promise<ReshadeHealth> {
   return invoke<ReshadeHealth>("set_reshade_enabled", { enabled });

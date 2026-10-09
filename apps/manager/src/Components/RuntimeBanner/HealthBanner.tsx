@@ -1,4 +1,4 @@
-import { CloudOff, HardDriveDownload, PowerOff } from "lucide-react";
+import { CloudOff, FolderOutput, HardDriveDownload, PowerOff } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@frost/shared/Components/ui/button";
@@ -13,6 +13,7 @@ import {
 import {
   healthCheck,
   keepPibosoOnDevice,
+  moveEmptyTyreFolders,
   onModsDehydrated,
   onPinProgress,
   setReshadeEnabled,
@@ -20,7 +21,7 @@ import {
 import type { HealthReport } from "@frost/shared/types";
 import { useGameRunning } from "@/lib/useGameRunning";
 import { useT } from "@/i18n";
-import { onedriveNotice, onlineOnlyTotal } from "@/lib/healthNotice";
+import { onedriveNotice, onlineOnlyTotal, tyreNotices } from "@/lib/healthNotice";
 import { Bar } from "./RuntimeBanner";
 
 /**
@@ -30,13 +31,23 @@ import { Bar } from "./RuntimeBanner";
  *
  * Each is a slim bar like the runtime ones above it, with a one-click fix that can be undone
  * — "Keep on this device" for OneDrive, "Turn off ReShade" for ReShade — and never anything
- * done without a press. Renders nothing when neither applies.
+ * done without a press.
+ *
+ * Plus the tyre check: an empty folder in `mods/tyres` crashes the bike list, so it gets a
+ * loud bar with "Move out" (moved beside `mods`, never deleted). A folder or `.pkz` that
+ * replaces a stock tyre gets a quiet one. Renders nothing when none applies.
  */
 export default function HealthBanner() {
   const t = useT();
   const { running } = useGameRunning();
   const [report, setReport] = useState<HealthReport | null>(null);
-  const [dismissed, setDismissed] = useState<{ onedrive?: boolean; reshade?: boolean }>({});
+  const [dismissed, setDismissed] = useState<{
+    onedrive?: boolean;
+    reshade?: boolean;
+    tyreEmpty?: boolean;
+    tyreOverride?: boolean;
+  }>({});
+  const [movingTyres, setMovingTyres] = useState(false);
   const [pinning, setPinning] = useState<{ done: number; total: number } | null>(null);
   const [togglingReshade, setTogglingReshade] = useState(false);
   const [moveOpen, setMoveOpen] = useState(false);
@@ -114,15 +125,59 @@ export default function HealthBanner() {
     }
   };
 
+  const moveTyres = async () => {
+    setMovingTyres(true);
+    try {
+      await moveEmptyTyreFolders();
+      toast.success(t("health.tyreMovedDone"));
+    } catch (e) {
+      toast.error(t("health.tyreMoveFailed"), { description: String(e) });
+    } finally {
+      setMovingTyres(false);
+      await refresh();
+    }
+  };
+
   if (!report) return null;
 
   const notice = onedriveNotice(report);
   const online = onlineOnlyTotal(report);
   const showOnedrive = notice && !dismissed.onedrive;
   const showReshade = report.reshade.active && !dismissed.reshade;
+  const tyres = tyreNotices(report);
 
   return (
     <>
+      {tyres.empty && !dismissed.tyreEmpty && (
+        <Bar
+          tone="danger"
+          icon={FolderOutput}
+          wrap
+          body={t("health.tyreEmpty", { names: tyres.empty.names, count: tyres.empty.count })}
+          pitch={t("health.tyreEmptyPitch")}
+          action={running ? t("health.closeGameFirst") : t("health.tyreMove")}
+          actionIcon={FolderOutput}
+          actionDisabled={running}
+          busy={movingTyres}
+          busyLabel={t("health.tyreMoving")}
+          onAction={() => void moveTyres()}
+          onDismiss={() => setDismissed((d) => ({ ...d, tyreEmpty: true }))}
+          dismissLabel={t("runtime.dismiss")}
+        />
+      )}
+      {tyres.overrides && !dismissed.tyreOverride && (
+        <Bar
+          tone="warning"
+          wrap
+          body={t("health.tyreOverride", {
+            names: tyres.overrides.names,
+            count: tyres.overrides.count,
+          })}
+          pitch={t("health.tyreOverridePitch")}
+          onDismiss={() => setDismissed((d) => ({ ...d, tyreOverride: true }))}
+          dismissLabel={t("runtime.dismiss")}
+        />
+      )}
       {showOnedrive && (
         <Bar
           tone={notice.kind === "online" ? "danger" : "warning"}
