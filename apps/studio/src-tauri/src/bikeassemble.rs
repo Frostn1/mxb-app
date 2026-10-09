@@ -210,6 +210,21 @@ impl Group {
             Group::Rsusp => "rsusp",
         }
     }
+
+    /// How far the part's root empty is turned about Blender's X, in degrees.
+    ///
+    /// The converter doesn't keep a part root's rotation: it writes the part's own axes
+    /// instead, as `fbx2edf.exe` does (`0 180 0` for chassis and rsusp, `-90 180 0` for steer
+    /// and fsusp, Rz·Ry·Rx), and keeps everything under the root where it is relative to it.
+    /// A root turned by this much is one the converter's rotation stands in for exactly, so
+    /// the meshes come out where the build put them. Checked by a round trip of a stock bike
+    /// through Blender and the converter: every part's bounds match its model.edf.
+    pub fn root_turn(self) -> f64 {
+        match self {
+            Group::Chassis | Group::Rsusp => 90.0,
+            Group::Steer | Group::Fsusp => 180.0,
+        }
+    }
 }
 
 /// Where a role hangs, which game part it's built into, and the anchors it gives the roles
@@ -495,6 +510,41 @@ mod tests {
         assert!(close(a["handlebar"], [0.0, -0.40, 1.10]));
         assert!(close(a["footpegs"], [0.0, 0.08, 0.40]));
         assert!(close(a["plate_mount"], [0.0, -0.58, 0.98]));
+    }
+
+    #[test]
+    fn root_turns_differ_as_the_converters_part_axes_do() {
+        // The converter's part axes, in the game's frame: degrees, applied X then Y then Z.
+        fn axes(g: Group) -> V3 {
+            match g {
+                Group::Chassis | Group::Rsusp => [0.0, 180.0, 0.0],
+                Group::Steer | Group::Fsusp => [-90.0, 180.0, 0.0],
+            }
+        }
+        fn rot_y(p: V3, deg: f64) -> V3 {
+            let (s, c) = deg.to_radians().sin_cos();
+            [p[0] * c + p[2] * s, p[1], -p[0] * s + p[2] * c]
+        }
+        fn rot_z(p: V3, deg: f64) -> V3 {
+            let (s, c) = deg.to_radians().sin_cos();
+            [p[0] * c - p[1] * s, p[0] * s + p[1] * c, p[2]]
+        }
+        let turn = |p: V3, a: V3| rot_z(rot_y(rot_x(p, a[0]), a[1]), a[2]);
+        let unturn = |p: V3, a: V3| rot_x(rot_y(rot_z(p, -a[2]), -a[1]), -a[0]);
+        // Turning from one part's root to another's in Blender is the same turn as from one
+        // part's axes to the other's in the game: so one root put right puts them all right.
+        for a in Group::ALL {
+            for b in Group::ALL {
+                for v in [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]] {
+                    let in_blender = rot_x(rot_x(v, -b.root_turn()), a.root_turn());
+                    let in_game = to_blender(turn(unturn(to_game(v), axes(b)), axes(a)));
+                    assert!(close(in_blender, in_game), "{a:?} from {b:?}: {in_blender:?} vs {in_game:?}");
+                }
+            }
+        }
+        // Where they start is pinned by the round trip of a stock bike (see `root_turn`).
+        assert_eq!(Group::Chassis.root_turn(), 90.0);
+        assert_eq!(Group::Steer.root_turn(), 180.0);
     }
 
     /// The CR250 `.geom` the core's own tests use: a real bike's mounts.

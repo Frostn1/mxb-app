@@ -538,17 +538,23 @@ def op_assemble(job):
     the game part it's built into, under roots named for those parts. Exported as the model's
     FBX, then again as a low, plain white shadow.
 
-    The roots sit at the origin, unturned: the converter keeps a root's rotation and drops
-    its position, and the template's .geom places each part, so all the placing is in the
-    meshes. Empties are dropped; the lever and peg objects keep their names, which the
-    game's gfx.cfg animates them by.
+    The roots sit at the origin, each turned about X by job["rootTurns"][group] degrees. The
+    converter drops a root's position and writes the part's own axes in place of its
+    rotation, as fbx2edf.exe does; a root turned this way is one those axes stand in for
+    exactly. The meshes keep their world placement under it, and the template's .geom places
+    each part, so all the placing is in the meshes. Empties are dropped; the lever and peg
+    objects keep their names, which the game's gfx.cfg animates them by.
     """
     empty_scene()
+    turns = job.get("rootTurns") or {}
     roots = {}
     for group in job["groups"]:
         root = bpy.data.objects.new(group, None)
         bpy.context.scene.collection.objects.link(root)
+        root.rotation_euler = (math.radians(turns.get(group, 0.0)), 0.0, 0.0)
         roots[group] = root
+    # The roots' turns into their world matrices, before any mesh is placed under them.
+    bpy.context.view_layer.update()
     for p in job["parts"]:
         objs = import_part(p["source"])
         into = Matrix(job["groups"][p["group"]]) @ Matrix.Translation(Vector(p["offset"]))
