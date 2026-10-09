@@ -35,6 +35,9 @@ pub struct Outcome {
     pub error: Option<String>,
     /// The `.hrc` files written beside a bike's `.edf`.
     pub hrc: Vec<String>,
+    /// The `.shd` files written for its textures, each with the maps it names:
+    /// `bike.shd: normal bike_n, reflection bike_r`.
+    pub shd: Vec<String>,
 }
 
 #[derive(Clone, Serialize)]
@@ -184,23 +187,156 @@ fn write_hrc(report: &Value, edf: &Path) -> Vec<String> {
     written
 }
 
+/// The maps found beside a colour picture, by file name.
+#[derive(Debug, Default, PartialEq)]
+pub struct Maps {
+    pub normal: Option<String>,
+    pub reflection: Option<String>,
+    pub specular: Option<String>,
+}
+
+impl Maps {
+    fn any(&self) -> bool {
+        self.normal.is_some() || self.reflection.is_some() || self.specular.is_some()
+    }
+}
+
+const NORMAL: &[&str] = &["_n", "_normal", "_nrm"];
+const REFLECTION: &[&str] = &["_r", "_refl", "_reflection"];
+const SPECULAR: &[&str] = &["_s", "_spec"];
+/// What the converter reads, the colour picture's own extension tried first.
+const EXTS: &[&str] = &["tga", "png", "bmp", "jpg", "jpeg"];
+
+/// `<name><suffix>.<ext>` in `dir` for each kind of map, matched without regard to case.
+pub fn find_maps(dir: &Path, name: &str, ext: Option<&str>) -> Maps {
+    let Ok(entries) = std::fs::read_dir(dir) else { return Maps::default() };
+    let present: Vec<String> = entries
+        .filter_map(Result::ok)
+        .filter(|e| e.file_type().is_ok_and(|t| t.is_file()))
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .collect();
+    let mut exts: Vec<String> = ext.map(|e| e.to_ascii_lowercase()).into_iter().collect();
+    exts.extend(EXTS.iter().map(|e| e.to_string()).filter(|e| Some(e.as_str()) != ext));
+    let find = |suffixes: &[&str]| {
+        suffixes.iter().find_map(|s| {
+            exts.iter().find_map(|e| {
+                let want = format!("{name}{s}.{e}").to_lowercase();
+                present.iter().find(|p| p.to_lowercase() == want).cloned()
+            })
+        })
+    };
+    Maps { normal: find(NORMAL), reflection: find(REFLECTION), specular: find(SPECULAR) }
+}
+
+/// A `.shd` naming `maps`, laid out the way `fbx2edf.exe` reads it: each block's name, braces
+/// and keys on lines of their own (it skips a block written on one line). The numbers are the
+/// stock bikes' paint: shininess 30, reflection 0 to 0.6 with exponent 1.5. With no specular
+/// map, the specular mask is the normal map's alpha.
+pub fn shd_text(maps: &Maps) -> String {
+    let mut out = String::new();
+    let mut block = |name: &str, lines: Vec<String>| {
+        out.push_str(&format!("{name}\r\n{{\r\n"));
+        for l in lines {
+            out.push_str(&format!("\t{l}\r\n"));
+        }
+        out.push_str("}\r\n");
+    };
+    if maps.normal.is_some() || maps.specular.is_some() {
+        let mut l = vec!["shininess = 30".to_string()];
+        l.extend(maps.specular.iter().map(|m| format!("map = {m}")));
+        block("specular", l);
+    }
+    if let Some(m) = &maps.reflection {
+        block("reflection", vec!["factormin = 0".into(), "factormax = 0.6".into(), "factorexp = 1.5".into(), format!("map = {m}")]);
+    }
+    if let Some(m) = &maps.normal {
+        block("bump", vec![format!("map = {m}"), "repetitions = 1".into()]);
+    }
+    out
+}
+
+/// `bike.shd: normal bike_n, reflection bike_r`.
+fn shd_summary(file: &str, maps: &Maps) -> String {
+    let stem = |m: &String| Path::new(m).file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+    let parts: Vec<String> = [("normal", &maps.normal), ("reflection", &maps.reflection), ("specular", &maps.specular)]
+        .into_iter()
+        .filter_map(|(k, m)| m.as_ref().map(|m| format!("{k} {}", stem(m))))
+        .collect();
+    format!("{file}: {}", parts.join(", "))
+}
+
+/// The `.shd` to write for one picture, if any: in the first of its folders that has a map,
+/// since the converter reads the maps a `.shd` names beside it. A `.shd` the converter already
+/// reads is left alone unless `overwrite`. Path, text, summary.
+pub fn plan_shd(site: &host::ShdSite, overwrite: bool) -> Option<(PathBuf, String, String)> {
+    if site.shd.is_some() && !overwrite {
+        return None;
+    }
+    let (dir, maps) = site.dirs.iter().map(|d| (d, find_maps(d, &site.name, site.ext.as_deref()))).find(|(_, m)| m.any())?;
+    let file = format!("{}.shd", site.name);
+    let path = dir.join(&file);
+    if path.exists() && !overwrite {
+        return None;
+    }
+    Some((path, shd_text(&maps), shd_summary(&file, &maps)))
+}
+
+/// Write the `.shd` files an FBX's textures lack, before it is converted, so the converter
+/// builds their maps in. `done` holds the files written so far in the batch: a texture two
+/// models share is written once.
+fn write_shd(fbx: &Path, overwrite: bool, done: &mut std::collections::HashSet<PathBuf>) -> Vec<String> {
+    let sites = match host::shd_sites(fbx) {
+        Ok(s) => s,
+        Err(e) => {
+            log::warn!("[convert] no .shd files for {}: {e}", fbx.display());
+            return Vec::new();
+        }
+    };
+    let mut written = Vec::new();
+    for site in &sites {
+        let Some((path, text, summary)) = plan_shd(site, overwrite) else { continue };
+        if !done.insert(path.clone()) {
+            continue;
+        }
+        match std::fs::write(&path, text) {
+            Ok(()) => written.push(summary),
+            Err(e) => log::warn!("[convert] couldn't write {}: {e}", path.display()),
+        }
+    }
+    written
+}
+
 /// Convert a batch. Each pair's progress and outcome is sent as it happens (`fbx-convert-progress`,
-/// `fbx-convert-done`), and every outcome is returned at the end, in order.
+/// `fbx-convert-done`), and every outcome is returned at the end, in order. With `shd`, the
+/// `.shd` files its textures lack are written first (see [`write_shd`]).
 #[tauri::command]
-pub async fn fbx_convert(app: tauri::AppHandle, pairs: Vec<Pair>, options: Options, hrc: bool) -> Result<Vec<Outcome>, String> {
+pub async fn fbx_convert(
+    app: tauri::AppHandle,
+    pairs: Vec<Pair>,
+    options: Options,
+    hrc: bool,
+    shd: Option<bool>,
+    overwrite_shd: Option<bool>,
+) -> Result<Vec<Outcome>, String> {
     if RUNNING.swap(true, Ordering::SeqCst) {
         return Err("A batch is already converting.".into());
     }
+    let (shd, overwrite_shd) = (shd.unwrap_or(false), overwrite_shd.unwrap_or(false));
     let result = tauri::async_runtime::spawn_blocking(move || {
         let pairs: Vec<(PathBuf, PathBuf)> = pairs.into_iter().map(|p| (PathBuf::from(p.input), PathBuf::from(p.output))).collect();
         let started = std::time::Instant::now();
+        let mut done = std::collections::HashSet::new();
+        let mut shd_files: Vec<Vec<String>> = pairs
+            .iter()
+            .map(|(fbx, _)| if shd { write_shd(fbx, overwrite_shd, &mut done) } else { Vec::new() })
+            .collect();
         let mut outcomes: Vec<Option<Outcome>> = (0..pairs.len()).map(|_| None).collect();
         let results = host::convert(&pairs, &options, &mut |event| match event {
             Event::Pictures { index, done, total } => {
                 let _ = app.emit("fbx-convert-progress", ProgressEvent { index, done, total });
             }
             Event::Finished { index, result } => {
-                let outcome = outcome_of(result, hrc, &pairs[index].1);
+                let outcome = outcome_of(result, hrc, &pairs[index].1, std::mem::take(&mut shd_files[index]));
                 let _ = app.emit("fbx-convert-done", DoneEvent { index, outcome: &outcome });
                 outcomes[index] = Some(outcome);
             }
@@ -210,7 +346,7 @@ pub async fn fbx_convert(app: tauri::AppHandle, pairs: Vec<Pair>, options: Optio
             .into_iter()
             .zip(outcomes)
             .enumerate()
-            .map(|(i, (r, o))| o.unwrap_or_else(|| outcome_of(r, hrc, &pairs[i].1)))
+            .map(|(i, (r, o))| o.unwrap_or_else(|| outcome_of(r, hrc, &pairs[i].1, Vec::new())))
             .collect())
     })
     .await
@@ -219,13 +355,13 @@ pub async fn fbx_convert(app: tauri::AppHandle, pairs: Vec<Pair>, options: Optio
     result?
 }
 
-fn outcome_of(result: Result<Value, String>, hrc: bool, edf: &Path) -> Outcome {
+fn outcome_of(result: Result<Value, String>, hrc: bool, edf: &Path, shd: Vec<String>) -> Outcome {
     match result {
         Ok(report) => {
             let hrc = if hrc { write_hrc(&report, edf) } else { Vec::new() };
-            Outcome { report: Some(report), error: None, hrc }
+            Outcome { report: Some(report), error: None, hrc, shd }
         }
-        Err(e) => Outcome { error: Some(e), ..Default::default() },
+        Err(e) => Outcome { error: Some(e), shd, ..Default::default() },
     }
 }
 
@@ -268,6 +404,57 @@ mod tests {
         assert_eq!(files[0].1, "level0\r\n{\r\n\tscene = ktm.edf\r\n\tswitch = 0\r\n}\r\n");
         assert_eq!(files[2].1, "level0\r\n{\r\n\tscene = ktm.edf\r\n\tname = fsuspa\r\n\tswitch = 0\r\n}\r\n");
         assert!(hrc_files(&["".to_string()], "helmet.edf").is_empty(), "a single model has none");
+    }
+
+    fn site(name: &str, dirs: &[&Path], shd: Option<PathBuf>) -> host::ShdSite {
+        host::ShdSite { name: name.into(), ext: Some("tga".into()), dirs: dirs.iter().map(|d| d.to_path_buf()).collect(), shd }
+    }
+
+    #[test]
+    fn maps_are_found_by_their_suffix_whatever_the_case() {
+        let dir = tempfile::tempdir().unwrap();
+        for f in ["bike.tga", "Bike_N.TGA", "bike_r.png", "bike_spec.tga", "other_n.tga"] {
+            std::fs::write(dir.path().join(f), b"x").unwrap();
+        }
+        let m = find_maps(dir.path(), "bike", Some("tga"));
+        assert_eq!(m.normal.as_deref(), Some("Bike_N.TGA"));
+        assert_eq!(m.reflection.as_deref(), Some("bike_r.png"));
+        assert_eq!(m.specular.as_deref(), Some("bike_spec.tga"));
+        assert!(!find_maps(dir.path(), "frame", Some("tga")).any());
+    }
+
+    #[test]
+    fn a_shd_is_written_the_way_fbx2edf_exe_reads_it() {
+        let maps = Maps { normal: Some("bike_n.tga".into()), reflection: Some("bike_r.tga".into()), specular: None };
+        assert_eq!(
+            shd_text(&maps),
+            "specular\r\n{\r\n\tshininess = 30\r\n}\r\n\
+             reflection\r\n{\r\n\tfactormin = 0\r\n\tfactormax = 0.6\r\n\tfactorexp = 1.5\r\n\tmap = bike_r.tga\r\n}\r\n\
+             bump\r\n{\r\n\tmap = bike_n.tga\r\n\trepetitions = 1\r\n}\r\n"
+        );
+        let spec = Maps { specular: Some("bike_s.tga".into()), ..Maps::default() };
+        assert_eq!(shd_text(&spec), "specular\r\n{\r\n\tshininess = 30\r\n\tmap = bike_s.tga\r\n}\r\n");
+        assert_eq!(shd_summary("bike.shd", &maps), "bike.shd: normal bike_n, reflection bike_r");
+    }
+
+    #[test]
+    fn a_shd_goes_where_the_maps_are_and_never_over_one_unless_asked() {
+        let dir = tempfile::tempdir().unwrap();
+        let (fbm, root) = (dir.path().join("bike.fbm"), dir.path().to_path_buf());
+        std::fs::create_dir(&fbm).unwrap();
+        std::fs::write(root.join("bike_n.tga"), b"x").unwrap();
+        // Embedded paint: the .fbm folder has no maps, the FBX's folder has.
+        let (path, text, summary) = plan_shd(&site("bike", &[&fbm, &root], None), false).unwrap();
+        assert_eq!(path, root.join("bike.shd"));
+        assert!(text.contains("map = bike_n.tga"));
+        assert_eq!(summary, "bike.shd: normal bike_n");
+
+        let existing = Some(root.join("bike.shd"));
+        std::fs::write(root.join("bike.shd"), "mine").unwrap();
+        assert!(plan_shd(&site("bike", &[&root], existing.clone()), false).is_none(), "the converter's own is kept");
+        assert!(plan_shd(&site("bike", &[&root], None), false).is_none(), "nor one it would miss");
+        assert_eq!(plan_shd(&site("bike", &[&root], existing), true).unwrap().0, root.join("bike.shd"));
+        assert!(plan_shd(&site("frame", &[&root], None), true).is_none(), "no maps, no .shd");
     }
 
     #[test]

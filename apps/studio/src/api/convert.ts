@@ -33,6 +33,8 @@ export interface Outcome {
   error: string | null;
   /** The `.hrc` files written beside a bike's `.edf`. */
   hrc: string[];
+  /** The `.shd` files written for its textures: `bike.shd: normal bike_n, reflection bike_r`. */
+  shd: string[];
 }
 
 export interface Found {
@@ -50,8 +52,9 @@ export function convertFiles(
   pairs: { input: string; output: string }[],
   options: ConvertOptions,
   hrc: boolean,
+  shd: { make: boolean; overwrite: boolean } = { make: false, overwrite: false },
 ): Promise<Outcome[]> {
-  return invoke<Outcome[]>("fbx_convert", { pairs, options, hrc });
+  return invoke<Outcome[]>("fbx_convert", { pairs, options, hrc, shd: shd.make, overwriteShd: shd.overwrite });
 }
 
 export function onProgress(f: (e: { index: number; done: number; total: number }) => void): Promise<UnlistenFn> {
