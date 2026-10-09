@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 2026-10-08 — v0.20.0-beta.6 — Tyre folder warning
+
+### Added
+- **Tyre folder warning.** Flags an empty tyre folder that crashes the bike list, with a Move out button. Also flags mods that replace a stock tyre.
+- Crash reports include FrostMod's NaN tyre log when `nantrap=1` is on. Needs FrostMod 0.49.11.
+
 ## 2026-10-08 — v0.20.0-beta.5 — NaN crash trap
 
 ### Added
