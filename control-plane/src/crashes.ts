@@ -21,6 +21,11 @@
  *
  * The minidump is not here and is not sent. It is megabytes, it is a copy of process memory,
  * and it stays on the player's machine until a person asks for it.
+ *
+ * One attachment is: FrostMod's nantrap=1 tyre ring, the last two seconds of the player's bike
+ * state before a physics NaN, as CSV. The report names it (`nanRing`) and the app sends its text
+ * in the same PUT (`nanRingCsv`). It is numbers and a track folder, a few hundred KB, stored in
+ * `client_crash_rings` against the crash and gone with it.
  */
 
 import { isAppVersion, isGuid } from "./validate";
@@ -39,6 +44,37 @@ export const MAX_TRAIL = 32;
 const MAX_TEXT = 160;
 /** A run longer than a month did not happen; neither did a negative one. */
 const MAX_MS = 40 * 24 * 60 * 60 * 1000;
+/**
+ * The nan ring's ceiling, in bytes. About 2 MB, and under D1's 2,000,000-byte row limit with
+ * room for the row's other columns. FrostMod's ring is 4,000 rows, roughly 400 KB.
+ */
+export const MAX_RING_BYTES = 1_900_000;
+/** What FrostMod names a ring file: `frostmod-nan-ring-20261008-180509-crash.csv`. */
+const RING_NAME = /^frostmod-nan-ring-[0-9]{8}-[0-9]{6}-[a-z]{1,16}\.csv$/;
+/** And the first line it writes. Anything else is not one of ours. */
+const RING_HEAD = "# frostmod nan ring:";
+
+export interface NanRing {
+  name: string;
+  csv: string;
+  bytes: number;
+}
+
+/**
+ * The tyre ring sent with a report, or null when there is none or it is not one.
+ *
+ * Optional, and never a reason to refuse the report: a bad attachment costs the attachment,
+ * not the crash it came with.
+ */
+export function parseRing(body: unknown): NanRing | null {
+  if (!body || typeof body !== "object") return null;
+  const b = body as Record<string, unknown>;
+  if (typeof b.nanRing !== "string" || !RING_NAME.test(b.nanRing)) return null;
+  if (typeof b.nanRingCsv !== "string" || !b.nanRingCsv.startsWith(RING_HEAD)) return null;
+  const bytes = new TextEncoder().encode(b.nanRingCsv).length;
+  if (bytes > MAX_RING_BYTES) return null;
+  return { name: b.nanRing, csv: b.nanRingCsv, bytes };
+}
 
 export interface CrashReport {
   site: string;
@@ -189,7 +225,7 @@ export async function putCrash(request: Request, account: Account, env: Env): Pr
   const appVersion = isAppVersion(b.appVersion) ? (b.appVersion as string) : "";
   const guid = isGuid(b.guid) ? (b.guid as string) : (account.guid ?? "");
 
-  await env.DB.prepare(
+  const stored = await env.DB.prepare(
     `INSERT OR IGNORE INTO client_crashes (
        account_id, rider_name, guid,
        site, kind, code, access, target,
@@ -197,7 +233,8 @@ export async function putCrash(request: Request, account: Account, env: Env): Pr
        place, in_session, track, server, riders, reloads,
        since_frame_ms, since_reload_ms, uptime_ms,
        frames, trail, has_dump, crashed_at, received_at
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     RETURNING id`,
   )
     .bind(
       account.id,
@@ -227,7 +264,18 @@ export async function putCrash(request: Request, account: Account, env: Env): Pr
       report.crashedAt,
       Date.now(),
     )
-    .run();
+    .first<{ id: number }>();
+
+  // The ring rides on the row it came with. A report already stored (a retry) returns no id,
+  // and its ring went in the first time.
+  const ring = parseRing(body);
+  if (ring && stored && typeof stored.id === "number") {
+    await env.DB.prepare(
+      "INSERT OR IGNORE INTO client_crash_rings (crash_id, name, bytes, csv) VALUES (?, ?, ?, ?)",
+    )
+      .bind(stored.id, ring.name, ring.bytes, ring.csv)
+      .run();
+  }
 
   // Nothing comes back down. The client's next move is the same whatever happened here.
   return json(200, { ok: true });
@@ -338,12 +386,16 @@ export async function crashDetail(
   db: D1Database,
   site: string,
   limit = 25,
-): Promise<{ site: string; reports: (CrashRow & { frames: string[]; trail: unknown[] })[] } | null> {
+): Promise<{
+  site: string;
+  reports: (CrashRow & { frames: string[]; trail: unknown[]; ringBytes: number | null })[];
+} | null> {
   if (!isSite(site)) return null;
   const { results } = await db
     .prepare(
       `SELECT id, rider_name, site, kind, place, track, server, riders,
-              frostmod, app_version, has_dump, crashed_at, frames, trail
+              frostmod, app_version, has_dump, crashed_at, frames, trail,
+              (SELECT bytes FROM client_crash_rings WHERE crash_id = client_crashes.id) AS ring_bytes
          FROM client_crashes
         WHERE site = ?
         ORDER BY received_at DESC
@@ -369,8 +421,20 @@ export async function crashDetail(
     // shape changed still reads, and a malformed one is an empty list rather than a 500.
     frames: safeList(r.frames).filter((f): f is string => typeof f === "string"),
     trail: safeList(r.trail),
+    // The tyre ring's size when the report came with one; fetched on its own, by id.
+    ringBytes: r.ring_bytes === null || r.ring_bytes === undefined ? null : Number(r.ring_bytes),
   }));
   return { site, reports };
+}
+
+/** One crash's tyre ring, for the admin view. Null when that crash has none. */
+export async function crashRing(db: D1Database, id: number): Promise<NanRing | null> {
+  if (!Number.isSafeInteger(id) || id <= 0) return null;
+  const row = await db
+    .prepare("SELECT name, bytes, csv FROM client_crash_rings WHERE crash_id = ?")
+    .bind(id)
+    .first<{ name: string; bytes: number; csv: string }>();
+  return row ? { name: String(row.name), bytes: Number(row.bytes), csv: String(row.csv) } : null;
 }
 
 function safeList(value: unknown): unknown[] {
