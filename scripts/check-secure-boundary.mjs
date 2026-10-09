@@ -23,7 +23,7 @@ for (const [label, pattern, probe] of forbiddenRust) {
 
 const violations = [];
 for (const path of tracked) {
-  if (privateModules.has(path)) {
+  if (privateModules.has(path) || path.startsWith("crates/fbx2edf/private/")) {
     violations.push(`${path}: private module is tracked`);
   }
   if (!path.endsWith(".rs")) continue;

@@ -10,6 +10,7 @@ resolver = "2"
 members = [
     "crates/content",
     "crates/core",
+    "crates/fbx2edf",
     "apps/manager/src-tauri",
     "apps/studio/src-tauri",
     "apps/coach/src-tauri",
@@ -31,6 +32,11 @@ exclude = [".sidecar-src", "tools/mxb-fetcher"]
 # The local crate too, but only lightly: a creator-sealed `.pnt` is decrypted a byte at a time
 # over the whole file before it is even parsed, and that loop is ours. Keeps debug info.
 opt-level = 1
+
+# The FBX converter is a workspace member, so it would get the opt-level 1 above; it spends
+# its time decoding and compressing textures, which at 1 is several times slower.
+[profile.dev.package.fbx2edf]
+opt-level = 3
 
 [profile.dev.package."*"]
 # Dependencies are never stepped through, and they're built once and then cached.

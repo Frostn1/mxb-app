@@ -26,6 +26,8 @@ mod partmaker;
 mod blender;
 mod edfwrite;
 mod gearrepair;
+/// Convert: FBX files to the `.edf` the game loads.
+mod modelconvert;
 mod paintstudio;
 /// Recording a replay the mod is flying, so nobody has to run OBS beside the game.
 mod replayrec;
@@ -319,6 +321,11 @@ fn main() {
             replayrec::replay_delete,
             replayrec::replay_out_dir,
             replayrec::replay_fetch_ffmpeg,
+            modelconvert::fbx_convert_available,
+            modelconvert::fbx_scan,
+            modelconvert::fbx_part_names,
+            modelconvert::fbx_read_text,
+            modelconvert::fbx_convert,
             initial_view,
         ])
         .setup(|app| {

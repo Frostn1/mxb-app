@@ -1,0 +1,29 @@
+[package]
+name = "fbx2edf"
+version = "0.1.0"
+description = "FBX to EDF for Frost's Studio: the public face of a private converter."
+authors = ["Frost"]
+edition = "2021"
+publish = false
+
+# The converter's sources are private (Frostn1/mxbapp-private, `fbx2edf/`) and never live in
+# this repository. Its `sync.sh` copies them into `private/` here, which is gitignored, and
+# `build.rs` builds them in as this crate's own modules. Without them this crate is `host`
+# alone: every call refuses, and the studio hides its Convert tab.
+#
+# The dependencies are the private crate's, declared whether or not it is present, so the
+# lockfile is the same either way and `--locked` holds in CI, where it is never synced.
+[dependencies]
+anyhow = "1"
+ufbx = "0.11"
+# zlib-rs, as in the private crate and its browser build: the same DEFLATE, so a file made
+# here is byte for byte the one mxbsecure.com/convert makes.
+flate2 = { version = "1", default-features = false, features = ["zlib-rs"] }
+md-5 = "0.10"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "tga", "bmp"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rayon = "1"
+
+[dev-dependencies]
+tempfile = "3"
