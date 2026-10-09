@@ -107,6 +107,7 @@ mod racemode;
 mod ranked;
 mod health;
 mod reshade;
+mod tyres;
 mod savedservers;
 mod serverbook;
 mod serverfilter;
@@ -1049,6 +1050,21 @@ async fn set_reshade_enabled(
     .map_err(|e| format!("set_reshade_enabled task failed: {e}"))?
 }
 
+/// Move empty folders out of `mods/tyres` (they crash the bike list). Re-scans on the
+/// backend, so the UI never passes a path. Returns where each folder went.
+#[tauri::command]
+async fn move_empty_tyre_folders(app: tauri::AppHandle) -> Result<Vec<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+        let moved = tyres::move_empty_for(&cfg, gameproc::is_game_running())
+            .map_err(|e| format!("{e:#}"))?;
+        let moved: Vec<String> = moved.iter().map(|p| p.display().to_string()).collect();
+        log::info!("[tyres] moved empty tyre folders: {}", moved.join(", "));
+        Ok(moved)
+    })
+    .await
+    .map_err(|e| format!("move_empty_tyre_folders task failed: {e}"))?
+}
 #[tauri::command]
 async fn bind_sound(
     app: tauri::AppHandle,
@@ -9182,6 +9198,7 @@ fn main() {
             health_check,
             keep_piboso_on_device,
             set_reshade_enabled,
+            move_empty_tyre_folders,
             detect_loose_swaps,
             register_loose_swaps,
             detect_orphaned_setup,

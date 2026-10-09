@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { HealthReport } from "@frost/shared/types";
-import { onedriveNotice, onlineOnlyTotal } from "../src/lib/healthNotice";
+import { onedriveNotice, onlineOnlyTotal, tyreNotices } from "../src/lib/healthNotice";
 
 function report(over: Partial<HealthReport["onedrive"]> = {}): HealthReport {
   return {
@@ -25,6 +25,7 @@ function report(over: Partial<HealthReport["onedrive"]> = {}): HealthReport {
       config: false,
       log: false,
     },
+    tyres: { empty: [], overrides: [] },
   };
 }
 
@@ -57,6 +58,20 @@ describe("onedriveNotice", () => {
     expect(onedriveNotice(report({ gameInOnedrive: true }))).toEqual({
       kind: "game",
       canKeep: false,
+    });
+  });
+});
+
+describe("tyreNotices", () => {
+  test("no tyre problems means no bars", () => {
+    expect(tyreNotices(report())).toEqual({ empty: null, overrides: null });
+  });
+
+  test("empty folders and stock overrides each get their own bar", () => {
+    const r = { ...report(), tyres: { empty: ["p_mx", "custom"], overrides: ["m_sm.pkz"] } };
+    expect(tyreNotices(r)).toEqual({
+      empty: { names: "p_mx, custom", count: 2 },
+      overrides: { names: "m_sm.pkz", count: 1 },
     });
   });
 });

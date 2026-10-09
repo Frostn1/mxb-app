@@ -1318,10 +1318,19 @@ export interface ReshadeHealth {
   log: boolean;
 }
 
-/** Both health checks. Mirrors `health::Report`. */
+/** Folders in `mods/tyres` that break the bike list. Mirrors `tyres::TyreHealth`. */
+export interface TyreHealth {
+  /** Folders with no real files in them (junk like `desktop.ini` doesn't count). They crash. */
+  empty: string[];
+  /** Folders or `.pkz` files that replace a stock tyre. */
+  overrides: string[];
+}
+
+/** The health checks. Mirrors `health::Report`. */
 export interface HealthReport {
   onedrive: OneDriveHealth;
   reshade: ReshadeHealth;
+  tyres: TyreHealth;
 }
 
 /** What "Keep on this device" did. Mirrors `cloudfiles::PinResult`. */
