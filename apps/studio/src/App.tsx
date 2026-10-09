@@ -36,6 +36,7 @@ import SurveyPrompt from "@frost/shared/Components/Survey/SurveyPrompt";
 import { parsePluginView, usePlugins } from "@frost/shared/lib/usePlugins";
 import { initialView } from "@frost/shared/api/mods";
 import { toast } from "sonner";
+import { convertAvailable } from "./api/convert";
 
 /**
  * The rail's own view space: the Studio's tools, Settings, and whatever a plugin adds.
@@ -51,6 +52,13 @@ function Shell() {
   const [config, setConfig] = useState<Config>({ modsPath: "" });
   const [games, setGames] = useState<GameInfo[]>([MXB_FALLBACK]);
   const [view, setView] = useState<View>("designer");
+  // The FBX converter is private, so a build may not carry it; its tab is offered only if so.
+  const [canConvert, setCanConvert] = useState(false);
+  useEffect(() => {
+    convertAvailable()
+      .then(setCanConvert)
+      .catch(() => {});
+  }, []);
   // Plugins whose panels belong here — MXB Replay, and anything else installed in MXB
   // App. A plugin that fails to mount says so once and is then dropped: a broken add-on must
   // not take the Studio down with the work somebody has open in it.
@@ -173,6 +181,8 @@ function Shell() {
       { id: "track", label: t("nav.track"), group: "make" },
       // Builds a bike from parts in the rider's own Blender. MX Bikes' model layout only.
       { id: "bike", label: t("nav.bike"), group: "make", when: game.caps.viewer },
+      // FBX to EDF, the converter mxbsecure.com/convert runs, here without the upload.
+      { id: "convert", label: t("nav.convert"), group: "make", when: canConvert },
       // Recording a replay needs an in-game mod, and MXB Replay is an MX Bikes plugin
       // like FrostMod — so it is gated on the same capability rather than on the game's id.
       { id: "replay", label: t("nav.replay"), group: "make", when: game.caps.frostmod },
@@ -188,7 +198,7 @@ function Shell() {
       ),
     ];
     return all.filter((e) => e.when !== false);
-  }, [t, game.caps.viewer, game.caps.frostmod, plugins]);
+  }, [t, game.caps.viewer, game.caps.frostmod, plugins, canConvert]);
 
   useEffect(() => {
     if (!entries.some((e) => e.id === view) && view !== "settings") setView("designer");

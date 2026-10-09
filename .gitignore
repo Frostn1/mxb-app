@@ -49,6 +49,8 @@ docs/secure-content/
 # checkout; they must never become Git objects in this public repository.
 crates/core/src/mxbsecure.rs
 crates/core/src/sidecar.rs
+# The FBX -> EDF converter's sources, synced the same way; crates/fbx2edf builds them in.
+crates/fbx2edf/private/
 
 # CI-only checkout of the private sidecar module (see .github/workflows/release.yml)
 /.sidecar-src/
