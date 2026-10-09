@@ -107,7 +107,7 @@ pub fn convert(_pairs: &[(PathBuf, PathBuf)], _options: &Options, _on: &mut dyn 
 pub fn part_names(fbx: &Path) -> Result<Vec<String>, String> {
     use crate::params::{Layout, Params};
     let bytes = std::fs::read(fbx).map_err(|e| format!("{}: {e}", fbx.display()))?;
-    let files = crate::files::DiskFiles { root: fbx.parent().map(Path::to_path_buf).unwrap_or_default() };
+    let files = crate::files::DiskFiles::for_fbx(fbx);
     let p = Params { layout: Layout::Parts, ..Params::default() };
     let s = crate::session::Session::prepare(&bytes, &files, &p).map_err(|e| format!("{e:#}"))?;
     Ok(s.report().objects.iter().map(|o| o.name.clone()).collect())
