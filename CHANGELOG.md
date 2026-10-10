@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-10-10 — Frost's Studio v0.7.2 — See-through textures in Convert
+
+### Added
+- **See-through textures.** A texture with alpha now shows see-through in game (glass, visors, mesh). A Blender material's Alpha below 1, or an image in Alpha, is baked into the texture.
+- **Colour key.** Textures named `CK_...` get hard cutout edges in place of see-through.
+- **Shape animation.** Meshes named `<name>_shapeanim0keyN` become one animated mesh.
+
+### Fixed
+- **Grey reflection maps.** A grey RGBA `_r` map is read as grey, not as full reflection.
+
 ## 2026-10-09 — Frost's Studio v0.7.1 — .shd files and Gfx tab
 
 ### Added
