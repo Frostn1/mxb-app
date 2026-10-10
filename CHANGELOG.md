@@ -1,9 +1,10 @@
 # Changelog
 
-## Unreleased
+## 2026-10-09 — Frost's Studio v0.7.1 — .shd files and Gfx tab
 
 ### Added
 - **.shd files in Convert.** Writes a .shd for each texture that has `_n`, `_r` or `_s` maps, so normal maps, spec and reflection show in game. Existing .shd files are kept unless you tick Overwrite.
+- **Gfx tab.** Edit a bike's gfx.cfg on the model.
 
 ### Fixed
 - **Shaders on embedded textures.** A .shd beside the FBX or in its .fbm folder is now used when the FBX embeds its textures.
