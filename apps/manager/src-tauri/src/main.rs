@@ -1007,10 +1007,18 @@ struct PinProgress {
 
 /// Mark the PiBoSo folder "Always keep on this device". The folder is the one the health
 /// check names, re-derived from the config here — the UI never passes a path.
+///
+/// Refused while the game runs. Pinning changes the attributes of every file under `mods`,
+/// and OneDrive then downloads whatever was online-only; the mods watcher sees both as mod
+/// changes and asks FrostMod for full reloads in the running game, one every 45 s for as
+/// long as the download goes on.
 #[tauri::command]
 async fn keep_piboso_on_device(app: tauri::AppHandle) -> Result<cloudfiles::PinResult, String> {
     tauri::async_runtime::spawn_blocking(move || {
         use tauri::Emitter as _;
+        if gameproc::is_game_running() {
+            return Err("Close the game first.".to_string());
+        }
         let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
         let Some(dir) = health::pin_target(&cfg) else {
             return Err("The PiBoSo folder isn't set or isn't there.".to_string());

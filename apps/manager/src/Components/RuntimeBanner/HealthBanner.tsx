@@ -191,8 +191,11 @@ export default function HealthBanner() {
                 : t("health.onedriveGame")
           }
           pitch={t("health.onedrivePitch")}
-          action={notice.canKeep ? t("health.keep") : undefined}
+          action={
+            notice.canKeep ? (running ? t("health.closeGameFirst") : t("health.keep")) : undefined
+          }
           actionIcon={HardDriveDownload}
+          actionDisabled={running}
           busy={pinning !== null}
           busyLabel={
             pinning && pinning.total > 0
