@@ -1455,6 +1455,8 @@ export interface LogsInfo {
   app: LogGroup;
   frostmod: LogGroup;
   game: LogGroup;
+  /** The game's `plugins` folder: logs FrostMod and the locked-content DLL write beside the plugin. */
+  plugins: LogGroup;
   secure: LogGroup;
 }
 

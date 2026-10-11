@@ -117,6 +117,12 @@ pub fn start(app: &AppHandle) {
             }
 
             if started {
+                // A freeze leaves no trace of its own; this line marks where a session began,
+                // and the pid ties it to the matching end line in `gameproc`.
+                match mxb_core::gamewindow::find_game_pid() {
+                    Some(pid) => log::info!("[session] game started (pid {pid})"),
+                    None => log::info!("[session] game started (pid unknown)"),
+                }
                 // Re-arm FrostMod for the new session — whether it was launched from Steam,
                 // the desktop, or the Play button.
                 crate::frostmod_manage::on_game_started(&app, &cfg);

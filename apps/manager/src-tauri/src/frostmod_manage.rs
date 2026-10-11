@@ -1215,7 +1215,7 @@ pub fn sync_plugin(app: &AppHandle, cfg: &crate::config::AppConfig) -> PluginSyn
 /// folder corrected, a game moved to another library — be found and taken back later.
 const PLACES_FILE: &str = "plugin_places.txt";
 
-fn read_places(dir: &Path) -> Vec<PathBuf> {
+pub(crate) fn read_places(dir: &Path) -> Vec<PathBuf> {
     std::fs::read_to_string(dir.join(PLACES_FILE))
         .map(|text| {
             text.lines()
