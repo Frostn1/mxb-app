@@ -264,28 +264,32 @@ async fn load(app: &AppHandle, url: &str, width: Option<u32>) -> Option<(Vec<u8>
         return Some(hit);
     }
 
+    // A second, much tighter gate for the store that counts requests. Everything else here is
+    // fetched four at a time, which is enough to keep a grid's first paint moving; MXB Hub
+    // answers that burst by deciding we are a robot and refusing the whole site, images and API
+    // alike, for everyone on this address. Two at a time costs a moment on the first paint of a
+    // page and nothing at all afterwards, because the entry is then on disk.
+    //
+    // Taken *before* the shared permit below, never inside it. The other way round, Hub
+    // thumbnails queued for their two slots sat on all four shared ones, and with the Hub
+    // challenged or stalling (thirty seconds a request) the merged Mods grid showed no
+    // pictures from any catalog: every mxb-mods and Shop thumbnail waited behind the Hub's,
+    // and a request that never finishes never errors, so the webview's fallback never ran.
+    let _polite = if is_hub(url) {
+        Some(hub_semaphore().acquire().await.ok()?)
+    } else {
+        None
+    };
     // This permit stays alive through sniffing and (when requested) the blocking decode. A
     // completed download is still a large resident body, so it must not stop counting merely
     // because it is waiting for the CPU rather than the network.
     let _image_job = image_job_semaphore().acquire().await.ok()?;
-    let bytes = {
-        // A second, much tighter gate for the store that counts requests. Everything else here
-        // is fetched four at a time, which is enough to keep a grid's first paint moving;
-        // MXB Hub answers that burst by deciding we are a robot and refusing the whole site,
-        // images and API alike, for everyone on this address. Two at a time costs a moment on
-        // the first paint of a page and nothing at all afterwards, because the entry is then
-        // on disk — and it is the difference between a grid that loads and one that cannot.
-        let _polite = if is_hub(url) {
-            Some(hub_semaphore().acquire().await.ok()?)
-        } else {
-            None
-        };
-        fetch(url).await
-    };
+    let bytes = fetch(url).await;
 
     let bytes = match bytes {
         Ok(bytes) => bytes,
         Err(why) => {
+            log_refusal_once(url, why);
             remember_failure(app, url, width, why);
             return None;
         }
@@ -297,6 +301,7 @@ async fn load(app: &AppHandle, url: &str, width: Option<u32>) -> Option<(Vec<u8>
     let Some(mime) = sniff(&bytes) else {
         log::debug!("imgcache: {url} did not answer with a recognisable image");
         let why = if looks_like_html(&bytes) { Refusal::Blocked } else { Refusal::Dead };
+        log_refusal_once(url, why);
         remember_failure(app, url, width, why);
         return None;
     };
@@ -496,7 +501,12 @@ async fn fetch(url: &str) -> Result<Vec<u8>, Refusal> {
         return Err(Refusal::Blocked);
     }
     if !resp.status().is_success() {
-        return Err(refusal_for(resp.status()));
+        let why = refusal_for(resp.status());
+        log_once(
+            format!("{}:{}", host_of(url), resp.status().as_u16()),
+            format!("imgcache: {} answered {} ({})", host_of(url), resp.status(), why.tag()),
+        );
+        return Err(why);
     }
 
     // Refuse an oversized body before a byte of it is read, when the origin says how big it
@@ -520,6 +530,33 @@ async fn fetch(url: &str) -> Result<Vec<u8>, Refusal> {
         }
     }
     Ok(body)
+}
+
+fn host_of(url: &str) -> String {
+    reqwest::Url::parse(url)
+        .ok()
+        .and_then(|u| u.host_str().map(str::to_ascii_lowercase))
+        .unwrap_or_default()
+}
+
+/// Say a host refused us, once per host and reason a session.
+///
+/// Refusals were debug-only, so a report of "no pictures anywhere" came with a log that had
+/// nothing to say about pictures at all. Once each is enough to tell a challenged catalog from
+/// a dead connection, without a line per thumbnail.
+fn log_refusal_once(url: &str, why: Refusal) {
+    let host = host_of(url);
+    log_once(
+        format!("{host}:{}", why.tag()),
+        format!("imgcache: {host} refused a thumbnail ({}); the webview loads it direct", why.tag()),
+    );
+}
+
+fn log_once(key: String, line: String) {
+    static SEEN: OnceLock<Mutex<std::collections::HashSet<String>>> = OnceLock::new();
+    if lock(SEEN.get_or_init(Default::default)).insert(key) {
+        log::info!("{line}");
+    }
 }
 
 /// What a status code says about the URL rather than the moment.

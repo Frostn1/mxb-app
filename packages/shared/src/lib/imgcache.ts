@@ -102,6 +102,15 @@ const directHosts = new Set<string>();
  */
 const RECOVERIES_BEFORE_GIVING_UP = 3;
 
+/**
+ * How long an image in view may wait on the cache before it is loaded direct instead.
+ *
+ * A cache hit answers in milliseconds and a fresh fetch in a second or two, so this only
+ * catches a request stuck behind others that are stalling (a challenged store's thumbnails
+ * get thirty seconds each).
+ */
+export const CACHE_PATIENCE_MS = 8000;
+
 function hostOf(url: string): string | null {
   try {
     return new URL(url).hostname.toLowerCase();
