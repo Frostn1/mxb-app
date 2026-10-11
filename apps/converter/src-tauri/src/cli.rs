@@ -60,6 +60,7 @@ pub fn console() -> bool {
     true
 }
 
+#[derive(Debug)]
 struct Args {
     inputs: Vec<String>,
     out: Option<PathBuf>,
