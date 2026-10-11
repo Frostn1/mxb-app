@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-10-11 — v0.20.1-beta.1 — Mod pictures
+
+### Fixed
+- **Mod pictures load again.** They no longer wait behind MXB Hub pictures.
+- **Missing covers.** Mods whose cover mxb-mods.com hides now show a picture from their page.
+
 ## 2026-10-11 — v0.20.0 — Shop pictures, OneDrive banner gone, better logs
 
 ### Fixed
