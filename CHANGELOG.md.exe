@@ -3,7 +3,7 @@
 ## 2026-10-10 — Frost's Studio v0.7.3 — Convert fixes
 
 ### Added
-- **Skipped-object report.** Convert lists the objects it skipped.
+- **Skipped-object report.** Convert lists every object it left out and why.
 - **model.edf naming.** Option to name the bike model `model.edf`.
 - **.hrc options.** Choose how the .hrc file is written.
 
