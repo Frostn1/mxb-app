@@ -112,8 +112,9 @@ jobs:
           # A fine-grained PAT with contents:write on frost-converter only.
           GITHUB_TOKEN: ${{ secrets.CONVERTER_RELEASE_TOKEN }}
           VITE_APP_NAME: "Frost Converter"
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.CONVERTER_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.CONVERTER_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # The updater key (minisign, no password); its public half is in tauri.conf.json.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.FROST_CONVERTER_UPDATER_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
         with:
           owner: Frostn1
           repo: frost-converter
