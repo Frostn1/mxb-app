@@ -342,7 +342,7 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
       />
       <RuntimeBanner />
       <ProfileBanner />
-      {/* OneDrive and ReShade: the two setups behind crashes on joining busy servers. */}
+      {/* ReShade and broken tyre folders: setups the game crashes on. */}
       <HealthBanner />
       <UpdateBanner />
       {/* An offer, not a problem, so it waits for the intro and the tour and sits below both bars. */}
