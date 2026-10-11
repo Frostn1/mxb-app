@@ -312,11 +312,24 @@ pub struct ShdPlan {
 }
 
 /// A linked map as the `.shd` in `dir` names it: its file name when it sits there, else its
-/// full path (the converter reads either).
+/// full path (the converter reads either). The engine hands linked maps back canonical
+/// (`\\?\C:\...`), so folders are compared canonical too, and a full path is written without
+/// the `\\?\` prefix.
 fn map_name(map: &Path, dir: &Path) -> String {
+    let same = |p: &Path| p == dir || matches!((p.canonicalize(), dir.canonicalize()), (Ok(a), Ok(b)) if a == b);
     match map.parent() {
-        Some(p) if p == dir => map.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
-        _ => map.to_string_lossy().into_owned(),
+        Some(p) if same(p) => map.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
+        _ => strip_verbatim(map),
+    }
+}
+
+/// A path as the user would type it: `\\?\C:\x` is `C:\x`, `\\?\UNC\host\x` is `\\host\x`.
+fn strip_verbatim(path: &Path) -> String {
+    let s = path.to_string_lossy();
+    match (s.strip_prefix(r"\\?\UNC\"), s.strip_prefix(r"\\?\")) {
+        (Some(rest), _) => format!(r"\\{rest}"),
+        (None, Some(rest)) => rest.to_string(),
+        _ => s.into_owned(),
     }
 }
 
@@ -611,6 +624,27 @@ mod tests {
         let plan = plan_shd(&only, false, SHININESS).unwrap();
         assert_eq!(plan.path, empty.path().join("Y.shd"));
         assert!(plan.text.contains("factormax = 0.5"));
+    }
+
+    /// The engine hands linked maps back canonical (`\\?\C:\...`): one beside the `.shd` is
+    /// still named bare, and one elsewhere is written without the prefix.
+    #[cfg(windows)]
+    #[test]
+    fn verbatim_linked_maps_are_named_by_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        let other = tempfile::tempdir().unwrap();
+        std::fs::write(root.join("bike_n.tga"), b"x").unwrap();
+        std::fs::write(other.path().join("bike_r.tga"), b"x").unwrap();
+        let normal = root.join("bike_n.tga").canonicalize().unwrap();
+        let reflection = other.path().join("bike_r.tga").canonicalize().unwrap();
+        assert!(normal.to_string_lossy().starts_with(r"\\?\"), "{}", normal.display());
+        let linked = host::ShdSite { normal: Some(normal), reflection: Some(reflection.clone()), ..site("bike", &[&root], None) };
+        let plan = plan_shd(&linked, false, SHININESS).unwrap();
+        assert!(plan.text.contains("map = bike_n.tga"), "{}", plan.text);
+        assert!(!plan.text.contains(r"\\?\"), "{}", plan.text);
+        assert!(plan.text.contains(&format!("map = {}", strip_verbatim(&reflection))), "{}", plan.text);
+        assert_eq!(strip_verbatim(Path::new(r"\\?\UNC\host\share\a.tga")), r"\\host\share\a.tga");
     }
 
     fn bike_report() -> Value {
