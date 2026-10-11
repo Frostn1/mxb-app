@@ -9,7 +9,7 @@
 - **Better crash and freeze logs.**
 
 ### Also in this release
-Everything from the v0.20.0 betas below: free plugins, Storage page, guided tour, FrostMod refresh by type, Use less RAM, 3D preset preview, tips, install from mxbsecure.com, mod uploads, NaN crash trap and the tyre folder warning.
+Everything from the v0.20.0 betas: free plugins, Storage page, guided tour, FrostMod refresh by type, Use less RAM, 3D preset preview, tips, install from mxbsecure.com, mod uploads, NaN crash trap and the tyre folder warning.
 
 ## 2026-10-10 — Frost's Studio v0.7.3 — Convert fixes
 
