@@ -739,6 +739,11 @@ pub async fn detail(slug: &str) -> anyhow::Result<ModDetail> {
     let html = resp.body;
     let (downloads, version) = (parse_downloads(&html), parse_version(&html));
     let author = parse_author(&html);
+    // A post whose only picture is a featured image the REST API won't hand over
+    // (`rest_forbidden`) still names it on the page, so the gallery isn't left empty.
+    if images.is_empty() {
+        images.extend(parse_og_image(&html));
+    }
     // Only call it a challenge when the page also yielded nothing, so a marker that turns
     // up in a page that actually parsed can never turn a working mod into an error.
     if downloads.is_empty() {
@@ -1289,6 +1294,17 @@ fn parse_version(html: &str) -> Option<String> {
 /// <a href="…/author/<slug>/"><b id="authorName">Name</b></a>`. Scoped to the post header
 /// because every comment below the page names an author too, and the first `/author/` link
 /// in the document is only the byline by luck of layout.
+/// The page's `og:image`, when it is an https picture.
+fn parse_og_image(html: &str) -> Option<String> {
+    let doc = Html::parse_document(html);
+    let sel = Selector::parse(r#"meta[property="og:image"]"#).ok()?;
+    doc.select(&sel)
+        .filter_map(|el| el.value().attr("content"))
+        .map(str::trim)
+        .find(|u| u.starts_with("https://") && is_image_url(u))
+        .map(str::to_string)
+}
+
 fn parse_author(html: &str) -> Option<(String, Option<String>)> {
     let doc = Html::parse_document(html);
 
@@ -1516,6 +1532,18 @@ mod tests {
         assert_eq!(downloads.len(), 1);
         assert_eq!(downloads[0].host, "MediaFire");
         assert_eq!(downloads[0].label, "GoWithTheFlow");
+    }
+
+    #[test]
+    fn reads_the_pages_og_image() {
+        let html = r#"<html><head>
+            <meta property="og:image" content="https://mxb-mods.com/wp-content/uploads/2026/10/655500_40.webp" />
+            <meta property="og:image:width" content="1920" /></head><body></body></html>"#;
+        assert_eq!(
+            parse_og_image(html).as_deref(),
+            Some("https://mxb-mods.com/wp-content/uploads/2026/10/655500_40.webp")
+        );
+        assert_eq!(parse_og_image("<html><head></head></html>"), None);
     }
 
     #[test]

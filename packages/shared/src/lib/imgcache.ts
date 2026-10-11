@@ -111,6 +111,18 @@ const RECOVERIES_BEFORE_GIVING_UP = 3;
  */
 export const CACHE_PATIENCE_MS = 8000;
 
+/**
+ * Whether a slow cache load of `url` may be sent direct.
+ *
+ * Not for MXB Hub: its thumbnails queue two at a time on purpose, because a burst is what
+ * trips its robot challenge for the whole site. Sending every queued one direct at once is
+ * exactly that burst.
+ */
+export function mayOutwaitCache(url: string): boolean {
+  const host = hostOf(url);
+  return host !== null && host !== "mxb-hub.com" && !host.endsWith(".mxb-hub.com");
+}
+
 function hostOf(url: string): string | null {
   try {
     return new URL(url).hostname.toLowerCase();

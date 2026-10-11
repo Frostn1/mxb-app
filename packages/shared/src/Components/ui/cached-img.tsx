@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ImgHTMLAttributes } from "react";
 import {
   CACHE_PATIENCE_MS,
   cachedImage,
+  mayOutwaitCache,
   noteDirectRecovery,
   schemeIsBroken,
 } from "../../lib/imgcache";
@@ -57,7 +58,7 @@ export default function CachedImg({
   // the fold hasn't been requested yet, and must not be sent direct for waiting its turn.
   useEffect(() => {
     const img = ref.current;
-    if (direct || settled || !img) return;
+    if (direct || settled || !img || !mayOutwaitCache(src)) return;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const observer = new IntersectionObserver(
       (entries) => {
@@ -77,7 +78,7 @@ export default function CachedImg({
       observer.disconnect();
       clearTimeout(timer);
     };
-  }, [direct, settled]);
+  }, [direct, settled, src]);
 
   return (
     <img
