@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-10-10 — Frost's Studio v0.7.3 — Convert fixes
+
+### Added
+- **Skipped-object report.** Convert lists the objects it skipped.
+- **model.edf naming.** Option to name the bike model `model.edf`.
+- **.hrc options.** Choose how the .hrc file is written.
+
+### Fixed
+- **Objects next to the chassis.** Parts beside the chassis, like the exhaust, now go into it.
+- **.shd files.** Written in stock order, with shininess 6 and a reflection block.
+- **Hidden objects and curves.** Now exported.
+
 ## 2026-10-10 — Frost's Studio v0.7.2 — See-through textures in Convert
 
 ### Added
