@@ -153,6 +153,20 @@ pub fn resident_bytes() -> usize {
 mod tests {
     use super::*;
 
+    // The store is global and other tests put and release in parallel, so a before/after
+    // read of `resident_bytes` races. Check one token's share and the counter's invariant,
+    // each under a single lock, instead.
+
+    /// Bytes `token` adds to the counter, or `None` once it is gone.
+    fn counted(token: &str) -> Option<usize> {
+        store().lock().unwrap().blobs.get(token).map(Entry::bytes)
+    }
+
+    fn assert_counter_matches_blobs() {
+        let s = store().lock().unwrap();
+        assert_eq!(s.bytes, s.blobs.values().map(Entry::bytes).sum::<usize>());
+    }
+
     #[test]
     fn round_trips_pixels() {
         let px = vec![1u8, 2, 3, 4, 5, 6, 7, 8];
@@ -163,12 +177,12 @@ mod tests {
 
     #[test]
     fn lazy_tokens_inflate_on_fetch_and_count_what_they_hold() {
-        let before = resident_bytes();
         let token = put_lazy(10, || Some(vec![1u8, 2, 3, 4]));
-        assert_eq!(resident_bytes(), before + 10);
+        assert_eq!(counted(&token), Some(10));
         assert_eq!(bytes_or_missing(&token), vec![1u8, 2, 3, 4]);
         release(std::slice::from_ref(&token));
-        assert_eq!(resident_bytes(), before);
+        assert_eq!(counted(&token), None);
+        assert_counter_matches_blobs();
     }
 
     #[test]
@@ -189,11 +203,12 @@ mod tests {
 
     #[test]
     fn releasing_keeps_the_byte_count_honest() {
-        let before = resident_bytes();
         let token = put(vec![7u8; 4096]);
-        assert_eq!(resident_bytes(), before + 4096);
-        release(&[token]);
-        assert_eq!(resident_bytes(), before);
+        assert_eq!(counted(&token), Some(4096));
+        assert_counter_matches_blobs();
+        release(std::slice::from_ref(&token));
+        assert_eq!(counted(&token), None);
+        assert_counter_matches_blobs();
     }
 
     #[test]
