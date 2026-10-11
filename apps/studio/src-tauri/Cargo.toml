@@ -14,8 +14,9 @@ tauri-build = { version = "2", features = [] }
 # The shared core. Everything this app can currently do comes from here — which is the
 # point of standing the skeleton up before the studio's own code moves in.
 mxb-core = { path = "../../../crates/core" }
-# The Convert tab: FBX to EDF. The converter itself is private; see crates/fbx2edf.
-fbx2edf = { path = "../../../crates/fbx2edf" }
+# The Convert tab: FBX to EDF, shared with Frost Converter. The converter itself is private;
+# see crates/fbx2edf.
+fbx2edf = { path = "../../../crates/fbx2edf", features = ["tauri"] }
 tauri = { version = "2", features = [] }
 tauri-plugin-shell = "2"
 tauri-plugin-dialog = "2"

@@ -1919,12 +1919,15 @@ dependencies = [
  "anyhow",
  "flate2",
  "image",
+ "log",
  "md-5",
  "rayon",
  "serde",
  "serde_json",
+ "tauri",
  "tempfile",
  "ufbx",
+ "walkdir",
 ]
 
 [[package]]
@@ -2097,6 +2100,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cb4cb245038516f5f85277875cdaa4f7d2c9a0fa0468de06ed190163b1581fcf"
 dependencies = [
  "percent-encoding",
+]
+
+[[package]]
+name = "frost-converter"
+version = "0.1.0"
+dependencies = [
+ "fbx2edf",
+ "log",
+ "serde_json",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-dialog",
+ "tauri-plugin-log",
+ "tauri-plugin-process",
+ "tauri-plugin-updater",
 ]
 
 [[package]]

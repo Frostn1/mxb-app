@@ -1,32 +1,31 @@
-import { useContext, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { CheckCircle2, FileBox, FilePlus, FolderOpen, FolderPlus, Layers, Loader2, Play, TriangleAlert, X } from "lucide-react";
-import { cn } from "@frost/shared/lib/utils";
-import { Button } from "@frost/shared/Components/ui/button";
-import { Input } from "@frost/shared/Components/ui/input";
-import { Progress } from "@frost/shared/Components/ui/progress";
-import { Segmented } from "@frost/shared/Components/ui/segmented";
-import { revealInExplorer } from "@frost/shared/api/mods";
-import { PaneActive } from "../../Shell/ContextBar";
+import { cn } from "../../lib/utils";
+import { Button } from "../ui/button";
+import { Input } from "../ui/input";
+import { Progress } from "../ui/progress";
+import { Segmented } from "../ui/segmented";
+import { revealInExplorer } from "../../api/mods";
 import {
   checkScript,
   convertFiles,
   dirOf,
-  looksLikeBike,
+  isBike,
   nameOf,
   onDone,
   onProgress,
   outputPaths,
-  partNames,
   readText,
   scanPaths,
   type ConvertOptions,
+  type ConvertReport,
   type Found,
   type HrcMode,
   type Outcome,
-} from "@/api/convert";
-import { useT } from "@/i18n";
+} from "../../api/convert";
+import { useT } from "../../i18n/context";
 
 type Normals = "file" | "flat" | "recalc";
 
@@ -70,11 +69,9 @@ const DEFAULTS: Settings = {
   hrc: "ifNone",
 };
 
-const REMEMBER = "studio.convert";
-
-function load(): Settings {
+function load(key: string): Settings {
   try {
-    return { ...DEFAULTS, ...JSON.parse(localStorage.getItem(REMEMBER) ?? "{}") };
+    return { ...DEFAULTS, ...JSON.parse(localStorage.getItem(key) ?? "{}") };
   } catch {
     return DEFAULTS;
   }
@@ -96,12 +93,15 @@ const mb = (n: number) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)} MB` : `${Math.max
 
 /**
  * Convert: FBX files to the `.edf` MX Bikes loads, a batch at a time, on this machine. The
- * same converter and the same options as mxbsecure.com/convert, without the upload.
+ * same converter and the same options as mxbsecure.com/convert, without the upload. Frost's
+ * Studio shows it as a tab and Frost Converter as its whole window.
+ *
+ * `active`: drops land here while it is on screen. `storageKey`: where the settings are kept.
+ * `opened`: paths to start with, as files dropped on an app's icon.
  */
-export default function Convert() {
+export default function Convert({ active, storageKey, opened }: { active: boolean; storageKey: string; opened?: string[] }) {
   const t = useT();
-  const active = useContext(PaneActive);
-  const [s, setS] = useState<Settings>(load);
+  const [s, setS] = useState<Settings>(() => load(storageKey));
   const [files, setFiles] = useState<Found[]>([]);
   const [off, setOff] = useState<Set<string>>(new Set());
   const [jobs, setJobs] = useState<Job[] | null>(null);
@@ -112,11 +112,11 @@ export default function Convert() {
 
   useEffect(() => {
     try {
-      localStorage.setItem(REMEMBER, JSON.stringify(s));
+      localStorage.setItem(storageKey, JSON.stringify(s));
     } catch {
       // Blocked storage: the settings just aren't remembered.
     }
-  }, [s]);
+  }, [s, storageKey]);
   const set = <K extends keyof Settings>(k: K, v: Settings[K]) => setS((p) => ({ ...p, [k]: v }));
 
   const models = useMemo(() => files.filter((f) => f.kind !== "params"), [files]);
@@ -155,14 +155,18 @@ export default function Convert() {
     };
   }, [active]);
 
+  useEffect(() => {
+    if (opened?.length) void addRef.current(opened);
+  }, [opened]);
+
   // A bike defaults to Parts, from the first model's own top-level names, until Layout is
   // picked by hand.
   const firstPath = (chosen.find((f) => f.kind === "model") ?? chosen[0])?.path;
   useEffect(() => {
     if (!firstPath || layoutTouched.current) return;
     let alive = true;
-    partNames(firstPath)
-      .then((names) => alive && !layoutTouched.current && set("layout", looksLikeBike(names) ? "parts" : "whole"))
+    isBike(firstPath)
+      .then((bike) => alive && !layoutTouched.current && set("layout", bike ? "parts" : "whole"))
       .catch(() => {});
     return () => {
       alive = false;
@@ -216,7 +220,12 @@ export default function Convert() {
     }
     if (typeof o === "string") return setError(o);
     const list = chosen.map((f) => ({ path: f.path, shadow: f.kind === "shadow" }));
-    const outs = outputPaths(list, s.out === "folder" && s.folder ? s.folder : null, s.layout === "parts" && s.naming === "model");
+    let outs: string[];
+    try {
+      outs = await outputPaths(list, s.out === "folder" && s.folder ? s.folder : null, s.layout === "parts" && s.naming === "model");
+    } catch (e) {
+      return setError(String(e));
+    }
     const batch: Job[] = list.map((m, i) => ({ input: m.path, output: outs[i], shadow: m.shadow, status: { state: "waiting" } }));
     setJobs(batch);
     setRunning(true);
@@ -522,6 +531,18 @@ function Skipped({ items }: { items: { name: string; reason: string }[] }) {
   );
 }
 
+/** Textures written with a flag: `visor.tga: alpha blend`. */
+function useFlagged() {
+  const t = useT();
+  return (report: ConvertReport) =>
+    report.textures
+      .filter((x) => (x.flags & 3) !== 0)
+      .map((x) => {
+        const what = [x.flags & 1 && t("convert.colourKey"), x.flags & 2 && t("convert.alphaBlend")].filter(Boolean);
+        return `${x.name}: ${what.join(", ")}`;
+      });
+}
+
 function Row({
   path,
   kind,
@@ -538,6 +559,7 @@ function Row({
   onToggle: () => void;
 }) {
   const t = useT();
+  const flagged = useFlagged();
   const st = job?.status;
   const outcome = st?.state === "done" ? st.outcome : null;
   const report = outcome?.report ?? null;
@@ -607,6 +629,11 @@ function Row({
             {report.objects.map((o) => `${o.name || t("convert.mainObject")} ${o.triangles.toLocaleString()}`).join(" · ")}
           </p>
           {outcome!.shd.map((line) => (
+            <p key={line} className="select-text truncate">
+              {line}
+            </p>
+          ))}
+          {flagged(report).map((line) => (
             <p key={line} className="select-text truncate">
               {line}
             </p>

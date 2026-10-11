@@ -2,8 +2,9 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 /**
- * Convert: FBX to EDF on this machine. Mirrors `src-tauri/src/modelconvert.rs`, which runs the
- * converter mxbsecure.com/convert runs in the browser, natively.
+ * Convert: FBX to EDF on this machine, in Frost's Studio and Frost Converter alike. Mirrors
+ * `crates/fbx2edf/src/commands.rs`, which runs the converter mxbsecure.com/convert runs in the
+ * browser, natively.
  */
 
 /** The browser converter's options, read the same way. Anything left out takes its default. */
@@ -22,7 +23,8 @@ export interface ConvertOptions {
 
 export interface ConvertReport {
   objects: { name: string; nodes: number; vertices: number; triangles: number; materials: number }[];
-  textures: { name: string; width: number; height: number; maps: string[] }[];
+  /** `flags` is the word written: 0x1 colour key, 0x2 alpha blend. */
+  textures: { name: string; width: number; height: number; flags: number; maps: string[] }[];
   warnings: string[];
   /** Scene nodes that draw nothing in the file, each with the reason. */
   skipped: { name: string; reason: string }[];
@@ -55,7 +57,7 @@ export interface Found {
 
 export const convertAvailable = () => invoke<boolean>("fbx_convert_available");
 export const scanPaths = (paths: string[]) => invoke<Found[]>("fbx_scan", { paths });
-export const partNames = (path: string) => invoke<string[]>("fbx_part_names", { path });
+export const isBike = (path: string) => invoke<boolean>("fbx_is_bike", { path });
 export const readText = (path: string) => invoke<string>("fbx_read_text", { path });
 
 export function convertFiles(
@@ -82,10 +84,8 @@ export function onDone(f: (e: { index: number; outcome: Outcome }) => void): Pro
   return listen<{ index: number; outcome: Outcome }>("fbx-convert-done", (e) => f(e.payload));
 }
 
-const sep = (p: string) => (p.includes("\\") ? "\\" : "/");
 export const dirOf = (p: string) => p.slice(0, Math.max(p.lastIndexOf("\\"), p.lastIndexOf("/")));
 export const nameOf = (p: string) => p.slice(Math.max(p.lastIndexOf("\\"), p.lastIndexOf("/")) + 1);
-const stemOf = (name: string) => name.replace(/\.[^.]*$/, "");
 
 /**
  * Where each model is written: beside it, or in `folder` when one is given. A bike's shadow
@@ -93,25 +93,8 @@ const stemOf = (name: string) => name.replace(/\.[^.]*$/, "");
  * names MX Bikes looks for. Otherwise a model keeps its FBX's name. Two models landing on one
  * name are kept apart with a number, as the browser converter does.
  */
-export function outputPaths(models: { path: string; shadow: boolean }[], folder: string | null, bike = false): string[] {
-  const taken = new Set<string>();
-  return models.map((m) => {
-    const dir = folder || dirOf(m.path);
-    const s = sep(dir || m.path);
-    const stem = m.shadow ? "shadow_model" : bike ? "model" : stemOf(nameOf(m.path));
-    let name = `${dir}${s}${stem}.edf`;
-    for (let n = 2; taken.has(name.toLowerCase()); n++) name = `${dir}${s}${stem}_${n}.edf`;
-    taken.add(name.toLowerCase());
-    return name;
-  });
-}
-
-/** Whether Parts-planned object names look like a bike's, as the browser converter guesses. */
-export function looksLikeBike(names: string[]): boolean {
-  const has = (n: string) => names.some((x) => x.toLowerCase() === n);
-  const others = ["fsusp", "rsusp", "steer"].filter(has).length;
-  return others >= 2 || (has("chassis") && others >= 1);
-}
+export const outputPaths = (models: { path: string; shadow: boolean }[], folder: string | null, bike = false) =>
+  invoke<string[]>("fbx_output_paths", { models, folder, bike });
 
 const PARTS = ["chassis", "steer", "fsusp", "rsusp"];
 

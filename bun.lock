@@ -38,9 +38,32 @@
         "vite": "^5.4.10",
       },
     },
+    "apps/converter": {
+      "name": "@frost/converter",
+      "version": "0.1.0",
+      "dependencies": {
+        "@frost/shared": "*",
+        "@tauri-apps/api": "^2.1.1",
+        "@tauri-apps/plugin-dialog": "^2.2.0",
+        "@tauri-apps/plugin-process": "^2.3.1",
+        "@tauri-apps/plugin-updater": "^2.10.1",
+        "lucide-react": "^1.24.0",
+        "react": "^18.3.1",
+        "react-dom": "^18.3.1",
+        "sonner": "^2.0.7",
+      },
+      "devDependencies": {
+        "@tailwindcss/vite": "^4.3.2",
+        "@tauri-apps/cli": "^2.1.0",
+        "@types/react": "^18.3.12",
+        "@types/react-dom": "^18.3.1",
+        "@vitejs/plugin-react": "^4.3.3",
+        "vite": "^5.4.10",
+      },
+    },
     "apps/manager": {
       "name": "@frost/manager",
-      "version": "0.19.1",
+      "version": "0.20.0",
       "dependencies": {
         "@frost/shared": "*",
         "@radix-ui/react-alert-dialog": "^1.1.19",
@@ -111,7 +134,7 @@
     },
     "apps/studio": {
       "name": "@frost/studio",
-      "version": "0.6.1",
+      "version": "0.7.3",
       "dependencies": {
         "@frost/shared": "*",
         "@tauri-apps/api": "^2.1.1",
@@ -159,6 +182,7 @@
         "@react-three/drei": "^9.122.0",
         "@react-three/fiber": "^8.18.0",
         "@tauri-apps/api": "^2.1.1",
+        "@tauri-apps/plugin-dialog": "^2.2.0",
         "@tauri-apps/plugin-shell": "^2",
         "class-variance-authority": "^0.7.1",
         "clsx": "^2.1.1",
@@ -306,6 +330,8 @@
     "@fontsource/geist-mono": ["@fontsource/geist-mono@5.3.0", "", {}, "sha512-UtJ1BBBCVpMYdIcW7nEB45UAoAw5M53ZXs2t0ciPW+IokuAAIc56M8+kW5tXbRJCTpDw4XTtU7proT6NdQAHTg=="],
 
     "@frost/coach": ["@frost/coach@workspace:apps/coach"],
+
+    "@frost/converter": ["@frost/converter@workspace:apps/converter"],
 
     "@frost/manager": ["@frost/manager@workspace:apps/manager"],
 

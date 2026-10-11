@@ -1,0 +1,7 @@
+/* The Studio's arrangement without its editor layer: Tailwind's scanner off and every source
+   declared, the shared theme, then the shared dark skin (Coach's look). */
+@import "tailwindcss" source(none);
+@import "@frost/shared/theme.css";
+@import "@frost/shared/Skins/dark.css";
+@source "./**/*.{ts,tsx}";
+@source "../index.html";

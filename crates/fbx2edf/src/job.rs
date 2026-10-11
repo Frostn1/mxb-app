@@ -1,16 +1,15 @@
-//! Convert: FBX files to the `.edf` MX Bikes loads, on this machine, a batch at a time.
-//!
-//! The converter is the `fbx2edf` crate's, the one mxbsecure.com/convert runs in the browser,
-//! built natively here. When this build doesn't carry it, `fbx_convert_available` says so and
-//! the tab isn't offered.
+//! A batch as Frost's Studio and Frost Converter both run it: what dropped paths hold, where
+//! each model is written, the `.shd` files written before converting and the `.hrc` files
+//! after. Both apps (and the converter's command line) call this, so the same settings make
+//! the same files in each.
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
 
-use fbx2edf::host::{self, Event, Options};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use tauri::Emitter;
+
+use crate::host::{self, Event, Options};
 
 /// One file an added path turned out to hold.
 #[derive(Debug, Serialize, PartialEq)]
@@ -20,61 +19,6 @@ pub struct Found {
     /// "model", "shadow" (an FBX named like a bike's shadow) or "params" (an `.ini`).
     pub kind: &'static str,
     pub size: u64,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct Pair {
-    pub input: String,
-    pub output: String,
-}
-
-#[derive(Debug, Default, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Outcome {
-    pub report: Option<Value>,
-    pub error: Option<String>,
-    /// The `.hrc` files written beside a bike's `.edf`.
-    pub hrc: Vec<String>,
-    /// The `.shd` files written for its textures, each with the maps it names:
-    /// `bike.shd: normal bike_n, reflection bike_r`.
-    pub shd: Vec<String>,
-    /// What writing those files decided for the modder: a map used by name because the
-    /// material doesn't link it, `.hrc` files kept or replaced.
-    pub notes: Vec<String>,
-}
-
-/// When a bike's `.hrc` files are written beside its `.edf`.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum HrcMode {
-    /// Every one; one already there and different is kept as `<name>.bak` first.
-    Always,
-    /// Only into a folder with no `.hrc` at all.
-    #[default]
-    IfNone,
-    Never,
-}
-
-#[derive(Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ProgressEvent {
-    index: usize,
-    done: usize,
-    total: usize,
-}
-
-#[derive(Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct DoneEvent<'a> {
-    index: usize,
-    outcome: &'a Outcome,
-}
-
-static RUNNING: AtomicBool = AtomicBool::new(false);
-
-#[tauri::command]
-pub fn fbx_convert_available() -> bool {
-    host::available()
 }
 
 fn kind_of(path: &Path) -> Option<&'static str> {
@@ -92,7 +36,7 @@ fn kind_of(path: &Path) -> Option<&'static str> {
 /// the way down. Each once, in order.
 pub fn scan(paths: &[String]) -> Vec<Found> {
     let mut out = Vec::new();
-    let mut seen = std::collections::HashSet::new();
+    let mut seen = HashSet::new();
     let mut push = |p: &Path, out: &mut Vec<Found>| {
         let Some(kind) = kind_of(p) else { return };
         if !seen.insert(p.to_string_lossy().to_lowercase()) {
@@ -121,27 +65,65 @@ pub fn scan(paths: &[String]) -> Vec<Found> {
     out
 }
 
-#[tauri::command]
-pub fn fbx_scan(paths: Vec<String>) -> Vec<Found> {
-    scan(&paths)
+/// A model to write: its FBX, and whether it is a bike's shadow.
+#[derive(Debug, Clone, Deserialize)]
+pub struct Model {
+    pub path: String,
+    pub shadow: bool,
 }
 
-/// The objects an FBX makes as bike parts, for telling a bike from a single model.
-#[tauri::command]
-pub async fn fbx_part_names(path: String) -> Result<Vec<String>, String> {
-    tauri::async_runtime::spawn_blocking(move || host::part_names(Path::new(&path)))
-        .await
-        .map_err(|e| e.to_string())?
+/// Where each model is written: beside it, or in `folder` when one is given. A bike's shadow
+/// model is always `shadow_model.edf` and, with `bike`, the bike itself is `model.edf`: the
+/// names MX Bikes looks for. Otherwise a model keeps its FBX's name. Two models landing on one
+/// name are kept apart with a number, as the browser converter does.
+pub fn output_paths(models: &[Model], folder: Option<&Path>, bike: bool) -> Vec<PathBuf> {
+    let mut taken = HashSet::new();
+    models
+        .iter()
+        .map(|m| {
+            let input = Path::new(&m.path);
+            let dir = folder.map(Path::to_path_buf).unwrap_or_else(|| input.parent().map(Path::to_path_buf).unwrap_or_default());
+            let stem = if m.shadow {
+                "shadow_model".to_string()
+            } else if bike {
+                "model".to_string()
+            } else {
+                input.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default()
+            };
+            let mut out = dir.join(format!("{stem}.edf"));
+            let mut n = 2;
+            while taken.contains(&out.to_string_lossy().to_lowercase()) {
+                out = dir.join(format!("{stem}_{n}.edf"));
+                n += 1;
+            }
+            taken.insert(out.to_string_lossy().to_lowercase());
+            out
+        })
+        .collect()
 }
 
-/// A parameter file or export script, as text. Small files only: these are a few lines.
-#[tauri::command]
-pub fn fbx_read_text(path: String) -> Result<String, String> {
-    let len = std::fs::metadata(&path).map_err(|e| e.to_string())?.len();
-    if len > 1 << 20 {
-        return Err(format!("{path} is too large to be a parameter file"));
-    }
-    std::fs::read_to_string(&path).map_err(|e| format!("{path}: {e}"))
+/// Whether Parts-planned object names look like a bike's, as the browser converter guesses.
+pub fn looks_like_bike(names: &[String]) -> bool {
+    let has = |n: &str| names.iter().any(|x| x.eq_ignore_ascii_case(n));
+    let others = ["fsusp", "rsusp", "steer"].iter().filter(|n| has(n)).count();
+    others >= 2 || (has("chassis") && others >= 1)
+}
+
+/// Whether an FBX is a bike: Parts layout and `model.edf` by default.
+pub fn is_bike(fbx: &Path) -> Result<bool, String> {
+    host::part_names(fbx).map(|names| looks_like_bike(&names))
+}
+
+/// When a bike's `.hrc` files are written beside its `.edf`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum HrcMode {
+    /// Every one; one already there and different is kept as `<name>.bak` first.
+    Always,
+    /// Only into a folder with no `.hrc` at all.
+    #[default]
+    IfNone,
+    Never,
 }
 
 /// The `.hrc` files a converted bike needs beside its `.edf`, in the game's own format, as the
@@ -374,7 +356,7 @@ pub fn plan_shd(site: &host::ShdSite, overwrite: bool, shininess: f32) -> Option
 /// Write the `.shd` files an FBX's textures lack, before it is converted, so the converter
 /// builds their maps in. `done` holds the files written so far in the batch: a texture two
 /// models share is written once. Summaries, and notes.
-fn write_shd(fbx: &Path, overwrite: bool, shininess: f32, done: &mut std::collections::HashSet<PathBuf>) -> (Vec<String>, Vec<String>) {
+fn write_shd(fbx: &Path, overwrite: bool, shininess: f32, done: &mut HashSet<PathBuf>) -> (Vec<String>, Vec<String>) {
     let sites = match host::shd_sites(fbx) {
         Ok(s) => s,
         Err(e) => {
@@ -399,55 +381,71 @@ fn write_shd(fbx: &Path, overwrite: bool, shininess: f32, done: &mut std::collec
     (written, notes)
 }
 
-/// Convert a batch. Each pair's progress and outcome is sent as it happens (`fbx-convert-progress`,
-/// `fbx-convert-done`), and every outcome is returned at the end, in order. With `shd`, the
-/// `.shd` files its textures lack are written first (see [`write_shd`]).
-#[tauri::command]
-pub async fn fbx_convert(
-    app: tauri::AppHandle,
-    pairs: Vec<Pair>,
-    options: Options,
-    hrc: HrcMode,
-    shd: Option<bool>,
-    overwrite_shd: Option<bool>,
-    shininess: Option<f32>,
-) -> Result<Vec<Outcome>, String> {
-    if RUNNING.swap(true, Ordering::SeqCst) {
-        return Err("A batch is already converting.".into());
+/// The `.shd` files a batch writes before converting.
+#[derive(Debug, Clone, Copy)]
+pub struct Shd {
+    /// Write the `.shd` files textures lack.
+    pub make: bool,
+    /// Write over the ones there.
+    pub overwrite: bool,
+    pub shininess: f32,
+}
+
+impl Default for Shd {
+    fn default() -> Self {
+        Shd { make: false, overwrite: false, shininess: SHININESS }
     }
-    let (shd, overwrite_shd) = (shd.unwrap_or(false), overwrite_shd.unwrap_or(false));
-    let shininess = shininess.filter(|s| s.is_finite() && *s >= 0.0).unwrap_or(SHININESS);
-    let result = tauri::async_runtime::spawn_blocking(move || {
-        let pairs: Vec<(PathBuf, PathBuf)> = pairs.into_iter().map(|p| (PathBuf::from(p.input), PathBuf::from(p.output))).collect();
-        let started = std::time::Instant::now();
-        let mut done = std::collections::HashSet::new();
-        let mut shd_files: Vec<(Vec<String>, Vec<String>)> = pairs
-            .iter()
-            .map(|(fbx, _)| if shd { write_shd(fbx, overwrite_shd, shininess, &mut done) } else { Default::default() })
-            .collect();
-        let mut outcomes: Vec<Option<Outcome>> = (0..pairs.len()).map(|_| None).collect();
-        let results = host::convert(&pairs, &options, &mut |event| match event {
-            Event::Pictures { index, done, total } => {
-                let _ = app.emit("fbx-convert-progress", ProgressEvent { index, done, total });
-            }
-            Event::Finished { index, result } => {
-                let outcome = outcome_of(result, hrc, &pairs[index].1, std::mem::take(&mut shd_files[index]));
-                let _ = app.emit("fbx-convert-done", DoneEvent { index, outcome: &outcome });
-                outcomes[index] = Some(outcome);
-            }
-        })?;
-        log::info!("[convert] {} files in {} ms", pairs.len(), started.elapsed().as_millis());
-        Ok(results
-            .into_iter()
-            .zip(outcomes)
-            .enumerate()
-            .map(|(i, (r, o))| o.unwrap_or_else(|| outcome_of(r, hrc, &pairs[i].1, Default::default())))
-            .collect())
-    })
-    .await
-    .map_err(|e| e.to_string());
-    RUNNING.store(false, Ordering::SeqCst);
-    result?
+}
+
+/// How one model went.
+#[derive(Debug, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Outcome {
+    pub report: Option<Value>,
+    pub error: Option<String>,
+    /// The `.hrc` files written beside a bike's `.edf`.
+    pub hrc: Vec<String>,
+    /// The `.shd` files written for its textures, each with the maps it names:
+    /// `bike.shd: normal bike_n, reflection bike_r`.
+    pub shd: Vec<String>,
+    /// What writing those files decided for the modder: a map used by name because the
+    /// material doesn't link it, `.hrc` files kept or replaced.
+    pub notes: Vec<String>,
+}
+
+/// What a batch says as it goes. `index` is the pair's place in the batch.
+pub enum Progress<'a> {
+    /// `done` of `total` textures made.
+    Pictures { index: usize, done: usize, total: usize },
+    /// One model finished, written or not.
+    Done { index: usize, outcome: &'a Outcome },
+}
+
+/// Convert a batch: the `.shd` files its textures lack first (with `shd.make`), then every
+/// model through one pool, then each bike's `.hrc` files as `hrc` says. One outcome per pair,
+/// in order; `Err` only when the options are refused, before anything is read.
+pub fn run(pairs: &[(PathBuf, PathBuf)], options: &Options, hrc: HrcMode, shd: Shd, on: &mut dyn FnMut(Progress)) -> Result<Vec<Outcome>, String> {
+    let shininess = if shd.shininess.is_finite() && shd.shininess >= 0.0 { shd.shininess } else { SHININESS };
+    let mut done = HashSet::new();
+    let mut shd_files: Vec<(Vec<String>, Vec<String>)> = pairs
+        .iter()
+        .map(|(fbx, _)| if shd.make { write_shd(fbx, shd.overwrite, shininess, &mut done) } else { Default::default() })
+        .collect();
+    let mut outcomes: Vec<Option<Outcome>> = (0..pairs.len()).map(|_| None).collect();
+    let results = host::convert(pairs, options, &mut |event| match event {
+        Event::Pictures { index, done, total } => on(Progress::Pictures { index, done, total }),
+        Event::Finished { index, result } => {
+            let outcome = outcome_of(result, hrc, &pairs[index].1, std::mem::take(&mut shd_files[index]));
+            on(Progress::Done { index, outcome: &outcome });
+            outcomes[index] = Some(outcome);
+        }
+    })?;
+    Ok(results
+        .into_iter()
+        .zip(outcomes)
+        .enumerate()
+        .map(|(i, (r, o))| o.unwrap_or_else(|| outcome_of(r, hrc, &pairs[i].1, Default::default())))
+        .collect())
 }
 
 fn outcome_of(result: Result<Value, String>, hrc: HrcMode, edf: &Path, (shd, mut notes): (Vec<String>, Vec<String>)) -> Outcome {
@@ -489,6 +487,28 @@ mod tests {
                 ("helmet.fbx".to_string(), "model"),
             ]
         );
+    }
+
+    fn model(path: &str, shadow: bool) -> Model {
+        Model { path: path.into(), shadow }
+    }
+
+    #[test]
+    fn outputs_take_the_names_the_game_loads_and_never_collide() {
+        let models = [model("a/ktm.fbx", false), model("a/Shadow_ktm.fbx", true), model("b/ktm.fbx", false)];
+        let names = |v: Vec<PathBuf>| v.into_iter().map(|p| p.to_string_lossy().replace('\\', "/")).collect::<Vec<_>>();
+        assert_eq!(names(output_paths(&models, None, true)), ["a/model.edf", "a/shadow_model.edf", "b/model.edf"]);
+        assert_eq!(names(output_paths(&models, None, false)), ["a/ktm.edf", "a/shadow_model.edf", "b/ktm.edf"]);
+        assert_eq!(names(output_paths(&models, Some(Path::new("out")), false)), ["out/ktm.edf", "out/shadow_model.edf", "out/ktm_2.edf"]);
+    }
+
+    #[test]
+    fn a_bike_is_told_by_its_parts() {
+        let v = |names: &[&str]| names.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert!(looks_like_bike(&v(&["", "steer", "fsusp", "rsusp"])));
+        assert!(looks_like_bike(&v(&["chassis", "Steer"])));
+        assert!(!looks_like_bike(&v(&["", "steer"])));
+        assert!(!looks_like_bike(&v(&[""])));
     }
 
     #[test]

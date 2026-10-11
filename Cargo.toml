@@ -15,6 +15,7 @@ members = [
     "apps/studio/src-tauri",
     "apps/coach/src-tauri",
     "apps/servers/src-tauri",
+    "apps/converter/src-tauri",
 ]
 # `tools/mxb-fetcher` builds on its own on a bare Linux box (its README), with its own lockfile
 # and none of the apps' dependencies.
