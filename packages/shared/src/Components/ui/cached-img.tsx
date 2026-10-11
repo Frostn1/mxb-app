@@ -63,9 +63,9 @@ export default function CachedImg({
       (entries) => {
         if (timer === undefined && entries.some((e) => e.isIntersecting)) {
           timer = setTimeout(() => {
-            if (img.complete) return;
-            setDirect(true);
-            setRecovered(true);
+            // Not reported as a recovery: slow is not broken, and three slow images must not
+            // send the rest of the session around the cache.
+            if (!img.complete) setDirect(true);
           }, CACHE_PATIENCE_MS);
           observer.disconnect();
         }
