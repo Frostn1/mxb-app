@@ -75,32 +75,45 @@ export function isCacheableImage(url: string): boolean {
 }
 
 /**
- * Whether the `imgcache` scheme has proved unusable this session.
+ * Hosts whose images go straight to the origin for the rest of the session.
  *
  * A user's report: every picture in the app blank — Browse, Shop and Hub alike — while all
  * the text around them loaded fine. Their log read `thumbnails 0 served (0 MB)` for the whole
- * session, so nothing had reached the handler at all; three different origins failing at once
- * is the scheme, not any one site. Whatever intercepts `http://imgcache.localhost` on that
- * machine, the origin URL still loads in the same webview, so falling back to it is the
- * difference between a grid of pictures and a grid of placeholders.
+ * session, so nothing had reached the handler at all. Whatever intercepts
+ * `http://imgcache.localhost` on that machine, the origin URL still loads in the same webview,
+ * so falling back to it is the difference between a grid of pictures and a grid of
+ * placeholders.
  *
- * Session-local and one-way. Losing the cache for a session costs re-fetching thumbnails;
- * getting it wrong the other way costs the user every image, which is what they reported.
+ * Per host, not global. It used to be one switch: three mxb-mods thumbnails that the cache
+ * couldn't fetch (a Cloudflare challenge only the webview can pass) but the webview could
+ * wrote off the cache for every catalog. The Shop's CDN then got direct requests it refuses
+ * (it only serves its own pages, or no referer at all), and every Shop card went blank while
+ * mxb-mods looked fine. A scheme that is broken outright still ends up direct everywhere,
+ * one host at a time.
  */
-let directRecoveries = 0;
-let schemeBroken = false;
+const directRecoveries = new Map<string, number>();
+const directHosts = new Set<string>();
 
 /**
- * How many images must load direct after failing through the cache before the scheme itself
- * is written off. More than one, because a single image can fail through the cache on its own
- * merits — an origin that 404s only for us, a body past the fetch cap, a format the sniffer
- * won't have — and one of those must not cost everyone else their cache.
+ * How many images from one host must load direct after failing through the cache before that
+ * host skips the cache. More than one, because a single image can fail through the cache on
+ * its own merits — an origin that 404s only for us, a body past the fetch cap, a format the
+ * sniffer won't have — and one of those must not cost everyone else their cache.
  */
 const RECOVERIES_BEFORE_GIVING_UP = 3;
 
-/** Whether [`cachedImage`] should be skipped in favour of the origin URL. */
-export function schemeIsBroken(): boolean {
-  return schemeBroken;
+function hostOf(url: string): string | null {
+  try {
+    return new URL(url).hostname.toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
+/** Whether [`cachedImage`] should be skipped in favour of the origin URL for `url`. */
+export function schemeIsBroken(url: string): boolean {
+  const host = hostOf(url);
+  return host !== null && directHosts.has(host);
 }
 
 /**
@@ -108,7 +121,16 @@ export function schemeIsBroken(): boolean {
  *
  * Only affects images mounted afterwards; the one that recovered is already showing.
  */
-export function noteDirectRecovery(): void {
-  directRecoveries += 1;
-  if (directRecoveries >= RECOVERIES_BEFORE_GIVING_UP) schemeBroken = true;
+export function noteDirectRecovery(url: string): void {
+  const host = hostOf(url);
+  if (host === null) return;
+  const n = (directRecoveries.get(host) ?? 0) + 1;
+  directRecoveries.set(host, n);
+  if (n >= RECOVERIES_BEFORE_GIVING_UP) directHosts.add(host);
+}
+
+/** Test hook: forget what this session has learnt. */
+export function resetDirectHosts(): void {
+  directRecoveries.clear();
+  directHosts.clear();
 }

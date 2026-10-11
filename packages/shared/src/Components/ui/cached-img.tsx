@@ -36,7 +36,7 @@ export default function CachedImg({
 }: CachedImgProps) {
   // `direct` from the start once the scheme has been written off, so the rest of a session
   // doesn't pay a doomed request per image.
-  const [direct, setDirect] = useState(() => schemeIsBroken());
+  const [direct, setDirect] = useState(() => schemeIsBroken(src));
   // Set when this image is showing *because* of the fallback, so its load can be reported.
   const [recovered, setRecovered] = useState(false);
 
@@ -46,6 +46,9 @@ export default function CachedImg({
       // Keyed so React swaps the element rather than reusing one the browser has already
       // marked as errored, which can leave the new `src` unrequested.
       key={direct ? "direct" : "cached"}
+      // The direct request must not carry the app's origin as a referer: the Shop's CDN
+      // refuses any referer but its own store, and answers a request with none.
+      referrerPolicy="no-referrer"
       src={direct ? src : cachedImage(src, width)}
       onError={() => {
         if (direct) {
@@ -58,7 +61,7 @@ export default function CachedImg({
       onLoad={() => {
         if (recovered) {
           setRecovered(false);
-          noteDirectRecovery();
+          noteDirectRecovery(src);
         }
       }}
     />
