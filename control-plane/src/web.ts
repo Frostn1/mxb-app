@@ -24,6 +24,7 @@ import { steamResult } from "./page";
 import { isWebAdmin, isWebAdminPath, webAdminRoutes } from "./webadmin";
 import { isWebModsPath, webModRoutes } from "./modreports";
 import { hostingWebRoutes, isHostingWebPath } from "./hostingroutes";
+import { isWebBuildsPath, webBuildRoutes } from "./builds";
 import { isVerified, loginUrl, steamPersonaName, verifyAssertion } from "./steam";
 import {
   clearedCookie,
@@ -75,6 +76,9 @@ export async function webRoutes(
 
   // Entering a series signed in: the GUID comes from this session's Steam ID (`series.ts`).
   if (isWebSeriesPath(path)) return webSeriesRoutes(request, url, env, origin);
+
+  // Builds from the Build page, sent as model swap orders, and the creator's queue (`builds.ts`).
+  if (isWebBuildsPath(path)) return webBuildRoutes(request, url, env, origin);
 
   // User server deploy and its operator view, on servers.mxbsecure.com (`hostingroutes.ts`).
   // Before the shared preflight below: these also take PUT and DELETE.
