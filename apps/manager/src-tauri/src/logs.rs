@@ -87,6 +87,9 @@ pub struct LogsInfo {
     pub game_user: LogGroup,
     /// MXBMRP3's crash logs (`<user folder>\mxbmrp3\crashes`).
     pub mxbmrp3: LogGroup,
+    /// The game's `plugins` folder. FrostMod and the locked-content DLL write their logs
+    /// beside the plugin when it runs from there rather than from the managed folder.
+    pub plugins: LogGroup,
     /// Where the game really is, and whether the game will load plugins from there.
     pub install: InstallFacts,
 }
@@ -202,6 +205,17 @@ fn is_secure_log(name: &str) -> bool {
     lower == "mxbsecure.log" || lower == "manifest.tsv"
 }
 
+/// Whether a file in the game's `plugins` folder goes in the bundle. That folder holds other
+/// people's plugins too, so it is matched by name: logs, and FrostMod's crash reports and
+/// dumps. Never a `.dlo`, a `.dll` or a settings file.
+fn is_plugin_log(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    lower.ends_with(".log")
+        || (lower.starts_with("frostmod")
+            && lower.contains("crash")
+            && (lower.ends_with(".json") || is_dump(&lower)))
+}
+
 fn describe(path: &Path) -> Option<LogFile> {
     let meta = std::fs::metadata(path).ok()?;
     if !meta.is_file() {
@@ -302,11 +316,16 @@ pub fn game_dirs(cfg: &AppConfig) -> Vec<PathBuf> {
 /// With the real install known (`install`, the folder holding the executable), that folder is
 /// the answer: it is where `log.txt`, `e3dlog.txt`, `sllog.txt` and the crash dumps are, and
 /// the user folder gets a group of its own.
-fn game_group(cfg: &AppConfig, install: Option<&Path>) -> LogGroup {
+///
+/// Without it, the folders FrostMod was installed into (`places`) are tried after the
+/// configured ones: on a PC where the saved path is wrong and Steam detection misses the
+/// library (`G:\SteamLibrary`), they are the record of where the game really is.
+fn game_group(cfg: &AppConfig, install: Option<&Path>, places: &[PathBuf]) -> LogGroup {
     if let Some(dir) = install {
         return scan(dir, is_game_log);
     }
-    let dirs = game_dirs(cfg);
+    let mut dirs = game_dirs(cfg);
+    dirs.extend(places.iter().cloned());
     let Some(first) = dirs.first().cloned() else {
         // No folders configured at all — first run, or a game that was never set up.
         return LogGroup::missing(PathBuf::new());
@@ -346,6 +365,31 @@ fn mxbmrp3_group(cfg: &AppConfig) -> LogGroup {
     group
 }
 
+/// The `plugins` folder of the install, or else of the first game folder FrostMod was put
+/// into that holds logs.
+fn plugins_group(install: Option<&Path>, places: &[PathBuf]) -> LogGroup {
+    let dirs: Vec<PathBuf> = install
+        .map(Path::to_path_buf)
+        .into_iter()
+        .chain(places.iter().cloned())
+        .map(|d| crate::library::resolve_child(&d, "plugins"))
+        .collect();
+    let Some(first) = dirs.first().cloned() else {
+        return LogGroup::missing(PathBuf::new());
+    };
+    let mut fallback: Option<LogGroup> = None;
+    for dir in dirs {
+        let group = scan(&dir, is_plugin_log);
+        if !group.files.is_empty() {
+            return group;
+        }
+        if group.exists && fallback.is_none() {
+            fallback = Some(group);
+        }
+    }
+    fallback.unwrap_or_else(|| LogGroup::missing(first))
+}
+
 pub fn info(app_log_dir: &Path, frostmod_dir: &Path, secure_dir: &Path, cfg: &AppConfig) -> LogsInfo {
     let install = crate::gamefolders::real_install(cfg);
     info_with(app_log_dir, frostmod_dir, secure_dir, cfg, install.as_deref())
@@ -360,8 +404,11 @@ fn info_with(
     cfg: &AppConfig,
     install: Option<&Path>,
 ) -> LogsInfo {
-    let game = game_group(cfg, install);
+    // Every game folder FrostMod was put into, from the app's own record of them.
+    let places = crate::frostmod_manage::read_places(frostmod_dir);
+    let game = game_group(cfg, install, &places);
     LogsInfo {
+        plugins: plugins_group(install, &places),
         app: scan_all(app_log_dir),
         frostmod: scan(frostmod_dir, is_frostmod_log),
         game_user: game_user_group(cfg, &game),
@@ -425,13 +472,14 @@ pub fn export(dest: &Path, info: &LogsInfo, summary: &str) -> anyhow::Result<Exp
 /// The groups in the order they're written, paired with the folder each takes inside an
 /// exported zip. Named once so the archive's layout and the summary listing it can't drift
 /// apart.
-fn groups(info: &LogsInfo) -> [(&'static str, &LogGroup); 6] {
+fn groups(info: &LogsInfo) -> [(&'static str, &LogGroup); 7] {
     [
         ("app", &info.app),
         ("frostmod", &info.frostmod),
         ("game", &info.game),
         ("game-user", &info.game_user),
         ("mxbmrp3", &info.mxbmrp3),
+        ("plugins", &info.plugins),
         ("secure", &info.secure),
     ]
 }
@@ -681,20 +729,74 @@ mod tests {
         };
 
         // Nothing anywhere: we still name the install folder rather than going blank.
-        let group = game_group(&cfg, None);
+        let group = game_group(&cfg, None, &[]);
         assert_eq!(group.dir, install.to_string_lossy());
         assert!(group.files.is_empty());
 
         // A log in the user folder wins over an install folder that has none.
         write(&user, "log.txt", "hello");
-        let group = game_group(&cfg, None);
+        let group = game_group(&cfg, None, &[]);
         assert_eq!(group.dir, user.to_string_lossy());
         assert_eq!(group.files.len(), 1);
 
         // …and the install folder wins as soon as it has one of its own.
         write(&install, "log.txt", "beside the exe");
-        let group = game_group(&cfg, None);
+        let group = game_group(&cfg, None, &[]);
         assert_eq!(group.dir, install.to_string_lossy());
+    }
+
+    /// A rider whose saved path is wrong and whose library Steam detection missed (another
+    /// drive, `G:\SteamLibrary`): the folders FrostMod was installed into still lead to the
+    /// game's `log.txt` and to the logs FrostMod wrote beside its plugin.
+    #[test]
+    fn logs_are_found_through_the_places_frostmod_was_installed() {
+        let root = tmpdir("places");
+        let frostmod_dir = root.join("frostmod");
+        let library = root.join("G").join("SteamLibrary").join("steamapps").join("common").join("MX Bikes");
+        let plugins = library.join("plugins");
+        std::fs::create_dir_all(&plugins).unwrap();
+        std::fs::create_dir_all(&frostmod_dir).unwrap();
+        write(&library, "log.txt", "game");
+        write(&plugins, "frostmod.dlo", "plugin");
+        write(&plugins, "frostmod.dir", "C:\\pointer");
+        write(&plugins, "frostmod_session.log", "plugin side");
+        write(&plugins, "mxbsecure.log", "dll side");
+        write(&plugins, "frostmod-crash-20261011-101010.json", "{}");
+        write(&plugins, "someone_elses.dlo", "not ours");
+        write(&plugins, "someone_elses.cfg", "settings");
+        write(&frostmod_dir, "plugin_places.txt", &library.to_string_lossy());
+
+        let cfg = AppConfig {
+            game_path: root.join("wrong").to_string_lossy().into_owned(),
+            ..Default::default()
+        };
+        let info = info_with(&root.join("app"), &frostmod_dir, &root.join("secure"), &cfg, None);
+        assert_eq!(info.game.dir, library.to_string_lossy());
+        assert_eq!(info.game.files.len(), 1);
+        let mut names: Vec<&str> = info.plugins.files.iter().map(|f| f.name.as_str()).collect();
+        names.sort_unstable();
+        assert_eq!(names, ["frostmod-crash-20261011-101010.json", "frostmod_session.log", "mxbsecure.log"]);
+
+        let dest = root.join("out.zip");
+        export(&dest, &info, "").unwrap();
+        let zip = zip::ZipArchive::new(std::fs::File::open(&dest).unwrap()).unwrap();
+        let files: Vec<String> = zip.file_names().map(str::to_string).collect();
+        assert!(files.contains(&"plugins/frostmod_session.log".to_string()), "{files:?}");
+        assert!(files.contains(&"game/log.txt".to_string()), "{files:?}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn only_logs_and_frostmod_crash_reports_come_out_of_plugins() {
+        assert!(is_plugin_log("frostmod_session.log"));
+        assert!(is_plugin_log("mxbsecure.log"));
+        assert!(is_plugin_log("FrostMod-Crash-1.json"));
+        assert!(is_plugin_log("frostmod-crash-1.dmp"));
+        assert!(!is_plugin_log("frostmod.dlo"));
+        assert!(!is_plugin_log("frostmod.dir"));
+        assert!(!is_plugin_log("frostmod_cmd.json"));
+        assert!(!is_plugin_log("other.json"));
+        assert!(!is_plugin_log("mxbsecure.dll"));
     }
 
     #[test]

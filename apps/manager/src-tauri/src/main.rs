@@ -9431,6 +9431,9 @@ fn main() {
         .run(|app, event| {
             // Coach reads our presence file to find us; a stale one is only ignored.
             if let tauri::RunEvent::Exit = event {
+                // So a log that ends here reads as a quit, and one that just stops reads as a
+                // freeze or a kill.
+                log::info!("[app] exiting cleanly");
                 overlay::stop_link(app);
             }
         });
