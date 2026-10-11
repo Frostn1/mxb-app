@@ -1,5 +1,6 @@
-import { useState, type ImgHTMLAttributes } from "react";
+import { useEffect, useRef, useState, type ImgHTMLAttributes } from "react";
 import {
+  CACHE_PATIENCE_MS,
   cachedImage,
   noteDirectRecovery,
   schemeIsBroken,
@@ -27,6 +28,11 @@ interface CachedImgProps extends Omit<ImgHTMLAttributes<HTMLImageElement>, "src"
  * real browser, real fingerprint, the site's cookies — which is also the one thing that gets
  * a Cloudflare-challenged user their mxb-mods.com pictures, since a `cf_clearance` cannot be
  * replayed into our HTTP client (see `mxb_session.rs`). One fallback, two failures answered.
+ *
+ * A cache request that never answers is a miss too. An error is what triggers the fallback,
+ * and a request queued behind stalled ones raises none: a grid sat blank, every card waiting,
+ * with nothing to recover from. So an image still pending [`CACHE_PATIENCE_MS`] after it came
+ * into view goes direct as well.
  */
 export default function CachedImg({
   src,
@@ -39,10 +45,44 @@ export default function CachedImg({
   const [direct, setDirect] = useState(() => schemeIsBroken(src));
   // Set when this image is showing *because* of the fallback, so its load can be reported.
   const [recovered, setRecovered] = useState(false);
+  const [settled, setSettled] = useState(false);
+  const ref = useRef<HTMLImageElement>(null);
+
+  const fallBack = () => {
+    setDirect(true);
+    setRecovered(true);
+  };
+
+  // The clock starts when the image is near the viewport, not at mount: a lazy image below
+  // the fold hasn't been requested yet, and must not be sent direct for waiting its turn.
+  useEffect(() => {
+    const img = ref.current;
+    if (direct || settled || !img) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (timer === undefined && entries.some((e) => e.isIntersecting)) {
+          timer = setTimeout(() => {
+            // Not reported as a recovery: slow is not broken, and three slow images must not
+            // send the rest of the session around the cache.
+            if (!img.complete) setDirect(true);
+          }, CACHE_PATIENCE_MS);
+          observer.disconnect();
+        }
+      },
+      { rootMargin: "200px" },
+    );
+    observer.observe(img);
+    return () => {
+      observer.disconnect();
+      clearTimeout(timer);
+    };
+  }, [direct, settled]);
 
   return (
     <img
       {...rest}
+      ref={ref}
       // Keyed so React swaps the element rather than reusing one the browser has already
       // marked as errored, which can leave the new `src` unrequested.
       key={direct ? "direct" : "cached"}
@@ -55,10 +95,10 @@ export default function CachedImg({
           onUnavailable?.();
           return;
         }
-        setDirect(true);
-        setRecovered(true);
+        fallBack();
       }}
       onLoad={() => {
+        setSettled(true);
         if (recovered) {
           setRecovered(false);
           noteDirectRecovery(src);

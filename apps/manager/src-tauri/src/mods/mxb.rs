@@ -880,9 +880,21 @@ fn summary_from_post(p: &Value, category_id: u32) -> Option<ModSummary> {
         title: decode_entities(rendered(p, "title")),
         link: p.get("link").and_then(Value::as_str).unwrap_or("").to_string(),
         date: p.get("date").and_then(Value::as_str).unwrap_or("").to_string(),
-        image: featured_image(p),
+        image: card_image(p),
         category_id,
         author: embedded_author(p),
+    })
+}
+
+/// The card's picture: the featured image, else the first picture in the post.
+///
+/// Some posts' featured media answers `rest_forbidden` inside `_embed`, so the card had no
+/// picture at all while the detail page, which also reads the content, showed a full gallery.
+fn card_image(p: &Value) -> Option<String> {
+    featured_image(p).or_else(|| {
+        extract_images(rendered(p, "content"))
+            .into_iter()
+            .find(|u| u.starts_with("https://") && is_image_url(u))
     })
 }
 
@@ -1504,6 +1516,19 @@ mod tests {
         assert_eq!(downloads.len(), 1);
         assert_eq!(downloads[0].host, "MediaFire");
         assert_eq!(downloads[0].label, "GoWithTheFlow");
+    }
+
+    #[test]
+    fn a_forbidden_featured_image_falls_back_to_the_posts_first_picture() {
+        let post: Value = serde_json::from_str(
+            r#"{"id":1,"slug":"reed-creek","title":{"rendered":"Reed Creek MX"},
+                "featured_media":192044,
+                "content":{"rendered":"<p><a href=\"https://mxb-mods.com/a.webp\"><img src=\"https://mxb-mods.com/a-1280x669.webp\"></a></p>"},
+                "_embedded":{"wp:featuredmedia":[{"code":"rest_forbidden"}]}}"#,
+        )
+        .unwrap();
+        let summary = summary_from_post(&post, 22).unwrap();
+        assert_eq!(summary.image.as_deref(), Some("https://mxb-mods.com/a.webp"));
     }
 
     #[test]
