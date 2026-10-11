@@ -74,15 +74,15 @@ export default function RichDescription({ html }: RichDescriptionProps) {
  */
 function proxyImages(html: string): string {
   if (typeof DOMParser === "undefined") return html;
-  // Rewriting into a scheme that has already proved unusable on this machine would turn
-  // images that load today into ones that cannot. `CachedImg` recovers per image; this is
-  // markup, so the whole rewrite steps aside instead.
-  if (schemeIsBroken()) return html;
-
   const doc = new DOMParser().parseFromString(html, "text/html");
   for (const img of doc.querySelectorAll("img[src]")) {
     const src = img.getAttribute("src");
-    if (!src || !isCacheableImage(src)) continue;
+    if (!src) continue;
+    // Direct loads must not hand the store's CDN our origin as a referer; it refuses those.
+    img.setAttribute("referrerpolicy", "no-referrer");
+    // Rewriting into a scheme that has already proved unusable for this host would turn
+    // images that load today into ones that cannot.
+    if (!isCacheableImage(src) || schemeIsBroken(src)) continue;
     const cached = cachedImage(src, DESCRIPTION_IMAGE_WIDTH);
     if (!cached) continue;
     img.setAttribute("src", cached);

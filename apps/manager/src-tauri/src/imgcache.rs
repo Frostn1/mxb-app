@@ -85,7 +85,7 @@ const MAX_FETCH_BYTES: usize = 32 * 1024 * 1024;
 
 /// How a refusal was arrived at. Bumped when the reasoning below changes in a way that
 /// could give a different answer for the same URL, which retires every row the old way wrote.
-const MISS_VERSION: u32 = 1;
+const MISS_VERSION: u32 = 2;
 
 /// How long a URL that answered with nothing an image could be made of is left alone. Long,
 /// because that is the answer least likely to change: a thumbnail a catalog 404s today, or an
@@ -96,6 +96,11 @@ const KEEP_DEAD: u64 = 7 * 24 * 60 * 60 * 1000;
 /// How long a refusal that was about this moment rather than this URL is left alone — a robot
 /// challenge, a timeout, a 5xx. Minutes, because the picture is probably still there.
 const KEEP_BUSY: u64 = 5 * 60 * 1000;
+
+/// The longest a block is left alone, however many times in a row it has come back. A 403 or a
+/// robot challenge is about the client and the minute, not the picture, so it must never sit
+/// out a week the way a 404 does: that is what left the store's cards blank for days.
+const KEEP_BLOCKED_MAX: u64 = 6 * 60 * 60 * 1000;
 
 /// The most refusals the book will hold. Oldest-checked rows go first.
 const MAX_MISSES: usize = 4096;
@@ -291,7 +296,8 @@ async fn load(app: &AppHandle, url: &str, width: Option<u32>) -> Option<(Vec<u8>
     // an "image".
     let Some(mime) = sniff(&bytes) else {
         log::debug!("imgcache: {url} did not answer with a recognisable image");
-        remember_failure(app, url, width, Refusal::Dead);
+        let why = if looks_like_html(&bytes) { Refusal::Blocked } else { Refusal::Dead };
+        remember_failure(app, url, width, why);
         return None;
     };
 
@@ -487,7 +493,7 @@ async fn fetch(url: &str) -> Result<Vec<u8>, Refusal> {
     // all trying to solve the same challenge is the request storm that caused it.
     if crate::mods::hub::challenged(&resp) {
         log::debug!("imgcache: {url} came back as a robot challenge — not caching it");
-        return Err(Refusal::Busy);
+        return Err(Refusal::Blocked);
     }
     if !resp.status().is_success() {
         return Err(refusal_for(resp.status()));
@@ -518,13 +524,28 @@ async fn fetch(url: &str) -> Result<Vec<u8>, Refusal> {
 
 /// What a status code says about the URL rather than the moment.
 ///
-/// A 404 or a 410 is the file; a 403 is the app, and neither changes on the next scroll. A
-/// 429 or a 5xx is the server having a minute, so that one is worth another look soon.
+/// A 404 or a 410 is the file, and that doesn't change on the next scroll. A 401 or 403 is a
+/// bot filter or a hotlink rule deciding against this client right now, so it is retried with
+/// a backoff rather than written off. A 429 or a 5xx is the server having a minute.
 fn refusal_for(status: http::StatusCode) -> Refusal {
     match status.as_u16() {
-        404 | 410 | 403 | 401 | 400 => Refusal::Dead,
+        404 | 410 | 400 => Refusal::Dead,
+        401 | 403 => Refusal::Blocked,
         _ => Refusal::Busy,
     }
+}
+
+/// A body that is a web page where a picture was asked for: a challenge or block page served
+/// with a 200. That is the filter talking, not the file, so it is not a reason to give up.
+fn looks_like_html(bytes: &[u8]) -> bool {
+    let head: Vec<u8> = bytes
+        .iter()
+        .copied()
+        .skip_while(|b| b.is_ascii_whitespace())
+        .take(64)
+        .map(|b| b.to_ascii_lowercase())
+        .collect();
+    head.starts_with(b"<!doctype html") || head.starts_with(b"<html") || head.starts_with(b"<head")
 }
 
 /// Append `chunk`, unless doing so would take `body` past [`MAX_FETCH_BYTES`].
@@ -567,8 +588,11 @@ enum Refusal {
     /// There is nothing here to fetch — a 404, a body that was never an image, a file past
     /// the cap. Asking again tomorrow gets the same answer.
     Dead,
-    /// The origin wouldn't answer *now* — a robot challenge, a 429, a dropped connection.
+    /// The origin wouldn't answer *now* — a 429, a 5xx, a dropped connection.
     Busy,
+    /// A bot filter said no — a 401/403, an `SG-Captcha` challenge, a block page. Retried
+    /// after [`KEEP_BUSY`], doubling on each repeat up to [`KEEP_BLOCKED_MAX`].
+    Blocked,
 }
 
 impl Refusal {
@@ -576,6 +600,7 @@ impl Refusal {
         match self {
             Refusal::Dead => "dead",
             Refusal::Busy => "busy",
+            Refusal::Blocked => "blocked",
         }
     }
 }
@@ -591,11 +616,26 @@ struct Miss {
     checked: u64,
     /// The [`MISS_VERSION`] that wrote this row.
     version: u32,
+    /// How many blocks in a row, for the backoff. Zero for any other reason.
+    strikes: u32,
 }
 
 impl Miss {
     fn new(why: Refusal, now: u64) -> Self {
-        Self { reason: why.tag().into(), checked: now, version: MISS_VERSION }
+        let strikes = u32::from(why == Refusal::Blocked);
+        Self { reason: why.tag().into(), checked: now, version: MISS_VERSION, strikes }
+    }
+
+    /// The row to write for a refusal, given the one already there. A block that keeps
+    /// coming back backs off; anything else starts over.
+    fn next(prev: Option<&Miss>, why: Refusal, now: u64) -> Self {
+        let mut row = Self::new(why, now);
+        if why == Refusal::Blocked {
+            if let Some(p) = prev.filter(|p| p.reason == Refusal::Blocked.tag()) {
+                row.strikes = p.strikes.saturating_add(1);
+            }
+        }
+        row
     }
 
     /// Still worth believing at `now`.
@@ -603,7 +643,14 @@ impl Miss {
         if self.version != MISS_VERSION {
             return false;
         }
-        let keep = if self.reason == Refusal::Dead.tag() { KEEP_DEAD } else { KEEP_BUSY };
+        let keep = if self.reason == Refusal::Dead.tag() {
+            KEEP_DEAD
+        } else if self.reason == Refusal::Blocked.tag() {
+            let doublings = self.strikes.saturating_sub(1).min(16);
+            KEEP_BUSY.saturating_mul(1u64 << doublings).min(KEEP_BLOCKED_MAX)
+        } else {
+            KEEP_BUSY
+        };
         now.saturating_sub(self.checked) < keep
     }
 }
@@ -650,7 +697,9 @@ fn remember_failure(app: &AppHandle, url: &str, width: Option<u32>, why: Refusal
     let now = crate::trackbook::now_ms();
     let snapshot = {
         let mut book = lock(miss_book(app));
-        book.insert(miss_key(url, width), Miss::new(why, now));
+        let key = miss_key(url, width);
+        let row = Miss::next(book.get(&key), why, now);
+        book.insert(key, row);
         prune_misses(&mut book, now);
         book.clone()
     };
@@ -659,7 +708,14 @@ fn remember_failure(app: &AppHandle, url: &str, width: Option<u32>, why: Refusal
 
 /// Drop what has aged out, then the oldest rows until the book fits.
 fn prune_misses(book: &mut MissBook, now: u64) {
-    book.retain(|_, m| m.fresh(now));
+    // A block that has served its time is kept a while longer anyway, so the next refusal can
+    // see the streak and back off further instead of starting over at five minutes.
+    book.retain(|_, m| {
+        m.fresh(now)
+            || (m.version == MISS_VERSION
+                && m.reason == Refusal::Blocked.tag()
+                && now.saturating_sub(m.checked) < 2 * KEEP_BLOCKED_MAX)
+    });
     if book.len() <= MAX_MISSES {
         return;
     }
@@ -987,6 +1043,42 @@ mod tests {
         assert!(!Miss::new(Refusal::Dead, now - KEEP_DEAD - 1).fresh(now));
     }
 
+    /// The bug: a 403 or a robot challenge was filed as dead, so a store's cards stayed blank
+    /// for a week after the filter had long since let go.
+    #[test]
+    fn a_block_is_retried_in_minutes_not_days() {
+        let now = 10 * KEEP_DEAD;
+        let first = Miss::next(None, Refusal::Blocked, now - KEEP_BUSY - 1);
+        assert!(!first.fresh(now), "first block: another look after five minutes");
+        assert!(first.fresh(now - 2), "but not before");
+    }
+
+    #[test]
+    fn a_block_that_keeps_coming_back_backs_off_up_to_a_ceiling() {
+        let now = 10 * KEEP_DEAD;
+        let mut row = Miss::next(None, Refusal::Blocked, now);
+        row = Miss::next(Some(&row), Refusal::Blocked, now);
+        assert_eq!(row.strikes, 2);
+        assert!(Miss { checked: now - KEEP_BUSY - 1, ..row.clone() }.fresh(now), "doubled");
+        assert!(!Miss { checked: now - 2 * KEEP_BUSY - 1, ..row.clone() }.fresh(now));
+        for _ in 0..40 {
+            row = Miss::next(Some(&row), Refusal::Blocked, now);
+        }
+        assert!(!Miss { checked: now - KEEP_BLOCKED_MAX - 1, ..row.clone() }.fresh(now), "capped");
+        // A different answer starts the count over.
+        let busy = Miss::next(Some(&row), Refusal::Busy, now);
+        assert_eq!(busy.strikes, 0);
+    }
+
+    #[test]
+    fn a_challenge_page_in_place_of_an_image_is_a_block_not_a_dead_url() {
+        assert!(looks_like_html(b"  <!DOCTYPE html><html><head><title>Robot Challenge"));
+        assert!(looks_like_html(b"<html><body>sgcaptcha</body></html>"));
+        assert!(!looks_like_html(&[0x89, b'P', b'N', b'G']));
+        assert!(!looks_like_html(b""));
+    }
+
+    /// Rows a build before the fix wrote (403s filed dead for a week) must not outlive it.
     #[test]
     fn a_row_written_by_an_older_way_of_refusing_is_never_used() {
         let now = 10 * KEEP_DEAD;
@@ -1016,7 +1108,8 @@ mod tests {
         use http::StatusCode;
         assert_eq!(refusal_for(StatusCode::NOT_FOUND), Refusal::Dead);
         assert_eq!(refusal_for(StatusCode::GONE), Refusal::Dead);
-        assert_eq!(refusal_for(StatusCode::FORBIDDEN), Refusal::Dead);
+        assert_eq!(refusal_for(StatusCode::FORBIDDEN), Refusal::Blocked);
+        assert_eq!(refusal_for(StatusCode::UNAUTHORIZED), Refusal::Blocked);
         assert_eq!(refusal_for(StatusCode::TOO_MANY_REQUESTS), Refusal::Busy);
         assert_eq!(refusal_for(StatusCode::BAD_GATEWAY), Refusal::Busy);
         assert_eq!(refusal_for(StatusCode::SERVICE_UNAVAILABLE), Refusal::Busy);
