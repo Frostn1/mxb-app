@@ -11,7 +11,7 @@ import Diagnose from "./Diagnose/Diagnose";
 import ReplayStudio from "../Replay/ReplayStudio";
 import TrackStudio from "./TrackStudio/TrackStudio";
 import BikeBuilder from "./BikeBuilder/BikeBuilder";
-import Convert from "./Convert/Convert";
+import Convert from "@frost/shared/Components/Convert/Convert";
 import GfxEditor from "./Gfx/GfxEditor";
 import RiderKitProvider from "../Rider/RiderKit";
 
@@ -101,7 +101,7 @@ export default function Studio({
       )}
       {visited.has("convert") && (
         <Pane active={tab === "convert"}>
-          <Convert />
+          <Convert active={tab === "convert"} storageKey="studio.convert" />
         </Pane>
       )}
       {visited.has("gfx") && (

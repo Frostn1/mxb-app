@@ -1,0 +1,140 @@
+name: Release Frost Converter
+
+# Build and publish Frost Converter: Frost's Studio's Convert screen, and its command line, as
+# a small Windows app of its own.
+#
+# The Studio's release, narrowed to Windows. Source lives in this repo and the FBX converter's
+# engine in Frostn1/mxbapp-private; releases go to Frostn1/frost-converter, which only ever gets
+# the built files: the NSIS installer, the portable exe, and latest.json for the updater. Its
+# own repo gives it its own `releases/latest` and its own updater key, like the Studio's.
+#
+# Tags are `converter-v0.1.0` here and land as `v0.1.0` over there. `release.yml` triggers on
+# `v*`, which does not match `converter-v*`.
+
+on:
+  push:
+    tags:
+      - "converter-v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    # The same environment as the Studio's: the one OIDC subject Azure trusts for signing.
+    # See docs/signing/SETUP.md.
+    environment: code-signing
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Enforce secure-content boundary before private sync
+        run: bun run check:secure-boundary
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: . -> target
+          shared-key: release
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      # The converter's engine. Without it the build has no converter, so a tag must not go
+      # on without it.
+      - name: Fetch private sidecar module
+        if: ${{ github.repository == 'Frostn1/mxb-app' }}
+        uses: actions/checkout@v4
+        with:
+          repository: Frostn1/mxbapp-private
+          ssh-key: ${{ secrets.SIDECAR_DEPLOY_KEY }}
+          path: .sidecar-src
+
+      - name: Apply sidecar module
+        if: ${{ github.repository == 'Frostn1/mxb-app' }}
+        shell: bash
+        run: |
+          bash .sidecar-src/sync.sh "$GITHUB_WORKSPACE"
+          test -f crates/fbx2edf/private/src/lib.rs || { echo "::error::the fbx2edf engine was not synced"; exit 1; }
+
+      - name: Tag without the converter- prefix
+        id: tag
+        shell: bash
+        run: |
+          raw="${{ github.ref_type == 'tag' && github.ref_name || format('converter-v0.0.{0}', github.run_number) }}"
+          echo "name=${raw#converter-}" >> "$GITHUB_OUTPUT"
+
+      # A canonical tag fails rather than publish an unsigned build; an ad-hoc dispatch may
+      # stay unsigned.
+      - name: Set up Windows code signing
+        id: signing
+        uses: ./.github/actions/artifact-signing
+        with:
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          endpoint: ${{ vars.ARTIFACT_SIGNING_ENDPOINT }}
+          account: ${{ vars.ARTIFACT_SIGNING_ACCOUNT }}
+          profile: ${{ vars.ARTIFACT_SIGNING_PROFILE }}
+          required: ${{ github.repository == 'Frostn1/mxb-app' && github.ref_type == 'tag' }}
+
+      - name: Compose release notes
+        id: notes
+        shell: bash
+        run: |
+          {
+            echo 'body<<RELEASE_NOTES_EOF'
+            bash scripts/release-notes.sh "${{ steps.tag.outputs.name }}" --app="Frost Converter"
+            echo 'RELEASE_NOTES_EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Build and publish release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          # A fine-grained PAT with contents:write on frost-converter only.
+          GITHUB_TOKEN: ${{ secrets.CONVERTER_RELEASE_TOKEN }}
+          VITE_APP_NAME: "Frost Converter"
+          # The updater key (minisign, no password); its public half is in tauri.conf.json.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.FROST_CONVERTER_UPDATER_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+        with:
+          owner: Frostn1
+          repo: frost-converter
+          releaseCommitish: main
+          projectPath: apps/converter
+          tagName: ${{ steps.tag.outputs.name }}
+          releaseName: "Frost Converter ${{ steps.tag.outputs.name }}"
+          releaseBody: ${{ steps.notes.outputs.body }}
+          assetNamePattern: "Frost-Converter-[version]-[arch][ext]"
+          releaseDraft: false
+          prerelease: ${{ github.ref_type != 'tag' || contains(github.ref_name, '-beta') || contains(github.ref_name, '-rc') }}
+          args: ${{ steps.signing.outputs.tauri-args }}
+
+      # The portable exe: the app binary itself, which Tauri signed with the installer's
+      # signCommand while it bundled. Needs nothing installed beyond WebView2 (in Windows 11).
+      - name: Upload the portable exe
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.CONVERTER_RELEASE_TOKEN }}
+        run: |
+          version="${{ steps.tag.outputs.name }}"
+          cp target/release/frost-converter.exe "Frost-Converter-${version#v}-portable.exe"
+          gh release upload "$version" "Frost-Converter-${version#v}-portable.exe" --repo Frostn1/frost-converter --clobber

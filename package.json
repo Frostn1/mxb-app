@@ -9,7 +9,8 @@
     "apps/manager",
     "apps/studio",
     "apps/coach",
-    "apps/servers"
+    "apps/servers",
+    "apps/converter"
   ],
   "scripts": {
     "dev": "cd apps/manager && bun run dev",
@@ -26,7 +27,9 @@
     "dev:coach": "cd apps/coach && bun run dev",
     "tauri:coach": "cd apps/coach && bun run tauri",
     "dev:servers": "cd apps/servers && bun run dev",
-    "tauri:servers": "cd apps/servers && bun run tauri"
+    "tauri:servers": "cd apps/servers && bun run tauri",
+    "dev:converter": "cd apps/converter && bun run dev",
+    "tauri:converter": "cd apps/converter && bun run tauri"
   },
   "overrides": {
     "postcss": "^8.5.25"

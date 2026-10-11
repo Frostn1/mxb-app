@@ -36,7 +36,7 @@ import SurveyPrompt from "@frost/shared/Components/Survey/SurveyPrompt";
 import { parsePluginView, usePlugins } from "@frost/shared/lib/usePlugins";
 import { initialView } from "@frost/shared/api/mods";
 import { toast } from "sonner";
-import { convertAvailable } from "./api/convert";
+import { convertAvailable } from "@frost/shared/api/convert";
 
 /**
  * The rail's own view space: the Studio's tools, Settings, and whatever a plugin adds.

@@ -1,4 +1,4 @@
-//! FBX to EDF for Frost's Studio.
+//! FBX to EDF for Frost's Studio and Frost Converter.
 //!
 //! The converter is private and is not in this repository (see Cargo.toml). When its sources
 //! have been synced in, they are this crate's root modules and [`host`] calls them. Without
@@ -8,3 +8,7 @@
 include!(concat!(env!("OUT_DIR"), "/private_root.rs"));
 
 pub mod host;
+pub mod job;
+
+#[cfg(feature = "tauri")]
+pub mod commands;

@@ -26,8 +26,6 @@ mod partmaker;
 mod blender;
 mod edfwrite;
 mod gearrepair;
-/// Convert: FBX files to the `.edf` the game loads.
-mod modelconvert;
 // The Gfx tab: gfx.cfg on the model, saved and reloaded in-game.
 mod gfxedit;
 mod paintstudio;
@@ -323,14 +321,17 @@ fn main() {
             replayrec::replay_delete,
             replayrec::replay_out_dir,
             replayrec::replay_fetch_ffmpeg,
-            modelconvert::fbx_convert_available,
-            modelconvert::fbx_scan,
             gfxedit::gfx_open,
             gfxedit::gfx_preview,
             gfxedit::gfx_save,
-            modelconvert::fbx_part_names,
-            modelconvert::fbx_read_text,
-            modelconvert::fbx_convert,
+            // Convert: FBX files to the `.edf` the game loads. Frost Converter registers the same.
+            fbx2edf::commands::fbx_convert_available,
+            fbx2edf::commands::fbx_scan,
+            fbx2edf::commands::fbx_part_names,
+            fbx2edf::commands::fbx_is_bike,
+            fbx2edf::commands::fbx_output_paths,
+            fbx2edf::commands::fbx_read_text,
+            fbx2edf::commands::fbx_convert,
             initial_view,
         ])
         .setup(|app| {
