@@ -23,6 +23,7 @@ import math
 import os
 import sys
 import traceback
+from contextlib import contextmanager
 
 import bpy
 from mathutils import Matrix, Vector
@@ -113,29 +114,78 @@ def describe(obj):
     return info
 
 
+def _layer_paths(lc, target, path=()):
+    """Layer-collection chains from `lc` down to every layer collection of `target`."""
+    path = path + (lc,)
+    if lc.collection == target:
+        yield path
+    for c in lc.children:
+        yield from _layer_paths(c, target, path)
+
+
+@contextmanager
+def visible_for_export(objects):
+    """Blender exports nothing it can't select: an object in an excluded or hidden collection,
+    or hidden itself, would leave the FBX without a word (an exhaust kept in its own hidden
+    collection). Show them for the export and put every flag back after."""
+    saved = []
+    hidden = []
+
+    def force(thing, attr, value):
+        if getattr(thing, attr) != value:
+            saved.append((thing, attr, getattr(thing, attr)))
+            setattr(thing, attr, value)
+
+    try:
+        root = bpy.context.view_layer.layer_collection
+        for coll in {c for o in objects for c in o.users_collection}:
+            for chain in _layer_paths(root, coll):
+                for lc in chain[1:]:
+                    force(lc, "exclude", False)
+                    force(lc, "hide_viewport", False)
+                    force(lc.collection, "hide_viewport", False)
+                    force(lc.collection, "hide_select", False)
+        for o in objects:
+            force(o, "hide_viewport", False)
+            force(o, "hide_select", False)
+            if o.hide_get():
+                hidden.append(o)
+                o.hide_set(False)
+        yield
+    finally:
+        for o in hidden:
+            o.hide_set(True)
+        for thing, attr, value in reversed(saved):
+            setattr(thing, attr, value)
+
+
 def export_fbx(path, objs=None):
     """`objs`, when given, exports only those objects — `op_split` uses this to give each
     group its own standalone file, which is what a later build imports for that group
     instead of pulling in the whole bike it was cut from. Left `None` (every other caller),
     this is the same whole-scene export it always was."""
-    if objs is not None:
-        bpy.ops.object.select_all(action="DESELECT")
-        for o in objs:
-            o.select_set(True)
-    # Pinned so every build exports the same way. Axes and scale are checked against the
-    # reference bike in the converter before anything is trusted in the game.
-    bpy.ops.export_scene.fbx(
-        filepath=path,
-        use_selection=objs is not None,
-        object_types={"MESH", "EMPTY"},
-        apply_unit_scale=True,
-        apply_scale_options="FBX_SCALE_ALL",
-        axis_forward="-Z",
-        axis_up="Y",
-        mesh_smooth_type="FACE",
-        add_leaf_bones=False,
-        bake_anim=False,
-    )
+    targets = list(objs) if objs is not None else list(bpy.context.scene.objects)
+    with visible_for_export(targets):
+        if objs is not None:
+            bpy.ops.object.select_all(action="DESELECT")
+            for o in objs:
+                o.select_set(True)
+        # Pinned so every build exports the same way. Axes and scale are checked against the
+        # reference bike in the converter before anything is trusted in the game. "OTHER" is
+        # curves, text and surfaces, which the exporter turns into meshes; left out, a curve
+        # exhaust would leave the FBX.
+        bpy.ops.export_scene.fbx(
+            filepath=path,
+            use_selection=objs is not None,
+            object_types={"MESH", "EMPTY", "OTHER"},
+            apply_unit_scale=True,
+            apply_scale_options="FBX_SCALE_ALL",
+            axis_forward="-Z",
+            axis_up="Y",
+            mesh_smooth_type="FACE",
+            add_leaf_bones=False,
+            bake_anim=False,
+        )
 
 
 def export_glb(path, objs=None):
