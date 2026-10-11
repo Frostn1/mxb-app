@@ -128,6 +128,10 @@ pub struct ShdSite {
     pub dirs: Vec<PathBuf>,
     /// The `.shd` the converter reads for it now, if there is one.
     pub shd: Option<PathBuf>,
+    /// The normal map the material links, when it is a file on disk.
+    pub normal: Option<PathBuf>,
+    /// The reflection map the material links (its `*_r` picture), likewise.
+    pub reflection: Option<PathBuf>,
 }
 
 /// Each colour picture the FBX's materials use, and where its `.shd` goes.
@@ -165,7 +169,14 @@ pub fn shd_sites(fbx: &Path) -> Result<Vec<ShdSite>, String> {
                     push(files.root.join("textures"));
                 }
             }
-            ShdSite { name: x.name.clone(), ext: x.ext.clone(), dirs, shd: x.shd.as_ref().map(PathBuf::from) }
+            ShdSite {
+                name: x.name.clone(),
+                ext: x.ext.clone(),
+                dirs,
+                shd: x.shd.as_ref().map(PathBuf::from),
+                normal: x.normal.as_ref().map(PathBuf::from),
+                reflection: x.reflection.as_ref().map(PathBuf::from),
+            }
         })
         .collect())
 }

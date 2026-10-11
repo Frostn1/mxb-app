@@ -643,6 +643,44 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    /// Nothing a part brings is left out of its FBX: a hidden mesh and a curve (`cargo test
+    /// blender -- --ignored`, on a machine with Blender).
+    #[test]
+    #[ignore = "needs Blender installed"]
+    fn hidden_meshes_and_curves_reach_the_fbx() {
+        let blender = detect("").expect("a Blender on this machine");
+        let exe = PathBuf::from(&blender.path);
+        let root = std::env::temp_dir().join(format!("frost-blender-hidden-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let blend = root.join("pipe.blend");
+        let target = serde_json::to_string(&blend.to_string_lossy()).unwrap();
+        let status = Command::new(&exe)
+            .args(["-b", "--factory-startup", "--python-expr"])
+            .arg(format!(
+                "import bpy\n\
+                 bpy.ops.wm.read_factory_settings(use_empty=True)\n\
+                 bpy.ops.mesh.primitive_cylinder_add(radius=0.04, depth=0.6); e = bpy.context.object; e.name = 'exhaust'\n\
+                 e.hide_viewport = True; e.hide_select = True\n\
+                 cu = bpy.data.curves.new('bend', 'CURVE'); cu.bevel_depth = 0.03\n\
+                 sp = cu.splines.new('POLY'); sp.points.add(1); sp.points[1].co = (0.5, 0, 0, 1)\n\
+                 c = bpy.data.objects.new('header', cu); bpy.context.scene.collection.objects.link(c)\n\
+                 bpy.ops.wm.save_as_mainfile(filepath={target})\n"
+            ))
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .unwrap();
+        assert!(status.success() && blend.is_file(), "Blender saved the test part");
+        let got = job(&exe, &root, "hidden", |w| serde_json::json!({ "op": "inspect", "part": blend, "fbx": w.join("p.fbx") }))
+            .expect("inspect the part");
+        let fbx = std::fs::read(got["fbx"].as_str().unwrap()).unwrap();
+        let has = |name: &str| fbx.windows(name.len() + 2).any(|w| w.starts_with(name.as_bytes()) && w.ends_with(b"\x00\x01"));
+        assert!(has("exhaust"), "the hidden mesh is in the FBX");
+        assert!(has("header"), "the curve is in the FBX, as a mesh");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     #[test]
     fn each_job_gets_its_own_folder_and_old_ones_go() {
         let root = std::env::temp_dir().join(format!("frost-blender-jobs-{}", std::process::id()));

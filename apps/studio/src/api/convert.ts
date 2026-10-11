@@ -24,6 +24,8 @@ export interface ConvertReport {
   objects: { name: string; nodes: number; vertices: number; triangles: number; materials: number }[];
   textures: { name: string; width: number; height: number; maps: string[] }[];
   warnings: string[];
+  /** Scene nodes that draw nothing in the file, each with the reason. */
+  skipped: { name: string; reason: string }[];
   bytes: number;
   millis: number;
 }
@@ -35,7 +37,15 @@ export interface Outcome {
   hrc: string[];
   /** The `.shd` files written for its textures: `bike.shd: normal bike_n, reflection bike_r`. */
   shd: string[];
+  /** A map used by name because the material doesn't link it, `.hrc` files kept or replaced. */
+  notes: string[];
 }
+
+/**
+ * When a bike's `.hrc` files are written: every time (one already there and different is kept
+ * as `.bak`), only into a folder that has none, or never.
+ */
+export type HrcMode = "always" | "ifNone" | "never";
 
 export interface Found {
   path: string;
@@ -51,10 +61,17 @@ export const readText = (path: string) => invoke<string>("fbx_read_text", { path
 export function convertFiles(
   pairs: { input: string; output: string }[],
   options: ConvertOptions,
-  hrc: boolean,
-  shd: { make: boolean; overwrite: boolean } = { make: false, overwrite: false },
+  hrc: HrcMode,
+  shd: { make: boolean; overwrite: boolean; shininess?: number } = { make: false, overwrite: false },
 ): Promise<Outcome[]> {
-  return invoke<Outcome[]>("fbx_convert", { pairs, options, hrc, shd: shd.make, overwriteShd: shd.overwrite });
+  return invoke<Outcome[]>("fbx_convert", {
+    pairs,
+    options,
+    hrc,
+    shd: shd.make,
+    overwriteShd: shd.overwrite,
+    shininess: shd.shininess,
+  });
 }
 
 export function onProgress(f: (e: { index: number; done: number; total: number }) => void): Promise<UnlistenFn> {
@@ -71,16 +88,17 @@ export const nameOf = (p: string) => p.slice(Math.max(p.lastIndexOf("\\"), p.las
 const stemOf = (name: string) => name.replace(/\.[^.]*$/, "");
 
 /**
- * Where each model is written: `<name>.edf` beside it, or in `folder` when one is given. A
- * bike's shadow model is always `shadow_model.edf`, the name MX Bikes looks for. Two models
- * landing on one name are kept apart with a number, as the browser converter does.
+ * Where each model is written: beside it, or in `folder` when one is given. A bike's shadow
+ * model is always `shadow_model.edf` and, with `bike`, the bike itself is `model.edf`: the
+ * names MX Bikes looks for. Otherwise a model keeps its FBX's name. Two models landing on one
+ * name are kept apart with a number, as the browser converter does.
  */
-export function outputPaths(models: { path: string; shadow: boolean }[], folder: string | null): string[] {
+export function outputPaths(models: { path: string; shadow: boolean }[], folder: string | null, bike = false): string[] {
   const taken = new Set<string>();
   return models.map((m) => {
     const dir = folder || dirOf(m.path);
     const s = sep(dir || m.path);
-    const stem = m.shadow ? "shadow_model" : stemOf(nameOf(m.path));
+    const stem = m.shadow ? "shadow_model" : bike ? "model" : stemOf(nameOf(m.path));
     let name = `${dir}${s}${stem}.edf`;
     for (let n = 2; taken.has(name.toLowerCase()); n++) name = `${dir}${s}${stem}_${n}.edf`;
     taken.add(name.toLowerCase());

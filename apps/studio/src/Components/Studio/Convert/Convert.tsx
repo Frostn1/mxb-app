@@ -1,7 +1,7 @@
 import { useContext, useEffect, useMemo, useRef, useState } from "react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
-import { CheckCircle2, FileBox, FilePlus, FolderOpen, FolderPlus, Loader2, Play, TriangleAlert, X } from "lucide-react";
+import { CheckCircle2, FileBox, FilePlus, FolderOpen, FolderPlus, Layers, Loader2, Play, TriangleAlert, X } from "lucide-react";
 import { cn } from "@frost/shared/lib/utils";
 import { Button } from "@frost/shared/Components/ui/button";
 import { Input } from "@frost/shared/Components/ui/input";
@@ -23,6 +23,7 @@ import {
   scanPaths,
   type ConvertOptions,
   type Found,
+  type HrcMode,
   type Outcome,
 } from "@/api/convert";
 import { useT } from "@/i18n";
@@ -43,6 +44,10 @@ interface Settings {
   script: string;
   shd: boolean;
   overwriteShd: boolean;
+  shininess: string;
+  /** A bike's file: `model.edf`, the name MX Bikes loads, or the FBX's own name as before. */
+  naming: "model" | "fbx";
+  hrc: HrcMode;
 }
 
 // The browser converter's defaults, which are fbx2edf.exe's own dialog's.
@@ -60,6 +65,9 @@ const DEFAULTS: Settings = {
   script: "",
   shd: true,
   overwriteShd: false,
+  shininess: "6",
+  naming: "model",
+  hrc: "ifNone",
 };
 
 const REMEMBER = "studio.convert";
@@ -183,7 +191,8 @@ export default function Convert() {
     const scale = num(s.scale, t("convert.scale"));
     const merge = s.merge ? num(s.mergeDistance, t("convert.merge")) : 0;
     const angle = s.normals === "flat" ? 0 : num(s.angle, t("convert.recalc"));
-    for (const v of [scale, merge, s.normals === "recalc" ? angle : 0]) if (typeof v === "string") return v;
+    const shininess = s.shd ? num(s.shininess, t("convert.shininess")) : 0;
+    for (const v of [scale, merge, s.normals === "recalc" ? angle : 0, shininess]) if (typeof v === "string") return v;
     const text = s.script.trim() ? s.script : params ? await readText(params.path) : undefined;
     return {
       params: text,
@@ -207,7 +216,7 @@ export default function Convert() {
     }
     if (typeof o === "string") return setError(o);
     const list = chosen.map((f) => ({ path: f.path, shadow: f.kind === "shadow" }));
-    const outs = outputPaths(list, s.out === "folder" && s.folder ? s.folder : null);
+    const outs = outputPaths(list, s.out === "folder" && s.folder ? s.folder : null, s.layout === "parts" && s.naming === "model");
     const batch: Job[] = list.map((m, i) => ({ input: m.path, output: outs[i], shadow: m.shadow, status: { state: "waiting" } }));
     setJobs(batch);
     setRunning(true);
@@ -218,8 +227,8 @@ export default function Convert() {
       const results = await convertFiles(
         batch.map((j) => ({ input: j.input, output: j.output })),
         o,
-        true,
-        { make: s.shd, overwrite: s.shd && s.overwriteShd },
+        s.hrc,
+        { make: s.shd, overwrite: s.shd && s.overwriteShd, shininess: Number(s.shininess) },
       );
       setJobs((js) => js && js.map((j, i) => ({ ...j, status: { state: "done", outcome: results[i] } })));
     } catch (e) {
@@ -310,6 +319,34 @@ export default function Convert() {
             />
           </Field>
 
+          {s.layout === "parts" && (
+            <>
+              <Field label={t("convert.fileName")}>
+                <Segmented
+                  size="sm"
+                  value={s.naming}
+                  onChange={(v) => set("naming", v)}
+                  options={[
+                    { value: "model", label: "model.edf" },
+                    { value: "fbx", label: t("convert.fbxName") },
+                  ]}
+                />
+              </Field>
+              <Field label={t("convert.hrc")}>
+                <Segmented
+                  size="sm"
+                  value={s.hrc}
+                  onChange={(v) => set("hrc", v)}
+                  options={[
+                    { value: "always", label: t("convert.hrcAlways") },
+                    { value: "ifNone", label: t("convert.hrcIfNone") },
+                    { value: "never", label: t("convert.hrcNever") },
+                  ]}
+                />
+              </Field>
+            </>
+          )}
+
           <div className="grid grid-cols-2 gap-3">
             <Field label={t("convert.scale")}>
               <Input className="h-8" inputMode="decimal" value={s.scale} onChange={(e) => set("scale", e.target.value)} />
@@ -335,6 +372,16 @@ export default function Convert() {
               <label className={cn("flex items-center gap-2", !s.shd && "opacity-50")}>
                 <input type="checkbox" disabled={!s.shd} checked={s.overwriteShd} onChange={(e) => set("overwriteShd", e.target.checked)} />
                 {t("convert.overwriteShd")}
+              </label>
+              <label className={cn("flex h-8 items-center gap-2", !s.shd && "opacity-50")}>
+                <span className="flex-none">{t("convert.shininess")}</span>
+                <Input
+                  className="ml-auto h-8 w-20 text-right"
+                  inputMode="decimal"
+                  disabled={!s.shd}
+                  value={s.shininess}
+                  onChange={(e) => set("shininess", e.target.value)}
+                />
               </label>
             </div>
           </Field>
@@ -455,6 +502,26 @@ function Field({ label, action, children }: { label: string; action?: React.Reac
   );
 }
 
+/** What the file leaves out and why, laid out like the MXB App's skipped list. */
+function Skipped({ items }: { items: { name: string; reason: string }[] }) {
+  const t = useT();
+  return (
+    <div className="mt-1.5 rounded-lg border border-border bg-card/40 px-3.5 py-2.5">
+      <div className="flex items-center gap-2 text-[11.5px] font-semibold text-muted-foreground">
+        <Layers className="size-3.5" />
+        {t("convert.skipped", { count: items.length })}
+      </div>
+      <ul className="mt-1 space-y-0.5">
+        {items.map((s, i) => (
+          <li key={i} className="select-text text-[11px] text-muted-foreground">
+            <span className="font-mono">{s.name}</span> — {s.reason}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 function Row({
   path,
   kind,
@@ -517,10 +584,15 @@ function Row({
       </div>
       {st?.state === "working" && st.total > 0 && <Progress className="mt-2" value={(st.done / st.total) * 100} />}
       {outcome?.error && <p className="mt-1 select-text pl-[26px] text-destructive">{outcome.error}</p>}
-      {outcome && !report && outcome.shd.length > 0 && (
+      {outcome && !report && outcome.shd.length + outcome.notes.length > 0 && (
         <div className="mt-1 grid gap-0.5 pl-[26px] text-[11.5px] text-muted-foreground">
           {outcome.shd.map((line) => (
             <p key={line} className="select-text truncate">
+              {line}
+            </p>
+          ))}
+          {outcome.notes.map((line, i) => (
+            <p key={i} className="select-text text-amber-600 dark:text-amber-400">
               {line}
             </p>
           ))}
@@ -539,11 +611,12 @@ function Row({
               {line}
             </p>
           ))}
-          {report.warnings.map((w, i) => (
+          {[...outcome!.notes, ...report.warnings].map((w, i) => (
             <p key={i} className="select-text text-amber-600 dark:text-amber-400">
               {w}
             </p>
           ))}
+          {report.skipped.length > 0 && <Skipped items={report.skipped} />}
         </div>
       )}
     </li>
