@@ -1284,29 +1284,6 @@ export interface ModsDehydrated {
   provider: string | null;
 }
 
-/** Online-only files by area. Mirrors `cloudfiles::AreaCounts`. */
-export interface CloudAreaCounts {
-  bikes: number;
-  tracks: number;
-  paints: number;
-  plugins: number;
-}
-
-/** The OneDrive health check. Mirrors `cloudfiles::CloudHealth`. */
-export interface OneDriveHealth {
-  /** The folder "Keep on this device" pins — normally `Documents\PiBoSo`. */
-  pibosoDir: string;
-  pibosoInOnedrive: boolean;
-  gameDir: string;
-  gameInOnedrive: boolean;
-  /** Already marked "Always keep on this device". */
-  pinned: boolean;
-  /** Files whose bytes aren't on this PC — counted from attributes, never downloaded. */
-  onlineOnly: CloudAreaCounts;
-  scanned: number;
-  truncated: boolean;
-}
-
 /** The ReShade health check. Mirrors `reshade::Health`. */
 export interface ReshadeHealth {
   gameDir: string;
@@ -1332,21 +1309,8 @@ export interface TyreHealth {
 
 /** The health checks. Mirrors `health::Report`. */
 export interface HealthReport {
-  onedrive: OneDriveHealth;
   reshade: ReshadeHealth;
   tyres: TyreHealth;
-}
-
-/** What "Keep on this device" did. Mirrors `cloudfiles::PinResult`. */
-export interface PinResult {
-  /** False off Windows. */
-  supported: boolean;
-  total: number;
-  pinned: number;
-  failed: number;
-  firstError: string | null;
-  /** Still online-only right after: OneDrive is downloading them in the background. */
-  stillOnlineOnly: number;
 }
 
 /** Trainer files the app repaired before the game could crash on them. Matches `Report`. */

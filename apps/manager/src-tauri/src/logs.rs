@@ -537,8 +537,8 @@ pub fn summary(
         }
     ));
     out.push_str(&format!("profiles folder: {}\n", cfg.profiles_dir().display()));
-    // The `onedrive: …` and `reshade: …` lines from [`crate::health`] — the two setups behind
-    // crashes on joining busy servers, so support sees them without having to ask.
+    // The `reshade: …` and `tyres: …` lines from [`crate::health`] — setups the game crashes on,
+    // so support sees them without having to ask.
     out.push_str(health);
     // Resolved on disk, not just read from the config: a saved folder without the exe in it is
     // exactly the mistake this line exists to show.
@@ -790,11 +790,11 @@ mod tests {
         let cfg = AppConfig::default();
         let info = info_with(&app_dir, &frostmod_dir, &root.join("secure"), &cfg, None);
 
-        let text = summary("9.9.9", Some("v0.13.0"), &cfg, &info, "onedrive: x\nreshade: y\n");
+        let text = summary("9.9.9", Some("v0.13.0"), &cfg, &info, "reshade: x\ntyres: y\n");
         assert!(text.contains("MXB App 9.9.9"), "{text}");
         assert!(text.contains("frostmod: v0.13.0"), "{text}");
         assert!(text.contains("frostmod.log"), "{text}");
-        assert!(text.contains("onedrive: x\nreshade: y\n"), "{text}");
+        assert!(text.contains("reshade: x\ntyres: y\n"), "{text}");
 
         // Nothing installed is a fact worth stating, not a line to leave out.
         assert!(summary("9.9.9", None, &cfg, &info, "").contains("frostmod: (not installed)"));

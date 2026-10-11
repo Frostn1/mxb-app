@@ -984,7 +984,7 @@ async fn delete_reshade_preset(app: tauri::AppHandle, name: String) -> Result<()
     .map_err(|e| format!("delete_reshade_preset task failed: {e}"))?
 }
 
-/// The OneDrive and ReShade health checks — see [`health`]. Read by the Home screen's
+/// The ReShade and tyre health checks — see [`health`]. Read by the Home screen's
 /// notices; the same report goes into the log export's summary.
 #[tauri::command]
 async fn health_check(app: tauri::AppHandle) -> Result<health::Report, String> {
@@ -996,42 +996,6 @@ async fn health_check(app: tauri::AppHandle) -> Result<health::Report, String> {
     .map_err(|e| format!("health_check task failed: {e}"))?
 }
 
-/// Progress for [`keep_piboso_on_device`]: `{ done, total }` items marked so far.
-const PIN_PROGRESS_EVENT: &str = "onedrive-pin-progress";
-
-#[derive(Clone, serde::Serialize)]
-struct PinProgress {
-    done: usize,
-    total: usize,
-}
-
-/// Mark the PiBoSo folder "Always keep on this device". The folder is the one the health
-/// check names, re-derived from the config here — the UI never passes a path.
-#[tauri::command]
-async fn keep_piboso_on_device(app: tauri::AppHandle) -> Result<cloudfiles::PinResult, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        use tauri::Emitter as _;
-        let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
-        let Some(dir) = health::pin_target(&cfg) else {
-            return Err("The PiBoSo folder isn't set or isn't there.".to_string());
-        };
-        let result = cloudfiles::pin_tree(&dir, |done, total| {
-            let _ = app.emit(PIN_PROGRESS_EVENT, PinProgress { done, total });
-        });
-        log::info!(
-            "[cloud] keep on this device: {} — pinned {} of {}, {} failed, {} still downloading{}",
-            dir.display(),
-            result.pinned,
-            result.total,
-            result.failed,
-            result.still_online_only,
-            result.first_error.as_deref().map(|e| format!(" (first error: {e})")).unwrap_or_default()
-        );
-        Ok(result)
-    })
-    .await
-    .map_err(|e| format!("keep_piboso_on_device task failed: {e}"))?
-}
 
 /// Turn ReShade off (rename `opengl32.dll` aside) or back on. Refused while the game runs.
 #[tauri::command]
@@ -9196,7 +9160,6 @@ fn main() {
             apply_reshade_preset,
             delete_reshade_preset,
             health_check,
-            keep_piboso_on_device,
             set_reshade_enabled,
             move_empty_tyre_folders,
             detect_loose_swaps,

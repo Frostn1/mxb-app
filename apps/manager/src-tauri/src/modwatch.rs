@@ -23,12 +23,19 @@
 //! * **Only what's really there.** A cloud sync tool evicting a file's bytes is a change
 //!   to the folder like any other, and reloading for it hands the game a content list it
 //!   then has to read off a disk the bytes have left. See [`split_evicted`].
+//! * **Only what really changed.** The watcher reports a path for *any* change to it,
+//!   attributes included. Pinning a folder "Always keep on this device" rewrites the
+//!   attributes of every file under it, and OneDrive downloading a file's bytes changes
+//!   nothing a reader sees but its attributes — yet both arrived here as a change to every
+//!   mod, and pulsed full reloads in the running game once per batch and every
+//!   [`MAX_SETTLE`] while the download went on. A path now counts only when its size or
+//!   modified time differs from the last time we looked. See [`Seen`].
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use notify::{RecommendedWatcher, RecursiveMode};
 use notify_debouncer_mini::{new_debouncer, DebounceEventResult, Debouncer};
@@ -74,6 +81,97 @@ const LINK_DEPTH: usize = 4;
 /// Upper bound on the extra watches. Each is a real OS handle; a tree with more links
 /// than this is doing something we shouldn't try to keep up with.
 const LINK_CAP: usize = 64;
+
+/// Cap on the entries [`Seen`] records up front. A big mods tree is tens of thousands of
+/// files; past this, an unrecorded file costs at most one reload the first time it's touched.
+const SEEN_CAP: usize = 300_000;
+
+/// How deep the up-front walk goes. Deeper than any mod's own folders.
+const SEEN_DEPTH: usize = 12;
+
+/// What a path looks like to a reader: present as a folder, present as a file of this size
+/// written at this time, or (as `None` where it's held) not there.
+///
+/// Attributes are deliberately not part of it. Pinning, unpinning, OneDrive downloading a
+/// file's bytes or freeing them, the archive bit, read-only: none of these change what the
+/// game would read, and all of them reach the watcher as a change.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Print {
+    Dir,
+    File { len: u64, modified: Option<SystemTime> },
+}
+
+impl Print {
+    fn of(meta: &std::fs::Metadata) -> Self {
+        if meta.is_dir() {
+            Print::Dir
+        } else {
+            Print::File { len: meta.len(), modified: meta.modified().ok() }
+        }
+    }
+
+    /// The path as it is now. Metadata only: opening a cloud placeholder for its attributes
+    /// doesn't download it.
+    fn read(path: &Path) -> Option<Self> {
+        std::fs::metadata(path).ok().map(|m| Self::of(&m))
+    }
+}
+
+/// The last [`Print`] seen for every path under the watched folders.
+///
+/// Seeded by a metadata-only walk when the watcher starts (see [`Seen::walk`]) and updated
+/// from every batch, so a change counts only when what a reader would see has moved.
+#[derive(Default)]
+struct Seen(HashMap<PathBuf, Print>);
+
+impl Seen {
+    /// Record what `path` looks like `now`. True when that is a change to its content: it
+    /// appeared, went away, or its size or modified time moved.
+    fn update(&mut self, path: &Path, now: Option<Print>) -> bool {
+        let before = match now {
+            Some(p) => self.0.insert(path.to_path_buf(), p),
+            None => self.0.remove(path),
+        };
+        // Gone and never seen (a scratch file made and removed inside one debounce window)
+        // compares equal, and isn't a change.
+        before != now
+    }
+
+    /// Fill in what each folder holds, without overwriting anything a batch already
+    /// recorded (that is newer than what the walk read).
+    fn seed(&mut self, found: Vec<(PathBuf, Print)>) {
+        for (path, print) in found {
+            self.0.entry(path).or_insert(print);
+        }
+    }
+
+    /// Every entry under `roots`, read from the directory listings. On Windows the listing
+    /// already carries size, time and attributes, so no file is opened.
+    fn walk(roots: &[PathBuf]) -> Vec<(PathBuf, Print)> {
+        let mut out = Vec::new();
+        let mut stack: Vec<(PathBuf, usize)> = roots.iter().map(|r| (r.clone(), 0)).collect();
+        while let Some((dir, depth)) = stack.pop() {
+            let Ok(entries) = std::fs::read_dir(&dir) else { continue };
+            for entry in entries.flatten() {
+                if out.len() >= SEEN_CAP {
+                    return out;
+                }
+                let Ok(kind) = entry.file_type() else { continue };
+                let path = entry.path();
+                // A link reads as itself in the listing; the watcher sees it followed.
+                let meta = if kind.is_symlink() { std::fs::metadata(&path) } else { entry.metadata() };
+                let Ok(meta) = meta else { continue };
+                let print = Print::of(&meta);
+                // Links are walked as roots of their own, like they're watched.
+                if print == Print::Dir && !kind.is_symlink() && depth < SEEN_DEPTH {
+                    stack.push((path.clone(), depth + 1));
+                }
+                out.push((path, print));
+            }
+        }
+        out
+    }
+}
 
 /// A watcher and the flag that retires it.
 pub struct Running {
@@ -126,6 +224,10 @@ struct Pending {
     /// only paints is rider gear — a helmet, boots, a rider model — and FrostMod's gear
     /// refresh covers it (see [`Batch::Gear`]).
     beyond_rider: bool,
+    /// The last batch went out on the [`MAX_SETTLE`] cap with files still landing. Until the
+    /// folder has gone quiet once, the next batch waits for quiet: one early reload per
+    /// download, not one every [`MAX_SETTLE`] for as long as it runs.
+    capped: bool,
 }
 
 /// What a settled batch needs from FrostMod.
@@ -144,6 +246,10 @@ impl Pending {
     /// Fold a batch of changed mods in. Returns whether this batch is the one that
     /// needs a settle thread started behind it — every later batch joins that one.
     fn absorb(&mut self, keys: Vec<String>, now: Instant) -> bool {
+        if self.last_seen.is_some_and(|t| now.saturating_duration_since(t) >= SETTLE) {
+            // The stretch that was capped has ended; this is a new one.
+            self.capped = false;
+        }
         self.mods.extend(keys);
         self.first_seen.get_or_insert(now);
         self.last_seen = Some(now);
@@ -163,14 +269,21 @@ impl Pending {
     fn take_settled_batch(&mut self, now: Instant) -> Option<(Vec<String>, Batch)> {
         let since = |t: Option<Instant>| t.map(|t| now.saturating_duration_since(t));
         let quiet = since(self.last_seen).is_none_or(|d| d >= SETTLE);
-        let overdue = since(self.first_seen).is_some_and(|d| d >= MAX_SETTLE);
+        let overdue = !self.capped && since(self.first_seen).is_some_and(|d| d >= MAX_SETTLE);
         if !quiet && !overdue {
             return None;
         }
-        if overdue && !quiet {
-            log::info!("mods watcher: still changing after {MAX_SETTLE:?} — reloading what's landed");
+        let capped = !quiet;
+        if capped {
+            log::info!(
+                "mods watcher: still changing after {MAX_SETTLE:?} — reloading what's landed, \
+                 then waiting for the folder to go quiet"
+            );
         }
+        let last_seen = self.last_seen;
         let taken = std::mem::take(self);
+        self.capped = capped;
+        self.last_seen = last_seen;
         let kind = match (taken.content, taken.beyond_rider) {
             (false, _) => Batch::Paints,
             (true, false) => Batch::Gear,
@@ -221,12 +334,14 @@ pub fn start(app: &AppHandle, state: &ModWatcher, mods_path: &str) {
     // debouncer is built because its callback needs them to name what changed.
     let links = crate::linkwalk::dir_links(&root, LINK_DEPTH, LINK_CAP);
     let event_links = links.clone();
+    let seen: Arc<Mutex<Seen>> = Arc::default();
+    let event_seen = Arc::clone(&seen);
 
     let batch_live = Arc::clone(&live);
     let mut debouncer = match new_debouncer(DEBOUNCE, move |res: DebounceEventResult| match res {
         Ok(events) if !events.is_empty() => {
             let changed: Vec<PathBuf> = events.into_iter().map(|e| e.path).collect();
-            on_batch(&handle, &pending, &batch_live, &watched, &event_links, changed);
+            on_batch(&handle, &pending, &batch_live, &event_seen, &watched, &event_links, changed);
         }
         Ok(_) => {}
         Err(e) => log::warn!("mods watcher: event error: {e:?}"),
@@ -256,6 +371,20 @@ pub fn start(app: &AppHandle, state: &ModWatcher, mods_path: &str) {
             Err(e) => log::warn!("mods watcher: could not watch {}: {e}", target.display()),
         }
     }
+
+    // Record what is already there, off the caller's thread: on a big tree on a sync tool the
+    // walk takes a moment. A batch that lands first is still judged — a path it touches that
+    // the walk hasn't reached yet counts as new, the conservative answer.
+    let mut roots = vec![root.clone()];
+    roots.extend(links.iter().map(|(_, t)| t.clone()));
+    roots.sort();
+    roots.dedup();
+    std::thread::spawn(move || {
+        let found = Seen::walk(&roots);
+        let n = found.len();
+        seen.lock().unwrap_or_else(|e| e.into_inner()).seed(found);
+        log::info!("mods watcher: recorded {n} entries to compare changes against");
+    });
 
     log::info!("mods watcher: watching {} for changes", root.display());
     *state.0.lock().unwrap() = Some(Running {
@@ -308,6 +437,7 @@ fn split_evicted<'a>(
         .filter(|p| !is_partial(p))
         .partition(|p| !evicted(p))
 }
+
 
 /// Reduce a changed path to the mod it belongs to: `<type>/<name>` relative to the
 /// watched root, e.g. `.../mods/tracks/Red Bud/Red Bud.pkz` -> `tracks/Red Bud`.
@@ -364,6 +494,7 @@ fn on_batch(
     app: &AppHandle,
     pending: &Arc<Mutex<Pending>>,
     live: &Arc<AtomicBool>,
+    seen: &Arc<Mutex<Seen>>,
     root: &Path,
     links: &[(PathBuf, PathBuf)],
     changed: Vec<PathBuf>,
@@ -372,6 +503,18 @@ fn on_batch(
         return;
     }
     let (present, evicted) = split_evicted(&changed, crate::cloudfiles::is_placeholder);
+    let touched = present.len();
+    let present: Vec<&PathBuf> = {
+        let mut seen = seen.lock().unwrap_or_else(|e| e.into_inner());
+        present.into_iter().filter(|p| seen.update(p, Print::read(p))).collect()
+    };
+    if present.len() < touched {
+        log::debug!(
+            "mods watcher: {} of {touched} changed path(s) were attributes only (pinning, a cloud \
+             download) — not mod changes",
+            touched - present.len()
+        );
+    }
     if !evicted.is_empty() {
         // Not silent: a player whose auto-reload has gone quiet deserves the reason in the
         // log, and it is the same reason — and the same fix — `cloudfiles` already warns
@@ -379,8 +522,8 @@ fn on_batch(
         log::warn!(
             "mods watcher: {} of {} changed path(s) are cloud placeholders, not real files — \
              not treating them as mod changes, because a reload would send the game reading \
-             them. Fix: \"Always keep on this device\" on the mods folder, or move it off the \
-             sync tool. e.g. {}",
+             them. Fix: move the mods folder off the sync tool. \
+             e.g. {}",
             evicted.len(),
             changed.len(),
             evicted[0].display(),
@@ -794,6 +937,102 @@ mod tests {
             p.take_if_settled(t0 + MAX_SETTLE).is_some(),
             "past the cap we act on what's landed",
         );
+    }
+
+    /// A download that keeps going past the cap gets one early reload, not one every
+    /// MAX_SETTLE for as long as it runs. Once it goes quiet, the rest goes out once.
+    #[test]
+    fn a_long_download_is_capped_once_not_every_max_settle() {
+        let t0 = Instant::now();
+        let mut p = Pending::default();
+        let mut t = t0;
+        let mut fired = 0;
+        // Five minutes of a file landing every second.
+        while t < t0 + Duration::from_secs(300) {
+            p.absorb(batch(&["tracks/Slow"]), t);
+            if p.take_if_settled(t).is_some() {
+                fired += 1;
+            }
+            t += Duration::from_secs(1);
+        }
+        assert_eq!(fired, 1, "one capped reload while the download ran");
+        assert!(p.take_if_settled(t).is_none(), "not quiet yet");
+        assert!(p.take_if_settled(t + SETTLE).is_some(), "and one more once it settles");
+
+        // The next download, after a quiet folder, gets its own cap.
+        let later = t + SETTLE + Duration::from_secs(60);
+        p.absorb(batch(&["tracks/Next"]), later);
+        p.absorb(batch(&["tracks/Next"]), later + MAX_SETTLE);
+        assert!(p.take_if_settled(later + MAX_SETTLE).is_some());
+    }
+
+    fn file(len: u64, secs: u64) -> Option<Print> {
+        Some(Print::File { len, modified: Some(SystemTime::UNIX_EPOCH + Duration::from_secs(secs)) })
+    }
+
+    /// Pinning, unpinning and OneDrive downloading a file's bytes change its attributes
+    /// only. Size and modified time stay put, so none of it is a mod change.
+    #[test]
+    fn only_size_time_or_presence_count_as_a_change() {
+        let path = Path::new("/m/mods/tracks/Red Bud/Red Bud.pkz");
+        let mut seen = Seen::default();
+        seen.seed(vec![(path.to_path_buf(), file(100, 1).unwrap())]);
+
+        assert!(!seen.update(path, file(100, 1)), "attributes only");
+        assert!(!seen.update(path, file(100, 1)), "and again, as each download batch lands");
+        assert!(seen.update(path, file(120, 1)), "new size");
+        assert!(seen.update(path, file(120, 2)), "rewritten in place");
+        assert!(seen.update(path, None), "deleted");
+        assert!(!seen.update(path, None), "a second event for a deleted file");
+        assert!(seen.update(path, file(120, 2)), "back again");
+
+        let fresh = Path::new("/m/mods/tracks/New/New.pkz");
+        assert!(seen.update(fresh, file(5, 9)), "a file the walk never saw is new");
+        assert!(!seen.update(Path::new("/m/mods/tracks/x.tmp"), None), "made and gone unseen");
+
+        let dir = Path::new("/m/mods/tracks/Red Bud");
+        seen.seed(vec![(dir.to_path_buf(), Print::Dir)]);
+        assert!(!seen.update(dir, Some(Print::Dir)), "a folder's attributes changing");
+    }
+
+    /// What a batch recorded is newer than what the start-up walk read, so the walk never
+    /// overwrites it.
+    #[test]
+    fn the_startup_walk_does_not_overwrite_a_newer_batch() {
+        let path = Path::new("/m/mods/bikes/KTM/ktm.pkz");
+        let mut seen = Seen::default();
+        assert!(seen.update(path, file(200, 5)));
+        seen.seed(vec![(path.to_path_buf(), file(100, 1).unwrap())]);
+        assert!(!seen.update(path, file(200, 5)));
+    }
+
+    /// Against a real folder: the walk records it, a read-only flip (an attribute change,
+    /// like pinning) is ignored, and writing new bytes is picked up.
+    #[test]
+    fn attribute_changes_on_disk_are_not_content_changes() {
+        let root = std::env::temp_dir().join(format!("frost-modwatch-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let track = root.join("tracks/Red Bud");
+        std::fs::create_dir_all(&track).unwrap();
+        let pkz = track.join("Red Bud.pkz");
+        std::fs::write(&pkz, b"first").unwrap();
+
+        let mut seen = Seen::default();
+        seen.seed(Seen::walk(std::slice::from_ref(&root)));
+        assert!(seen.0.contains_key(&pkz) && seen.0.contains_key(&track));
+
+        let mut perms = std::fs::metadata(&pkz).unwrap().permissions();
+        perms.set_readonly(true);
+        std::fs::set_permissions(&pkz, perms.clone()).unwrap();
+        assert!(!seen.update(&pkz, Print::read(&pkz)), "read-only is an attribute");
+        assert!(!seen.update(&track, Print::read(&track)));
+
+        #[allow(clippy::permissions_set_readonly_false)]
+        perms.set_readonly(false);
+        std::fs::set_permissions(&pkz, perms).unwrap();
+        std::fs::write(&pkz, b"second, longer").unwrap();
+        assert!(seen.update(&pkz, Print::read(&pkz)), "new bytes are a change");
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

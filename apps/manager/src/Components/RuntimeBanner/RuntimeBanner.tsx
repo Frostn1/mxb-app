@@ -170,8 +170,8 @@ export default function RuntimeBanner() {
   }
 
   // Below the two runtime bars: those are things that stop FrostMod dead, this is a folder
-  // that makes the game slow and fragile. Shown only when nothing louder is up. OneDrive is
-  // left to `HealthBanner`, which says the same thing and can also fix it.
+  // that makes the game slow and fragile. Shown only when nothing louder is up. OneDrive is left
+  // out: it is often just Windows' own Documents, and players tripped over the bar.
   if (!runtimeWarning && cloud && !cloudDismissed && cloud.provider !== "OneDrive") {
     const evicted = cloud.count > 0;
     const provider = cloud.provider ?? t("cloud.genericProvider");

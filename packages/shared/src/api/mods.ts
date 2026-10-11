@@ -6,7 +6,6 @@ import type {
   Attachment,
   ModsDehydrated,
   HealthReport,
-  PinResult,
   ReshadeHealth,
   TrainersRepaired,
   BikeModels,
@@ -3137,21 +3136,9 @@ export function onModsDehydrated(
   return listen<ModsDehydrated>("mods-dehydrated", (e) => cb(e.payload));
 }
 
-/** The OneDrive and ReShade health checks, read fresh. Attributes only — nothing is downloaded. */
+/** The ReShade and tyre health checks, read fresh. */
 export function healthCheck(): Promise<HealthReport> {
   return invoke<HealthReport>("health_check");
-}
-
-/** Mark the PiBoSo folder "Always keep on this device". Progress arrives on {@link onPinProgress}. */
-export function keepPibosoOnDevice(): Promise<PinResult> {
-  return invoke<PinResult>("keep_piboso_on_device");
-}
-
-/** Progress of {@link keepPibosoOnDevice}: items marked so far, of `total`. */
-export function onPinProgress(
-  cb: (p: { done: number; total: number }) => void,
-): Promise<UnlistenFn> {
-  return listen<{ done: number; total: number }>("onedrive-pin-progress", (e) => cb(e.payload));
 }
 
 /** Move empty folders out of `mods/tyres` into `mxbapp_moved/tyres`. Returns where each went.
