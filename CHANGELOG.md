@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-10-12 — MXB Coach v0.1.24 — No more freezing on the session review
+
+### Fixed
+- **Coach no longer freezes on the session review.** Toggling the feel chips could leave the window Not Responding. Heavy work now runs in the background, and slow actions are logged.
+
+### Added
+- **Settings → Logs.** Save or share your logs.
+
 ## 2026-10-12 — v0.20.2 — Shop pictures
 
 ### Fixed
