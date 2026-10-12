@@ -881,17 +881,7 @@ pub(crate) fn file_size(p: &Path) -> u64 {
     std::fs::metadata(p).map(|m| m.len()).unwrap_or(0)
 }
 
-pub(crate) fn human_size(bytes: u64) -> String {
-    const KB: u64 = 1024;
-    const MB: u64 = KB * 1024;
-    if bytes >= MB {
-        format!("{:.1} MB", bytes as f64 / MB as f64)
-    } else if bytes >= KB {
-        format!("{:.0} KB", bytes as f64 / KB as f64)
-    } else {
-        format!("{bytes} B")
-    }
-}
+pub(crate) use mxb_core::upload::human_size;
 
 pub(crate) fn sanitize_file(name: &str) -> String {
     let s: String = name

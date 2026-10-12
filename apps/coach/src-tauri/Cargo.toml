@@ -16,6 +16,9 @@ tauri = { version = "2", features = [] }
 tauri-plugin-shell = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-log = "2"
+# The share link is copied the moment its upload lands, minutes after the click; the web
+# clipboard refuses that (no focus, no gesture), so the process writes it, as in MXB App.
+tauri-plugin-clipboard-manager = "2"
 tauri-plugin-process = "2"
 tauri-plugin-updater = "2"
 # The overlay hotkey, and one Coach at a time holding it.
@@ -38,3 +41,5 @@ custom-protocol = ["tauri/custom-protocol"]
 [dev-dependencies]
 # Tauri's mock runtime, for tests that need an app handle. Dev-only.
 tauri = { version = "2", features = ["test"] }
+# Opens the log bundle the tests write.
+zip = "2"

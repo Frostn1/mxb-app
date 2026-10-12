@@ -68,6 +68,9 @@ ed25519-dalek = { version = "2", default-features = false, features = ["std"] }
 # Signs a usage report with the build key, when one was compiled in. See `usage::signature`.
 hmac = "0.12"
 base64 = "0.22"
+# Compile-time string obfuscation for the upload host (upload.rs).
+obfstr = "0.4"
+futures-util = { version = "0.3", features = ["io"] }
 log = "0.4"
 dirs-next = "2.0.0"
 chacha20poly1305 = "0.10"
@@ -89,3 +92,6 @@ mint-install-id = ["dep:uuid"]
 # Tauri's mock runtime, so paintwatch's watcher lifecycle can be exercised without a display
 # or a real webview. Dev-only, so the shipped binaries never get the `test` feature.
 tauri = { version = "2", features = ["test"] }
+# The upload's own tests (upload.rs): `#[tokio::test]`, and `test-util` so the retry tests
+# skip their backoff instead of sleeping through it.
+tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread", "time", "test-util"] }

@@ -18,6 +18,7 @@
     "dialog:allow-save",
     "shell:allow-open",
     "process:allow-restart",
+    "clipboard-manager:allow-write-text",
     "updater:default"
   ]
 }
