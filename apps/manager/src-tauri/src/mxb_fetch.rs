@@ -175,6 +175,12 @@ static ACTIVE: AtomicU64 = AtomicU64::new(0);
 static IDLE_GENERATION: AtomicU64 = AtomicU64::new(0);
 static LIFECYCLE: Mutex<()> = Mutex::new(());
 
+/// Navigations against fetches. A `fetch()` in flight dies with "Failed to fetch" the moment its
+/// document is navigated away - [`read_page`] does that to the shared window on purpose, and so
+/// does recovery from a stray redirect. Fetches share this lock; anything that moves the window
+/// takes it exclusively, so the two can never overlap.
+static NAV: tokio::sync::RwLock<()> = tokio::sync::RwLock::const_new(());
+
 struct WindowLease {
     app: AppHandle,
 }
@@ -339,6 +345,7 @@ pub async fn read_page(url: &str) -> anyhow::Result<Fetched> {
         return Err(stopped(reason));
     }
     let app = app()?;
+    let _nav = NAV.write().await;
     let _lease = WindowLease::acquire(app);
     let mut cleanup = WindowFailureCleanup::new(app);
     let window = ensure_window(app).await?;
@@ -438,33 +445,30 @@ async fn run(url: &str, body: Option<&str>) -> anyhow::Result<Fetched> {
         return Err(stopped(reason));
     }
     let app = app()?;
+    let _nav = NAV.read().await;
     let _lease = WindowLease::acquire(app);
     let mut cleanup = WindowFailureCleanup::new(app);
     let window = ensure_window(app).await?;
-
-    let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
-    let (tx, rx) = tokio::sync::oneshot::channel();
-    lock(waiting()).insert(id, tx);
+    ensure_on_site(app, &window).await?;
 
     let started = std::time::Instant::now();
-    if let Err(e) = window.eval(script(id, url, body)) {
-        lock(waiting()).remove(&id);
-        return Err(anyhow::anyhow!("could not run the fetch in the WebView: {e}"));
+    let mut reply = send_fetch(&window, url, body).await?;
+    // A `fetch` that rejected outright ("Failed to fetch") means the page it ran in was not
+    // where it should be - mid-reload after Cloudflare's check, or sent off the site's origin
+    // by a redirect, so the request became a blocked cross-origin one. Put the window back on
+    // the site and ask once more. Once: a second failure is the site's answer, and asking
+    // again would only be hammering it.
+    if reply.error.as_deref().is_some_and(is_network_failure) {
+        log::info!(
+            "WebView fetch of {} failed ({}) - returning the window to {} and retrying once",
+            url.strip_prefix(mxb_session::base()).unwrap_or(url),
+            reply.error.as_deref().unwrap_or_default(),
+            mxb_session::site().domain
+        );
+        tokio::time::sleep(RETRY_DELAY).await;
+        recover(app, &window).await?;
+        reply = send_fetch(&window, url, body).await?;
     }
-
-    let reply = match tokio::time::timeout(TIMEOUT, rx).await {
-        Ok(Ok(reply)) => reply,
-        // The sender is only dropped if the map is cleared out from under us.
-        Ok(Err(_)) => {
-            return Err(anyhow::anyhow!("the WebView fetch was cancelled"));
-        }
-        Err(_) => {
-            lock(waiting()).remove(&id);
-            return Err(anyhow::anyhow!(
-                "the WebView did not answer within {TIMEOUT:?} — {url}"
-            ));
-        }
-    };
 
     if let Some(error) = reply.error {
         return Err(anyhow::anyhow!("the WebView could not reach {url}: {error}"));
@@ -489,6 +493,68 @@ async fn run(url: &str, body: Option<&str>) -> anyhow::Result<Fetched> {
     };
     cleanup.disarm();
     Ok(fetched)
+}
+
+/// Pause before the single retry of a fetch that failed at the network level.
+const RETRY_DELAY: Duration = Duration::from_millis(1500);
+
+/// Whether a `fetch` rejection is the kind a fresh page fixes: Chromium says "Failed to fetch",
+/// WebKit "Load failed", Gecko "NetworkError...". An HTTP status never lands here.
+fn is_network_failure(error: &str) -> bool {
+    let e = error.to_ascii_lowercase();
+    e.contains("failed to fetch") || e.contains("load failed") || e.contains("networkerror")
+}
+
+/// Whether the origin the window reports (`location.origin`) is the catalog's.
+fn same_site(origin: &str, base: &str) -> bool {
+    origin.trim_end_matches('/').eq_ignore_ascii_case(base.trim_end_matches('/'))
+}
+
+/// Run one fetch in the window and wait for its reply.
+async fn send_fetch(
+    window: &tauri::WebviewWindow,
+    url: &str,
+    body: Option<&str>,
+) -> anyhow::Result<Reply> {
+    let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    lock(waiting()).insert(id, tx);
+
+    if let Err(e) = window.eval(script(id, url, body)) {
+        lock(waiting()).remove(&id);
+        return Err(anyhow::anyhow!("could not run the fetch in the WebView: {e}"));
+    }
+
+    match tokio::time::timeout(TIMEOUT, rx).await {
+        Ok(Ok(reply)) => Ok(reply),
+        // The sender is only dropped if the map is cleared out from under us.
+        Ok(Err(_)) => Err(anyhow::anyhow!("the WebView fetch was cancelled")),
+        Err(_) => {
+            lock(waiting()).remove(&id);
+            Err(anyhow::anyhow!(
+                "the WebView did not answer within {TIMEOUT:?} - {url}"
+            ))
+        }
+    }
+}
+
+/// The fetch only works from a document on the site's own origin: from anywhere else it is a
+/// cross-origin request, which the site's CORS headers refuse. The window can end up elsewhere
+/// (a mod page that redirected off-site, an error page), so check before using it.
+async fn ensure_on_site(app: &AppHandle, window: &tauri::WebviewWindow) -> anyhow::Result<()> {
+    let p = probe(window).await;
+    if p.origin.is_some() && !p.on_site {
+        log::info!("the fetch window is off {} - navigating it back", mxb_session::site().domain);
+        recover(app, window).await?;
+    }
+    Ok(())
+}
+
+/// Navigate the window back to the site's front page and wait for it to be past the check.
+async fn recover(app: &AppHandle, window: &tauri::WebviewWindow) -> anyhow::Result<()> {
+    let previous = probe(window).await.origin;
+    window.navigate(mxb_session::base().parse()?)?;
+    clear(app, window, previous).await
 }
 
 /// The script run inside the page.
@@ -796,11 +862,15 @@ struct Probe {
     /// The document's `performance.timeOrigin`, minted fresh per document — how a caller that
     /// has just navigated tells the page it asked for from the one it asked to leave.
     origin: Option<f64>,
+    /// The document is on the catalog's own origin - the only place a fetch to it is same-origin.
+    on_site: bool,
 }
 
 impl Probe {
     fn is_past(&self, replacing: Option<f64>) -> bool {
-        self.page == Page::Ready && (replacing.is_none() || self.origin != replacing)
+        self.page == Page::Ready
+            && self.on_site
+            && (replacing.is_none() || self.origin != replacing)
     }
 }
 
@@ -810,6 +880,9 @@ struct ProbeReply {
     complete: bool,
     challenge: bool,
     origin: f64,
+    /// `location.origin`.
+    #[serde(default)]
+    site: String,
 }
 
 /// Read the page's state straight out of the WebView.
@@ -828,6 +901,7 @@ fn classify(reply: Option<ProbeReply>) -> Probe {
         return Probe {
             page: Page::Loading,
             origin: None,
+            on_site: false,
         };
     };
     let page = if r.challenge {
@@ -840,6 +914,7 @@ fn classify(reply: Option<ProbeReply>) -> Probe {
     Probe {
         page,
         origin: Some(r.origin),
+        on_site: same_site(&r.site, mxb_session::base()),
     }
 }
 
@@ -855,7 +930,7 @@ fn probe_script() -> String {
        complete: document.readyState === 'complete', \
        challenge: typeof window._cf_chl_opt !== 'undefined' \
          || /^just a moment/i.test(document.title || ''), \
-       origin: performance.timeOrigin }; } catch (e) { return null; } })()"
+       origin: performance.timeOrigin, site: location.origin }; } catch (e) { return null; } })()"
         .to_string()
 }
 
@@ -1058,7 +1133,32 @@ mod tests {
             complete,
             challenge,
             origin,
+            site: mxb_session::base().to_string(),
         })
+    }
+
+    /// A document anywhere but the catalog's origin cannot fetch from it same-origin, so it is
+    /// never "past" - however complete it looks.
+    #[test]
+    fn a_page_off_the_site_is_not_ready() {
+        let mut off = reply(true, true, false, 1.0).unwrap();
+        off.site = "https://example.org".to_string();
+        let p = classify(Some(off));
+        assert!(!p.on_site);
+        assert!(!p.is_past(None));
+        assert!(same_site("https://mxb-mods.com/", "https://mxb-mods.com"));
+        assert!(!same_site("https://www.mxb-mods.com", "https://mxb-mods.com"));
+        assert!(!same_site("", "https://mxb-mods.com"));
+        assert!(classify(reply(true, true, false, 1.0)).is_past(None));
+    }
+
+    #[test]
+    fn rejected_fetches_are_told_from_answers() {
+        assert!(is_network_failure("TypeError: Failed to fetch"));
+        assert!(is_network_failure("TypeError: Load failed"));
+        assert!(is_network_failure("TypeError: NetworkError when attempting to fetch resource."));
+        assert!(!is_network_failure("SyntaxError: Unexpected token"));
+        assert!(!is_network_failure(""));
     }
 
     /// The challenge wins over everything else — Tauri's IPC is injected into it and it

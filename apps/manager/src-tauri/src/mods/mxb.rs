@@ -980,7 +980,11 @@ async fn warm_feed_authors(category_id: u32, q: &str, page: u32) {
         let url = reqwest::Url::parse_with_params(&base, &params).ok()?;
         Some(async move {
             let resp = get_page(url.as_str()).await.ok()?;
-            resp.is_success().then(|| (key, feed_creators(&resp.body)))
+            match feed_page_outcome(resp.status) {
+                FeedPage::Items => Some((key, feed_creators(&resp.body))),
+                FeedPage::PastTheEnd => Some((key, Vec::new())),
+                FeedPage::Failed => None,
+            }
         })
     });
 
@@ -997,6 +1001,24 @@ async fn warm_feed_authors(category_id: u32, q: &str, page: u32) {
         if let Ok(mut d) = done.lock() {
             d.insert(key);
         }
+    }
+}
+
+/// What a feed page's status says.
+#[derive(Debug, PartialEq, Eq)]
+enum FeedPage {
+    Items,
+    /// WordPress answers a feed page beyond the last one with a 404. That is the end of the
+    /// feed, not a failure: remember it, or every visit to the last listing page asks again.
+    PastTheEnd,
+    Failed,
+}
+
+fn feed_page_outcome(status: u16) -> FeedPage {
+    match status {
+        200..=299 => FeedPage::Items,
+        404 => FeedPage::PastTheEnd,
+        _ => FeedPage::Failed,
     }
 }
 
@@ -1045,7 +1067,15 @@ fn embedded_author(p: &Value) -> Option<String> {
 
 #[cfg(test)]
 mod feed_tests {
-    use super::{feed_creators, feed_pages_for};
+    use super::{feed_creators, feed_page_outcome, feed_pages_for, FeedPage};
+
+    #[test]
+    fn a_feed_404_is_the_end_not_a_failure() {
+        assert_eq!(feed_page_outcome(200), FeedPage::Items);
+        assert_eq!(feed_page_outcome(404), FeedPage::PastTheEnd);
+        assert_eq!(feed_page_outcome(403), FeedPage::Failed);
+        assert_eq!(feed_page_outcome(503), FeedPage::Failed);
+    }
 
     #[test]
     fn feed_pages_cover_a_listing_page() {
