@@ -488,6 +488,17 @@ pub async fn by_slug(slug: &str, category_id: u32) -> anyhow::Result<Option<ModS
     if slug.is_empty() {
         return Ok(None);
     }
+    // Our mirror first: it never meets the bot check. A mod it does not hold (new, or the
+    // mirror is behind) is asked of the site, which answers "no such post" itself.
+    super::mirror::mirror_then(
+        "slug lookup",
+        async { super::mirror::by_slug(&slug.to_lowercase(), category_id).await.map(Some) },
+        by_slug_site(slug, category_id),
+    )
+    .await
+}
+
+async fn by_slug_site(slug: &str, category_id: u32) -> anyhow::Result<Option<ModSummary>> {
     let url = format!("{}{}", mxb_session::base(), obfstr!("/wp-json/wp/v2/posts"));
     let params = vec![
         ("slug", slug.to_string()),
@@ -517,6 +528,24 @@ pub async fn search(
         ModSort::Newest
     };
 
+    // Our mirror first (newest and oldest, with or without search text); the site, and from
+    // there the WebView, only when it cannot answer: see `super::mirror`. Popular stays with
+    // the site, which is the only one that has view counts.
+    super::mirror::mirror_then(
+        "listing",
+        super::mirror::search(q, category_id, page, sort),
+        search_site(q, category_id, page, sort),
+    )
+    .await
+}
+
+/// The site's own listing, which already falls back to the WebView when the HTTP client is refused.
+async fn search_site(
+    q: &str,
+    category_id: u32,
+    page: u32,
+    sort: ModSort,
+) -> anyhow::Result<Vec<ModSummary>> {
     let listing_fut = async {
         match sort {
             ModSort::Newest => listing(q, category_id, Page::Number(page)).await,
