@@ -85,7 +85,7 @@ const MAX_FETCH_BYTES: usize = 32 * 1024 * 1024;
 
 /// How a refusal was arrived at. Bumped when the reasoning below changes in a way that
 /// could give a different answer for the same URL, which retires every row the old way wrote.
-const MISS_VERSION: u32 = 2;
+const MISS_VERSION: u32 = 3;
 
 /// How long a URL that answered with nothing an image could be made of is left alone. Long,
 /// because that is the answer least likely to change: a thumbnail a catalog 404s today, or an
@@ -201,7 +201,23 @@ fn source_url(uri: &str) -> Option<String> {
         return None;
     }
     let host = url.host_str()?.to_ascii_lowercase();
-    is_allowed(&host).then(|| url.to_string())
+    is_allowed(&host).then(|| prefer_cdn(url).to_string())
+}
+
+/// The store's Cloudflare-protected origin answers image requests with a 403 challenge, while
+/// the same files load from its CDN host. Catalog pictures are therefore fetched from the CDN.
+/// Only `/wp-content/uploads/` on exactly `mxbikes-shop.com` / `www.mxbikes-shop.com` is
+/// rewritten; every other host and path is left alone. Done before the cache key is derived,
+/// so the key stays the same however the catalog spells the URL.
+fn prefer_cdn(url: reqwest::Url) -> reqwest::Url {
+    let origin = matches!(url.host_str(), Some("mxbikes-shop.com" | "www.mxbikes-shop.com"));
+    if origin && url.path().starts_with("/wp-content/uploads/") {
+        let mut cdn = url.clone();
+        if cdn.set_host(Some("cdn.mxbikes-shop.com")).is_ok() {
+            return cdn;
+        }
+    }
+    url
 }
 
 /// The `?w=` the caller asked for, if any.
@@ -1113,6 +1129,62 @@ mod tests {
         assert!(looks_like_html(b"<html><body>sgcaptcha</body></html>"));
         assert!(!looks_like_html(&[0x89, b'P', b'N', b'G']));
         assert!(!looks_like_html(b""));
+    }
+
+    fn cdn(u: &str) -> String {
+        prefer_cdn(reqwest::Url::parse(u).unwrap()).to_string()
+    }
+
+    #[test]
+    fn origin_uploads_are_fetched_from_the_cdn() {
+        assert_eq!(
+            cdn("https://mxbikes-shop.com/wp-content/uploads/2024/05/a.jpg"),
+            "https://cdn.mxbikes-shop.com/wp-content/uploads/2024/05/a.jpg"
+        );
+        assert_eq!(
+            cdn("https://www.mxbikes-shop.com/wp-content/uploads/a.png"),
+            "https://cdn.mxbikes-shop.com/wp-content/uploads/a.png"
+        );
+    }
+
+    #[test]
+    fn the_query_string_survives_the_rewrite() {
+        assert_eq!(
+            cdn("https://mxbikes-shop.com/wp-content/uploads/a.jpg?ver=3&x=1"),
+            "https://cdn.mxbikes-shop.com/wp-content/uploads/a.jpg?ver=3&x=1"
+        );
+    }
+
+    #[test]
+    fn other_hosts_and_paths_are_not_rewritten() {
+        for u in [
+            "https://cdn.mxbikes-shop.com/wp-content/uploads/a.jpg",
+            "https://mxbikes-shop.com/product/some-bike/",
+            "https://mxbikes-shop.com/wp-content/plugins/a.jpg",
+            "https://mxbikes-shop.com/wp-content/uploads",
+            "https://evil-mxbikes-shop.com/wp-content/uploads/a.jpg",
+            "https://mxbikes-shop.b-cdn.net/wp-content/uploads/a.jpg",
+            "https://mxb-mods.com/wp-content/uploads/a.jpg",
+            "https://shop.mxb-hub.com/wp-content/uploads/a.jpg",
+        ] {
+            assert_eq!(cdn(u), u);
+        }
+    }
+
+    #[test]
+    fn source_url_rewrites_before_the_cache_key() {
+        let enc = "https%3A%2F%2Fmxbikes-shop.com%2Fwp-content%2Fuploads%2Fa.jpg";
+        let got = source_url(&format!("http://imgcache.localhost/{enc}?w=300")).unwrap();
+        assert_eq!(got, "https://cdn.mxbikes-shop.com/wp-content/uploads/a.jpg");
+    }
+
+    /// Blocks recorded by 0.20.0/0.20.1 (origin 403s) must be dropped on upgrade.
+    #[test]
+    fn blocked_rows_from_the_previous_version_are_dropped() {
+        let now = 1_000_000;
+        let old = Miss { version: MISS_VERSION - 1, ..Miss::new(Refusal::Blocked, now) };
+        assert!(!old.fresh(now));
+        assert!(Miss::new(Refusal::Blocked, now).fresh(now));
     }
 
     /// Rows a build before the fix wrote (403s filed dead for a week) must not outlive it.
