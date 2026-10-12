@@ -22,7 +22,7 @@
  * cacheable for a minute; the routes are rate-limited per address.
  */
 
-import { ASSET_TYPES, hex, LEASE_MS, type AssetType, type MirrorJob } from "./mirror";
+import { ASSET_TYPES, hex, LEASE_MS, SYNCED_KEY, type AssetType, type MirrorJob } from "./mirror";
 import { safeBlocks } from "./modbody";
 import { activeBikes, supported, touchBlob } from "./mirrorpolicy";
 import { reportAsset } from "./modreports";
@@ -55,6 +55,8 @@ export function ftsQuery(q: string): string | null {
 
 interface AssetRow {
   id: number;
+  source_ref: number | null;
+  slug: string | null;
   public_id: string;
   thumb_key: string | null;
   source: string;
@@ -88,6 +90,10 @@ function summary(env: Env, r: AssetRow) {
   return {
     id: r.public_id,
     slug: modSlug(r.title),
+    // The source post's own id and slug (mxb-mods.com's WordPress): what the MXB App keys its
+    // cards, ratings and detail pages by. Null for an upload.
+    wp_id: r.source_ref,
+    wp_slug: r.source === "mirror" ? r.slug : null,
     source: r.source,
     title: r.title,
     author: r.author,
@@ -106,7 +112,7 @@ function summary(env: Env, r: AssetRow) {
 }
 
 /** The current version's label and seq, and what of it is stored. */
-const COLUMNS = `a.id, a.public_id, a.thumb_key, a.source, a.title, a.author, a.type, a.bike, a.visibility, a.thumb_sha, a.source_url, a.modified, a.published,
+const COLUMNS = `a.id, a.source_ref, a.slug, a.public_id, a.thumb_key, a.source, a.title, a.author, a.type, a.bike, a.visibility, a.thumb_sha, a.source_url, a.modified, a.published,
   a.first_seen, a.last_seen, v.label, v.seq,
   (SELECT COUNT(*) FROM mod_files f WHERE f.version_id = v.id AND f.status = 'done') AS files,
   (SELECT COALESCE(SUM(b.size), 0) FROM mod_files f JOIN mod_blobs b ON b.sha256 = f.sha256
@@ -128,7 +134,40 @@ const SORTS: Record<string, string> = {
   updated: "a.modified DESC, a.id DESC",
   name: "a.title COLLATE NOCASE ASC, a.id ASC",
   size: "bytes DESC, a.id DESC",
+  oldest: `${NEWEST.replace(" DESC", " ASC")}, a.id ASC`,
 };
+
+/**
+ * When the mirror last finished walking mxb-mods.com's listing, as an ISO time; null before the
+ * first walk. A mirror whose fetcher has stopped stops moving this, so a client can tell.
+ */
+export async function syncedAt(env: Env): Promise<string | null> {
+  const row = await env.DB.prepare("SELECT value FROM mirror_state WHERE key = ?").bind(SYNCED_KEY).first<{ value: string }>();
+  try {
+    const at = row ? (JSON.parse(row.value) as { at?: unknown }).at : null;
+    return typeof at === "number" && at > 0 ? new Date(at).toISOString() : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * A mxb-mods.com category id as the name the mirror stores on each mod. null: not a category we
+ * know, or its name is shared by another category (so a name match would not mean this one).
+ * `categories=<id>` on WordPress matches posts filed directly under it, as the name does here.
+ */
+async function categoryName(env: Env, id: number): Promise<string | null> {
+  const row = await env.DB.prepare("SELECT value FROM mirror_state WHERE key = 'categories'").first<{ value: string }>();
+  let cats: { id: number; name: string }[] = [];
+  try {
+    cats = (JSON.parse(row?.value ?? "{}") as { cats?: { id: number; name: string }[] }).cats ?? [];
+  } catch {
+    return null;
+  }
+  const hit = cats.find((c) => c.id === id);
+  if (!hit || cats.filter((c) => c.name === hit.name).length !== 1) return null;
+  return hit.name;
+}
 
 export async function searchAssets(url: URL, env: Env): Promise<{ status: number; body: unknown }> {
   const q = (url.searchParams.get("q") ?? "").slice(0, 200);
@@ -140,11 +179,20 @@ export async function searchAssets(url: URL, env: Env): Promise<{ status: number
   if (type && !ASSET_TYPES.includes(type as never)) return { status: 400, body: { error: "unknown type" } };
   if (sort && !Object.hasOwn(SORTS, sort)) return { status: 400, body: { error: "unknown sort" } };
   if (source && source !== "mirror" && source !== "upload") return { status: 400, body: { error: "unknown source" } };
+  const catParam = url.searchParams.get("category");
+  const category = catParam === null ? null : /^\d{1,6}$/.test(catParam) ? Number(catParam) : NaN;
+  if (Number.isNaN(category)) return { status: 400, body: { error: "unknown category" } };
 
   const where: string[] = [LISTABLE];
   const args: unknown[] = [];
   if (type) where.push("a.type = ?"), args.push(type);
   if (source) where.push("a.source = ?"), args.push(source);
+  if (category !== null) {
+    const name = await categoryName(env, category);
+    if (!name) return { status: 400, body: { error: "unknown category" } };
+    where.push("('; ' || a.categories || '; ') LIKE ? ESCAPE '\\'");
+    args.push(`%; ${name.replace(/[\\%_]/g,(c) => "\\" + c)}; %`);
+  }
   if (bike) {
     where.push("a.bike LIKE ? ESCAPE '\\'");
     args.push(`%${bike.replace(/[\\%_]/g, (c) => "\\" + c)}%`);
@@ -173,7 +221,14 @@ export async function searchAssets(url: URL, env: Env): Promise<{ status: number
     .all<AssetRow>();
   return {
     status: 200,
-    body: { page, per_page: PER_PAGE, total, pages: Math.ceil(total / PER_PAGE), results: results.map((r) => summary(env, r)) },
+    body: {
+      page,
+      per_page: PER_PAGE,
+      total,
+      pages: Math.ceil(total / PER_PAGE),
+      synced_at: await syncedAt(env),
+      results: results.map((r) => summary(env, r)),
+    },
   };
 }
 
@@ -286,6 +341,7 @@ export async function getAsset(id: number, url: URL, env: Env): Promise<{ status
     status: 200,
     body: {
       ...summary(env, asset),
+      synced_at: await syncedAt(env),
       visibility: asset.visibility,
       version_seq: version.seq,
       description: asset.description,
