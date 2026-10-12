@@ -641,6 +641,9 @@ async function discover(s: Sync, tree: Map<number, Category>): Promise<void> {
   }
 }
 
+/** `mirror_state` key holding when the listing walk last reached its end. */
+export const SYNCED_KEY = "synced";
+
 async function listingState(env: Env): Promise<Listing> {
   return (await getState<Listing>(env, "listing")) ?? { hwm: "", walk: null };
 }
@@ -688,6 +691,9 @@ export async function applyListingPage(
     if (walk.top > st.hwm) st.hwm = walk.top;
     st.walk = null;
     await setState(env, "listing", st);
+    // The catalogue is as current as this walk: what the public API reports as `synced_at`,
+    // so the MXB App can tell a live mirror from one whose fetcher has stopped.
+    await setState(env, SYNCED_KEY, { at: now });
     return "done";
   }
   walk.offset += Math.max(1, perPage - LIST_OVERLAP);
