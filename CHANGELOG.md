@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-10-12 — v0.20.2 — Shop pictures
+
+### Fixed
+- **Shop pictures load again.** They now come from the shop's picture server, and old blocked pictures are cleared on update.
+
 ## 2026-10-11 — v0.20.1 — Mod pictures
 
 ### Fixed
