@@ -87,6 +87,7 @@ import { FETCHER_PREFIX, fetcherRoutes } from "./mirrorfetcher";
 import { abortUpload, completeUpload, deleteMod, editMod, myMods, openUpload, setThumb, uploadStatus } from "./uploads";
 import { internalId, UUID_RE } from "./modids";
 import { viewOnlyOn, listPolicies, lockKey, minisignPublicKey, putPolicy, signedLocks, wantsViewOnly } from "./paintpolicy";
+import { clarenceRoutes, isClarencePath } from "./builds";
 import {
   liveKey,
   mayFetchPaint,
@@ -210,6 +211,9 @@ async function route(request: Request, env: Env): Promise<Response> {
   // Steam sign-in for mxbsecure.com. Its session is a signed cookie, checked where it's used.
   // MSM driving a hosted server, and the box install runner (`hostingroutes.ts`).
   if (isHostedPath(path)) return hostedRoutes(request, url, env);
+
+  // Clarence, DGS's ticket bot, reporting on website orders (`builds.ts`). Signed, no session.
+  if (isClarencePath(path)) return clarenceRoutes(request, url, env);
 
   if (isWebPath(path)) return webRoutes(request, url, env);
 
