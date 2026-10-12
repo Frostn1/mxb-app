@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-10-12 — v0.20.3 — Mod browsing
+
+### Fixed
+- **Mod browsing from mxb-mods.com is more reliable.** Page loads no longer overlap, the page origin is checked, a failed load retries once, and the end of the feed is remembered.
+
+### Changed
+- **Mod listings load faster.** They come from the mxbsecure mirror first, then the site, then the in-app browser. The mirror is skipped when it is out of date or missing an item.
+
 ## 2026-10-12 — MXB Coach v0.1.24 — No more freezing on the session review
 
 ### Fixed
