@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
-import { MAX_SENT_PER_DAY, parseShot, parseSpec, SPEC_FORMAT } from "../src/builds";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { clarenceRoutes, MAX_SENT_PER_DAY, parseShot, parseSpec, SPEC_FORMAT } from "../src/builds";
+import { sign, SIGNATURE_HEADER, verify } from "../src/clarence";
 import { webRoutes } from "../src/web";
 import { sealToken, SESSION_COOKIE } from "../src/websession";
 import { d1 } from "./d1sqlite";
@@ -200,5 +201,76 @@ describe("build routes", () => {
     }
     expect((await call(env, "POST", "/v1/web/builds", RIDER, { spec: spec(), send: true })).status).toBe(429);
     expect((await call(env, "POST", "/v1/web/builds", RIDER, { spec: spec() })).status).toBe(201);
+  });
+});
+
+describe("Clarence feed", () => {
+  const SECRET = "clarence-test-secret";
+  const withClarence = () => ({ ...deployment(), CLARENCE_ORDERS_URL: "https://clarence.example/orders", CLARENCE_SECRET: SECRET }) as unknown as Env;
+  const posted: { body: string; sig: string | null }[] = [];
+  let answer = 200;
+  beforeEach(() => {
+    posted.length = 0;
+    answer = 200;
+    vi.stubGlobal("fetch", async (_url: string, init: RequestInit) => {
+      posted.push({ body: String(init.body), sig: new Headers(init.headers).get(SIGNATURE_HEADER) });
+      return new Response("{}", { status: answer });
+    });
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  async function inbound(env: Env, id: string, body: unknown, secret = SECRET) {
+    const raw = JSON.stringify(body);
+    const r = new Request(`${API}/v1/clarence/builds/${id}`, { method: "POST", headers: { [SIGNATURE_HEADER]: await sign(secret, raw) }, body: raw });
+    return clarenceRoutes(r, new URL(r.url), env);
+  }
+
+  it("posts a sent order, signed, with the rider's Discord name; a saved build stays home", async () => {
+    const env = withClarence();
+    await call(env, "POST", "/v1/web/builds", RIDER, { spec: spec() });
+    expect(posted).toHaveLength(0);
+    const { id } = await json<{ id: string }>(call(env, "POST", "/v1/web/builds", RIDER, { spec: spec(), send: true, guids: 2, discord: "@Frost_41" }));
+    expect(posted).toHaveLength(1);
+    expect(await verify(SECRET, posted[0].body, posted[0].sig)).toBe(true);
+    expect(JSON.parse(posted[0].body)).toMatchObject({ event: "order.created", id, steamId: RIDER, discord: "frost_41", guids: 2, stage: "quote" });
+    const q = await json<{ builds: { clarence: string }[] }>(call(env, "GET", "/v1/web/builds?all=1", ADMIN));
+    expect(q.builds[0].clarence).toBe("sent");
+  });
+
+  it("marks an order Clarence didn't take, and the creator resends it", async () => {
+    const env = withClarence();
+    answer = 500;
+    const { id } = await json<{ id: string }>(call(env, "POST", "/v1/web/builds", RIDER, { spec: spec(), send: true }));
+    expect((await json<{ builds: { clarence: string }[] }>(call(env, "GET", "/v1/web/builds?all=1", ADMIN))).builds[0].clarence).toBe("failed");
+    expect((await call(env, "POST", `/v1/web/builds/${id}/clarence`, RIDER, {})).status).toBe(403);
+    answer = 200;
+    expect((await call(env, "POST", `/v1/web/builds/${id}/clarence`, ADMIN, {})).status).toBe(200);
+  });
+
+  it("refuses a bad Discord name", async () => {
+    expect((await call(withClarence(), "POST", "/v1/web/builds", RIDER, { spec: spec(), send: true, discord: "no spaces please" })).status).toBe(400);
+  });
+
+  it("takes the ticket's moves back, signed only", async () => {
+    const env = withClarence();
+    const { id } = await json<{ id: string }>(call(env, "POST", "/v1/web/builds", RIDER, { spec: spec(), send: true }));
+    expect((await inbound(env, id, { stage: "pending_payment", priceCents: 2500 }, "wrong")).status).toBe(401);
+    expect((await inbound(env, id, { ticketUrl: "https://evil.example/x" })).status).toBe(400);
+    expect((await inbound(env, id, { ticketUrl: "https://discord.com/channels/123456789/987654321" })).status).toBe(200);
+    expect((await inbound(env, id, { stage: "paid" })).status).toBe(409);
+    expect((await inbound(env, id, { stage: "pending_payment", priceCents: 2500, note: "PayPal" })).status).toBe(200);
+    expect((await inbound(env, id, { stage: "paid" })).status).toBe(200);
+    expect((await inbound(env, id, { stage: "approval" })).status).toBe(200);
+    expect((await inbound(env, id, { approval: "approved" })).status).toBe(200);
+    expect((await inbound(env, id, { stage: "complete" })).status).toBe(200);
+    const { build } = await json<{ build: Record<string, unknown> }>(call(env, "GET", `/v1/web/builds/${id}`, RIDER));
+    expect(build).toMatchObject({ stage: "complete", priceCents: 2500, ticketUrl: "https://discord.com/channels/123456789/987654321" });
+  });
+
+  it("is off without its settings", async () => {
+    const env = deployment();
+    const { id } = await json<{ id: string }>(call(env, "POST", "/v1/web/builds", RIDER, { spec: spec(), send: true }));
+    expect(posted).toHaveLength(0);
+    expect((await inbound(env, id, { stage: "pending_payment", priceCents: 1 })).status).toBe(503);
   });
 });
