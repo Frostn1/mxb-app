@@ -39,6 +39,10 @@ interface Env {
      *  (`mirrorapi.ts`). Any long random string. Without it those downloads answer 503;
      *  public files are unaffected. */
     MXB_ASSET_URL_KEY?: string;
+    /** DGS Clarence's order endpoint (https) and the shared HMAC secret both ways (`clarence.ts`).
+     *  Without both, website orders stay on the site only and `/v1/clarence/*` answers 503. */
+    CLARENCE_ORDERS_URL?: string;
+    CLARENCE_SECRET?: string;
     /** View-only and locked paints: `on` delivers and accepts them; anything else (unset) pulls them. */
     VIEW_ONLY_MODE?: string;
     /** Paint download authorisation: unset = enforced, `log` = serve but log what would be refused, `off` = unchecked. A rollback lever, not a setting. */

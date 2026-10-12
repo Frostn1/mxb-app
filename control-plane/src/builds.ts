@@ -14,6 +14,7 @@
 
 import { cors, refuseCrossSiteWrite } from "./assets";
 import { isBanned } from "./bans";
+import { clarenceConfig, discordName, postToClarence, SIGNATURE_HEADER, ticketUrl, verify, type OrderEvent } from "./clarence";
 import { isWebAdmin } from "./webadmin";
 import { webSession } from "./websession";
 
@@ -42,7 +43,10 @@ export const MAX_GUIDS = 10;
 
 const ID_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
 const REF_RE = /^MXB-[0-9A-Z]{4,12}$/;
-const BUILD_RE = /^\/v1\/web\/builds\/([0-9a-f-]{36})(\/shot|\/send|\/approve|\/stage|\/discard)?$/i;
+const BUILD_RE = /^\/v1\/web\/builds\/([0-9a-f-]{36})(\/shot|\/send|\/approve|\/stage|\/discard|\/clarence)?$/i;
+const CLARENCE_RE = /^\/v1\/clarence\/builds\/([0-9a-f-]{36})$/i;
+/** Where a rider follows their orders. */
+const MINE_PAGE = "https://mxbsecure.com/build/mine";
 const SHOT_PREFIX = "builds/";
 
 export interface SpecPart {
@@ -71,6 +75,62 @@ export interface Spec {
 
 export function isWebBuildsPath(path: string): boolean {
   return path === "/v1/web/builds" || path.startsWith("/v1/web/builds/");
+}
+
+export function isClarencePath(path: string): boolean {
+  return path.startsWith("/v1/clarence/");
+}
+
+/**
+ * `POST /v1/clarence/builds/:id`, signed by Clarence as its ticket moves:
+ *
+ *   { stage?, priceCents?, note?, approval?: "approved" | "changes", approvalNote?, ticketUrl? }
+ *
+ * `stage` goes through the same one-step rules as the site's queue; `approval` is the customer's
+ * answer pressed in the ticket; `ticketUrl` links the ticket from the rider's page.
+ */
+export async function clarenceRoutes(request: Request, url: URL, env: Env): Promise<Response> {
+  const say = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+  const cfg = clarenceConfig(env);
+  if (!cfg) return say(503, { error: "Clarence isn't connected." });
+  const m = CLARENCE_RE.exec(url.pathname);
+  if (!m) return say(404, { error: "no such endpoint" });
+  if (request.method !== "POST") return say(405, { error: "method not allowed" });
+  const raw = await request.text();
+  if (raw.length > 8192) return say(413, { error: "too large" });
+  if (!(await verify(cfg.secret, raw, request.headers.get(SIGNATURE_HEADER)))) return say(401, { error: "bad signature" });
+  let body: Record<string, unknown>;
+  try {
+    const b = JSON.parse(raw) as unknown;
+    body = b && typeof b === "object" && !Array.isArray(b) ? (b as Record<string, unknown>) : {};
+  } catch {
+    return say(400, { error: "not JSON" });
+  }
+  let row = await one(env, m[1]);
+  if (!row || row.stage === "saved") return say(404, { error: "no such order" });
+  const now = Date.now();
+
+  if (body.ticketUrl !== undefined) {
+    const link = ticketUrl(body.ticketUrl);
+    if (!link) return say(400, { error: "ticketUrl is a discord.com/channels link" });
+    await env.DB.prepare("UPDATE builds SET ticket_url = ?, clarence = 'sent', updated_at = ? WHERE id = ?").bind(link, now, row.id).run();
+  }
+  if (body.approval !== undefined) {
+    if (body.approval !== "approved" && body.approval !== "changes") return say(400, { error: "approval is approved or changes" });
+    if (row.stage !== "approval" || row.approval !== "asked") return say(409, { error: "nothing to approve" });
+    const note = optText(body.approvalNote, MAX_NOTE_CHARS);
+    if (note === false) return say(400, { error: `approvalNote is at most ${MAX_NOTE_CHARS} characters` });
+    await env.DB.prepare("UPDATE builds SET approval = ?, approval_note = ?, updated_at = ? WHERE id = ?").bind(body.approval, note ?? null, now, row.id).run();
+    row = (await one(env, row.id))!;
+  }
+  if (body.stage !== undefined && body.stage !== row.stage) {
+    const r = await setStage(env, row, body, now);
+    if (r.status !== 200) return say(r.status, r.body);
+  } else if (body.stage === undefined && (body.priceCents !== undefined || body.note !== undefined)) {
+    return say(400, { error: "priceCents and note go with a stage" });
+  }
+  const after = (await one(env, row.id))!;
+  return say(200, { id: after.id, stage: after.stage, approval: after.approval });
 }
 
 /** Printable text, one line, capped. Control characters go. */
@@ -206,6 +266,9 @@ interface Row {
   sent_at: number | null;
   created_at: number;
   updated_at: number;
+  discord: string | null;
+  clarence: string | null;
+  ticket_url: string | null;
 }
 
 function view(r: Row, admin: boolean) {
@@ -226,8 +289,47 @@ function view(r: Row, admin: boolean) {
     sentAt: r.sent_at,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
-    ...(admin ? { steamId: r.steam_id, name: r.name } : {}),
+    discord: r.discord,
+    ticketUrl: r.ticket_url,
+    ...(admin ? { steamId: r.steam_id, name: r.name, clarence: r.clarence } : {}),
   };
+}
+
+function orderEvent(r: Row, event: OrderEvent["event"]): OrderEvent {
+  return {
+    event,
+    id: r.id,
+    ref: r.ref,
+    steamId: r.steam_id,
+    steamName: r.name,
+    discord: r.discord,
+    guids: r.guids,
+    note: r.note,
+    stage: r.stage,
+    priceCents: r.price_cents,
+    approval: r.approval,
+    approvalNote: r.approval_note,
+    spec: JSON.parse(r.spec) as Spec,
+    page: MINE_PAGE,
+    sentAt: r.sent_at,
+  };
+}
+
+/**
+ * Tell Clarence about an order, when the feed is on, and record whether it took it. A failure
+ * never fails the rider's request: the queue shows it and the creator can resend.
+ */
+export async function notifyClarence(env: Env, id: string, event: OrderEvent["event"], fetchImpl: typeof fetch = fetch): Promise<void> {
+  const cfg = clarenceConfig(env);
+  if (!cfg) return;
+  const row = await one(env, id);
+  if (!row || row.stage === "saved") return;
+  const ok = await postToClarence(cfg, orderEvent(row, event), fetchImpl);
+  // An approval answer that didn't arrive leaves the order itself in Clarence: only the first
+  // delivery decides 'failed'.
+  if (event === "order.created" || ok) {
+    await env.DB.prepare("UPDATE builds SET clarence = ? WHERE id = ?").bind(ok ? "sent" : "failed", id).run();
+  }
 }
 
 function guidsOf(v: unknown): number | null {
@@ -259,6 +361,8 @@ export async function createBuild(
   if (guids === null) return { status: 400, body: { error: `guids is 1 to ${MAX_GUIDS}` } };
   const note = optText(body.note, MAX_NOTE_CHARS);
   if (note === false) return { status: 400, body: { error: `note is at most ${MAX_NOTE_CHARS} characters` } };
+  const discord = discordName(body.discord);
+  if (discord === false) return { status: 400, body: { error: "That isn't a Discord username." } };
   let shot: { bytes: Uint8Array; type: string; ext: string } | null = null;
   if (body.shot !== undefined && body.shot !== null) {
     const s = parseShot(body.shot);
@@ -278,10 +382,10 @@ export async function createBuild(
   if (shot && shotKey) await env.ASSET_LOCKED.put(shotKey, shot.bytes, { httpMetadata: { contentType: shot.type } });
   const stage: Stage = send ? "quote" : "saved";
   await env.DB.prepare(
-    `INSERT INTO builds (id, steam_id, name, bike, ref, spec, shot_key, stage, guids, note, sent_at, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO builds (id, steam_id, name, bike, ref, spec, shot_key, stage, guids, note, discord, sent_at, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   )
-    .bind(id, who.steamId, who.name.slice(0, 80), parsed.spec.bike.id, parsed.spec.ref, specJson, shotKey, stage, guids, note ?? null, send ? now : null, now, now)
+    .bind(id, who.steamId, who.name.slice(0, 80), parsed.spec.bike.id, parsed.spec.ref, specJson, shotKey, stage, guids, note ?? null, discord, send ? now : null, now, now)
     .run();
   console.log(JSON.stringify({ msg: "build", id, stage, bike: parsed.spec.bike.id, parts: parsed.spec.parts.length }));
   return { status: 201, body: { id, ref: parsed.spec.ref, stage } };
@@ -296,9 +400,13 @@ export async function sendBuild(env: Env, row: Row, body: Record<string, unknown
   if (guids === null) return { status: 400, body: { error: `guids is 1 to ${MAX_GUIDS}` } };
   const note = optText(body.note, MAX_NOTE_CHARS);
   if (note === false) return { status: 400, body: { error: `note is at most ${MAX_NOTE_CHARS} characters` } };
+  const discord = discordName(body.discord);
+  if (discord === false) return { status: 400, body: { error: "That isn't a Discord username." } };
   if ((await sentToday(env, row.steam_id, now)) >= MAX_SENT_PER_DAY) return { status: 429, body: { error: "That's enough orders for today." } };
-  await env.DB.prepare("UPDATE builds SET stage = 'quote', guids = ?, note = COALESCE(?, note), sent_at = ?, updated_at = ? WHERE id = ? AND stage = 'saved'")
-    .bind(guids, note ?? null, now, now, row.id)
+  await env.DB.prepare(
+    "UPDATE builds SET stage = 'quote', guids = ?, note = COALESCE(?, note), discord = COALESCE(?, discord), sent_at = ?, updated_at = ? WHERE id = ? AND stage = 'saved'",
+  )
+    .bind(guids, note ?? null, discord, now, now, row.id)
     .run();
   return { status: 200, body: { id: row.id, stage: "quote" } };
 }
@@ -422,6 +530,8 @@ export async function webBuildRoutes(request: Request, url: URL, env: Env, origi
       const body = await jsonBody(request, MAX_BODY_BYTES);
       if (!body) return say(413, { error: "too large" });
       const r = await createBuild(env, session, body);
+      const made = r.body as { id?: string; stage?: string };
+      if (r.status === 201 && made.stage === "quote" && made.id) await notifyClarence(env, made.id, "order.created");
       return say(r.status, r.body);
     }
     if (request.method === "GET") {
@@ -465,14 +575,24 @@ export async function webBuildRoutes(request: Request, url: URL, env: Env, origi
     const r = await setStage(env, row, body);
     return say(r.status, r.body);
   }
+  if (action === "/clarence") {
+    // Resend an order Clarence didn't take.
+    if (!admin) return say(403, { error: "not an admin" });
+    if (!clarenceConfig(env)) return say(503, { error: "Clarence isn't connected." });
+    await notifyClarence(env, row.id, "order.created");
+    const after = await one(env, row.id);
+    return say(after?.clarence === "sent" ? 200 : 502, { id: row.id, clarence: after?.clarence ?? null });
+  }
   if (!mine) return say(404, { error: "no such build" });
   if (action === "/send") {
     if (await isBanned(env, { steamId: session.steamId })) return say(403, { error: "banned" });
     const r = await sendBuild(env, row, body);
+    if (r.status === 200) await notifyClarence(env, row.id, "order.created");
     return say(r.status, r.body);
   }
   if (action === "/approve") {
     const r = await answerApproval(env, row, body);
+    if (r.status === 200) await notifyClarence(env, row.id, "order.approval");
     return say(r.status, r.body);
   }
   // discard: only a build that was never sent; an order stays on record.
