@@ -3830,6 +3830,7 @@ dependencies = [
  "sha2",
  "tauri",
  "tauri-build",
+ "tauri-plugin-clipboard-manager",
  "tauri-plugin-dialog",
  "tauri-plugin-global-shortcut",
  "tauri-plugin-log",
@@ -3837,6 +3838,7 @@ dependencies = [
  "tauri-plugin-shell",
  "tauri-plugin-single-instance",
  "tauri-plugin-updater",
+ "zip 2.4.2",
 ]
 
 [[package]]
@@ -3858,6 +3860,7 @@ dependencies = [
  "dirs-next",
  "ed25519-dalek",
  "flate2",
+ "futures-util",
  "getrandom 0.2.17",
  "hmac",
  "image",
@@ -3867,6 +3870,7 @@ dependencies = [
  "mxb-content",
  "notify",
  "notify-debouncer-mini",
+ "obfstr",
  "rayon",
  "reqwest 0.12.28",
  "semver",

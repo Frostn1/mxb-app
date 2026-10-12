@@ -126,7 +126,7 @@ pub(crate) use mxb_core::texstore;
 /// The tracks that came with the game — the ones no scan of the mods tree can see.
 pub(crate) use mxb_core::trackstock;
 mod update_channel;
-mod upload;
+pub(crate) use mxb_core::upload;
 pub(crate) use mxb_core::usage;
 mod vcruntime;
 mod voice;

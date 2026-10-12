@@ -24,6 +24,8 @@ pub mod presets;
 pub mod soundmods;
 pub mod proton;
 pub mod update_channel;
+pub mod upload;
+pub mod logshare;
 pub mod usage;
 pub mod winehost;
 pub mod account;
