@@ -94,6 +94,9 @@ import {
   type TrackToolsStatus,
 } from "../../../api/trackgen";
 
+const linkBtn =
+  "cursor-default font-cond text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground hover:text-foreground disabled:opacity-40";
+
 /**
  * Track Studio: describe a track, get a track.
  *
@@ -1670,44 +1673,48 @@ export default function TrackStudio() {
                   </dl>
                 )}
 
-                <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-border pt-2">
-                  <span className="font-cond text-[10px] font-semibold uppercase tracking-[0.22em] text-faint">
+                <div className="mt-3 border-t border-border pt-3">
+                  <span className="block p-1 text-center font-cond text-[10px] font-semibold uppercase tracking-[0.22em] text-faint">
                     {t("track.startOver")}
                   </span>
-                  {/* The size is Random's, so it travels with it here too. */}
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => void onLoad(randomAtScale)}
-                      disabled={busy !== null}
-                      className="cursor-default font-cond text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground hover:text-foreground disabled:opacity-40"
-                    >
-                      {t("track.random")}
-                    </button>
-                    <Segmented size="sm" options={scales} value={scale} onChange={setScale} />
-                    <Segmented
-                      size="sm"
-                      options={disciplines}
-                      value={discipline}
-                      onChange={setDiscipline}
-                    />
-                    {discipline !== "mx" && (
-                      <DensitySlider value={density} onChange={setDensity} />
-                    )}
+                  <div className="mt-2 flex flex-wrap justify-center gap-x-5 gap-y-3">
+                    {/* The size is Random's, so it travels with it here too. */}
+                    <div className="flex flex-col items-center gap-1.5">
+                      <Segmented size="sm" options={scales} value={scale} onChange={setScale} />
+                      <Segmented
+                        size="sm"
+                        options={disciplines}
+                        value={discipline}
+                        onChange={setDiscipline}
+                      />
+                      {discipline !== "mx" && (
+                        <DensitySlider value={density} onChange={setDensity} />
+                      )}
+                    </div>
+                    <div className="flex items-center gap-4 py-1.5">
+                      <button
+                        onClick={() => void onLoad(blankTrackProgram)}
+                        disabled={busy !== null}
+                        className={linkBtn}
+                      >
+                        {t("track.blank")}
+                      </button>
+                      <button
+                        onClick={() => void onLoad(randomAtScale)}
+                        disabled={busy !== null}
+                        className={linkBtn}
+                      >
+                        {t("track.random")}
+                      </button>
+                      <button
+                        onClick={() => void onOpen()}
+                        disabled={busy !== null}
+                        className={linkBtn}
+                      >
+                        {t("track.open")}
+                      </button>
+                    </div>
                   </div>
-                  <button
-                    onClick={() => void onLoad(blankTrackProgram)}
-                    disabled={busy !== null}
-                    className="cursor-default font-cond text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground hover:text-foreground disabled:opacity-40"
-                  >
-                    {t("track.blank")}
-                  </button>
-                  <button
-                    onClick={() => void onOpen()}
-                    disabled={busy !== null}
-                    className="cursor-default font-cond text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground hover:text-foreground disabled:opacity-40"
-                  >
-                    {t("track.open")}
-                  </button>
                 </div>
               </div>
             )}
