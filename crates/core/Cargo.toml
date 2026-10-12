@@ -59,7 +59,8 @@ reqwest = { version = "0.12", default-features = false, features = [
     "multipart",
 ] }
 tokio = { version = "1", features = ["time", "sync", "rt"] }
-uuid = { version = "1", features = ["v4"], optional = true }
+# upload.rs names its temp file with one, so every app that links the core needs it.
+uuid = { version = "1", features = ["v4"] }
 sha2 = "0.10"
 # Verifies the signature on a paid plugin's entitlement (`plugins.rs`). Verification only —
 # both apps hold the public half of the pair and neither ever signs anything, which is the
@@ -86,7 +87,7 @@ windows-registry = "0.6"
 [features]
 # Only the binary that owns the anonymous-stats reporting mints an install id, so only it
 # pulls `uuid` in. Everything else reads the id the manager already wrote.
-mint-install-id = ["dep:uuid"]
+mint-install-id = []
 
 [dev-dependencies]
 # Tauri's mock runtime, so paintwatch's watcher lifecycle can be exercised without a display
