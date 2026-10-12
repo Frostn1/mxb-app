@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import type { LogGroup } from "@frost/shared/api/mods";
 
 /** Mirrors `coach.rs` and `analysis.rs`. */
 
@@ -275,6 +276,18 @@ export interface Ground {
 
 export const coachStatus = () => invoke<CoachStatus>("coach_status");
 /** Opens a folder in the file manager, making it first if the recorder hasn't yet. */
+/** Mirrors `logs.rs`: where Coach's logs are. The save, share and progress calls are the
+ *  shared ones in `@frost/shared/api/mods`; the command names are the same as MXB App's. */
+export type LogsKind = "app" | "recorder" | "plugins" | "game";
+export interface CoachLogsInfo {
+  app: LogGroup;
+  recorder: LogGroup;
+  plugins: LogGroup;
+  game: LogGroup;
+}
+export const logsInfo = () => invoke<CoachLogsInfo>("logs_info");
+export const openLogsFolder = (which: LogsKind) => invoke<void>("open_logs_folder", { which });
+
 export const openFolder = (path: string) => invoke<void>("open_folder", { path });
 /** The track's own terrain, or why the ground built from the laps is drawn instead. */
 export interface GroundAnswer {

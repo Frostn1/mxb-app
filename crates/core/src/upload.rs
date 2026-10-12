@@ -7,6 +7,49 @@ use std::path::Path;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering::Relaxed};
 use std::sync::Arc;
 
+/// The user agent every MXB app uploads with.
+pub const USER_AGENT: &str = "mxb-app";
+
+/// The client an upload goes through: a cookie store, because filebin gates a download behind
+/// a cookie it sets on the first request.
+pub fn client() -> anyhow::Result<Client> {
+    Ok(Client::builder()
+        .user_agent(USER_AGENT)
+        .connect_timeout(std::time::Duration::from_secs(15))
+        .cookie_store(true)
+        .build()?)
+}
+
+/// "12.3 MB" / "480 KB" / "90 B", for the sizes an upload names.
+pub fn human_size(bytes: u64) -> String {
+    const KB: u64 = 1024;
+    const MB: u64 = KB * 1024;
+    if bytes >= MB {
+        format!("{:.1} MB", bytes as f64 / MB as f64)
+    } else if bytes >= KB {
+        format!("{:.0} KB", bytes as f64 / KB as f64)
+    } else {
+        format!("{bytes} B")
+    }
+}
+
+fn is_web_page(resp: &reqwest::Response) -> bool {
+    resp.headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .to_lowercase()
+        .starts_with("text/html")
+}
+
+/// A 200 page that sets a cookie: filebin's gate in front of a download. A client with a
+/// cookie store holds the cookie once it has seen this, so asking again gets the file.
+fn is_cookie_gate(resp: &reqwest::Response) -> bool {
+    resp.status() == reqwest::StatusCode::OK
+        && is_web_page(resp)
+        && resp.headers().contains_key(reqwest::header::SET_COOKIE)
+}
+
 pub struct Upload {
     /// Direct download URLs, in order. One entry is the whole bundle; more than one means
     /// the bytes were sliced and have to be concatenated in this order to rebuild the zip.
@@ -95,9 +138,9 @@ pub async fn upload_file(
             Ok(up) => {
                 log::info!(
                     "share: uploaded {} in {} part(s) of {} in {:.1}s",
-                    crate::bundle::human_size(size),
+                    human_size(size),
                     up.parts.len(),
-                    crate::bundle::human_size(part_bytes),
+                    human_size(part_bytes),
                     started.elapsed().as_secs_f32()
                 );
                 return Ok(up);
@@ -107,7 +150,7 @@ pub async fn upload_file(
                 // the difference between a twenty-second share and a three-minute one.
                 log::warn!(
                     "share: a {} cut came back short after {:.1}s — recutting: {e:#}",
-                    crate::bundle::human_size(part_bytes),
+                    human_size(part_bytes),
                     started.elapsed().as_secs_f32()
                 );
                 last = Some(e);
@@ -194,7 +237,7 @@ async fn upload_sliced(
                 log::info!(
                     "share: part {} of {n} ({}) took {:.1}s",
                     i + 1,
-                    crate::bundle::human_size(len),
+                    human_size(len),
                     started.elapsed().as_secs_f32()
                 );
                 stored.fetch_add(len, Relaxed);
@@ -285,7 +328,7 @@ fn part_url(base: &str, bin: &str, name: &str) -> anyhow::Result<String> {
 /// It asks for the first byte rather than sending a HEAD, because catbox — still behind every
 /// code made before filebin — answers HEAD with `content-length: 0` for a file it holds fine.
 /// A `Range: bytes=0-0` answers `206` with `content-range: bytes 0-0/<total>`.
-pub(crate) async fn hosted_len(client: &Client, url: &str) -> Option<u64> {
+pub async fn hosted_len(client: &Client, url: &str) -> Option<u64> {
     let ask = || {
         client
             .get(url)
@@ -293,11 +336,11 @@ pub(crate) async fn hosted_len(client: &Client, url: &str) -> Option<u64> {
             .send()
     };
     let mut resp = ask().await.ok()?;
-    if crate::install::is_cookie_gate(&resp) {
+    if is_cookie_gate(&resp) {
         resp = ask().await.ok()?;
     }
     // A web page is not the file, whatever length it is.
-    if !resp.status().is_success() || crate::install::is_web_page(&resp) {
+    if !resp.status().is_success() || is_web_page(&resp) {
         return None;
     }
     // `content-range: bytes 0-0/2000000` — the size is what follows the slash.
@@ -382,8 +425,8 @@ async fn put_part(
                     if attempt == ATTEMPTS {
                         return Err(Short(anyhow::anyhow!(
                             "filebin is holding {} of a {} part after {ATTEMPTS} tries.",
-                            crate::bundle::human_size(got),
-                            crate::bundle::human_size(expect)
+                            human_size(got),
+                            human_size(expect)
                         )));
                     }
                 }
@@ -447,18 +490,18 @@ mod tests {
         let path = std::path::PathBuf::from(std::env::var("FROST_UPLOAD").expect("set FROST_UPLOAD"));
         let size = std::fs::metadata(&path).unwrap().len();
         let plan = part_plan(size);
-        println!("  {} is {} in {} part(s)", path.display(), crate::bundle::human_size(size), plan.len());
+        println!("  {} is {} in {} part(s)", path.display(), human_size(size), plan.len());
 
         let rt = tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap();
         rt.block_on(async {
             let client = match std::env::var("FROST_H1") {
                 Ok(_) => Client::builder()
-                    .user_agent(crate::frostmod_manage::UA)
+                    .user_agent(USER_AGENT)
                     .http1_only()
                     .cookie_store(true)
                     .build()
                     .unwrap(),
-                Err(_) => crate::install::build_client().expect("a client"),
+                Err(_) => client().expect("a client"),
             };
             let up = upload_file(&client, &path, |p| {
                 println!("  {} of {} part(s) stored, {:.0}%", p.done, p.parts, p.fraction() * 100.0)
@@ -484,8 +527,8 @@ mod tests {
             }
             println!(
                 "  joined {} against {} — {}",
-                crate::bundle::human_size(joined),
-                crate::bundle::human_size(size),
+                human_size(joined),
+                human_size(size),
                 if joined == size { "matches" } else { "SHORT" }
             );
             assert_eq!(joined, size, "the parts do not add up to the file");

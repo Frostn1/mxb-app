@@ -33,13 +33,14 @@ import {
 } from "@/api/coach";
 import HudPanel from "../Review/HudPanel";
 import { SpokenCues } from "../Review/LiveCues";
+import LogsSettings from "./Logs";
 import LineLookSettings, { LINE_PARTS } from "./LineLook";
 import { FieldRow, Rule, Section, ToggleRow } from "./parts";
 
 /** The folder a file sits in. */
 const folderOf = (path: string) => path.replace(/[\\/][^\\/]*$/, "");
 
-export type SectionId = "general" | "line" | "hud" | "recording" | "keybinds" | "about";
+export type SectionId = "general" | "line" | "hud" | "recording" | "keybinds" | "logs" | "about";
 
 /**
  * The nav, and with it the page: one section on screen at a time, laid out as MXB App's
@@ -65,7 +66,13 @@ const GROUPS: { label: TKey; sections: { id: SectionId; label: TKey }[] }[] = [
       { id: "keybinds", label: "coachSettings.keybinds" },
     ],
   },
-  { label: "coachSettings.groupAbout", sections: [{ id: "about", label: "coachSettings.about" }] },
+  {
+    label: "coachSettings.groupAbout",
+    sections: [
+      { id: "logs", label: "coachSettings.logs" },
+      { id: "about", label: "coachSettings.about" },
+    ],
+  },
 ];
 
 function Row({ label, value, onOpen }: { label: string; value: string; onOpen?: () => void }) {
@@ -376,6 +383,8 @@ export default function Settings({ initialSection }: { initialSection?: SectionI
               <Overlay />
             </Section>
           )}
+
+          {active === "logs" && <LogsSettings />}
 
           {active === "about" && (
             <>

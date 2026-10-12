@@ -20,6 +20,7 @@ mod imports;
 mod ini;
 mod setupbook;
 mod lines;
+mod logs;
 mod others;
 mod overlay;
 mod replay;
@@ -139,6 +140,7 @@ fn main() {
         .plugin(tauri_plugin_log::Builder::new().build())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         // The overlay's hotkey has to fire while MX Bikes holds keyboard focus.
@@ -197,6 +199,11 @@ fn main() {
             coach::coach_rider_body,
             mxb_core::viewer::texture_bytes,
             get_config,
+            // Settings -> Logs: where they are, save them, or upload them for a link.
+            logs::logs_info,
+            logs::open_logs_folder,
+            logs::export_logs,
+            logs::share_logs,
             list_games,
             steam_link_start,
             steam_link_status,
