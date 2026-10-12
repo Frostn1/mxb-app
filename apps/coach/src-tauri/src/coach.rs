@@ -45,6 +45,18 @@ fn err(e: impl std::fmt::Display) -> String {
     e.to_string()
 }
 
+/// Runs a command's work and puts it in the log when it took longer than half a second, so a
+/// report of a freeze names the command and how long it held things up.
+fn timed<T>(name: &str, f: impl FnOnce() -> T) -> T {
+    let start = std::time::Instant::now();
+    let out = f();
+    let ms = start.elapsed().as_millis();
+    if ms > 500 {
+        log::warn!("slow command {name}: {ms} ms");
+    }
+    out
+}
+
 /// Where the recorder writes. More than one candidate: the user folder can be moved, and the
 /// configured profiles folder may know better than the default.
 pub(crate) fn session_dirs(cfg: &AppConfig) -> Vec<PathBuf> {
@@ -371,7 +383,11 @@ pub(crate) fn all_sessions(app: &AppHandle) -> Vec<SessionSummary> {
 }
 
 #[tauri::command]
-pub fn coach_sessions(app: AppHandle) -> Vec<SessionSummary> {
+pub async fn coach_sessions(app: AppHandle) -> Vec<SessionSummary> {
+    tauri::async_runtime::spawn_blocking(move || timed("coach_sessions", || coach_sessions_sync(app))).await.unwrap_or_default()
+}
+
+fn coach_sessions_sync(app: AppHandle) -> Vec<SessionSummary> {
     // The folder only exists once the recorder has written to it, so the watch that couldn't
     // start when the app opened gets another go here.
     ensure_watching(&app);
@@ -514,7 +530,11 @@ pub struct SessionDetail {
 
 /// The whole session `path` belongs to: every stint of that event, with all their laps.
 #[tauri::command]
-pub fn coach_session(app: AppHandle, path: String) -> Result<SessionDetail, String> {
+pub async fn coach_session(app: AppHandle, path: String) -> Result<SessionDetail, String> {
+    tauri::async_runtime::spawn_blocking(move || timed("coach_session", || coach_session_sync(app, path))).await.map_err(err)?
+}
+
+fn coach_session_sync(app: AppHandle, path: String) -> Result<SessionDetail, String> {
     let sessions = all_sessions(&app);
     let summary = match sessions.iter().find(|s| s.stints.iter().any(|x| x.path == path)) {
         Some(s) => s.clone(),
@@ -712,7 +732,20 @@ fn ideal_line(
 /// fastest other lap on the track when none is given. `solo`, or no other lap to compare with,
 /// reviews it on its own instead.
 #[tauri::command]
-pub fn coach_review(
+#[allow(clippy::too_many_arguments)]
+pub async fn coach_review(
+    app: AppHandle,
+    path: String,
+    lap: i32,
+    ref_path: Option<String>,
+    ref_lap: Option<i32>,
+    solo: Option<bool>,
+    ideal: Option<bool>,
+) -> Result<ReviewOut, String> {
+    tauri::async_runtime::spawn_blocking(move || timed("review", || review_sync(app, path, lap, ref_path, ref_lap, solo, ideal))).await.map_err(err)?
+}
+
+fn review_sync(
     app: AppHandle,
     path: String,
     lap: i32,
@@ -1057,7 +1090,11 @@ fn setup_base(file: &Path) -> String {
 
 /// The changes behind a lap's setup tips, against the setup the rider had on.
 #[tauri::command]
-pub fn coach_setup_plan(app: AppHandle, path: String, skills: Vec<String>) -> Result<SetupPlan, String> {
+pub async fn coach_setup_plan(app: AppHandle, path: String, skills: Vec<String>) -> Result<SetupPlan, String> {
+    tauri::async_runtime::spawn_blocking(move || timed("coach_setup_plan", || coach_setup_plan_sync(app, path, skills))).await.map_err(err)?
+}
+
+fn coach_setup_plan_sync(app: AppHandle, path: String, skills: Vec<String>) -> Result<SetupPlan, String> {
     let rec = load(&path)?;
     let r = rider_setup(&app, &rec);
     let fixes = all_fixes(&r, &skills, rec.event.susp_max_travel);
@@ -1127,7 +1164,11 @@ fn point_at(file: &Path, track: &str, wet: bool) -> Result<Picked, String> {
 /// it's unchanged since, and the game is closed (see [`crate::setupbook`]). So one setup keeps
 /// one name instead of gaining a number every session. Any other file is never overwritten.
 #[tauri::command]
-pub fn coach_save_setup(app: AppHandle, path: String, skills: Vec<String>) -> Result<SavedSetup, String> {
+pub async fn coach_save_setup(app: AppHandle, path: String, skills: Vec<String>) -> Result<SavedSetup, String> {
+    tauri::async_runtime::spawn_blocking(move || timed("coach_save_setup", || coach_save_setup_sync(app, path, skills))).await.map_err(err)?
+}
+
+fn coach_save_setup_sync(app: AppHandle, path: String, skills: Vec<String>) -> Result<SavedSetup, String> {
     let rec = load(&path)?;
     let r = rider_setup(&app, &rec);
     let fixes = all_fixes(&r, &skills, rec.event.susp_max_travel);
@@ -1232,7 +1273,11 @@ fn write_new(save: &Save, bytes: &[u8]) -> Result<PathBuf, String> {
 /// Point the game at a setup the coach already saved: for when it was written while MX Bikes
 /// was open, so selecting it then would not have stuck.
 #[tauri::command]
-pub fn coach_select_setup(app: AppHandle, path: String, name: String) -> Result<SavedSetup, String> {
+pub async fn coach_select_setup(app: AppHandle, path: String, name: String) -> Result<SavedSetup, String> {
+    tauri::async_runtime::spawn_blocking(move || timed("coach_select_setup", || coach_select_setup_sync(app, path, name))).await.map_err(err)?
+}
+
+fn coach_select_setup_sync(app: AppHandle, path: String, name: String) -> Result<SavedSetup, String> {
     let rec = load(&path)?;
     let e = &rec.event;
     let cfg = load_config(&app);
@@ -1493,7 +1538,7 @@ pub fn coach_write_cues(
         false => (path, lap),
     };
     let ref_arg_given = ref_path.is_some() || ideal.unwrap_or(false);
-    let out = coach_review(app.clone(), path.clone(), lap, ref_path, ref_lap, None, ideal)?;
+    let out = review_sync(app.clone(), path.clone(), lap, ref_path, ref_lap, None, ideal)?;
     let rec = load(&path)?;
     // The lap the calls are placed on, and the one the HUD races. The ideal lap can't be
     // either: there is no line to draw a ghost from and no ghost to run a gap against, so the
@@ -1748,7 +1793,11 @@ fn terrain_under(app: &AppHandle, rec: &Recording) -> Option<mxb_core::track::Ma
 
 /// The ground under a session's laps, built from the laps; see `surface.rs`.
 #[tauri::command]
-pub fn coach_surface(path: String) -> Result<Option<crate::surface::Surface>, String> {
+pub async fn coach_surface(path: String) -> Result<Option<crate::surface::Surface>, String> {
+    tauri::async_runtime::spawn_blocking(move || timed("coach_surface", || coach_surface_sync(path))).await.map_err(err)?
+}
+
+fn coach_surface_sync(path: String) -> Result<Option<crate::surface::Surface>, String> {
     Ok(crate::surface::build(&load(&path)?.samples, 400))
 }
 
@@ -1898,6 +1947,25 @@ pub fn coach_uninstall_plugin(app: AppHandle) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A plain `fn` command runs on the main thread, so a click that parses a recording froze the
+    /// window ("Not Responding"). Only these small ones may stay that way.
+    #[test]
+    fn heavy_commands_run_off_the_main_thread() {
+        let src = include_str!("coach.rs");
+        let cheap = ["coach_status", "coach_write_cues", "coach_set_game_dir", "coach_uninstall_plugin"];
+        let lines: Vec<&str> = src.lines().collect();
+        for (i, l) in lines.iter().enumerate() {
+            if l.trim() != "#[tauri::command]" {
+                continue;
+            }
+            let next = lines[i + 1..].iter().find(|x| x.contains("fn ")).unwrap();
+            if next.trim_start().starts_with("pub fn ") {
+                let name = next.trim_start()["pub fn ".len()..].split('(').next().unwrap();
+                assert!(cheap.contains(&name), "{name} is a sync command: make it async + spawn_blocking");
+            }
+        }
+    }
 
 
     fn session(path: &str, track: &str, bike: &str, laps: &[(i32, i32, bool)]) -> SessionSummary {
