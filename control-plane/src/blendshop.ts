@@ -482,7 +482,14 @@ async function serveFile(env: Env, deps: Deps, cfg: ShopConfig | null, steamId: 
     .bind(now, now, order.id)
     .run();
   console.log(JSON.stringify({ msg: "blends download", order: order.ref, slug: order.slug }));
-  return new Response(marked.body, {
+  // On Workers a plain stream goes out chunked; a FixedLengthStream keeps the length, so the browser shows progress.
+  let body: ReadableStream<Uint8Array> = marked.body;
+  if (typeof FixedLengthStream === "function") {
+    const fixed = new FixedLengthStream(marked.length);
+    void marked.body.pipeTo(fixed.writable).catch((err) => console.error(JSON.stringify({ msg: "blends download stream", error: String(err) })));
+    body = fixed.readable;
+  }
+  return new Response(body, {
     headers: {
       "content-type": "application/zip",
       "content-length": String(marked.length),
