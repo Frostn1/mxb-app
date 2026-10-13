@@ -304,13 +304,18 @@ export async function blendShopRoutes(request: Request, url: URL, env: Env, orig
 
 type Result = { status: number; body: unknown };
 
-/** `POST /v1/web/blends/checkout` `{ slug, agree: true, terms: "YYYY-MM-DD" }`: a Checkout URL. */
+/**
+ * `POST /v1/web/blends/checkout` `{ slug, agree: true, waiver: true, terms: "YYYY-MM-DD" }`: a Checkout URL.
+ * `waiver` is the buyer asking for immediate access and accepting the loss of the right to cancel
+ * (all sales are final); it is recorded on the order with the Terms version.
+ */
 export async function startCheckout(env: Env, deps: Deps, cfg: ShopConfig, steamId: string, body: Record<string, unknown>): Promise<Result> {
   const slug = typeof body.slug === "string" && SLUG_RE.test(body.slug) ? body.slug : null;
   if (!slug) return { status: 400, body: { error: "No such Blend." } };
   if (body.agree !== true || typeof body.terms !== "string" || !TERMS_RE.test(body.terms)) {
     return { status: 400, body: { error: "Agree to the Terms and the License first." } };
   }
+  if (body.waiver !== true) return { status: 400, body: { error: "Confirm immediate access first." } };
   if (await isBanned(env, { steamId })) return { status: 403, body: { error: BANNED } };
   const catalog = await loadCatalog(cfg, deps);
   if (!catalog) return { status: 503, body: { error: "The shop is closed right now." } };
@@ -354,7 +359,7 @@ export async function startCheckout(env: Env, deps: Deps, cfg: ShopConfig, steam
       metadata: meta,
       expires_at: Math.floor(now / 1000) + CHECKOUT_TTL_S,
       success_url: `${cfg.site}/account?checkout=done&order=${ref}`,
-      cancel_url: `${cfg.site}/blends/${slug}?checkout=cancelled`,
+      cancel_url: `${cfg.site}/blends/${slug}?checkout=canceled`,
     },
     `mxb-blend-checkout-${id}`,
   );
@@ -365,10 +370,10 @@ export async function startCheckout(env: Env, deps: Deps, cfg: ShopConfig, steam
   }
   await env.DB.prepare(
     `INSERT INTO blend_orders (id, ref, steam_id, slug, name, status, price_cents, currency, customer_id, checkout_session_id,
-                               terms_version, agreed_at, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, 'pending', ?, 'usd', ?, ?, ?, ?, ?, ?)`,
+                               terms_version, agreed_at, waiver_at, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, 'pending', ?, 'usd', ?, ?, ?, ?, ?, ?, ?)`,
   )
-    .bind(id, ref, steamId, slug, item.name, item.priceCents, customerId, session.body.id, body.terms, now, now, now)
+    .bind(id, ref, steamId, slug, item.name, item.priceCents, customerId, session.body.id, body.terms, now, now, now, now)
     .run();
   console.log(JSON.stringify({ msg: "blends checkout", order: ref, slug }));
   return { status: 200, body: { url: session.body.url, ref } };

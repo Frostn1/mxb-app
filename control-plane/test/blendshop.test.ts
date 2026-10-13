@@ -148,7 +148,7 @@ function completed(sessionId: string, orderId: string, id = "evt_test_paid") {
 }
 
 async function buy(d: ReturnType<typeof deployment>, who = RIDER) {
-  const res = await call(d, "POST", "/v1/web/blends/checkout", who, { slug: SLUG, agree: true, terms: "2026-10-12" });
+  const res = await call(d, "POST", "/v1/web/blends/checkout", who, { slug: SLUG, agree: true, waiver: true, terms: "2026-10-12" });
   expect(res.status).toBe(200);
   const order = await d.e.DB.prepare("SELECT * FROM blend_orders WHERE steam_id = ? ORDER BY created_at DESC").bind(who).first<{ id: string; checkout_session_id: string; ref: string }>();
   return order!;
@@ -177,35 +177,36 @@ describe("the switch", () => {
   it("says so to the page, and checkout refuses", async () => {
     const d = deployment({ MXB_BLENDS_SHOP: "off" });
     expect(await (await call(d, "GET", "/v1/web/blends", null)).json()).toEqual({ enabled: false, mode: null, owned: [] });
-    const r = await call(d, "POST", "/v1/web/blends/checkout", RIDER, { slug: SLUG, agree: true, terms: "2026-10-12" });
+    const r = await call(d, "POST", "/v1/web/blends/checkout", RIDER, { slug: SLUG, agree: true, waiver: true, terms: "2026-10-12" });
     expect(r.status).toBe(503);
     expect(d.s.stripeCalls()).toHaveLength(0);
   });
 });
 
 describe("checkout", () => {
-  it("needs a sign-in and the agreement", async () => {
+  it("needs a sign-in, the agreement and the waiver", async () => {
     const d = deployment();
-    expect((await call(d, "POST", "/v1/web/blends/checkout", null, { slug: SLUG, agree: true, terms: "2026-10-12" })).status).toBe(401);
+    expect((await call(d, "POST", "/v1/web/blends/checkout", null, { slug: SLUG, agree: true, waiver: true, terms: "2026-10-12" })).status).toBe(401);
     expect((await call(d, "POST", "/v1/web/blends/checkout", RIDER, { slug: SLUG, terms: "2026-10-12" })).status).toBe(400);
     expect((await call(d, "POST", "/v1/web/blends/checkout", RIDER, { slug: SLUG, agree: true })).status).toBe(400);
+    expect((await call(d, "POST", "/v1/web/blends/checkout", RIDER, { slug: SLUG, agree: true, terms: "2026-10-12" })).status).toBe(400);
   });
 
   it("refuses a write from another site", async () => {
     const d = deployment();
-    const r = await call(d, "POST", "/v1/web/blends/checkout", RIDER, { slug: SLUG, agree: true, terms: "2026-10-12" }, { Origin: "https://evil.example.com" });
+    const r = await call(d, "POST", "/v1/web/blends/checkout", RIDER, { slug: SLUG, agree: true, waiver: true, terms: "2026-10-12" }, { Origin: "https://evil.example.com" });
     expect(r.status).toBe(403);
   });
 
   it("sells only what the site prices", async () => {
     const d = deployment();
-    expect((await call(d, "POST", "/v1/web/blends/checkout", RIDER, { slug: "free-thing", agree: true, terms: "2026-10-12" })).status).toBe(404);
-    expect((await call(d, "POST", "/v1/web/blends/checkout", RIDER, { slug: "nope", agree: true, terms: "2026-10-12" })).status).toBe(404);
+    expect((await call(d, "POST", "/v1/web/blends/checkout", RIDER, { slug: "free-thing", agree: true, waiver: true, terms: "2026-10-12" })).status).toBe(404);
+    expect((await call(d, "POST", "/v1/web/blends/checkout", RIDER, { slug: "nope", agree: true, waiver: true, terms: "2026-10-12" })).status).toBe(404);
   });
 
   it("opens a Checkout at the site's price, with tax, an invoice and the order on it", async () => {
     const d = deployment();
-    const res = await call(d, "POST", "/v1/web/blends/checkout", RIDER, { slug: SLUG, agree: true, terms: "2026-10-12", priceCents: 1 });
+    const res = await call(d, "POST", "/v1/web/blends/checkout", RIDER, { slug: SLUG, agree: true, waiver: true, terms: "2026-10-12", priceCents: 1 });
     expect(res.status).toBe(200);
     const body = (await res.json()) as { url: string; ref: string };
     expect(body.url).toMatch(/^https:\/\/checkout\.stripe\.com\//);
@@ -224,6 +225,7 @@ describe("checkout", () => {
     expect(p.get("success_url")).toBe(`${SITE}/account?checkout=done&order=${body.ref}`);
     const row = await d.e.DB.prepare("SELECT * FROM blend_orders").first<{ status: string; price_cents: number; terms_version: string; id: string }>();
     expect(row).toMatchObject({ status: "pending", price_cents: 2000, terms_version: "2026-10-12" });
+    expect((row as unknown as { waiver_at: number | null }).waiver_at).not.toBeNull();
     expect(p.get("metadata[order_id]")).toBe(row!.id);
     // Nothing is owned until Stripe says paid.
     expect(await (await call(d, "GET", "/v1/web/blends", RIDER)).json()).toMatchObject({ enabled: true, owned: [] });
@@ -253,7 +255,7 @@ describe("the webhook", () => {
     expect(ents.results).toHaveLength(1);
     expect(await (await call(d, "GET", "/v1/web/blends", RIDER)).json()).toMatchObject({ owned: [SLUG] });
     // And it can't be bought twice.
-    expect((await call(d, "POST", "/v1/web/blends/checkout", RIDER, { slug: SLUG, agree: true, terms: "2026-10-12" })).status).toBe(409);
+    expect((await call(d, "POST", "/v1/web/blends/checkout", RIDER, { slug: SLUG, agree: true, waiver: true, terms: "2026-10-12" })).status).toBe(409);
   });
 
   it("works with hosting billing off", async () => {

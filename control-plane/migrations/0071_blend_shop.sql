@@ -26,6 +26,8 @@ CREATE TABLE blend_orders (
   -- The Terms and License version the buyer agreed to at checkout, and when.
   terms_version       TEXT NOT NULL,
   agreed_at           INTEGER NOT NULL,
+  -- When the buyer asked for immediate access and accepted losing the right to cancel. All sales are final.
+  waiver_at           INTEGER NOT NULL,
   -- The first time the files were served: the refund policy turns on it.
   first_download_at   INTEGER,
   created_at          INTEGER NOT NULL,
