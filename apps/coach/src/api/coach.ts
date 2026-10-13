@@ -595,6 +595,42 @@ export const coachSetHud = (key: string, on: boolean) => invoke<Hud>("coach_set_
  *  FrostMod 0.24 reads them; older recorders leave the cue where it was. */
 export const coachSetCuePos = (x: number, y: number) => invoke<Hud>("coach_set_cue_pos", { x, y });
 
+/** One cut the recorder logged (FrostMod 0.49.13, `cuts/cuts.jsonl`). `marker` is the track
+ *  centreline marker the rider left the line at, `to` the one they came back at; -1 unknown.
+ *  `source`: "game" (a cut penalty), "lap" (an invalid lap), "watch" (seen live). */
+export interface CutRow {
+  at: string;
+  session: string;
+  track: string;
+  rider: string;
+  own: boolean;
+  source: string;
+  confirmed: boolean;
+  lap: number;
+  marker: number;
+  to: number;
+  x: number;
+  z: number;
+  gainM: number;
+  penaltyMs: number;
+}
+export interface CutMarker {
+  id: number;
+  x: number;
+  z: number;
+  atM: number;
+}
+/** One ride: an event on one track, with the rider's own cuts per marker. */
+export interface CutSession {
+  session: string;
+  track: string;
+  cuts: CutRow[];
+  byMarker: { marker: number; confirmed: number; possible: number }[];
+  markers: CutMarker[];
+}
+/** The rides with cuts, newest first. */
+export const coachCuts = () => invoke<CutSession[]>("coach_cuts");
+
 /** The line's colours, `#rrggbb`: its gradient from gas to heavy braking, and the pace hints. */
 export interface LineColours {
   gas: string;
