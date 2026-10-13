@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-10-13 — MXB Coach v0.1.25 — Cleaner racing line, cut markers
+
+### Fixed
+- **The racing line comes only from your fastest clean lap.** Crash, warm-up and cut laps no longer count. The line in the game clears when Coach is off or closed.
+
+### Added
+- **Track cuts.** A new panel shows where you cut, by marker.
+- **Cut markers on the minimap** and **cut markers on the track** are two switches in Settings.
+- **Recorder update prompt.** Coach asks you to update the recorder when it is older than 0.49.13.
+
 ## 2026-10-13 — Frost Converter v0.1.1 — Fewer game crashes
 
 ### Fixed
