@@ -158,7 +158,7 @@ fn ghost(app: &AppHandle, path: &str, num: i32, rec: &Recording, id: &str) -> Re
         Some(s) => s.clone(),
         None => crate::coach::summarize(Path::new(path), rec),
     };
-    let Some(best) = summary.laps.iter().filter(|l| l.comparable()).min_by_key(|l| l.time_ms) else {
+    let Some(best) = summary.laps.iter().filter(|l| l.clean()).min_by_key(|l| l.time_ms) else {
         return Ok((Vec::new(), None));
     };
     if best.path == path && best.num == num {

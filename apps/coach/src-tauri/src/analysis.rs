@@ -3184,7 +3184,7 @@ pub(crate) mod tests {
 
     pub(crate) fn lap(st: &Style) -> Trace {
         let (samples, t) = ride_lap(st);
-        let lap = Lap { num: 1, time_ms: (t * 1000.0) as i32, invalid: false, whole: true, issue: None, crashed: false, ridden_ms: 0, samples };
+        let lap = Lap { num: 1, time_ms: (t * 1000.0) as i32, invalid: false, whole: true, issue: None, crashed: false, reset: false, cut: false, warmup: false, ridden_ms: 0, samples };
         Trace::new(&lap, len()).unwrap()
     }
 

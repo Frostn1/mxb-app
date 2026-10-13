@@ -196,6 +196,19 @@ fn chunk(b: &mut Vec<u8>, tag: &[u8; 4], payload: &[u8]) {
 }
 
 /// The file the plugin looks for first: this bike on this track, beside the `.cue`.
+/// A sheet with no line and no sections: there is no clean lap to draw yet. The recorder takes a
+/// sheet with no points as "draw nothing" and drops the line it had, where it keeps the line in
+/// use when a sheet is missing or doesn't read (FrostMod `CheckRef`, 0.49.13).
+pub fn write_empty(track_len: f32) -> Vec<u8> {
+    let mut b = MAGIC.to_vec();
+    b.extend_from_slice(&VERSION.to_le_bytes());
+    b.extend_from_slice(&track_len.to_le_bytes());
+    b.extend_from_slice(&0u32.to_le_bytes()); // points
+    b.extend_from_slice(&0u32.to_le_bytes()); // sections
+    b.extend_from_slice(&0u32.to_le_bytes()); // flags
+    b
+}
+
 pub fn file_name(track: &str, bike: &str) -> String {
     format!("{}.{}.hud", crate::cues::safe_name(track), crate::cues::safe_name(bike))
 }
@@ -207,6 +220,18 @@ mod tests {
 
     fn lap(n: usize) -> Trace {
         Trace { pts: (0..n).map(|i| Point { t: 10.0 + i as f32 * 0.1, x: i as f32, z: -(i as f32), ..Point::default() }).collect() }
+    }
+
+    /// No clean lap yet: a sheet with no line in it, which the recorder reads as "draw nothing".
+    #[test]
+    fn an_empty_sheet_has_no_line() {
+        let b = write_empty(1234.5);
+        let u32_at = |i: usize| u32::from_le_bytes(b[i..i + 4].try_into().unwrap());
+        assert_eq!(&b[..4], b"MXHD");
+        assert_eq!(u32_at(4), VERSION);
+        assert_eq!(f32::from_le_bytes(b[8..12].try_into().unwrap()), 1234.5);
+        assert_eq!((u32_at(12), u32_at(16), u32_at(20)), (0, 0, 0), "no points, no sections, no flags");
+        assert_eq!(b.len(), 24);
     }
 
     #[test]
