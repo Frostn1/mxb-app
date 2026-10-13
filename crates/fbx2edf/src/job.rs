@@ -16,9 +16,28 @@ use crate::host::{self, Event, Options};
 #[serde(rename_all = "camelCase")]
 pub struct Found {
     pub path: String,
-    /// "model", "shadow" (an FBX named like a bike's shadow) or "params" (an `.ini`).
+    /// "model", "shadow" (an FBX named like a bike's shadow) or "params" (an export script,
+    /// see [`is_export_script`]).
     pub kind: &'static str,
     pub size: u64,
+}
+
+/// Whether a dropped file is an export script: the files the Convert screen's script slot
+/// loads (`.ini`, `.params`, `.txt`). An `.ini` or `.params` always is; a `.txt` only when it
+/// holds a `[Hierarchy]` or `[params]` section, so notes and readmes stay out.
+pub fn is_export_script(path: &Path) -> bool {
+    let ext = path.extension().map(|e| e.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
+    match ext.as_str() {
+        "ini" | "params" => true,
+        "txt" => {
+            std::fs::metadata(path).is_ok_and(|m| m.len() <= 1 << 20)
+                && std::fs::read(path).is_ok_and(|b| {
+                    let t = String::from_utf8_lossy(&b).to_ascii_lowercase();
+                    t.lines().map(str::trim).any(|l| l == "[hierarchy]" || l == "[params]")
+                })
+        }
+        _ => false,
+    }
 }
 
 fn kind_of(path: &Path) -> Option<&'static str> {
@@ -27,7 +46,7 @@ fn kind_of(path: &Path) -> Option<&'static str> {
     match ext.as_str() {
         "fbx" if name.contains("shadow") => Some("shadow"),
         "fbx" => Some("model"),
-        "ini" => Some("params"),
+        _ if is_export_script(path) => Some("params"),
         _ => None,
     }
 }
@@ -500,6 +519,26 @@ mod tests {
                 ("helmet.fbx".to_string(), "model"),
             ]
         );
+    }
+
+    #[test]
+    fn export_scripts_are_told_from_models_and_other_text() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = dir.path();
+        // PiBoSo's bike template's export_script.ini, shortened.
+        let template = "[Hierarchy]\r\nsplit = 1\r\nchassis = C:\\MX Bikes\\bikes\\template\\model.edf\r\nchassis_rot = 0 180 0\r\nsteer_rot = -90 180 0\r\n";
+        std::fs::write(d.join("export_script.ini"), template).unwrap();
+        std::fs::write(d.join("export_script.txt"), template).unwrap();
+        std::fs::write(d.join("tweaks.params"), "[params]\nscaling = 2\n").unwrap();
+        std::fs::write(d.join("readme.txt"), "How to install: copy the folder.").unwrap();
+        std::fs::write(d.join("bike.fbx"), b"x").unwrap();
+        for (file, script) in [("export_script.ini", true), ("export_script.txt", true), ("tweaks.params", true), ("readme.txt", false), ("bike.fbx", false)] {
+            assert_eq!(is_export_script(&d.join(file)), script, "{file}");
+        }
+        // Dropped together, a script is "params", never a model to convert.
+        let paths: Vec<String> = ["bike.fbx", "export_script.txt", "readme.txt"].iter().map(|f| d.join(f).to_string_lossy().into_owned()).collect();
+        let kinds: Vec<&str> = scan(&paths).iter().map(|f| f.kind).collect();
+        assert_eq!(kinds, ["model", "params"]);
     }
 
     fn model(path: &str, shadow: bool) -> Model {
