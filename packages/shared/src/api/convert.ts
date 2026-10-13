@@ -99,6 +99,33 @@ export const outputPaths = (models: { path: string; shadow: boolean }[], folder:
 const PARTS = ["chassis", "steer", "fsusp", "rsusp"];
 
 /**
+ * What an export script sets, for the line under its slot: the bike parts its `[Hierarchy]`
+ * names (in the game's order), then the `[params]` keys it gives, each once.
+ */
+export function scriptSettings(text: string): string[] {
+  let section = "";
+  const parts = new Set<string>();
+  const params: string[] = [];
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.split(/[;#]/)[0].trim();
+    if (!line) continue;
+    const sec = /^\[(.*)\]$/.exec(line);
+    if (sec) {
+      section = sec[1].trim().toLowerCase();
+      continue;
+    }
+    const kv = /^([a-z_]+)\s*=/i.exec(line);
+    if (!kv) continue;
+    const key = kv[1].toLowerCase();
+    if (section === "hierarchy") {
+      const part = key.replace(/_(rot|append)$/, "");
+      if (PARTS.includes(part)) parts.add(part);
+    } else if (section === "params" && !params.includes(key)) params.push(key);
+  }
+  return [...PARTS.filter((p) => parts.has(p)), ...params];
+}
+
+/**
  * Check a pasted export script the way the browser converter does: it needs a `[Hierarchy]`
  * section naming at least one bike part. The text itself goes to the converter as is.
  */

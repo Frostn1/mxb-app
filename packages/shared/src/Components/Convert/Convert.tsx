@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
-import { CheckCircle2, FileBox, FilePlus, FolderOpen, FolderPlus, Layers, Loader2, Play, TriangleAlert, X } from "lucide-react";
+import { CheckCircle2, FileBox, FileCode2, FilePlus, FolderOpen, FolderPlus, Layers, Loader2, Play, TriangleAlert, X } from "lucide-react";
 import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
@@ -19,6 +19,7 @@ import {
   outputPaths,
   readText,
   scanPaths,
+  scriptSettings,
   type ConvertOptions,
   type ConvertReport,
   type Found,
@@ -41,6 +42,8 @@ interface Settings {
   scale: string;
   fast: boolean;
   script: string;
+  /** The file the script came from, when it was dropped or loaded rather than typed. */
+  scriptName: string;
   shd: boolean;
   overwriteShd: boolean;
   shininess: string;
@@ -62,6 +65,7 @@ const DEFAULTS: Settings = {
   scale: "1",
   fast: true,
   script: "",
+  scriptName: "",
   shd: true,
   overwriteShd: false,
   shininess: "6",
@@ -121,17 +125,43 @@ export default function Convert({ active, storageKey, opened }: { active: boolea
 
   const models = useMemo(() => files.filter((f) => f.kind !== "params"), [files]);
   const chosen = useMemo(() => models.filter((f) => !off.has(f.path)), [models, off]);
-  const params = files.find((f) => f.kind === "params") ?? null;
   const script = s.script.trim() ? checkScript(s.script) : null;
+  const settings = s.script.trim() ? scriptSettings(s.script) : [];
 
-  const add = async (paths: string[]) => {
+  // A dropped export script goes to its slot, not the list: it flies there from the drop, then
+  // the slot lights up for a moment.
+  const slotRef = useRef<HTMLDivElement>(null);
+  const [fly, setFly] = useState<{ name: string; x: number; y: number; dx: number; dy: number; go: boolean } | null>(null);
+  const [lit, setLit] = useState(false);
+  const light = () => {
+    setLit(true);
+    window.setTimeout(() => setLit(false), 900);
+  };
+  const toSlot = (name: string, at?: { x: number; y: number }) => {
+    const slot = slotRef.current?.getBoundingClientRect();
+    if (slot) slotRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    const still = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    if (!slot || !at || still) return light();
+    setFly({ name, x: at.x, y: at.y, dx: slot.left + 12 - at.x, dy: slot.top + 8 - at.y, go: false });
+    requestAnimationFrame(() => requestAnimationFrame(() => setFly((f) => f && { ...f, go: true })));
+  };
+
+  const add = async (paths: string[], at?: { x: number; y: number }) => {
     if (running || paths.length === 0) return;
     const found = await scanPaths(paths);
-    setJobs(null);
+    const scripts = found.filter((f) => f.kind === "params");
+    const models = found.filter((f) => f.kind !== "params");
+    if (models.length) setJobs(null);
     setFiles((prev) => {
       const seen = new Set(prev.map((f) => f.path.toLowerCase()));
-      return [...prev, ...found.filter((f) => !seen.has(f.path.toLowerCase()))];
+      return [...prev, ...models.filter((f) => !seen.has(f.path.toLowerCase()))];
     });
+    const last = scripts[scripts.length - 1];
+    if (last) {
+      const text = await readText(last.path);
+      setS((p) => ({ ...p, script: text, scriptName: nameOf(last.path) }));
+      toSlot(nameOf(last.path), at);
+    }
   };
 
   // Drops land on the whole pane while it is on screen.
@@ -145,7 +175,8 @@ export default function Convert({ active, storageKey, opened }: { active: boolea
       .onDragDropEvent((e) => {
         if (e.payload.type === "drop") {
           setOver(false);
-          void addRef.current(e.payload.paths);
+          const r = window.devicePixelRatio || 1;
+          void addRef.current(e.payload.paths, { x: e.payload.position.x / r, y: e.payload.position.y / r });
         } else setOver(e.payload.type === "over" || e.payload.type === "enter");
       })
       .then((f) => (gone ? f() : (un = f)));
@@ -177,7 +208,7 @@ export default function Convert({ active, storageKey, opened }: { active: boolea
     const p = await openDialog({
       multiple: true,
       directory,
-      filters: directory ? undefined : [{ name: "FBX", extensions: ["fbx", "ini"] }],
+      filters: directory ? undefined : [{ name: "FBX", extensions: ["fbx", "ini", "params", "txt"] }],
     });
     void add(Array.isArray(p) ? p : p ? [p] : []);
   };
@@ -187,7 +218,11 @@ export default function Convert({ active, storageKey, opened }: { active: boolea
   };
   const loadScript = async () => {
     const p = await openDialog({ filters: [{ name: "Script", extensions: ["ini", "txt", "params"] }] });
-    if (typeof p === "string") set("script", await readText(p));
+    if (typeof p === "string") {
+      const text = await readText(p);
+      setS((prev) => ({ ...prev, script: text, scriptName: nameOf(p) }));
+      light();
+    }
   };
 
   const options = async (): Promise<ConvertOptions | string> => {
@@ -197,9 +232,8 @@ export default function Convert({ active, storageKey, opened }: { active: boolea
     const angle = s.normals === "flat" ? 0 : num(s.angle, t("convert.recalc"));
     const shininess = s.shd ? num(s.shininess, t("convert.shininess")) : 0;
     for (const v of [scale, merge, s.normals === "recalc" ? angle : 0, shininess]) if (typeof v === "string") return v;
-    const text = s.script.trim() ? s.script : params ? await readText(params.path) : undefined;
     return {
-      params: text,
+      params: s.script.trim() ? s.script : undefined,
       layout: s.layout,
       main: s.layout === "parts" && s.main.trim() ? s.main.trim() : undefined,
       scale: scale as number,
@@ -255,6 +289,20 @@ export default function Convert({ active, storageKey, opened }: { active: boolea
 
   return (
     <div className="flex h-full min-h-0">
+      {fly && (
+        <div
+          className="pointer-events-none fixed z-50 flex items-center gap-1.5 rounded-lg border border-border bg-card px-2.5 py-1.5 text-[12px] shadow-md transition-[transform,opacity] duration-500 ease-out"
+          style={{ left: fly.x, top: fly.y, transform: fly.go ? `translate(${fly.dx}px, ${fly.dy}px) scale(0.9)` : "translate(-50%, -50%)", opacity: fly.go ? 0.2 : 1 }}
+          onTransitionEnd={(e) => {
+            if (e.propertyName !== "transform") return;
+            setFly(null);
+            light();
+          }}
+        >
+          <FileCode2 className="size-3.5 text-muted-foreground" />
+          <span className="font-mono">{fly.name}</span>
+        </div>
+      )}
       <section className="flex w-[340px] flex-none flex-col gap-4 overflow-y-auto border-r border-border px-6 py-4">
         <h2 className="text-[11px] font-semibold uppercase tracking-[0.09em] text-faint">{t("convert.title")}</h2>
         <fieldset disabled={running} className="contents">
@@ -395,6 +443,7 @@ export default function Convert({ active, storageKey, opened }: { active: boolea
             </div>
           </Field>
 
+          <div ref={slotRef} className={cn("-mx-2 rounded-lg px-2 py-1 ring-1 ring-transparent transition-[background-color,box-shadow] duration-700", lit && "bg-primary/[0.07] ring-primary/40")}>
           <Field
             label={t("convert.script")}
             action={
@@ -407,14 +456,24 @@ export default function Convert({ active, storageKey, opened }: { active: boolea
               rows={5}
               spellCheck={false}
               value={s.script}
-              onChange={(e) => set("script", e.target.value)}
+              onChange={(e) => setS((p) => ({ ...p, script: e.target.value, scriptName: e.target.value.trim() ? p.scriptName : "" }))}
               placeholder={"[Hierarchy]\nsteer_rot = -90 180 0"}
               className="w-full rounded-lg border border-input bg-transparent p-2 font-mono text-[11.5px] placeholder:text-faint"
             />
             {script && script !== "ok" && (
               <p className="mt-1 text-[11.5px] text-destructive">{t(script === "noSection" ? "convert.scriptNoSection" : "convert.scriptNoParts")}</p>
             )}
+            {s.scriptName && s.script.trim() && (
+              <p className="mt-1 flex min-w-0 items-center gap-1.5 text-[11.5px] text-muted-foreground" title={s.scriptName}>
+                <FileCode2 className="size-3.5 flex-none" />
+                <span className="truncate">
+                  <span className="font-mono">{s.scriptName}</span>
+                  {settings.length > 0 && ` · ${settings.join(", ")}`}
+                </span>
+              </p>
+            )}
           </Field>
+          </div>
         </fieldset>
 
         {error && <p className="select-text text-[12px] text-destructive">{error}</p>}
