@@ -11,6 +11,7 @@ mod analysis;
 mod bikecfg;
 mod coach;
 mod cues;
+mod cuts;
 mod fixes;
 mod ground;
 mod groundgrid;
@@ -258,6 +259,7 @@ fn main() {
             coach::coach_set_game_dir,
             coach::coach_uninstall_plugin,
             hud::coach_hud,
+            cuts::coach_cuts,
             hud::coach_set_hud,
             hud::coach_set_cue_pos,
             hud::coach_line_look,

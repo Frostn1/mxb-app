@@ -32,6 +32,7 @@ import {
   type CoachStatus,
 } from "@/api/coach";
 import HudPanel from "../Review/HudPanel";
+import CutsPanel from "../Review/CutsPanel";
 import { SpokenCues } from "../Review/LiveCues";
 import LogsSettings from "./Logs";
 import LineLookSettings, { LINE_PARTS } from "./LineLook";
@@ -305,6 +306,9 @@ export default function Settings({ initialSection }: { initialSection?: SectionI
               </Section>
               <Section title={t("coachSettings.spoken")}>
                 <SpokenCues />
+              </Section>
+              <Section title={t("cuts.title")}>
+                <CutsPanel />
               </Section>
             </>
           )}
