@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-10-13 — Frost Converter v0.1.1 — Fewer game crashes
+
+### Fixed
+- **Fixes game crashes on some bikes.** Empty nodes like brake_lever and clutch_lever, duplicate materials and non-power-of-two textures no longer crash the game.
+
+### Added
+- **Export scripts are picked up automatically.** Drop an export script with your files and it is picked up automatically.
+
 ## 2026-10-12 — v0.20.3 — Mod browsing
 
 ### Fixed
