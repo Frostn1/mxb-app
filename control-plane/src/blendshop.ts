@@ -466,7 +466,7 @@ async function serveFile(env: Env, deps: Deps, cfg: ShopConfig | null, steamId: 
         `Date: ${at.toISOString().slice(0, 10)}`,
         "",
         "Licensed to the buyer only. Do not share or resell these files.",
-        "Credit in your mod: Model by mxbsecure",
+        "Credit in your mod: Model by frost",
         "License: https://mxbsecure.com/legal/blends-license",
         "",
       ].join("\r\n"),
