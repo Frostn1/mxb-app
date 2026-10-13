@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { signStripePayload, stripeWebhook } from "../src/billing";
-import { forgetCatalog, LINKS_PER_PACK_PER_DAY, sealLink, shopConfig } from "../src/blendshop";
+import { blendShopTick, EVIDENCE_TTL_MS, forgetCatalog, LINKS_PER_PACK_PER_DAY, sealLink, shopConfig } from "../src/blendshop";
 import { defaultDeps } from "../src/hosting";
 import { webRoutes } from "../src/web";
 import { sealToken, SESSION_COOKIE } from "../src/websession";
@@ -411,5 +411,56 @@ describe("zipmark", () => {
     const twice = listZip(new Uint8Array(await new Response(second!.body).arrayBuffer()));
     expect(twice.comment).toBe("second");
     expect(twice.names).toEqual(["Blend/fork.blend", "README.md", "A.txt", "B.txt"]);
+  });
+});
+
+describe("dispute records", () => {
+  const ADMIN = "76561190000000009";
+  const who = { "CF-Connecting-IP": "203.0.113.7", "User-Agent": "TestBrowser/1.0" };
+
+  it("keep the address, browser, account and time of each checkout, link and download", async () => {
+    const d = deployment({ ADMIN_STEAM_IDS: ADMIN });
+    const res = await call(d, "POST", "/v1/web/blends/checkout", RIDER, { slug: SLUG, agree: true, waiver: true, terms: "2026-10-12" }, who);
+    const { ref } = (await res.json()) as { ref: string };
+    const order = (await d.e.DB.prepare("SELECT * FROM blend_orders").first<{ id: string; checkout_session_id: string }>())!;
+    await deliver(d, completed(order.checkout_session_id, order.id));
+    const { url } = (await (await call(d, "POST", "/v1/web/blends/download", RIDER, { slug: SLUG }, who)).json()) as { url: string };
+    await (await call(d, "GET", url, RIDER, undefined, who)).arrayBuffer();
+    const rows = await d.e.DB.prepare("SELECT * FROM blend_evidence ORDER BY id").all<Record<string, unknown>>();
+    expect(rows.results.map((r) => r.kind)).toEqual(["checkout", "download_link", "download"]);
+    for (const r of rows.results) expect(r).toMatchObject({ order_id: order.id, steam_id: RIDER, ip: "203.0.113.7", user_agent: "TestBrowser/1.0" });
+
+    // The evidence pack: admins only.
+    expect((await call(d, "GET", `/v1/web/blends/admin/evidence/${ref}`, RIDER)).status).toBe(403);
+    const pack = (await (await call(d, "GET", `/v1/web/blends/admin/evidence/${ref}`, ADMIN)).json()) as Record<string, any>;
+    expect(pack.order).toMatchObject({ ref, status: "paid", steamId: RIDER, stripePaymentIntent: "pi_test_1" });
+    expect(pack.agreement.termsVersion).toBe("2026-10-12");
+    expect(pack.agreement.immediateAccessWaiverAt).toBeTruthy();
+    expect(pack.downloads).toHaveLength(1);
+    expect(pack.activity).toHaveLength(3);
+    expect((await call(d, "GET", "/v1/web/blends/admin/evidence/MXBB-NOPE2345", ADMIN)).status).toBe(404);
+  });
+
+  it("are deleted after two years", async () => {
+    const d = deployment();
+    await paid(d);
+    const old = Date.now() - EVIDENCE_TTL_MS - 1000;
+    await d.e.DB.prepare("UPDATE blend_evidence SET at = ?").bind(old).run();
+    await blendShopTick(d.e, defaultDeps(d.e, d.s.fetch));
+    expect((await d.e.DB.prepare("SELECT COUNT(*) AS n FROM blend_evidence").first<{ n: number }>())!.n).toBe(0);
+  });
+
+  it("go with the account, except while a dispute is open", async () => {
+    const d = deployment();
+    await paid(d);
+    await deliver(d, { id: "evt_test_dp2", type: "charge.dispute.created", data: { object: { payment_intent: "pi_test_1" } } });
+    const r = (await (await call(d, "POST", "/v1/web/blends/account/delete", RIDER, { confirm: "DELETE" })).json()) as { kept: { what: string }[] };
+    expect(r.kept.map((k) => k.what)).toContain("blend_evidence");
+    expect((await d.e.DB.prepare("SELECT COUNT(*) AS n FROM blend_evidence").first<{ n: number }>())!.n).toBeGreaterThan(0);
+
+    const e = deployment();
+    await paid(e);
+    await call(e, "POST", "/v1/web/blends/account/delete", RIDER, { confirm: "DELETE" });
+    expect((await e.e.DB.prepare("SELECT COUNT(*) AS n FROM blend_evidence").first<{ n: number }>())!.n).toBe(0);
   });
 });

@@ -48,6 +48,7 @@ consequences fall out of that, and they're baked into the schema:
 | POST | `/v1/stripe/webhook` | Stripe-Signature HMAC | Stripe events for paid hosting and the Blends shop |
 | GET/POST | `/v1/web/blends[/checkout\|/orders\|/download\|/billing\|/account/delete]` | Steam sign-in | The Blends shop: what you own, Checkout, purchases, download links, the billing portal, deleting the shop account — see **Blends shop** |
 | GET | `/v1/web/blends/file/:token` | Signed link + the buyer's Steam sign-in | A purchased Blend's zip, marked with the order |
+| GET | `/v1/web/blends/admin/evidence/:ref` | Steam sign-in, admin | Chargeback evidence pack for one order: the order, the Terms/License and waiver times, downloads, and the IP and user agent of each checkout, link and download (`blend_evidence`, kept 2 years) |
 | PUT/GET | `/v1/paints/:sha256` | bearer | Content-addressed paint blobs |
 | POST | `/v1/bmac/webhook` | HMAC signature | Buy Me a Coffee announcing a supporter. Posted on to Discord. |
 | POST | `/v1/usage` | — | Anonymous usage counters from an install. Unauthenticated because most people who run the app never claim an invite; bounded by body size, event count and a per-address daily cap. |

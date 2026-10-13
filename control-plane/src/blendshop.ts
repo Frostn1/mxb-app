@@ -21,6 +21,7 @@
 
 import { cors, refuseCrossSiteWrite } from "./assets";
 import { tokenMatches } from "./auth";
+import { isWebAdmin } from "./webadmin";
 import { BANNED, isBanned } from "./bans";
 import { customerFor, stripe } from "./billing";
 import { alert, type Deps } from "./hosting";
@@ -46,7 +47,11 @@ const DEFAULT_TAX_CODE = "txcd_10000000";
 const SITE = "https://mxbsecure.com";
 export const ZIP_PREFIX = "blends/";
 
+/** How long dispute records are kept (`blend_evidence`). */
+export const EVIDENCE_TTL_MS = 2 * 365 * DAY;
+
 const SLUG_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
+const ORDER_REF_RE = /^MXBB-[2-9A-Z]{8}$/;
 const TERMS_RE = /^\d{4}-\d{2}-\d{2}$/;
 const FILE_RE = /^\/v1\/web\/blends\/file\/([A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)$/;
 
@@ -221,6 +226,82 @@ export async function openLink(token: string, key: string, now: number): Promise
   }
 }
 
+// ---- Dispute records ------------------------------------------------------------------------
+
+/** Who made a request: Cloudflare's client address and the browser's user agent. */
+export interface Client {
+  ip: string | null;
+  userAgent: string | null;
+}
+
+export function clientOf(request: Request): Client {
+  const ip = request.headers.get("CF-Connecting-IP")?.trim().slice(0, 64) || null;
+  const userAgent = request.headers.get("User-Agent")?.replace(/[\u0000-\u001f\u007f]+/g, " ").trim().slice(0, 512) || null;
+  return { ip, userAgent };
+}
+
+const NO_CLIENT: Client = { ip: null, userAgent: null };
+
+/** One row in `blend_evidence`, for fraud prevention and chargeback defense. */
+async function record(env: Env, orderId: string, steamId: string, kind: "checkout" | "download_link" | "download", client: Client, at: number): Promise<void> {
+  await env.DB.prepare("INSERT INTO blend_evidence (order_id, steam_id, kind, ip, user_agent, at) VALUES (?, ?, ?, ?, ?, ?)")
+    .bind(orderId, steamId, kind, client.ip, client.userAgent, at)
+    .run();
+}
+
+/**
+ * `GET /v1/web/blends/admin/evidence/:ref`, admins only: everything we hold on one order, for answering
+ * a chargeback. The order, what the buyer agreed to and when, every download link and download, and
+ * the address and browser behind each.
+ */
+export async function evidencePack(env: Env, ref: string): Promise<Result> {
+  if (!ORDER_REF_RE.test(ref)) return { status: 404, body: { error: "No such order." } };
+  const order = await env.DB.prepare("SELECT * FROM blend_orders WHERE ref = ?").bind(ref).first<OrderRow & { waiver_at: number | null }>();
+  if (!order) return { status: 404, body: { error: "No such order." } };
+  const iso = (ms: number | null) => (ms ? new Date(ms).toISOString() : null);
+  const downloads = await env.DB.prepare("SELECT id, at, served_at FROM blend_downloads WHERE order_id = ? ORDER BY at")
+    .bind(order.id)
+    .all<{ id: number; at: number; served_at: number | null }>();
+  const events = await env.DB.prepare("SELECT kind, ip, user_agent, at FROM blend_evidence WHERE order_id = ? ORDER BY at")
+    .bind(order.id)
+    .all<{ kind: string; ip: string | null; user_agent: string | null; at: number }>();
+  return {
+    status: 200,
+    body: {
+      format: "mxb-blend-evidence/1",
+      generatedAt: new Date().toISOString(),
+      seller: "Creste LLC",
+      order: {
+        ref: order.ref,
+        status: order.status,
+        product: order.name,
+        slug: order.slug,
+        steamId: order.steam_id,
+        currency: order.currency,
+        priceCents: order.price_cents,
+        taxCents: order.tax_cents,
+        totalCents: order.total_cents,
+        stripeCustomer: order.customer_id,
+        stripeCheckoutSession: order.checkout_session_id,
+        stripePaymentIntent: order.payment_intent_id,
+        createdAt: iso(order.created_at),
+        paidAt: iso(order.paid_at),
+        firstDownloadAt: iso(order.first_download_at),
+      },
+      agreement: {
+        termsVersion: order.terms_version,
+        agreedToTermsAndLicenseAt: iso(order.agreed_at),
+        immediateAccessWaiverAt: iso(order.waiver_at),
+        terms: "https://mxbsecure.com/legal/terms",
+        license: "https://mxbsecure.com/legal/blends-license",
+        refunds: "https://mxbsecure.com/legal/refunds",
+      },
+      downloads: downloads.results.map((d) => ({ linkAt: iso(d.at), servedAt: iso(d.served_at) })),
+      activity: events.results.map((e) => ({ kind: e.kind, at: iso(e.at), ip: e.ip, userAgent: e.user_agent })),
+    },
+  };
+}
+
 // ---- Routes --------------------------------------------------------------------------------
 
 export function isBlendShopPath(path: string): boolean {
@@ -265,7 +346,7 @@ export async function blendShopRoutes(request: Request, url: URL, env: Env, orig
 
   // The file itself: a top-level navigation, so no CORS, and the cookie must be the buyer's.
   const file = FILE_RE.exec(path);
-  if (method === "GET" && file) return serveFile(env, deps, cfg, session?.steamId ?? null, file[1]);
+  if (method === "GET" && file) return serveFile(env, deps, cfg, session?.steamId ?? null, file[1], clientOf(request));
 
   if (method === "POST") {
     const refused = refuseCrossSiteWrite(request, env);
@@ -274,6 +355,13 @@ export async function blendShopRoutes(request: Request, url: URL, env: Env, orig
   if (!session) return cors(json(401, { error: "Sign in with Steam first." }), origin);
 
   if (method === "GET" && path === "/v1/web/blends/orders") return cors(json(200, await myOrders(env, session.steamId)), origin);
+
+  const evidence = /^\/v1\/web\/blends\/admin\/evidence\/([A-Z0-9-]{1,20})$/.exec(path);
+  if (method === "GET" && evidence) {
+    if (!isWebAdmin(session.steamId, env)) return cors(json(403, { error: "Admins only." }), origin);
+    const r = await evidencePack(env, evidence[1]);
+    return cors(json(r.status, r.body), origin);
+  }
 
   if (method === "POST" && path === "/v1/web/blends/account/delete") {
     const body = await readBody(request);
@@ -287,12 +375,12 @@ export async function blendShopRoutes(request: Request, url: URL, env: Env, orig
   if (!cfg) return cors(json(503, { error: "The shop is closed right now." }), origin);
 
   if (method === "POST" && path === "/v1/web/blends/checkout") {
-    const r = await startCheckout(env, deps, cfg, session.steamId, await readBody(request));
+    const r = await startCheckout(env, deps, cfg, session.steamId, await readBody(request), clientOf(request));
     return cors(json(r.status, r.body), origin);
   }
   if (method === "POST" && path === "/v1/web/blends/download") {
     const body = await readBody(request);
-    const r = await downloadLink(env, deps, cfg, session.steamId, body.slug, url.origin);
+    const r = await downloadLink(env, deps, cfg, session.steamId, body.slug, url.origin, clientOf(request));
     return cors(json(r.status, r.body), origin);
   }
   if (method === "POST" && path === "/v1/web/blends/billing") {
@@ -309,7 +397,7 @@ type Result = { status: number; body: unknown };
  * `waiver` is the buyer asking for immediate access and accepting the loss of the right to cancel
  * (all sales are final); it is recorded on the order with the Terms version.
  */
-export async function startCheckout(env: Env, deps: Deps, cfg: ShopConfig, steamId: string, body: Record<string, unknown>): Promise<Result> {
+export async function startCheckout(env: Env, deps: Deps, cfg: ShopConfig, steamId: string, body: Record<string, unknown>, client: Client = NO_CLIENT): Promise<Result> {
   const slug = typeof body.slug === "string" && SLUG_RE.test(body.slug) ? body.slug : null;
   if (!slug) return { status: 400, body: { error: "No such Blend." } };
   if (body.agree !== true || typeof body.terms !== "string" || !TERMS_RE.test(body.terms)) {
@@ -375,6 +463,7 @@ export async function startCheckout(env: Env, deps: Deps, cfg: ShopConfig, steam
   )
     .bind(id, ref, steamId, slug, item.name, item.priceCents, customerId, session.body.id, body.terms, now, now, now, now)
     .run();
+  await record(env, id, steamId, "checkout", client, now);
   console.log(JSON.stringify({ msg: "blends checkout", order: ref, slug }));
   return { status: 200, body: { url: session.body.url, ref } };
 }
@@ -407,7 +496,7 @@ export async function myOrders(env: Env, steamId: string): Promise<{ orders: unk
 }
 
 /** `POST /v1/web/blends/download` `{ slug }`: a link that works for `LINK_TTL_MS`, for this account only. */
-export async function downloadLink(env: Env, deps: Deps, cfg: ShopConfig, steamId: string, rawSlug: unknown, apiOrigin: string): Promise<Result> {
+export async function downloadLink(env: Env, deps: Deps, cfg: ShopConfig, steamId: string, rawSlug: unknown, apiOrigin: string, client: Client = NO_CLIENT): Promise<Result> {
   const slug = typeof rawSlug === "string" && SLUG_RE.test(rawSlug) ? rawSlug : null;
   if (!slug) return { status: 400, body: { error: "No such Blend." } };
   const own = await owned(env, steamId, slug);
@@ -431,13 +520,14 @@ export async function downloadLink(env: Env, deps: Deps, cfg: ShopConfig, steamI
   const row = await env.DB.prepare("INSERT INTO blend_downloads (order_id, steam_id, slug, at) VALUES (?, ?, ?, ?) RETURNING id")
     .bind(own.order_id, steamId, slug, now)
     .first<{ id: number }>();
+  await record(env, own.order_id, steamId, "download_link", client, now);
   const exp = now + LINK_TTL_MS;
   const token = await sealLink({ d: row?.id ?? 0, o: own.order_id, s: steamId, slug, exp }, cfg.sessionKey);
   return { status: 200, body: { url: `${apiOrigin}/v1/web/blends/file/${token}`, expiresAt: exp } };
 }
 
 /** `GET /v1/web/blends/file/<token>`: the marked zip. */
-async function serveFile(env: Env, deps: Deps, cfg: ShopConfig | null, steamId: string | null, token: string): Promise<Response> {
+async function serveFile(env: Env, deps: Deps, cfg: ShopConfig | null, steamId: string | null, token: string, client: Client): Promise<Response> {
   const page = (status: number, text: string) =>
     new Response(text, { status, headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" } });
   if (!cfg) return page(503, "The shop is closed right now.");
@@ -483,6 +573,7 @@ async function serveFile(env: Env, deps: Deps, cfg: ShopConfig | null, steamId: 
     return page(503, "This download isn't ready yet.");
   }
   await env.DB.prepare("UPDATE blend_downloads SET served_at = COALESCE(served_at, ?) WHERE id = ?").bind(now, claims.d).run();
+  await record(env, order.id, steamId, "download", client, now);
   await env.DB.prepare("UPDATE blend_orders SET first_download_at = ?, updated_at = ? WHERE id = ? AND first_download_at IS NULL")
     .bind(now, now, order.id)
     .run();
@@ -532,7 +623,16 @@ export async function eraseShopAccount(env: Env, deps: Deps, steamId: string): P
   const cleared: string[] = [];
   const kept: { what: string; why: string }[] = [];
   const ent = await env.DB.prepare("DELETE FROM blend_entitlements WHERE steam_id = ?").bind(steamId).run();
+  // Dispute records go too, except for an order whose dispute is still open: we need them to answer it.
+  const disputed = await env.DB.prepare("SELECT COUNT(*) AS n FROM blend_orders WHERE steam_id = ? AND status = 'disputed'").bind(steamId).first<{ n: number }>();
+  const ev = await env.DB.prepare(
+    "DELETE FROM blend_evidence WHERE steam_id = ? AND order_id NOT IN (SELECT id FROM blend_orders WHERE steam_id = ? AND status = 'disputed')",
+  )
+    .bind(steamId, steamId)
+    .run();
   if (ent.meta.changes) cleared.push("blend_entitlements");
+  if (ev.meta.changes) cleared.push("blend_evidence");
+  if (disputed?.n) kept.push({ what: "blend_evidence", why: "Kept for an open payment dispute, until it closes or two years pass." });
   const dl = await env.DB.prepare("DELETE FROM blend_downloads WHERE steam_id = ?").bind(steamId).run();
   if (dl.meta.changes) cleared.push("blend_downloads");
   const orders = await env.DB.prepare("UPDATE blend_orders SET steam_id = 'erased', customer_id = NULL, updated_at = ? WHERE steam_id = ?")
@@ -705,6 +805,8 @@ export async function applyBlendEvent(env: Env, deps: Deps, event: StripeEvent):
 /** Pending orders whose Checkout is long gone (a missed `expired` event). From the cron tick. */
 export async function blendShopTick(env: Env, deps: Deps): Promise<void> {
   const now = deps.now();
+  // Dispute records are kept two years.
+  await env.DB.prepare("DELETE FROM blend_evidence WHERE at < ?").bind(now - EVIDENCE_TTL_MS).run();
   await env.DB.prepare("UPDATE blend_orders SET status = 'expired', closed_at = ?, updated_at = ? WHERE status = 'pending' AND created_at < ?")
     .bind(now, now, now - DAY)
     .run();
