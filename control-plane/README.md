@@ -45,7 +45,9 @@ consequences fall out of that, and they're baked into the schema:
 | POST, GET/PUT/POST | `/v1/hosted/claim`, `/v1/hosted/servers/:id[/settings\|/restart]` | one-time claim, then bearer | MSM driving one hosted server |
 | GET/POST | `/v1/hosting/*` | `MXB_BOX_ENROLL_KEY` | The box install runner: stages, enroll, the track manifest |
 | GET/POST | `/v1/web/hosting/billing[/portal\|/servers/:id/checkout]` | Steam sign-in | Paid hosting: prices, each server's billing status, the Stripe Customer Portal, a fresh Checkout — see **Paid hosting** |
-| POST | `/v1/stripe/webhook` | Stripe-Signature HMAC | Stripe events for paid hosting |
+| POST | `/v1/stripe/webhook` | Stripe-Signature HMAC | Stripe events for paid hosting and the Blends shop |
+| GET/POST | `/v1/web/blends[/checkout\|/orders\|/download\|/billing\|/account/delete]` | Steam sign-in | The Blends shop: what you own, Checkout, purchases, download links, the billing portal, deleting the shop account — see **Blends shop** |
+| GET | `/v1/web/blends/file/:token` | Signed link + the buyer's Steam sign-in | A purchased Blend's zip, marked with the order |
 | PUT/GET | `/v1/paints/:sha256` | bearer | Content-addressed paint blobs |
 | POST | `/v1/bmac/webhook` | HMAC signature | Buy Me a Coffee announcing a supporter. Posted on to Discord. |
 | POST | `/v1/usage` | — | Anonymous usage counters from an install. Unauthenticated because most people who run the app never claim an invite; bounded by body size, event count and a per-address daily cap. |
@@ -130,6 +132,26 @@ In the Stripe dashboard add the endpoint `https://api.mxbsecure.com/v1/stripe/we
 `checkout.session.expired`, `invoice.paid`, `invoice.payment_failed`,
 `customer.subscription.updated` and `customer.subscription.deleted`, and turn on the Customer
 Portal (Settings, Billing, Customer portal).
+
+#### Blends shop
+
+One-off purchases of a part's source pack on mxbsecure.com/blends, sold by Creste LLC through
+Stripe Checkout (`src/blendshop.ts`). Prices are the site's (`/shop/blends.json`, from
+`src/lib/blend-list.ts` in mxbsecure-site), so there are no Stripe products to make: each Checkout
+carries its own price, with Stripe Tax on and an invoice for the receipt. The webhook grants the
+download (`blend_entitlements`) once per event; a full refund or a chargeback takes it away. A
+download is a 10-minute link for the buyer's own Steam sign-in, at most 10 an hour and 5 per pack a
+day, and the zip is streamed from `mxb-private` under `blends/<slug>.zip` with an `ORDER.txt` and a
+zip comment naming the order (`src/zipmark.ts`).
+
+Shut unless `MXB_BLENDS_SHOP` (in `wrangler.jsonc`) is `test` or `live` and `STRIPE_SECRET_KEY` is a
+key of that kind; it shares `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET` with paid hosting. Add
+`charge.refunded`, `charge.dispute.created`, `charge.dispute.closed` and
+`checkout.session.async_payment_failed` to the webhook endpoint's events, and upload each pack:
+
+```sh
+bunx wrangler r2 object put mxb-private/blends/<slug>.zip --file <slug>.zip --remote
+```
 
 ### Donations in Discord
 

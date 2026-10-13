@@ -56,6 +56,9 @@
     "MXB_OWNER_ACCOUNT_ID": "f72db68a-9541-4814-ae09-6096b497abc9",
     // Where Steam sign-in on mxbsecure.com lands afterwards.
     "MXB_SITE_ORIGIN": "https://mxbsecure.com",
+    // The Blends shop on mxbsecure.com/blends (`blendshop.ts`). "off" keeps it shut; "test" opens it
+    // with a Stripe test key only, "live" with a live key only. Prices come from the site.
+    "MXB_BLENDS_SHOP": "off",
     // Refuses a usage report that carries no valid build signature. Off, and it must stay off
     // until signed builds are the ones in the field — turning it on early drops everybody's
     // numbers and says nothing. The key itself is a secret; see `src/env.d.ts`.

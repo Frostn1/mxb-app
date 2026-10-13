@@ -25,6 +25,8 @@ import { isWebAdmin, isWebAdminPath, webAdminRoutes } from "./webadmin";
 import { isWebModsPath, webModRoutes } from "./modreports";
 import { hostingWebRoutes, isHostingWebPath } from "./hostingroutes";
 import { isWebBuildsPath, webBuildRoutes } from "./builds";
+import { blendShopRoutes, isBlendShopPath } from "./blendshop";
+import { defaultDeps } from "./hosting";
 import { isVerified, loginUrl, steamPersonaName, verifyAssertion } from "./steam";
 import {
   clearedCookie,
@@ -79,6 +81,9 @@ export async function webRoutes(
 
   // Builds from the Build page, sent as model swap orders, and the creator's queue (`builds.ts`).
   if (isWebBuildsPath(path)) return webBuildRoutes(request, url, env, origin);
+
+  // The Blends shop: checkout, purchases, downloads and the billing portal (`blendshop.ts`).
+  if (isBlendShopPath(path)) return blendShopRoutes(request, url, env, origin, defaultDeps(env, fetchImpl));
 
   // User server deploy and its operator view, on servers.mxbsecure.com (`hostingroutes.ts`).
   // Before the shared preflight below: these also take PUT and DELETE.

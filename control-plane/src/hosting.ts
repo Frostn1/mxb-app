@@ -15,6 +15,7 @@
 
 import { bearer, hashToken, newToken, tokenMatches } from "./auth";
 import { PAYING_SQL, billingConfig, billingServerGone, billingTick, openCheckout } from "./billing";
+import { blendShopTick } from "./blendshop";
 import {
   BIKE_SETS,
   BOX_OS,
@@ -1430,6 +1431,7 @@ export async function hostingTick(env: Env, deps: Deps = defaultDeps(env)): Prom
     ["idle", () => reclaimIdle(env, deps, cfg)],
     ["scale", () => scaleDown(env, deps, cfg)],
     ["billing", () => billingTick(env, deps)],
+    ["blends", () => blendShopTick(env, deps)],
     ["msm-logins", () => pruneMsmLogins(env, deps.now())],
   ];
   for (const [name, step] of steps) {
