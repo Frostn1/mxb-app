@@ -13,6 +13,8 @@ export interface CoachStatus {
   recorderVersion: string | null;
   /** The recorder that ran is older than the HUD and the spoken cues need. */
   recorderOutdated: boolean;
+  /** The recorder keeps drawing after Coach is off or closed: update it. */
+  recorderNoClear: boolean;
 }
 
 export interface LapSummary {

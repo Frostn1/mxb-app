@@ -344,6 +344,9 @@ export default function Settings({ initialSection }: { initialSection?: SectionI
                   <p className="text-[12px] text-muted-foreground">{t("recorder.versionUnknown")}</p>
                 )}
                 {status?.recorderOutdated && <p className="text-[12px] text-warning">{t("recorder.updateIt")}</p>}
+                {!status?.recorderOutdated && status?.recorderNoClear && (
+                  <p className="text-[12px] text-warning">{t("recorder.noClear")}</p>
+                )}
                 <Rule />
                 <div>
                   <div className="text-[12.5px] font-semibold">{t("recorder.gameFolder")}</div>

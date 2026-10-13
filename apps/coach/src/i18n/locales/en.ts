@@ -394,6 +394,7 @@ export const en = {
   "recorder.versionUnknown":
     "The recorder's version shows here once you've started MX Bikes with it installed.",
   "recorder.tooOld": "Your recorder is {{version}}. This needs 0.23 or newer. Update it in Settings.",
+  "recorder.noClear": "Update the recorder so the line and hints clear when Coach is off.",
   "recorder.updateIt": "Your recorder is older than 0.23. Update it for the HUD and the spoken cues.",
   "recorder.missingTitle": "The recorder isn't installed",
   "recorder.missingBody": "Install it to start saving your laps.",

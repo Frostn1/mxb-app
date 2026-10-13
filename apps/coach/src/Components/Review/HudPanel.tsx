@@ -44,6 +44,9 @@ export default function HudPanel({
             {t("recorder.tooOld", { version: status.recorderVersion ?? "" })}
           </p>
         )}
+        {!status?.recorderOutdated && status?.recorderNoClear && (
+          <p className="mt-2 text-[12px] text-warning">{t("recorder.noClear")}</p>
+        )}
         <div className="mt-3 flex items-center justify-between gap-4 border-b border-border pb-3">
           <span className="text-[13px] font-semibold">{t("hud.enabled")}</span>
           <Switch checked={hud.enabled} onCheckedChange={(on) => void set("enabled", on)} />

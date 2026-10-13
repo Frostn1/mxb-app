@@ -15,8 +15,8 @@ use tauri_plugin_global_shortcut::GlobalShortcutExt;
 use mxb_core::config;
 use mxb_core::gamewindow;
 use mxb_core::overlay::{self as core, OverlayState, Spec};
-use mxb_core::overlaylink::{self, App, Event, Link, Msg, PeerInfo};
 pub use mxb_core::overlay::{on_focus_lost, LABEL};
+use mxb_core::overlaylink::{self, App, Event, Link, Msg, PeerInfo};
 
 pub static SPEC: Spec = Spec {
     app: App::Coach,
@@ -111,9 +111,7 @@ pub fn start(app: &AppHandle) {
     if let Some(dir) = config::data_dir(app).map(|d| d.join("overlay")) {
         let handle = app.clone();
         let version = app.package_info().version.to_string();
-        match Link::start(App::Coach, dir, &version, SPEC.tabs, move |link, event| {
-            on_link(&handle, link, event)
-        }) {
+        match Link::start(App::Coach, dir, &version, SPEC.tabs, move |link, event| on_link(&handle, link, event)) {
             Ok(link) => {
                 app.manage(link);
             }

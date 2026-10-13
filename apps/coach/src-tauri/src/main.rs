@@ -18,13 +18,14 @@ mod hud;
 mod hudsheet;
 mod imports;
 mod ini;
-mod setupbook;
 mod lines;
+mod link;
 mod logs;
 mod others;
 mod overlay;
 mod replay;
 mod sag;
+mod setupbook;
 mod soil;
 mod stitch;
 mod stp;
@@ -76,9 +77,16 @@ async fn check_coach_update(
     webview: tauri::Webview,
     beta: bool,
 ) -> Result<Option<mxb_core::update_channel::UpdateMetadata>, String> {
-    mxb_core::update_channel::check(&webview, "Frostn1/mxb-coach", "v", beta, "mxb-coach", option_env!("MXB_RELEASE_TAG"))
-        .await
-        .map_err(|e| format!("{e:#}"))
+    mxb_core::update_channel::check(
+        &webview,
+        "Frostn1/mxb-coach",
+        "v",
+        beta,
+        "mxb-coach",
+        option_env!("MXB_RELEASE_TAG"),
+    )
+    .await
+    .map_err(|e| format!("{e:#}"))
 }
 
 /// Register the cheap key-state check. Coach never opens secured track contents; only
@@ -157,6 +165,8 @@ fn main() {
             // And again every half hour while it runs, so a ban reaches an app left open.
             mxb_core::appgate::watch(app.handle());
             overlay::start(app.handle());
+            // Tell the recorder Coach is open, so it clears the line and the hints once it isn't.
+            link::start(app.handle());
             coach::watch_sessions(app.handle());
             coach::watch_tracks(app.handle());
             // Anonymous counters, under the same switch and the same config file as the manager's
@@ -175,6 +185,14 @@ fn main() {
             Ok(())
         })
         .on_window_event(|window, event| {
+            // Closing Coach's own window is closing Coach. A parked overlay window kept the app
+            // running with nothing on screen, and the recorder was told Coach was still open.
+            if window.label() == "main" {
+                if let WindowEvent::Destroyed = event {
+                    window.app_handle().exit(0);
+                }
+                return;
+            }
             if window.label() != overlay::LABEL {
                 return;
             }
@@ -276,6 +294,8 @@ fn main() {
         .expect("error while running MXB Coach")
         .run(|app, event| {
             if let tauri::RunEvent::Exit = event {
+                // First: the recorder clears what it draws now rather than when the beat stops.
+                link::stop(app);
                 overlay::stop(app);
                 // The last counters, on the way out. This is the right exit point rather than a
                 // `Destroyed` window event: the window handler above is the overlay's, and the

@@ -119,7 +119,8 @@ fn replay_for(app: &AppHandle, path: &str, num: i32, section_id: &str) -> Result
 }
 
 fn lap_and_trace(rec: &Recording, num: i32) -> Result<(Lap, Trace), String> {
-    let lap = rec.laps().into_iter().find(|l| l.num == num).ok_or_else(|| format!("Lap {num} isn't in that session."))?;
+    let lap =
+        rec.laps().into_iter().find(|l| l.num == num).ok_or_else(|| format!("Lap {num} isn't in that session."))?;
     let tr = Trace::new(&lap, rec.event.track_length).ok_or_else(|| format!("Lap {num} is too short to replay."))?;
     Ok((lap, tr))
 }
@@ -150,7 +151,13 @@ fn span(sec: &Section) -> (f32, f32) {
 /// asked-for lap is already that lap, and nothing when the fastest lap hasn't got the section:
 /// sections are found lap by lap, so a jump one lap cleared and the other rolled isn't there
 /// on both to compare.
-fn ghost(app: &AppHandle, path: &str, num: i32, rec: &Recording, id: &str) -> Result<(Vec<Frame>, Option<i32>), String> {
+fn ghost(
+    app: &AppHandle,
+    path: &str,
+    num: i32,
+    rec: &Recording,
+    id: &str,
+) -> Result<(Vec<Frame>, Option<i32>), String> {
     let sessions = crate::coach::all_sessions(app);
     // The session this recording belongs to, or a session of its own when it isn't on disk to
     // be grouped — the same reading of it the rest of the coach takes.
@@ -158,7 +165,7 @@ fn ghost(app: &AppHandle, path: &str, num: i32, rec: &Recording, id: &str) -> Re
         Some(s) => s.clone(),
         None => crate::coach::summarize(Path::new(path), rec),
     };
-    let Some(best) = summary.laps.iter().filter(|l| l.comparable()).min_by_key(|l| l.time_ms) else {
+    let Some(best) = summary.laps.iter().filter(|l| l.clean()).min_by_key(|l| l.time_ms) else {
         return Ok((Vec::new(), None));
     };
     if best.path == path && best.num == num {
@@ -167,10 +174,14 @@ fn ghost(app: &AppHandle, path: &str, num: i32, rec: &Recording, id: &str) -> Re
     // Another stint of the same session is another file; the same file is already read.
     let other = if best.path == path { None } else { Some(crate::coach::load(&best.path)?) };
     let brec = other.as_ref().unwrap_or(rec);
-    let Ok((blap, btr)) = lap_and_trace(brec, best.num) else { return Ok((Vec::new(), None)) };
+    let Ok((blap, btr)) = lap_and_trace(brec, best.num) else {
+        return Ok((Vec::new(), None));
+    };
     let mut bsecs = analysis::sections(&btr);
     crate::coach::label(app, &brec.event.track_id, brec.event.track_length, &[], &mut bsecs);
-    let Some(bsec) = bsecs.iter().find(|s| s.id == id) else { return Ok((Vec::new(), None)) };
+    let Some(bsec) = bsecs.iter().find(|s| s.id == id) else {
+        return Ok((Vec::new(), None));
+    };
     Ok((frames(&blap, brec, span(bsec)), Some(best.num)))
 }
 
@@ -299,7 +310,17 @@ mod tests {
     fn the_wheels_only_ever_turn_forwards() {
         // Braking to a crawl and driving out again: the speed the spin is integrated from
         // falls, and the spin still must not.
-        let rec = ride(|d| if (100.0..200.0).contains(&d) { 3.0 } else { 18.0 }, [0.4, -0.2], [2, 2]);
+        let rec = ride(
+            |d| {
+                if (100.0..200.0).contains(&d) {
+                    3.0
+                } else {
+                    18.0
+                }
+            },
+            [0.4, -0.2],
+            [2, 2],
+        );
         let (lap, tr) = lap_and_trace(&rec, 1).unwrap();
         let secs = analysis::sections(&tr);
         let sec = &secs[0];

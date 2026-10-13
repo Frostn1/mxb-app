@@ -104,7 +104,11 @@ fn offset(lap: &Trace, r: &Trace, a: usize, b: usize) -> f32 {
         sum += dx * h.cos() - dz * h.sin();
         n += 1;
     }
-    if n == 0 { 0.0 } else { sum / n as f32 }
+    if n == 0 {
+        0.0
+    } else {
+        sum / n as f32
+    }
 }
 
 /// Mean height of the ground under the line, from the grounded points only.
@@ -191,7 +195,12 @@ pub fn lines(laps: &[(LapId, Trace)], reference: &Trace, others: &[[f32; 2]], se
         let rows: Vec<Row> = laps
             .iter()
             .filter(|(_, t)| s.end < t.len())
-            .map(|(n, t)| Row { id: *n, offset: offset(t, reference, a, b), time: t.span(s.start, s.end), ground: ground(t, a, b) })
+            .map(|(n, t)| Row {
+                id: *n,
+                offset: offset(t, reference, a, b),
+                time: t.span(s.start, s.end),
+                ground: ground(t, a, b),
+            })
             .collect();
         offsets.push(rows.iter().map(|r| SectionLine { id: r.id, offset: r.offset, time: r.time }).collect());
 
@@ -244,7 +253,9 @@ fn busy(si: usize, s: &Section, r: &Trace, others: &[[f32; 2]], rows: &[Row]) ->
     // Each position beside the corner's core, as metres to the right of the fast line there.
     let mut side: Vec<f32> = others
         .iter()
-        .filter(|p| p[0] > lo_x - BESIDE_M && p[0] < hi_x + BESIDE_M && p[1] > lo_z - BESIDE_M && p[1] < hi_z + BESIDE_M)
+        .filter(|p| {
+            p[0] > lo_x - BESIDE_M && p[0] < hi_x + BESIDE_M && p[1] > lo_z - BESIDE_M && p[1] < hi_z + BESIDE_M
+        })
         .filter_map(|p| {
             let i = (a..=b).min_by(|&i, &j| near(i, p).total_cmp(&near(j, p)))?;
             // Past either end of the core it's before or after the corner, not beside it.
@@ -316,7 +327,11 @@ fn busy(si: usize, s: &Section, r: &Trace, others: &[[f32; 2]], rows: &[Row]) ->
 /// -1 for a left: a line to the right of a right-hander is the inside of it.
 fn side_word(offset: f32, dir: i8) -> &'static str {
     if dir == 0 {
-        if offset > 0.0 { "right" } else { "left" }
+        if offset > 0.0 {
+            "right"
+        } else {
+            "left"
+        }
     } else if offset * dir as f32 > 0.0 {
         "inside"
     } else {
@@ -338,9 +353,8 @@ fn other_side(side: &str) -> &'static str {
 fn line_that_pays(si: usize, s: &Section, rows: &[Row], stints: bool) -> Option<Note> {
     let mut sorted: Vec<&Row> = rows.iter().collect();
     sorted.sort_by(|x, y| x.offset.total_cmp(&y.offset));
-    let (at, width) = (1..sorted.len())
-        .map(|i| (i, sorted[i].offset - sorted[i - 1].offset))
-        .max_by(|x, y| x.1.total_cmp(&y.1))?;
+    let (at, width) =
+        (1..sorted.len()).map(|i| (i, sorted[i].offset - sorted[i - 1].offset)).max_by(|x, y| x.1.total_cmp(&y.1))?;
     if width <= SPLIT_M || at < 2 || sorted.len() - at < 2 {
         return None;
     }
@@ -534,7 +548,11 @@ mod tests {
         let wide = Style { wide: 2.5, corner_v: 11.0, ..FAST };
         let laps = vec![(id(0), lap(&FAST)), (id(1), lap(&FAST)), (id(2), lap(&wide)), (id(3), lap(&wide))];
         let out = lines_of(&laps, &lap(&FAST), &[]);
-        let t1 = out.notes.iter().find(|n| n.kind == "line" && n.name == "Turn 1").unwrap_or_else(|| panic!("{:?}", titles(&out)));
+        let t1 = out
+            .notes
+            .iter()
+            .find(|n| n.kind == "line" && n.name == "Turn 1")
+            .unwrap_or_else(|| panic!("{:?}", titles(&out)));
         assert!(t1.title.contains("outside"), "{}", t1.title);
         assert!(t1.detail.contains("laps 3, 4"), "{}", t1.detail);
         assert!(!out.notes.iter().any(|n| n.kind == "line" && n.name == "Turn 2"), "same line in Turn 2");
@@ -549,7 +567,11 @@ mod tests {
         let wide = Style { wide: 2.5, corner_v: 10.2, ..FAST };
         let laps = vec![(id(0), lap(&FAST)), (id(1), lap(&FAST)), (id(2), lap(&wide)), (id(3), lap(&wide))];
         let out = lines_of(&laps, &lap(&FAST), &[]);
-        let t1 = out.notes.iter().find(|n| n.kind == "line" && n.name == "Turn 1").unwrap_or_else(|| panic!("{:?}", titles(&out)));
+        let t1 = out
+            .notes
+            .iter()
+            .find(|n| n.kind == "line" && n.name == "Turn 1")
+            .unwrap_or_else(|| panic!("{:?}", titles(&out)));
         assert!(t1.detail.contains("inside line is only") && t1.detail.contains("for passing"), "{}", t1.detail);
         // A line that's much slower isn't offered as a second one.
         let far = Style { wide: 2.5, corner_v: 11.0, ..FAST };
@@ -670,7 +692,11 @@ mod tests {
             (LapId { lap: 1, stint: 1 }, lap(&wide)),
         ];
         let out = lines_of(&laps, &lap(&FAST), &[]);
-        let t1 = out.notes.iter().find(|n| n.kind == "line" && n.name == "Turn 1").unwrap_or_else(|| panic!("{:?}", titles(&out)));
+        let t1 = out
+            .notes
+            .iter()
+            .find(|n| n.kind == "line" && n.name == "Turn 1")
+            .unwrap_or_else(|| panic!("{:?}", titles(&out)));
         assert!(t1.detail.contains("laps 1, 2 of stint 2"), "{}", t1.detail);
     }
 

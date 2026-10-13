@@ -72,7 +72,9 @@ pub(crate) fn local_num(rec: &Recording) -> Option<i32> {
         return Some(num);
     }
     let mut count: Vec<(i32, usize)> = Vec::new();
-    for b in rec.frames.iter().flat_map(|f| &f.bikes).filter(|b| b.local && (named.is_empty() || named.contains(&b.num))) {
+    for b in
+        rec.frames.iter().flat_map(|f| &f.bikes).filter(|b| b.local && (named.is_empty() || named.contains(&b.num)))
+    {
         match count.iter_mut().find(|c| c.0 == b.num) {
             Some(c) => c.1 += 1,
             None => count.push((b.num, 1)),
@@ -149,7 +151,11 @@ pub fn rivals(rec: &Recording, parts: &[Part], my_ms: i32, ended: f32, race: boo
         });
         // Their lap nearest to ours in time.
         if let Some((num, _)) = ahead {
-            if let Some(l) = laps.iter().filter(|l| l.num == num).min_by(|a, b| (a.t_end - ended).abs().total_cmp(&(b.t_end - ended).abs())) {
+            if let Some(l) = laps
+                .iter()
+                .filter(|l| l.num == num)
+                .min_by(|a, b| (a.t_end - ended).abs().total_cmp(&(b.t_end - ended).abs()))
+            {
                 picked.push(("ahead", l));
             }
         }
@@ -191,7 +197,8 @@ mod tests {
     /// Two riders on a 1000 m track from t = 0: #3 is the one recording (a 60 s lap), #7 does
     /// the first half as fast and the second half 5 s quicker (55 s).
     fn session() -> Recording {
-        let mut rec = Recording { event: EventInfo { track_length: 1000.0, ..EventInfo::default() }, ..Recording::default() };
+        let mut rec =
+            Recording { event: EventInfo { track_length: 1000.0, ..EventInfo::default() }, ..Recording::default() };
         rec.riders = vec![
             Rider { num: 3, name: "Me".into(), bike: "KTM".into(), riding: true },
             Rider { num: 7, name: "Fast Guy".into(), bike: "YZ".into(), riding: true },
@@ -199,7 +206,8 @@ mod tests {
         let seven = |t: f32| if t <= 30.0 { t / 60.0 } else { 0.5 + (t - 30.0) / 50.0 };
         for i in 0..=600 {
             let t = i as f32 * 0.1;
-            let bike = |num: i32, pos: f32, local: bool| Place { num, local, pos: pos.rem_euclid(1.0), ..Place::default() };
+            let bike =
+                |num: i32, pos: f32, local: bool| Place { num, local, pos: pos.rem_euclid(1.0), ..Place::default() };
             rec.frames.push(Frame { t, bikes: vec![bike(3, t / 60.0, true), bike(7, seven(t), false)] });
         }
         rec.race_laps = vec![

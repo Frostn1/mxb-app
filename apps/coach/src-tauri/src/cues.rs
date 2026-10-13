@@ -330,10 +330,8 @@ pub fn pick(points: &[CuePoint], review: &Review, level: Level, amount: Amount, 
         // the fast lap placed does. Without the second arm the line calls were the only kind
         // that could never be doubled: `line` has no `answers` entry, while `gear_up` and
         // `gear_down` sit in both tables and always were.
-        let answered = sr
-            .findings
-            .iter()
-            .any(|f| answers(f.skill) == Some(kind) || from_finding(f.skill, &f.title) == Some(kind));
+        let answered =
+            sr.findings.iter().any(|f| answers(f.skill) == Some(kind) || from_finding(f.skill, &f.title) == Some(kind));
         let resting = seen.resting(&sr.section.id, kind);
         let score = (lost * if answered { 2.0 } else { 1.0 }
             + if judged { JUDGED } else { 0.0 }
@@ -437,8 +435,14 @@ mod tests {
     use crate::analysis::tests::{lap, Style, CASED, FAST, OVER};
     use crate::analysis::{cue_points, review, sections, Bike};
 
-    const BIKE: Bike =
-        Bike { limiter: 13000.0, max_rpm: 14000.0, shift_rpm: 12500.0, travel: [0.3, 0.3], land_scale: 0.0, torque_scale: 0.0 };
+    const BIKE: Bike = Bike {
+        limiter: 13000.0,
+        max_rpm: 14000.0,
+        shift_rpm: 12500.0,
+        travel: [0.3, 0.3],
+        land_scale: 0.0,
+        torque_scale: 0.0,
+    };
 
     fn picked(st: &Style, level: Level, amount: Amount, seen: &History) -> Picked {
         let (fast, mine) = (lap(&FAST), lap(st));
@@ -461,13 +465,7 @@ mod tests {
             "a solo review has no time lost to rank by, which is the whole difficulty"
         );
         let fast = lap(&FAST);
-        let sheet = pick(
-            &cue_points(&fast, &sections(&fast)),
-            &rv,
-            Level::Pro,
-            Amount::Normal,
-            &History::default(),
-        );
+        let sheet = pick(&cue_points(&fast, &sections(&fast)), &rv, Level::Pro, Amount::Normal, &History::default());
         assert!(
             sheet.cues.iter().any(|c| c.kind == cue::ROLL),
             "the over-jump is still the thing worth saying: {:?}",
@@ -553,10 +551,7 @@ mod tests {
         assert!(!line_tips.is_empty(), "the lap needs a line tip to be a test of one");
         for f in &line_tips {
             let kind = from_finding(f.skill, &f.title).expect("a line tip names a side");
-            assert!(
-                answers(f.skill) != Some(kind),
-                "this test is about the case `answers` does not cover"
-            );
+            assert!(answers(f.skill) != Some(kind), "this test is about the case `answers` does not cover");
         }
         // On the tightest sheet there is, the line call still earns its place.
         let c = pick(&cue_points(&fast, &sections(&fast)), &rv, Level::SubPro, Amount::Few, &History::default()).cues;
@@ -622,7 +617,10 @@ mod tests {
     /// stops qualifying and nothing is carried for it.
     #[test]
     fn a_call_that_was_taken_is_not_kept_alive() {
-        let seen = History { version: HISTORY_VERSION, sent: vec![Sent { section: "t1".into(), kind: cue::BRAKE, runs: 2, resting: 0 }] };
+        let seen = History {
+            version: HISTORY_VERSION,
+            sent: vec![Sent { section: "t1".into(), kind: cue::BRAKE, runs: 2, resting: 0 }],
+        };
         // A clean lap at pro level qualifies nothing at all.
         let out = picked(&FAST, Level::Pro, Amount::Normal, &seen);
         assert!(out.cues.is_empty());
@@ -631,7 +629,14 @@ mod tests {
 
     #[test]
     fn writes_the_file_the_plugin_reads() {
-        let c = [CueOut { at: 500.0, kind: cue::BRAKE, priority: 200, text: "Brake here".into(), section: "Turn 1".into(), section_id: "t1".into() }];
+        let c = [CueOut {
+            at: 500.0,
+            kind: cue::BRAKE,
+            priority: 200,
+            text: "Brake here".into(),
+            section: "Turn 1".into(),
+            section_id: "t1".into(),
+        }];
         let b = write(1000.0, &c, Amount::Normal);
         assert_eq!(&b[..4], b"MXCQ");
         let u32_at = |i: usize| u32::from_le_bytes(b[i..i + 4].try_into().unwrap());
@@ -647,7 +652,10 @@ mod tests {
 
     #[test]
     fn file_names_match_the_plugin() {
-        assert_eq!(file_name("indiana nationals", "MX2OEM_2023_KTM_250_SX-F"), "indiana_nationals.MX2OEM_2023_KTM_250_SX-F.cue");
+        assert_eq!(
+            file_name("indiana nationals", "MX2OEM_2023_KTM_250_SX-F"),
+            "indiana_nationals.MX2OEM_2023_KTM_250_SX-F.cue"
+        );
         assert_eq!(history_name("indiana nationals", "KX450"), "indiana_nationals.KX450.json");
     }
 
@@ -668,7 +676,11 @@ mod tests {
         };
         let after = picked(&slow, Level::New, Amount::Normal, &seen);
         let still_there = after.cues.iter().any(|c| c.section == head.section && c.kind == head.kind);
-        assert!(!still_there, "the rested call kept its place: {:?}", after.cues.iter().map(|c| (&c.section, c.kind)).collect::<Vec<_>>());
+        assert!(
+            !still_there,
+            "the rested call kept its place: {:?}",
+            after.cues.iter().map(|c| (&c.section, c.kind)).collect::<Vec<_>>()
+        );
         assert!(!after.cues.is_empty(), "and something else was said instead");
 
         // With nothing else to say it comes back rather than leaving the rider in silence:
@@ -678,14 +690,22 @@ mod tests {
         assert_ne!(head.section, head.section_id, "a history keyed on the name would be inert");
         let only = History {
             version: HISTORY_VERSION,
-            sent: fresh.cues.iter().map(|c| Sent { section: c.section_id.clone(), kind: c.kind, runs: 0, resting: 2 }).collect(),
+            sent: fresh
+                .cues
+                .iter()
+                .map(|c| Sent { section: c.section_id.clone(), kind: c.kind, runs: 0, resting: 2 })
+                .collect(),
         };
         let all_rested = picked(&slow, Level::New, Amount::Normal, &only);
         assert!(!all_rested.cues.is_empty(), "silence is worse than a repeat");
         // And it is the rested calls themselves that come back, not the sheet quietly filling
         // with whatever was left over: that would be silence on everything that matters.
         let back = |c: &CueOut| fresh.cues.iter().any(|f| f.section_id == c.section_id && f.kind == c.kind);
-        assert!(all_rested.cues.iter().any(back), "{:?}", all_rested.cues.iter().map(|c| (&c.section_id, c.kind)).collect::<Vec<_>>());
+        assert!(
+            all_rested.cues.iter().any(back),
+            "{:?}",
+            all_rested.cues.iter().map(|c| (&c.section_id, c.kind)).collect::<Vec<_>>()
+        );
     }
 
     /// Over-jumping asks for a roll, and asks at the lip: once the bike is in the air there is
@@ -740,9 +760,11 @@ mod tests {
     fn casing_a_jump_asks_for_the_gas() {
         let rv = review(&lap(&Style { air_v: 16.0, ..CASED }), &lap(&FAST), BIKE);
         let j = rv.sections.iter().find(|s| s.section.name == "Jump 1").expect("Jump 1");
-        let tip = j.findings.iter().find(|f| f.skill == "land_short").unwrap_or_else(|| {
-            panic!("{:?}", j.findings.iter().map(|f| f.skill).collect::<Vec<_>>())
-        });
+        let tip = j
+            .findings
+            .iter()
+            .find(|f| f.skill == "land_short")
+            .unwrap_or_else(|| panic!("{:?}", j.findings.iter().map(|f| f.skill).collect::<Vec<_>>()));
         // It stops at the mapping because a jump of its own has no gas call to double: a jump
         // section's cue points are the scrub and nothing else. The doubling lands where the
         // jump is folded into a corner, which is where `chop_face`'s has always landed too.

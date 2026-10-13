@@ -101,6 +101,9 @@ pub struct Status {
     pub recorder_version: Option<String>,
     /// The recorder that ran is older than the one the HUD and the spoken cues need.
     pub recorder_outdated: bool,
+    /// The recorder that ran keeps drawing the line and the hints after Coach is switched off
+    /// or closed: it predates `coach.ini` (see `link.rs`).
+    pub recorder_no_clear: bool,
 }
 
 #[tauri::command]
@@ -117,6 +120,9 @@ pub fn coach_status(app: AppHandle) -> Status {
         recorder_outdated: recorder_version
             .as_deref()
             .is_some_and(|v| !crate::hud::at_least(v, crate::hud::RECORDER_NEEDS)),
+        recorder_no_clear: recorder_version
+            .as_deref()
+            .is_some_and(|v| !crate::hud::at_least(v, crate::link::CLEAR_NEEDS)),
         recorder_version,
     }
 }
@@ -141,6 +147,15 @@ pub struct LapSummary {
     pub issue: Option<String>,
     #[serde(default)]
     pub crashed: bool,
+    /// The game put the bike back on the track during it (see `telemetry::Lap::reset`).
+    #[serde(default)]
+    pub reset: bool,
+    /// Part of the track was cut (see `telemetry::Lap::cut`).
+    #[serde(default)]
+    pub cut: bool,
+    /// The stint's first lap, from standstill (see `telemetry::Lap::warmup`).
+    #[serde(default)]
+    pub warmup: bool,
     /// How long it took by the recording, for a lap the game left untimed.
     #[serde(default)]
     pub ridden_ms: i32,
@@ -149,6 +164,12 @@ pub struct LapSummary {
 impl LapSummary {
     pub(crate) fn comparable(&self) -> bool {
         self.whole && !self.invalid
+    }
+
+    /// A lap worth racing and drawing as the line: comparable, and ridden at pace with no crash,
+    /// reset or cut. The reference and the in-game line only ever come from these.
+    pub(crate) fn clean(&self) -> bool {
+        self.comparable() && !self.crashed && !self.reset && !self.cut && !self.warmup
     }
 }
 
@@ -207,6 +228,9 @@ pub(crate) fn summarize(path: &Path, rec: &Recording) -> SessionSummary {
             whole: l.whole,
             issue: l.issue.map(str::to_owned),
             crashed: l.crashed,
+            reset: l.reset,
+            cut: l.cut,
+            warmup: l.warmup,
             ridden_ms: l.ridden_ms,
         })
         .collect();
@@ -288,9 +312,8 @@ pub(crate) fn group_sessions(mut stints: Vec<SessionSummary>) -> Vec<SessionSumm
     for s in stints {
         let start = stamp_secs(&s.started);
         let end = start.unwrap_or(0) + ridden_s(&s);
-        let joins = out.last().is_some_and(|(g, off)| {
-            same_event(g, &s) && start.map_or(true, |t| t - off <= SAME_EVENT_GAP_S)
-        });
+        let joins =
+            out.last().is_some_and(|(g, off)| same_event(g, &s) && start.map_or(true, |t| t - off <= SAME_EVENT_GAP_S));
         match out.len().checked_sub(1).filter(|_| joins) {
             Some(i) => {
                 let (g, off) = &mut out[i];
@@ -312,7 +335,9 @@ struct Indexed {
 
 fn index_path(app: &AppHandle) -> Option<PathBuf> {
     // v4: stints carry the event they belong to, and laps the file they're in.
-    Some(config::data_dir(app)?.join("coach").join("index-v4.json"))
+    // v5: laps say whether they had a reset, a cut or were the warm-up, so a lap summarised
+    // before that isn't taken for a clean one.
+    Some(config::data_dir(app)?.join("coach").join("index-v5.json"))
 }
 
 /// Every recording in `dirs`, summarised one stint at a time, with `index_file` as a cache
@@ -330,7 +355,9 @@ pub(crate) fn summaries(dirs: &[PathBuf], index_file: Option<PathBuf>) -> Vec<Se
     let mut seen = HashSet::new();
     let mut out = Vec::new();
     for dir in dirs {
-        let Ok(entries) = fs::read_dir(dir) else { continue };
+        let Ok(entries) = fs::read_dir(dir) else {
+            continue;
+        };
         for entry in entries.flatten() {
             let path = entry.path();
             if path.extension().and_then(|e| e.to_str()) != Some("mxbc") {
@@ -338,11 +365,8 @@ pub(crate) fn summaries(dirs: &[PathBuf], index_file: Option<PathBuf>) -> Vec<Se
             }
             let Ok(meta) = entry.metadata() else { continue };
             let size = meta.len();
-            let modified = meta
-                .modified()
-                .ok()
-                .and_then(|m| m.duration_since(UNIX_EPOCH).ok())
-                .map_or(0, |d| d.as_secs());
+            let modified =
+                meta.modified().ok().and_then(|m| m.duration_since(UNIX_EPOCH).ok()).map_or(0, |d| d.as_secs());
             let key = path.to_string_lossy().into_owned();
             seen.insert(key.clone());
             let summary = match index.get(&key) {
@@ -384,7 +408,9 @@ pub(crate) fn all_sessions(app: &AppHandle) -> Vec<SessionSummary> {
 
 #[tauri::command]
 pub async fn coach_sessions(app: AppHandle) -> Vec<SessionSummary> {
-    tauri::async_runtime::spawn_blocking(move || timed("coach_sessions", || coach_sessions_sync(app))).await.unwrap_or_default()
+    tauri::async_runtime::spawn_blocking(move || timed("coach_sessions", || coach_sessions_sync(app)))
+        .await
+        .unwrap_or_default()
 }
 
 fn coach_sessions_sync(app: AppHandle) -> Vec<SessionSummary> {
@@ -405,7 +431,9 @@ pub struct TrackWatch(pub mxb_core::paintwatch::WatchSet);
 /// Make the ground grids now (start), and again whenever `mods/tracks` changes.
 pub fn watch_tracks(app: &AppHandle) {
     crate::groundgrid::prepare_all(app);
-    let Some(state) = app.try_state::<TrackWatch>() else { return };
+    let Some(state) = app.try_state::<TrackWatch>() else {
+        return;
+    };
     let dir = mxb_core::library::mods_subdir(&load_config(app).mods_path, "mods/tracks");
     let handle = app.clone();
     mxb_core::paintwatch::watch_folders(
@@ -428,7 +456,9 @@ const SESSION_DEBOUNCE: Duration = Duration::from_secs(2);
 
 /// Watch the sessions folders, replacing any watch already running.
 pub fn watch_sessions(app: &AppHandle) {
-    let Some(state) = app.try_state::<SessionWatch>() else { return };
+    let Some(state) = app.try_state::<SessionWatch>() else {
+        return;
+    };
     let dirs: Vec<String> = session_dirs(&load_config(app)).iter().map(|d| d.to_string_lossy().into_owned()).collect();
     let handle = app.clone();
     mxb_core::paintwatch::watch_folders(&state.0, "session watcher", &dirs, SESSION_DEBOUNCE, move |paths| {
@@ -454,7 +484,8 @@ pub(crate) fn load(path: &str) -> Result<Recording, String> {
 }
 
 fn trace(rec: &Recording, num: i32) -> Result<Trace, String> {
-    let lap = rec.laps().into_iter().find(|l| l.num == num).ok_or_else(|| format!("Lap {num} isn't in that session."))?;
+    let lap =
+        rec.laps().into_iter().find(|l| l.num == num).ok_or_else(|| format!("Lap {num} isn't in that session."))?;
     Trace::new(&lap, rec.event.track_length).ok_or_else(|| format!("Lap {num} is too short to review."))
 }
 
@@ -505,14 +536,23 @@ impl LapRef {
     }
 }
 
-/// The fastest comparable lap on this track, other than `exclude`, across every session the
-/// rider has ridden here. The same bike wins over a faster lap on a different one: a 250 and a
-/// 450 don't take a corner the same way.
-fn best_reference(sessions: &[SessionSummary], track_id: &str, bike_id: &str, exclude: Option<(&str, i32)>) -> Option<LapRef> {
+/// The fastest clean lap on this track, other than `exclude`, across every session the rider has
+/// ridden here. The same bike wins over a faster lap on a different one: a 250 and a 450 don't
+/// take a corner the same way.
+///
+/// Clean, not just whole: a lap with a crash, a reset or a cut in it, or the warm-up out of the
+/// pits, was taken here before and drawn in the game as the line to ride, through the scenery
+/// wherever the bike had been thrown (GAMING PROFI 2, v0.1.24). None until there is a clean one.
+pub(crate) fn best_reference(
+    sessions: &[SessionSummary],
+    track_id: &str,
+    bike_id: &str,
+    exclude: Option<(&str, i32)>,
+) -> Option<LapRef> {
     sessions
         .iter()
         .filter(|s| s.track_id == track_id)
-        .flat_map(|s| s.laps.iter().filter(|l| l.comparable()).map(move |l| (s, l)))
+        .flat_map(|s| s.laps.iter().filter(|l| l.clean()).map(move |l| (s, l)))
         .filter(|(_, l)| exclude != Some((l.path.as_str(), l.num)))
         .min_by_key(|(s, l)| (s.bike_id != bike_id, l.time_ms))
         .map(|(s, l)| LapRef::of(s, l, RefKind::Own))
@@ -531,7 +571,9 @@ pub struct SessionDetail {
 /// The whole session `path` belongs to: every stint of that event, with all their laps.
 #[tauri::command]
 pub async fn coach_session(app: AppHandle, path: String) -> Result<SessionDetail, String> {
-    tauri::async_runtime::spawn_blocking(move || timed("coach_session", || coach_session_sync(app, path))).await.map_err(err)?
+    tauri::async_runtime::spawn_blocking(move || timed("coach_session", || coach_session_sync(app, path)))
+        .await
+        .map_err(err)?
 }
 
 fn coach_session_sync(app: AppHandle, path: String) -> Result<SessionDetail, String> {
@@ -635,7 +677,7 @@ fn ideal_pool(sessions: &[SessionSummary], summary: &SessionSummary) -> Result<I
     let sections = analysis::sections(&trace(&load(&grid.path)?, grid.lap)?);
     let on_this_bike = sessions
         .iter()
-        .any(|s| s.track_id == summary.track_id && s.bike_id == summary.bike_id && s.laps.iter().any(|l| l.comparable()));
+        .any(|s| s.track_id == summary.track_id && s.bike_id == summary.bike_id && s.laps.iter().any(|l| l.clean()));
     let mut laps: Vec<(i32, Trace)> = Vec::new();
     let mut meta: Vec<(String, i32, usize)> = Vec::new();
     for (si, s) in sessions.iter().filter(|s| s.track_id == summary.track_id).enumerate() {
@@ -644,7 +686,9 @@ fn ideal_pool(sessions: &[SessionSummary], summary: &SessionSummary) -> Result<I
         }
         for st in &s.stints {
             let Ok(rec) = load(&st.path) else { continue };
-            for l in rec.laps().iter().filter(|l| l.whole && !l.invalid) {
+            // Clean laps only: a reset is a section crossed in no time, and the stitched line would
+            // run through wherever a crash threw the bike.
+            for l in rec.laps().iter().filter(|l| l.clean()) {
                 if let Some(t) = Trace::new(l, rec.event.track_length) {
                     laps.push((laps.len() as i32, t));
                     meta.push((st.path.clone(), l.num, si + 1));
@@ -742,7 +786,11 @@ pub async fn coach_review(
     solo: Option<bool>,
     ideal: Option<bool>,
 ) -> Result<ReviewOut, String> {
-    tauri::async_runtime::spawn_blocking(move || timed("review", || review_sync(app, path, lap, ref_path, ref_lap, solo, ideal))).await.map_err(err)?
+    tauri::async_runtime::spawn_blocking(move || {
+        timed("review", || review_sync(app, path, lap, ref_path, ref_lap, solo, ideal))
+    })
+    .await
+    .map_err(err)?
 }
 
 fn review_sync(
@@ -776,7 +824,8 @@ fn review_sync(
     };
     let e = &rec.event;
     // The whole session, so one lap's floors are this rider's on this bike.
-    let laps: Vec<analysis::Trace> = rec.laps().iter().filter_map(|l| analysis::Trace::new(l, e.track_length)).collect();
+    let laps: Vec<analysis::Trace> =
+        rec.laps().iter().filter_map(|l| analysis::Trace::new(l, e.track_length)).collect();
     let (land_scale, torque_scale) = analysis::norm(&laps);
     let bike = analysis::Bike {
         limiter: e.limiter as f32,
@@ -866,9 +915,15 @@ fn review_sync(
     let parts: Vec<crate::others::Part> = review
         .sections
         .iter()
-        .map(|s| crate::others::Part { name: s.section.name.clone(), start: s.section.start, end: s.section.end, time: s.lap_time })
+        .map(|s| crate::others::Part {
+            name: s.section.name.clone(),
+            start: s.section.start,
+            end: s.section.end,
+            time: s.lap_time,
+        })
         .collect();
-    let ended = rec.laps().into_iter().find(|l| l.num == this.lap).and_then(|l| l.samples.last().map(|s| s.t)).unwrap_or(0.0);
+    let ended =
+        rec.laps().into_iter().find(|l| l.num == this.lap).and_then(|l| l.samples.last().map(|s| s.t)).unwrap_or(0.0);
     let rivals = crate::others::rivals(&rec, &parts, this.time_ms, ended, rec.event.event_type == 2);
     let best_here = nothing_faster(&sessions, &summary.track_id, (&this.path, this.lap), this.time_ms);
     Ok(ReviewOut {
@@ -943,7 +998,9 @@ fn names_for(lineage: &str) -> Vec<String> {
 
 /// Whether `file` is named like a setup Coach built from the default for `track`.
 fn is_fresh_name(file: &Path, track: &str) -> bool {
-    let Some(stem) = file.file_stem().and_then(|s| s.to_str()) else { return false };
+    let Some(stem) = file.file_stem().and_then(|s| s.to_str()) else {
+        return false;
+    };
     crate::stp::fresh_names(track).any(|n| n.eq_ignore_ascii_case(stem))
 }
 
@@ -975,17 +1032,16 @@ fn rider_setup(app: &AppHandle, rec: &Recording) -> RiderSetup {
     let mut opts = bike_cfg.as_ref().map(crate::bikecfg::options);
     // The swingarm's lengths are in the bike's `.geom`, not its cfg.
     if let (Some(bc), Some(o)) = (&bike_cfg, opts.as_mut()) {
-        if let Some(sw) = crate::bikecfg::load_geom(&cfg.mods_path, &e.bike_id, bc).as_ref().and_then(crate::bikecfg::swingarm) {
+        if let Some(sw) =
+            crate::bikecfg::load_geom(&cfg.mods_path, &e.bike_id, bc).as_ref().and_then(crate::bikecfg::swingarm)
+        {
             o.insert(crate::stp::Field::SwingarmLength, sw);
         }
     }
     let profiles = cfg.profiles_dir();
     let gears = usize::try_from(e.gears).ok().filter(|&g| g > 0);
     let read = |p: &Path| {
-        fs::read(p)
-            .ok()
-            .and_then(|b| crate::stp::Setup::parse(&b, gears).ok())
-            .filter(|s| s.bike_id() == e.bike_id)
+        fs::read(p).ok().and_then(|b| crate::stp::Setup::parse(&b, gears).ok()).filter(|s| s.bike_id() == e.bike_id)
     };
     let file = crate::stp::locate(&profiles, &raw, &e.track_id, &e.bike_id);
     let book = setup_book_path(app).map(|p| crate::setupbook::Book::load(&p)).unwrap_or_default();
@@ -996,7 +1052,8 @@ fn rider_setup(app: &AppHandle, rec: &Recording) -> RiderSetup {
     let (setup, save) = match file.as_deref().and_then(read) {
         Some(s) => (Some(s), file.as_deref().and_then(|f| Save::beside(f, &e.track_id, &book))),
         None => {
-            let donor = crate::stp::setups_for_bike(&profiles, &e.track_id, &e.bike_id).into_iter().find_map(|p| read(&p));
+            let donor =
+                crate::stp::setups_for_bike(&profiles, &e.track_id, &e.bike_id).into_iter().find_map(|p| read(&p));
             let built = || {
                 let g = gears?;
                 let slots = crate::bikecfg::default_slots(bike_cfg.as_ref()?, g)?;
@@ -1091,7 +1148,9 @@ fn setup_base(file: &Path) -> String {
 /// The changes behind a lap's setup tips, against the setup the rider had on.
 #[tauri::command]
 pub async fn coach_setup_plan(app: AppHandle, path: String, skills: Vec<String>) -> Result<SetupPlan, String> {
-    tauri::async_runtime::spawn_blocking(move || timed("coach_setup_plan", || coach_setup_plan_sync(app, path, skills))).await.map_err(err)?
+    tauri::async_runtime::spawn_blocking(move || timed("coach_setup_plan", || coach_setup_plan_sync(app, path, skills)))
+        .await
+        .map_err(err)?
 }
 
 fn coach_setup_plan_sync(app: AppHandle, path: String, skills: Vec<String>) -> Result<SetupPlan, String> {
@@ -1102,7 +1161,15 @@ fn coach_setup_plan_sync(app: AppHandle, path: String, skills: Vec<String>) -> R
     let game_open = mxb_core::gamewindow::is_game_running();
     let save_as = r.save.as_ref().and_then(|s| s.target(&book, game_open)).map(|t| t.name());
     let (sag, travel_used) = (r.sag, crate::sag::travel_used(&rec));
-    Ok(SetupPlan { name: r.name, file: r.file.map(|p| p.display().to_string()), save_as, why: r.why, fixes, sag, travel_used })
+    Ok(SetupPlan {
+        name: r.name,
+        file: r.file.map(|p| p.display().to_string()),
+        save_as,
+        why: r.why,
+        fixes,
+        sag,
+        travel_used,
+    })
 }
 
 /// A setup the coach wrote: what it is called, what it really changed, and whether the game
@@ -1165,7 +1232,9 @@ fn point_at(file: &Path, track: &str, wet: bool) -> Result<Picked, String> {
 /// one name instead of gaining a number every session. Any other file is never overwritten.
 #[tauri::command]
 pub async fn coach_save_setup(app: AppHandle, path: String, skills: Vec<String>) -> Result<SavedSetup, String> {
-    tauri::async_runtime::spawn_blocking(move || timed("coach_save_setup", || coach_save_setup_sync(app, path, skills))).await.map_err(err)?
+    tauri::async_runtime::spawn_blocking(move || timed("coach_save_setup", || coach_save_setup_sync(app, path, skills)))
+        .await
+        .map_err(err)?
 }
 
 fn coach_save_setup_sync(app: AppHandle, path: String, skills: Vec<String>) -> Result<SavedSetup, String> {
@@ -1224,8 +1293,12 @@ fn reserve(dir: &Path, stem: &str, tag: &str) -> Option<PathBuf> {
 /// and the caller writes a new file instead. Every name used is reserved first, so nothing
 /// else is ever overwritten.
 fn replace_own(path: &Path, book: &crate::setupbook::Book, bytes: &[u8]) -> bool {
-    let (Some(dir), Some(stem)) = (path.parent(), path.file_stem().and_then(|s| s.to_str())) else { return false };
-    let Some(tmp) = reserve(dir, stem, "coach-new") else { return false };
+    let (Some(dir), Some(stem)) = (path.parent(), path.file_stem().and_then(|s| s.to_str())) else {
+        return false;
+    };
+    let Some(tmp) = reserve(dir, stem, "coach-new") else {
+        return false;
+    };
     if fs::write(&tmp, bytes).is_err() {
         let _ = fs::remove_file(&tmp);
         return false;
@@ -1274,7 +1347,11 @@ fn write_new(save: &Save, bytes: &[u8]) -> Result<PathBuf, String> {
 /// was open, so selecting it then would not have stuck.
 #[tauri::command]
 pub async fn coach_select_setup(app: AppHandle, path: String, name: String) -> Result<SavedSetup, String> {
-    tauri::async_runtime::spawn_blocking(move || timed("coach_select_setup", || coach_select_setup_sync(app, path, name))).await.map_err(err)?
+    tauri::async_runtime::spawn_blocking(move || {
+        timed("coach_select_setup", || coach_select_setup_sync(app, path, name))
+    })
+    .await
+    .map_err(err)?
 }
 
 fn coach_select_setup_sync(app: AppHandle, path: String, name: String) -> Result<SavedSetup, String> {
@@ -1286,7 +1363,12 @@ fn coach_select_setup_sync(app: AppHandle, path: String, name: String) -> Result
         .ok_or_else(|| format!("\"{name}\" isn't in your profiles folder any more."))?;
     let picked = select(&file, &e.track_id, rec.session.conditions == 2)?;
     // Nothing was written to the setup itself here: this only points the game at one.
-    Ok(SavedSetup { name, changed: Vec::new(), selected: picked == Picked::Done, game_open: picked == Picked::GameOpen })
+    Ok(SavedSetup {
+        name,
+        changed: Vec::new(),
+        selected: picked == Picked::Done,
+        game_open: picked == Picked::GameOpen,
+    })
 }
 
 #[derive(Serialize)]
@@ -1360,10 +1442,7 @@ pub async fn preview_model_swap(
 /// model installs as its own `mods/rider/riders/<profile>/` folder, a model swap only ever
 /// touches `mods/bikes`, and reading the archive alone once left a picked profile with no body.
 #[tauri::command]
-pub async fn coach_rider_body(
-    app: AppHandle,
-    profile: String,
-) -> Result<Vec<mxb_core::viewer::RiderPart>, String> {
+pub async fn coach_rider_body(app: AppHandle, profile: String) -> Result<Vec<mxb_core::viewer::RiderPart>, String> {
     tauri::async_runtime::spawn_blocking(move || {
         use mxb_core::{texstore, viewer};
         let t0 = std::time::Instant::now();
@@ -1407,7 +1486,9 @@ fn read_map(app: &AppHandle, track: &str, length: f32) -> crate::trackmap::Track
 }
 
 fn write_map(app: &AppHandle, track: &str, m: &crate::trackmap::TrackMap) {
-    let Some(path) = map_path(app, track) else { return };
+    let Some(path) = map_path(app, track) else {
+        return;
+    };
     if let Some(parent) = path.parent() {
         let _ = fs::create_dir_all(parent);
     }
@@ -1451,7 +1532,9 @@ fn read_history(app: &AppHandle, track: &str, bike: &str) -> crate::cues::Histor
 }
 
 fn write_history(app: &AppHandle, track: &str, bike: &str, h: &crate::cues::History) {
-    let Some(path) = history_path(app, track, bike) else { return };
+    let Some(path) = history_path(app, track, bike) else {
+        return;
+    };
     if let Some(parent) = path.parent() {
         let _ = fs::create_dir_all(parent);
     }
@@ -1483,7 +1566,8 @@ fn newest_lap_in(sessions: &[SessionSummary], track: &str, bike: &str) -> Option
 
 /// What each HUD sheet written this run was made from, so an unchanged line isn't written again.
 fn hud_keys() -> &'static std::sync::Mutex<std::collections::HashMap<String, String>> {
-    static KEYS: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, String>>> = std::sync::OnceLock::new();
+    static KEYS: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, String>>> =
+        std::sync::OnceLock::new();
     KEYS.get_or_init(Default::default)
 }
 
@@ -1538,16 +1622,34 @@ pub fn coach_write_cues(
         false => (path, lap),
     };
     let ref_arg_given = ref_path.is_some() || ideal.unwrap_or(false);
-    let out = review_sync(app.clone(), path.clone(), lap, ref_path, ref_lap, None, ideal)?;
+    let mut out = review_sync(app.clone(), path.clone(), lap, ref_path, ref_lap, None, ideal)?;
     let rec = load(&path)?;
+    let sessions = all_sessions(&app);
     // The lap the calls are placed on, and the one the HUD races. The ideal lap can't be
     // either: there is no line to draw a ghost from and no ghost to run a gap against, so the
     // fastest lap on the track stands in and the rider is told which lap that is.
+    //
+    // Nor can a lap with a crash, a reset or a cut in it, or the warm-up. With nothing faster to
+    // hold it against, the review is of the lap on its own and names that lap as its reference:
+    // the first lap of a session, crashes and all, became the line in the game. The fastest clean
+    // lap stands in for any of those, and with none yet there is no line at all.
     let ghost = match out.reference.kind {
-        RefKind::Ideal => best_reference(&all_sessions(&app), &out.track_id, &rec.event.bike_id, None)
-            .ok_or("There's no whole lap on this track for the in-game HUD to race against.")?,
-        _ => out.reference.clone(),
+        RefKind::Ideal => best_reference(&sessions, &out.track_id, &rec.event.bike_id, None),
+        _ if lap_is_clean(&sessions, &out.reference.path, out.reference.lap) => Some(out.reference.clone()),
+        _ => best_reference(&sessions, &out.track_id, &rec.event.bike_id, None),
     };
+    let Some(ghost) = ghost else {
+        clear_hud_sheet(&app, &rec)?;
+        return Err("There's no clean lap on this track yet (whole, with no crash, reset or cut), so there's no line to draw in the game. Ride one and it shows."
+            .into());
+    };
+    // The calls are about where this lap loses time to the line, so a lap that stood in for an
+    // unclean reference is the one it is reviewed against.
+    let stood_in = out.reference.kind != RefKind::Ideal
+        && (ghost.path.as_str(), ghost.lap) != (out.reference.path.as_str(), out.reference.lap);
+    if stood_in && (ghost.path.as_str(), ghost.lap) != (path.as_str(), lap) {
+        out = review_sync(app.clone(), path.clone(), lap, Some(ghost.path.clone()), Some(ghost.lap), None, None)?;
+    }
     let r = &ghost;
     let ref_rec = if r.path == path { None } else { Some(load(&r.path)?) };
     // The line the HUD draws: the fastest lap (today's), the ideal lap stitched from the laps that
@@ -1564,7 +1666,6 @@ pub fn coach_write_cues(
     match want_line {
         "chosen" => line.kind = "chosen".into(),
         "ideal" => {
-            let sessions = all_sessions(&app);
             let summary = match sessions.iter().find(|s| s.stints.iter().any(|x| x.path == path)) {
                 Some(s) => s.clone(),
                 None => summarize(Path::new(&path), &rec),
@@ -1573,7 +1674,12 @@ pub fn coach_write_cues(
                 Ok((t, secs, l)) => {
                     fast = t;
                     stitched_sections = Some(secs);
-                    line_id = l.from.iter().map(|p| format!("{}-{}:{}.{}", p.start_m, p.end_m, p.session, p.lap)).collect::<Vec<_>>().join(",");
+                    line_id = l
+                        .from
+                        .iter()
+                        .map(|p| format!("{}-{}:{}.{}", p.start_m, p.end_m, p.session, p.lap))
+                        .collect::<Vec<_>>()
+                        .join(",");
                     line = l;
                 }
                 Err(why) => line.notes.push(format!("The ideal line wasn't used: {why} The fastest lap's is drawn.")),
@@ -1581,7 +1687,7 @@ pub fn coach_write_cues(
         }
         // The fastest lap on the track, whatever reference the review is held against.
         _ if ref_arg_given => {
-            if let Some(g) = best_reference(&all_sessions(&app), &out.track_id, &rec.event.bike_id, None) {
+            if let Some(g) = best_reference(&sessions, &out.track_id, &rec.event.bike_id, None) {
                 fast = own_fast(&g)?;
                 line_id = format!("{}#{}", g.path, g.lap);
             }
@@ -1634,6 +1740,38 @@ pub fn coach_write_cues(
     // heard, and it would be wrong to count it against them.
     write_history(&app, &rec.event.track_id, &rec.event.bike_id, &next);
     Ok(CuesOut { file: file.display().to_string(), cues, ghost, line })
+}
+
+/// Whether lap `num` of the recording at `path` is clean (see [`LapSummary::clean`]): from the
+/// sessions already read when it is one of them, else from the file (an imported lap).
+fn lap_is_clean(sessions: &[SessionSummary], path: &str, num: i32) -> bool {
+    let listed = sessions.iter().flat_map(|s| s.laps.iter()).find(|l| l.path == path && l.num == num);
+    match listed {
+        Some(l) => l.clean(),
+        None => load(path)
+            .ok()
+            .is_some_and(|rec| summarize(Path::new(path), &rec).laps.iter().any(|l| l.num == num && l.clean())),
+    }
+}
+
+/// With no clean lap to draw, the HUD sheet for this track and bike says so: a sheet with no line
+/// in it, which the recorder takes as "draw nothing" rather than keeping a line made of a bad lap.
+fn clear_hud_sheet(app: &AppHandle, rec: &Recording) -> Result<(), String> {
+    let dir = sheets_dir(&load_config(app)).ok_or("The game's user folder wasn't found.")?;
+    fs::create_dir_all(&dir).map_err(err)?;
+    let hud_name = crate::hudsheet::file_name(&rec.event.track_id, &rec.event.bike_id);
+    let hud_path = dir.join(&hud_name);
+    let key = "none".to_string();
+    if hud_path.exists() && hud_keys().lock().map_or(false, |m| m.get(&hud_name) == Some(&key)) {
+        return Ok(());
+    }
+    let tmp = dir.join(format!("{hud_name}.tmp"));
+    fs::write(&tmp, crate::hudsheet::write_empty(rec.event.track_length)).map_err(err)?;
+    move_into_place(&tmp, &hud_path).map_err(err)?;
+    if let Ok(mut m) = hud_keys().lock() {
+        m.insert(hud_name, key);
+    }
+    Ok(())
 }
 
 /// The session's lines and its track, with the stint the lap under review was ridden in.
@@ -1744,7 +1882,8 @@ fn ground_for(app: &AppHandle, path: &str) -> Result<GroundAnswer, String> {
     let points: Vec<[f32; 3]> =
         rec.samples.iter().filter(|s| !s.airborne() && !s.crashed).step_by(5).map(|s| [s.x, s.y, s.z]).collect();
     let i = &master.info;
-    let fit = crate::ground::measure(i.width as usize, i.height as usize, i.metres_per_sample, &master.heights, &points);
+    let fit =
+        crate::ground::measure(i.width as usize, i.height as usize, i.metres_per_sample, &master.heights, &points);
     // The track is shown whenever its terrain can be read, exactly as MXB App shows it: the
     // check below decides how high to hang the lines over it, not whether the rider gets to
     // see their track at all. Refusing on a poor fit meant a rutted lap came back as a blurred
@@ -1794,7 +1933,9 @@ fn terrain_under(app: &AppHandle, rec: &Recording) -> Option<mxb_core::track::Ma
 /// The ground under a session's laps, built from the laps; see `surface.rs`.
 #[tauri::command]
 pub async fn coach_surface(path: String) -> Result<Option<crate::surface::Surface>, String> {
-    tauri::async_runtime::spawn_blocking(move || timed("coach_surface", || coach_surface_sync(path))).await.map_err(err)?
+    tauri::async_runtime::spawn_blocking(move || timed("coach_surface", || coach_surface_sync(path)))
+        .await
+        .map_err(err)?
 }
 
 fn coach_surface_sync(path: String) -> Result<Option<crate::surface::Surface>, String> {
@@ -1877,7 +2018,9 @@ fn installed_note(app: &AppHandle) -> Option<String> {
 }
 
 fn write_installed_note(app: &AppHandle, version: &str) {
-    let Some(path) = installed_note_path(app) else { return };
+    let Some(path) = installed_note_path(app) else {
+        return;
+    };
     if let Some(parent) = path.parent() {
         let _ = fs::create_dir_all(parent);
     }
@@ -1916,7 +2059,9 @@ async fn latest_recorder() -> Result<String, String> {
 #[tauri::command]
 pub async fn coach_refresh_plugin(app: AppHandle) -> Result<Option<String>, String> {
     let cfg = load_config(&app);
-    let Some(target) = plugin_path(&cfg) else { return Ok(None) };
+    let Some(target) = plugin_path(&cfg) else {
+        return Ok(None);
+    };
     let latest = latest_recorder().await?;
     // What is there now: what the game last ran, else what Coach last installed. Neither, with
     // a file present, means a recorder of unknown age — treat that as out of date, because the
@@ -1936,7 +2081,9 @@ pub async fn coach_refresh_plugin(app: AppHandle) -> Result<Option<String>, Stri
 
 #[tauri::command]
 pub fn coach_uninstall_plugin(app: AppHandle) -> Result<(), String> {
-    let Some(target) = plugin_path(&load_config(&app)) else { return Ok(()) };
+    let Some(target) = plugin_path(&load_config(&app)) else {
+        return Ok(());
+    };
     match fs::remove_file(&target) {
         Ok(()) => Ok(()),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
@@ -1967,7 +2114,6 @@ mod tests {
         }
     }
 
-
     fn session(path: &str, track: &str, bike: &str, laps: &[(i32, i32, bool)]) -> SessionSummary {
         SessionSummary {
             path: path.into(),
@@ -1993,6 +2139,9 @@ mod tests {
                     whole,
                     issue: None,
                     crashed: false,
+                    reset: false,
+                    cut: false,
+                    warmup: false,
                     ridden_ms: time_ms,
                 })
                 .collect(),
@@ -2085,6 +2234,42 @@ mod tests {
             stint("20261001-000500-000", "kx450", 1, &[(0, 60_000)]),
         ]);
         assert_eq!(out.len(), 1, "fifteen minutes, over the end of a month");
+    }
+
+    /// The line in the game is the fastest clean lap: never one with a crash, a reset or a cut,
+    /// and never the warm-up, however fast. The next best clean lap stands in, a faster clean lap
+    /// takes over as soon as it is on disk, and with no clean lap there is no line at all
+    /// (GAMING PROFI 2: the first lap, crashes and all, was drawn off the track).
+    #[test]
+    fn the_line_is_the_fastest_clean_lap() {
+        let mut s = session(
+            "a",
+            "indiana",
+            "kx450",
+            &[(1, 50_000, true), (2, 52_000, true), (3, 53_000, true), (4, 51_000, true), (5, 60_000, true)],
+        );
+        s.laps[0].warmup = true; // the out lap, quickest only on paper
+        s.laps[1].crashed = true;
+        s.laps[2].reset = true;
+        s.laps[3].cut = true;
+        let r = best_reference(&[s.clone()], "indiana", "kx450", None).expect("lap 5 is clean");
+        assert_eq!(r.lap, 5, "the only clean lap, slow as it is");
+
+        // Only laps with something wrong in them: no line rather than a bad one.
+        let mut bad = s.clone();
+        bad.laps.truncate(4);
+        assert!(best_reference(&[bad], "indiana", "kx450", None).is_none());
+
+        // A faster clean lap arrives: it is the line now.
+        s.laps.push(session("a", "indiana", "kx450", &[(6, 55_000, true)]).laps.remove(0));
+        assert_eq!(best_reference(&[s.clone()], "indiana", "kx450", None).unwrap().lap, 6);
+        // And a faster one with a crash in it doesn't take over.
+        let mut crash = session("a", "indiana", "kx450", &[(7, 49_000, true)]).laps.remove(0);
+        crash.crashed = true;
+        s.laps.push(crash);
+        assert_eq!(best_reference(&[s.clone()], "indiana", "kx450", None).unwrap().lap, 6);
+        assert!(lap_is_clean(&[s.clone()], "a", 6));
+        assert!(!lap_is_clean(&[s], "a", 7));
     }
 
     #[test]
@@ -2209,7 +2394,11 @@ mod tests {
         let track = root.join("Frost").join("setups").join("indiana").join("2027_K85M");
         let save = Save::beside(&mine, "indiana", &crate::setupbook::Book::default()).expect("somewhere to save");
         assert_eq!(save.dir, track, "under the track, not beside the setup it came from");
-        assert_eq!(save.target(&crate::setupbook::Book::default(), false).map(|t| t.name()).as_deref(), Some("frost-race (coach)"), "still named off the rider's own");
+        assert_eq!(
+            save.target(&crate::setupbook::Book::default(), false).map(|t| t.name()).as_deref(),
+            Some("frost-race (coach)"),
+            "still named off the rider's own"
+        );
         // A setup already under a track stays where it is.
         let theirs = track.join("wet.stp");
         assert_eq!(Save::beside(&theirs, "indiana", &crate::setupbook::Book::default()).unwrap().dir, track);
@@ -2261,7 +2450,11 @@ mod tests {
         let again = Save::beside(&copy, "indiana", &book).unwrap();
         assert_eq!(again.lineage, "coach:frost-race");
         assert_eq!(again.target(&book, false), Some(crate::setupbook::Target::Over(copy.clone())));
-        assert_eq!(again.target(&book, true).map(|t| t.name()).as_deref(), Some("frost-race (coach 2)"), "not with the game open");
+        assert_eq!(
+            again.target(&book, true).map(|t| t.name()).as_deref(),
+            Some("frost-race (coach 2)"),
+            "not with the game open"
+        );
 
         // Edited in the garage: it's the rider's now.
         fs::write(&copy, b"rider tweaked it").unwrap();

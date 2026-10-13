@@ -101,7 +101,9 @@ impl Book {
         let dir_key = key(dir);
         self.files
             .iter()
-            .filter(|(k, e)| e.lineage == lineage && Path::new(k.as_str()).parent().map(key).as_deref() == Some(dir_key.as_str()))
+            .filter(|(k, e)| {
+                e.lineage == lineage && Path::new(k.as_str()).parent().map(key).as_deref() == Some(dir_key.as_str())
+            })
             .max_by_key(|(_, e)| e.written)
             .map(|(_, e)| e.path.clone())
     }
@@ -185,12 +187,14 @@ mod tests {
         disk.put("Fast", b"rider's own");
         let lineage = "coach:Fast";
 
-        let first = book.target(lineage, Path::new(DIR), &names("Fast"), false, &disk.on_disk(), &disk.taken()).unwrap();
+        let first =
+            book.target(lineage, Path::new(DIR), &names("Fast"), false, &disk.on_disk(), &disk.taken()).unwrap();
         assert_eq!(first, Target::New("Fast (coach)".into()));
         let p = disk.put("Fast (coach)", b"v1");
         book.record(&p, b"v1", lineage, 1, &disk.exists());
 
-        let second = book.target(lineage, Path::new(DIR), &names("Fast"), false, &disk.on_disk(), &disk.taken()).unwrap();
+        let second =
+            book.target(lineage, Path::new(DIR), &names("Fast"), false, &disk.on_disk(), &disk.taken()).unwrap();
         assert_eq!(second.name(), "Fast (coach)", "same name, not \"(coach 2)\"");
         assert!(matches!(second, Target::Over(_)));
     }
@@ -203,7 +207,8 @@ mod tests {
         book.record(&p, b"v1", "coach:Fast", 1, &disk.exists());
         disk.put("Fast (coach)", b"edited in the garage");
 
-        let t = book.target("coach:Fast", Path::new(DIR), &names("Fast"), false, &disk.on_disk(), &disk.taken()).unwrap();
+        let t =
+            book.target("coach:Fast", Path::new(DIR), &names("Fast"), false, &disk.on_disk(), &disk.taken()).unwrap();
         assert_eq!(t, Target::New("Fast (coach 2)".into()));
     }
 
@@ -212,7 +217,8 @@ mod tests {
     fn a_file_coach_never_wrote_is_left_alone() {
         let (book, mut disk) = (Book::default(), Disk(BTreeMap::new()));
         disk.put("Fast (coach)", b"from an older Coach, or hand-made");
-        let t = book.target("coach:Fast", Path::new(DIR), &names("Fast"), false, &disk.on_disk(), &disk.taken()).unwrap();
+        let t =
+            book.target("coach:Fast", Path::new(DIR), &names("Fast"), false, &disk.on_disk(), &disk.taken()).unwrap();
         assert_eq!(t, Target::New("Fast (coach 2)".into()));
     }
 
@@ -222,7 +228,8 @@ mod tests {
         let (mut book, mut disk) = (Book::default(), Disk(BTreeMap::new()));
         let p = disk.put("Fast (coach)", b"v1");
         book.record(&p, b"v1", "coach:Fast", 1, &disk.exists());
-        let t = book.target("coach:Fast", Path::new(DIR), &names("Fast"), true, &disk.on_disk(), &disk.taken()).unwrap();
+        let t =
+            book.target("coach:Fast", Path::new(DIR), &names("Fast"), true, &disk.on_disk(), &disk.taken()).unwrap();
         assert_eq!(t, Target::New("Fast (coach 2)".into()));
     }
 
@@ -235,7 +242,8 @@ mod tests {
         disk.put("Fast (coach)", b"edited");
         let p2 = disk.put("Fast (coach 2)", b"v2");
         book.record(&p2, b"v2", "coach:Fast", 2, &disk.exists());
-        let t = book.target("coach:Fast", Path::new(DIR), &names("Fast"), false, &disk.on_disk(), &disk.taken()).unwrap();
+        let t =
+            book.target("coach:Fast", Path::new(DIR), &names("Fast"), false, &disk.on_disk(), &disk.taken()).unwrap();
         assert_eq!(t.name(), "Fast (coach 2)");
         assert!(matches!(t, Target::Over(_)));
     }

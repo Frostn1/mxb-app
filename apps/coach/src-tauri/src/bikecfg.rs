@@ -364,13 +364,21 @@ rear_suspension
     #[test]
     fn the_swingarm_list_comes_from_the_geom_either_way_round() {
         // A 2023 KTM 450: short to long, 9 positions over 40 mm.
-        let ktm = swingarm(&cfg::parse(b"rwheel_min = 0, 0.0331, -0.5758\nrwheel_max = 0, 0.0331, -0.6162\nswingarm_steps = 8\n")).unwrap();
+        let ktm = swingarm(&cfg::parse(
+            b"rwheel_min = 0, 0.0331, -0.5758\nrwheel_max = 0, 0.0331, -0.6162\nswingarm_steps = 8\n",
+        ))
+        .unwrap();
         assert_eq!(ktm.count, 9);
         assert!(close(&[ktm.values[0], ktm.values[8]], &[0.5758, 0.6162]));
         // A 2003 RM250 lists long to short.
-        let rm = swingarm(&cfg::parse(b"rwheel_min = 0, -0.0409, -0.6065\nrwheel_max = 0, -0.0457, -0.566\nswingarm_steps = 8\n")).unwrap();
+        let rm = swingarm(&cfg::parse(
+            b"rwheel_min = 0, -0.0409, -0.6065\nrwheel_max = 0, -0.0457, -0.566\nswingarm_steps = 8\n",
+        ))
+        .unwrap();
         assert!(rm.values[8] < rm.values[0]);
         // No steps: the bike can't change it.
-        assert!(swingarm(&cfg::parse(b"rwheel_min = 0, 0, -0.5\nrwheel_max = 0, 0, -0.5\nswingarm_steps = 0\n")).is_none());
+        assert!(
+            swingarm(&cfg::parse(b"rwheel_min = 0, 0, -0.5\nrwheel_max = 0, 0, -0.5\nswingarm_steps = 0\n")).is_none()
+        );
     }
 }

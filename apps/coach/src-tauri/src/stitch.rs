@@ -110,9 +110,7 @@ pub fn stitch(sections: &[(usize, usize)], best: &[usize], laps: &[&Trace], base
             joined.push(Piece { start: at, end: next.end, lap: next.lap });
         } else {
             let apart = if lo <= hi { d_min } else { gap(&laps[last.lap].pts[b], &laps[next.lap].pts[b]) };
-            notes.push(format!(
-                "at {b} m the laps are {apart:.1} m apart: the earlier lap's line carries on instead"
-            ));
+            notes.push(format!("at {b} m the laps are {apart:.1} m apart: the earlier lap's line carries on instead"));
             joined.last_mut().unwrap().end = next.end;
         }
     }
@@ -168,13 +166,7 @@ fn owner_at(joined: &[Piece], m: usize) -> usize {
 }
 
 /// The time from metre `m` to the next on the finished line: each lap's own, blended at joins.
-fn mix_dt(
-    joined: &[Piece],
-    joins: &[usize],
-    laps: &[&Trace],
-    m: usize,
-    dt: &dyn Fn(&Point, &Point) -> f32,
-) -> f32 {
+fn mix_dt(joined: &[Piece], joins: &[usize], laps: &[&Trace], m: usize, dt: &dyn Fn(&Point, &Point) -> f32) -> f32 {
     let d = |l: usize| dt(&laps[l].pts[m], &laps[l].pts[m + 1]);
     for (k, &c) in joins.iter().enumerate() {
         if m + BLEND_M >= c && m < c + BLEND_M {

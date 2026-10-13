@@ -50,7 +50,8 @@ pub fn build(samples: &[Sample], max_side: usize) -> Option<Surface> {
         sum[k] += s.y as f64;
         n[k] += 1;
     }
-    let raw: Vec<Option<f32>> = (0..width * height).map(|k| (n[k] > 0).then(|| (sum[k] / n[k] as f64) as f32)).collect();
+    let raw: Vec<Option<f32>> =
+        (0..width * height).map(|k| (n[k] > 0).then(|| (sum[k] / n[k] as f64) as f32)).collect();
 
     let mut heights = raw.clone();
     for r in 0..height {
@@ -86,9 +87,7 @@ mod tests {
     use super::*;
 
     fn ride(points: impl Iterator<Item = (f32, f32, f32)>) -> Vec<Sample> {
-        points
-            .map(|(x, y, z)| Sample { x, y, z, wheel_material: [1, 1], ..Default::default() })
-            .collect()
+        points.map(|(x, y, z)| Sample { x, y, z, wheel_material: [1, 1], ..Default::default() }).collect()
     }
 
     #[test]

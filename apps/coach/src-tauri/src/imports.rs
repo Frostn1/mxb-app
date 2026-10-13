@@ -166,7 +166,11 @@ mod tests {
         let stem = "20260915-100000-000";
         assert_eq!(free_name(&d, stem), d.join("20260915-100000-000.mxbc"));
         fs::write(d.join(format!("{stem}.mxbc")), b"a").unwrap();
-        assert_eq!(free_name(&d, stem), d.join("20260915-100000-000-2.mxbc"), "two riders can be out at the same second");
+        assert_eq!(
+            free_name(&d, stem),
+            d.join("20260915-100000-000-2.mxbc"),
+            "two riders can be out at the same second"
+        );
         let _ = fs::remove_dir_all(&d);
     }
 

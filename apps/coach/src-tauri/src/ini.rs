@@ -49,14 +49,11 @@ pub fn set_keys(text: &str, section: &str, keys: &[(&str, String)]) -> String {
             lines.len() - 1
         }
     };
-    let mut end = lines[head + 1..]
-        .iter()
-        .position(|l| l.trim().starts_with('['))
-        .map_or(lines.len(), |i| head + 1 + i);
+    let mut end =
+        lines[head + 1..].iter().position(|l| l.trim().starts_with('[')).map_or(lines.len(), |i| head + 1 + i);
     for (key, value) in keys {
-        let found = (head + 1..end).find(|&i| {
-            lines[i].split_once('=').is_some_and(|(k, _)| k.trim().eq_ignore_ascii_case(key))
-        });
+        let found = (head + 1..end)
+            .find(|&i| lines[i].split_once('=').is_some_and(|(k, _)| k.trim().eq_ignore_ascii_case(key)));
         match found {
             Some(i) => lines[i] = format!("{key}={value}"),
             None => {

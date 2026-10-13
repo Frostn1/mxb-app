@@ -419,8 +419,8 @@ pub(crate) mod tests {
 
     /// A real 85 SX sand setup (six gears, 244 bytes), setting for setting.
     pub(crate) const SAND_85: [u32; 49] = [
-        0, 0, 2, 3, 3, 3, 2, 13, 0, 0, 3, 3, 0, 4, 7, 0, 0, 0, 0, 1, 2, 3, 4, 5, 2, 5, 0, 0, 0, 0, 13, 10,
-        13, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 2, 3, 3, 3, 2, 13, 0, 0, 3, 3, 0, 4, 7, 0, 0, 0, 0, 1, 2, 3, 4, 5, 2, 5, 0, 0, 0, 0, 13, 10, 13, 0, 0, 2,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     ];
 
     #[test]
@@ -507,7 +507,10 @@ pub(crate) mod tests {
         let found = setups_for_bike(&root, "indiana", bike);
         let names: Vec<String> = found.iter().map(|p| p.file_stem().unwrap().to_string_lossy().into_owned()).collect();
         assert_eq!(names, ["here", "every", "there"]);
-        assert_eq!(fresh_dir(&root, "indiana", bike), Some(root.join("Frost").join("setups").join("indiana").join(bike)));
+        assert_eq!(
+            fresh_dir(&root, "indiana", bike),
+            Some(root.join("Frost").join("setups").join("indiana").join(bike))
+        );
         std::fs::remove_dir_all(&root).ok();
     }
 

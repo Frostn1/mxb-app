@@ -77,8 +77,11 @@ pub fn measure(rec: &Recording) -> Option<Sag> {
             false,
             s.iter()
                 .filter(|x| {
-                    on_ground(x) && x.speed > 12.0 && x.yaw_rate.abs() < 10.0
-                        && (0.3..0.95).contains(&x.throttle) && x.acc[2].abs() < 0.3
+                    on_ground(x)
+                        && x.speed > 12.0
+                        && x.yaw_rate.abs() < 10.0
+                        && (0.3..0.95).contains(&x.throttle)
+                        && x.acc[2].abs() < 0.3
                 })
                 .collect(),
         ),
@@ -152,13 +155,7 @@ mod tests {
     use crate::telemetry::{EventInfo, Recording, SessionInfo};
 
     fn sample(t: f32, speed: f32, susp: [f32; 2], ground: bool) -> Sample {
-        Sample {
-            t,
-            speed,
-            susp,
-            wheel_material: if ground { [1, 1] } else { [0, 0] },
-            ..Sample::default()
-        }
+        Sample { t, speed, susp, wheel_material: if ground { [1, 1] } else { [0, 0] }, ..Sample::default() }
     }
 
     fn rec(samples: Vec<Sample>) -> Recording {

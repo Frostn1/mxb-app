@@ -63,8 +63,7 @@ pub struct TrackMap {
 }
 
 /// The word and the slug for each kind, in `Kind`'s own order.
-const WORDS: [(&str, &str); 5] =
-    [("Straight", "s"), ("Turn", "t"), ("Jump", "j"), ("Rhythm", "r"), ("Whoops", "w")];
+const WORDS: [(&str, &str); 5] = [("Straight", "s"), ("Turn", "t"), ("Jump", "j"), ("Rhythm", "r"), ("Whoops", "w")];
 
 fn word_of(kind: Kind) -> (&'static str, &'static str) {
     WORDS[kind as usize]
@@ -231,8 +230,8 @@ pub fn file_name(track: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::analysis::tests::{lap, Style, FAST};
     use crate::analysis::sections;
+    use crate::analysis::tests::{lap, Style, FAST};
 
     fn ids(secs: &[Section]) -> Vec<(&str, &str)> {
         secs.iter().map(|s| (s.id.as_str(), s.name.as_str())).collect()

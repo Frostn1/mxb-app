@@ -68,10 +68,8 @@ pub struct Fit {
 }
 
 pub fn measure(width: usize, height: usize, mps: f32, heights: &[f32], points: &[[f32; 3]]) -> Fit {
-    let mut gaps: Vec<f32> = points
-        .iter()
-        .filter_map(|&[x, y, z]| Some(y - height_at(width, height, mps, heights, x, z)?))
-        .collect();
+    let mut gaps: Vec<f32> =
+        points.iter().filter_map(|&[x, y, z]| Some(y - height_at(width, height, mps, heights, x, z)?)).collect();
     let mut out = Fit { on_grid: gaps.len(), offered: points.len(), ..Fit::default() };
     if gaps.len() < MIN_POINTS || gaps.len() * 2 < points.len() {
         return out;

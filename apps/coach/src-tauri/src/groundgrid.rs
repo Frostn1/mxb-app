@@ -234,7 +234,8 @@ fn run_all(app: &AppHandle) {
         if e.secured || e.locked || protected(Path::new(&e.path)) {
             continue;
         }
-        let id = mxb_core::track::folder_name(Path::new(&e.path)).unwrap_or_else(|| mxb_core::library::strip_ext(&e.name));
+        let id =
+            mxb_core::track::folder_name(Path::new(&e.path)).unwrap_or_else(|| mxb_core::library::strip_ext(&e.name));
         if !stale(&dir.join(file_name(&id)), Path::new(&e.path)) {
             continue;
         }

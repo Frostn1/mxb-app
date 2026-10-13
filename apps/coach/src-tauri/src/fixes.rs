@@ -80,25 +80,44 @@ const FRONT_LOW: &[Step] = &[
 const FRONT_PUSH: &[Step] = &[
     step(Field::ForkCompression, -1, "Softer fork compression lets the front dig in."),
     step(Field::ShockPreload, 1, "A little more shock preload puts more weight on the front."),
-    step(Field::ForkHeight, -1, "Still pushing: the fork up in the clamps puts weight on the front. Less stable at speed."),
+    step(
+        Field::ForkHeight,
+        -1,
+        "Still pushing: the fork up in the clamps puts weight on the front. Less stable at speed.",
+    ),
 ];
-const GEARING_TALL: &[Step] =
-    &[step(Field::RearSprocket, -1, "One tooth less on the rear: taller gearing, so it pulls longer before the limiter.")];
+const GEARING_TALL: &[Step] = &[step(
+    Field::RearSprocket,
+    -1,
+    "One tooth less on the rear: taller gearing, so it pulls longer before the limiter.",
+)];
 const GEARING_SHORT: &[Step] =
     &[step(Field::RearSprocket, 1, "One tooth more on the rear: shorter gearing, so it pulls out of slow corners.")];
 const SWINGARM: &[Step] = &[
     step(Field::SwingarmLength, 1, "A longer swingarm puts weight on the front and keeps it down."),
-    step(Field::ShockLowCompression, 1, "Firmer low-speed compression stops the rear squatting when you get on the gas."),
+    step(
+        Field::ShockLowCompression,
+        1,
+        "Firmer low-speed compression stops the rear squatting when you get on the gas.",
+    ),
 ];
 
 // Only the rider feels these; telemetry can't see them, so they come from the feel check.
 const UNSTABLE: &[Step] = &[
-    step(Field::ForkHeight, 1, "Raise the front: slide the fork down in the clamps. Calmer at speed, a little slower to turn."),
+    step(
+        Field::ForkHeight,
+        1,
+        "Raise the front: slide the fork down in the clamps. Calmer at speed, a little slower to turn.",
+    ),
     step(Field::ForkOffset, -1, "Less offset: more trail, so the front holds its line."),
     step(Field::SwingarmLength, 1, "Still loose: a longer swingarm is steadier and finds more drive."),
 ];
 const TURNS_SLOW: &[Step] = &[
-    step(Field::ForkHeight, -1, "Lower the front: slide the fork up in the clamps. Turns in quicker, less calm at speed."),
+    step(
+        Field::ForkHeight,
+        -1,
+        "Lower the front: slide the fork up in the clamps. Turns in quicker, less calm at speed.",
+    ),
     step(Field::ForkOffset, 1, "More offset: lighter, quicker steering."),
     step(Field::SwingarmLength, -1, "Still slow: a shorter swingarm turns tighter."),
 ];
@@ -113,8 +132,11 @@ const HARDPACK: &[Step] = &[
     step(Field::ForkCompression, -1, "Softer fork compression keeps the front tyre on the slick ground."),
     step(Field::ShockLowCompression, -1, "Softer low-speed compression lets the rear follow the ground for drive."),
 ];
-const MUD: &[Step] =
-    &[step(Field::RearSprocket, -1, "One tooth less on the rear: taller gearing is smoother on the gas when it spins up.")];
+const MUD: &[Step] = &[step(
+    Field::RearSprocket,
+    -1,
+    "One tooth less on the rear: taller gearing is smoother on the gas when it spins up.",
+)];
 
 fn steps(skill: &str) -> &'static [Step] {
     match skill {
@@ -234,10 +256,7 @@ pub fn plan(skills: &[String], setup: Option<&Setup>, opts: Option<&BikeOptions>
         .filter(|s| !steps(s).is_empty())
         .map(|s| Fix {
             skill: s.clone(),
-            changes: steps(s)
-                .iter()
-                .map(|st| make(st.field, st.firmer, st.why.to_string(), setup, opts))
-                .collect(),
+            changes: steps(s).iter().map(|st| make(st.field, st.firmer, st.why.to_string(), setup, opts)).collect(),
         })
         .collect()
 }
@@ -440,7 +459,10 @@ mod tests {
         let (s, o) = sand();
         let f = plan(&skills(&["setup_bottoming_fork"]), Some(&s), Some(&o));
         let c = &f[0].changes;
-        assert_eq!(c.iter().map(|c| c.field).collect::<Vec<_>>(), [Field::ForkCompression, Field::ForkOil, Field::ForkSpring]);
+        assert_eq!(
+            c.iter().map(|c| c.field).collect::<Vec<_>>(),
+            [Field::ForkCompression, Field::ForkOil, Field::ForkSpring]
+        );
         assert_eq!((c[0].from, c[0].to), (Some(3), Some(5)));
         // The oil is already at its fullest option: nothing to do there.
         assert_eq!((c[1].from, c[1].to, c[1].writes), (Some(0), Some(0), false));
@@ -451,10 +473,22 @@ mod tests {
     #[test]
     fn every_setup_tip_the_review_gives_has_a_fix() {
         let tips = [
-            "setup_bottoming_fork", "setup_bottoming_shock", "setup_bottoming_shock_slow", "setup_stiff_fork",
-            "setup_stiff_shock", "setup_gearing_tall", "setup_gearing_short", "setup_swingarm", "setup_brake_dive",
-            "setup_exit_squat", "setup_shock_kick", "setup_packing_fork", "setup_packing_shock", "setup_rear_low",
-            "setup_front_low", "setup_front_push",
+            "setup_bottoming_fork",
+            "setup_bottoming_shock",
+            "setup_bottoming_shock_slow",
+            "setup_stiff_fork",
+            "setup_stiff_shock",
+            "setup_gearing_tall",
+            "setup_gearing_short",
+            "setup_swingarm",
+            "setup_brake_dive",
+            "setup_exit_squat",
+            "setup_shock_kick",
+            "setup_packing_fork",
+            "setup_packing_shock",
+            "setup_rear_low",
+            "setup_front_low",
+            "setup_front_push",
         ];
         for s in tips {
             assert!(!steps(s).is_empty(), "{s}");
@@ -484,7 +518,10 @@ mod tests {
         s.set(Field::RearPressure, 11); // 82.5 kPa, close enough
         let fix = pressure_fix(&s, &o, [Some(85.0), Some(85.0)]).unwrap();
         assert_eq!(fix.changes.len(), 1);
-        assert_eq!((fix.changes[0].from_value.as_deref(), fix.changes[0].to_value.as_deref()), (Some("60.0 kPa"), Some("85.0 kPa")));
+        assert_eq!(
+            (fix.changes[0].from_value.as_deref(), fix.changes[0].to_value.as_deref()),
+            (Some("60.0 kPa"), Some("85.0 kPa"))
+        );
         assert!(pressure_finding(&s, &o, [Some(85.0), Some(85.0)]).is_some());
         s.set(Field::FrontPressure, 12);
         assert!(pressure_fix(&s, &o, [Some(85.0), Some(85.0)]).is_none());
@@ -563,7 +600,11 @@ mod tests {
         let (s, o) = sand();
         let mut f = plan(&skills(&["setup_sand", "setup_gearing_tall"]), Some(&s), Some(&o));
         let rear = |f: &[Fix]| -> Vec<(bool, bool)> {
-            f.iter().flat_map(|x| &x.changes).filter(|c| c.field == Field::RearSprocket).map(|c| (c.writes, c.conflict)).collect()
+            f.iter()
+                .flat_map(|x| &x.changes)
+                .filter(|c| c.field == Field::RearSprocket)
+                .map(|c| (c.writes, c.conflict))
+                .collect()
         };
         // Each tip on its own is a change the coach can make, which is why it used to claim both.
         assert_eq!(rear(&f), [(true, false), (true, false)]);

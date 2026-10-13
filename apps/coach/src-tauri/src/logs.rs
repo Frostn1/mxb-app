@@ -43,10 +43,7 @@ fn info_of(app_log_dir: &Path, cfg: &AppConfig, install: Option<&Path>) -> LogsI
         None => LogGroup::missing(PathBuf::new()),
     };
     let (plugins, game) = match install {
-        Some(dir) => (
-            scan(&mxb_core::library::resolve_child(dir, "plugins"), is_plugin_log),
-            scan(dir, is_game_log),
-        ),
+        Some(dir) => (scan(&mxb_core::library::resolve_child(dir, "plugins"), is_plugin_log), scan(dir, is_game_log)),
         None => (LogGroup::missing(PathBuf::new()), LogGroup::missing(PathBuf::new())),
     };
     LogsInfo { app: scan_all(app_log_dir), recorder, plugins, game }
@@ -147,9 +144,7 @@ pub async fn share_logs(app: AppHandle) -> Result<ShareResult, String> {
     let info = info(&app, &cfg);
     let text = summary_now(&app, &cfg, &info);
     let owned = groups(&info).iter().map(|(n, g)| (*n, (*g).clone())).collect();
-    logshare::share(&app, owned, &text, "mxb-coach-logs.zip")
-        .await
-        .map_err(|e| format!("{e:#}"))
+    logshare::share(&app, owned, &text, "mxb-coach-logs.zip").await.map_err(|e| format!("{e:#}"))
 }
 
 #[cfg(test)]
