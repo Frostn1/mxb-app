@@ -1970,7 +1970,7 @@ type Framing = "default" | "solo" | "pair" | "onBike";
 
 // Default camera looks down over a bike/rider; a solo gear item gets a level, closer view,
 // and a bike-plus-rider pair is roughly twice as wide, so it starts further back.
-function CameraRig({ frame }: { frame: Framing }) {
+function CameraRig({ frame, view }: { frame: Framing; view?: ViewerView | null }) {
   const camera = useThree((s) => s.camera);
   // OrbitControls (`makeDefault`) owns the camera each frame, so moves must go through
   // the controls and be committed with `update()`.
@@ -1979,6 +1979,18 @@ function CameraRig({ frame }: { frame: Framing }) {
     | null;
   const invalidate = useThree((s) => s.invalidate);
   useEffect(() => {
+    if (view) {
+      camera.position.set(...view.position);
+      camera.updateProjectionMatrix();
+      if (controls) {
+        controls.target.set(...view.target);
+        controls.update();
+      } else {
+        camera.lookAt(...view.target);
+      }
+      invalidate();
+      return;
+    }
     const [x, y, z] =
       frame === "solo"
         ? [1.25, 0.35, 1.7]
@@ -1999,7 +2011,7 @@ function CameraRig({ frame }: { frame: Framing }) {
     // Moving the camera by hand changes no React state, so under `frameloop="demand"`
     // nothing would repaint and the reframe wouldn't show until the next interaction.
     invalidate();
-  }, [frame, camera, controls, invalidate]);
+  }, [frame, view, camera, controls, invalidate]);
   return null;
 }
 
@@ -2316,6 +2328,16 @@ function FrameOnChange({ token }: { token?: number }) {
   return null;
 }
 
+/**
+ * A camera to look through: where it stands and what it looks at, in the viewer's frame (the
+ * bike centred, +y up, +z ahead). Handing a new object moves the camera there; the person can
+ * orbit away from it as usual.
+ */
+export interface ViewerView {
+  position: [number, number, number];
+  target: [number, number, number];
+}
+
 export interface ModelViewerProps {
   mode: ViewerMode;
   texture?: PaintTexture | null;
@@ -2426,6 +2448,8 @@ export interface ModelViewerProps {
   loading?: boolean;
   noStandIn?: boolean;
   className?: string;
+  /** Start from this camera instead of the default framing (see [`ViewerView`]). */
+  view?: ViewerView | null;
   /** Drawn in the bike's own frame, beside a lone bike: markers, handles. */
   bikeOverlay?: React.ReactNode;
 }
@@ -2456,6 +2480,7 @@ export function ModelViewer({
   className,
   grounded = true,
   bikeOverlay,
+  view = null,
 }: ModelViewerProps) {
   // Photo mode takes the dots away by not handing the rider anything to write a pose back
   // through — the handles exist only where a caller asked to edit one.
@@ -2556,7 +2581,7 @@ export function ModelViewer({
         >
           <Sky scene={look} />
           <FrameOnChange token={frameToken} />
-          <CameraRig frame={frame} />
+          <CameraRig frame={frame} view={view} />
           <CaptureBridge onReady={onCaptureReady} />
           <ambientLight intensity={look.ambient} />
           {/* Even sky/ground fill so matte paint reads its true colour. */}
