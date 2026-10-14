@@ -1919,12 +1919,14 @@ dependencies = [
  "anyhow",
  "flate2",
  "image",
+ "log",
  "md-5",
  "rayon",
  "serde",
  "serde_json",
  "tempfile",
  "ufbx",
+ "walkdir",
 ]
 
 [[package]]
