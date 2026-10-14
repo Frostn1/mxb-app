@@ -41,7 +41,7 @@
     },
     "apps/converter": {
       "name": "@frost/converter",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "dependencies": {
         "@frost/shared": "*",
         "@tauri-apps/api": "^2.1.1",
@@ -64,7 +64,7 @@
     },
     "apps/manager": {
       "name": "@frost/manager",
-      "version": "0.20.2",
+      "version": "0.20.3",
       "dependencies": {
         "@frost/shared": "*",
         "@radix-ui/react-alert-dialog": "^1.1.19",
