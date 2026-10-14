@@ -121,6 +121,9 @@ pub struct BikeModel {
     /// installed falls back to the bike's own, and the picker has to show that rather than
     /// claim a pack that isn't on screen.
     pub tyres: Option<String>,
+    /// The tyre sheets that mod's `gfx.cfg` names (`tyre_texture`), which the viewer draws as
+    /// rubber rather than with the paint's sheen. Empty when the bike drew no wheels.
+    pub tyre_textures: Vec<String>,
     /// Whether the parts were placed into one frame by the bike's `.geom`.
     ///
     /// False means every node still sits in its own local frame, so a vertex's position says
@@ -571,6 +574,7 @@ pub fn build_bike_model(
     // Wheels last, and only onto a bike that arrived: a mesh that didn't read has to go on
     // reading as "none of this bike arrived", not as a pair of wheels hanging in the air.
     let mut tyres = None;
+    let mut tyre_textures = Vec::new();
     let mut wheel_count = 0;
     if let Some(set) = tyre_set.as_ref().filter(|_| !nodes.is_empty()) {
         let (mut wheels, meshes) = wheel_nodes(&set.files);
@@ -578,6 +582,7 @@ pub fn build_bike_model(
             log::warn!("[viewer] {label}: tyres '{}' hold no readable wheel mesh", set.name);
         } else {
             tyres = Some(set.name.clone());
+            tyre_textures = tyre_sheets(&set.files);
         }
         wheel_count = wheels.len();
         nodes.append(&mut wheels);
@@ -774,6 +779,7 @@ pub fn build_bike_model(
         paints,
         base: model_base,
         tyres,
+        tyre_textures,
         assembled,
         rig,
         wheels: wheel_count,
@@ -1078,6 +1084,23 @@ pub fn wheel_nodes(files: &[(String, Vec<u8>)]) -> (Vec<edf::EdfNode>, Vec<&Vec<
         }
     }
     (nodes, used)
+}
+
+/// The tyre sheets a tyres mod's `gfx.cfg` names: each wheel's `tyre_texture`, in order, once.
+pub fn tyre_sheets(files: &[(String, Vec<u8>)]) -> Vec<String> {
+    let Some((_, bytes)) = files.iter().find(|(n, _)| n.to_ascii_lowercase().ends_with("gfx.cfg")) else {
+        return Vec::new();
+    };
+    let gfx = cfg::parse(bytes);
+    let mut out: Vec<String> = Vec::new();
+    for part in ["front_wheel", "rear_wheel"] {
+        if let Some(t) = gfx.block(part).and_then(|p| p.get("tyre_texture")).map(str::trim) {
+            if !t.is_empty() && !out.iter().any(|o| o.eq_ignore_ascii_case(t)) {
+                out.push(t.to_string());
+            }
+        }
+    }
+    out
 }
 
 pub fn is_chain(sm: &edf::Submesh) -> bool {
@@ -3958,6 +3981,7 @@ mod viewer_tests {
             }],
             base: vec![tex("plastics", "t-own"), tex("wheel", "t-shared")],
             tyres: None,
+            tyre_textures: Vec::new(),
             assembled: true,
             rig: None,
             wheels: 0,
@@ -4163,6 +4187,30 @@ mod viewer_tests {
         ] {
             std::fs::write(dir.join(file), body).unwrap();
         }
+    }
+
+    /// The tyre sheets come off the mod's own gfx.cfg, front then rear, each once.
+    #[test]
+    fn tyre_sheets_are_the_wheels_tyre_textures() {
+        let gfx = "front_wheel
+{
+	tyre_texture = fgeomax
+}
+rear_wheel
+{
+	tyre_texture = rgeomax
+}
+                   cockpit
+{
+	front_wheel
+	{
+		tyre_texture = fgeomax
+	}
+}
+";
+        let files = vec![("oem_mx/gfx.cfg".to_string(), gfx.as_bytes().to_vec())];
+        assert_eq!(super::tyre_sheets(&files), ["fgeomax", "rgeomax"]);
+        assert!(super::tyre_sheets(&[]).is_empty());
     }
 
     fn tyre_file_names(set: &super::TyreSet) -> Vec<&str> {

@@ -379,6 +379,63 @@ fn fork_hang(
     })
 }
 
+/// The shock's length with the swingarm turned `deg` about the pivot (+ lifts the axle), for a
+/// "Linkage Rod Chassis" rear: the rocker rides the swingarm at `rocker_swingarm`, its rod end
+/// (`rocker_length` out, at `ref_angle` in the rocker) is held `rod_length` from `rod_chassis`,
+/// and the shock runs from `shock_chassis` to the rocker's `shock_rocker`. `None` where the rod
+/// can't reach.
+fn shock_length(
+    g: &std::collections::HashMap<String, [f32; 3]>,
+    sc: &std::collections::HashMap<String, f32>,
+    deg: f32,
+) -> Option<f32> {
+    let pivot = *g.get("chassis_rsusp_min")?;
+    let joint = *g.get("rsusp_joint")?;
+    let q = v_add(pivot, rot_x(v_sub(*g.get("rocker_swingarm")?, joint), deg));
+    let qc = v_sub(*g.get("rod_chassis")?, q);
+    let (r1, r2) = (*sc.get("rocker_length")?, *sc.get("rod_length")?);
+    let d = v_dot(qc, qc).sqrt();
+    if d < 1e-9 {
+        return None;
+    }
+    let a = (r1 * r1 - r2 * r2 + d * d) / (2.0 * d);
+    if r1 * r1 < a * a {
+        return None;
+    }
+    let (uy, uz) = (qc[1] / d, qc[2] / d);
+    let h = (r1 * r1 - a * a).sqrt();
+    let rod_end = [0.0, q[1] + a * uy - h * uz, q[2] + a * uz + h * uy];
+    let phi = (rod_end[2] - q[2]).atan2(rod_end[1] - q[1]).to_degrees();
+    let ref_angle = sc.get("ref_angle").copied().unwrap_or(-90.0);
+    let s = v_add(q, rot_x(*g.get("shock_rocker")?, phi + ref_angle));
+    let shock = v_sub(s, *g.get("shock_chassis")?);
+    Some(v_dot(shock, shock).sqrt())
+}
+
+/// How far (degrees, negative = down) the swingarm hangs below its authored pose with the shock
+/// fully out: the bike on its stand, as the game's Bike Selection shows it. Where the rod goes
+/// straight first (the 2023 CRF250R's, ~12° down), that is where the rear tops out. `None`
+/// when the .geom has no linkage to solve, or it doesn't reach full length within 60°.
+fn rear_extension(
+    g: &std::collections::HashMap<String, [f32; 3]>,
+    sc: &std::collections::HashMap<String, f32>,
+) -> Option<f32> {
+    let full = sc.get("shock_minlength")? + sc.get("rear_length")?;
+    let mut prev: Option<(f32, f32)> = None;
+    for i in 0..=600 {
+        let deg = -(i as f32) * 0.1;
+        let Some(l) = shock_length(g, sc, deg) else {
+            return prev.map(|(d, _)| d);
+        };
+        if l >= full {
+            let (pd, pl) = prev?;
+            return Some(if l > pl { pd + (deg - pd) * (full - pl) / (l - pl) } else { deg });
+        }
+        prev = Some((deg, l));
+    }
+    None
+}
+
 fn mounts(
     g: &std::collections::HashMap<String, [f32; 3]>,
     sc: &std::collections::HashMap<String, f32>,
@@ -458,6 +515,10 @@ pub struct BikeRig {
     /// grips) is turned by `rake` about x and then moved by this, exactly as the steer
     /// mesh's vertices were.
     pub steer_origin: [f32; 3],
+    /// How far the rear axle sits below as-authored with the shock fully out (mm, a pose's
+    /// `rearDrop`): the bike on its stand, as Bike Selection shows it. Solved from the .geom's
+    /// linkage; `None` when it has none or it doesn't reach.
+    pub rear_extended_drop: Option<f32>,
 }
 
 impl BikeRig {
@@ -531,6 +592,10 @@ pub fn assemble_bike(nodes: &mut [EdfNode], geom_bytes: &[u8]) -> Option<BikeRig
         seat: g.get("seat_height_ref").copied(),
         chassis_origin: [0.0; 3],
         steer_origin: v_sub(head, rot_x(steer_joint, rake)),
+        rear_extended_drop: axles.zip(rear_extension(&g, &sc)).map(|((_, rear), deg)| {
+            let hung = v_add(pivot, rot_x(v_sub(rear, pivot), deg));
+            (rear[1] - hung[1]) * 1000.0
+        }),
     };
 
     for n in nodes.iter_mut() {
@@ -2039,6 +2104,69 @@ front_length = 0.31
 ");
         let d = rot_x([yz[0] - plain[0], yz[1] - plain[1], yz[2] - plain[2]], 26.9);
         assert!((d[1] + 0.0270).abs() < 1e-4 && (d[2] + 0.0225).abs() < 1e-4, "{d:?}");
+    }
+
+    /// On its stand the shock is fully out: the swingarm hangs where the linkage puts the shock
+    /// at `shock_minlength + rear_length`. The 2024 YZ250F's and the 2023 KTM 250 SX-F's own
+    /// numbers; the KTM is authored fully compressed, so it hangs further.
+    #[test]
+    fn the_swingarm_hangs_at_full_shock_length() {
+        let parse = |s: &str| (parse_geom(s.as_bytes()), parse_geom_scalars(s.as_bytes()));
+        let (g, sc) = parse(
+            "chassis_rsusp_min = 0, 0.4808, -0.1766
+rsusp_joint = 0, 0.0006, -0.0007
+rear_length = 0.125
+shock_minlength = 0.324
+shock_chassis = 0, 0.7706, -0.1578
+rocker_swingarm = 0, -0.0351, -0.1803
+rocker_length = 0.039
+rod_chassis = 0, 0.3936, -0.2153
+rod_length = 0.136
+shock_rocker = 0, 0.0544, 0.0309
+ref_angle = -90
+",
+        );
+        let yz = rear_extension(&g, &sc).unwrap();
+        assert!((yz + 20.1).abs() < 0.2, "{yz}");
+        assert!((shock_length(&g, &sc, yz).unwrap() - 0.449).abs() < 1e-3);
+        let (g, sc) = parse(
+            "chassis_rsusp_min = 0, 0.4835, -0.1957
+rsusp_joint = 0, 0, 0
+rear_length = 0.129
+shock_minlength = 0.337
+shock_chassis = 0, 0.7881, -0.14
+rocker_swingarm = 0, -0.032, -0.1786
+rocker_length = 0.042
+rod_chassis = 0, 0.3908, -0.1961
+rod_length = 0.148
+shock_rocker = 0, 0.0743, 0.0418
+ref_angle = -90
+",
+        );
+        assert!((shock_length(&g, &sc, 0.0).unwrap() - 0.337).abs() < 1e-3, "authored compressed");
+        let ktm = rear_extension(&g, &sc).unwrap();
+        assert!((ktm + 29.6).abs() < 0.2, "{ktm}");
+        // The CRF250R's rod goes straight before its shock is fully out: it tops out there.
+        let (g, sc) = parse(
+            "chassis_rsusp_min = 0, 0.4599, -0.2118
+rsusp_joint = 0, 0, 0
+rear_length = 0.133
+shock_minlength = 0.317
+shock_chassis = 0, 0.7347, -0.2019
+rocker_swingarm = 0, -0.0534, -0.1565
+rocker_length = 0.045
+rod_chassis = 0, 0.3589, -0.2524
+rod_length = 0.15
+shock_rocker = 0, 0.0427, 0.0394
+ref_angle = -90
+",
+        );
+        let crf = rear_extension(&g, &sc).unwrap();
+        assert!(crf < -10.0 && crf > -14.0, "{crf}");
+        assert!(shock_length(&g, &sc, crf - 0.1).is_none());
+        // No linkage in the file: nothing to solve, the bike stands as authored.
+        let (g, sc) = parse("chassis_rsusp_min = 0, 0.48, -0.17\nrsusp_joint = 0, 0, 0\n");
+        assert!(rear_extension(&g, &sc).is_none());
     }
 
     #[test]

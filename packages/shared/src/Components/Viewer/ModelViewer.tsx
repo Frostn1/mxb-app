@@ -1204,10 +1204,25 @@ function makeEdfMaterial(
   t: THREE.Texture | null,
   tex: Map<string, THREE.Texture>,
   envMap: THREE.Texture,
+  rubber: ReadonlySet<string> = NO_RUBBER,
 ) {
   // The number-plate planes are the game's to draw on, not ours — see `isDecalPlane`.
   if (isDecalPlane(name)) {
     return makeHiddenMaterial();
+  }
+  // A tyre sheet (`tyre_texture` in the tyres mod): rubber, with its tread and sidewall relief
+  // at full strength, and none of the paint's sheen.
+  if (name && rubber.has(name.toLowerCase())) {
+    return new THREE.MeshStandardMaterial({
+      map: t ?? undefined,
+      normalMap: tex.get(`${name.toLowerCase()}_n`) ?? null,
+      color: t ? 0xffffff : 0x1a1a1a,
+      metalness: 0,
+      roughness: 0.88,
+      envMap,
+      envMapIntensity: 0.15,
+      side: THREE.DoubleSide,
+    });
   }
   // The sheet's own normal map, if it has one: `plastics_n` beside `plastics`. Bikes carry
   // them the same way riders do, and until now only the rider read them — so a bike's
@@ -1236,9 +1251,12 @@ function makeEdfMaterial(
   });
 }
 
+const NO_RUBBER: ReadonlySet<string> = new Set();
+
 function useEdfMeshes(
   nodes: EdfNode[] | null | undefined,
   tex: Map<string, THREE.Texture>,
+  rubber: ReadonlySet<string> = NO_RUBBER,
 ) {
   const list = useMemo(() => nodes ?? [], [nodes]);
   const geoms = useNodeGeometries(list);
@@ -1252,12 +1270,12 @@ function useEdfMeshes(
       list.map((n) =>
         n.submeshes.length
           ? n.submeshes.map((sm) =>
-              makeEdfMaterial(sm.texture, submeshTexture(sm.texture, tex), tex, env),
+              makeEdfMaterial(sm.texture, submeshTexture(sm.texture, tex), tex, env, rubber),
             )
           : // No submesh table → whole-node binding (the model's primary body texture).
-            [makeEdfMaterial(n.texture, submeshTexture(n.texture, tex), tex, env)],
+            [makeEdfMaterial(n.texture, submeshTexture(n.texture, tex), tex, env, rubber)],
       ),
-    [list, tex, env],
+    [list, tex, env, rubber],
   );
   useEffect(
     () => () => materials.forEach((a) => a.forEach((m) => m.dispose())),
@@ -1514,6 +1532,7 @@ function EdfMesh({
   highlight,
   rig,
   pose = NEUTRAL_POSE,
+  rubber,
 }: {
   nodes: EdfNode[];
   textures: Map<string, THREE.Texture>;
@@ -1521,8 +1540,10 @@ function EdfMesh({
   /** The joints to pose about. Absent (an unassembled bike, or gear) draws one rigid group. */
   rig?: BikeRig | null;
   pose?: BikePose;
+  /** Tyre sheets, lower-case, drawn as rubber. */
+  rubber?: ReadonlySet<string>;
 }) {
-  const { geoms, materials } = useEdfMeshes(nodes, textures);
+  const { geoms, materials } = useEdfMeshes(nodes, textures, rubber);
   const groups = useMemo<PoseGroup[]>(
     () => nodes.map((n) => (rig ? poseGroup(n.name) : "static")),
     [nodes, rig],
@@ -1792,6 +1813,7 @@ function SideBySide({
   onRiderPose,
   onGrab,
   place,
+  rubber,
 }: {
   nodes: EdfNode[];
   textures: Map<string, THREE.Texture>;
@@ -1811,6 +1833,7 @@ function SideBySide({
   onGrab?: (bone: string) => void;
   /** Where each half has been moved to, on top of the arrangement below. */
   place?: Record<PlaceTarget, Placement>;
+  rubber?: ReadonlySet<string>;
 }) {
   const at = useMemo(() => {
     const bike = partBounds(nodes);
@@ -1836,6 +1859,7 @@ function SideBySide({
               textures={textures}
               highlight={highlight}
               rig={rig}
+              rubber={rubber}
               pose={pose}
             />
           </Placed>
@@ -1899,6 +1923,7 @@ export function BikeOnGround({
   onGrab,
   place,
   seat = null,
+  rubber,
 }: {
   nodes: EdfNode[];
   textures: Map<string, THREE.Texture>;
@@ -1917,6 +1942,7 @@ export function BikeOnGround({
   place?: Record<PlaceTarget, Placement>;
   /** The bike's seat, in the frame its vertices came back in — see {@link canSeatRider}. */
   seat?: Vec3 | null;
+  rubber?: ReadonlySet<string>;
 }) {
   const seated = seat != null && !!riderParts?.length;
   const at = useMemo(() => {
@@ -1941,6 +1967,7 @@ export function BikeOnGround({
             textures={textures}
             highlight={highlight}
             rig={rig}
+            rubber={rubber}
             pose={pose}
           />
         </Placed>
@@ -2450,6 +2477,8 @@ export interface ModelViewerProps {
   className?: string;
   /** Start from this camera instead of the default framing (see [`ViewerView`]). */
   view?: ViewerView | null;
+  /** The tyre sheets the wheels wear (a `BikeModel`'s `tyreTextures`), drawn as rubber. */
+  tyreTextures?: string[] | null;
   /** Drawn in the bike's own frame, beside a lone bike: markers, handles. */
   bikeOverlay?: React.ReactNode;
 }
@@ -2481,7 +2510,12 @@ export function ModelViewer({
   grounded = true,
   bikeOverlay,
   view = null,
+  tyreTextures = null,
 }: ModelViewerProps) {
+  const rubber = useMemo(
+    () => new Set((tyreTextures ?? []).map((t) => t.toLowerCase())),
+    [tyreTextures],
+  );
   // Photo mode takes the dots away by not handing the rider anything to write a pose back
   // through — the handles exist only where a caller asked to edit one.
   const poseEdit = photo ? undefined : onRiderPose;
@@ -2614,6 +2648,7 @@ export function ModelViewer({
                 riderParts={riderParts!}
                 overrides={overrides}
                 rig={rig}
+                rubber={rubber}
                 pose={pose}
                 attitude={bikeAttitude}
                 riderPose={riderPose}
@@ -2630,6 +2665,7 @@ export function ModelViewer({
                 parts={riderParts!}
                 overrides={overrides}
                 rig={rig}
+                rubber={rubber}
                 pose={pose}
                 attitude={bikeAttitude}
                 riderPose={riderPose}
@@ -2645,6 +2681,7 @@ export function ModelViewer({
                     textures={texMap}
                     highlight={highlight}
                     rig={rig}
+                    rubber={rubber}
                     pose={pose}
                   />
                   {bikeOverlay}
