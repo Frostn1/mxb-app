@@ -6,7 +6,6 @@ import type {
   Attachment,
   ModsDehydrated,
   HealthReport,
-  PinResult,
   ReshadeHealth,
   TrainersRepaired,
   BikeModels,
