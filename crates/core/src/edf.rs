@@ -363,6 +363,22 @@ struct Mounts {
     fork_origin: [f32; 3],
 }
 
+/// Where the game hangs the fork (`fsusp`, fully extended) in the steer's frame:
+/// `front_upper - front_lower - (0, front_length, 0)`, or `front_upper` when the .geom has no
+/// `front_lower`. Most bikes' `front_lower` is `(0, -front_length, 0)`, which makes it
+/// `front_upper`; the 2024 YZ250F's puts the fork 27 mm lower and 22.5 mm back, and only there
+/// do its own tubes and lowers meet.
+fn fork_hang(
+    g: &std::collections::HashMap<String, [f32; 3]>,
+    sc: &std::collections::HashMap<String, f32>,
+) -> Option<[f32; 3]> {
+    let front_upper = *g.get("front_upper")?;
+    Some(match (g.get("front_lower"), sc.get("front_length")) {
+        (Some(&fl), Some(&len)) => v_sub(v_sub(front_upper, fl), [0.0, len, 0.0]),
+        _ => front_upper,
+    })
+}
+
 fn mounts(
     g: &std::collections::HashMap<String, [f32; 3]>,
     sc: &std::collections::HashMap<String, f32>,
@@ -371,9 +387,8 @@ fn mounts(
     let pivot = *g.get("chassis_rsusp_min")?;
     let steer_joint = *g.get("steer_joint")?;
     let rsusp_joint = *g.get("rsusp_joint")?;
-    let front_upper = *g.get("front_upper")?;
     let rake = -sc.get("rakeangle_min").copied().unwrap_or(0.0);
-    let fork_origin = v_add(rot_x(v_sub(front_upper, steer_joint), rake), head);
+    let fork_origin = v_add(rot_x(v_sub(fork_hang(g, sc)?, steer_joint), rake), head);
     Some(Mounts {
         rake,
         head,
@@ -1995,6 +2010,37 @@ mod tests {
     /// The mesh arrays cross as base64 of their raw bytes, and the webview reads them back as
     /// typed arrays. A silent mismatch here would not fail anything — it would draw a bike
     /// made of noise — so the round trip is asserted rather than assumed.
+    #[test]
+    fn the_fork_hangs_at_front_upper_minus_front_lower() {
+        let base = "chassis_steer = 0, 1.0061, 0.3377
+chassis_rsusp_min = 0, 0.4808, -0.1766
+steer_joint = 0, -0.0851, 0
+rsusp_joint = 0, 0.0006, -0.0007
+front_upper = 0, -0.5002, 0.0216
+fwheel = 0, -0.3344, 0.0631
+rwheel_min = 0, 0.0202, -0.5652
+rwheel_max = 0, 0.0202, -0.6062
+rakeangle_min = 26.9
+";
+        let axle = |extra: &str| {
+            let geom = format!("{base}{extra}");
+            wheel_axles(geom.as_bytes()).unwrap().0
+        };
+        let plain = axle("");
+        // front_lower = (0, -front_length, 0): the same as no front_lower.
+        let same = axle("front_lower = 0, -0.31, 0
+front_length = 0.31
+");
+        assert!((0..3).all(|k| (plain[k] - same[k]).abs() < 1e-6), "{plain:?} {same:?}");
+        // The YZ250F's: the fork (and its axle) 27 mm further down and 22.5 mm further back,
+        // in the steer's frame.
+        let yz = axle("front_lower = 0, -0.283, 0.0225
+front_length = 0.31
+");
+        let d = rot_x([yz[0] - plain[0], yz[1] - plain[1], yz[2] - plain[2]], 26.9);
+        assert!((d[1] + 0.0270).abs() < 1e-4 && (d[2] + 0.0225).abs() < 1e-4, "{d:?}");
+    }
+
     #[test]
     fn mesh_arrays_survive_the_base64_round_trip() {
         use base64::{engine::general_purpose::STANDARD, Engine as _};
