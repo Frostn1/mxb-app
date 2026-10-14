@@ -413,8 +413,9 @@ fn shock_length(
 }
 
 /// How far (degrees, negative = down) the swingarm hangs below its authored pose with the shock
-/// fully out: the bike on its stand, as the game's Bike Selection shows it. `None` when the
-/// .geom has no linkage to solve, or it doesn't reach full length within 60°.
+/// fully out: the bike on its stand, as the game's Bike Selection shows it. Where the rod goes
+/// straight first (the 2023 CRF250R's, ~12° down), that is where the rear tops out. `None`
+/// when the .geom has no linkage to solve, or it doesn't reach full length within 60°.
 fn rear_extension(
     g: &std::collections::HashMap<String, [f32; 3]>,
     sc: &std::collections::HashMap<String, f32>,
@@ -423,7 +424,9 @@ fn rear_extension(
     let mut prev: Option<(f32, f32)> = None;
     for i in 0..=600 {
         let deg = -(i as f32) * 0.1;
-        let l = shock_length(g, sc, deg)?;
+        let Some(l) = shock_length(g, sc, deg) else {
+            return prev.map(|(d, _)| d);
+        };
         if l >= full {
             let (pd, pl) = prev?;
             return Some(if l > pl { pd + (deg - pd) * (full - pl) / (l - pl) } else { deg });
@@ -2143,6 +2146,24 @@ ref_angle = -90
         assert!((shock_length(&g, &sc, 0.0).unwrap() - 0.337).abs() < 1e-3, "authored compressed");
         let ktm = rear_extension(&g, &sc).unwrap();
         assert!((ktm + 29.6).abs() < 0.2, "{ktm}");
+        // The CRF250R's rod goes straight before its shock is fully out: it tops out there.
+        let (g, sc) = parse(
+            "chassis_rsusp_min = 0, 0.4599, -0.2118
+rsusp_joint = 0, 0, 0
+rear_length = 0.133
+shock_minlength = 0.317
+shock_chassis = 0, 0.7347, -0.2019
+rocker_swingarm = 0, -0.0534, -0.1565
+rocker_length = 0.045
+rod_chassis = 0, 0.3589, -0.2524
+rod_length = 0.15
+shock_rocker = 0, 0.0427, 0.0394
+ref_angle = -90
+",
+        );
+        let crf = rear_extension(&g, &sc).unwrap();
+        assert!(crf < -10.0 && crf > -14.0, "{crf}");
+        assert!(shock_length(&g, &sc, crf - 0.1).is_none());
         // No linkage in the file: nothing to solve, the bike stands as authored.
         let (g, sc) = parse("chassis_rsusp_min = 0, 0.48, -0.17\nrsusp_joint = 0, 0, 0\n");
         assert!(rear_extension(&g, &sc).is_none());
