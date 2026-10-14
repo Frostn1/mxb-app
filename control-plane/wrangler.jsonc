@@ -29,7 +29,7 @@
     "MXB_HOST_MAX_BOXES": "4",
     "MXB_HOST_LEGACY_MAX_BOXES": "1",
     "MXB_HOST_SLOTS_NATIVE": "4",
-    "MXB_HOST_SLOTS_LEGACY": "2",
+    "MXB_HOST_SLOTS_LEGACY": "3",
     // A hosted server nobody rides on for this long is deleted and its slot freed.
     "MXB_HOST_IDLE_DAYS": "7",
     // A box empty this long is flagged for cancelling at OVH shortly before it renews.
