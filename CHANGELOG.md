@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026-10-15 — Frost Converter v0.1.2 — Convert for any object
+
+### Fixed
+- **Objects that aren't bike parts.** With the One model layout, a chain or any other object converts without asking for a bike part.
+- **Export script drop.** A dropped export script goes to its slot, not the file list.
+
+## 2026-10-15 — Frost's Studio v0.7.4 — Convert for any object
+
+### Fixed
+- **Convert for objects that aren't bike parts.** With the One model layout, a chain or any other object converts without asking for a bike part.
+- **Export script drop.** A dropped export script goes to its slot, not the file list.
+- **Track builder.** The start-over buttons no longer spill off the screen.
+
 ## 2026-10-13 — MXB Coach v0.1.25 — Cleaner racing line, cut markers
 
 ### Fixed
