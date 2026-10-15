@@ -31,3 +31,22 @@ describe("a dropped export script", () => {
     expect(scriptSettings("just a note")).toEqual([]);
   });
 });
+
+describe("an export script for something that is not a bike", () => {
+  const CHAIN = "[Hierarchy]\nchain_rot = 0 180 0\n[params]\nscale = 1\n";
+
+  test("is refused for bike parts, naming no part", () => {
+    expect(checkScript(CHAIN)).toBe("noParts");
+    expect(checkScript(CHAIN, "parts")).toBe("noParts");
+  });
+
+  test("passes as one model, which has no bike part to name", () => {
+    expect(checkScript(CHAIN, "whole")).toBe("ok");
+    expect(checkScript("[params]\nscale = 1\n", "whole")).toBe("ok");
+  });
+
+  test("still needs a part for a bike", () => {
+    expect(checkScript("[params]\nscale = 1\n", "parts")).toBe("noSection");
+    expect(checkScript(TEMPLATE, "whole")).toBe("ok");
+  });
+});

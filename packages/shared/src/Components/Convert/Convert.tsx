@@ -125,7 +125,7 @@ export default function Convert({ active, storageKey, opened }: { active: boolea
 
   const models = useMemo(() => files.filter((f) => f.kind !== "params"), [files]);
   const chosen = useMemo(() => models.filter((f) => !off.has(f.path)), [models, off]);
-  const script = s.script.trim() ? checkScript(s.script) : null;
+  const script = s.script.trim() ? checkScript(s.script, s.layout) : null;
   const settings = s.script.trim() ? scriptSettings(s.script) : [];
 
   // A dropped export script goes to its slot, not the list: it flies there from the drop, then

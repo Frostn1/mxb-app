@@ -126,10 +126,13 @@ export function scriptSettings(text: string): string[] {
 }
 
 /**
- * Check a pasted export script the way the browser converter does: it needs a `[Hierarchy]`
- * section naming at least one bike part. The text itself goes to the converter as is.
+ * Check a pasted export script the way the browser converter does. Bike parts need a
+ * `[Hierarchy]` section naming at least one bike part; a single object (a chain, a prop, a
+ * helmet) has no bike part to name, so with `layout` "whole" any script passes. The text
+ * itself goes to the converter as is.
  */
-export function checkScript(text: string): "ok" | "noSection" | "noParts" {
+export function checkScript(text: string, layout: "whole" | "parts" = "parts"): "ok" | "noSection" | "noParts" {
+  if (layout === "whole") return "ok";
   let inside = false;
   let section = false;
   let parts = 0;
