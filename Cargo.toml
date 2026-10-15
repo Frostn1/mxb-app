@@ -9,6 +9,7 @@
 resolver = "2"
 members = [
     "crates/content",
+    "vendor/mega",
     "crates/core",
     "crates/fbx2edf",
     "apps/manager/src-tauri",
