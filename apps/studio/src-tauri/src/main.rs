@@ -332,6 +332,7 @@ fn main() {
             fbx2edf::commands::fbx_output_paths,
             fbx2edf::commands::fbx_read_text,
             fbx2edf::commands::fbx_convert,
+            fbx2edf::commands::fbx_write_shd,
             initial_view,
         ])
         .setup(|app| {

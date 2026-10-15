@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use tauri::Emitter;
 
 use crate::host::{self, Options};
-use crate::job::{self, Found, HrcMode, Model, Outcome, Progress, Shd};
+use crate::job::{self, Found, HrcMode, Maps, Model, Outcome, Progress, Shd, ShdValues};
 
 #[derive(Debug, Deserialize)]
 pub struct Pair {
@@ -80,26 +80,31 @@ pub fn fbx_read_text(path: String) -> Result<String, String> {
     std::fs::read_to_string(&path).map_err(|e| format!("{path}: {e}"))
 }
 
+/// Write one material's `.shd` with these maps and values: the Convert screen's sliders.
+#[tauri::command]
+pub fn fbx_write_shd(path: String, maps: Maps, values: ShdValues) -> Result<(), String> {
+    job::save_shd(Path::new(&path), &maps, &values)
+}
+
 /// Convert a batch. Each pair's progress and outcome is sent as it happens, and every outcome
-/// is returned at the end, in order. With `shd`, the `.shd` files its textures lack are
-/// written first.
+/// is returned at the end, in order. Each model gets a `.shd` per material beside its `.edf`
+/// (`overwrite_shd` writes over the ones there), with `shd` the values they start from.
 #[tauri::command]
 pub async fn fbx_convert(
     app: tauri::AppHandle,
     pairs: Vec<Pair>,
     options: Options,
     hrc: HrcMode,
-    shd: Option<bool>,
     overwrite_shd: Option<bool>,
-    shininess: Option<f32>,
+    shd: Option<ShdValues>,
 ) -> Result<Vec<Outcome>, String> {
     if RUNNING.swap(true, Ordering::SeqCst) {
         return Err("A batch is already converting.".into());
     }
     let shd = Shd {
-        make: shd.unwrap_or(false),
+        make: true,
         overwrite: overwrite_shd.unwrap_or(false),
-        shininess: shininess.unwrap_or(job::SHININESS),
+        values: shd.unwrap_or_default(),
     };
     let result = tauri::async_runtime::spawn_blocking(move || {
         let pairs: Vec<(PathBuf, PathBuf)> = pairs.into_iter().map(|p| (PathBuf::from(p.input), PathBuf::from(p.output))).collect();

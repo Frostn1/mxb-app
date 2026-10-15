@@ -2139,6 +2139,7 @@ version = "0.1.2"
 dependencies = [
  "fbx2edf",
  "log",
+ "mxb-core",
  "serde_json",
  "tauri",
  "tauri-build",

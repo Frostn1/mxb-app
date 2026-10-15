@@ -27,6 +27,7 @@ import {
   type Outcome,
 } from "../../api/convert";
 import { useT } from "../../i18n/context";
+import ConvertResult from "./ConvertResult";
 
 type Normals = "file" | "flat" | "recalc";
 
@@ -44,9 +45,7 @@ interface Settings {
   script: string;
   /** The file the script came from, when it was dropped or loaded rather than typed. */
   scriptName: string;
-  shd: boolean;
   overwriteShd: boolean;
-  shininess: string;
   /** A bike's file: `model.edf`, the name MX Bikes loads, or the FBX's own name as before. */
   naming: "model" | "fbx";
   hrc: HrcMode;
@@ -66,9 +65,7 @@ const DEFAULTS: Settings = {
   fast: true,
   script: "",
   scriptName: "",
-  shd: true,
   overwriteShd: false,
-  shininess: "6",
   naming: "model",
   hrc: "ifNone",
 };
@@ -110,6 +107,9 @@ export default function Convert({ active, storageKey, opened }: { active: boolea
   const [off, setOff] = useState<Set<string>>(new Set());
   const [jobs, setJobs] = useState<Job[] | null>(null);
   const [running, setRunning] = useState(false);
+  /** Which converted model the result below the list is about, by its FBX. */
+  const [picked, setPicked] = useState<string | null>(null);
+  const [runs, setRuns] = useState(0);
   const [over, setOver] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const layoutTouched = useRef(false);
@@ -230,8 +230,7 @@ export default function Convert({ active, storageKey, opened }: { active: boolea
     const scale = num(s.scale, t("convert.scale"));
     const merge = s.merge ? num(s.mergeDistance, t("convert.merge")) : 0;
     const angle = s.normals === "flat" ? 0 : num(s.angle, t("convert.recalc"));
-    const shininess = s.shd ? num(s.shininess, t("convert.shininess")) : 0;
-    for (const v of [scale, merge, s.normals === "recalc" ? angle : 0, shininess]) if (typeof v === "string") return v;
+    for (const v of [scale, merge, s.normals === "recalc" ? angle : 0]) if (typeof v === "string") return v;
     return {
       params: s.script.trim() ? s.script : undefined,
       layout: s.layout,
@@ -271,8 +270,9 @@ export default function Convert({ active, storageKey, opened }: { active: boolea
         batch.map((j) => ({ input: j.input, output: j.output })),
         o,
         s.hrc,
-        { make: s.shd, overwrite: s.shd && s.overwriteShd, shininess: Number(s.shininess) },
+        s.overwriteShd,
       );
+      setRuns((n) => n + 1);
       setJobs((js) => js && js.map((j, i) => ({ ...j, status: { state: "done", outcome: results[i] } })));
     } catch (e) {
       setError(String(e));
@@ -285,6 +285,8 @@ export default function Convert({ active, storageKey, opened }: { active: boolea
   };
 
   const doneCount = (jobs ?? []).filter((j) => j.status.state === "done" && j.status.outcome.report).length;
+  const converted = (jobs ?? []).filter((j): j is Job & { status: { state: "done"; outcome: Outcome } } => j.status.state === "done" && !!j.status.outcome.report);
+  const shown = running ? undefined : (converted.find((j) => j.input === picked) ?? converted[0]);
   const outFolder = s.out === "folder" && s.folder ? s.folder : jobs?.[0] ? dirOf(jobs[0].output) : null;
 
   return (
@@ -422,23 +424,10 @@ export default function Convert({ active, storageKey, opened }: { active: boolea
 
           <Field label={t("convert.shaders")}>
             <div className="grid gap-1.5 text-[12.5px]">
+              <p className="text-[11.5px] text-muted-foreground">{t("convert.shdAlways")}</p>
               <label className="flex items-center gap-2">
-                <input type="checkbox" checked={s.shd} onChange={(e) => set("shd", e.target.checked)} />
-                {t("convert.makeShd")}
-              </label>
-              <label className={cn("flex items-center gap-2", !s.shd && "opacity-50")}>
-                <input type="checkbox" disabled={!s.shd} checked={s.overwriteShd} onChange={(e) => set("overwriteShd", e.target.checked)} />
+                <input type="checkbox" checked={s.overwriteShd} onChange={(e) => set("overwriteShd", e.target.checked)} />
                 {t("convert.overwriteShd")}
-              </label>
-              <label className={cn("flex h-8 items-center gap-2", !s.shd && "opacity-50")}>
-                <span className="flex-none">{t("convert.shininess")}</span>
-                <Input
-                  className="ml-auto h-8 w-20 text-right"
-                  inputMode="decimal"
-                  disabled={!s.shd}
-                  value={s.shininess}
-                  onChange={(e) => set("shininess", e.target.value)}
-                />
               </label>
             </div>
           </Field>
@@ -541,6 +530,8 @@ export default function Convert({ active, storageKey, opened }: { active: boolea
                   job={row.job}
                   checked={row.kind === "params" ? undefined : !off.has(row.path)}
                   disabled={running}
+                  selected={shown?.input === row.path}
+                  onSelect={() => setPicked(row.path)}
                   onToggle={() =>
                     setOff((prev) => {
                       const next = new Set(prev);
@@ -552,6 +543,7 @@ export default function Convert({ active, storageKey, opened }: { active: boolea
               ))}
             </ul>
           )}
+          {shown && <ConvertResult key={`${runs}:${shown.output}`} output={shown.output} outcome={shown.status.outcome} />}
         </div>
       </section>
     </div>
@@ -608,6 +600,8 @@ function Row({
   job,
   checked,
   disabled,
+  selected,
+  onSelect,
   onToggle,
 }: {
   path: string;
@@ -615,6 +609,9 @@ function Row({
   job: Job | null;
   checked?: boolean;
   disabled: boolean;
+  /** This is the converted model the result below the list is showing. */
+  selected: boolean;
+  onSelect: () => void;
   onToggle: () => void;
 }) {
   const t = useT();
@@ -623,7 +620,10 @@ function Row({
   const outcome = st?.state === "done" ? st.outcome : null;
   const report = outcome?.report ?? null;
   return (
-    <li className={cn("border-b border-border/60 px-3 py-2 last:border-b-0", checked === false && !job && "opacity-50")}>
+    <li
+      className={cn("border-b border-border/60 px-3 py-2 last:border-b-0", checked === false && !job && "opacity-50", selected && report && "bg-muted/40")}
+      onClick={report ? onSelect : undefined}
+    >
       <div className="flex items-center gap-3">
         {job ? (
           st?.state === "working" ? (

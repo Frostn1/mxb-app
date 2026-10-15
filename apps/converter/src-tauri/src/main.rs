@@ -19,6 +19,13 @@ fn converter_opened(opened: tauri::State<Opened>) -> Vec<String> {
     opened.0.clone()
 }
 
+/// Frontend log lines, into the same file the Rust side writes. The shared 3D viewer reports
+/// its renderer through this.
+#[tauri::command]
+fn log_client(level: String, message: String) {
+    mxb_core::clientlog::record(&level, &message);
+}
+
 #[tauri::command]
 fn reveal_in_explorer(path: String) -> Result<(), String> {
     let p = PathBuf::from(&path);
@@ -57,8 +64,12 @@ fn main() {
             fbx2edf::commands::fbx_output_paths,
             fbx2edf::commands::fbx_read_text,
             fbx2edf::commands::fbx_convert,
+            fbx2edf::commands::fbx_write_shd,
+            mxb_core::viewer::load_model_file,
+            mxb_core::viewer::texture_bytes,
             converter_opened,
             reveal_in_explorer,
+            log_client,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Frost Converter");
