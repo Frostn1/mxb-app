@@ -39,8 +39,40 @@ export interface Outcome {
   hrc: string[];
   /** The `.shd` files written for its textures: `bike.shd: normal bike_n, reflection bike_r`. */
   shd: string[];
+  /** Every file this model wrote, in full: the `.edf`, its `.shd` files, its `.hrc` files. */
+  files: string[];
+  /** Each material's `.shd` beside the `.edf`, written now or already there. */
+  shaders: ShdFile[];
   /** A map used by name because the material doesn't link it, `.hrc` files kept or replaced. */
   notes: string[];
+}
+
+/** What a `.shd` sets besides its maps. Stock is 6, 0, 0.5 and 1. */
+export interface ShdValues {
+  shininess: number;
+  reflectionMin: number;
+  reflectionMax: number;
+  reflectionExp: number;
+}
+
+export const STOCK_SHD: ShdValues = { shininess: 6, reflectionMin: 0, reflectionMax: 0.5, reflectionExp: 1 };
+
+/** The maps a `.shd` names, as it names them. */
+export interface ShdMaps {
+  normal: string | null;
+  reflection: string | null;
+  specular: string | null;
+}
+
+/** One material's `.shd`, as it is on disk. */
+export interface ShdFile {
+  /** The material's picture, without extension: the `.shd`'s name. */
+  name: string;
+  path: string;
+  /** Written by this conversion, rather than one that was already there. */
+  written: boolean;
+  maps: ShdMaps;
+  values: ShdValues;
 }
 
 /**
@@ -64,17 +96,14 @@ export function convertFiles(
   pairs: { input: string; output: string }[],
   options: ConvertOptions,
   hrc: HrcMode,
-  shd: { make: boolean; overwrite: boolean; shininess?: number } = { make: false, overwrite: false },
+  overwriteShd = false,
 ): Promise<Outcome[]> {
-  return invoke<Outcome[]>("fbx_convert", {
-    pairs,
-    options,
-    hrc,
-    shd: shd.make,
-    overwriteShd: shd.overwrite,
-    shininess: shd.shininess,
-  });
+  return invoke<Outcome[]>("fbx_convert", { pairs, options, hrc, overwriteShd });
 }
+
+/** Write a material's `.shd` with these values: what the sliders do. */
+export const writeShd = (path: string, maps: ShdMaps, values: ShdValues) =>
+  invoke<void>("fbx_write_shd", { path, maps, values });
 
 export function onProgress(f: (e: { index: number; done: number; total: number }) => void): Promise<UnlistenFn> {
   return listen<{ index: number; done: number; total: number }>("fbx-convert-progress", (e) => f(e.payload));

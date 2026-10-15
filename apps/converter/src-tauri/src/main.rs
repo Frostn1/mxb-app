@@ -57,6 +57,9 @@ fn main() {
             fbx2edf::commands::fbx_output_paths,
             fbx2edf::commands::fbx_read_text,
             fbx2edf::commands::fbx_convert,
+            fbx2edf::commands::fbx_write_shd,
+            mxb_core::viewer::load_model_file,
+            mxb_core::viewer::texture_bytes,
             converter_opened,
             reveal_in_explorer,
         ])

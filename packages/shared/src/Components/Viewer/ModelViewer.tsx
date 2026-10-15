@@ -1230,7 +1230,7 @@ function makeEdfMaterial(
   // in the sheet nobody looked at. A paint may supply its own, which then replaces the
   // model's by name like any other sheet.
   const normalMap = (name && tex.get(`${name.toLowerCase()}_n`)) || null;
-  return new THREE.MeshStandardMaterial({
+  const material = new THREE.MeshStandardMaterial({
     map: t ?? undefined,
     normalMap,
     // Gentle: these sheets are authored for the game's own lighting, and at full strength
@@ -1249,6 +1249,30 @@ function makeEdfMaterial(
     // Inconsistent winding — render both sides so the bike isn't see-through.
     side: THREE.DoubleSide,
   });
+  material.userData.sheet = name?.toLowerCase() ?? null;
+  return material;
+}
+
+/**
+ * How a `.shd` makes a sheet look: its specular shininess and the range its reflection runs
+ * over. The viewer's own materials are PBR, so these are mapped onto roughness and the
+ * strength of the room's reflection. The stock values (shininess 6, reflection 0 to 0.5 at
+ * exponent 1) come out as the look every sheet already has.
+ */
+export interface Shader {
+  shininess: number;
+  reflectionMin: number;
+  reflectionMax: number;
+  reflectionExp: number;
+}
+
+/** A `.shd`'s values for each sheet, by lowercase sheet name. */
+export type Shaders = Record<string, Shader>;
+
+export function lookOf(s: Shader): { roughness: number; envMapIntensity: number } {
+  const roughness = THREE.MathUtils.clamp(0.55 * Math.pow(6 / Math.max(s.shininess, 1), 0.3), 0.1, 0.95);
+  const fall = s.reflectionMin + (s.reflectionMax - s.reflectionMin) * Math.pow(0.5, Math.max(s.reflectionExp, 0) - 1);
+  return { roughness, envMapIntensity: THREE.MathUtils.clamp(fall, 0, 3) };
 }
 
 const NO_RUBBER: ReadonlySet<string> = new Set();
@@ -1257,8 +1281,10 @@ function useEdfMeshes(
   nodes: EdfNode[] | null | undefined,
   tex: Map<string, THREE.Texture>,
   rubber: ReadonlySet<string> = NO_RUBBER,
+  shaders: Shaders | null = null,
 ) {
   const list = useMemo(() => nodes ?? [], [nodes]);
+  const invalidate = useThree((s) => s.invalidate);
   const geoms = useNodeGeometries(list);
   const gl = useThree((s) => s.gl);
   const env = useMemo(() => roomReflection(gl), [gl]);
@@ -1281,6 +1307,21 @@ function useEdfMeshes(
     () => () => materials.forEach((a) => a.forEach((m) => m.dispose())),
     [materials],
   );
+  // A `.shd` being tuned moves the materials in place: rebuilding them per slider step would
+  // restart every texture lookup, and under `frameloop="demand"` nothing redraws by itself.
+  useEffect(() => {
+    if (!shaders) return;
+    for (const row of materials) {
+      for (const m of row) {
+        const shader = shaders[m.userData.sheet as string];
+        if (!shader || !(m instanceof THREE.MeshStandardMaterial)) continue;
+        const look = lookOf(shader);
+        m.roughness = look.roughness;
+        m.envMapIntensity = look.envMapIntensity;
+      }
+    }
+    invalidate();
+  }, [materials, shaders, invalidate]);
 
   return { geoms, materials };
 }
@@ -1533,6 +1574,7 @@ function EdfMesh({
   rig,
   pose = NEUTRAL_POSE,
   rubber,
+  shaders,
 }: {
   nodes: EdfNode[];
   textures: Map<string, THREE.Texture>;
@@ -1542,8 +1584,9 @@ function EdfMesh({
   pose?: BikePose;
   /** Tyre sheets, lower-case, drawn as rubber. */
   rubber?: ReadonlySet<string>;
+  shaders?: Shaders | null;
 }) {
-  const { geoms, materials } = useEdfMeshes(nodes, textures, rubber);
+  const { geoms, materials } = useEdfMeshes(nodes, textures, rubber, shaders ?? null);
   const groups = useMemo<PoseGroup[]>(
     () => nodes.map((n) => (rig ? poseGroup(n.name) : "static")),
     [nodes, rig],
@@ -2481,6 +2524,11 @@ export interface ModelViewerProps {
   tyreTextures?: string[] | null;
   /** Drawn in the bike's own frame, beside a lone bike: markers, handles. */
   bikeOverlay?: React.ReactNode;
+  /**
+   * A `.shd`'s values for each sheet, by lowercase name, for a lone model: the Convert screen's
+   * sliders, so the shininess and reflection being tuned show as they move.
+   */
+  shaders?: Shaders | null;
 }
 
 export function ModelViewer({
@@ -2511,6 +2559,7 @@ export function ModelViewer({
   bikeOverlay,
   view = null,
   tyreTextures = null,
+  shaders = null,
 }: ModelViewerProps) {
   const rubber = useMemo(
     () => new Set((tyreTextures ?? []).map((t) => t.toLowerCase())),
@@ -2682,6 +2731,7 @@ export function ModelViewer({
                     highlight={highlight}
                     rig={rig}
                     rubber={rubber}
+                    shaders={shaders}
                     pose={pose}
                   />
                   {bikeOverlay}

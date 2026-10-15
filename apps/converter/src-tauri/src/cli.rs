@@ -82,7 +82,7 @@ fn parse(args: &[String]) -> Result<Option<Args>, String> {
         main: None,
         fbx_name: false,
         hrc: HrcMode::IfNone,
-        shd: Shd { make: true, ..Shd::default() },
+        shd: Shd::default(),
         // The window's defaults: scale 1, no merging, the file's normals, every core.
         options: Options { scale: Some(1.0), merge_distance: Some(0.0), use_file_normals: true, ..Options::default() },
         params: None,
@@ -109,7 +109,7 @@ fn parse(args: &[String]) -> Result<Option<Args>, String> {
             }
             "--no-shd" => a.shd.make = false,
             "--overwrite-shd" => a.shd.overwrite = true,
-            "--shininess" => a.shd.shininess = number(value(&mut it, arg)?, arg)?,
+            "--shininess" => a.shd.values.shininess = number(value(&mut it, arg)?, arg)?,
             "--scale" => a.options.scale = Some(number(value(&mut it, arg)?, arg)?),
             "--merge" => a.options.merge_distance = Some(number(value(&mut it, arg)?, arg)?),
             "--flat" => {
@@ -261,7 +261,7 @@ mod tests {
         assert_eq!(a.inputs, ["bike.fbx"]);
         assert!(a.out.is_none() && a.layout.is_none() && !a.fbx_name && !a.json);
         assert_eq!(a.hrc, HrcMode::IfNone);
-        assert!(a.shd.make && !a.shd.overwrite && a.shd.shininess == job::SHININESS);
+        assert!(a.shd.make && !a.shd.overwrite && a.shd.values.shininess == job::SHININESS);
         assert_eq!((a.options.scale, a.options.merge_distance, a.options.use_file_normals), (Some(1.0), Some(0.0), true));
     }
 
