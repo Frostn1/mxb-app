@@ -85,6 +85,8 @@ const PERSONAL: readonly string[] = [
   "client_module_seen",
   "client_crashes",
   "lock_attempts",
+  "supporter_emails",
+  "supporter_email_codes",
 ];
 
 /**

@@ -35,6 +35,7 @@ import { stripeWebhook } from "./billing";
 import { steamResult, redirectPage } from "./page";
 import { pinGuidFromSteam, rememberLink, steamIdFor } from "./steamlink";
 import { bmacWebhook } from "./bmac";
+import { confirmEmailCode, sendEmailCode } from "./supporteremail";
 import { isSupporter, supporterOwnerSql } from "./supporters";
 import { pruneCrashes, putCrash } from "./crashes";
 import { pruneLockAttempts } from "./lockpermit";
@@ -567,6 +568,15 @@ async function route(request: Request, env: Env): Promise<Response> {
   // is the point of the flow, and entitlement is checked per asset when it is asked for.
   if (method === "POST" && path === "/v1/steam/login") return steamLogin(request, account, env);
   if (method === "GET" && path === "/v1/entitlements") return listEntitlements(account, env);
+  // Linking a Buy Me a Coffee address to this account, for the supporter pack.
+  if (method === "POST" && path === "/v1/supporter/email") {
+    const r = await sendEmailCode(request, account, env);
+    return json(r.status, r.body);
+  }
+  if (method === "POST" && path === "/v1/supporter/email/confirm") {
+    const r = await confirmEmailCode(request, account, env);
+    return json(r.status, r.body);
+  }
 
   // Status for a set of secured files the app found on disk, so it can show a locked `.mxbsecure`
   // with its registered name and why it's locked — without the content key. Public title, plus

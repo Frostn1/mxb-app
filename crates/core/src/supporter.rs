@@ -105,7 +105,58 @@ pub fn start(app: &AppHandle) {
     });
 }
 
+/// Why linking a Buy Me a Coffee email didn't work, as a word the webview has a string for.
+/// The control plane's own messages are English; these are what the player reads.
+fn email_error(status: u16) -> &'static str {
+    match status {
+        503 => "notSetUp",
+        409 => "steam",
+        410 => "expired",
+        429 => "tooMany",
+        400 => "bad",
+        _ => "failed",
+    }
+}
+
+/// POST one of the email routes with the account's bearer. `Err` is a word from [`email_error`].
+async fn email_post(app: &AppHandle, path: &str, body: serde_json::Value) -> Result<(), String> {
+    let cfg = config::load(app).unwrap_or_default();
+    let token = cfg.cp_token.trim().to_string();
+    if token.is_empty() {
+        return Err("steam".into());
+    }
+    let client = reqwest::Client::builder()
+        .timeout(HTTP_TIMEOUT)
+        .build()
+        .map_err(|_| "failed".to_string())?;
+    let resp = client
+        .post(format!("{}{path}", control_plane()))
+        .bearer_auth(&token)
+        .json(&body)
+        .send()
+        .await
+        .map_err(|_| "failed".to_string())?;
+    if resp.status().is_success() {
+        Ok(())
+    } else {
+        Err(email_error(resp.status().as_u16()).into())
+    }
+}
+
 // ── The commands the webview calls ──────────────────────────────────────────────────────
+
+/// Mail a code to the address somebody paid with on Buy Me a Coffee.
+#[tauri::command]
+pub async fn supporter_email_send(app: tauri::AppHandle, email: String) -> Result<(), String> {
+    email_post(&app, "/v1/supporter/email", serde_json::json!({ "email": email.trim() })).await
+}
+
+/// Type the code back. Answers with the fresh status: the pack, if that address has paid.
+#[tauri::command]
+pub async fn supporter_email_confirm(app: tauri::AppHandle, code: String) -> Result<Status, String> {
+    email_post(&app, "/v1/supporter/email/confirm", serde_json::json!({ "code": code.trim() })).await?;
+    Ok(refresh(&app).await)
+}
 
 /// The cached answer. Instant, works offline.
 #[tauri::command]

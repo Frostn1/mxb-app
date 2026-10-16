@@ -25,6 +25,24 @@ export function supporterRefresh(): Promise<SupporterStatus> {
   return invoke<SupporterStatus>("supporter_refresh");
 }
 
+/**
+ * Why linking a Buy Me a Coffee email failed: `notSetUp`, `steam`, `bad`, `expired`, `tooMany`
+ * or `failed`. Each has a `supporter.err.*` string.
+ */
+export type EmailError = "notSetUp" | "steam" | "bad" | "expired" | "tooMany" | "failed";
+
+/** Mail a code to the address used on Buy Me a Coffee. Rejects with an {@link EmailError}. */
+export function supporterEmailSend(email: string): Promise<void> {
+  return invoke("supporter_email_send", { email });
+}
+
+/** Type the code back; resolves to the fresh status. Rejects with an {@link EmailError}. */
+export async function supporterEmailConfirm(code: string): Promise<SupporterStatus> {
+  const next = await invoke<SupporterStatus>("supporter_email_confirm", { code });
+  window.dispatchEvent(new CustomEvent<SupporterStatus>(CHANGED, { detail: next }));
+  return next;
+}
+
 /** Fired after a refresh, so every mounted {@link useSupporter} picks the answer up. */
 const CHANGED = "frost:supporter-changed";
 
