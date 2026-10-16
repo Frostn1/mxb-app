@@ -7,16 +7,17 @@ import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Progress } from "../ui/progress";
 import { Segmented } from "../ui/segmented";
-import { revealInExplorer } from "../../api/mods";
 import {
   checkScript,
   convertFiles,
-  dirOf,
   isBike,
   keptScripts,
   nameOf,
   onDone,
   onProgress,
+  onSourceChanged,
+  unwatchSources,
+  watchSources,
   outputPaths,
   readText,
   rememberScript,
@@ -32,7 +33,7 @@ import {
   type SavedScript,
 } from "../../api/convert";
 import { useT } from "../../i18n/context";
-import ConvertResult from "./ConvertResult";
+import { ConvertPreview, WrittenFiles } from "./ConvertResult";
 
 type Normals = "file" | "flat" | "recalc";
 
@@ -121,6 +122,12 @@ export default function Convert({ active, storageKey, opened }: { active: boolea
   const [over, setOver] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const layoutTouched = useRef(false);
+  const [view, setView] = useState<"convert" | "preview">("convert");
+  const [watch, setWatch] = useState(false);
+  const [watchPaths, setWatchPaths] = useState<string[]>([]);
+  /** The last conversion that worked: what the Preview shows, kept while the next one runs. */
+  const [last, setLast] = useState<{ key: string; output: string; outcome: Outcome } | null>(null);
+  const redo = useRef(false);
   const [saved, setSaved] = useState<SavedScript[]>([]);
 
   // The last script used comes back with the app, and the saved ones are listed.
@@ -177,6 +184,7 @@ export default function Convert({ active, storageKey, opened }: { active: boolea
 
   const add = async (paths: string[], at?: { x: number; y: number }) => {
     if (running || paths.length === 0) return;
+    setView("convert");
     const found = await scanPaths(paths);
     const scripts = found.filter((f) => f.kind === "params");
     const models = found.filter((f) => f.kind !== "params");
@@ -283,7 +291,7 @@ export default function Convert({ active, storageKey, opened }: { active: boolea
     light();
   };
 
-  const run = async () => {
+  const run = async (auto = false) => {
     if (running || chosen.length === 0) return;
     setError(null);
     keep(s.scriptName, s.script);
@@ -303,6 +311,7 @@ export default function Convert({ active, storageKey, opened }: { active: boolea
     }
     const batch: Job[] = list.map((m, i) => ({ input: m.path, output: outs[i], shadow: m.shadow, status: { state: "waiting" } }));
     setJobs(batch);
+    setWatchPaths(batch.map((j) => j.input));
     setRunning(true);
     const patch = (i: number, status: Status) => setJobs((js) => js && js.map((j, k) => (k === i ? { ...j, status } : j)));
     const unProgress = await onProgress((e) => patch(e.index, { state: "working", done: e.done, total: e.total }));
@@ -316,6 +325,7 @@ export default function Convert({ active, storageKey, opened }: { active: boolea
       );
       setRuns((n) => n + 1);
       setJobs((js) => js && js.map((j, i) => ({ ...j, status: { state: "done", outcome: results[i] } })));
+      if (!auto && results.some((r) => r.report)) setView("preview");
     } catch (e) {
       setError(String(e));
       setJobs(null);
@@ -323,16 +333,45 @@ export default function Convert({ active, storageKey, opened }: { active: boolea
       unProgress();
       unDone();
       setRunning(false);
+      // A source saved while this ran is converted next.
+      if (redo.current) {
+        redo.current = false;
+        window.setTimeout(() => void runRef.current(true), 0);
+      }
     }
   };
+  const runRef = useRef(run);
+  runRef.current = run;
+  const runningRef = useRef(running);
+  runningRef.current = running;
 
-  const doneCount = (jobs ?? []).filter((j) => j.status.state === "done" && j.status.outcome.report).length;
   const converted = (jobs ?? []).filter((j): j is Job & { status: { state: "done"; outcome: Outcome } } => j.status.state === "done" && !!j.status.outcome.report);
   const shown = running ? undefined : (converted.find((j) => j.input === picked) ?? converted[0]);
-  const outFolder = s.out === "folder" && s.folder ? s.folder : jobs?.[0] ? dirOf(jobs[0].output) : null;
+  useEffect(() => {
+    if (shown) setLast({ key: `${runs}:${shown.output}`, output: shown.output, outcome: shown.status.outcome });
+    else if (!jobs && !running) setLast(null);
+  }, [shown, runs, jobs, running]);
+
+  // Watch: a source saved over converts again and the Preview follows.
+  const watchKey = JSON.stringify(watchPaths);
+  useEffect(() => {
+    if (!watch || watchKey === "[]") return;
+    let un: (() => void) | undefined;
+    let gone = false;
+    watchSources(JSON.parse(watchKey) as string[]).catch((e) => setError(String(e)));
+    void onSourceChanged(() => {
+      if (runningRef.current) redo.current = true;
+      else void runRef.current(true);
+    }).then((f) => (gone ? f() : (un = f)));
+    return () => {
+      gone = true;
+      un?.();
+      void unwatchSources().catch(() => {});
+    };
+  }, [watch, watchKey]);
 
   return (
-    <div className="flex h-full min-h-0">
+    <div className="flex h-full min-h-0 flex-col">
       {fly && (
         <div
           className="pointer-events-none fixed z-50 flex items-center gap-1.5 rounded-lg border border-border bg-card px-2.5 py-1.5 text-[12px] shadow-md transition-[transform,opacity] duration-500 ease-out"
@@ -347,6 +386,34 @@ export default function Convert({ active, storageKey, opened }: { active: boolea
           <span className="font-mono">{fly.name}</span>
         </div>
       )}
+      <div className="flex flex-none items-center gap-3 border-b border-border px-6 py-2">
+        <Segmented
+          size="sm"
+          value={view}
+          onChange={setView}
+          options={[
+            { value: "convert", label: t("convert.tabConvert") },
+            { value: "preview", label: t("convert.tabPreview") },
+          ]}
+        />
+        {running && (
+          <span className="flex items-center gap-1.5 text-[11.5px] text-muted-foreground">
+            <Loader2 className="size-3.5 animate-spin" /> {t("convert.converting")}
+          </span>
+        )}
+      </div>
+      <div className="min-h-0 flex-1">
+        {view === "preview" ? (
+          <ConvertPreview
+            last={last}
+            running={running}
+            watching={watch}
+            canWatch={!!last}
+            onWatch={setWatch}
+            onConvert={() => setView("convert")}
+          />
+        ) : (
+          <div className="flex h-full min-h-0">
       <section className="flex w-[340px] flex-none flex-col gap-4 overflow-y-auto border-r border-border px-6 py-4">
         <h2 className="text-[11px] font-semibold uppercase tracking-[0.09em] text-faint">{t("convert.title")}</h2>
         <fieldset disabled={running} className="contents">
@@ -373,36 +440,6 @@ export default function Convert({ active, storageKey, opened }: { active: boolea
                 </Button>
               </div>
             )}
-          </Field>
-
-          <Field label={t("convert.mergeTitle")}>
-            <div className="flex items-center gap-3">
-              <label className="flex flex-none items-center gap-2 text-[12.5px]">
-                <input type="checkbox" checked={s.merge} onChange={(e) => set("merge", e.target.checked)} />
-                {t("convert.merge")}
-              </label>
-              <Input className="h-8" inputMode="decimal" disabled={!s.merge} value={s.mergeDistance} onChange={(e) => set("mergeDistance", e.target.value)} />
-            </div>
-          </Field>
-
-          <Field label={t("convert.normals")}>
-            <div className="grid gap-1.5 text-[12.5px]">
-              {(["file", "flat", "recalc"] as const).map((n) => (
-                <label key={n} className="flex h-8 items-center gap-2">
-                  <input type="radio" name="convert-normals" checked={s.normals === n} onChange={() => set("normals", n)} />
-                  <span className="flex-none">{t(n === "file" ? "convert.keep" : n === "flat" ? "convert.flat" : "convert.recalc")}</span>
-                  {n === "recalc" && (
-                    <Input
-                      className="ml-auto h-8 w-20 text-right"
-                      inputMode="decimal"
-                      disabled={s.normals !== "recalc"}
-                      value={s.angle}
-                      onChange={(e) => set("angle", e.target.value)}
-                    />
-                  )}
-                </label>
-              ))}
-            </div>
           </Field>
 
           <Field label={t("convert.layout")}>
@@ -433,18 +470,6 @@ export default function Convert({ active, storageKey, opened }: { active: boolea
                   ]}
                 />
               </Field>
-              <Field label={t("convert.hrc")}>
-                <Segmented
-                  size="sm"
-                  value={s.hrc}
-                  onChange={(v) => set("hrc", v)}
-                  options={[
-                    { value: "always", label: t("convert.hrcAlways") },
-                    { value: "ifNone", label: t("convert.hrcIfNone") },
-                    { value: "never", label: t("convert.hrcNever") },
-                  ]}
-                />
-              </Field>
             </>
           )}
 
@@ -454,32 +479,6 @@ export default function Convert({ active, storageKey, opened }: { active: boolea
               <p className="mt-1 text-[11.5px] text-muted-foreground">{t("convert.outNameHint")}</p>
             </Field>
           )}
-
-          <div className="grid grid-cols-2 gap-3">
-            <Field label={t("convert.scale")}>
-              <Input className="h-8" inputMode="decimal" value={s.scale} onChange={(e) => set("scale", e.target.value)} />
-            </Field>
-            {s.layout === "parts" && (
-              <Field label={t("convert.main")}>
-                <Input className="h-8" value={s.main} placeholder="chassis" onChange={(e) => set("main", e.target.value)} />
-              </Field>
-            )}
-          </div>
-
-          <label className="flex items-center gap-2 text-[12.5px]">
-            <input type="checkbox" checked={s.fast} onChange={(e) => set("fast", e.target.checked)} />
-            {t("convert.fast")}
-          </label>
-
-          <Field label={t("convert.shaders")}>
-            <div className="grid gap-1.5 text-[12.5px]">
-              <p className="text-[11.5px] text-muted-foreground">{t("convert.shdAlways")}</p>
-              <label className="flex items-center gap-2">
-                <input type="checkbox" checked={s.overwriteShd} onChange={(e) => set("overwriteShd", e.target.checked)} />
-                {t("convert.overwriteShd")}
-              </label>
-            </div>
-          </Field>
 
           <div ref={slotRef} className={cn("-mx-2 rounded-lg px-2 py-1 ring-1 ring-transparent transition-[background-color,box-shadow] duration-700", lit && "bg-primary/[0.07] ring-primary/40")}>
           <Field
@@ -538,6 +537,84 @@ export default function Convert({ active, storageKey, opened }: { active: boolea
             )}
           </Field>
           </div>
+
+          <details className="group rounded-lg border border-border px-3 py-2">
+            <summary className="cursor-default select-none text-[11px] font-semibold uppercase tracking-[0.09em] text-faint">{t("convert.more")}</summary>
+            <div className="mt-3 grid gap-4">
+                        <Field label={t("convert.mergeTitle")}>
+                          <div className="flex items-center gap-3">
+                            <label className="flex flex-none items-center gap-2 text-[12.5px]">
+                              <input type="checkbox" checked={s.merge} onChange={(e) => set("merge", e.target.checked)} />
+                              {t("convert.merge")}
+                            </label>
+                            <Input className="h-8" inputMode="decimal" disabled={!s.merge} value={s.mergeDistance} onChange={(e) => set("mergeDistance", e.target.value)} />
+                          </div>
+                        </Field>
+
+                        <Field label={t("convert.normals")}>
+                          <div className="grid gap-1.5 text-[12.5px]">
+                            {(["file", "flat", "recalc"] as const).map((n) => (
+                              <label key={n} className="flex h-8 items-center gap-2">
+                                <input type="radio" name="convert-normals" checked={s.normals === n} onChange={() => set("normals", n)} />
+                                <span className="flex-none">{t(n === "file" ? "convert.keep" : n === "flat" ? "convert.flat" : "convert.recalc")}</span>
+                                {n === "recalc" && (
+                                  <Input
+                                    className="ml-auto h-8 w-20 text-right"
+                                    inputMode="decimal"
+                                    disabled={s.normals !== "recalc"}
+                                    value={s.angle}
+                                    onChange={(e) => set("angle", e.target.value)}
+                                  />
+                                )}
+                              </label>
+                            ))}
+                          </div>
+                        </Field>
+
+              {s.layout === "parts" && (
+                <>
+                            <Field label={t("convert.hrc")}>
+                              <Segmented
+                                size="sm"
+                                value={s.hrc}
+                                onChange={(v) => set("hrc", v)}
+                                options={[
+                                  { value: "always", label: t("convert.hrcAlways") },
+                                  { value: "ifNone", label: t("convert.hrcIfNone") },
+                                  { value: "never", label: t("convert.hrcNever") },
+                                ]}
+                              />
+                            </Field>
+                </>
+              )}
+
+                        <div className="grid grid-cols-2 gap-3">
+                          <Field label={t("convert.scale")}>
+                            <Input className="h-8" inputMode="decimal" value={s.scale} onChange={(e) => set("scale", e.target.value)} />
+                          </Field>
+                          {s.layout === "parts" && (
+                            <Field label={t("convert.main")}>
+                              <Input className="h-8" value={s.main} placeholder="chassis" onChange={(e) => set("main", e.target.value)} />
+                            </Field>
+                          )}
+                        </div>
+
+                        <label className="flex items-center gap-2 text-[12.5px]">
+                          <input type="checkbox" checked={s.fast} onChange={(e) => set("fast", e.target.checked)} />
+                          {t("convert.fast")}
+                        </label>
+
+                        <Field label={t("convert.shaders")}>
+                          <div className="grid gap-1.5 text-[12.5px]">
+                            <p className="text-[11.5px] text-muted-foreground">{t("convert.shdAlways")}</p>
+                            <label className="flex items-center gap-2">
+                              <input type="checkbox" checked={s.overwriteShd} onChange={(e) => set("overwriteShd", e.target.checked)} />
+                              {t("convert.overwriteShd")}
+                            </label>
+                          </div>
+                        </Field>
+            </div>
+          </details>
         </fieldset>
 
         {error && <p className="select-text text-[12px] text-destructive">{error}</p>}
@@ -552,11 +629,6 @@ export default function Convert({ active, storageKey, opened }: { active: boolea
         <div className="flex flex-none items-center gap-2 px-6 pb-2.5 pt-4">
           <h2 className="text-[11px] font-semibold uppercase tracking-[0.09em] text-faint">{t("convert.files")}</h2>
           <div className="ml-auto flex items-center gap-2">
-            {doneCount > 0 && outFolder && (
-              <Button size="sm" variant="ghost" onClick={() => void revealInExplorer(jobs!.find((j) => j.status.state === "done")!.output)}>
-                <FolderOpen className="size-3.5" /> {t("convert.openFolder")}
-              </Button>
-            )}
             {files.length > 0 && (
               <Button
                 size="sm"
@@ -618,9 +690,13 @@ export default function Convert({ active, storageKey, opened }: { active: boolea
               ))}
             </ul>
           )}
-          {shown && <ConvertResult key={`${runs}:${shown.output}`} output={shown.output} outcome={shown.status.outcome} />}
+          {shown && <WrittenFiles outcome={shown.status.outcome} />}
         </div>
       </section>
+
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -732,9 +808,6 @@ function Row({
           <>
             <span className="flex-none text-muted-foreground">{mb(report.bytes)}</span>
             <span className="flex-none tabular-nums text-muted-foreground">{(report.millis / 1000).toFixed(1)} s</span>
-            <Button size="sm" variant="ghost" className="h-6 px-1.5" onClick={() => void revealInExplorer(job!.output)}>
-              <FolderOpen className="size-3.5" />
-            </Button>
           </>
         )}
       </div>
