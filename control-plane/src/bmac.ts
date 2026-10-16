@@ -7,6 +7,7 @@
  */
 
 import { tokenMatches } from "./auth";
+import { recordBmacPayer } from "./supporteremail";
 
 /** Bigger than any real event, small enough that a junk body can't be used to burn CPU. */
 const MAX_BODY_BYTES = 64 * 1024;
@@ -39,6 +40,7 @@ const ANNOUNCED: Record<string, string> = {
 // same failure.
 const NAME_KEYS = ["supporter_name", "payer_name", "buyer_name", "name"];
 const NOTE_KEYS = ["support_note", "supporter_message", "message", "note"];
+const EMAIL_KEYS = ["supporter_email", "payer_email", "email"];
 const TIER_KEYS = ["membership_level_name", "tier_name", "level_name", "plan_name"];
 
 interface BmacEvent {
@@ -74,6 +76,11 @@ export async function bmacWebhook(request: Request, env: Env): Promise<Response>
 
   const payload = announcement(event);
   if (!payload) return json(200, { ok: true, announced: false });
+
+  // Money in, from a real payment: the payer's address (hashed, never kept) can unlock the
+  // supporter pack for an account that confirmed it. Before the Discord post, and idempotent,
+  // so a retry after a failed post changes nothing.
+  if (event.live_mode !== false) await recordBmacPayer(env, payerEmail(event));
 
   // BMAC retries a delivery up to four more times, and a response we sent but it never
   // received looks exactly like a failure from its side. Claiming the id first is what keeps
@@ -122,8 +129,8 @@ export async function signatureMatches(
 /**
  * The Discord payload for an event, or null if it isn't one we announce.
  *
- * Name and note only. No amount, no coffee count, and `supporter_email` is never so much as
- * read — this goes to a public channel, and what somebody paid is between them and BMAC.
+ * Name and note only. No amount, no coffee count, and never `supporter_email` — this goes to a
+ * public channel, and what somebody paid is between them and BMAC.
  */
 export function announcement(event: BmacEvent): unknown | null {
   const type = typeof event.type === "string" ? event.type : "";
@@ -157,6 +164,15 @@ export function announcement(event: BmacEvent): unknown | null {
       },
     ],
   };
+}
+
+/** The address the supporter paid with. Read only to be hashed by `supporteremail.ts`. */
+function payerEmail(event: BmacEvent): string | undefined {
+  const data = (event.data && typeof event.data === "object" ? event.data : {}) as Record<
+    string,
+    unknown
+  >;
+  return pick(data, EMAIL_KEYS);
 }
 
 /** First non-empty string among `keys`. */

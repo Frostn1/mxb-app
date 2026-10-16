@@ -41,6 +41,11 @@ pub(crate) const FADE_NEEDS: &str = "0.48";
 /// The first recorder that gives each text item (jump call, MORE SPEED, gear badge, cue box) its own
 /// style, size and place (FrostMod 0.49.0, `<item>_style` and friends in hud.ini).
 pub(crate) const ITEMS_NEED: &str = "0.49";
+/// The first recorder that draws the track's cut markers and writes `cuts/cuts.jsonl`
+/// (FrostMod 0.49.13, `cuts` in hud.ini).
+pub(crate) const CUTS_NEED: &str = "0.49.13";
+/// The first recorder that stands the cut markers on the track itself (`cuts_track` in hud.ini).
+pub(crate) const CUTS_TRACK_NEEDS: &str = "0.49.13";
 
 /// The HUD parts, in the order the overlay lists them: key, label, whether the plugin draws it
 /// when the file doesn't say, and the recorder it needs.
@@ -69,6 +74,11 @@ pub const HUD_PARTS: &[Part] = &[
     // Drawn on the line on the track too (and beside the cue box either way).
     Part { key: "gear", label: "Gear hints", default_on: true, needs: GEAR_NEEDS },
     Part { key: "setup", label: "Setup card (when stopped)", default_on: true, needs: HUD_NEEDS },
+    // For track makers: every centreline marker on the map, numbered, and the one each cut was at.
+    // Off until asked for; on, the plugin shows the map even with the map part off.
+    Part { key: "cuts", label: "Cut markers on the minimap", default_on: false, needs: CUTS_NEED },
+    // The same markers standing on the track: posts either side and the number over the middle.
+    Part { key: "cuts_track", label: "Cut markers on the track", default_on: false, needs: CUTS_TRACK_NEEDS },
 ];
 
 pub struct Part {

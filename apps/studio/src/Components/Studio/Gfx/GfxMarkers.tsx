@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useFrame, useThree, type ThreeEvent } from "@react-three/fiber";
+import { Html } from "@react-three/drei";
 import * as THREE from "three";
 import type { BikeRig, Vec3 } from "@frost/shared/types";
 import type { Frame } from "@/api/gfx";
@@ -50,6 +51,10 @@ export interface Marker {
   /** Already in the view frame, for `fixed` points read off the drawn mesh. */
   view?: Vec3;
   color: string;
+  /** Shown beside the dot. */
+  label: string;
+  /** The gfx.cfg key it stands for, shown on hover. */
+  title: string;
 }
 
 /** On-screen size: a fraction of the distance to the camera, so zoom doesn't change it. */
@@ -61,8 +66,11 @@ export function GfxMarkers({
   selected,
   onSelect,
   onMove,
+  chain = null,
 }: {
   markers: Marker[];
+  /** Two marker ids to draw the chain run between. */
+  chain?: [string, string] | null;
   rig: BikeRig | null;
   selected: string | null;
   onSelect: (id: string) => void;
@@ -92,6 +100,13 @@ export function GfxMarkers({
   );
 
   useEffect(() => invalidate(), [placed, selected, over, held, invalidate]);
+
+  const run = useMemo(() => {
+    if (!chain) return null;
+    const a = placed.find((p) => p.m.id === chain[0]);
+    const b = placed.find((p) => p.m.id === chain[1]);
+    return a && b ? { from: a.at, to: b.at, color: a.m.color } : null;
+  }, [placed, chain]);
 
   // Same size on screen at any zoom.
   useFrame(() => {
@@ -185,9 +200,23 @@ export function GfxMarkers({
               <meshBasicMaterial color={hot ? "#ffffff" : m.color} depthTest={false} transparent opacity={hot ? 1 : 0.9} toneMapped={false} />
             </mesh>
             {tip && <Line from={at} to={tip} color={m.color} />}
+            <Html position={at} zIndexRange={[20, 0]} style={{ pointerEvents: "none" }}>
+              <span
+                title={m.title}
+                className={`pointer-events-auto ml-2.5 block -translate-y-1/2 whitespace-nowrap rounded px-1 py-px text-[10.5px] leading-tight shadow-sm ${hot ? "bg-white text-black" : "bg-black/65 text-white"}`}
+                style={{ borderLeft: `2px solid ${m.color}` }}
+                onPointerDown={(e) => {
+                  e.stopPropagation();
+                  onSelect(m.id);
+                }}
+              >
+                {m.label}
+              </span>
+            </Html>
           </group>
         );
       })}
+      {run && <Line from={run.from} to={run.to} color={run.color} />}
     </group>
   );
 }

@@ -329,6 +329,117 @@
   --ring: #4a5157;
 }
 
+/* ---- The supporter pack's colorways (`PACK_COLORWAYS` in Theme.tsx). Same shape as the
+   ones above; `Theme.tsx` only applies them for a supporter and falls back to frost otherwise. */
+
+/* --- Night: ice cyan over deep navy --- */
+.dark[data-colorway="night"] {
+  --window: #05080f;
+  --background: #080d17;
+  --card: #111a2b;
+  --popover: #172238;
+  --secondary: #1d2a42;
+  --muted: #111a2b;
+  --muted-foreground: #8b9ab3;
+  --faint: #5f6d85;
+  --foreground: #eaf1fb;
+  --primary: #5ce1ff;
+  --primary-foreground: #04121a;
+  --accent: rgba(92, 225, 255, 0.12);
+  --accent-foreground: #a6efff;
+  --ring: #5ce1ff;
+}
+.light[data-colorway="night"] {
+  --window: #cdd6e4;
+  --background: #dde4ef;
+  --card: #eef2f8;
+  --popover: #ffffff;
+  --secondary: #cbd4e2;
+  --muted: #e4e9f1;
+  --muted-foreground: rgba(10, 20, 40, 0.58);
+  --faint: rgba(10, 20, 40, 0.44);
+  --foreground: #0b1424;
+  --primary: #0a6f8c;
+  --primary-foreground: #ffffff;
+  --accent: rgba(10, 111, 140, 0.12);
+  --accent-foreground: #08536a;
+  --border: rgba(10, 20, 40, 0.12);
+  --input: rgba(10, 20, 40, 0.14);
+  --ring: #0a6f8c;
+}
+
+/* --- Works: race red over carbon --- */
+.dark[data-colorway="works"] {
+  --window: #0a0909;
+  --background: #100e0e;
+  --card: #1b1717;
+  --popover: #241f1f;
+  --secondary: #2e2727;
+  --muted: #1b1717;
+  --muted-foreground: #a39494;
+  --faint: #6f6363;
+  --foreground: #f6efef;
+  --primary: #ff4a3d;
+  --primary-foreground: #ffffff;
+  --accent: rgba(255, 74, 61, 0.13);
+  --accent-foreground: #ff9a91;
+  --ring: #ff4a3d;
+}
+.light[data-colorway="works"] {
+  --window: #dcd3d2;
+  --background: #ebe4e3;
+  --card: #f7f3f2;
+  --popover: #ffffff;
+  --secondary: #ddd3d2;
+  --muted: #efe9e8;
+  --muted-foreground: rgba(36, 14, 12, 0.58);
+  --faint: rgba(36, 14, 12, 0.44);
+  --foreground: #1e0f0d;
+  --primary: #c8261b;
+  --primary-foreground: #ffffff;
+  --accent: rgba(200, 38, 27, 0.11);
+  --accent-foreground: #9a1c13;
+  --border: rgba(36, 14, 12, 0.12);
+  --input: rgba(36, 14, 12, 0.14);
+  --ring: #c8261b;
+}
+
+/* --- Lime: acid green over graphite --- */
+.dark[data-colorway="lime"] {
+  --window: #0a0b09;
+  --background: #0f110d;
+  --card: #191c16;
+  --popover: #21251d;
+  --secondary: #2a2f25;
+  --muted: #191c16;
+  --muted-foreground: #969d8c;
+  --faint: #656b5d;
+  --foreground: #f1f5ea;
+  --primary: #c6f432;
+  --primary-foreground: #121803;
+  --accent: rgba(198, 244, 50, 0.11);
+  --accent-foreground: #ddf98a;
+  --ring: #c6f432;
+}
+.light[data-colorway="lime"] {
+  --window: #d5d9cc;
+  --background: #e4e8dc;
+  --card: #f2f4ed;
+  --popover: #ffffff;
+  --secondary: #d3d8c8;
+  --muted: #e9ece2;
+  --muted-foreground: rgba(22, 28, 10, 0.58);
+  --faint: rgba(22, 28, 10, 0.44);
+  --foreground: #141a08;
+  --primary: #4f7a00;
+  --primary-foreground: #ffffff;
+  --accent: rgba(79, 122, 0, 0.12);
+  --accent-foreground: #3b5c00;
+  --border: rgba(22, 28, 10, 0.12);
+  --input: rgba(22, 28, 10, 0.14);
+  --ring: #4f7a00;
+}
+
 /* --- Retro: amber phosphor. More than a palette — see the treatment below. --- */
 .dark[data-colorway="retro"] {
   --window: #0a0806;

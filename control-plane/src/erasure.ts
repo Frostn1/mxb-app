@@ -85,6 +85,8 @@ const PERSONAL: readonly string[] = [
   "client_module_seen",
   "client_crashes",
   "lock_attempts",
+  "supporter_emails",
+  "supporter_email_codes",
 ];
 
 /**
@@ -166,6 +168,10 @@ export async function eraseAccount(account: Account, env: Env): Promise<Response
   kept.push({
     what: "entitlements",
     why: "purchases are keyed by Steam id and are what keep bought content working",
+  });
+  kept.push({
+    what: "supporters",
+    why: "the supporter pack was paid for, is keyed by Steam id, and comes back on the next sign-in",
   });
 
   const erasure: Erasure = { cleared: [...PERSONAL, "friendships", "accounts (cleared in place)"], kept, erasedAt: now };

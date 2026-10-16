@@ -30,6 +30,7 @@ import { useDownloads } from "./Downloads";
 import { useDropReview } from "./DropReview";
 import { useT } from "@/i18n";
 import { installNoteKey } from "../lib/installNote";
+import { supportMoment } from "@frost/shared/api/support";
 
 /** Where the bytes come from — a resolvable host, a file the user picked, or something already
  *  bought on one of the two stores.
@@ -436,6 +437,8 @@ export function InstallProvider({
           </>
         ),
       });
+      // Only once nothing else is queued or running: the support card never lands mid-task.
+      if (queueRef.current.length === 0 && activeKeysRef.current.size <= 1) supportMoment();
       // Auto-retire the sidebar/detail card a few seconds after success.
       clearTimers.current.set(
         key,

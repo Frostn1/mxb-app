@@ -82,6 +82,11 @@ interface Env {
     /** Discord webhook the supporter announcements are posted to. A credential in itself:
      *  anyone holding the URL can post to that channel. */
     DISCORD_DONATION_WEBHOOK_URL?: string;
+    /** Resend API key, for mailing the supporter-pack email code (`supporteremail.ts`).
+     *  Without it, or without `SUPPORTER_MAIL_FROM`, those routes answer 503. */
+    RESEND_API_KEY?: string;
+    /** The From line on that email, e.g. `Frost <noreply@mxbsecure.com>`. */
+    SUPPORTER_MAIL_FROM?: string;
     /** Anthropic API key, for writing track programs. Without it `/v1/track/generate`
      *  answers 503 — the app says track generation isn't available and everything else
      *  carries on. Spend is capped by the endpoint itself: one Opus call per request, at

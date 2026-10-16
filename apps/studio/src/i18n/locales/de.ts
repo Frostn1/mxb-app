@@ -848,4 +848,9 @@ export const de: Translation = {
   "gfx.cockpitDiffers": "Cockpit-Kopie weicht ab",
   "gfx.inUse": "Aktiv",
   "gfx.unassembled": "Teile nicht montiert",
+  "gfx.dotLeftgrip": "L Griff",
+  "gfx.dotRightgrip": "R Griff",
+  "gfx.rearSprocket": "Kettenrad hinten",
+  "gfx.rearSprocketTitle": "Hinterachse, in Linie mit dem Motorritzel",
+  "gfx.texturesInPkz": "Texturen in einer .pkz",
 };

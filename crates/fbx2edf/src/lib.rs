@@ -9,6 +9,7 @@ include!(concat!(env!("OUT_DIR"), "/private_root.rs"));
 
 pub mod host;
 pub mod job;
+pub mod scripts;
 
 #[cfg(feature = "tauri")]
 pub mod commands;

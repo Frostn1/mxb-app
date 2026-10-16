@@ -11,6 +11,7 @@ import { Switch } from "@frost/shared/Components/ui/switch";
 import { Segmented } from "@frost/shared/Components/ui/segmented";
 import { cn } from "@frost/shared/lib/utils";
 import { useTheme, type ThemeMode } from "@frost/shared/Context/Theme";
+import SupporterLooks from "@frost/shared/Components/Supporter/SupporterLooks";
 import HotkeyField from "@frost/shared/Components/HotkeyField";
 import {
   getOverlayState,
@@ -32,6 +33,7 @@ import {
   type CoachStatus,
 } from "@/api/coach";
 import HudPanel from "../Review/HudPanel";
+import CutsPanel from "../Review/CutsPanel";
 import { SpokenCues } from "../Review/LiveCues";
 import LogsSettings from "./Logs";
 import LineLookSettings, { LINE_PARTS } from "./LineLook";
@@ -283,6 +285,7 @@ export default function Settings({ initialSection }: { initialSection?: SectionI
                     ]}
                   />
                 </FieldRow>
+                <SupporterLooks />
               </Section>
               {/* Coach has one dictionary so far (i18n/index.ts serves it to every locale), so
                   this says so rather than offering a picker that changes nothing. */}
@@ -305,6 +308,9 @@ export default function Settings({ initialSection }: { initialSection?: SectionI
               </Section>
               <Section title={t("coachSettings.spoken")}>
                 <SpokenCues />
+              </Section>
+              <Section title={t("cuts.title")}>
+                <CutsPanel />
               </Section>
             </>
           )}
@@ -344,6 +350,9 @@ export default function Settings({ initialSection }: { initialSection?: SectionI
                   <p className="text-[12px] text-muted-foreground">{t("recorder.versionUnknown")}</p>
                 )}
                 {status?.recorderOutdated && <p className="text-[12px] text-warning">{t("recorder.updateIt")}</p>}
+                {!status?.recorderOutdated && status?.recorderNoClear && (
+                  <p className="text-[12px] text-warning">{t("recorder.noClear")}</p>
+                )}
                 <Rule />
                 <div>
                   <div className="text-[12.5px] font-semibold">{t("recorder.gameFolder")}</div>

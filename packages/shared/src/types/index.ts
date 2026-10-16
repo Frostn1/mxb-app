@@ -513,6 +513,11 @@ export interface BikeRig {
   chassisOrigin: Vec3;
   /** A steer-frame point (x mirrored) turned by `rake` about x, plus this. */
   steerOrigin: Vec3;
+  /**
+   * The `rearDrop` (mm) with the shock fully out: the bike on its stand, as Bike Selection
+   * shows it. Null when the `.geom` has no linkage to solve. Absent from older backends.
+   */
+  rearExtendedDrop?: number | null;
 }
 
 export interface BikeModel {
@@ -534,6 +539,8 @@ export interface BikeModel {
    * installed falls back to the bike's own, and the picker shows what's on screen.
    */
   tyres: string | null;
+  /** The tyre sheets that mod names (`tyre_texture`), for the viewer to draw as rubber. */
+  tyreTextures?: string[];
   /**
    * Whether the bike's `.geom` placed the parts into one frame.
    *
@@ -1591,6 +1598,8 @@ export interface LiveShareInfo {
   /** The paths an owned code carries, so a republish repacks the same files. Empty for a
    *  subscription — a follower has nothing to republish. */
   rels: string[];
+  /** Published by an account with the supporter pack, for a small badge. */
+  supporter: boolean;
 }
 
 export type SlotSource =

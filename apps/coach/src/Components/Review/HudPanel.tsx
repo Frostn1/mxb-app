@@ -44,6 +44,9 @@ export default function HudPanel({
             {t("recorder.tooOld", { version: status.recorderVersion ?? "" })}
           </p>
         )}
+        {!status?.recorderOutdated && status?.recorderNoClear && (
+          <p className="mt-2 text-[12px] text-warning">{t("recorder.noClear")}</p>
+        )}
         <div className="mt-3 flex items-center justify-between gap-4 border-b border-border pb-3">
           <span className="text-[13px] font-semibold">{t("hud.enabled")}</span>
           <Switch checked={hud.enabled} onCheckedChange={(on) => void set("enabled", on)} />
@@ -63,6 +66,7 @@ export default function HudPanel({
               {/* Pace hints are new and visual, so say what they draw before the rider rides out. */}
               {p.key === "pace" && <p className="mt-1 text-[11.5px] text-muted-foreground">{t("hud.paceBody")}</p>}
               {p.key === "gear" && <p className="mt-1 text-[11.5px] text-muted-foreground">{t("hud.gearBody")}</p>}
+              {p.key === "cuts" && <p className="mt-1 text-[11.5px] text-muted-foreground">{t("hud.cutsBody")}</p>}
               {/* The newest parts draw nothing on an older recorder, so say so rather than
                   leave a switch that looks broken. */}
               {p.needs === "0.24" && hud.preExtras && (

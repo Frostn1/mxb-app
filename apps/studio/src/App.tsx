@@ -33,6 +33,7 @@ import { UpdateProvider } from "./Context/Update";
 import UpdateBanner from "./Components/Shell/UpdateBanner";
 import SigninGate from "@frost/shared/Components/SigninGate/SigninGate";
 import SurveyPrompt from "@frost/shared/Components/Survey/SurveyPrompt";
+import SupportPrompt from "@frost/shared/Components/Support/SupportPrompt";
 import { parsePluginView, usePlugins } from "@frost/shared/lib/usePlugins";
 import { initialView } from "@frost/shared/api/mods";
 import { toast } from "sonner";
@@ -330,6 +331,7 @@ export default function App() {
           <SigninGate />
           {/* The survey prompt. Rare, and on its own schedule — see `crates/core/src/survey.rs`. */}
           <SurveyPrompt />
+          <SupportPrompt />
         </UpdateProvider>
       </I18nProvider>
     </ThemeProvider>

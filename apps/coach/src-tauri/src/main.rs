@@ -11,6 +11,7 @@ mod analysis;
 mod bikecfg;
 mod coach;
 mod cues;
+mod cuts;
 mod fixes;
 mod ground;
 mod groundgrid;
@@ -18,6 +19,7 @@ mod hud;
 mod hudsheet;
 mod imports;
 mod ini;
+mod link;
 mod setupbook;
 mod lines;
 mod logs;
@@ -157,6 +159,8 @@ fn main() {
             // And again every half hour while it runs, so a ban reaches an app left open.
             mxb_core::appgate::watch(app.handle());
             overlay::start(app.handle());
+            // Tell the recorder Coach is open, so it clears the line and the hints once it isn't.
+            link::start(app.handle());
             coach::watch_sessions(app.handle());
             coach::watch_tracks(app.handle());
             // Anonymous counters, under the same switch and the same config file as the manager's
@@ -172,9 +176,19 @@ fn main() {
             // it answers the question counters cannot, which is whether any of this is any
             // good. Nothing is fetched or asked when either switch is off.
             mxb_core::survey::start(app.handle(), usage::COACH);
+            // Whether the account has the supporter pack, cached for offline use.
+            mxb_core::supporter::start(app.handle());
             Ok(())
         })
         .on_window_event(|window, event| {
+            // Closing Coach's own window is closing Coach. A parked overlay window kept the app
+            // running with nothing on screen, and the recorder was told Coach was still open.
+            if window.label() == "main" {
+                if let WindowEvent::Destroyed = event {
+                    window.app_handle().exit(0);
+                }
+                return;
+            }
             if window.label() != overlay::LABEL {
                 return;
             }
@@ -247,6 +261,7 @@ fn main() {
             coach::coach_set_game_dir,
             coach::coach_uninstall_plugin,
             hud::coach_hud,
+            cuts::coach_cuts,
             hud::coach_set_hud,
             hud::coach_set_cue_pos,
             hud::coach_line_look,
@@ -269,6 +284,10 @@ fn main() {
             mxb_core::survey::survey_answer,
             mxb_core::survey::survey_dismiss,
             mxb_core::survey::set_survey_enabled,
+            mxb_core::supporter::supporter_status,
+            mxb_core::supporter::supporter_refresh,
+            mxb_core::supporter::supporter_email_send,
+            mxb_core::supporter::supporter_email_confirm,
             mxb_core::uninstall::uninstall_info,
             mxb_core::uninstall::uninstall_app,
         ])
@@ -276,6 +295,8 @@ fn main() {
         .expect("error while running MXB Coach")
         .run(|app, event| {
             if let tauri::RunEvent::Exit = event {
+                // First: the recorder clears what it draws now rather than when the beat stops.
+                link::stop(app);
                 overlay::stop(app);
                 // The last counters, on the way out. This is the right exit point rather than a
                 // `Destroyed` window event: the window handler above is the overlay's, and the
