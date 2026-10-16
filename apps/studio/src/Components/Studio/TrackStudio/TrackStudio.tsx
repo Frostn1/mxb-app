@@ -114,9 +114,7 @@ export default function TrackStudio() {
   // Whether the real-place panel is open. Its own state, because it replaces the whole tab.
   const [fromPlace, setFromPlace] = useState(false);
   // Starting from a track somebody already compiled — one of the game's own, or any `.pkz`.
-  const [working, setWorking] = useState<
-    "generate" | "preview" | "export" | null
-  >(null);
+  const [working, setWorking] = useState<"generate" | "preview" | "export" | null>(null);
   // The build itself lives above this component — see `Context/TrackBuild` — so that leaving
   // the tab doesn't take the bar with it. To everything here that asks "is the studio busy?"
   // it is still one answer.
@@ -169,10 +167,7 @@ export default function TrackStudio() {
   } | null>(null);
   // The same gesture in the form the plan wants. The 3D viewer highlights a path of world
   // points; the plan re-walks the lap itself, so it only needs to be told which stretch.
-  const [hoverSpan, setHoverSpan] = useState<{
-    at: number;
-    length: number;
-  } | null>(null);
+  const [hoverSpan, setHoverSpan] = useState<{ at: number; length: number } | null>(null);
   // Reordering is done with pointer events, not HTML5 drag-and-drop. Tauri's
   // `dragDropEnabled` hands drags to the OS so the webview never sees a dragstart — which is
   // also why the whole-window file dropzone was catching every attempt.
@@ -215,35 +210,27 @@ export default function TrackStudio() {
   }));
   // Not a switch for Random like the two above: these are the loaded track's own, so they
   // are read off the program and settled back into it.
-  const borders = (["soft", "solid", "banners", "none"] as const).map(
-    (value) => ({
+  const borders = (["soft", "solid", "banners", "none"] as const).map((value) => ({
       value,
       label: t(`track.border.${value}`),
-    }),
-  );
+    }));
   const venues = (["stadium", "open"] as const).map((value) => ({
     value,
     label: t(`track.venue.${value}`),
   }));
-  const randomAtScale = () =>
-    randomTrackProgram(undefined, scale, discipline, density);
+  const randomAtScale = () => randomTrackProgram(undefined, scale, discipline, density);
   const rebuild = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [tools, setTools] = useState<TrackToolsStatus | null>(null);
 
   // Whether the compilers are here decides whether the last step is a button or a folder of
   // homework, so it is worth knowing before anyone has generated anything.
   useEffect(() => {
-    trackToolsStatus()
-      .then(setTools)
-      .catch(() => {});
+    trackToolsStatus().then(setTools).catch(() => {});
   }, []);
 
   /** Re-check and re-measure. Called after every edit, so the numbers are never stale. */
   const settle = useCallback(
-    async (
-      next: TrackProgram,
-      how: { history?: boolean; fresh?: boolean } = {},
-    ) => {
+    async (next: TrackProgram, how: { history?: boolean; fresh?: boolean } = {}) => {
       if (how.fresh) {
         // A different track is a different history. Undoing into the one before it would
         // silently bring back work the "replace" prompt just said would be discarded.
@@ -283,10 +270,7 @@ export default function TrackStudio() {
           // Debounced: a drag is a hundred edits, and only the last one is worth building.
           if (rebuild.current) clearTimeout(rebuild.current);
           const settled = next;
-          rebuild.current = setTimeout(
-            () => void showIn3d(settled).catch(() => {}),
-            500,
-          );
+          rebuild.current = setTimeout(() => void showIn3d(settled).catch(() => {}), 500);
         }
         // What stops the caller, which is only ever what cannot be built.
         return found.fatal;
@@ -325,11 +309,7 @@ export default function TrackStudio() {
       // A text field has its own undo, and taking it over would make typing a name feel
       // broken. Same for anything contenteditable.
       const el = e.target as HTMLElement | null;
-      if (
-        el?.isContentEditable ||
-        (el && /^(input|textarea|select)$/i.test(el.tagName))
-      )
-        return;
+      if (el?.isContentEditable || (el && /^(input|textarea|select)$/i.test(el.tagName)))return;
       e.preventDefault();
       // Ctrl+Shift+Z and Ctrl+Y both redo, because both are what people reach for.
       if (e.shiftKey) redo();
@@ -416,22 +396,16 @@ export default function TrackStudio() {
           : undefined,
       );
     } catch (e) {
-      toast.error(
-        t(current.current ? "track.editFailed" : "track.generateFailed"),
-        {
+      toast.error(t(current.current ? "track.editFailed" : "track.generateFailed"), {
           description: String(e),
-        },
-      );
+        });
     } finally {
       setWorking(null);
     }
   }
 
   /** Load a starting point and put it on screen — a track you can't see isn't a start. */
-  async function onLoad(
-    load: () => Promise<TrackProgram>,
-    from: string | null = null,
-  ) {
+  async function onLoad(load: () => Promise<TrackProgram>, from: string | null = null) {
     if (busy) return;
     // Replacing a track you have been working on is the one action here that throws work
     // away, so it asks first — and only when there is work to throw away.
@@ -443,10 +417,7 @@ export default function TrackStudio() {
   }
 
   /** `from` is the project file being opened; null for every other start. */
-  async function reallyLoad(
-    load: () => Promise<TrackProgram>,
-    from: string | null,
-  ) {
+  async function reallyLoad(load: () => Promise<TrackProgram>, from: string | null) {
     if (busy) return;
     setWorking("generate");
     setPreview(null);
@@ -460,9 +431,7 @@ export default function TrackStudio() {
       toast.success(t("track.baseLoaded", { name: next.name }));
       if (found.length === 0) await showIn3d(next);
     } catch (e) {
-      toast.error(t(from ? "track.openFailed" : "track.generateFailed"), {
-        description: String(e),
-      });
+      toast.error(t(from ? "track.openFailed" : "track.generateFailed"), { description: String(e)});
     } finally {
       setWorking(null);
     }
@@ -480,11 +449,7 @@ export default function TrackStudio() {
         return;
       }
       const el = document.activeElement;
-      if (
-        el instanceof HTMLInputElement ||
-        el instanceof HTMLTextAreaElement ||
-        el instanceof HTMLSelectElement
-      ) {
+      if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement) {
         return;
       }
       setScope(null);
@@ -547,9 +512,7 @@ export default function TrackStudio() {
     setWorking("export");
     try {
       const wrote = await exportTrackSource(program, dir);
-      toast.success(t("track.exported", { count: wrote.length }), {
-        description: dir,
-      });
+      toast.success(t("track.exported", { count: wrote.length }), {description: dir });
     } catch (e) {
       toast.error(t("track.exportFailed"), { description: String(e) });
     } finally {
@@ -565,9 +528,7 @@ export default function TrackStudio() {
     if (!dest) {
       dest = await pickSavePath({
         defaultPath: `${prog.name.trim() || "track"}.${TRACK_PROJECT_EXT}`,
-        filters: [
-          { name: t("track.projectFile"), extensions: [TRACK_PROJECT_EXT] },
-        ],
+        filters: [{ name: t("track.projectFile"), extensions: [TRACK_PROJECT_EXT] }],
       });
       if (!dest) return false;
     }
@@ -575,9 +536,7 @@ export default function TrackStudio() {
       await saveTrackProject(prog, dest);
       setFile(dest);
       setTouched(false);
-      toast.success(t("track.saved", { name: prog.name }), {
-        description: dest,
-      });
+      toast.success(t("track.saved", { name: prog.name }), { description: dest });
       return true;
     } catch (e) {
       toast.error(t("track.saveFailed"), { description: String(e) });
@@ -589,12 +548,7 @@ export default function TrackStudio() {
     if (busy) return;
     const path = await openDialog({
       multiple: false,
-      filters: [
-        {
-          name: t("track.projectFile"),
-          extensions: [TRACK_PROJECT_EXT, "json"],
-        },
-      ],
+      filters: [{  name: t("track.projectFile"), extensions: [TRACK_PROJECT_EXT, "json"] }],
     });
     if (typeof path !== "string") return;
     await onLoad(() => openTrackProject(path), path);
@@ -607,12 +561,7 @@ export default function TrackStudio() {
   saveRef.current = saveProject;
   const unsavedRef = useRef(false);
   unsavedRef.current = touched && program !== null;
-  useEffect(
-    () =>
-      register({
-        dirty: () => unsavedRef.current,
-        save: () => saveRef.current(),
-      }),
+  useEffect(() => register({ dirty: () => unsavedRef.current, save: () => saveRef.current() }),
     [register],
   );
 
@@ -669,10 +618,7 @@ export default function TrackStudio() {
   function removeFeature(index: number) {
     if (!program) return;
     setTouched(true);
-    void settle({
-      ...program,
-      features: program.features.filter((_, i) => i !== index),
-    });
+    void settle({...program, features: program.features.filter((_, i) => i !== index) });
   }
 
   /// A corner or a straight can go too — the lap stops closing, and the validator says so
@@ -735,16 +681,12 @@ export default function TrackStudio() {
     segments.splice(index, 0, seg);
     const at = segmentStart(program.segments, index);
     const grew = segLength(seg);
-    const features = program.features.map((f) =>
-      f.at >= at ? { ...f, at: f.at + grew } : f,
-    );
+    const features = program.features.map((f) => (f.at >= at ? { ...f, at: f.at + grew } : f));
     const next = fitFeatures({ ...program, segments, features });
     void settle(next);
     // Select it and put it on screen, or a new row appears somewhere off the bottom of a
     // thirty-step list and reads as nothing having happened.
-    const row = lapSteps(next).findIndex(
-      (x) => x.kind !== "feature" && x.index === index,
-    );
+    const row = lapSteps(next).findIndex((x) => x.kind !== "feature" && x.index === index);
     if (row >= 0) {
       setScope(row);
       setFocus(positionAt(next, at));
@@ -766,17 +708,14 @@ export default function TrackStudio() {
     const moved = steps[from];
     const target = steps[to];
     if (moved.kind === "feature") {
-      const at =
-        target.kind === "feature" ? target.at : target.at + (to > from ? 1 : 0);
+      const at = target.kind === "feature" ? target.at : target.at + (to > from ? 1 : 0);
       const features = program.features.map((f, i) =>
         i === moved.index ? { ...f, at: Math.max(0, at) } : f,
       );
       const next = { ...program, features };
       void settle(next);
       // Keep the part you just dragged selected, at its new row.
-      const row = lapSteps(next).findIndex(
-        (x) => x.kind === "feature" && x.index === moved.index,
-      );
+      const row = lapSteps(next).findIndex((x) => x.kind === "feature" && x.index === moved.index);
       if (row >= 0) setScope(row);
       return;
     }
@@ -784,8 +723,7 @@ export default function TrackStudio() {
     // the segment the feature is on — the last one that starts at or before it.
     const landing =
       target.kind === "feature"
-        ? steps.filter((x) => x.kind !== "feature" && x.at <= target.at)
-            .length - 1
+        ? steps.filter((x) => x.kind !== "feature" && x.at <= target.at).length - 1
         : target.index;
     const next = [...program.segments];
     const [seg] = next.splice(moved.index, 1);
@@ -797,9 +735,7 @@ export default function TrackStudio() {
   // Bring a newly added feature into view once the list has it.
   useEffect(() => {
     if (flash === null || !listRef.current) return;
-    const row = listRef.current.querySelector<HTMLElement>(
-      `[data-at="${flash}"]`,
-    );
+    const row = listRef.current.querySelector<HTMLElement>(`[data-at="${flash}"]`);
     row?.scrollIntoView({ block: "center", behavior: "smooth" });
     const id = setTimeout(() => setFlash(null), 1400);
     return () => clearTimeout(id);
@@ -833,11 +769,7 @@ export default function TrackStudio() {
     if (dragging !== null && dropAt !== null) {
       // A gap index is one past the row above it, so dropping below where you started
       // lands one row too far without this.
-      reorder(
-        steps,
-        dragging,
-        Math.max(0, dropAt > dragging ? dropAt - 1 : dropAt),
-      );
+      reorder(steps, dragging, Math.max(0, dropAt > dragging ? dropAt - 1 : dropAt));
     }
     setDragging(null);
     setDropAt(null);
@@ -867,14 +799,9 @@ export default function TrackStudio() {
     const on = scope !== null ? steps[scope] : undefined;
     const at = on ? on.at : roomiestGap(program, featureSpan(probe).length);
     const newIndex = program.features.length;
-    const next = {
-      ...program,
-      features: [...program.features, newFeature(kind, at)],
-    };
+    const next = {...program, features: [...program.features, newFeature(kind, at)] };
     void settle(next);
-    const row = lapSteps(next).findIndex(
-      (x) => x.kind === "feature" && x.index === newIndex,
-    );
+    const row = lapSteps(next).findIndex((x) => x.kind === "feature" && x.index === newIndex);
     if (row >= 0) {
       setScope(row);
       setFocus(positionAt(next, at));
@@ -919,8 +846,7 @@ export default function TrackStudio() {
   // The 3D view is a build, so it is only ever as new as the last one. Comparing the whole
   // program is cheap next to synthesising it, and nothing smaller is honest — every field
   // here changes the ground.
-  const stale =
-    program !== null && built !== null && built !== JSON.stringify(program);
+  const stale = program !== null && built !== null && built !== JSON.stringify(program);
 
   const steps = program ? lapSteps(program) : [];
   const selected = scope !== null ? steps[scope] : undefined;
@@ -929,8 +855,7 @@ export default function TrackStudio() {
   /** Which step covers a distance round the lap — how a click on the map becomes a row. */
   function pickAt(at: number) {
     let row = 0;
-    for (let i = 0; i < steps.length; i++)
-      if (steps[i].kind !== "feature" && steps[i].at <= at) row = i;
+    for (let i = 0; i < steps.length; i++) if (steps[i].kind !== "feature" && steps[i].at <= at) row = i;
     setScope(row);
     setFocus(positionAt(program!, at));
   }
@@ -971,9 +896,7 @@ export default function TrackStudio() {
               </Button>
             </div>
             <p className="mt-3 text-[12.5px] leading-relaxed text-muted-foreground">
-              {busy === "generate"
-                ? t("track.generatingHint")
-                : t("track.empty")}
+              {busy === "generate" ? t("track.generatingHint") : t("track.empty")}
             </p>
             {/* Or start from a track instead of a sentence. Random leads, because it is the
                 one that hands you something to ride, and the size sits against it: the size is
@@ -1063,8 +986,7 @@ export default function TrackStudio() {
                     ? steps.filter((x, i) => {
                         if (x.kind !== "feature") return false;
                         for (let j = i; j >= 0; j--)
-                          if (steps[j].kind !== "feature")
-                            return steps[j].index === step.index;
+                          if (steps[j].kind !== "feature") return steps[j].index === step.index;
                         return false;
                       }).length
                     : 0;
@@ -1130,9 +1052,7 @@ export default function TrackStudio() {
                       <div
                         className={cn(
                           "truncate font-cond text-[12.5px] font-semibold uppercase tracking-[0.12em]",
-                          scope === row
-                            ? "text-primary"
-                            : "text-muted-foreground",
+                          scope === row ? "text-primary" : "text-muted-foreground",
                         )}
                         style={
                           step.kind === "feature" && scope !== row
@@ -1165,9 +1085,7 @@ export default function TrackStudio() {
                         {collapsed ? (
                           <span className="flex items-center gap-1">
                             {inSection > 0 && (
-                              <span className="tabular-figures text-[10.5px]">
-                                {inSection}
-                              </span>
+                              <span className="tabular-figures text-[10.5px]">{inSection}</span>
                             )}
                             <ChevronRight className="size-3.5" />
                           </span>
@@ -1222,8 +1140,7 @@ export default function TrackStudio() {
                   {t("track.groupOnIt")}
                 </div>
                 <div className="mt-1.5 flex flex-wrap gap-1">
-                  {(Object.keys(FEATURE_ICON) as TrackFeatureKind[]).map(
-                    (kind) => (
+                  {(Object.keys(FEATURE_ICON) as TrackFeatureKind[]).map((kind) => (
                       <button
                         key={kind}
                         onClick={() => {
@@ -1266,10 +1183,7 @@ export default function TrackStudio() {
                 disabled={busy !== null}
                 className={cn(
                   "flex-1 cursor-default text-left font-cond text-[11px] font-semibold uppercase tracking-[0.16em] transition-colors disabled:opacity-40",
-                  adding
-                    ? "text-foreground"
-                    : "text-primary hover:text-foreground",
-                )}
+                  adding ? "text-foreground" : "text-primary hover:text-foreground")}
               >
                 {t("track.addStep")}
               </button>
@@ -1281,9 +1195,7 @@ export default function TrackStudio() {
                 disabled={busy !== null}
                 className={cn(
                   "cursor-default font-cond text-[11px] font-semibold uppercase tracking-[0.16em] transition-colors disabled:opacity-40",
-                  asking
-                    ? "text-foreground"
-                    : "text-muted-foreground hover:text-foreground",
+                  asking ? "text-foreground" : "text-muted-foreground hover:text-foreground",
                 )}
               >
                 {busy === "generate" ? t("track.generating") : t("track.askAi")}
@@ -1329,9 +1241,7 @@ export default function TrackStudio() {
                 />
               ) : (
                 <div className="absolute inset-0 grid place-items-center px-6 text-center text-[12.5px] text-muted-foreground">
-                  {busy === "preview"
-                    ? t("track.building")
-                    : t("track.previewHint")}
+                  {busy === "preview" ? t("track.building") : t("track.previewHint")}
                 </div>
               )}
 
@@ -1366,35 +1276,18 @@ export default function TrackStudio() {
               {/* What the colors on the map mean. */}
               {stage === "plan" && !full && (
                 <div className="pointer-events-none absolute left-4 top-4 flex items-center gap-4">
-                  <Legend
-                    className="bg-primary"
-                    label={t("track.legendSelected")}
-                  />
-                  <Legend
-                    className="bg-warning"
-                    label={t("track.legendJump")}
-                  />
-                  <Legend
-                    className="bg-primary/30"
-                    label={t("track.legendLap")}
-                  />
+                  <Legend className="bg-primary" label={t("track.legendSelected")}/>
+                  <Legend className="bg-warning" label={t("track.legendJump")} />
+                  <Legend className="bg-primary/30" label={t("track.legendLap")} />
                 </div>
               )}
 
               {/* Measured off the program, not claimed. */}
               {!full && (
                 <div className="pointer-events-none absolute right-4 top-4 flex items-start gap-4">
-                  <Stat
-                    value={(lap / 1000).toFixed(2)}
-                    unit="km"
-                    label={t("track.lap")}
-                  />
+                  <Stat value={(lap / 1000).toFixed(2)} unit="km" label={t("track.lap")}/>
                   <Stat value={String(steps.length)} label={t("track.steps")} />
-                  <Stat
-                    value={climbOf(program).toFixed(0)}
-                    unit="m"
-                    label={t("track.climb")}
-                  />
+                  <Stat value={climbOf(program).toFixed(0)} unit="m" label={t("track.climb")}/>
                 </div>
               )}
 
@@ -1415,19 +1308,11 @@ export default function TrackStudio() {
                     variant="ghost"
                     size="icon"
                     onClick={() => setFull((v) => !v)}
-                    title={t(
-                      full ? "track.exitFullscreen" : "track.fullscreen",
-                    )}
-                    aria-label={t(
-                      full ? "track.exitFullscreen" : "track.fullscreen",
-                    )}
-                    className="size-8 bg-black/45 text-foreground backdrop-blur hover:bg-black/65"
+                    title={t(full ? "track.exitFullscreen" : "track.fullscreen")}
+                    aria-label={t(full ? "track.exitFullscreen" : "track.fullscreen")}
+                         className="size-8 bg-black/45 text-foreground backdrop-blur hover:bg-black/65"
                   >
-                    {full ? (
-                      <Minimize2 className="size-4" />
-                    ) : (
-                      <Maximize2 className="size-4" />
-                    )}
+                    {full ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
                   </Button>
                 )}
               </div>
@@ -1450,9 +1335,7 @@ export default function TrackStudio() {
                     {(selected.at + stepLength(selected)).toFixed(0)} m ×
                   </button>
                 ) : (
-                  <span className="font-mono text-[10.5px] text-faint">
-                    {t("track.wholeLap")}
-                  </span>
+                  <span className="font-mono text-[10.5px] text-faint">{t("track.wholeLap")}</span>
                 )}
                 {/* Only where there is a shape to edit: a straight has ground, not a shape. */}
                 {selected?.kind === "feature" && (
@@ -1506,15 +1389,10 @@ export default function TrackStudio() {
                       // so the selection stays on the part you're editing instead of jumping to
                       // whatever now sits where it used to.
                       if ("at" in patch) {
-                        const moved = program.features.map((f, i) =>
-                          i === on.index
-                            ? ({ ...f, ...patch } as TrackFeature)
-                            : f,
+                        const moved = program.features.map((f, i) => 
+                          i === on.index ? ({ ...f, ...patch } as TrackFeature) : f,
                         );
-                        const row = lapSteps({
-                          ...program,
-                          features: moved,
-                        }).findIndex(
+                        const row = lapSteps({...program, features: moved }).findIndex(
                           (x) => x.kind === "feature" && x.index === on.index,
                         );
                         if (row >= 0) setScope(row);
@@ -1524,15 +1402,12 @@ export default function TrackStudio() {
                     // Only a jump that is already a drawn shape has loose points to move;
                     // every other kind is reshaped through its own numbers.
                     onShape: (shape: { u: number; h: number }[]) => {
-                      if (on.kind !== "feature" || on.feature.kind !== "custom")
-                        return;
+                      if (on.kind !== "feature" || on.feature.kind !== "custom") return;
                       setTouched(true);
                       void settle({
                         ...program,
                         features: program.features.map((f, i) =>
-                          i === on.index
-                            ? ({ ...on.feature, shape } as TrackFeature)
-                            : f,
+                          i === on.index ? ({ ...on.feature, shape } as TrackFeature) : f,
                         ),
                       });
                     },
@@ -1562,10 +1437,8 @@ export default function TrackStudio() {
               <div className="flex-none px-4 pb-4 pt-4">
                 <div className="flex items-baseline gap-2">
                   <div className="text-[11px] font-semibold uppercase tracking-[0.09em] text-faint">
-                    {t("track.stepNumber", {
-                      n: String((scope ?? 0) + 1).padStart(2, "0"),
-                    })}{" "}
-                    — {stepName(selected, t)}
+                    {t("track.stepNumber", { n: String((scope ?? 0) + 1).padStart(2, "0") })}
+                      {stepName(selected, t)}
                   </div>
                   {/* The way back to the track's own settings. Esc does the same. */}
                   <button
@@ -1598,24 +1471,17 @@ export default function TrackStudio() {
                         f.ground && selected.kind === "feature"
                           ? liftFeature(selected.feature, v)
                           : selected.kind === "feature"
-                            ? editFeature(selected.index, {
-                                [f.key]: v,
-                              } as Partial<TrackFeature>)
+                            ? editFeature(selected.index, { [f.key]: v} as Partial<TrackFeature>)
                             : editSegment(selected.index, {
                                 [f.key]:
-                                  f.key === "radius"
-                                    ? selected.kind === "left"
-                                      ? -v
-                                      : v
-                                    : v,
+                                  f.key === "radius" ? (selected.kind === "left" ? -v : v) : v,
                               } as Partial<TrackSegment>)
                       }
                     />
                   ))}
                 </div>
                 {selected.kind === "feature" &&
-                  (selected.feature.kind === "tabletop" ||
-                    selected.feature.kind === "double") && (
+                  (selected.feature.kind === "tabletop" || selected.feature.kind === "double") && (
                     <label className="mt-4 flex cursor-default items-start justify-between gap-3">
                       <span className="text-[12px]">
                         {t("track.finishLine")}
@@ -1631,8 +1497,7 @@ export default function TrackStudio() {
                   )}
                 <button
                   onClick={() => {
-                    if (selected.kind === "feature")
-                      removeFeature(selected.index);
+                    if (selected.kind === "feature") removeFeature(selected.index);
                     else removeSegment(selected.index);
                     setScope(null);
                   }}
@@ -1656,9 +1521,7 @@ export default function TrackStudio() {
                 <div className="mt-3 space-y-1.5">
                   <input
                     value={program.name}
-                    onChange={(e) =>
-                      void settle({ ...program, name: e.target.value })
-                    }
+                    onChange={(e) => void settle({ ...program, name: e.target.value })}
                     className="w-full border border-input bg-card px-2.5 py-1.5 text-[13.5px] font-bold outline-none focus:border-ring"
                     aria-label={t("track.name")}
                     placeholder={t("track.name")}
@@ -1666,18 +1529,14 @@ export default function TrackStudio() {
                   <div className="flex gap-2">
                     <input
                       value={program.author}
-                      onChange={(e) =>
-                        void settle({ ...program, author: e.target.value })
-                      }
+                      onChange={(e) => void settle({ ...program, author: e.target.value })}
                       placeholder={t("track.author")}
                       className="min-w-0 flex-1 border border-input bg-card px-2.5 py-1.5 text-[12px] text-muted-foreground outline-none focus:border-ring"
                       aria-label={t("track.author")}
                     />
                     <input
                       value={program.location}
-                      onChange={(e) =>
-                        void settle({ ...program, location: e.target.value })
-                      }
+                      onChange={(e) => void settle({ ...program, location: e.target.value })}
                       placeholder={t("track.location")}
                       className="min-w-0 flex-1 border border-input bg-card px-2.5 py-1.5 text-[12px] text-muted-foreground outline-none focus:border-ring"
                       aria-label={t("track.location")}
@@ -1693,10 +1552,7 @@ export default function TrackStudio() {
                     max={2000}
                     unit="m"
                     onChange={(v) =>
-                      void settleTerrain({
-                        sizeX: Math.max(100, v),
-                        sizeZ: Math.max(100, v),
-                      })
+                      void settleTerrain({ sizeX: Math.max(100, v), sizeZ: Math.max(100, v) })
                     }
                   />
                   <PropRow
@@ -1723,10 +1579,7 @@ export default function TrackStudio() {
                         ...program,
                         terrain: {
                           ...program.terrain,
-                          relief: {
-                            ...program.terrain.relief,
-                            amplitude: Math.max(0, v),
-                          },
+                          relief: {...program.terrain.relief, amplitude: Math.max(0, v) },
                         },
                       })
                     }
@@ -1780,8 +1633,7 @@ export default function TrackStudio() {
                   {/* Only a stadium discipline lines its lanes, so nothing else is asked. The
                       value falls back to `tuff`, which is what this was called before it grew
                       banners and none, so an old project still shows its own answer. */}
-                  {(program.discipline === "sx" ||
-                    program.discipline === "smx") && (
+                  {(program.discipline === "sx" || program.discipline === "smx") && (
                     <div>
                       <div className="font-cond text-[10px] font-semibold uppercase tracking-[0.22em] text-faint">
                         {t("track.border")}
@@ -1792,10 +1644,7 @@ export default function TrackStudio() {
                           options={borders}
                           value={program.border ?? program.tuff ?? "soft"}
                           onChange={(v) =>
-                            void settle({
-                              ...program,
-                              border: v,
-                              tuff: undefined,
+                            void settle({ ...program, border: v, tuff: undefined,
                             })
                           }
                         />
@@ -1814,45 +1663,28 @@ export default function TrackStudio() {
                           size="sm"
                           options={venues}
                           value={program.venue ?? "stadium"}
-                          onChange={(v) =>
-                            void settle({ ...program, venue: v })
+                          onChange={(v) => void settle({ ...program, venue: v })
                           }
                         />
                       </div>
                     </div>
                   )}
                 </div>
+
                 {/* Measured, not claimed — the same figures taken of published tracks. */}
                 {preview && (
                   <dl className="mt-3 grid grid-cols-2 gap-x-3 gap-y-1 border-t border-border pt-2 text-[12px]">
-                    <Row
-                      label={t("track.measured")}
-                      value={`${preview.measuredLengthM.toFixed(0)} m`}
-                    />
-                    <Row
-                      label={t("track.width")}
-                      value={`${preview.measuredWidthM.toFixed(1)} m`}
-                    />
-                    <Row
-                      label={t("track.lips")}
-                      value={`${preview.lips} · ${preview.lipsPerKm.toFixed(0)}/km`}
-                    />
-                    <Row
-                      label={t("track.steepest")}
-                      value={`${preview.slopeP99Deg.toFixed(0)}°`}
-                    />
-                    <Row
-                      label={t("track.relief")}
-                      value={`${preview.reliefP90M.toFixed(2)} m`}
-                    />
-                    <Row
-                      label={t("track.budget")}
-                      value={`${preview.usedM.toFixed(1)} / ${preview.budgetM.toFixed(0)} m`}
-                    />
+                    <Row label={t("track.measured")} value={`${preview.measuredLengthM.toFixed(0)} m`} />
+                    <Row label={t("track.width")} value={`${preview.measuredWidthM.toFixed(1)} m`} />
+                    <Row label={t("track.lips")} value={`${preview.lips} · ${preview.lipsPerKm.toFixed(0)}/km`} />
+                    <Row label={t("track.steepest")} value={`${preview.slopeP99Deg.toFixed(0)}°`} />
+                    <Row label={t("track.relief")} value={`${preview.reliefP90M.toFixed(2)} m`} />
+                    <Row label={t("track.budget")} value={`${preview.usedM.toFixed(1)} / ${preview.budgetM.toFixed(0)} m`} />
                   </dl>
                 )}
+
                 <div className="mt-3 border-t border-border pt-3">
-                  <span className="block font-cond text-[10px] font-semibold uppercase tracking-[0.22em] text-center p-1 text-faint">
+                  <span className="block text-center p-1 font-cond text-[10px] font-semibold uppercase tracking-[0.22em] text-faint">
                     {t("track.startOver")}
                   </span>
                   <div className="mt-2 flex flex-col items-center gap-3">
@@ -1920,8 +1752,8 @@ export default function TrackStudio() {
                     fatal.length > 0
                       ? "bg-destructive"
                       : problems.length > 0 || notes.length > 0
-                        ? "bg-warning"
-                        : "bg-success",
+                      ? "bg-warning"
+                      : "bg-success",
                   )}
                 />
                 <h3 className="flex-1 text-[11px] font-semibold uppercase tracking-[0.09em] text-faint">
@@ -1930,11 +1762,7 @@ export default function TrackStudio() {
                 <span
                   className={cn(
                     "tabular-figures font-cond text-[10.5px]",
-                    fatal.length > 0
-                      ? "text-destructive"
-                      : problems.length > 0
-                        ? "text-warning"
-                        : "text-faint",
+                    fatal.length > 0 ? "text-destructive" : problems.length > 0 ? "text-warning" : "text-faint",
                   )}
                 >
                   {fatal.length > 0
@@ -1942,8 +1770,8 @@ export default function TrackStudio() {
                     : problems.length > 0
                       ? t("track.problemCount", { count: problems.length })
                       : notes.length > 0
-                        ? t("track.noteCount", { count: notes.length })
-                        : t("track.checksOk")}
+                      ? t("track.noteCount", { count: notes.length })
+                      : t("track.checksOk")}
                 </span>
               </div>
 
@@ -1978,9 +1806,7 @@ export default function TrackStudio() {
                   ))}
               </div>
 
-              {[...fatal, ...problems].some((p) =>
-                p.includes("doesn't close"),
-              ) && (
+              {[...fatal, ...problems].some((p) => p.includes("doesn't close") ) && (
                 <Button
                   variant="outline"
                   size="sm"
@@ -2010,18 +1836,14 @@ export default function TrackStudio() {
           <span
             className={cn(
               "font-cond text-[11px] font-semibold uppercase tracking-[0.18em]",
-              blocked
-                ? "text-destructive"
-                : problems.length > 0
-                  ? "text-warning"
-                  : "text-success",
+              blocked ? "text-destructive" : problems.length > 0 ? "text-warning" : "text-success",
             )}
           >
             {blocked
               ? t("track.problemCount", { count: fatal.length })
               : problems.length > 0
-                ? t("track.problemCount", { count: problems.length })
-                : t("track.valid")}
+              ? t("track.problemCount", { count: problems.length })
+              : t("track.valid")}
           </span>
           {!blocked && problems.length === 0 && notes.length > 0 && (
             <>
@@ -2046,11 +1868,7 @@ export default function TrackStudio() {
             {t("track.live")}
           </label>
           {/* Not held back by the checks: a half-built lap is exactly what's worth keeping. */}
-          <Button
-            variant="ghost"
-            onClick={() => void saveProject()}
-            title={file ?? undefined}
-          >
+          <Button variant="ghost" onClick={() => void saveProject()} title={file ?? undefined}>
             {t("track.save")}
           </Button>
           <Button
@@ -2065,35 +1883,23 @@ export default function TrackStudio() {
             onClick={guarded(onPreview)}
             disabled={blocked || busy !== null}
           >
-            <RefreshCw
-              className={cn("size-3.5", busy === "preview" && "animate-spin")}
-            />
+            <RefreshCw className={cn("size-3.5", busy === "preview" && "animate-spin")} />
             {t("track.preview")}
           </Button>
-          <Button
-            onClick={guarded(async () => onBuild())}
-            disabled={blocked || busy !== null}
-          >
+          <Button onClick={guarded(async () => onBuild())} disabled={blocked || busy !== null}>
             {building ? t("track.compiling") : t("track.compile")}
           </Button>
         </div>
       )}
 
-      <AlertDialog
-        open={confirming !== null}
-        onOpenChange={(o) => !o && setConfirming(null)}
-      >
+      <AlertDialog open={confirming !== null} onOpenChange={(o) => !o && setConfirming(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
-              {confirming?.kind === "problems"
-                ? t("track.anywayTitle")
-                : t("track.replaceTitle")}
+              {confirming?.kind === "problems" ? t("track.anywayTitle") : t("track.replaceTitle")}
             </AlertDialogTitle>
             <AlertDialogDescription>
-              {confirming?.kind === "problems"
-                ? t("track.anywayBody")
-                : t("track.replaceBody")}
+              {confirming?.kind === "problems" ? t("track.anywayBody") : t("track.replaceBody")}
             </AlertDialogDescription>
           </AlertDialogHeader>
           {confirming?.kind === "problems" && (
@@ -2114,9 +1920,7 @@ export default function TrackStudio() {
                 void go?.run();
               }}
             >
-              {confirming?.kind === "problems"
-                ? t("track.anywayConfirm")
-                : t("track.replaceConfirm")}
+              {confirming?.kind === "problems" ? t("track.anywayConfirm") : t("track.replaceConfirm")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -2159,8 +1963,7 @@ function stepIcon(step: LapStep): LucideIcon {
   if (step.kind === "right") return CornerUpRight;
   // A step-down is a step-up with a negative height, and drawing both the same way hides
   // the one thing that tells them apart.
-  if (step.feature.kind === "stepUp" && step.feature.height < 0)
-    return TrendingDown;
+  if (step.feature.kind === "stepUp" && step.feature.height < 0) return TrendingDown;
   return FEATURE_ICON[step.feature.kind];
 }
 
@@ -2185,8 +1988,7 @@ function segLength(seg: TrackSegment): number {
 /** How far round the lap a segment begins. */
 function segmentStart(segments: TrackSegment[], index: number): number {
   let at = 0;
-  for (let i = 0; i < Math.min(index, segments.length); i++)
-    at += segLength(segments[i]);
+  for (let i = 0; i < Math.min(index, segments.length); i++) at += segLength(segments[i]);
   return at;
 }
 
@@ -2228,25 +2030,9 @@ interface StepField {
 
 function fieldsOf(step: LapStep, ground?: number): StepField[] {
   const len = (v: number, max = 400) =>
-    ({
-      key: "length",
-      label: "length",
-      value: v,
-      step: 1,
-      min: 2,
-      max,
-      unit: "m",
-    }) as StepField;
+    ({ key: "length", label: "length", value: v, step: 1, min: 2, max, unit: "m" }) as StepField;
   const rise = (v: number) =>
-    ({
-      key: "rise",
-      label: "rise",
-      value: v,
-      step: 0.5,
-      min: -20,
-      max: 20,
-      unit: "m",
-    }) as StepField;
+    ({ key: "rise", label: "rise", value: v, step: 0.5, min: -20, max: 20, unit: "m" }) as StepField;
   if (step.kind === "straight") {
     const seg = step.segment as { length: number; rise: number };
     return [len(seg.length), rise(seg.rise ?? 0)];
@@ -2256,24 +2042,9 @@ function fieldsOf(step: LapStep, ground?: number): StepField[] {
     return [
       // Signed on the wire — positive turns right — but shown as the radius you would
       // measure, because the arrow already says which way it goes.
-      {
-        key: "radius",
-        label: "radius",
-        value: Math.abs(seg.radius),
-        step: 1,
-        min: 5,
-        max: 200,
-        unit: "m",
-      },
-      {
-        key: "angle",
-        label: "angle",
-        value: seg.angle,
-        step: 5,
-        min: 0,
-        max: 180,
-        unit: "°",
-      },
+
+      { key: "radius", label: "radius", value: Math.abs(seg.radius), step: 1, min: 5, max: 200, unit: "m" },
+      { key: "angle", label: "angle", value: seg.angle, step: 5, min: 0, max: 180, unit: "°" },
       rise(seg.rise ?? 0),
     ];
   }
@@ -2294,77 +2065,21 @@ function fieldsOf(step: LapStep, ground?: number): StepField[] {
   switch (f.kind) {
     case "double":
       return [
-        {
-          key: "height",
-          label: "height",
-          value: f.height,
-          step: 0.1,
-          min: 0,
-          max: 6,
-          unit: "m",
-        },
-        {
-          key: "gap",
-          label: "gap",
-          value: f.gap,
-          step: 1,
-          min: 0,
-          max: 40,
-          unit: "m",
-        },
-        {
-          key: "lip",
-          label: "lip",
-          value: f.lip,
-          step: 0.5,
-          min: 1,
-          max: 15,
-          unit: "m",
-        },
+        { key: "height", label: "height", value: f.height, step: 0.1, min: 0, max: 6, unit: "m" },
+        { key: "gap", label: "gap", value: f.gap, step: 1, min: 0, max: 40, unit: "m" },
+        { key: "lip", label: "lip", value: f.lip, step: 0.5, min: 1, max: 15, unit: "m" },
         up,
       ];
     case "whoops":
       return [
-        {
-          key: "height",
-          label: "height",
-          value: f.height,
-          step: 0.05,
-          min: 0,
-          max: 2,
-          unit: "m",
-        },
-        {
-          key: "count",
-          label: "count",
-          value: f.count,
-          step: 1,
-          min: 2,
-          max: 20,
-          unit: "×",
-        },
-        {
-          key: "spacing",
-          label: "spacing",
-          value: f.spacing,
-          step: 0.5,
-          min: 1,
-          max: 10,
-          unit: "m",
-        },
+        { key: "height", label: "height", value: f.height, step: 0.05, min: 0, max: 2, unit: "m" },
+        { key: "count", label: "count", value: f.count, step: 1, min: 2, max: 20, unit: "×" },
+        { key: "spacing", label: "spacing", value: f.spacing, step: 0.5, min: 1, max: 10, unit: "m" },
         up,
       ];
     case "rut":
       return [
-        {
-          key: "depth",
-          label: "depth",
-          value: f.depth,
-          step: 0.05,
-          min: 0,
-          max: 1,
-          unit: "m",
-        },
+        { key: "depth", label: "depth", value: f.depth, step: 0.05, min: 0, max: 1, unit: "m" },
         len(f.length, 120),
         up,
       ];
@@ -2373,15 +2088,7 @@ function fieldsOf(step: LapStep, ground?: number): StepField[] {
       return [len(f.length, 120), up];
     case "stepUp":
       return [
-        {
-          key: "height",
-          label: "height",
-          value: f.height,
-          step: 0.1,
-          min: -6,
-          max: 6,
-          unit: "m",
-        },
+        { key: "height", label: "height", value: f.height, step: 0.1, min: -6, max: 6, unit: "m" },
         len(f.length, 120),
         up,
       ];
@@ -2389,15 +2096,7 @@ function fieldsOf(step: LapStep, ground?: number): StepField[] {
       return [len(f.length, 200), up];
     default:
       return [
-        {
-          key: "height",
-          label: "height",
-          value: f.height,
-          step: 0.1,
-          min: 0,
-          max: 6,
-          unit: "m",
-        },
+        { key: "height", label: "height", value: f.height, step: 0.1, min: 0, max: 6, unit: "m" },
         len(f.length, 120),
         up,
       ];
@@ -2414,10 +2113,7 @@ function summarise(step: LapStep, t: ReturnType<typeof useT>): string {
   const m = (v: number) => `${v.toFixed(v < 10 ? 1 : 0)} m`;
   if (step.kind === "straight") {
     const seg = step.segment as { length: number; rise: number };
-    return (
-      m(seg.length) +
-      (seg.rise ? ` · ${seg.rise > 0 ? "+" : ""}${seg.rise.toFixed(1)} m` : "")
-    );
+    return m(seg.length) + (seg.rise ? ` · ${seg.rise > 0 ? "+" : ""}${seg.rise.toFixed(1)} m` : "");
   }
   if (step.kind === "left" || step.kind === "right") {
     const seg = step.segment as { radius: number; angle: number; rise: number };
@@ -2490,15 +2186,7 @@ function Legend({ className, label }: { className: string; label: string }) {
 }
 
 /** A measurement of the lap, over the picture of it. */
-function Stat({
-  value,
-  unit,
-  label,
-}: {
-  value: string;
-  unit?: string;
-  label: string;
-}) {
+function Stat({ value, unit, label }: { value: string; unit?: string; label: string }) {
   return (
     <div className="min-w-[76px] border-t border-foreground/20 pt-[7px]">
       <div className="tabular-figures font-cond text-[25px] font-bold leading-none text-foreground">
@@ -2539,16 +2227,12 @@ function GroundLook({
   // What has already been imported, so a slot filled by a saved project shows its picture
   // rather than a hash.
   useEffect(() => {
-    void listTrackTextures()
-      .then(setOwn)
-      .catch(() => setOwn([]));
+    void listTrackTextures().then(setOwn).catch(() => setOwn([]));
   }, []);
 
   /** Nothing picked at all is left out of the file, so an untouched track saves as before. */
   function put(next: TextureSet) {
-    onChange(
-      next.preset === "ride" && next.sheets?.length === 0 ? undefined : next,
-    );
+    onChange(next.preset === "ride" && next.sheets?.length === 0 ? undefined : next);
   }
 
   function setPreset(p: TexturePreset) {
@@ -2558,25 +2242,14 @@ function GroundLook({
   async function pick(slot: SheetSlot) {
     const path = await openDialog({
       multiple: false,
-      filters: [
-        {
-          name: t("track.look.images"),
-          extensions: ["png", "jpg", "jpeg", "webp", "bmp", "tga"],
-        },
-      ],
+      filters: [{ name: t("track.look.images"), extensions: ["png", "jpg", "jpeg", "webp", "bmp", "tga"] }],
     });
     if (typeof path !== "string") return;
     setBusy(slot);
     try {
       const added = await importTrackTexture(path);
       setOwn((was) => [added, ...was.filter((o) => o.id !== added.id)]);
-      put({
-        preset,
-        sheets: [
-          ...sheets.filter((s) => s.slot !== slot),
-          { slot, id: added.id },
-        ],
-      });
+      put({ preset, sheets: [...sheets.filter((s) => s.slot !== slot), { slot, id: added.id }] });
     } catch (e) {
       // Why, not "failed": every refusal from the store says what was wrong with the file.
       toast.error(String(e));
@@ -2634,10 +2307,7 @@ function GroundLook({
                   )}
                   style={
                     img
-                      ? {
-                          backgroundImage: `url(${img.thumb})`,
-                          backgroundSize: "cover",
-                        }
+                      ? { backgroundImage: `url(${img.thumb})`, backgroundSize: "cover" }
                       : undefined
                   }
                 >
@@ -2649,7 +2319,7 @@ function GroundLook({
                     title={t("track.look.clear")}
                     className="absolute -right-1 -top-1 h-4 w-4 cursor-default border border-border bg-background text-[10px] leading-none text-muted-foreground hover:text-foreground"
                   >
-                
+                    ×
                   </button>
                 )}
               </div>
@@ -2671,19 +2341,13 @@ function GroundLook({
  * — the middle of the slider is what a real round measures. A national spaces its jumps by a
  * different rule and never reads it, so it only appears where it does something.
  */
-function DensitySlider({
-  value,
-  onChange,
-}: {
-  value: number;
-  onChange: (v: number) => void;
-}) {
+function DensitySlider({ value, onChange }: { value: number; onChange: (v: number) => void }) {
   const t = useT();
   const span = DENSITY_RANGE.max - DENSITY_RANGE.min;
   const word = value < 0.9 ? "sparse" : value > 1.1 ? "packed" : "real";
   return (
     <label className="flex items-center gap-2">
-      <span className="shrink-0 whitespace-nowrap font-cond text-[10px] font-semibold uppercase tracking-[0.22em] text-faint">
+      <span className="font-cond text-[10px] font-semibold uppercase tracking-[0.22em] text-faint">
         {t("track.density")}
       </span>
       <input
@@ -2693,15 +2357,11 @@ function DensitySlider({
         step={DENSITY_RANGE.step}
         value={value}
         onChange={(e) => onChange(Number(e.target.value))}
-        style={{
-          ["--fill" as string]: `${((value - DENSITY_RANGE.min) / span) * 100}%`,
-        }}
-        className="min-w-0 flex-1"
+        style={{ ["--fill" as string]: `${((value - DENSITY_RANGE.min) / span) * 100}%` }}
+        className="w-[104px]"
         aria-label={t("track.density")}
       />
-      <span className="w-[40px] shrink-0 text-left text-[11px] text-faint">
-        {t(`track.density.${word}`)}
-      </span>
+      <span className="w-[52px] text-[11px] text-faint">{t(`track.density.${word}`)}</span>
     </label>
   );
 }
@@ -2752,15 +2412,8 @@ function PropRow({
           className="min-w-0 flex-1"
           aria-label={label}
         />
-        <Num
-          value={value}
-          step={step}
-          onChange={onChange}
-          className="w-[64px]"
-        />
-        {unit && (
-          <span className="w-3 flex-none text-[11px] text-faint">{unit}</span>
-        )}
+        <Num value={value} step={step} onChange={onChange} className="w-[64px]" />
+        {unit && <span className="w-3 flex-none text-[11px] text-faint">{unit}</span>}
       </div>
     </div>
   );
