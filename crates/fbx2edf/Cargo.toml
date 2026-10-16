@@ -29,10 +29,12 @@ rayon = "1"
 log = "0.4"
 walkdir = "2"
 tauri = { version = "2", optional = true }
+notify = { version = "6", optional = true }
+notify-debouncer-mini = { version = "0.4", optional = true }
 
 [features]
 # `commands`: the Convert screen's Tauri commands, for Frost's Studio and Frost Converter.
-tauri = ["dep:tauri"]
+tauri = ["dep:tauri", "dep:notify", "dep:notify-debouncer-mini"]
 
 [dev-dependencies]
 tempfile = "3"

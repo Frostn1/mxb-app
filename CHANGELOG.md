@@ -5,6 +5,8 @@
 ### Added
 - **Output name for Convert.** When one model is converted, an optional name field sets the .edf's file name. Leave it empty for the usual name. `.edf` is added when missing, and characters Windows file names can't hold are removed. A bike's shadow stays `shadow_model.edf`, the .shd files keep their material names, and the .hrc files point at the new name. Frost Converter's command line has `--name NAME` too.
 - **Saved export scripts.** Convert remembers the last export script you used and puts it back when the app starts. Save a script under its name to pick it again later from a short list, and remove the ones you don't need. They are kept in the app's own config folder, not next to your files.
+- **Convert and Preview tabs.** Convert keeps the files, layout, output, name and export script, with the rarely used settings under More. After converting, Preview opens with the model, the .shd list beside the view (it scrolls on its own, each material opens on click and lights up in the view) and one Open folder in Files written.
+- **Watch.** In Preview, tick Watch and the model is converted again whenever a source file is saved, so the view follows your export.
 
 ## 2026-10-15 — Frost Converter v0.1.3 — .shd files you can find
 

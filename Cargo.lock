@@ -1952,6 +1952,8 @@ dependencies = [
  "image",
  "log",
  "md-5",
+ "notify",
+ "notify-debouncer-mini",
  "rayon",
  "serde",
  "serde_json",

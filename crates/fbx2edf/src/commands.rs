@@ -155,3 +155,45 @@ pub async fn fbx_convert(
     RUNNING.store(false, Ordering::SeqCst);
     result?
 }
+
+/// The debouncer watching the Preview's sources: dropping it stops the watch.
+static WATCH: std::sync::Mutex<Option<notify_debouncer_mini::Debouncer<notify::RecommendedWatcher>>> = std::sync::Mutex::new(None);
+
+#[derive(Clone, Serialize)]
+struct WatchEvent {
+    path: String,
+}
+
+/// Watch these source files; when one changes (an export saved over it), `fbx-source-changed`
+/// is emitted with its path once the writes settle. Replaces any earlier watch.
+#[tauri::command]
+pub fn fbx_watch(app: tauri::AppHandle, paths: Vec<String>) -> Result<(), String> {
+    use notify::RecursiveMode;
+    let watched: Vec<PathBuf> = paths.iter().map(PathBuf::from).collect();
+    let mut dirs: Vec<PathBuf> = watched.iter().filter_map(|p| p.parent().map(Path::to_path_buf)).collect();
+    dirs.sort();
+    dirs.dedup();
+    let list = watched.clone();
+    let mut debouncer = notify_debouncer_mini::new_debouncer(job::WATCH_SETTLE, move |res: notify_debouncer_mini::DebounceEventResult| {
+        let Ok(events) = res else { return };
+        for e in events {
+            if let Some(hit) = job::watched_match(&list, &e.path) {
+                let _ = app.emit("fbx-source-changed", WatchEvent { path: hit.to_string_lossy().into_owned() });
+            }
+        }
+    })
+    .map_err(|e| e.to_string())?;
+    for d in &dirs {
+        debouncer.watcher().watch(d, RecursiveMode::NonRecursive).map_err(|e| format!("{}: {e}", d.display()))?;
+    }
+    *WATCH.lock().map_err(|e| e.to_string())? = Some(debouncer);
+    Ok(())
+}
+
+/// Stop watching.
+#[tauri::command]
+pub fn fbx_unwatch() {
+    if let Ok(mut w) = WATCH.lock() {
+        *w = None;
+    }
+}
