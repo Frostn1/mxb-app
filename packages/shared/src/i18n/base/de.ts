@@ -238,6 +238,11 @@ export const de: Record<keyof typeof en, string> = {
   "survey.setting.label": "Gelegentliche Fragen",
   "survey.setting.desc":
     "Die App darf ab und zu nach Feedback fragen.",
+  "support.title": "Frost unterstützen",
+  "support.body": "Gefallen dir die Apps? Spendier mir einen Kaffee.",
+  "support.support": "Unterstützen",
+  "support.later": "Später erinnern",
+  "support.never": "Nicht mehr anzeigen",
   "uninstall.label": "{{app}} deinstallieren",
   "uninstall.desc": "Entfernt diese App. Dein Spiel und andere Apps bleiben.",
   "uninstall.manual": "Per Paketmanager installiert. Entferne sie dort:",

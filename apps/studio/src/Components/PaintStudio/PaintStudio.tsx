@@ -46,6 +46,7 @@ import {
 } from "@frost/shared/api/mods";
 import type { SavedPaint, StudioImage } from "@frost/shared/types";
 import { useT } from "@/i18n";
+import { supportMoment } from "@frost/shared/api/support";
 
 /**
  * Paint Studio — build a `.pnt` out of ordinary image files.
@@ -220,6 +221,7 @@ export default function PaintStudio({ onSendToDesigner }: PaintStudioProps) {
         });
         setSaved(outcome);
         toast.success(t("paints.saved", { path: outcome.path }));
+        supportMoment();
       } catch (e) {
         toast.error(String(e).replace(/^Error:\s*/, ""));
       } finally {

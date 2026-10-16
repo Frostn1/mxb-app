@@ -53,6 +53,7 @@ pub mod scenery;
 pub mod searchmiss;
 pub mod securesource;
 pub mod steamid;
+pub mod support;
 pub mod survey;
 pub mod uninstall;
 pub mod texstore;

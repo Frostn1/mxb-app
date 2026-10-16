@@ -15,14 +15,12 @@
  */
 
 /**
- * The Buy Me a Coffee page every button here opens.
- *
- * The handle is the auto-generated one the account was created with, not a word — it's
- * meant to be opened, never typed, so don't "tidy" it. `supportUrl` in the manifest
- * overrides it, which is what to reach for if the page ever moves: a shipped build
- * can't be told about a new link, but the manifest can.
+ * The Buy Me a Coffee page every button here opens. Lives in the shared package, where the
+ * support card reads it too. `supportUrl` in the manifest overrides it, which is what to reach
+ * for if the page ever moves: a shipped build can't be told about a new link, but the
+ * manifest can.
  */
-export const SUPPORT_URL = "https://buymeacoffee.com/22ypnh5yfme";
+export { SUPPORT_URL } from "@frost/shared/api/support";
 
 /** Read from `main`, not from a tag: the list has to move faster than releases do. */
 export const SUPPORTERS_URL =

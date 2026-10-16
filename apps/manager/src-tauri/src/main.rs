@@ -8998,6 +8998,9 @@ fn main() {
             // it answers the question counters cannot, which is whether any of this is any
             // good. Nothing is fetched or asked when either switch is off.
             mxb_core::survey::start(handle, usage::MANAGER);
+            // The support card's launch count. Counted whatever the build; whether it is ever shown
+            // is decided in `support::due`.
+            mxb_core::support::start(handle, usage::MANAGER);
             // Warm an empty address book from the shared one, once, before anybody needs it.
             // The Servers tab already rebuilds its whole list with `GETINFO` when the master
             // won't answer — but only from addresses this install has been told about, so on a
@@ -9225,6 +9228,11 @@ fn main() {
             mxb_core::survey::survey_dismiss,
             mxb_core::survey::set_survey_enabled,
             mxb_core::searchmiss::report_search_miss,
+            mxb_core::support::support_due,
+            mxb_core::support::support_shown,
+            mxb_core::support::support_later,
+            mxb_core::support::support_opened,
+            mxb_core::support::support_never,
             mxb_core::uninstall::uninstall_info,
             mxb_core::uninstall::uninstall_app,
             set_launch_at_startup,

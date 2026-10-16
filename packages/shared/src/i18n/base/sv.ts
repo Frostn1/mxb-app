@@ -239,6 +239,11 @@ export const sv: Record<keyof typeof en, string> = {
   "survey.setting.label": "Tillfälliga frågor",
   "survey.setting.desc":
     "Låter appen be om feedback då och då.",
+  "support.title": "Stöd Frost",
+  "support.body": "Gillar du apparna? Bjud mig på en kaffe.",
+  "support.support": "Stöd",
+  "support.later": "Påminn mig senare",
+  "support.never": "Visa inte igen",
   "uninstall.label": "Avinstallera {{app}}",
   "uninstall.desc": "Tar bort den här appen. Ditt spel och andra appar finns kvar.",
   "uninstall.manual": "Installerad via din pakethanterare. Ta bort den där:",

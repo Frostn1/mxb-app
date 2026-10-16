@@ -93,6 +93,7 @@ import {
   type TrackSegment,
   type TrackToolsStatus,
 } from "../../../api/trackgen";
+import { supportMoment } from "@frost/shared/api/support";
 
 const linkBtn =
   "cursor-default font-cond text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground hover:text-foreground disabled:opacity-40";
@@ -509,6 +510,7 @@ export default function TrackStudio() {
     try {
       const wrote = await exportTrackSource(program, dir);
       toast.success(t("track.exported", { count: wrote.length }), { description: dir });
+      supportMoment();
     } catch (e) {
       toast.error(t("track.exportFailed"), { description: String(e) });
     } finally {

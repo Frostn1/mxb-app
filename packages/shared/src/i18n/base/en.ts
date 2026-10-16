@@ -244,6 +244,11 @@ export const en = {
   "survey.setting.label": "Occasional questions",
   "survey.setting.desc":
     "Lets the app ask for feedback now and then.",
+  "support.title": "Support Frost",
+  "support.body": "Like the apps? Buy me a coffee.",
+  "support.support": "Support",
+  "support.later": "Remind me later",
+  "support.never": "Don't show again",
   "uninstall.label": "Uninstall {{app}}",
   "uninstall.desc": "Removes this app. Your game and other apps stay.",
   "uninstall.manual": "Installed by your package manager. Remove it there:",
