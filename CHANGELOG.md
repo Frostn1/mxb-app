@@ -9,10 +9,11 @@
 - **Watch.** In Preview, tick Watch and the model is converted again whenever a source file is saved, so the view follows your export.
 - **Textures found beside the model.** Preview looks for the pictures a model uses beside the .edf, in its paints and textures folders and in a Textures folder next to it, whatever their case, and lists the ones it can't find.
 - **Gfx labels.** Each dot on the bike has a label (L grip, R grip, Engine sprocket, Exhaust, the levers), and hovering one shows its gfx.cfg key.
-- **Gfx rear sprocket and chain.** A fixed Rear sprocket marker on the rear axle, in line with the engine sprocket, and the chain run between the two. gfx.cfg has no key for it.
+- **Gfx rear sprocket and chain.** On an assembled bike, a fixed Rear sprocket marker on the rear axle, in line with the engine sprocket, and the chain run between the two. gfx.cfg has no key for it.
+- **Gfx reopens the last bike** when the tab opens.
 
 ### Fixed
-- **Bikes drawn grey in the 3D view.** A mesh with an untextured black material, or a sheet whose name ends in _bump, lost its texture bindings. The Gfx tab also looks for missing sheets in the folders above, and says "Textures in a .pkz" when the rest are packed.
+- **Bikes drawn grey in the 3D view.** A mesh with an untextured black material, or a sheet whose name ends in _bump, lost its texture bindings. The Gfx tab draws a bike from its loose files only and never opens a .pkz. It looks for missing sheets in the folders around the model and says "Textures in a .pkz" when the rest could only be packed.
 - **Shock and spring textures.** Parts that sit a little further from their placement in the file get their own texture instead of the frame's.
 
 ## 2026-10-15 — Frost Converter v0.1.3 — .shd files you can find

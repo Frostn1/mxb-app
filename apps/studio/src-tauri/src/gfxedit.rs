@@ -68,16 +68,6 @@ fn bike_id(bike_dir: &Path) -> Option<String> {
     eq_ci(parent, "bikes").then(|| bike_dir.file_name().map(|n| n.to_string_lossy().into_owned()))?
 }
 
-/// The folder holding `mods`, for the swap preview to resolve the bike against.
-fn mods_path(bike_dir: &Path) -> Option<String> {
-    let bikes = bike_dir.parent()?;
-    let mods = bikes.parent()?;
-    if !eq_ci(bikes.file_name()?, "bikes") || !eq_ci(mods.file_name()?, "mods") {
-        return None;
-    }
-    Some(mods.parent()?.to_string_lossy().into_owned())
-}
-
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GfxFile {
@@ -153,17 +143,14 @@ pub async fn gfx_preview(path: String) -> Result<GfxPreview, String> {
     .map_err(|e| e.to_string())?
 }
 
+/// Loose files only: the bike folder, and a FrostMod model not in use laid over it. A
+/// `.pkz` is never opened here.
 fn preview_model(r: &Resolved) -> Result<viewer::BikeModel, String> {
-    match (&r.variant, r.active, mods_path(&r.bike_dir)) {
-        (Some(v), false, Some(mods)) => {
-            let bike = r.bike_dir.file_name().unwrap_or_default().to_string_lossy().into_owned();
-            viewer::preview_model_swap_blocking(&mods, &bike, v, None)
-        }
-        (Some(_), false, None) => {
-            let dir = r.gfx.parent().unwrap_or(&r.bike_dir).to_string_lossy().into_owned();
-            viewer::load_bike_model_blocking(dir, None)
-        }
-        _ => viewer::load_bike_model_blocking(r.bike_dir.to_string_lossy().into_owned(), None),
+    let own = r.gfx.parent().unwrap_or(&r.bike_dir);
+    if own == r.bike_dir {
+        viewer::load_loose_bike_model_blocking(&[&r.bike_dir])
+    } else {
+        viewer::load_loose_bike_model_blocking(&[&r.bike_dir, own])
     }
 }
 
@@ -241,7 +228,6 @@ mod tests {
         let r = resolve(bike.to_str().unwrap()).unwrap();
         assert_eq!((r.gfx.clone(), r.variant.clone(), r.active), (bike.join("gfx.cfg"), None, false));
         assert_eq!(bike_id(&r.bike_dir).as_deref(), Some("KTM250"));
-        assert_eq!(mods_path(&r.bike_dir).as_deref(), t.path().to_str());
 
         // A model not in use: its own copy.
         let r = resolve(bike.join(MODELS_DIR).join("Blend").to_str().unwrap()).unwrap();
@@ -265,7 +251,6 @@ mod tests {
         touch(&blend.join("gfx.cfg"), "steer { }");
         let r = resolve(blend.to_str().unwrap()).unwrap();
         assert_eq!(bike_id(&r.bike_dir), None);
-        assert_eq!(mods_path(&r.bike_dir), None);
         assert!(resolve(t.path().to_str().unwrap()).is_err());
     }
 

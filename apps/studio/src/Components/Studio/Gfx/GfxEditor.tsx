@@ -103,6 +103,17 @@ export default function GfxEditor() {
     }
   }, []);
 
+  // The last bike opened comes back with the tab.
+  useEffect(() => {
+    let last: string | null = null;
+    try {
+      last = localStorage.getItem(`${REMEMBER}.last`);
+    } catch {
+      // Nothing remembered.
+    }
+    if (last) void load(last);
+  }, [load]);
+
   const save = useCallback(async (): Promise<boolean> => {
     if (!path || !dirty) return true;
     setSaving(true);

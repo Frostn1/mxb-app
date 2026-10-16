@@ -441,6 +441,42 @@ pub fn load_bike_model_blocking(
     build_bike_model(&source, key, files, installed, tyres, pick, t0)
 }
 
+/// A bike from its loose files only, later folders layered over earlier ones. No `.pkz` is
+/// opened, the bike's own or a tyre pack's: what only an archive holds (a `.geom`, wheels,
+/// packed sheets) is simply not drawn.
+pub fn load_loose_bike_model_blocking(dirs: &[&std::path::Path]) -> Result<BikeModel, String> {
+    let t0 = std::time::Instant::now();
+    let Some(first) = dirs.first() else { return Err("no folder".into()) };
+    let stamps: Vec<String> = dirs.iter().map(|d| format!("{}{}", d.display(), folder_stamp(d))).collect();
+    let key = format!("loose#{}", stamps.join("|"));
+    if let Some(m) = cached_bike(&key) {
+        return Ok(m);
+    }
+    let _gate = gate::enter(&key);
+    if let Some(m) = cached_bike(&key) {
+        return Ok(m);
+    }
+    let mut files = Vec::new();
+    for dir in dirs {
+        let mut loose = Vec::new();
+        for entry in std::fs::read_dir(dir).map_err(|e| format!("{}: {e}", dir.display()))?.flatten() {
+            let path = entry.path();
+            let name = path.file_name().and_then(|n| n.to_str()).map(str::to_string);
+            if path.is_file() && name.as_deref().is_some_and(wanted_bike_file) {
+                if let (Some(name), Some(bytes)) = (name, read_bike_file(&path)) {
+                    loose.push((name, bytes));
+                }
+            }
+        }
+        overlay_files(&mut files, loose);
+    }
+    if !files.iter().any(|(n, _)| bikefiles::is_mesh(n)) {
+        return Err(format!("no .edf mesh in {}", first.display()));
+    }
+    let installed = installed_paints(first);
+    build_bike_model(&first.display().to_string(), key, files, installed, None, None, t0)
+}
+
 /// Why a bike came back with nothing to draw, in words the player can act on.
 ///
 /// Three unrelated faults land here and they want three different answers: a mesh that never
