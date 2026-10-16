@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronRight, Eye, FileBox, FolderOpen, Loader2, RotateCcw } from "lucide-react";
 import { Button } from "../ui/button";
+import { Segmented } from "../ui/segmented";
 import { Slider } from "../ui/controls";
 import { cn } from "../../lib/utils";
 import { ErrorBoundary } from "../ErrorBoundary";
 import { ModelViewer, type Shaders } from "../Viewer/ModelViewer";
-import { loadModelFile, revealInExplorer, type LooseModel } from "../../api/mods";
+import { contextBike, contextBikes, contextRiderBody, loadModelFile, revealInExplorer, type LooseModel } from "../../api/mods";
+import type { BikeModel, RiderPart } from "../../types";
 import { nameOf, STOCK_SHD, writeShd, type Outcome, type ShdFile, type ShdValues } from "../../api/convert";
 import { useT } from "../../i18n/context";
 
@@ -63,6 +65,26 @@ export function ConvertPreview({
   onConvert: () => void;
 }) {
   const t = useT();
+  const [ctx, setCtx] = useState<Context>("model");
+  const [gear, setGear] = useState<Gear>("protection");
+  const [bikes, setBikes] = useState<string[]>([]);
+  const [bike, setBike] = useState("");
+  useEffect(() => {
+    let alive = true;
+    contextBikes()
+      .then((b) => {
+        if (!alive) return;
+        setBikes(b);
+        setBike((cur) => cur || (b.includes("450xf") ? "450xf" : (b[0] ?? "")));
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
+  // A bike context needs the .hrc files the conversion wrote: they say which parts are the model's.
+  const bikeOk = !!last && last.outcome.hrc.length > 0;
+  const shown: Context = ctx === "bike" && !bikeOk ? "model" : ctx;
   if (!last)
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3 text-[12.5px] text-muted-foreground">
@@ -78,6 +100,37 @@ export function ConvertPreview({
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex flex-none items-center gap-3 px-6 pt-3 text-[12px]">
+        <Segmented
+          size="sm"
+          value={shown}
+          onChange={setCtx}
+          options={[
+            { value: "model", label: t("convert.ctxModel") },
+            { value: "rider", label: t("convert.ctxRider") },
+            ...(bikeOk ? [{ value: "bike" as const, label: t("convert.ctxBike") }] : []),
+          ]}
+        />
+        {shown === "rider" && (
+          <Segmented
+            size="sm"
+            value={gear}
+            onChange={setGear}
+            options={[
+              { value: "protection", label: t("convert.gearProtection") },
+              { value: "helmet", label: t("convert.gearHelmet") },
+              { value: "boots", label: t("convert.gearBoots") },
+            ]}
+          />
+        )}
+        {shown === "bike" && bikes.length > 0 && (
+          <select className="h-7 rounded-md border border-input bg-transparent px-2 text-[12px]" value={bike} onChange={(e) => setBike(e.target.value)}>
+            {bikes.map((b) => (
+              <option key={b} value={b}>
+                {b}
+              </option>
+            ))}
+          </select>
+        )}
         <label className="flex items-center gap-2">
           <input type="checkbox" checked={watching} disabled={!canWatch} onChange={(e) => onWatch(e.target.checked)} />
           {t("convert.watch")}
@@ -86,14 +139,50 @@ export function ConvertPreview({
           {nameOf(last.output)}
         </span>
       </div>
-      <PreviewBody key={last.key} output={last.output} outcome={last.outcome} />
+      <PreviewBody key={last.key} output={last.output} outcome={last.outcome} ctx={shown} gear={gear} bike={bike} />
     </div>
   );
 }
 
+type Context = "model" | "rider" | "bike";
+type Gear = "protection" | "helmet" | "boots";
+
+/**
+ * The model among the game's own files, read from the player's game folder and never copied
+ * out: worn by the stock rider as a piece of gear, or laid over a stock bike so the parts it
+ * wrote replace the stock ones. `null` while loading; `why` says what went wrong.
+ */
+function useAround(ctx: Context, output: string, outcome: Outcome, bike: string) {
+  const [body, setBody] = useState<RiderPart | null>(null);
+  const [onBike, setOnBike] = useState<BikeModel | null>(null);
+  const [why, setWhy] = useState<string | null>(null);
+  useEffect(() => {
+    if (ctx === "model") return;
+    let alive = true;
+    setWhy(null);
+    if (ctx === "rider") {
+      contextRiderBody()
+        .then((b) => alive && (b ? setBody(b) : setWhy("noGame")))
+        .catch((e) => alive && setWhy(String(e).replace(/^Error:\s*/, "")));
+    } else {
+      setOnBike(null);
+      if (!bike) setWhy("noGame");
+      else
+        contextBike(bike, output, outcome.hrc)
+          .then((m) => alive && setOnBike(m))
+          .catch((e) => alive && setWhy(String(e).replace(/^Error:\s*/, "")));
+    }
+    return () => {
+      alive = false;
+    };
+  }, [ctx, output, outcome.hrc, bike]);
+  return { body, onBike, why };
+}
+
 /** Mount per conversion (`key`): the values start from what the conversion left on disk. */
-function PreviewBody({ output, outcome }: { output: string; outcome: Outcome }) {
+function PreviewBody({ output, outcome, ctx, gear, bike }: { output: string; outcome: Outcome; ctx: Context; gear: Gear; bike: string }) {
   const t = useT();
+  const around = useAround(ctx, output, outcome, bike);
   const [model, setModel] = useState<LooseModel | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
   const [values, setValues] = useState<Record<string, ShdValues>>(() => Object.fromEntries(outcome.shaders.map((f) => [f.path, f.values])));
@@ -147,15 +236,36 @@ function PreviewBody({ output, outcome }: { output: string; outcome: Outcome }) 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-4 px-6 pb-5 pt-3 lg:flex-row">
       <div className="relative h-[46%] min-h-[220px] flex-none overflow-hidden rounded-lg border border-border bg-card lg:h-auto lg:min-h-0 lg:flex-1">
-        {failed ? (
-          <p className="flex h-full items-center justify-center px-6 text-center text-[12px] text-muted-foreground">{t("convert.viewFailed", { why: failed })}</p>
-        ) : !model ? (
+        {failed || (ctx !== "model" && around.why) ? (
+          <p className="flex h-full items-center justify-center px-6 text-center text-[12px] text-muted-foreground">
+            {around.why === "noGame" && !failed ? t("convert.noGame") : t("convert.viewFailed", { why: failed ?? around.why ?? "" })}
+          </p>
+        ) : !model || (ctx === "rider" && !around.body) || (ctx === "bike" && !around.onBike) ? (
           <div className="flex h-full items-center justify-center text-muted-foreground">
             <Loader2 className="size-4 animate-spin" />
           </div>
         ) : (
           <ErrorBoundary compact label="convert-view">
+            {ctx === "rider" && around.body ? (
+              <ModelViewer
+                mode="rider"
+                riderParts={[around.body, { part: gear, nodes: model.nodes, textures: model.textures }]}
+                hideHints
+                className="absolute inset-0"
+              />
+            ) : ctx === "bike" && around.onBike ? (
+              <ModelViewer
+                mode="bike"
+                nodes={around.onBike.nodes}
+                rig={around.onBike.rig}
+                textures={around.onBike.paints[0]?.textures ?? around.onBike.base}
+                tyreTextures={around.onBike.tyreTextures}
+                hideHints
+                className="absolute inset-0"
+              />
+            ) : (
             <ModelViewer mode="bike" nodes={model.nodes} textures={model.textures} shaders={shaders} focusSheet={focus} hideHints className="absolute inset-0" />
+            )}
           </ErrorBoundary>
         )}
       </div>

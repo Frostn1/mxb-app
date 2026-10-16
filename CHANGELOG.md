@@ -7,6 +7,7 @@
 - **Saved export scripts.** Convert remembers the last export script you used and puts it back when the app starts. Save a script under its name to pick it again later from a short list, and remove the ones you don't need. They are kept in the app's own config folder, not next to your files.
 - **Convert and Preview tabs.** Convert keeps the files, layout, output, name and export script, with the rarely used settings under More. After converting, Preview opens with the model, the .shd list beside the view (it scrolls on its own, each material opens on click and lights up in the view) and one Open folder in Files written.
 - **Watch.** In Preview, tick Watch and the model is converted again whenever a source file is saved, so the view follows your export.
+- **Preview in context.** Show the converted model on the stock rider (as protection, helmet or boots) or on a stock bike, read from your game folder and never copied out. On a bike the parts you converted replace the stock ones.
 
 ## 2026-10-15 — Frost Converter v0.1.3 — .shd files you can find
 
