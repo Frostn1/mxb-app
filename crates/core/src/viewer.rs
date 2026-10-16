@@ -1947,9 +1947,10 @@ pub struct LooseModel {
 /// (an export project keeps `EDF/` and `Textures/` side by side).
 pub fn texture_search_dirs(edf: &std::path::Path) -> Vec<PathBuf> {
     let Some(dir) = edf.parent() else { return Vec::new() };
-    let mut dirs = vec![dir.to_path_buf(), dir.join("paints"), dir.join("textures")];
+    let child = crate::library::resolve_child;
+    let mut dirs = vec![dir.to_path_buf(), child(dir, "paints"), child(dir, "textures")];
     if let Some(up) = dir.parent() {
-        dirs.push(up.join("textures"));
+        dirs.push(child(up, "textures"));
     }
     dirs
 }
