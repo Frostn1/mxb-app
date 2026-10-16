@@ -243,6 +243,7 @@ export const de: Record<keyof typeof en, string> = {
   "support.support": "Unterstützen",
   "support.later": "Später erinnern",
   "support.never": "Nicht mehr anzeigen",
+  "supporter.badge": "Supporter",
   "uninstall.label": "{{app}} deinstallieren",
   "uninstall.desc": "Entfernt diese App. Dein Spiel und andere Apps bleiben.",
   "uninstall.manual": "Per Paketmanager installiert. Entferne sie dort:",

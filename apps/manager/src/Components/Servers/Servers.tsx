@@ -50,6 +50,7 @@ import {
   closeAndJoinListedServer,
   queueJoin,
   serversWithPaintSync,
+  supporterServers,
   serverTrackPreviews,
   serverTrackInactive,
   serverTrackCatalog,
@@ -274,6 +275,8 @@ const Servers = ({ link }: ServersProps) => {
   // each one and reading its Riders panel — a request per server to answer a question about
   // the list. This is one request for all of them, and it marks the rows.
   const [paintSync, setPaintSync] = useState<Record<string, number>>({});
+  /** Addresses run by somebody with the supporter pack, for the badge. */
+  const [supporterAt, setSupporterAt] = useState<Set<string>>(() => new Set());
 
   const [sort, setSort] = useState<SortMode>("players");
   const [dir, setDir] = useState<SortDir>(DEFAULT_DIR.players);
@@ -540,6 +543,9 @@ const Servers = ({ link }: ServersProps) => {
         )
           .then(setPaintSync)
           .catch(() => setPaintSync({}));
+        supporterServers(list.map((s) => ({ name: s.name, address: s.address })))
+          .then((at) => setSupporterAt(new Set(at)))
+          .catch(() => setSupporterAt(new Set()));
       })
       .catch((e: unknown) => {
         const message = typeof e === "string" ? e : String(e);
@@ -1417,6 +1423,7 @@ const Servers = ({ link }: ServersProps) => {
                 onActivateJoin={activateAndJoin}
                 favourite={favs.has(s.address)}
                 paintSync={paintSync[s.address] ?? 0}
+                supporter={supporterAt.has(s.address)}
                 friends={friendsHere[s.address] ?? 0}
                 joining={joining === s.address}
                 busy={joining !== null}
@@ -1454,6 +1461,7 @@ const Servers = ({ link }: ServersProps) => {
                     selected={s.address === selected}
                     favourite={favs.has(s.address)}
                     paintSync={paintSync[s.address] ?? 0}
+                    supporter={supporterAt.has(s.address)}
                     friends={friendsHere[s.address] ?? 0}
                     queuePosition={queue?.address === s.address ? queue.position : null}
                     onSelect={pick}

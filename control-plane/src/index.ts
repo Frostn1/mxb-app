@@ -35,7 +35,7 @@ import { stripeWebhook } from "./billing";
 import { steamResult, redirectPage } from "./page";
 import { pinGuidFromSteam, rememberLink, steamIdFor } from "./steamlink";
 import { bmacWebhook } from "./bmac";
-import { isSupporter } from "./supporters";
+import { isSupporter, supporterOwnerSql } from "./supporters";
 import { pruneCrashes, putCrash } from "./crashes";
 import { pruneLockAttempts } from "./lockpermit";
 import { pruneReports, putReport } from "./diagnostics";
@@ -1752,10 +1752,14 @@ async function getPaint(sha256: string, account: Account, env: Env): Promise<Res
  * free. Everything else here is what a player needs in order to connect.
  */
 async function listServers(env: Env): Promise<Response> {
+  // `supporter`: the owner has the supporter pack, for a small badge in the browser.
   const servers = await env.DB.prepare(
-    "SELECT id, name, region, address FROM servers WHERE published = 1 ORDER BY region, name",
-  ).all<{ id: string; name: string; region: string; address: string }>();
-  return json(200, { servers: servers.results });
+    `SELECT s.id, s.name, s.region, s.address, ${supporterOwnerSql("s.owner_account_id")} AS supporter` +
+      " FROM servers s WHERE s.published = 1 ORDER BY s.region, s.name",
+  ).all<{ id: string; name: string; region: string; address: string; supporter: number }>();
+  return json(200, {
+    servers: (servers.results ?? []).map((r) => ({ ...r, supporter: r.supporter === 1 })),
+  });
 }
 
 /** How many servers one account may register. Enough for a small league, not a botnet. */

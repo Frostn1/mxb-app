@@ -244,6 +244,7 @@ export const sv: Record<keyof typeof en, string> = {
   "support.support": "Stöd",
   "support.later": "Påminn mig senare",
   "support.never": "Visa inte igen",
+  "supporter.badge": "Supporter",
   "uninstall.label": "Avinstallera {{app}}",
   "uninstall.desc": "Tar bort den här appen. Ditt spel och andra appar finns kvar.",
   "uninstall.manual": "Installerad via din pakethanterare. Ta bort den där:",

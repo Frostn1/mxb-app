@@ -49,6 +49,9 @@ struct ShareBody {
     size: u64,
     #[serde(default)]
     updated_at: u64,
+    /// Published by an account with the supporter pack. Absent from an older control plane.
+    #[serde(default)]
+    supporter: bool,
     manifest: FileShare,
 }
 
@@ -88,6 +91,9 @@ pub struct LiveShareInfo {
     /// exactly what was shared last time without the player picking the files again.
     /// Empty for a subscription — a follower has no business republishing.
     pub rels: Vec<String>,
+    /// Published by an account with the supporter pack — for a followed code, as the server
+    /// last said; for one of ours, whether this account has it now.
+    pub supporter: bool,
 }
 
 /// Normalise a code the way it might be typed rather than the way it was printed.
@@ -188,6 +194,9 @@ pub async fn publish(
     let http = client()?;
     let base = control_plane();
     let body = serde_json::json!({ "name": name, "manifest": share });
+    // Optional, and only so a supporter's share carries the badge: publishing stays open.
+    // Signed out, this is an empty bearer, which the server reads as no token at all.
+    let token = cfg.cp_token.trim().to_string();
 
     let published: PublishBody = match &existing {
         Some(prev) => {
@@ -195,6 +204,7 @@ pub async fn publish(
             let resp = http
                 .put(format!("{base}/v1/share/{plain}"))
                 .header("x-update-key", &prev.update_key)
+                .bearer_auth(&token)
                 .json(&body)
                 .send()
                 .await
@@ -204,6 +214,7 @@ pub async fn publish(
         None => {
             let resp = http
                 .post(format!("{base}/v1/share"))
+                .bearer_auth(&token)
                 .json(&body)
                 .send()
                 .await
@@ -251,6 +262,7 @@ pub async fn publish(
         mine: true,
         items: share.items.len(),
         rels: row.rels.clone(),
+        supporter: mxb_core::supporter::is_supporter(cfg),
     })
 }
 
@@ -389,6 +401,7 @@ pub fn list(app: &AppHandle, cfg: &AppConfig) -> anyhow::Result<Vec<LiveShareInf
             mine: true,
             items: s.rels.len(),
             rels: s.rels.clone(),
+            supporter: mxb_core::supporter::is_supporter(&cfg),
         })
         .collect();
     out.extend(cfg.live_subscriptions.iter().map(|s| LiveShareInfo {
@@ -403,6 +416,7 @@ pub fn list(app: &AppHandle, cfg: &AppConfig) -> anyhow::Result<Vec<LiveShareInf
         mine: false,
         items: 0,
         rels: Vec::new(),
+        supporter: s.supporter,
     }));
     Ok(out)
 }
@@ -451,6 +465,7 @@ pub async fn adopt(app: &AppHandle, cfg: &AppConfig, text: &str) -> anyhow::Resu
         mine: true,
         items: row.rels.len(),
         rels: row.rels.clone(),
+        supporter: mxb_core::supporter::is_supporter(cfg),
     })
 }
 
@@ -480,6 +495,7 @@ fn remember(cfg: &mut AppConfig, body: &ShareBody, installed: bool) {
         sub.checked_at = now;
         sub.size = body.size;
         sub.published_at = body.updated_at;
+        sub.supporter = body.supporter;
         return;
     }
     cfg.live_subscriptions.push(LiveSubscription {
@@ -491,6 +507,7 @@ fn remember(cfg: &mut AppConfig, body: &ShareBody, installed: bool) {
         size: body.size,
         published_at: body.updated_at,
         auto: false,
+        supporter: body.supporter,
     });
 }
 
@@ -698,6 +715,7 @@ mod tests {
             version: 2,
             size: 1,
             updated_at: 0,
+            supporter: false,
             manifest: share(&[("RedBud.pkz", "tracks/RedBud.pkz")]),
         };
         remember(&mut cfg, &body, true);
@@ -724,6 +742,7 @@ mod tests {
             version: 4,
             size: 1,
             updated_at: 0,
+            supporter: false,
             manifest: share(&[("RedBud.pkz", "tracks/RedBud.pkz")]),
         };
 
