@@ -277,7 +277,7 @@ export default function Convert({ active, storageKey, opened }: { active: boolea
     const name = s.scriptName.replace(/\.[^.]*$/, "") || "Script";
     saveScript(name, s.script).then((k) => setSaved(k.saved)).catch((e) => setError(String(e)));
   };
-  const useSaved = (x: SavedScript) => {
+  const pickSaved = (x: SavedScript) => {
     setS((p) => ({ ...p, script: x.text, scriptName: x.name }));
     keep(x.name, x.text);
     light();
@@ -509,7 +509,7 @@ export default function Convert({ active, storageKey, opened }: { active: boolea
               <div className="mt-1.5 flex flex-wrap gap-1.5" aria-label={t("convert.savedScripts")}>
                 {saved.map((x) => (
                   <span key={x.name} className={cn("flex items-center rounded-md border border-input text-[11.5px]", x.text === s.script && "border-primary/50 bg-primary/[0.07]")}>
-                    <button className="cursor-default px-2 py-0.5 hover:text-foreground" title={t("convert.useScript")} onClick={() => useSaved(x)}>
+                    <button className="cursor-default px-2 py-0.5 hover:text-foreground" title={t("convert.useScript")} onClick={() => pickSaved(x)}>
                       {x.name}
                     </button>
                     <button
