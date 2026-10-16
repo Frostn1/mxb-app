@@ -289,7 +289,7 @@ export const en = {
   "convert.mainObject": "main",
   "convert.fast": "Fast mode",
   "convert.shaders": "Shaders",
-  "convert.overwriteShd": "Overwrite existing .shd",
+  "convert.noShd": "No .shd",
   "convert.outName": "Output name",
   "convert.script": "Export script",
   "convert.loadScript": "Load a file",

@@ -282,7 +282,7 @@ export const it: Record<keyof typeof en, string> = {
   "convert.mainObject": "principale",
   "convert.fast": "Modalità veloce",
   "convert.shaders": "Shader",
-  "convert.overwriteShd": "Sovrascrivi .shd esistenti",
+  "convert.noShd": "Nessun .shd",
   "convert.outName": "Nome di output",
   "convert.script": "Script di esportazione",
   "convert.loadScript": "Carica un file",

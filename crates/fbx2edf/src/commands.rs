@@ -132,13 +132,14 @@ pub async fn fbx_convert(
     options: Options,
     hrc: HrcMode,
     overwrite_shd: Option<bool>,
+    write_shd: Option<bool>,
     shd: Option<ShdValues>,
 ) -> Result<Vec<Outcome>, String> {
     if RUNNING.swap(true, Ordering::SeqCst) {
         return Err("A batch is already converting.".into());
     }
     let shd = Shd {
-        make: true,
+        make: write_shd.unwrap_or(true),
         overwrite: overwrite_shd.unwrap_or(false),
         values: shd.unwrap_or_default(),
     };

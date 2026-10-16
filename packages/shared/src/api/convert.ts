@@ -108,13 +108,16 @@ export const renameScript = (from: string, to: string) => invoke<KeptScripts>("f
 export const removeScript = (name: string) => invoke<KeptScripts>("fbx_scripts_remove", { name });
 export const readText = (path: string) => invoke<string>("fbx_read_text", { path });
 
+/** When `.shd` files are written: over the ones there, only where there is none, or not at all. */
+export type ShdMode = "always" | "ifNone" | "never";
+
 export function convertFiles(
   pairs: { input: string; output: string }[],
   options: ConvertOptions,
   hrc: HrcMode,
-  overwriteShd = false,
+  shd: ShdMode = "ifNone",
 ): Promise<Outcome[]> {
-  return invoke<Outcome[]>("fbx_convert", { pairs, options, hrc, overwriteShd });
+  return invoke<Outcome[]>("fbx_convert", { pairs, options, hrc, overwriteShd: shd === "always", writeShd: shd !== "never" });
 }
 
 /** Write a material's `.shd` with these values: what the sliders do. */

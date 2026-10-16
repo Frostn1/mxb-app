@@ -30,6 +30,7 @@ import {
   type ConvertReport,
   type Found,
   type HrcMode,
+  type ShdMode,
   type Outcome,
   type SavedScript,
 } from "../../api/convert";
@@ -52,7 +53,8 @@ interface Settings {
   script: string;
   /** The file the script came from, when it was dropped or loaded rather than typed. */
   scriptName: string;
-  overwriteShd: boolean;
+  /** Whether the `.shd` files are written over, only where there is none, or not at all. */
+  shd: ShdMode;
   /** A bike's file: `model.edf`, the name MX Bikes loads, or the FBX's own name as before. */
   naming: "model" | "fbx";
   /** A name for the .edf when one model is written; empty keeps the usual name. */
@@ -74,7 +76,7 @@ const DEFAULTS: Settings = {
   fast: true,
   script: "",
   scriptName: "",
-  overwriteShd: false,
+  shd: "ifNone",
   naming: "model",
   outName: "",
   hrc: "ifNone",
@@ -82,7 +84,11 @@ const DEFAULTS: Settings = {
 
 function load(key: string): Settings {
   try {
-    return { ...DEFAULTS, ...JSON.parse(localStorage.getItem(key) ?? "{}") };
+    const saved = JSON.parse(localStorage.getItem(key) ?? "{}");
+    // Before three-way shaders there was a tick box to write over them.
+    if (saved.shd === undefined && saved.overwriteShd === true) saved.shd = "always";
+    delete saved.overwriteShd;
+    return { ...DEFAULTS, ...saved };
   } catch {
     return DEFAULTS;
   }
@@ -127,7 +133,7 @@ export default function Convert({ active, storageKey, opened }: { active: boolea
   const [watch, setWatch] = useState(false);
   const [watchPaths, setWatchPaths] = useState<string[]>([]);
   /** The last conversion that worked: what the Preview shows, kept while the next one runs. */
-  const [last, setLast] = useState<{ key: string; output: string; source: string; outcome: Outcome } | null>(null);
+  const [last, setLast] = useState<{ key: string; output: string; source: string; noShd: boolean; outcome: Outcome } | null>(null);
   const redo = useRef(false);
   const [saved, setSaved] = useState<SavedScript[]>([]);
 
@@ -339,7 +345,7 @@ export default function Convert({ active, storageKey, opened }: { active: boolea
         batch.map((j) => ({ input: j.input, output: j.output })),
         o,
         s.hrc,
-        s.overwriteShd,
+        s.shd,
       );
       setRuns((n) => n + 1);
       setJobs((js) => js && js.map((j, i) => ({ ...j, status: { state: "done", outcome: results[i] } })));
@@ -366,9 +372,9 @@ export default function Convert({ active, storageKey, opened }: { active: boolea
   const converted = (jobs ?? []).filter((j): j is Job & { status: { state: "done"; outcome: Outcome } } => j.status.state === "done" && !!j.status.outcome.report);
   const shown = running ? undefined : (converted.find((j) => j.input === picked) ?? converted[0]);
   useEffect(() => {
-    if (shown) setLast({ key: `${runs}:${shown.output}`, output: shown.output, source: shown.input, outcome: shown.status.outcome });
+    if (shown) setLast({ key: `${runs}:${shown.output}`, output: shown.output, source: shown.input, noShd: s.shd === "never", outcome: shown.status.outcome });
     else if (!jobs && !running) setLast(null);
-  }, [shown, runs, jobs, running]);
+  }, [shown, runs, jobs, running, s.shd]);
 
   // Watch: a source saved over converts again and the Preview follows.
   const watchKey = JSON.stringify(watchPaths);
@@ -650,10 +656,18 @@ export default function Convert({ active, storageKey, opened }: { active: boolea
 
                         <Field label={t("convert.shaders")}>
                           <div className="grid gap-1.5 text-[12.5px]">
-                            <label className="flex items-center gap-2">
-                              <input type="checkbox" checked={s.overwriteShd} onChange={(e) => set("overwriteShd", e.target.checked)} />
-                              {t("convert.overwriteShd")}
-                            </label>
+                            <div>
+                              <Segmented
+                                size="sm"
+                                value={s.shd}
+                                onChange={(v) => set("shd", v)}
+                                options={[
+                                  { value: "always", label: t("convert.hrcAlways") },
+                                  { value: "ifNone", label: t("convert.hrcIfNone") },
+                                  { value: "never", label: t("convert.hrcNever") },
+                                ]}
+                              />
+                            </div>
                           </div>
                         </Field>
             </div>

@@ -55,7 +55,7 @@ export function ConvertPreview({
   onWatch,
   onConvert,
 }: {
-  last: { key: string; output: string; source: string; outcome: Outcome } | null;
+  last: { key: string; output: string; source: string; noShd: boolean; outcome: Outcome } | null;
   running: boolean;
   watching: boolean;
   canWatch: boolean;
@@ -86,13 +86,13 @@ export function ConvertPreview({
           {nameOf(last.output)}
         </span>
       </div>
-      <PreviewBody key={last.key} output={last.output} source={last.source} outcome={last.outcome} />
+      <PreviewBody key={last.key} output={last.output} source={last.source} noShd={last.noShd} outcome={last.outcome} />
     </div>
   );
 }
 
 /** Mount per conversion (`key`): the values start from what the conversion left on disk. */
-function PreviewBody({ output, source, outcome }: { output: string; source: string; outcome: Outcome }) {
+function PreviewBody({ output, source, noShd, outcome }: { output: string; source: string; noShd: boolean; outcome: Outcome }) {
   const t = useT();
   const [model, setModel] = useState<LooseModel | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
@@ -169,7 +169,7 @@ function PreviewBody({ output, source, outcome }: { output: string; source: stri
       <section className="min-h-0 flex-1 overflow-y-auto lg:w-[360px] lg:flex-none">
         <h3 className={head}>{t("convert.shaders")}</h3>
         {outcome.shaders.length === 0 ? (
-          <p className="text-[12px] text-muted-foreground">{t("convert.noShaders")}</p>
+          <p className="text-[12px] text-muted-foreground">{t(noShd ? "convert.noShd" : "convert.noShaders")}</p>
         ) : (
           <div className="grid gap-2">
             {outcome.shaders.map((f) => (
