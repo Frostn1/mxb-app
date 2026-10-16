@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased — Frost's Studio and Frost Converter: Preview normal maps
+
+### Fixed
+- **Blotchy Preview.** The Preview now uses the model's _n normal map, and its alpha as the specular mask, the way the game does.
+
 ## Unreleased — Frost's Studio and Frost Converter: name the .edf, saved export scripts
 
 ### Added
