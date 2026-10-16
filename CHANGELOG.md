@@ -1,22 +1,27 @@
 # Changelog
 
-## Unreleased — Frost's Studio and Frost Converter: named export scripts
+## 2026-10-16 — Frost Converter v0.1.5 — Named export scripts
 
 ### Fixed
-- **Preview highlight.** Opening a .shd card no longer tints its material while you tune it. A Highlight tick, off by default, flashes the material for a moment when its card opens.
-- **Shaders: Always / If none / Never.** Under More, Never writes no .shd and leaves the ones there alone; Always writes over them. The Preview then says No .shd.
 - **Saved export scripts.** Save asks for a name, so a second script no longer replaces the first. The same name asks Replace?, and each saved script can be renamed or removed.
+- **Shaders: Always / If none / Never.** Under More, Never writes no .shd and leaves the ones there alone; Always writes over them. The Preview then says No .shd.
+- **Preview highlight.** Opening a .shd card no longer tints its material while you tune it. A Highlight tick, off by default, flashes the material for a moment when its card opens.
 - **Preview textures.** Pictures are also found in the FBX's .fbm folder and beside the FBX, and a TGA the strict reader refused (a grey map with alpha bits set, for one) is read. A name with no file, and a file that can't be read, are told apart.
-
-## Unreleased — Frost's Studio and Frost Converter: one-line .shd files
-
-### Fixed
 - **.shd files written on one line.** The Preview sliders now show the values of a .shd with its blocks on one line, as the Blender kit writes them, not the stock ones.
 
-## Unreleased — Frost's Studio: Gfx assembles the bike again
+## 2026-10-16 — Frost's Studio v0.7.7 — Named export scripts, Gfx assembles again
+
+### Added
+- **Support card.** A small card asking for a coffee shows after an export or a track build, or every tenth launch, at most once a week. Remind me later and Don't show again are on it.
+- **Supporter pack.** Settings has the supporter themes (Night, Works, Lime) and an accent colour, for accounts with the pack. A Buy Me a Coffee supporter links the email they paid with to get it.
 
 ### Fixed
 - **Gfx assembly and wheels.** The Gfx tab takes a bike's .geom from its .pkz again, so the parts are assembled and the wheels and the Rear sprocket marker show. No texture is taken from the .pkz.
+- **Saved export scripts.** Save asks for a name, so a second script no longer replaces the first. The same name asks Replace?, and each saved script can be renamed or removed.
+- **Shaders: Always / If none / Never.** Under More, Never writes no .shd and leaves the ones there alone; Always writes over them. The Preview then says No .shd.
+- **Preview highlight.** Opening a .shd card no longer tints its material while you tune it. A Highlight tick, off by default, flashes the material for a moment when its card opens.
+- **Preview textures.** Pictures are also found in the FBX's .fbm folder and beside the FBX, and a TGA the strict reader refused (a grey map with alpha bits set, for one) is read. A name with no file, and a file that can't be read, are told apart.
+- **.shd files written on one line.** The Preview sliders now show the values of a .shd with its blocks on one line, as the Blender kit writes them, not the stock ones.
 
 ## 2026-10-16 — Frost Converter v0.1.4 — Name the .edf, Preview and Watch
 
