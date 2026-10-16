@@ -1,5 +1,25 @@
 # Changelog
 
+## 2026-10-15 — Frost Converter v0.1.3 — .shd files you can find
+
+### Fixed
+- **Every material gets a .shd.** A .shd is written beside the .edf in every layout, also for colour-only models. An existing one is kept unless Overwrite is ticked.
+
+### Added
+- **Files written.** After converting, a list of the files with Open folder.
+- **3D view** of the converted model.
+- **Shine sliders.** Shininess and reflection per material; the view follows and the .shd is saved.
+
+## 2026-10-15 — Frost's Studio v0.7.5 — .shd files you can find
+
+### Fixed
+- **Every material gets a .shd.** A .shd is written beside the .edf in every layout, also for colour-only models. An existing one is kept unless Overwrite is ticked.
+
+### Added
+- **Files written.** After converting, a list of the files with Open folder.
+- **3D view** of the converted model.
+- **Shine sliders.** Shininess and reflection per material; the view follows and the .shd is saved.
+
 ## 2026-10-15 — Frost Converter v0.1.2 — Convert for any object
 
 ### Fixed
