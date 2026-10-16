@@ -200,3 +200,8 @@ export function checkScript(text: string, layout: "whole" | "parts" = "parts"): 
   }
   return !section ? "noSection" : parts === 0 ? "noParts" : "ok";
 }
+
+/** Watch these source files: `onSourceChanged` fires when one is saved. Replaces any earlier watch. */
+export const watchSources = (paths: string[]) => invoke<void>("fbx_watch", { paths });
+export const unwatchSources = () => invoke<void>("fbx_unwatch");
+export const onSourceChanged = (f: (path: string) => void): Promise<UnlistenFn> => listen<{ path: string }>("fbx-source-changed", (e) => f(e.payload.path));
