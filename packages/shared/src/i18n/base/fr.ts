@@ -283,6 +283,7 @@ export const fr: Record<keyof typeof en, string> = {
   "convert.loadScript": "Charger un fichier",
   "convert.tabConvert": "Convertir",
   "convert.tabPreview": "Aperçu",
+  "convert.texturesMissing": "{{count}} textures introuvables : {{names}}",
   "convert.more": "Plus",
   "convert.watch": "Surveiller",
   "convert.previewEmpty": "Rien de converti",

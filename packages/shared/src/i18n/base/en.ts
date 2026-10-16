@@ -290,6 +290,7 @@ export const en = {
   "convert.loadScript": "Load a file",
   "convert.tabConvert": "Convert",
   "convert.tabPreview": "Preview",
+  "convert.texturesMissing": "{{count}} textures not found: {{names}}",
   "convert.more": "More",
   "convert.watch": "Watch",
   "convert.previewEmpty": "Nothing converted yet",

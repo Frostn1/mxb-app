@@ -285,6 +285,7 @@ export const sv: Record<keyof typeof en, string> = {
   "convert.loadScript": "Läs in fil",
   "convert.tabConvert": "Konvertera",
   "convert.tabPreview": "Förhandsvisning",
+  "convert.texturesMissing": "{{count}} texturer hittades inte: {{names}}",
   "convert.more": "Mer",
   "convert.watch": "Bevaka",
   "convert.previewEmpty": "Inget konverterat",

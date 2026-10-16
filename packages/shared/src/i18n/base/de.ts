@@ -284,6 +284,7 @@ export const de: Record<keyof typeof en, string> = {
   "convert.loadScript": "Datei laden",
   "convert.tabConvert": "Konvertieren",
   "convert.tabPreview": "Vorschau",
+  "convert.texturesMissing": "{{count}} Texturen nicht gefunden: {{names}}",
   "convert.more": "Mehr",
   "convert.watch": "Beobachten",
   "convert.previewEmpty": "Noch nichts konvertiert",

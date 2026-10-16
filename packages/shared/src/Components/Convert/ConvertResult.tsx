@@ -158,6 +158,11 @@ function PreviewBody({ output, outcome }: { output: string; outcome: Outcome }) 
             <ModelViewer mode="bike" nodes={model.nodes} textures={model.textures} shaders={shaders} focusSheet={focus} hideHints className="absolute inset-0" />
           </ErrorBoundary>
         )}
+        {model && model.missing.length > 0 && (
+          <p className="absolute bottom-2 left-2 right-2 truncate rounded-md bg-background/85 px-2 py-1 text-[11.5px] text-amber-600 dark:text-amber-400" title={model.missing.join(", ")}>
+            {t("convert.texturesMissing", { count: model.missing.length, names: model.missing.join(", ") })}
+          </p>
+        )}
       </div>
 
       <section className="min-h-0 flex-1 overflow-y-auto lg:w-[360px] lg:flex-none">

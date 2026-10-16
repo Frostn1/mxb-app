@@ -283,6 +283,7 @@ export const ptBR: Record<keyof typeof en, string> = {
   "convert.loadScript": "Carregar arquivo",
   "convert.tabConvert": "Converter",
   "convert.tabPreview": "Prévia",
+  "convert.texturesMissing": "{{count}} texturas não encontradas: {{names}}",
   "convert.more": "Mais",
   "convert.watch": "Observar",
   "convert.previewEmpty": "Nada convertido ainda",

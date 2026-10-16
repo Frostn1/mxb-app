@@ -283,6 +283,7 @@ export const it: Record<keyof typeof en, string> = {
   "convert.loadScript": "Carica un file",
   "convert.tabConvert": "Converti",
   "convert.tabPreview": "Anteprima",
+  "convert.texturesMissing": "{{count}} texture non trovate: {{names}}",
   "convert.more": "Altro",
   "convert.watch": "Osserva",
   "convert.previewEmpty": "Nulla convertito",
