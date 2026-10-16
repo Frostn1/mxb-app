@@ -5649,8 +5649,10 @@ mod texture_search_tests {
         std::fs::write(tex_dir.join("Frame.TGA"), b"x").unwrap();
         std::fs::write(edf_dir.join("plastics.png"), b"x").unwrap();
         let dirs = texture_search_dirs(&edf_dir.join("bike.edf"));
-        assert_eq!(find_texture_file(&dirs, "frame"), Some(tex_dir.join("Frame.TGA")));
-        assert_eq!(find_texture_file(&dirs, "plastics"), Some(edf_dir.join("plastics.png")));
+        // Windows keeps the spelling it was asked with, so compare the way the file system does.
+        let same = |hit: Option<PathBuf>, want: PathBuf| hit.is_some_and(|h| h.to_string_lossy().eq_ignore_ascii_case(&want.to_string_lossy()));
+        assert!(same(find_texture_file(&dirs, "frame"), tex_dir.join("Frame.TGA")));
+        assert!(same(find_texture_file(&dirs, "plastics"), edf_dir.join("plastics.png")));
         assert_eq!(find_texture_file(&dirs, "nothing"), None);
         let _ = std::fs::remove_dir_all(&root);
     }
