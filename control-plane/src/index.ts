@@ -35,6 +35,7 @@ import { stripeWebhook } from "./billing";
 import { steamResult, redirectPage } from "./page";
 import { pinGuidFromSteam, rememberLink, steamIdFor } from "./steamlink";
 import { bmacWebhook } from "./bmac";
+import { isSupporter } from "./supporters";
 import { pruneCrashes, putCrash } from "./crashes";
 import { pruneLockAttempts } from "./lockpermit";
 import { pruneReports, putReport } from "./diagnostics";
@@ -926,7 +927,7 @@ async function steamReturn(request: Request, url: URL, env: Env): Promise<Respon
  */
 async function listEntitlements(account: Account, env: Env): Promise<Response> {
   const steamId = await steamIdFor(env, account);
-  if (!steamId) return json(200, { steamId: null, assets: [] });
+  if (!steamId) return json(200, { steamId: null, assets: [], supporter: false });
 
   const rows = await env.DB.prepare(
     "SELECT e.asset_id, a.title, e.source, e.granted_at" +
@@ -940,6 +941,8 @@ async function listEntitlements(account: Account, env: Env): Promise<Response> {
 
   return json(200, {
     steamId,
+    // The supporter pack (`supporters.ts`). Cosmetic only; the app caches it for offline use.
+    supporter: await isSupporter(env, steamId),
     assets: (rows.results ?? []).map((r) => ({
       assetId: r.asset_id,
       title: r.title,

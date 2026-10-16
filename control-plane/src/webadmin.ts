@@ -47,6 +47,7 @@ import {
 } from "./survey";
 import { collectStats, windowApp, windowDays } from "./usage";
 import { collectMisses, missWindow } from "./searchmisses";
+import { adminSupporterAction, listSupporters } from "./supporters";
 import { webSession } from "./websession";
 import {
   action as serverAction,
@@ -110,6 +111,8 @@ export async function webAdminRoutes(
       const result = await serverLogs(env, logs[1], fetchImpl);
       return said(result.status, result.body);
     }
+    // Who has the supporter pack, every grant and revocation.
+    if (path === "/v1/web/admin/supporters") return said(200, { rows: await listSupporters(env) });
     switch (path) {
       // The Steam split rides along rather than living behind its own route: it is one query,
       // it is read on the same tab, and a second round trip would let the page draw a version
@@ -344,6 +347,27 @@ export async function webAdminRoutes(
       default:
         return said(400, { error: "no such action" });
     }
+  }
+
+  // The supporter pack by hand: for Buy Me a Coffee supporters until their email matches, and
+  // for anybody else Sean wants to thank. `grant` / `revoke`, with `who` a Steam id or profile.
+  if (request.method === "POST" && path === "/v1/web/admin/supporters") {
+    const refused = refuseCrossSiteWrite(request, env);
+    if (refused) return cors(refused, origin);
+    let body: Record<string, unknown>;
+    try {
+      body = (await request.json()) as Record<string, unknown>;
+    } catch {
+      return said(400, { error: "that was not JSON" });
+    }
+    const result = await adminSupporterAction(
+      env,
+      String(body.action ?? ""),
+      String(body.who ?? ""),
+      session.steamId,
+      fetchImpl,
+    );
+    return result.ok ? said(200, result) : said(result.status, { error: result.error });
   }
 
   // Who may lock and sell. One endpoint, an action each.

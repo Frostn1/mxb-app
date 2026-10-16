@@ -54,6 +54,7 @@ pub mod searchmiss;
 pub mod securesource;
 pub mod steamid;
 pub mod support;
+pub mod supporter;
 pub mod survey;
 pub mod uninstall;
 pub mod texstore;
