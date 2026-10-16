@@ -11,6 +11,8 @@ import { useT } from "../../i18n/context";
 
 /** How long a slider rests before its `.shd` is written: dragging is many values, one file. */
 const SAVE_AFTER = 250;
+/** How long after the last .shd write the model is converted again (with Watch on). */
+const CONVERT_AFTER = 900;
 /** How long a material stays lit after its card opens. */
 const FLASH_MS = 600;
 
@@ -29,15 +31,27 @@ export function WrittenFiles({ outcome }: { outcome: Outcome }) {
           </Button>
         )}
       </div>
-      <ul className="border border-border bg-card text-[12px]">
-        {outcome.files.map((f) => (
-          <li key={f} className="flex items-center gap-2 border-b border-border/60 px-3 py-1.5 last:border-b-0" title={f}>
-            <FileBox className="size-3.5 flex-none text-muted-foreground" />
-            <span className="select-text truncate font-mono">{nameOf(f)}</span>
-          </li>
-        ))}
-      </ul>
+      <FileList files={outcome.files} />
+      {outcome.shdFiles.length > 0 && (
+        <>
+          <h3 className={cn(head, "mt-4")}>{t("convert.modelFolder")}</h3>
+          <FileList files={outcome.shdFiles} />
+        </>
+      )}
     </section>
+  );
+}
+
+function FileList({ files }: { files: string[] }) {
+  return (
+    <ul className="border border-border bg-card text-[12px]">
+      {files.map((f) => (
+        <li key={f} className="flex items-center gap-2 border-b border-border/60 px-3 py-1.5 last:border-b-0" title={f}>
+          <FileBox className="size-3.5 flex-none text-muted-foreground" />
+          <span className="select-text truncate font-mono">{nameOf(f)}</span>
+        </li>
+      ))}
+    </ul>
   );
 }
 
@@ -55,6 +69,7 @@ export function ConvertPreview({
   watching,
   canWatch,
   onWatch,
+  onShdSaved,
   onConvert,
 }: {
   last: { key: string; output: string; source: string; noShd: boolean; outcome: Outcome } | null;
@@ -62,6 +77,8 @@ export function ConvertPreview({
   watching: boolean;
   canWatch: boolean;
   onWatch: (on: boolean) => void;
+  /** A `.shd` in the model's folder was edited: the model wants converting again to carry it. */
+  onShdSaved: () => void;
   onConvert: () => void;
 }) {
   const t = useT();
@@ -88,13 +105,13 @@ export function ConvertPreview({
           {nameOf(last.output)}
         </span>
       </div>
-      <PreviewBody key={last.key} output={last.output} source={last.source} noShd={last.noShd} outcome={last.outcome} />
+      <PreviewBody key={last.key} output={last.output} source={last.source} noShd={last.noShd} outcome={last.outcome} onShdSaved={onShdSaved} />
     </div>
   );
 }
 
 /** Mount per conversion (`key`): the values start from what the conversion left on disk. */
-function PreviewBody({ output, source, noShd, outcome }: { output: string; source: string; noShd: boolean; outcome: Outcome }) {
+function PreviewBody({ output, source, noShd, outcome, onShdSaved }: { output: string; source: string; noShd: boolean; outcome: Outcome; onShdSaved: () => void }) {
   const t = useT();
   const [model, setModel] = useState<LooseModel | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
@@ -132,9 +149,17 @@ function PreviewBody({ output, source, noShd, outcome }: { output: string; sourc
   // One pending write per file; leaving writes whatever is waiting, so a slider let go of and
   // then closed is not lost.
   const pending = useRef(new Map<string, { file: ShdFile; values: ShdValues; timer: number }>());
+  // The converter reads the .shd in the model's folder and bakes it into the .edf, so an edit
+  // is carried by converting again: once the sliders have been still a moment.
+  const again = useRef(0);
+  useEffect(() => () => window.clearTimeout(again.current), []);
   const save = (file: ShdFile, v: ShdValues) =>
     writeShd(file.path, file.maps, v).then(
-      () => setSaveError(null),
+      () => {
+        setSaveError(null);
+        window.clearTimeout(again.current);
+        again.current = window.setTimeout(onShdSaved, CONVERT_AFTER);
+      },
       (e) => setSaveError(String(e).replace(/^Error:\s*/, "")),
     );
   useEffect(() => {

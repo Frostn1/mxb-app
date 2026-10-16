@@ -317,6 +317,8 @@ export const it: Record<keyof typeof en, string> = {
   "convert.fast": "Modalità veloce",
   "convert.shaders": "Shader",
   "convert.noShd": "Nessun .shd",
+  "convert.makeShd": "Crea .shd mancanti",
+  "convert.modelFolder": "Cartella del modello",
   "convert.highlight": "Evidenzia",
   "convert.outName": "Nome di output",
   "convert.script": "Script di esportazione",
