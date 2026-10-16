@@ -1598,6 +1598,8 @@ export interface LiveShareInfo {
   /** The paths an owned code carries, so a republish repacks the same files. Empty for a
    *  subscription — a follower has nothing to republish. */
   rels: string[];
+  /** Published by an account with the supporter pack, for a small badge. */
+  supporter: boolean;
 }
 
 export type SlotSource =

@@ -469,6 +469,9 @@ pub struct RegisteredServer {
     pub region: String,
     /// `host:port` — the same form the game's connect flag takes.
     pub address: String,
+    /// The owner has the supporter pack, for a small badge. Absent from an older control plane.
+    #[serde(default)]
+    pub supporter: bool,
 }
 
 /// The joinable servers.
@@ -935,12 +938,14 @@ mod tests {
                 region: "eu".into(),
                 // Registered without a port, the way an address is usually published.
                 address: "203.0.113.10".into(),
+                supporter: false,
             },
             RegisteredServer {
                 id: "us-east-1".into(),
                 name: "US 1".into(),
                 region: "us".into(),
                 address: "198.51.100.7:54999".into(),
+                supporter: false,
             },
         ]
     }

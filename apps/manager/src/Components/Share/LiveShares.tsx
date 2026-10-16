@@ -56,6 +56,7 @@ import {
 } from "@frost/shared/Components/ui/dialog";
 import { cn } from "@frost/shared/lib/utils";
 import { supportMoment } from "@frost/shared/api/support";
+import SupporterBadge from "@frost/shared/Components/Supporter/SupporterBadge";
 
 /** "2h ago", from unix seconds. `0` means it never happened. */
 function ago(seconds: number, t: TFunc<TKey>): string {
@@ -127,6 +128,7 @@ function Row({
     >
       <div className="flex items-center gap-2">
         <span className="truncate text-[13px] font-semibold">{row.name}</span>
+        {row.supporter && <SupporterBadge compact />}
         {row.mine ? (
           <span className="flex-none rounded bg-emerald-500/15 px-1.5 py-px text-[10px] font-semibold uppercase tracking-wide text-emerald-500">
             {t("live.yours")}

@@ -10,6 +10,8 @@
  */
 
 import { resolveSteamAccount } from "./assets";
+import { bearer, hashToken } from "./auth";
+import { steamIdFor } from "./steamlink";
 
 export type SupporterSource = "manual" | "bmac" | "stripe";
 
@@ -28,6 +30,32 @@ export async function isSupporter(env: Env, steamId: string | null): Promise<boo
     .bind(steamId)
     .first<{ yes: number }>();
   return Boolean(row);
+}
+
+/**
+ * Whether an optional bearer on an otherwise open request belongs to a supporter. No token, an
+ * unknown token or an unlinked account are all simply "no".
+ */
+export async function requestIsSupporter(request: Request, env: Env): Promise<boolean> {
+  const token = bearer(request.headers.get("Authorization"));
+  if (!token) return false;
+  const account = await env.DB.prepare("SELECT id, steam_id FROM accounts WHERE token_hash = ?")
+    .bind(await hashToken(token))
+    .first<{ id: string; steam_id: string | null }>();
+  if (!account) return false;
+  return isSupporter(env, await steamIdFor(env, account));
+}
+
+/**
+ * SQL for "the account in `column` has the pack": its own Steam id, or the one it linked.
+ * For joining onto rows that carry an account id, like `servers.owner_account_id`.
+ */
+export function supporterOwnerSql(column: string): string {
+  return (
+    "EXISTS (SELECT 1 FROM supporters sp WHERE sp.revoked_at IS NULL AND sp.steam_id IN (" +
+    `SELECT a.steam_id FROM accounts a WHERE a.id = ${column} AND a.steam_id IS NOT NULL` +
+    ` UNION SELECT l.steam_id FROM steam_links l WHERE l.account_id = ${column}))`
+  );
 }
 
 /**

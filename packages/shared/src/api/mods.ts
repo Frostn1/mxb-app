@@ -4121,6 +4121,13 @@ export function serversWithPaintSync(
   return invoke<Record<string, number>>("servers_with_paint_sync", { servers });
 }
 
+/** The addresses among `servers` run by somebody with the supporter pack. Best-effort. */
+export function supporterServers(
+  servers: { name: string; address: string }[],
+): Promise<string[]> {
+  return invoke<string[]>("supporter_servers", { servers });
+}
+
 /** What track a server is running, matched against what you have and what you could get. */
 export interface TrackGuess {
   /** The internal id the server published, e.g. `mmx_supercross`. */

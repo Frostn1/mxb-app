@@ -27,6 +27,7 @@ import { formatPrice, openShopUrl } from "../../api/shop";
 import { isFull } from "@/lib/useServerQueue";
 import { joinAction } from "./joinAction";
 import { classLine } from "@/lib/serverClasses";
+import SupporterBadge from "@frost/shared/Components/Supporter/SupporterBadge";
 
 /** Latency to colour: close is green, far is red. */
 function pingTone(ms: number): string {
@@ -59,6 +60,8 @@ interface Props {
   favourite: boolean;
   /** Riders on this server running paint sync. */
   paintSync: number;
+  /** Run by somebody with the supporter pack. */
+  supporter?: boolean;
   /** Accepted friends currently on this server. */
   friends?: number;
   joining: boolean;
@@ -98,6 +101,7 @@ const ServerCard = memo(function ServerCard({
   onActivateJoin,
   favourite,
   paintSync,
+  supporter = false,
   friends = 0,
   joining,
   busy,
@@ -279,8 +283,11 @@ const ServerCard = memo(function ServerCard({
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col gap-2 px-3.5 py-3">
-        <span className="truncate text-[13px] font-semibold" title={s.name}>
-          {s.name || t("serverBrowser.unnamed")}
+        <span className="flex min-w-0 items-center gap-1.5">
+          <span className="truncate text-[13px] font-semibold" title={s.name}>
+            {s.name || t("serverBrowser.unnamed")}
+          </span>
+          {supporter && <SupporterBadge compact />}
         </span>
         <div className="flex min-w-0 items-center gap-1.5 text-[11.5px] text-muted-foreground">
           <span className="truncate" title={[s.track, s.trackLayout].filter(Boolean).join(" · ")}>

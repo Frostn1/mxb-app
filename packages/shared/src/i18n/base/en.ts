@@ -249,6 +249,7 @@ export const en = {
   "support.support": "Support",
   "support.later": "Remind me later",
   "support.never": "Don't show again",
+  "supporter.badge": "Supporter",
   "uninstall.label": "Uninstall {{app}}",
   "uninstall.desc": "Removes this app. Your game and other apps stay.",
   "uninstall.manual": "Installed by your package manager. Remove it there:",

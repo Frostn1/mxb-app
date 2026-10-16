@@ -24,6 +24,7 @@
 
 import { hashToken, newToken } from "./auth";
 import { isShareRel } from "./validate";
+import { requestIsSupporter } from "./supporters";
 
 /**
  * Crockford base32: no I, L, O or U. The first three because a code gets read down a
@@ -173,6 +174,7 @@ interface ShareRow {
   size: number;
   created_at: number;
   updated_at: number;
+  by_supporter: number;
 }
 
 /** What a subscriber is handed. The update key is never in here. */
@@ -183,6 +185,8 @@ function body(row: ShareRow): Record<string, unknown> {
     version: row.version,
     size: row.size,
     updatedAt: row.updated_at,
+    // The last publish came from an account with the supporter pack: a badge, nothing more.
+    supporter: row.by_supporter === 1,
     manifest: JSON.parse(row.manifest) as Manifest,
   };
 }
@@ -206,6 +210,8 @@ export async function publishShare(request: Request, env: Env): Promise<Response
 
   const updateKey = newToken();
   const now = Math.floor(Date.now() / 1000);
+  // Optional: publishing stays open. A signed-in supporter's share just carries the badge.
+  const bySupporter = (await requestIsSupporter(request, env)) ? 1 : 0;
 
   // Retried rather than assumed unique: 32^8 makes a clash vanishingly rare, and
   // `INSERT ... ON CONFLICT DO NOTHING` turns the rare one into another draw instead of a
@@ -214,8 +220,8 @@ export async function publishShare(request: Request, env: Env): Promise<Response
     const code = newCode();
     const done = await env.DB.prepare(
       `INSERT INTO live_shares
-         (code, update_hash, name, version, manifest, size, created_at, updated_at)
-       VALUES (?, ?, ?, 1, ?, ?, ?, ?)
+         (code, update_hash, name, version, manifest, size, created_at, updated_at, by_supporter)
+       VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?)
        ON CONFLICT (code) DO NOTHING
        RETURNING code`,
     )
@@ -227,6 +233,7 @@ export async function publishShare(request: Request, env: Env): Promise<Response
         manifest.totalSize,
         now,
         now,
+        bySupporter,
       )
       .first<{ code: string }>();
     if (done) {
@@ -269,13 +276,14 @@ export async function updateShare(request: Request, rawCode: string, env: Env): 
   // happens in the index, so there is no string comparison of ours to leak timing, and a
   // wrong key is indistinguishable from a code that does not exist.
   const now = Math.floor(Date.now() / 1000);
+  const bySupporter = (await requestIsSupporter(request, env)) ? 1 : 0;
   const row = await env.DB.prepare(
     `UPDATE live_shares
-        SET name = ?, manifest = ?, size = ?, version = version + 1, updated_at = ?
+        SET name = ?, manifest = ?, size = ?, version = version + 1, updated_at = ?, by_supporter = ?
       WHERE code = ? AND update_hash = ?
       RETURNING version`,
   )
-    .bind((name as string).trim(), text, manifest.totalSize, now, code, await hashToken(key))
+    .bind((name as string).trim(), text, manifest.totalSize, now, bySupporter, code, await hashToken(key))
     .first<{ version: number }>();
 
   if (!row) return json(403, { error: "that update key doesn't own this code" });
@@ -301,7 +309,7 @@ export async function readShare(request: Request, rawCode: string, env: Env): Pr
   if (!code) return json(404, { error: "no such share code" });
 
   const row = await env.DB.prepare(
-    `SELECT code, update_hash, name, version, manifest, size, created_at, updated_at
+    `SELECT code, update_hash, name, version, manifest, size, created_at, updated_at, by_supporter
        FROM live_shares WHERE code = ?`,
   )
     .bind(code)

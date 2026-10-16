@@ -365,6 +365,8 @@ pub struct LiveSubscription {
     pub published_at: u64,
     /// Install a new version as soon as a check finds one, rather than waiting to be asked.
     pub auto: bool,
+    /// The last publish came from an account with the supporter pack, for a small badge.
+    pub supporter: bool,
 }
 
 /// The record of the last publish and the last pull.
