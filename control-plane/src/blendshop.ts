@@ -26,6 +26,7 @@ import { BANNED, isBanned } from "./bans";
 import { customerFor, stripe } from "./billing";
 import { alert, type Deps } from "./hosting";
 import { markZip } from "./zipmark";
+import { grantSupporter, revokeSupporter } from "./supporters";
 import { clearedCookie, LEGACY_SESSION_COOKIE, SESSION_COOKIE, webSession } from "./websession";
 
 const MINUTE = 60 * 1000;
@@ -54,6 +55,13 @@ const SLUG_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
 const ORDER_REF_RE = /^MXBB-[2-9A-Z]{8}$/;
 const TERMS_RE = /^\d{4}-\d{2}-\d{2}$/;
 const FILE_RE = /^\/v1\/web\/blends\/file\/([A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)$/;
+
+/**
+ * The supporter pack (`supporterpack.ts`), sold through this shop. A paid order for it grants
+ * a `supporters` row instead of a Blend, and a refund or chargeback revokes that row. Never a
+ * real Blend's slug: the site's list is checked against it.
+ */
+export const SUPPORTER_PACK_SLUG = "supporter-pack";
 
 export type OrderStatus = "pending" | "paid" | "expired" | "refunded" | "disputed";
 
@@ -107,7 +115,7 @@ export function parseCatalog(raw: unknown): Map<string, CatalogItem> | null {
     const slug = typeof x.slug === "string" && SLUG_RE.test(x.slug) ? x.slug : null;
     const name = typeof x.name === "string" ? x.name.replace(/[\u0000-\u001f\u007f]+/g, " ").trim().slice(0, 120) : "";
     const price = x.priceCents;
-    if (!slug || !name || typeof price !== "number" || !Number.isInteger(price) || price < 100 || price > 100_000) continue;
+    if (!slug || slug === SUPPORTER_PACK_SLUG || !name || typeof price !== "number" || !Number.isInteger(price) || price < 100 || price > 100_000) continue;
     out.set(slug, { slug, name, priceCents: price });
   }
   return out;
@@ -695,6 +703,10 @@ function int(v: unknown): number | null {
 }
 
 async function grant(env: Env, order: OrderRow, now: number): Promise<void> {
+  if (order.slug === SUPPORTER_PACK_SLUG) {
+    await grantSupporter(env, order.steam_id, "stripe", order.id, null, now);
+    return;
+  }
   await env.DB.prepare(
     `INSERT INTO blend_entitlements (steam_id, slug, order_id, granted_at) VALUES (?, ?, ?, ?)
      ON CONFLICT(steam_id, slug) DO UPDATE SET order_id = excluded.order_id, granted_at = excluded.granted_at, revoked_at = NULL, revoked_why = NULL`,
@@ -704,6 +716,10 @@ async function grant(env: Env, order: OrderRow, now: number): Promise<void> {
 }
 
 async function revoke(env: Env, order: OrderRow, why: string, now: number): Promise<void> {
+  if (order.slug === SUPPORTER_PACK_SLUG) {
+    await revokeSupporter(env, order.steam_id, "stripe", order.id, now);
+    return;
+  }
   await env.DB.prepare("UPDATE blend_entitlements SET revoked_at = ?, revoked_why = ? WHERE steam_id = ? AND slug = ? AND order_id = ? AND revoked_at IS NULL")
     .bind(now, why, order.steam_id, order.slug, order.id)
     .run();

@@ -143,7 +143,52 @@ async fn email_post(app: &AppHandle, path: &str, body: serde_json::Value) -> Res
     }
 }
 
+/// Why starting a checkout didn't work, as a word the webview has a string for.
+fn checkout_error(status: u16, code: Option<&str>) -> &'static str {
+    match (status, code) {
+        (_, Some("owned")) => "owned",
+        (409, _) => "steam",
+        (503, _) => "notSetUp",
+        _ => "failed",
+    }
+}
+
 // ── The commands the webview calls ──────────────────────────────────────────────────────
+
+/// Start buying the pack: a Stripe Checkout URL for the browser. The player has agreed to the
+/// Terms and asked for immediate access in the app first; both are sent as such. `Err` is a word
+/// from [`checkout_error`].
+#[tauri::command]
+pub async fn supporter_checkout(app: tauri::AppHandle) -> Result<String, String> {
+    let cfg = config::load(&app).unwrap_or_default();
+    let token = cfg.cp_token.trim().to_string();
+    if token.is_empty() {
+        return Err("steam".into());
+    }
+    let client = reqwest::Client::builder()
+        .timeout(HTTP_TIMEOUT)
+        .build()
+        .map_err(|_| "failed".to_string())?;
+    let resp = client
+        .post(format!("{}/v1/supporter/checkout", control_plane()))
+        .bearer_auth(&token)
+        .json(&serde_json::json!({ "agree": true, "waiver": true }))
+        .send()
+        .await
+        .map_err(|_| "failed".to_string())?;
+    let status = resp.status();
+    let answer: serde_json::Value = resp.json().await.unwrap_or(serde_json::Value::Null);
+    if !status.is_success() {
+        let code = answer.get("code").and_then(|c| c.as_str());
+        return Err(checkout_error(status.as_u16(), code).into());
+    }
+    answer
+        .get("url")
+        .and_then(|u| u.as_str())
+        .filter(|u| u.starts_with("https://checkout.stripe.com/"))
+        .map(str::to_string)
+        .ok_or_else(|| "failed".to_string())
+}
 
 /// Mail a code to the address somebody paid with on Buy Me a Coffee.
 #[tauri::command]

@@ -37,6 +37,7 @@ import { pinGuidFromSteam, rememberLink, steamIdFor } from "./steamlink";
 import { bmacWebhook } from "./bmac";
 import { confirmEmailCode, sendEmailCode } from "./supporteremail";
 import { isSupporter, supporterOwnerSql } from "./supporters";
+import { startSupporterCheckout } from "./supporterpack";
 import { pruneCrashes, putCrash } from "./crashes";
 import { pruneLockAttempts } from "./lockpermit";
 import { pruneReports, putReport } from "./diagnostics";
@@ -568,6 +569,12 @@ async function route(request: Request, env: Env): Promise<Response> {
   // is the point of the flow, and entitlement is checked per asset when it is asked for.
   if (method === "POST" && path === "/v1/steam/login") return steamLogin(request, account, env);
   if (method === "GET" && path === "/v1/entitlements") return listEntitlements(account, env);
+  // The supporter pack, bought once with Stripe through the Blends shop's Checkout.
+  if (method === "POST" && path === "/v1/supporter/checkout") {
+    const body = ((await readJson(request)) ?? {}) as Record<string, unknown>;
+    const r = await startSupporterCheckout(env, defaultDeps(env), account, body);
+    return json(r.status, r.body);
+  }
   // Linking a Buy Me a Coffee address to this account, for the supporter pack.
   if (method === "POST" && path === "/v1/supporter/email") {
     const r = await sendEmailCode(request, account, env);
