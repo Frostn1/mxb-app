@@ -333,6 +333,10 @@ fn main() {
             fbx2edf::commands::fbx_read_text,
             fbx2edf::commands::fbx_convert,
             fbx2edf::commands::fbx_write_shd,
+            fbx2edf::commands::fbx_scripts,
+            fbx2edf::commands::fbx_scripts_last,
+            fbx2edf::commands::fbx_scripts_save,
+            fbx2edf::commands::fbx_scripts_remove,
             initial_view,
         ])
         .setup(|app| {

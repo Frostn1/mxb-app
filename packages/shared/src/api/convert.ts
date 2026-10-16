@@ -90,6 +90,21 @@ export interface Found {
 export const convertAvailable = () => invoke<boolean>("fbx_convert_available");
 export const scanPaths = (paths: string[]) => invoke<Found[]>("fbx_scan", { paths });
 export const isBike = (path: string) => invoke<boolean>("fbx_is_bike", { path });
+/** An export script kept between runs. */
+export interface SavedScript {
+  name: string;
+  text: string;
+}
+/** The scripts kept in the app's config folder: the last one used, and a saved list. */
+export interface KeptScripts {
+  last: SavedScript | null;
+  saved: SavedScript[];
+}
+export const keptScripts = () => invoke<KeptScripts>("fbx_scripts");
+/** Remember the script just used; empty text forgets it. */
+export const rememberScript = (name: string, text: string) => invoke<KeptScripts>("fbx_scripts_last", { name, text });
+export const saveScript = (name: string, text: string) => invoke<KeptScripts>("fbx_scripts_save", { name, text });
+export const removeScript = (name: string) => invoke<KeptScripts>("fbx_scripts_remove", { name });
 export const readText = (path: string) => invoke<string>("fbx_read_text", { path });
 
 export function convertFiles(

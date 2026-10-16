@@ -13,11 +13,15 @@ import {
   convertFiles,
   dirOf,
   isBike,
+  keptScripts,
   nameOf,
   onDone,
   onProgress,
   outputPaths,
   readText,
+  rememberScript,
+  removeScript,
+  saveScript,
   scanPaths,
   scriptSettings,
   type ConvertOptions,
@@ -25,6 +29,7 @@ import {
   type Found,
   type HrcMode,
   type Outcome,
+  type SavedScript,
 } from "../../api/convert";
 import { useT } from "../../i18n/context";
 import ConvertResult from "./ConvertResult";
@@ -116,6 +121,25 @@ export default function Convert({ active, storageKey, opened }: { active: boolea
   const [over, setOver] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const layoutTouched = useRef(false);
+  const [saved, setSaved] = useState<SavedScript[]>([]);
+
+  // The last script used comes back with the app, and the saved ones are listed.
+  useEffect(() => {
+    let alive = true;
+    keptScripts()
+      .then((k) => {
+        if (!alive) return;
+        setSaved(k.saved);
+        if (k.last) setS((p) => (p.script.trim() ? p : { ...p, script: k.last!.text, scriptName: k.last!.name }));
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
+  const keep = (name: string, text: string) => {
+    rememberScript(name, text).then((k) => setSaved(k.saved)).catch(() => {});
+  };
 
   useEffect(() => {
     try {
@@ -165,6 +189,7 @@ export default function Convert({ active, storageKey, opened }: { active: boolea
     if (last) {
       const text = await readText(last.path);
       setS((p) => ({ ...p, script: text, scriptName: nameOf(last.path) }));
+      keep(nameOf(last.path), text);
       toSlot(nameOf(last.path), at);
     }
   };
@@ -226,6 +251,7 @@ export default function Convert({ active, storageKey, opened }: { active: boolea
     if (typeof p === "string") {
       const text = await readText(p);
       setS((prev) => ({ ...prev, script: text, scriptName: nameOf(p) }));
+      keep(nameOf(p), text);
       light();
     }
   };
@@ -247,9 +273,20 @@ export default function Convert({ active, storageKey, opened }: { active: boolea
     };
   };
 
+  const saveCurrent = () => {
+    const name = s.scriptName.replace(/\.[^.]*$/, "") || "Script";
+    saveScript(name, s.script).then((k) => setSaved(k.saved)).catch((e) => setError(String(e)));
+  };
+  const useSaved = (x: SavedScript) => {
+    setS((p) => ({ ...p, script: x.text, scriptName: x.name }));
+    keep(x.name, x.text);
+    light();
+  };
+
   const run = async () => {
     if (running || chosen.length === 0) return;
     setError(null);
+    keep(s.scriptName, s.script);
     let o: ConvertOptions | string;
     try {
       o = await options();
@@ -448,9 +485,16 @@ export default function Convert({ active, storageKey, opened }: { active: boolea
           <Field
             label={t("convert.script")}
             action={
-              <button className="cursor-default text-[11px] text-muted-foreground hover:text-foreground" onClick={() => void loadScript()}>
-                {t("convert.loadScript")}
-              </button>
+              <span className="flex gap-3">
+                {s.script.trim() && (
+                  <button className="cursor-default text-[11px] text-muted-foreground hover:text-foreground" onClick={saveCurrent}>
+                    {t("convert.saveScript")}
+                  </button>
+                )}
+                <button className="cursor-default text-[11px] text-muted-foreground hover:text-foreground" onClick={() => void loadScript()}>
+                  {t("convert.loadScript")}
+                </button>
+              </span>
             }
           >
             <textarea
@@ -461,6 +505,25 @@ export default function Convert({ active, storageKey, opened }: { active: boolea
               placeholder={"[Hierarchy]\nsteer_rot = -90 180 0"}
               className="w-full rounded-lg border border-input bg-transparent p-2 font-mono text-[11.5px] placeholder:text-faint"
             />
+            {saved.length > 0 && (
+              <div className="mt-1.5 flex flex-wrap gap-1.5" aria-label={t("convert.savedScripts")}>
+                {saved.map((x) => (
+                  <span key={x.name} className={cn("flex items-center rounded-md border border-input text-[11.5px]", x.text === s.script && "border-primary/50 bg-primary/[0.07]")}>
+                    <button className="cursor-default px-2 py-0.5 hover:text-foreground" title={t("convert.useScript")} onClick={() => useSaved(x)}>
+                      {x.name}
+                    </button>
+                    <button
+                      className="cursor-default px-1 py-0.5 text-muted-foreground hover:text-destructive"
+                      title={t("convert.removeScript")}
+                      aria-label={t("convert.removeScript")}
+                      onClick={() => void removeScript(x.name).then((k) => setSaved(k.saved)).catch(() => {})}
+                    >
+                      <X className="size-3" />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
             {script && script !== "ok" && (
               <p className="mt-1 text-[11.5px] text-destructive">{t(script === "noSection" ? "convert.scriptNoSection" : "convert.scriptNoParts")}</p>
             )}

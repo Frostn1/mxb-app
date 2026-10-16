@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use tauri::Emitter;
 
 use crate::host::{self, Options};
+use crate::scripts::{self, Scripts};
 use crate::job::{self, Found, HrcMode, Maps, Model, Outcome, Progress, Shd, ShdValues};
 
 #[derive(Debug, Deserialize)]
@@ -78,6 +79,35 @@ pub fn fbx_read_text(path: String) -> Result<String, String> {
         return Err(format!("{path} is too large to be a parameter file"));
     }
     std::fs::read_to_string(&path).map_err(|e| format!("{path}: {e}"))
+}
+
+fn scripts_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    use tauri::Manager;
+    app.path().app_config_dir().map_err(|e| format!("no config directory: {e}"))
+}
+
+/// The export scripts kept between runs: the last one used and the saved list.
+#[tauri::command]
+pub fn fbx_scripts(app: tauri::AppHandle) -> Scripts {
+    scripts_dir(&app).map(|d| scripts::load(&d)).unwrap_or_default()
+}
+
+/// Remember the script just used (empty `text` forgets it).
+#[tauri::command]
+pub fn fbx_scripts_last(app: tauri::AppHandle, name: String, text: String) -> Result<Scripts, String> {
+    scripts::set_last(&scripts_dir(&app)?, &name, &text)
+}
+
+/// Save a script under a name.
+#[tauri::command]
+pub fn fbx_scripts_save(app: tauri::AppHandle, name: String, text: String) -> Result<Scripts, String> {
+    scripts::save(&scripts_dir(&app)?, &name, &text)
+}
+
+/// Remove a saved script.
+#[tauri::command]
+pub fn fbx_scripts_remove(app: tauri::AppHandle, name: String) -> Result<Scripts, String> {
+    scripts::remove(&scripts_dir(&app)?, &name)
 }
 
 /// Write one material's `.shd` with these maps and values: the Convert screen's sliders.
