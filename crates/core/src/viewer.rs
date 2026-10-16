@@ -2022,7 +2022,14 @@ pub fn load_model_file_blocking(path: &str) -> Result<LooseModel, String> {
         edf::to_right_handed(&mut part);
         keep_lod0(&mut part);
         bind_textures(&mut part, data, &Default::default(), &Default::default());
-        for t in edf::color_textures(data) {
+        // The colour sheets, then each one's `_n` tangent normal map: the game reads its alpha
+        // as the specular mask, so it travels whole (see the viewer's materials).
+        let colours: Vec<String> = edf::color_textures(data).into_iter().map(|t| t.name.to_ascii_lowercase()).collect();
+        let wanted_texture = |name: &str| {
+            let n = name.to_ascii_lowercase();
+            colours.contains(&n) || n.strip_suffix("_n").is_some_and(|base| colours.iter().any(|c| c == base))
+        };
+        for t in edf::embedded_textures(data).into_iter().filter(|t| wanted_texture(&t.name)) {
             if textures.iter().any(|h| h.name.eq_ignore_ascii_case(&t.name)) {
                 continue;
             }

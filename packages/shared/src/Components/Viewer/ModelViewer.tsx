@@ -1205,6 +1205,8 @@ function makeEdfMaterial(
   tex: Map<string, THREE.Texture>,
   envMap: THREE.Texture,
   rubber: ReadonlySet<string> = NO_RUBBER,
+  // The game's reading of a normal map's alpha: where it is clear the sheet has no specular.
+  specMask = false,
 ) {
   // The number-plate planes are the game's to draw on, not ours — see `isDecalPlane`.
   if (isDecalPlane(name)) {
@@ -1250,6 +1252,20 @@ function makeEdfMaterial(
     side: THREE.DoubleSide,
   });
   material.userData.sheet = name?.toLowerCase() ?? null;
+  if (specMask && normalMap) {
+    // MX Bikes keeps the specular mask in the normal map's alpha. Masked-out texels lose their
+    // highlight (full roughness) instead of the whole sheet shining evenly.
+    material.onBeforeCompile = (shader) => {
+      shader.fragmentShader = shader.fragmentShader.replace(
+        "#include <roughnessmap_fragment>",
+        `float roughnessFactor = roughness;
+#ifdef USE_NORMALMAP
+roughnessFactor = mix(1.0, roughnessFactor, clamp(texture2D(normalMap, vNormalMapUv).a, 0.0, 1.0));
+#endif`,
+      );
+    };
+    material.customProgramCacheKey = () => "edf-specmask";
+  }
   return material;
 }
 
@@ -1297,12 +1313,14 @@ function useEdfMeshes(
       list.map((n) =>
         n.submeshes.length
           ? n.submeshes.map((sm) =>
-              makeEdfMaterial(sm.texture, submeshTexture(sm.texture, tex), tex, env, rubber),
+              makeEdfMaterial(sm.texture, submeshTexture(sm.texture, tex), tex, env, rubber, !!shaders),
             )
           : // No submesh table → whole-node binding (the model's primary body texture).
-            [makeEdfMaterial(n.texture, submeshTexture(n.texture, tex), tex, env, rubber)],
+            [makeEdfMaterial(n.texture, submeshTexture(n.texture, tex), tex, env, rubber, !!shaders)],
       ),
-    [list, tex, env, rubber],
+    // Whether a `.shd` is in play, not its values: those move the materials in place.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [list, tex, env, rubber, !!shaders],
   );
   useEffect(
     () => () => materials.forEach((a) => a.forEach((m) => m.dispose())),
