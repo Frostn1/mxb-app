@@ -131,10 +131,12 @@ import { ContextBarLeft, ContextBarRight } from "../Shell/ContextBar";
 import { useViewActive } from "../Shell/RetainedView";
 import ReshadeCard from "./ReshadeCard";
 import SupportersCard from "./SupportersCard";
+import SupporterLooks from "@frost/shared/Components/Supporter/SupporterLooks";
 import {
   COLORWAYS,
   COLORWAY_SWATCH,
   UI_SCALES,
+  isPackColorway,
   useTheme,
   type UiScale,
   type Colorway,
@@ -2343,11 +2345,15 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
                     );
                   })}
                 </div>
-                <span className="text-[11px] text-muted-foreground">
-                  {t(COLORWAY_LABEL[colorway])}
-                </span>
+                {!isPackColorway(colorway) && (
+                  <span className="text-[11px] text-muted-foreground">
+                    {t(COLORWAY_LABEL[colorway])}
+                  </span>
+                )}
               </div>
             </div>
+
+            <SupporterLooks />
 
             {/* The webview's own zoom, so it moves type, spacing and icons together.
                 Scaling the root font instead would leave the app's 778 pixel-valued

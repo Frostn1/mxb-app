@@ -11,6 +11,7 @@ import { Switch } from "@frost/shared/Components/ui/switch";
 import { Segmented } from "@frost/shared/Components/ui/segmented";
 import { cn } from "@frost/shared/lib/utils";
 import { useTheme, type ThemeMode } from "@frost/shared/Context/Theme";
+import SupporterLooks from "@frost/shared/Components/Supporter/SupporterLooks";
 import HotkeyField from "@frost/shared/Components/HotkeyField";
 import {
   getOverlayState,
@@ -284,6 +285,7 @@ export default function Settings({ initialSection }: { initialSection?: SectionI
                     ]}
                   />
                 </FieldRow>
+                <SupporterLooks />
               </Section>
               {/* Coach has one dictionary so far (i18n/index.ts serves it to every locale), so
                   this says so rather than offering a picker that changes nothing. */}

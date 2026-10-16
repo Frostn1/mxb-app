@@ -73,6 +73,9 @@ fn main() {
             fbx2edf::commands::fbx_unwatch,
             mxb_core::viewer::load_model_file,
             mxb_core::viewer::texture_bytes,
+            // The theme reads the supporter pack's cached answer (the manager keeps it fresh).
+            mxb_core::supporter::supporter_status,
+            mxb_core::supporter::supporter_refresh,
             converter_opened,
             reveal_in_explorer,
             log_client,
