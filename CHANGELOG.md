@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased — Frost's Studio: Gfx assembles the bike again
+
+### Fixed
+- **Gfx assembly and wheels.** The Gfx tab takes a bike's .geom from its .pkz again, so the parts are assembled and the wheels and the Rear sprocket marker show. No texture is taken from the .pkz.
+
 ## 2026-10-16 — Frost Converter v0.1.4 — Name the .edf, Preview and Watch
 
 ### Added
