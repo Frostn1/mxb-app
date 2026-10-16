@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased — Frost's Studio and Frost Converter: named export scripts
+
+### Fixed
+- **Saved export scripts.** Save asks for a name, so a second script no longer replaces the first. The same name asks Replace?, and each saved script can be renamed or removed.
+
 ## Unreleased — Frost's Studio and Frost Converter: one-line .shd files
 
 ### Fixed

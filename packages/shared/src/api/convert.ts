@@ -104,6 +104,7 @@ export const keptScripts = () => invoke<KeptScripts>("fbx_scripts");
 /** Remember the script just used; empty text forgets it. */
 export const rememberScript = (name: string, text: string) => invoke<KeptScripts>("fbx_scripts_last", { name, text });
 export const saveScript = (name: string, text: string) => invoke<KeptScripts>("fbx_scripts_save", { name, text });
+export const renameScript = (from: string, to: string) => invoke<KeptScripts>("fbx_scripts_rename", { from, to });
 export const removeScript = (name: string) => invoke<KeptScripts>("fbx_scripts_remove", { name });
 export const readText = (path: string) => invoke<string>("fbx_read_text", { path });
 

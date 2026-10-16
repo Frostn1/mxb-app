@@ -104,6 +104,12 @@ pub fn fbx_scripts_save(app: tauri::AppHandle, name: String, text: String) -> Re
     scripts::save(&scripts_dir(&app)?, &name, &text)
 }
 
+/// Rename a saved script.
+#[tauri::command]
+pub fn fbx_scripts_rename(app: tauri::AppHandle, from: String, to: String) -> Result<Scripts, String> {
+    scripts::rename(&scripts_dir(&app)?, &from, &to)
+}
+
 /// Remove a saved script.
 #[tauri::command]
 pub fn fbx_scripts_remove(app: tauri::AppHandle, name: String) -> Result<Scripts, String> {
