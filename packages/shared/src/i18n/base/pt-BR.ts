@@ -319,6 +319,7 @@ export const ptBR: Record<keyof typeof en, string> = {
   "convert.noShd": "Sem .shd",
   "convert.makeShd": "Criar .shd ausentes",
   "convert.modelFolder": "Pasta do modelo",
+  "convert.notAssembled": "Não montada: sem dados da moto",
   "convert.highlight": "Destacar",
   "convert.outName": "Nome de saída",
   "convert.script": "Script de exportação",

@@ -1,9 +1,20 @@
 # Changelog
 
-## Unreleased — Frost's Studio and Frost Converter: .shd files stay with the model
+## 2026-10-16 — Frost Converter v0.1.6 — .shd files stay with the model
 
 ### Changed
 - **Shaders.** Convert no longer writes a .shd beside the .edf. Make missing .shd (on by default, under More) writes one only where a picture has none, in the model's folder where the converter reads it, and never writes over one. Files written lists them under Model folder. The Preview sliders edit that .shd and, with Watch on, convert again to carry the change.
+
+### Fixed
+- **Bike parts in Preview.** Parts now sit where they do on the assembled bike, placed by the .hrc files and the bike's .geom, instead of each at its own origin. Without a .geom the Preview says Not assembled.
+
+## 2026-10-16 — Frost's Studio v0.7.8 — .shd files stay with the model
+
+### Changed
+- **Shaders.** Convert no longer writes a .shd beside the .edf. Make missing .shd (on by default, under More) writes one only where a picture has none, in the model's folder where the converter reads it, and never writes over one. Files written lists them under Model folder. The Preview sliders edit that .shd and, with Watch on, convert again to carry the change.
+
+### Fixed
+- **Bike parts in Preview.** Parts now sit where they do on the assembled bike, placed by the .hrc files and the bike's .geom, instead of each at its own origin. Without a .geom the Preview says Not assembled.
 
 ## 2026-10-16 — Frost Converter v0.1.5 — Named export scripts
 
