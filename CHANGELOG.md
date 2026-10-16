@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased — Frost's Studio and Frost Converter: one-line .shd files
+
+### Fixed
+- **.shd files written on one line.** The Preview sliders now show the values of a .shd with its blocks on one line, as the Blender kit writes them, not the stock ones.
+
 ## Unreleased — Frost's Studio: Gfx assembles the bike again
 
 ### Fixed

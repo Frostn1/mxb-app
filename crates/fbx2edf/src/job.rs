@@ -384,11 +384,64 @@ pub fn shd_text(maps: &Maps, values: &ShdValues) -> String {
     out
 }
 
+/// `key = value` pairs in `body`, one per entry: the value runs up to where the next
+/// `key =` starts, so a path with spaces in it stays whole. Text with no `=` comes back as is.
+fn shd_pairs(body: &str) -> Vec<String> {
+    let starts: Vec<usize> = body
+        .match_indices('=')
+        .filter_map(|(eq, _)| {
+            let before = body[..eq].trim_end();
+            let key_len = before.chars().rev().take_while(|c| c.is_alphanumeric() || *c == '_').count();
+            (key_len > 0).then(|| before.len() - before.chars().rev().take(key_len).map(char::len_utf8).sum::<usize>())
+        })
+        .collect();
+    if starts.is_empty() {
+        return Some(body.trim()).filter(|b| !b.is_empty()).map(str::to_string).into_iter().collect();
+    }
+    let mut out: Vec<String> = Vec::new();
+    // Anything before the first key is a block name written on the same line.
+    let lead = body[..starts[0]].trim();
+    if !lead.is_empty() {
+        out.push(lead.to_string());
+    }
+    for (i, &s) in starts.iter().enumerate() {
+        let end = starts.get(i + 1).copied().unwrap_or(body.len());
+        let pair = body[s..end].trim().trim_end_matches([';', ',']).trim();
+        out.push(pair.to_string());
+    }
+    out
+}
+
+/// A `.shd` as one entry per line: block names, `key = value` pairs and braces, whether the
+/// file is laid out the way the converter reads it (a block per few lines) or the way other
+/// tools write it (`specular { shininess = 6 }` on one line).
+fn shd_lines(text: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    for raw in text.lines() {
+        let line = raw.trim();
+        let mut rest = line;
+        while !rest.is_empty() {
+            match rest.find(['{', '}']) {
+                Some(i) => {
+                    out.extend(shd_pairs(&rest[..i]));
+                    out.push(rest[i..=i].to_string());
+                    rest = rest[i + 1..].trim();
+                }
+                None => {
+                    out.extend(shd_pairs(rest));
+                    break;
+                }
+            }
+        }
+    }
+    out
+}
+
 /// What a `.shd` on disk names and sets. A key it doesn't have keeps its stock value.
 pub fn parse_shd(text: &str) -> (Maps, ShdValues) {
     let (mut maps, mut v) = (Maps::default(), ShdValues::default());
     let mut block = String::new();
-    for raw in text.lines() {
+    for raw in shd_lines(text) {
         let line = raw.trim();
         if line.is_empty() || line == "{" || line == "}" {
             continue;
@@ -994,6 +1047,31 @@ mod tests {
         assert_eq!(parse_shd("garbage"), (Maps::default(), ShdValues::default()));
         let bad = ShdValues { shininess: f32::NAN, reflection_min: -1.0, ..ShdValues::default() };
         assert_eq!(bad.sane(), ShdValues::default());
+    }
+
+    /// Other tools write each block on one line; the converter's own layout and these must read
+    /// the same.
+    #[test]
+    fn a_shd_reads_the_same_on_one_line_as_over_several() {
+        let multi = "bump\n{\n\tmap = X_n.tga\n\trepetitions = 1\n}\nspecular\n{\n\tshininess = 12\n\tmap = X_s.tga\n}\nreflection\n{\n\tfactormin = 0.1\n\tfactormax = 0.7\n\tfactorexp = 2.0\n\tmap = X_r.tga\n}\n";
+        let one = "bump { map = X_n.tga repetitions = 1 }\nspecular { shininess = 12 map = X_s.tga }\nreflection { factormin = 0.1 factormax = 0.7 factorexp = 2.0 map = X_r.tga }\n";
+        let (m, v) = parse_shd(multi);
+        assert_eq!((m.normal.as_deref(), m.specular.as_deref(), m.reflection.as_deref()), (Some("X_n.tga"), Some("X_s.tga"), Some("X_r.tga")));
+        assert_eq!((v.shininess, v.reflection_min, v.reflection_max, v.reflection_exp), (12.0, 0.1, 0.7, 2.0));
+        assert_eq!(parse_shd(one), (m, v));
+        // Braces on their own lines, pairs on the name's line, a path with spaces, `;` between pairs.
+        let mixed = "specular {\n shininess = 12; map = C:\\My Maps\\X_s.tga }\nbump{map=X_n.tga}";
+        let (m, v) = parse_shd(mixed);
+        assert_eq!((m.specular.as_deref(), m.normal.as_deref(), v.shininess), (Some("C:\\My Maps\\X_s.tga"), Some("X_n.tga"), 12.0));
+    }
+
+    /// What the Blender kit writes (`export/shd.py`), spacing and all.
+    #[test]
+    fn a_shd_written_by_the_kit_reads_back() {
+        let kit = "specular   { shininess = 30 }\nreflection { factormin = 0.25  factormax = 1  factorexp = 1  map = mypage_r.tga }\nbump       { map = mypage_n.tga  repetitions = 1 }\n";
+        let (m, v) = parse_shd(kit);
+        assert_eq!((m.normal.as_deref(), m.reflection.as_deref(), m.specular), (Some("mypage_n.tga"), Some("mypage_r.tga"), None));
+        assert_eq!((v.shininess, v.reflection_min, v.reflection_max, v.reflection_exp), (30.0, 0.25, 1.0, 1.0));
     }
 
     fn report(objects: &[&str]) -> Value {
