@@ -288,6 +288,7 @@ fn main() {
             mxb_core::supporter::supporter_refresh,
             mxb_core::supporter::supporter_email_send,
             mxb_core::supporter::supporter_email_confirm,
+            mxb_core::supporter::supporter_checkout,
             mxb_core::uninstall::uninstall_info,
             mxb_core::uninstall::uninstall_app,
         ])

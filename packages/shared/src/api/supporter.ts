@@ -43,6 +43,18 @@ export async function supporterEmailConfirm(code: string): Promise<SupporterStat
   return next;
 }
 
+/** Why buying the pack couldn't start. Each has a `supporter.buyErr.*` string. */
+export type CheckoutError = "notSetUp" | "steam" | "owned" | "failed";
+
+/**
+ * A Stripe Checkout URL for the supporter pack. Only call it once the player has ticked the
+ * Terms and the immediate-access waiver. Rejects with a {@link CheckoutError}; `notSetUp` means
+ * the pack isn't on sale here, and the caller should offer Buy Me a Coffee instead.
+ */
+export function supporterCheckout(): Promise<string> {
+  return invoke<string>("supporter_checkout");
+}
+
 /** Fired after a refresh, so every mounted {@link useSupporter} picks the answer up. */
 const CHANGED = "frost:supporter-changed";
 

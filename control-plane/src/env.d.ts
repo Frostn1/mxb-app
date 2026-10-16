@@ -87,6 +87,12 @@ interface Env {
     RESEND_API_KEY?: string;
     /** The From line on that email, e.g. `Frost <noreply@mxbsecure.com>`. */
     SUPPORTER_MAIL_FROM?: string;
+    /** The supporter pack's price in minor units (`supporterpack.ts`). Default 1000. */
+    MXB_SUPPORTER_PACK_CENTS?: string;
+    /** Its currency, ISO 4217 lower-case. Default usd, the shop's. */
+    MXB_SUPPORTER_PACK_CURRENCY?: string;
+    /** The Terms version a pack buyer agrees to (YYYY-MM-DD). Without it the pack isn't on sale. */
+    MXB_TERMS_VERSION?: string;
     /** Anthropic API key, for writing track programs. Without it `/v1/track/generate`
      *  answers 503 — the app says track generation isn't available and everything else
      *  carries on. Spend is capped by the endpoint itself: one Opus call per request, at

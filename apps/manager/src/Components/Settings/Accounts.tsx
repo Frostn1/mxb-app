@@ -55,6 +55,7 @@ import { useT } from "@/i18n";
 import SupporterBadge from "@frost/shared/Components/Supporter/SupporterBadge";
 import { recheckSupporter, useSupporter } from "@frost/shared/api/supporter";
 import SupporterEmailLink from "@frost/shared/Components/Supporter/SupporterEmailLink";
+import SupporterBuy from "@frost/shared/Components/Supporter/SupporterBuy";
 
 /** Where a row's status dot sits on the three states any account can be in. */
 type Tone = "on" | "off" | "none";
@@ -239,10 +240,11 @@ export default function Accounts() {
               : t("settings.steamLinkBtn")}
         </Button>
       </Row>
-      {/* A coffee on Buy Me a Coffee unlocks the supporter pack once its email is linked here.
-          Needs the Steam link, since the pack is kept by Steam id. */}
+      {/* The supporter pack, bought here or unlocked by a coffee on Buy Me a Coffee once its
+          email is linked. Needs the Steam link, since the pack is kept by Steam id. */}
       {steamId && !supporter && (
-        <div className="pb-2 pl-12">
+        <div className="flex flex-col gap-2 pb-2 pl-12">
+          <SupporterBuy />
           <SupporterEmailLink />
         </div>
       )}
