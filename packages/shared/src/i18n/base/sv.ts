@@ -281,6 +281,8 @@ export const sv: Record<keyof typeof en, string> = {
   "convert.fast": "Snabbläge",
   "convert.shaders": "Shaders",
   "convert.overwriteShd": "Skriv över befintliga .shd",
+  "convert.outName": "Utdatanamn",
+  "convert.outNameHint": "Valfritt. Tomt behåller vanligt namn; .edf läggs till.",
   "convert.script": "Exportskript",
   "convert.loadScript": "Läs in fil",
   "convert.scriptNoSection": "Ingen [Hierarchy]-sektion hittades.",

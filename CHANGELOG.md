@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased — Frost's Studio and Frost Converter: name the .edf
+
+### Added
+- **Output name for Convert.** When one model is converted, an optional name field sets the .edf's file name. Leave it empty for the usual name. `.edf` is added when missing, and characters Windows file names can't hold are removed. A bike's shadow stays `shadow_model.edf`, the .shd files keep their material names, and the .hrc files point at the new name. Frost Converter's command line has `--name NAME` too.
 ## 2026-10-15 — Frost Converter v0.1.3 — .shd files you can find
 
 ### Fixed

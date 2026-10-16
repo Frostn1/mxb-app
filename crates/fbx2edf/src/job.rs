@@ -91,12 +91,39 @@ pub struct Model {
     pub shadow: bool,
 }
 
+/// The base name (no `.edf`) a typed output name comes to: path parts dropped, characters
+/// Windows file names can't hold removed, trailing dots and spaces trimmed, a `.edf` suffix
+/// taken off. `None` when nothing usable is left, so the default name applies.
+pub fn sanitize_output_name(raw: &str) -> Option<String> {
+    let last = raw.rsplit(['/', '\\']).next().unwrap_or("");
+    let cleaned: String = last.chars().filter(|c| !c.is_control() && !"<>:\"|?*".contains(*c)).collect();
+    let mut stem = cleaned.trim().trim_end_matches(['.', ' ']).to_string();
+    if stem.len() >= 4 && stem[stem.len() - 4..].eq_ignore_ascii_case(".edf") {
+        stem.truncate(stem.len() - 4);
+        stem = stem.trim().trim_end_matches(['.', ' ']).to_string();
+    }
+    const RESERVED: [&str; 22] = [
+        "con", "prn", "aux", "nul", "com1", "com2", "com3", "com4", "com5", "com6", "com7", "com8", "com9", "lpt1", "lpt2", "lpt3", "lpt4", "lpt5",
+        "lpt6", "lpt7", "lpt8", "lpt9",
+    ];
+    if stem.is_empty() {
+        return None;
+    }
+    if RESERVED.contains(&stem.to_ascii_lowercase().as_str()) {
+        stem.push('_');
+    }
+    Some(stem)
+}
+
 /// Where each model is written: beside it, or in `folder` when one is given. A bike's shadow
 /// model is always `shadow_model.edf` and, with `bike`, the bike itself is `model.edf`: the
-/// names MX Bikes looks for. Otherwise a model keeps its FBX's name. Two models landing on one
-/// name are kept apart with a number, as the browser converter does.
-pub fn output_paths(models: &[Model], folder: Option<&Path>, bike: bool) -> Vec<PathBuf> {
+/// names MX Bikes looks for. Otherwise a model keeps its FBX's name. With `name`, the one
+/// non-shadow model takes it instead (see [`sanitize_output_name`]); with several models the
+/// name is ignored, as every one would land on it. Two models landing on one name are kept
+/// apart with a number, as the browser converter does.
+pub fn output_paths(models: &[Model], folder: Option<&Path>, bike: bool, name: Option<&str>) -> Vec<PathBuf> {
     let mut taken = HashSet::new();
+    let custom = name.and_then(sanitize_output_name).filter(|_| models.iter().filter(|m| !m.shadow).count() == 1);
     models
         .iter()
         .map(|m| {
@@ -104,6 +131,8 @@ pub fn output_paths(models: &[Model], folder: Option<&Path>, bike: bool) -> Vec<
             let dir = folder.map(Path::to_path_buf).unwrap_or_else(|| input.parent().map(Path::to_path_buf).unwrap_or_default());
             let stem = if m.shadow {
                 "shadow_model".to_string()
+            } else if let Some(n) = &custom {
+                n.clone()
             } else if bike {
                 "model".to_string()
             } else {
@@ -745,9 +774,53 @@ mod tests {
     fn outputs_take_the_names_the_game_loads_and_never_collide() {
         let models = [model("a/ktm.fbx", false), model("a/Shadow_ktm.fbx", true), model("b/ktm.fbx", false)];
         let names = |v: Vec<PathBuf>| v.into_iter().map(|p| p.to_string_lossy().replace('\\', "/")).collect::<Vec<_>>();
-        assert_eq!(names(output_paths(&models, None, true)), ["a/model.edf", "a/shadow_model.edf", "b/model.edf"]);
-        assert_eq!(names(output_paths(&models, None, false)), ["a/ktm.edf", "a/shadow_model.edf", "b/ktm.edf"]);
-        assert_eq!(names(output_paths(&models, Some(Path::new("out")), false)), ["out/ktm.edf", "out/shadow_model.edf", "out/ktm_2.edf"]);
+        assert_eq!(names(output_paths(&models, None, true, None)), ["a/model.edf", "a/shadow_model.edf", "b/model.edf"]);
+        assert_eq!(names(output_paths(&models, None, false, None)), ["a/ktm.edf", "a/shadow_model.edf", "b/ktm.edf"]);
+        assert_eq!(names(output_paths(&models, Some(Path::new("out")), false, None)), ["out/ktm.edf", "out/shadow_model.edf", "out/ktm_2.edf"]);
+    }
+
+    #[test]
+    fn a_typed_name_is_cleaned_and_gets_the_edf_suffix() {
+        assert_eq!(sanitize_output_name("  my bike "), Some("my bike".into()));
+        assert_eq!(sanitize_output_name("my bike.EDF"), Some("my bike".into()));
+        assert_eq!(sanitize_output_name("C:\\models/ktm:250?.edf"), Some("ktm250".into()));
+        assert_eq!(sanitize_output_name("a<b>c|d*e\"f"), Some("abcdef".into()));
+        assert_eq!(sanitize_output_name("name..."), Some("name".into()));
+        assert_eq!(sanitize_output_name("nul"), Some("nul_".into()));
+        assert_eq!(sanitize_output_name(""), None);
+        assert_eq!(sanitize_output_name("  .edf "), None);
+        assert_eq!(sanitize_output_name("???"), None);
+    }
+
+    #[test]
+    fn a_typed_name_replaces_the_one_models_name_and_empty_keeps_the_default() {
+        let one = [model("a/ktm.fbx", false)];
+        let names = |v: Vec<PathBuf>| v.iter().map(|p| p.to_string_lossy().replace('\\', "/")).collect::<Vec<_>>();
+        assert_eq!(names(output_paths(&one, None, false, Some("race"))), ["a/race.edf"]);
+        assert_eq!(names(output_paths(&one, None, true, Some("race.edf"))), ["a/race.edf"]);
+        assert_eq!(names(output_paths(&one, Some(Path::new("out")), false, Some("race"))), ["out/race.edf"]);
+        assert_eq!(names(output_paths(&one, None, true, Some(""))), ["a/model.edf"]);
+        assert_eq!(names(output_paths(&one, None, false, Some("  "))), ["a/ktm.edf"]);
+        // A bike's shadow keeps the name the game looks for.
+        let bike = [model("a/ktm.fbx", false), model("a/ktm_shadow.fbx", true)];
+        assert_eq!(names(output_paths(&bike, None, true, Some("race"))), ["a/race.edf", "a/shadow_model.edf"]);
+        // Several models would land on one name: the field is ignored.
+        let many = [model("a/ktm.fbx", false), model("b/yz.fbx", false)];
+        assert_eq!(names(output_paths(&many, None, false, Some("race"))), ["a/ktm.edf", "b/yz.edf"]);
+    }
+
+    #[test]
+    fn a_shd_keeps_its_picture_s_name_and_the_hrc_names_the_typed_edf() {
+        // .shd files are named by their material's picture, whatever the .edf is called.
+        let dir = tempfile::tempdir().unwrap();
+        let edf = dir.path().join("race.edf");
+        let sites = vec![site("chain", &[dir.path()], None)];
+        let o = outcome_of(Ok(report(&["", "steer", "fsusp"])), HrcMode::Always, &edf, pre(sites), Some((false, &ShdValues::default())), &mut HashSet::new());
+        assert!(dir.path().join("chain.shd").exists());
+        assert_eq!(o.files[0], edf.to_string_lossy());
+        assert!(o.files.iter().any(|f| f.ends_with("chain.shd")));
+        let hrc = std::fs::read_to_string(dir.path().join("steer.hrc")).unwrap();
+        assert!(hrc.contains("scene = race.edf"), "{hrc}");
     }
 
     #[test]

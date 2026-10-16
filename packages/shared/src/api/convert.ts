@@ -122,8 +122,8 @@ export const nameOf = (p: string) => p.slice(Math.max(p.lastIndexOf("\\"), p.las
  * names MX Bikes looks for. Otherwise a model keeps its FBX's name. Two models landing on one
  * name are kept apart with a number, as the browser converter does.
  */
-export const outputPaths = (models: { path: string; shadow: boolean }[], folder: string | null, bike = false) =>
-  invoke<string[]>("fbx_output_paths", { models, folder, bike });
+export const outputPaths = (models: { path: string; shadow: boolean }[], folder: string | null, bike = false, name: string | null = null) =>
+  invoke<string[]>("fbx_output_paths", { models, folder, bike, name });
 
 const PARTS = ["chassis", "steer", "fsusp", "rsusp"];
 

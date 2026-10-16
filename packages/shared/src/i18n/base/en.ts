@@ -286,6 +286,8 @@ export const en = {
   "convert.fast": "Fast mode",
   "convert.shaders": "Shaders",
   "convert.overwriteShd": "Overwrite existing .shd",
+  "convert.outName": "Output name",
+  "convert.outNameHint": "Optional. Leave empty to keep the usual name; .edf is added.",
   "convert.script": "Export script",
   "convert.loadScript": "Load a file",
   "convert.scriptNoSection": "No [Hierarchy] section. For a chain or any other object, pick One model.",

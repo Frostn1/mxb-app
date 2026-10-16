@@ -280,6 +280,8 @@ export const de: Record<keyof typeof en, string> = {
   "convert.fast": "Schnellmodus",
   "convert.shaders": "Shader",
   "convert.overwriteShd": "Vorhandene .shd überschreiben",
+  "convert.outName": "Ausgabename",
+  "convert.outNameHint": "Optional. Leer lassen für den üblichen Namen; .edf wird ergänzt.",
   "convert.script": "Export-Skript",
   "convert.loadScript": "Datei laden",
   "convert.scriptNoSection": "Kein [Hierarchy]-Abschnitt gefunden.",
