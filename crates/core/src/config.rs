@@ -295,6 +295,13 @@ pub struct AppConfig {
     pub survey_enabled: bool,
     /// What the prompt has already asked, and when. Never edited by hand.
     pub survey: SurveyState,
+    /// The "support the developer" card's schedule, per app (`manager`, `studio`) — see
+    /// [`crate::support`]. Per app because this file is shared, and turning the card off in
+    /// one app says nothing about the other.
+    pub support: BTreeMap<String, SupportState>,
+    /// Whether the signed-in account has the supporter pack, as last read — see
+    /// [`crate::supporter`]. Cached so themes and the badge work offline.
+    pub supporter: SupporterCache,
     /// Live share codes this machine publishes, and the key that lets it update each one.
     ///
     /// The key is why this is stored at all: publishing a live share needs no account, so
@@ -358,6 +365,8 @@ pub struct LiveSubscription {
     pub published_at: u64,
     /// Install a new version as soon as a check finds one, rather than waiting to be asked.
     pub auto: bool,
+    /// The last publish came from an account with the supporter pack, for a small badge.
+    pub supporter: bool,
 }
 
 /// The record of the last publish and the last pull.
@@ -409,6 +418,36 @@ pub struct SurveyState {
     /// Poll id to the unix milliseconds it was last answered. What keeps a question that has
     /// been answered from being asked again, and what `againDays` is measured against.
     pub answered: BTreeMap<String, u64>,
+}
+
+/// What the support card has already done in one app — see [`crate::support`].
+///
+/// Safe to delete: a missing block means a fresh install that has never seen the card.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct SupportState {
+    /// Launches of this app, this one included.
+    pub launches: u32,
+    /// Launches since the card was last on screen.
+    pub launches_since_shown: u32,
+    /// Unix milliseconds the card was last on screen. `0` means never.
+    pub last_shown: u64,
+    /// Unix milliseconds before which the card stays away ("Remind me later", "Support").
+    pub snooze_until: u64,
+    /// "Don't show again".
+    pub never: bool,
+    /// Known to support the project already. The account's own answer lives in
+    /// [`AppConfig::supporter`]; either one keeps the card away.
+    pub supporter: bool,
+}
+
+/// The supporter pack, as the control plane last said — see [`crate::supporter`].
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct SupporterCache {
+    pub supporter: bool,
+    /// Unix milliseconds of that answer. `0` means never asked.
+    pub checked_at: u64,
 }
 
 /// Toggle combo used until the player picks another one.
@@ -512,6 +551,8 @@ impl Default for AppConfig {
             install_id: String::new(),
             survey_enabled: true,
             survey: SurveyState::default(),
+            support: BTreeMap::new(),
+            supporter: SupporterCache::default(),
             published_shares: Vec::new(),
             live_subscriptions: Vec::new(),
             replay: crate::replay::Recording::default(),

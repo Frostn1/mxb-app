@@ -291,6 +291,14 @@ pub struct Lap {
     pub issue: Option<&'static str>,
     /// The rider came off during it. Still whole: the game timed it, and the review says where.
     pub crashed: bool,
+    /// The bike jumped further between two samples than it could have ridden: the game put it
+    /// back on the track (a reset), so part of the lap was never ridden.
+    pub reset: bool,
+    /// The path ridden is much shorter than the track: part of it was cut.
+    pub cut: bool,
+    /// The first lap of the stint, started from standstill: out of the pits or off the gate,
+    /// a warm-up rather than a lap at pace.
+    pub warmup: bool,
     /// How long it took by the recording, for a lap the game left untimed.
     pub ridden_ms: i32,
     pub samples: Vec<Sample>,
@@ -492,7 +500,7 @@ impl Recording {
     pub fn laps(&self) -> Vec<Lap> {
         let mut out = Vec::with_capacity(self.laps.len());
         let mut start = 0;
-        for m in &self.laps {
+        for (i, m) in self.laps.iter().enumerate() {
             let end = m.at.min(self.samples.len());
             let mut samples = self.samples[start.min(end)..end].to_vec();
             start = end;
@@ -503,10 +511,62 @@ impl Recording {
                 (Some(a), Some(b)) => ((b.t - a.t) * 1000.0).round() as i32,
                 _ => 0,
             };
-            out.push(Lap { num: m.num, time_ms: m.time_ms, invalid: m.invalid, whole: issue.is_none(), issue, crashed, ridden_ms, samples });
+            let reset = reset_in(&samples);
+            let cut = cut_short(&samples, self.event.track_length);
+            let warmup = i == 0 && samples.first().is_some_and(|s| s.speed.abs() < STANDING_MPS);
+            out.push(Lap {
+                num: m.num,
+                time_ms: m.time_ms,
+                invalid: m.invalid,
+                whole: issue.is_none(),
+                issue,
+                crashed,
+                reset,
+                cut,
+                warmup,
+                ridden_ms,
+                samples,
+            });
         }
         out
     }
+}
+
+impl Lap {
+    /// A lap the line on the track can be drawn from: whole, valid, ridden at pace from end to
+    /// end with no crash, no reset and no cut. A crash throws the bike off the track and a reset
+    /// teleports it, and either drew a line through the scenery (GAMING PROFI 2, v0.1.24).
+    pub fn clean(&self) -> bool {
+        self.whole && !self.invalid && !self.crashed && !self.reset && !self.cut && !self.warmup
+    }
+}
+
+/// Further than this between two samples, beyond what the bike's speed covers, is the game
+/// putting it somewhere else rather than the rider riding there.
+const RESET_JUMP_M: f32 = 15.0;
+/// A lap whose path is shorter than this share of the centreline skipped part of the track. The
+/// recorder's own check on a line it is handed uses the same share (coachhud.h `CheckRef`).
+const CUT_SHARE: f32 = 0.8;
+/// The first lap of a stint that starts slower than this left from standstill (m/s).
+const STANDING_MPS: f32 = 5.0;
+
+/// Whether the bike was put back somewhere between two samples: a reset after a crash, or the
+/// rider's own reset to the track.
+fn reset_in(samples: &[Sample]) -> bool {
+    samples.windows(2).any(|w| {
+        let dt = (w[1].t - w[0].t).max(0.0);
+        let moved = (w[1].x - w[0].x).hypot(w[1].z - w[0].z);
+        let could = w[0].speed.abs().max(w[1].speed.abs()) * dt * 1.5;
+        moved.is_finite() && moved > RESET_JUMP_M + could
+    })
+}
+
+/// Whether the path ridden is too short to have gone round the whole track. A recording with no
+/// positions in it says nothing.
+fn cut_short(samples: &[Sample], track_len: f32) -> bool {
+    let path: f32 =
+        samples.windows(2).map(|w| (w[1].x - w[0].x).hypot(w[1].z - w[0].z)).filter(|d| d.is_finite()).sum();
+    track_len > 0.0 && path > 0.0 && path < track_len * CUT_SHARE
 }
 
 /// The lap crosses the line at both ends, so the first few samples can still read ~1 and the
@@ -926,5 +986,98 @@ mod tests {
         let lap = &parse(&f.0).unwrap().laps()[0];
         assert!(lap.crashed);
         assert!(lap.whole, "{:?}", lap.issue);
+    }
+
+    /// Recorded-lap fixtures for which lap the line in the game may be drawn from: a circle of
+    /// track 100 m round, ridden at 10 m/s and sampled at 10 Hz, with what went wrong put in.
+    mod clean_laps {
+        use super::*;
+
+        const LEN: f32 = 100.0;
+
+        type Edit<'a> = &'a dyn Fn(usize, &mut [f32; 3], &mut bool);
+
+        /// Two laps of the circle. `lap1` and `lap2` change each sample `k` (0..=100 through the
+        /// lap): where the bike is (x, z), how fast, and whether the rider is down.
+        fn session(start_mps: f32, lap1: Edit, lap2: Edit) -> Vec<Lap> {
+            let r = LEN / std::f32::consts::TAU;
+            let mut f = File::new();
+            f.event("t", LEN);
+            for (n, edit) in [(1, lap1), (2, lap2)] {
+                let from = if n == 1 { 0 } else { 1 };
+                for k in from..=100 {
+                    let pos = k as f32 / 100.0;
+                    let a = pos * std::f32::consts::TAU;
+                    let speed = if n == 1 && k == 0 { start_mps } else { 10.0 };
+                    let mut at = [r * a.cos(), r * a.sin(), speed];
+                    let mut down = false;
+                    edit(k, &mut at, &mut down);
+                    let t = (n - 1) as f32 * 10.0 + k as f32 * 0.1;
+                    f.sample(t, pos.min(0.999), |b| {
+                        b.f(20, at[2]).f(24, at[0]).f(32, at[1]);
+                        if down {
+                            b.i(136, 1);
+                        }
+                    });
+                }
+                f.lap(n, 10_000);
+            }
+            f.end();
+            parse(&f.0).unwrap().laps()
+        }
+
+        fn fine(_: usize, _: &mut [f32; 3], _: &mut bool) {}
+
+        #[test]
+        fn a_lap_ridden_round_at_pace_is_clean() {
+            let laps = session(10.0, &fine, &fine);
+            assert!(laps.iter().all(|l| l.whole && !l.reset && !l.cut && !l.warmup && l.clean()));
+        }
+
+        #[test]
+        fn a_crash_is_never_clean() {
+            let laps = session(10.0, &|k, _, down| *down = (40..60).contains(&k), &fine);
+            assert!(laps[0].whole && laps[0].crashed, "still a whole, timed lap");
+            assert!(!laps[0].clean(), "but not one to draw the line from");
+            assert!(laps[1].clean());
+        }
+
+        #[test]
+        fn the_warm_up_out_of_the_pits_is_not_clean() {
+            let laps = session(0.0, &fine, &fine);
+            assert!(laps[0].warmup && !laps[0].clean(), "lap 1 started from standstill");
+            assert!(!laps[1].warmup && laps[1].clean(), "lap 2 is a flying lap");
+        }
+
+        #[test]
+        fn a_reset_to_the_track_is_not_clean() {
+            // Thrown 40 m off the track for two samples, then put back.
+            let off = |k: usize, at: &mut [f32; 3], _: &mut bool| {
+                if (50..52).contains(&k) {
+                    at[0] += 40.0;
+                }
+            };
+            let laps = session(10.0, &fine, &off);
+            assert!(laps[1].reset && !laps[1].clean());
+            assert!(laps[0].clean());
+        }
+
+        #[test]
+        fn a_cut_lap_is_not_clean() {
+            // Most of the lap straight across the middle instead of round: the path is short.
+            let r = LEN / std::f32::consts::TAU;
+            let across = move |k: usize, at: &mut [f32; 3], _: &mut bool| {
+                if (5..75).contains(&k) {
+                    let (a0, a1) = (0.05 * std::f32::consts::TAU, 0.75 * std::f32::consts::TAU);
+                    let s = (k - 5) as f32 / 70.0;
+                    at[0] = r * (a0.cos() + (a1.cos() - a0.cos()) * s);
+                    at[1] = r * (a0.sin() + (a1.sin() - a0.sin()) * s);
+                    at[2] = 3.0;
+                }
+            };
+            let laps = session(10.0, &fine, &across);
+            assert!(laps[1].cut && !laps[1].reset && !laps[1].clean());
+            assert!(laps[0].clean());
+        }
     }
 }

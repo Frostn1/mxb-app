@@ -16,9 +16,28 @@ use crate::host::{self, Event, Options};
 #[serde(rename_all = "camelCase")]
 pub struct Found {
     pub path: String,
-    /// "model", "shadow" (an FBX named like a bike's shadow) or "params" (an `.ini`).
+    /// "model", "shadow" (an FBX named like a bike's shadow) or "params" (an export script,
+    /// see [`is_export_script`]).
     pub kind: &'static str,
     pub size: u64,
+}
+
+/// Whether a dropped file is an export script: the files the Convert screen's script slot
+/// loads (`.ini`, `.params`, `.txt`). An `.ini` or `.params` always is; a `.txt` only when it
+/// holds a `[Hierarchy]` or `[params]` section, so notes and readmes stay out.
+pub fn is_export_script(path: &Path) -> bool {
+    let ext = path.extension().map(|e| e.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
+    match ext.as_str() {
+        "ini" | "params" => true,
+        "txt" => {
+            std::fs::metadata(path).is_ok_and(|m| m.len() <= 1 << 20)
+                && std::fs::read(path).is_ok_and(|b| {
+                    let t = String::from_utf8_lossy(&b).to_ascii_lowercase();
+                    t.lines().map(str::trim).any(|l| l == "[hierarchy]" || l == "[params]")
+                })
+        }
+        _ => false,
+    }
 }
 
 fn kind_of(path: &Path) -> Option<&'static str> {
@@ -27,7 +46,7 @@ fn kind_of(path: &Path) -> Option<&'static str> {
     match ext.as_str() {
         "fbx" if name.contains("shadow") => Some("shadow"),
         "fbx" => Some("model"),
-        "ini" => Some("params"),
+        _ if is_export_script(path) => Some("params"),
         _ => None,
     }
 }
@@ -65,6 +84,17 @@ pub fn scan(paths: &[String]) -> Vec<Found> {
     out
 }
 
+/// How long a watched source rests before it counts as saved: an exporter writes in pieces.
+pub const WATCH_SETTLE: std::time::Duration = std::time::Duration::from_millis(700);
+
+/// The watched source `changed` is, if any: the same file whatever the case or the slashes,
+/// and not a `.bak` or temporary neighbour.
+pub fn watched_match<'a>(watched: &'a [PathBuf], changed: &Path) -> Option<&'a PathBuf> {
+    let key = |p: &Path| p.to_string_lossy().replace('/', "\\").to_lowercase();
+    let c = key(changed);
+    watched.iter().find(|w| key(w) == c)
+}
+
 /// A model to write: its FBX, and whether it is a bike's shadow.
 #[derive(Debug, Clone, Deserialize)]
 pub struct Model {
@@ -72,12 +102,39 @@ pub struct Model {
     pub shadow: bool,
 }
 
+/// The base name (no `.edf`) a typed output name comes to: path parts dropped, characters
+/// Windows file names can't hold removed, trailing dots and spaces trimmed, a `.edf` suffix
+/// taken off. `None` when nothing usable is left, so the default name applies.
+pub fn sanitize_output_name(raw: &str) -> Option<String> {
+    let last = raw.rsplit(['/', '\\']).next().unwrap_or("");
+    let cleaned: String = last.chars().filter(|c| !c.is_control() && !"<>:\"|?*".contains(*c)).collect();
+    let mut stem = cleaned.trim().trim_end_matches(['.', ' ']).to_string();
+    if stem.len() >= 4 && stem[stem.len() - 4..].eq_ignore_ascii_case(".edf") {
+        stem.truncate(stem.len() - 4);
+        stem = stem.trim().trim_end_matches(['.', ' ']).to_string();
+    }
+    const RESERVED: [&str; 22] = [
+        "con", "prn", "aux", "nul", "com1", "com2", "com3", "com4", "com5", "com6", "com7", "com8", "com9", "lpt1", "lpt2", "lpt3", "lpt4", "lpt5",
+        "lpt6", "lpt7", "lpt8", "lpt9",
+    ];
+    if stem.is_empty() {
+        return None;
+    }
+    if RESERVED.contains(&stem.to_ascii_lowercase().as_str()) {
+        stem.push('_');
+    }
+    Some(stem)
+}
+
 /// Where each model is written: beside it, or in `folder` when one is given. A bike's shadow
 /// model is always `shadow_model.edf` and, with `bike`, the bike itself is `model.edf`: the
-/// names MX Bikes looks for. Otherwise a model keeps its FBX's name. Two models landing on one
-/// name are kept apart with a number, as the browser converter does.
-pub fn output_paths(models: &[Model], folder: Option<&Path>, bike: bool) -> Vec<PathBuf> {
+/// names MX Bikes looks for. Otherwise a model keeps its FBX's name. With `name`, the one
+/// non-shadow model takes it instead (see [`sanitize_output_name`]); with several models the
+/// name is ignored, as every one would land on it. Two models landing on one name are kept
+/// apart with a number, as the browser converter does.
+pub fn output_paths(models: &[Model], folder: Option<&Path>, bike: bool, name: Option<&str>) -> Vec<PathBuf> {
     let mut taken = HashSet::new();
+    let custom = name.and_then(sanitize_output_name).filter(|_| models.iter().filter(|m| !m.shadow).count() == 1);
     models
         .iter()
         .map(|m| {
@@ -85,6 +142,8 @@ pub fn output_paths(models: &[Model], folder: Option<&Path>, bike: bool) -> Vec<
             let dir = folder.map(Path::to_path_buf).unwrap_or_else(|| input.parent().map(Path::to_path_buf).unwrap_or_default());
             let stem = if m.shadow {
                 "shadow_model".to_string()
+            } else if let Some(n) = &custom {
+                n.clone()
             } else if bike {
                 "model".to_string()
             } else {
@@ -221,7 +280,8 @@ fn write_hrc(report: &Value, edf: &Path, mode: HrcMode) -> (Vec<String>, Vec<Str
 }
 
 /// The maps found beside a colour picture, by file name.
-#[derive(Debug, Default, PartialEq)]
+#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Maps {
     pub normal: Option<String>,
     pub reflection: Option<String>,
@@ -265,11 +325,44 @@ pub fn find_maps(dir: &Path, name: &str, ext: Option<&str>) -> Maps {
 /// modded bikes use.
 pub const SHININESS: f32 = 6.0;
 
+/// What a `.shd` sets, besides the maps it names: the specular shininess and the reflection's
+/// strength range. Stock is shininess 6 and a reflection from 0 to 0.5 with exponent 1.0, as
+/// modders' working bikes have it.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct ShdValues {
+    pub shininess: f32,
+    pub reflection_min: f32,
+    pub reflection_max: f32,
+    pub reflection_exp: f32,
+}
+
+impl Default for ShdValues {
+    fn default() -> Self {
+        ShdValues { shininess: SHININESS, reflection_min: 0.0, reflection_max: 0.5, reflection_exp: 1.0 }
+    }
+}
+
+impl ShdValues {
+    /// Each value as it is, or the stock one where it isn't a number the game can use.
+    pub fn sane(self) -> Self {
+        let d = ShdValues::default();
+        let ok = |v: f32, d: f32| if v.is_finite() && v >= 0.0 { v } else { d };
+        ShdValues {
+            shininess: ok(self.shininess, d.shininess),
+            reflection_min: ok(self.reflection_min, d.reflection_min),
+            reflection_max: ok(self.reflection_max, d.reflection_max),
+            reflection_exp: ok(self.reflection_exp, d.reflection_exp),
+        }
+    }
+}
+
 /// A `.shd` naming `maps`, laid out the way `fbx2edf.exe` reads it: each block's name, braces
 /// and keys on lines of their own (it skips a block written on one line), in the stock order
-/// bump, specular, reflection. Reflection runs 0 to 0.5 with exponent 1.0, as modders' working
-/// bikes have it. With no specular map, the specular mask is the normal map's alpha.
-pub fn shd_text(maps: &Maps, shininess: f32) -> String {
+/// bump, specular, reflection. Specular and reflection are always there, so every material
+/// has its shininess and reflection to tune; a map is named where there is one. With no
+/// specular map, the specular mask is the normal map's alpha.
+pub fn shd_text(maps: &Maps, values: &ShdValues) -> String {
     let mut out = String::new();
     let mut block = |name: &str, lines: Vec<String>| {
         out.push_str(&format!("{name}\r\n{{\r\n"));
@@ -281,15 +374,96 @@ pub fn shd_text(maps: &Maps, shininess: f32) -> String {
     if let Some(m) = &maps.normal {
         block("bump", vec![format!("map = {m}"), "repetitions = 1".into()]);
     }
-    if maps.normal.is_some() || maps.specular.is_some() {
-        let mut l = vec![format!("shininess = {shininess}")];
-        l.extend(maps.specular.iter().map(|m| format!("map = {m}")));
-        block("specular", l);
+    let mut spec = vec![format!("shininess = {}", values.shininess)];
+    spec.extend(maps.specular.iter().map(|m| format!("map = {m}")));
+    block("specular", spec);
+    let exp = if values.reflection_exp.fract() == 0.0 { format!("{:.1}", values.reflection_exp) } else { values.reflection_exp.to_string() };
+    let mut refl = vec![format!("factormin = {}", values.reflection_min), format!("factormax = {}", values.reflection_max), format!("factorexp = {exp}")];
+    refl.extend(maps.reflection.iter().map(|m| format!("map = {m}")));
+    block("reflection", refl);
+    out
+}
+
+/// `key = value` pairs in `body`, one per entry: the value runs up to where the next
+/// `key =` starts, so a path with spaces in it stays whole. Text with no `=` comes back as is.
+fn shd_pairs(body: &str) -> Vec<String> {
+    let starts: Vec<usize> = body
+        .match_indices('=')
+        .filter_map(|(eq, _)| {
+            let before = body[..eq].trim_end();
+            let key_len = before.chars().rev().take_while(|c| c.is_alphanumeric() || *c == '_').count();
+            (key_len > 0).then(|| before.len() - before.chars().rev().take(key_len).map(char::len_utf8).sum::<usize>())
+        })
+        .collect();
+    if starts.is_empty() {
+        return Some(body.trim()).filter(|b| !b.is_empty()).map(str::to_string).into_iter().collect();
     }
-    if let Some(m) = &maps.reflection {
-        block("reflection", vec!["factormin = 0".into(), "factormax = 0.5".into(), "factorexp = 1.0".into(), format!("map = {m}")]);
+    let mut out: Vec<String> = Vec::new();
+    // Anything before the first key is a block name written on the same line.
+    let lead = body[..starts[0]].trim();
+    if !lead.is_empty() {
+        out.push(lead.to_string());
+    }
+    for (i, &s) in starts.iter().enumerate() {
+        let end = starts.get(i + 1).copied().unwrap_or(body.len());
+        let pair = body[s..end].trim().trim_end_matches([';', ',']).trim();
+        out.push(pair.to_string());
     }
     out
+}
+
+/// A `.shd` as one entry per line: block names, `key = value` pairs and braces, whether the
+/// file is laid out the way the converter reads it (a block per few lines) or the way other
+/// tools write it (`specular { shininess = 6 }` on one line).
+fn shd_lines(text: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    for raw in text.lines() {
+        let line = raw.trim();
+        let mut rest = line;
+        while !rest.is_empty() {
+            match rest.find(['{', '}']) {
+                Some(i) => {
+                    out.extend(shd_pairs(&rest[..i]));
+                    out.push(rest[i..=i].to_string());
+                    rest = rest[i + 1..].trim();
+                }
+                None => {
+                    out.extend(shd_pairs(rest));
+                    break;
+                }
+            }
+        }
+    }
+    out
+}
+
+/// What a `.shd` on disk names and sets. A key it doesn't have keeps its stock value.
+pub fn parse_shd(text: &str) -> (Maps, ShdValues) {
+    let (mut maps, mut v) = (Maps::default(), ShdValues::default());
+    let mut block = String::new();
+    for raw in shd_lines(text) {
+        let line = raw.trim();
+        if line.is_empty() || line == "{" || line == "}" {
+            continue;
+        }
+        let Some((k, val)) = line.split_once('=') else {
+            block = line.to_ascii_lowercase();
+            continue;
+        };
+        let (k, val) = (k.trim().to_ascii_lowercase(), val.trim());
+        let num = val.parse::<f32>().ok();
+        match (block.as_str(), k.as_str()) {
+            ("bump", "map") => maps.normal = Some(val.into()),
+            ("specular", "map") => maps.specular = Some(val.into()),
+            ("reflection", "map") => maps.reflection = Some(val.into()),
+            ("specular", "shininess") => v.shininess = num.unwrap_or(v.shininess),
+            ("reflection", "factormin") => v.reflection_min = num.unwrap_or(v.reflection_min),
+            ("reflection", "factormax") => v.reflection_max = num.unwrap_or(v.reflection_max),
+            ("reflection", "factorexp") => v.reflection_exp = num.unwrap_or(v.reflection_exp),
+            _ => {}
+        }
+    }
+    (maps, v)
 }
 
 /// `bike.shd: normal bike_n, reflection bike_r`.
@@ -299,7 +473,7 @@ fn shd_summary(file: &str, maps: &Maps) -> String {
         .into_iter()
         .filter_map(|(k, m)| m.as_ref().map(|m| format!("{k} {}", stem(m))))
         .collect();
-    format!("{file}: {}", parts.join(", "))
+    format!("{file}: {}", if parts.is_empty() { "no maps".to_string() } else { parts.join(", ") })
 }
 
 /// One `.shd` to write: where, what, the summary line, and notes for the modder.
@@ -311,14 +485,18 @@ pub struct ShdPlan {
     pub notes: Vec<String>,
 }
 
+/// Whether two folders are the same one, however each is spelled.
+fn same_dir(a: &Path, b: &Path) -> bool {
+    a == b || matches!((a.canonicalize(), b.canonicalize()), (Ok(x), Ok(y)) if x == y)
+}
+
 /// A linked map as the `.shd` in `dir` names it: its file name when it sits there, else its
 /// full path (the converter reads either). The engine hands linked maps back canonical
 /// (`\\?\C:\...`), so folders are compared canonical too, and a full path is written without
 /// the `\\?\` prefix.
 fn map_name(map: &Path, dir: &Path) -> String {
-    let same = |p: &Path| p == dir || matches!((p.canonicalize(), dir.canonicalize()), (Ok(a), Ok(b)) if a == b);
     match map.parent() {
-        Some(p) if same(p) => map.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
+        Some(p) if same_dir(p, dir) => map.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
         _ => strip_verbatim(map),
     }
 }
@@ -333,15 +511,12 @@ fn strip_verbatim(path: &Path) -> String {
     }
 }
 
-/// The `.shd` to write for one picture, if any. The maps the material links come first; a
-/// normal or reflection map it doesn't link but that sits beside the picture by name
-/// (`X_n`, `X_r`) is used too, with a note saying so. The `.shd` goes in the first of the
-/// picture's folders with a map, since the converter reads the maps it names beside it. A
-/// `.shd` the converter already reads is left alone unless `overwrite`.
-pub fn plan_shd(site: &host::ShdSite, overwrite: bool, shininess: f32) -> Option<ShdPlan> {
-    if site.shd.is_some() && !overwrite {
-        return None;
-    }
+/// The folder and maps a picture's `.shd` names, with notes for the modder. The maps the
+/// material links come first; a normal or reflection map it doesn't link but that sits beside
+/// the picture by name (`X_n`, `X_r`) is used too, with a note saying so. The folder is the
+/// first of the picture's with a map, since the converter reads the maps it names beside it.
+/// `None` when the picture has no maps at all.
+fn site_maps(site: &host::ShdSite) -> Option<(PathBuf, Maps, Vec<String>)> {
     let linked = site.normal.is_some() || site.reflection.is_some();
     let found = site.dirs.iter().map(|d| (d, find_maps(d, &site.name, site.ext.as_deref()))).find(|(_, m)| m.any());
     let (dir, mut maps) = match found {
@@ -358,55 +533,161 @@ pub fn plan_shd(site: &host::ShdSite, overwrite: bool, shininess: f32) -> Option
         Some(r) => maps.reflection = Some(map_name(r, &dir)),
         None => notes.extend(maps.reflection.iter().map(|m| format!("reflection map not connected, using {m}"))),
     }
+    Some((dir, maps, notes))
+}
+
+/// The `.shd` to write for one picture before converting, if any: the converter builds the
+/// maps a `.shd` names into the model, so a picture with maps gets one beside them. A `.shd`
+/// the converter already reads is left alone unless `overwrite`.
+pub fn plan_shd(site: &host::ShdSite, overwrite: bool, values: &ShdValues) -> Option<ShdPlan> {
+    if site.shd.is_some() && !overwrite {
+        return None;
+    }
+    let (dir, maps, notes) = site_maps(site)?;
     let file = format!("{}.shd", site.name);
     let path = dir.join(&file);
     if path.exists() && !overwrite {
         return None;
     }
-    Some(ShdPlan { text: shd_text(&maps, shininess), summary: shd_summary(&file, &maps), path, notes })
+    Some(ShdPlan { text: shd_text(&maps, values), summary: shd_summary(&file, &maps), path, notes })
+}
+
+/// The `.shd` for one picture beside the `.edf`, where the game reads it. Whatever maps the
+/// picture has are named from there; with none it is still a `.shd`, shininess and reflection
+/// alone.
+fn plan_beside(site: &host::ShdSite, edf_dir: &Path, values: &ShdValues) -> ShdPlan {
+    let (maps, notes) = match site_maps(site) {
+        Some((dir, maps, notes)) => {
+            let from = |m: Option<String>| {
+                m.map(|m| if Path::new(&m).is_absolute() || same_dir(&dir, edf_dir) { m } else { strip_verbatim(&dir.join(m)) })
+            };
+            (Maps { normal: from(maps.normal), reflection: from(maps.reflection), specular: from(maps.specular) }, notes)
+        }
+        None => (Maps::default(), Vec::new()),
+    };
+    let file = format!("{}.shd", site.name);
+    ShdPlan { text: shd_text(&maps, values), summary: shd_summary(&file, &maps), path: edf_dir.join(&file), notes }
+}
+
+/// The `.shd` files written before a model is converted.
+#[derive(Default)]
+struct PreShd {
+    summaries: Vec<String>,
+    notes: Vec<String>,
+    paths: Vec<PathBuf>,
+    sites: Vec<host::ShdSite>,
 }
 
 /// Write the `.shd` files an FBX's textures lack, before it is converted, so the converter
 /// builds their maps in. `done` holds the files written so far in the batch: a texture two
-/// models share is written once. Summaries, and notes.
-fn write_shd(fbx: &Path, overwrite: bool, shininess: f32, done: &mut HashSet<PathBuf>) -> (Vec<String>, Vec<String>) {
+/// models share is written once.
+fn write_shd(fbx: &Path, overwrite: bool, values: &ShdValues, done: &mut HashSet<PathBuf>) -> PreShd {
     let sites = match host::shd_sites(fbx) {
         Ok(s) => s,
         Err(e) => {
             log::warn!("[convert] no .shd files for {}: {e}", fbx.display());
-            return (Vec::new(), Vec::new());
+            return PreShd::default();
         }
     };
-    let (mut written, mut notes) = (Vec::new(), Vec::new());
+    let mut pre = PreShd::default();
     for site in &sites {
-        let Some(plan) = plan_shd(site, overwrite, shininess) else { continue };
+        let Some(plan) = plan_shd(site, overwrite, values) else { continue };
         if !done.insert(plan.path.clone()) {
             continue;
         }
         match std::fs::write(&plan.path, plan.text) {
             Ok(()) => {
-                written.push(plan.summary);
-                notes.extend(plan.notes);
+                pre.summaries.push(plan.summary);
+                pre.notes.extend(plan.notes);
+                pre.paths.push(plan.path);
             }
             Err(e) => log::warn!("[convert] couldn't write {}: {e}", plan.path.display()),
         }
     }
-    (written, notes)
+    pre.sites = sites;
+    pre
 }
 
-/// The `.shd` files a batch writes before converting.
+/// One material's `.shd` beside the model, as it is on disk now.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ShdFile {
+    /// The material's picture, without extension: the `.shd`'s name.
+    pub name: String,
+    pub path: String,
+    /// Written by this conversion, rather than one that was already there.
+    pub written: bool,
+    pub maps: Maps,
+    pub values: ShdValues,
+}
+
+/// Write a `.shd` with these maps and values: what the sliders do.
+pub fn save_shd(path: &Path, maps: &Maps, values: &ShdValues) -> Result<(), String> {
+    if !path.extension().is_some_and(|e| e.eq_ignore_ascii_case("shd")) {
+        return Err(format!("{} isn't a .shd file.", path.display()));
+    }
+    std::fs::write(path, shd_text(maps, &values.sane())).map_err(|e| format!("{}: {e}", path.display()))
+}
+
+/// What a converted model's `.shd` files came to.
+#[derive(Default)]
+struct PostShd {
+    files: Vec<ShdFile>,
+    summaries: Vec<String>,
+    notes: Vec<String>,
+    written: Vec<PathBuf>,
+}
+
+/// After a model is converted, make sure each of its materials has a `.shd` beside the
+/// `.edf`: the ones written before converting count, one already there is kept unless
+/// `overwrite`, and the rest are written now. Every material is listed, written or not.
+fn finish_shd(pre: &PreShd, edf: &Path, overwrite: bool, values: &ShdValues, done: &mut HashSet<PathBuf>) -> PostShd {
+    let mut post = PostShd::default();
+    let dir = edf.parent().map(Path::to_path_buf).unwrap_or_default();
+    let mut seen = HashSet::new();
+    for site in &pre.sites {
+        if site.name.is_empty() || !seen.insert(site.name.to_lowercase()) {
+            continue;
+        }
+        let plan = plan_beside(site, &dir, values);
+        let mut written = pre.paths.contains(&plan.path);
+        if !written && !done.contains(&plan.path) && (overwrite || !plan.path.exists()) {
+            match std::fs::write(&plan.path, &plan.text) {
+                Ok(()) => {
+                    done.insert(plan.path.clone());
+                    post.summaries.push(plan.summary.clone());
+                    post.notes.extend(plan.notes.clone());
+                    written = true;
+                }
+                Err(e) => {
+                    log::warn!("[convert] couldn't write {}: {e}", plan.path.display());
+                    post.notes.push(format!("{} couldn't be written: {e}", plan.path.file_name().unwrap_or_default().to_string_lossy()));
+                }
+            }
+        }
+        if written {
+            post.written.push(plan.path.clone());
+        }
+        // What is on disk, which is not what was planned when one was kept.
+        let (maps, now) = std::fs::read_to_string(&plan.path).map(|t| parse_shd(&t)).unwrap_or_else(|_| (Maps::default(), *values));
+        post.files.push(ShdFile { name: site.name.clone(), path: plan.path.to_string_lossy().into_owned(), written, maps, values: now });
+    }
+    post
+}
+
+/// The `.shd` files a batch writes.
 #[derive(Debug, Clone, Copy)]
 pub struct Shd {
-    /// Write the `.shd` files textures lack.
+    /// Write a `.shd` for every material. On unless asked otherwise (`--no-shd`).
     pub make: bool,
     /// Write over the ones there.
     pub overwrite: bool,
-    pub shininess: f32,
+    pub values: ShdValues,
 }
 
 impl Default for Shd {
     fn default() -> Self {
-        Shd { make: false, overwrite: false, shininess: SHININESS }
+        Shd { make: true, overwrite: false, values: ShdValues::default() }
     }
 }
 
@@ -421,6 +702,10 @@ pub struct Outcome {
     /// The `.shd` files written for its textures, each with the maps it names:
     /// `bike.shd: normal bike_n, reflection bike_r`.
     pub shd: Vec<String>,
+    /// Every file this model wrote, in full: the `.edf`, its `.shd` files, its `.hrc` files.
+    pub files: Vec<String>,
+    /// Each material's `.shd` beside the `.edf`, written now or already there, for tuning.
+    pub shaders: Vec<ShdFile>,
     /// What writing those files decided for the modder: a map used by name because the
     /// material doesn't link it, `.hrc` files kept or replaced.
     pub notes: Vec<String>,
@@ -434,21 +719,23 @@ pub enum Progress<'a> {
     Done { index: usize, outcome: &'a Outcome },
 }
 
-/// Convert a batch: the `.shd` files its textures lack first (with `shd.make`), then every
-/// model through one pool, then each bike's `.hrc` files as `hrc` says. One outcome per pair,
-/// in order; `Err` only when the options are refused, before anything is read.
+/// Convert a batch: the `.shd` files its textures need first (with `shd.make`), then every
+/// model through one pool, then each model's `.shd` files beside it and each bike's `.hrc`
+/// files as `hrc` says. One outcome per pair, in order; `Err` only when the options are
+/// refused, before anything is read.
 pub fn run(pairs: &[(PathBuf, PathBuf)], options: &Options, hrc: HrcMode, shd: Shd, on: &mut dyn FnMut(Progress)) -> Result<Vec<Outcome>, String> {
-    let shininess = if shd.shininess.is_finite() && shd.shininess >= 0.0 { shd.shininess } else { SHININESS };
+    let values = shd.values.sane();
     let mut done = HashSet::new();
-    let mut shd_files: Vec<(Vec<String>, Vec<String>)> = pairs
+    let mut pre: Vec<PreShd> = pairs
         .iter()
-        .map(|(fbx, _)| if shd.make { write_shd(fbx, shd.overwrite, shininess, &mut done) } else { Default::default() })
+        .map(|(fbx, _)| if shd.make { write_shd(fbx, shd.overwrite, &values, &mut done) } else { Default::default() })
         .collect();
     let mut outcomes: Vec<Option<Outcome>> = (0..pairs.len()).map(|_| None).collect();
     let results = host::convert(pairs, options, &mut |event| match event {
         Event::Pictures { index, done, total } => on(Progress::Pictures { index, done, total }),
         Event::Finished { index, result } => {
-            let outcome = outcome_of(result, hrc, &pairs[index].1, std::mem::take(&mut shd_files[index]));
+            let pre = std::mem::take(&mut pre[index]);
+            let outcome = outcome_of(result, hrc, &pairs[index].1, pre, shd.make.then_some((shd.overwrite, &values)), &mut done);
             on(Progress::Done { index, outcome: &outcome });
             outcomes[index] = Some(outcome);
         }
@@ -457,16 +744,37 @@ pub fn run(pairs: &[(PathBuf, PathBuf)], options: &Options, hrc: HrcMode, shd: S
         .into_iter()
         .zip(outcomes)
         .enumerate()
-        .map(|(i, (r, o))| o.unwrap_or_else(|| outcome_of(r, hrc, &pairs[i].1, Default::default())))
+        .map(|(i, (r, o))| o.unwrap_or_else(|| outcome_of(r, hrc, &pairs[i].1, Default::default(), None, &mut done)))
         .collect())
 }
 
-fn outcome_of(result: Result<Value, String>, hrc: HrcMode, edf: &Path, (shd, mut notes): (Vec<String>, Vec<String>)) -> Outcome {
+fn outcome_of(
+    result: Result<Value, String>,
+    hrc: HrcMode,
+    edf: &Path,
+    pre: PreShd,
+    finish: Option<(bool, &ShdValues)>,
+    done: &mut HashSet<PathBuf>,
+) -> Outcome {
+    let mut notes = pre.notes.clone();
+    let mut shd = pre.summaries.clone();
     match result {
         Ok(report) => {
+            let post = match finish {
+                Some((overwrite, values)) => finish_shd(&pre, edf, overwrite, values, done),
+                None => PostShd::default(),
+            };
+            shd.extend(post.summaries);
+            notes.extend(post.notes);
             let (hrc, hrc_notes) = write_hrc(&report, edf, hrc);
             notes.extend(hrc_notes);
-            Outcome { report: Some(report), error: None, hrc, shd, notes }
+            let dir = edf.parent().map(Path::to_path_buf).unwrap_or_default();
+            let files = std::iter::once(edf.to_path_buf())
+                .chain(post.written)
+                .chain(hrc.iter().map(|h| dir.join(h)))
+                .map(|p| p.to_string_lossy().into_owned())
+                .collect();
+            Outcome { report: Some(report), error: None, hrc, shd, files, shaders: post.files, notes }
         }
         Err(e) => Outcome { error: Some(e), shd, notes, ..Default::default() },
     }
@@ -502,6 +810,26 @@ mod tests {
         );
     }
 
+    #[test]
+    fn export_scripts_are_told_from_models_and_other_text() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = dir.path();
+        // PiBoSo's bike template's export_script.ini, shortened.
+        let template = "[Hierarchy]\r\nsplit = 1\r\nchassis = C:\\MX Bikes\\bikes\\template\\model.edf\r\nchassis_rot = 0 180 0\r\nsteer_rot = -90 180 0\r\n";
+        std::fs::write(d.join("export_script.ini"), template).unwrap();
+        std::fs::write(d.join("export_script.txt"), template).unwrap();
+        std::fs::write(d.join("tweaks.params"), "[params]\nscaling = 2\n").unwrap();
+        std::fs::write(d.join("readme.txt"), "How to install: copy the folder.").unwrap();
+        std::fs::write(d.join("bike.fbx"), b"x").unwrap();
+        for (file, script) in [("export_script.ini", true), ("export_script.txt", true), ("tweaks.params", true), ("readme.txt", false), ("bike.fbx", false)] {
+            assert_eq!(is_export_script(&d.join(file)), script, "{file}");
+        }
+        // Dropped together, a script is "params", never a model to convert.
+        let paths: Vec<String> = ["bike.fbx", "export_script.txt", "readme.txt"].iter().map(|f| d.join(f).to_string_lossy().into_owned()).collect();
+        let kinds: Vec<&str> = scan(&paths).iter().map(|f| f.kind).collect();
+        assert_eq!(kinds, ["model", "params"]);
+    }
+
     fn model(path: &str, shadow: bool) -> Model {
         Model { path: path.into(), shadow }
     }
@@ -510,9 +838,61 @@ mod tests {
     fn outputs_take_the_names_the_game_loads_and_never_collide() {
         let models = [model("a/ktm.fbx", false), model("a/Shadow_ktm.fbx", true), model("b/ktm.fbx", false)];
         let names = |v: Vec<PathBuf>| v.into_iter().map(|p| p.to_string_lossy().replace('\\', "/")).collect::<Vec<_>>();
-        assert_eq!(names(output_paths(&models, None, true)), ["a/model.edf", "a/shadow_model.edf", "b/model.edf"]);
-        assert_eq!(names(output_paths(&models, None, false)), ["a/ktm.edf", "a/shadow_model.edf", "b/ktm.edf"]);
-        assert_eq!(names(output_paths(&models, Some(Path::new("out")), false)), ["out/ktm.edf", "out/shadow_model.edf", "out/ktm_2.edf"]);
+        assert_eq!(names(output_paths(&models, None, true, None)), ["a/model.edf", "a/shadow_model.edf", "b/model.edf"]);
+        assert_eq!(names(output_paths(&models, None, false, None)), ["a/ktm.edf", "a/shadow_model.edf", "b/ktm.edf"]);
+        assert_eq!(names(output_paths(&models, Some(Path::new("out")), false, None)), ["out/ktm.edf", "out/shadow_model.edf", "out/ktm_2.edf"]);
+    }
+
+    #[test]
+    fn a_typed_name_is_cleaned_and_gets_the_edf_suffix() {
+        assert_eq!(sanitize_output_name("  my bike "), Some("my bike".into()));
+        assert_eq!(sanitize_output_name("my bike.EDF"), Some("my bike".into()));
+        assert_eq!(sanitize_output_name("C:\\models/ktm:250?.edf"), Some("ktm250".into()));
+        assert_eq!(sanitize_output_name("a<b>c|d*e\"f"), Some("abcdef".into()));
+        assert_eq!(sanitize_output_name("name..."), Some("name".into()));
+        assert_eq!(sanitize_output_name("nul"), Some("nul_".into()));
+        assert_eq!(sanitize_output_name(""), None);
+        assert_eq!(sanitize_output_name("  .edf "), None);
+        assert_eq!(sanitize_output_name("???"), None);
+    }
+
+    #[test]
+    fn a_typed_name_replaces_the_one_models_name_and_empty_keeps_the_default() {
+        let one = [model("a/ktm.fbx", false)];
+        let names = |v: Vec<PathBuf>| v.iter().map(|p| p.to_string_lossy().replace('\\', "/")).collect::<Vec<_>>();
+        assert_eq!(names(output_paths(&one, None, false, Some("race"))), ["a/race.edf"]);
+        assert_eq!(names(output_paths(&one, None, true, Some("race.edf"))), ["a/race.edf"]);
+        assert_eq!(names(output_paths(&one, Some(Path::new("out")), false, Some("race"))), ["out/race.edf"]);
+        assert_eq!(names(output_paths(&one, None, true, Some(""))), ["a/model.edf"]);
+        assert_eq!(names(output_paths(&one, None, false, Some("  "))), ["a/ktm.edf"]);
+        // A bike's shadow keeps the name the game looks for.
+        let bike = [model("a/ktm.fbx", false), model("a/ktm_shadow.fbx", true)];
+        assert_eq!(names(output_paths(&bike, None, true, Some("race"))), ["a/race.edf", "a/shadow_model.edf"]);
+        // Several models would land on one name: the field is ignored.
+        let many = [model("a/ktm.fbx", false), model("b/yz.fbx", false)];
+        assert_eq!(names(output_paths(&many, None, false, Some("race"))), ["a/ktm.edf", "b/yz.edf"]);
+    }
+
+    #[test]
+    fn a_shd_keeps_its_picture_s_name_and_the_hrc_names_the_typed_edf() {
+        // .shd files are named by their material's picture, whatever the .edf is called.
+        let dir = tempfile::tempdir().unwrap();
+        let edf = dir.path().join("race.edf");
+        let sites = vec![site("chain", &[dir.path()], None)];
+        let o = outcome_of(Ok(report(&["", "steer", "fsusp"])), HrcMode::Always, &edf, pre(sites), Some((false, &ShdValues::default())), &mut HashSet::new());
+        assert!(dir.path().join("chain.shd").exists());
+        assert_eq!(o.files[0], edf.to_string_lossy());
+        assert!(o.files.iter().any(|f| f.ends_with("chain.shd")));
+        let hrc = std::fs::read_to_string(dir.path().join("steer.hrc")).unwrap();
+        assert!(hrc.contains("scene = race.edf"), "{hrc}");
+    }
+
+    #[test]
+    fn a_change_matches_only_a_watched_file_whatever_its_spelling() {
+        let watched = vec![PathBuf::from("C:/m/Bike.fbx"), PathBuf::from("C:/m/shadow.fbx")];
+        assert_eq!(watched_match(&watched, Path::new(r"c:\m\bike.FBX")), Some(&watched[0]));
+        assert_eq!(watched_match(&watched, Path::new("C:/m/bike.fbx.tmp")), None);
+        assert_eq!(watched_match(&watched, Path::new("C:/m/other.fbx")), None);
     }
 
     #[test]
@@ -565,16 +945,28 @@ mod tests {
         // Husk's working file: bump{map=X_n.tga, repetitions=1} specular{shininess=6}
         // reflection{factormin=0, factormax=0.5, factorexp=1.0, map=X_r.tga}, one key a line.
         assert_eq!(
-            shd_text(&maps, SHININESS),
+            shd_text(&maps, &ShdValues::default()),
             "bump\r\n{\r\n\tmap = X_n.tga\r\n\trepetitions = 1\r\n}\r\n\
              specular\r\n{\r\n\tshininess = 6\r\n}\r\n\
              reflection\r\n{\r\n\tfactormin = 0\r\n\tfactormax = 0.5\r\n\tfactorexp = 1.0\r\n\tmap = X_r.tga\r\n}\r\n"
         );
         let spec = Maps { specular: Some("bike_s.tga".into()), ..Maps::default() };
-        assert_eq!(shd_text(&spec, 12.5), "specular\r\n{\r\n\tshininess = 12.5\r\n\tmap = bike_s.tga\r\n}\r\n");
+        let tuned = ShdValues { shininess: 12.5, reflection_max: 0.8, reflection_exp: 2.0, ..ShdValues::default() };
+        assert_eq!(
+            shd_text(&spec, &tuned),
+            "specular\r\n{\r\n\tshininess = 12.5\r\n\tmap = bike_s.tga\r\n}\r\n\
+             reflection\r\n{\r\n\tfactormin = 0\r\n\tfactormax = 0.8\r\n\tfactorexp = 2.0\r\n}\r\n"
+        );
         let refl = Maps { reflection: Some("bike_r.tga".into()), ..Maps::default() };
-        assert!(shd_text(&refl, SHININESS).starts_with("reflection\r\n"), "an _r alone still gets its reflection");
+        assert!(shd_text(&refl, &ShdValues::default()).ends_with("map = bike_r.tga\r\n}\r\n"), "an _r alone still gets its reflection");
+        // No maps at all: still the stock shininess and the reflection block.
+        assert_eq!(
+            shd_text(&Maps::default(), &ShdValues::default()),
+            "specular\r\n{\r\n\tshininess = 6\r\n}\r\n\
+             reflection\r\n{\r\n\tfactormin = 0\r\n\tfactormax = 0.5\r\n\tfactorexp = 1.0\r\n}\r\n"
+        );
         assert_eq!(shd_summary("X.shd", &maps), "X.shd: normal X_n, reflection X_r");
+        assert_eq!(shd_summary("X.shd", &Maps::default()), "X.shd: no maps");
     }
 
     #[test]
@@ -584,17 +976,17 @@ mod tests {
         std::fs::create_dir(&fbm).unwrap();
         std::fs::write(root.join("bike_n.tga"), b"x").unwrap();
         // Embedded paint: the .fbm folder has no maps, the FBX's folder has.
-        let plan = plan_shd(&site("bike", &[&fbm, &root], None), false, SHININESS).unwrap();
+        let plan = plan_shd(&site("bike", &[&fbm, &root], None), false, &ShdValues::default()).unwrap();
         assert_eq!(plan.path, root.join("bike.shd"));
         assert!(plan.text.contains("map = bike_n.tga"));
         assert_eq!(plan.summary, "bike.shd: normal bike_n");
 
         let existing = Some(root.join("bike.shd"));
         std::fs::write(root.join("bike.shd"), "mine").unwrap();
-        assert!(plan_shd(&site("bike", &[&root], existing.clone()), false, SHININESS).is_none(), "the converter's own is kept");
-        assert!(plan_shd(&site("bike", &[&root], None), false, SHININESS).is_none(), "nor one it would miss");
-        assert_eq!(plan_shd(&site("bike", &[&root], existing), true, SHININESS).unwrap().path, root.join("bike.shd"));
-        assert!(plan_shd(&site("frame", &[&root], None), true, SHININESS).is_none(), "no maps, no .shd");
+        assert!(plan_shd(&site("bike", &[&root], existing.clone()), false, &ShdValues::default()).is_none(), "the converter's own is kept");
+        assert!(plan_shd(&site("bike", &[&root], None), false, &ShdValues::default()).is_none(), "nor one it would miss");
+        assert_eq!(plan_shd(&site("bike", &[&root], existing), true, &ShdValues::default()).unwrap().path, root.join("bike.shd"));
+        assert!(plan_shd(&site("frame", &[&root], None), true, &ShdValues::default()).is_none(), "no maps, no .shd");
     }
 
     #[test]
@@ -604,7 +996,7 @@ mod tests {
         for f in ["X_n.tga", "X_r.tga"] {
             std::fs::write(root.join(f), b"x").unwrap();
         }
-        let plan = plan_shd(&site("X", &[&root], None), false, SHININESS).unwrap();
+        let plan = plan_shd(&site("X", &[&root], None), false, &ShdValues::default()).unwrap();
         assert_eq!(plan.notes, ["normal map not connected, using X_n.tga", "reflection map not connected, using X_r.tga"]);
         assert!(plan.text.contains("map = X_r.tga"));
 
@@ -613,7 +1005,7 @@ mod tests {
         std::fs::create_dir(&maps).unwrap();
         std::fs::write(maps.join("X_normal.tga"), b"x").unwrap();
         let linked = host::ShdSite { normal: Some(maps.join("X_normal.tga")), reflection: Some(root.join("X_r.tga")), ..site("X", &[&root], None) };
-        let plan = plan_shd(&linked, false, SHININESS).unwrap();
+        let plan = plan_shd(&linked, false, &ShdValues::default()).unwrap();
         assert!(plan.notes.is_empty(), "{:?}", plan.notes);
         assert!(plan.text.contains(&format!("map = {}", maps.join("X_normal.tga").display())), "{}", plan.text);
         assert!(plan.text.contains("map = X_r.tga"));
@@ -621,7 +1013,7 @@ mod tests {
         // Linked maps alone, nothing beside the picture by name: still a .shd.
         let empty = tempfile::tempdir().unwrap();
         let only = host::ShdSite { reflection: Some(root.join("X_r.tga")), ..site("Y", &[empty.path()], None) };
-        let plan = plan_shd(&only, false, SHININESS).unwrap();
+        let plan = plan_shd(&only, false, &ShdValues::default()).unwrap();
         assert_eq!(plan.path, empty.path().join("Y.shd"));
         assert!(plan.text.contains("factormax = 0.5"));
     }
@@ -640,11 +1032,142 @@ mod tests {
         let reflection = other.path().join("bike_r.tga").canonicalize().unwrap();
         assert!(normal.to_string_lossy().starts_with(r"\\?\"), "{}", normal.display());
         let linked = host::ShdSite { normal: Some(normal), reflection: Some(reflection.clone()), ..site("bike", &[&root], None) };
-        let plan = plan_shd(&linked, false, SHININESS).unwrap();
+        let plan = plan_shd(&linked, false, &ShdValues::default()).unwrap();
         assert!(plan.text.contains("map = bike_n.tga"), "{}", plan.text);
         assert!(!plan.text.contains(r"\\?\"), "{}", plan.text);
         assert!(plan.text.contains(&format!("map = {}", strip_verbatim(&reflection))), "{}", plan.text);
         assert_eq!(strip_verbatim(Path::new(r"\\?\UNC\host\share\a.tga")), r"\\host\share\a.tga");
+    }
+
+    #[test]
+    fn a_shd_reads_back_as_it_was_written() {
+        let maps = Maps { normal: Some("X_n.tga".into()), reflection: Some("X_r.tga".into()), specular: Some("X_s.tga".into()) };
+        let values = ShdValues { shininess: 20.0, reflection_min: 0.1, reflection_max: 0.9, reflection_exp: 2.5 };
+        assert_eq!(parse_shd(&shd_text(&maps, &values)), (maps, values));
+        assert_eq!(parse_shd("garbage"), (Maps::default(), ShdValues::default()));
+        let bad = ShdValues { shininess: f32::NAN, reflection_min: -1.0, ..ShdValues::default() };
+        assert_eq!(bad.sane(), ShdValues::default());
+    }
+
+    /// Other tools write each block on one line; the converter's own layout and these must read
+    /// the same.
+    #[test]
+    fn a_shd_reads_the_same_on_one_line_as_over_several() {
+        let multi = "bump\n{\n\tmap = X_n.tga\n\trepetitions = 1\n}\nspecular\n{\n\tshininess = 12\n\tmap = X_s.tga\n}\nreflection\n{\n\tfactormin = 0.1\n\tfactormax = 0.7\n\tfactorexp = 2.0\n\tmap = X_r.tga\n}\n";
+        let one = "bump { map = X_n.tga repetitions = 1 }\nspecular { shininess = 12 map = X_s.tga }\nreflection { factormin = 0.1 factormax = 0.7 factorexp = 2.0 map = X_r.tga }\n";
+        let (m, v) = parse_shd(multi);
+        assert_eq!((m.normal.as_deref(), m.specular.as_deref(), m.reflection.as_deref()), (Some("X_n.tga"), Some("X_s.tga"), Some("X_r.tga")));
+        assert_eq!((v.shininess, v.reflection_min, v.reflection_max, v.reflection_exp), (12.0, 0.1, 0.7, 2.0));
+        assert_eq!(parse_shd(one), (m, v));
+        // Braces on their own lines, pairs on the name's line, a path with spaces, `;` between pairs.
+        let mixed = "specular {\n shininess = 12; map = C:\\My Maps\\X_s.tga }\nbump{map=X_n.tga}";
+        let (m, v) = parse_shd(mixed);
+        assert_eq!((m.specular.as_deref(), m.normal.as_deref(), v.shininess), (Some("C:\\My Maps\\X_s.tga"), Some("X_n.tga"), 12.0));
+    }
+
+    /// What the Blender kit writes (`export/shd.py`), spacing and all.
+    #[test]
+    fn a_shd_written_by_the_kit_reads_back() {
+        let kit = "specular   { shininess = 30 }\nreflection { factormin = 0.25  factormax = 1  factorexp = 1  map = mypage_r.tga }\nbump       { map = mypage_n.tga  repetitions = 1 }\n";
+        let (m, v) = parse_shd(kit);
+        assert_eq!((m.normal.as_deref(), m.reflection.as_deref(), m.specular), (Some("mypage_n.tga"), Some("mypage_r.tga"), None));
+        assert_eq!((v.shininess, v.reflection_min, v.reflection_max, v.reflection_exp), (30.0, 0.25, 1.0, 1.0));
+    }
+
+    fn report(objects: &[&str]) -> Value {
+        serde_json::json!({ "objects": objects.iter().map(|n| serde_json::json!({ "name": n })).collect::<Vec<_>>() })
+    }
+
+    fn pre(sites: Vec<host::ShdSite>) -> PreShd {
+        PreShd { sites, ..Default::default() }
+    }
+
+    /// A chain worn round the neck: one object, one plain colour picture, no maps. It used to
+    /// get no `.shd` at all.
+    #[test]
+    fn one_model_with_no_maps_still_gets_its_shd_beside_the_edf() {
+        let dir = tempfile::tempdir().unwrap();
+        let edf = dir.path().join("chain.edf");
+        let sites = vec![site("chain", &[dir.path()], None)];
+        let o = outcome_of(Ok(report(&[""])), HrcMode::Never, &edf, pre(sites), Some((false, &ShdValues::default())), &mut HashSet::new());
+        let shd = std::fs::read_to_string(dir.path().join("chain.shd")).unwrap();
+        assert_eq!(shd, shd_text(&Maps::default(), &ShdValues::default()));
+        assert!(shd.contains("shininess = 6") && shd.contains("reflection"));
+        assert_eq!(o.files, [edf.to_string_lossy(), dir.path().join("chain.shd").to_string_lossy()]);
+        assert_eq!(o.shaders.len(), 1);
+        assert!(o.shaders[0].written && o.shaders[0].values == ShdValues::default());
+    }
+
+    /// Bike parts: one `.shd` per material, the bike's `.hrc` files after them, all listed.
+    #[test]
+    fn bike_parts_get_a_shd_per_material_and_every_file_is_listed() {
+        let dir = tempfile::tempdir().unwrap();
+        let edf = dir.path().join("model.edf");
+        let sites = vec![site("plastics", &[dir.path()], None), site("frame", &[dir.path()], None), site("Plastics", &[dir.path()], None)];
+        let o = outcome_of(Ok(report(&["", "steer"])), HrcMode::Always, &edf, pre(sites), Some((false, &ShdValues::default())), &mut HashSet::new());
+        for n in ["plastics.shd", "frame.shd"] {
+            assert!(dir.path().join(n).exists(), "{n}");
+        }
+        assert_eq!(o.shaders.len(), 2, "a picture is one material however often it is named");
+        let names: Vec<String> = o.files.iter().map(|f| Path::new(f).file_name().unwrap().to_string_lossy().into_owned()).collect();
+        assert_eq!(names, ["model.edf", "plastics.shd", "frame.shd", "chassis.hrc", "steer.hrc"]);
+    }
+
+    /// `write_shd` without the engine reading an FBX for its sites.
+    fn write_shd_with(sites: &[host::ShdSite], values: &ShdValues, done: &mut HashSet<PathBuf>) -> PreShd {
+        let mut pre = PreShd::default();
+        for s in sites {
+            if let Some(plan) = plan_shd(s, false, values) {
+                if done.insert(plan.path.clone()) {
+                    std::fs::write(&plan.path, plan.text).unwrap();
+                    pre.paths.push(plan.path);
+                }
+            }
+        }
+        pre.sites = sites.to_vec();
+        pre
+    }
+
+    /// The `.edf` goes to another folder than the picture: the `.shd` goes with the `.edf`,
+    /// naming the maps by where they are.
+    #[test]
+    fn a_shd_follows_the_edf_to_its_folder_and_names_maps_by_path() {
+        let src = tempfile::tempdir().unwrap();
+        let out = tempfile::tempdir().unwrap();
+        std::fs::write(src.path().join("bike_n.tga"), b"x").unwrap();
+        let edf = out.path().join("bike.edf");
+        let mut done = HashSet::new();
+        let pre_shd = write_shd_with(&[site("bike", &[src.path()], None)], &ShdValues::default(), &mut done);
+        assert!(src.path().join("bike.shd").exists(), "the converter still reads the maps beside the picture");
+        let o = outcome_of(Ok(report(&[""])), HrcMode::Never, &edf, pre_shd, Some((false, &ShdValues::default())), &mut done);
+        let text = std::fs::read_to_string(out.path().join("bike.shd")).unwrap();
+        let normal = src.path().join("bike_n.tga").to_string_lossy().into_owned();
+        assert!(text.contains(&format!("map = {normal}")), "{text}");
+        assert_eq!(o.shaders[0].maps.normal.as_deref(), Some(normal.as_str()));
+    }
+
+    #[test]
+    fn a_shd_already_beside_the_edf_is_kept_until_overwrite_and_shows_its_own_values() {
+        let dir = tempfile::tempdir().unwrap();
+        let edf = dir.path().join("chain.edf");
+        let tuned = ShdValues { shininess: 30.0, ..ShdValues::default() };
+        std::fs::write(dir.path().join("chain.shd"), shd_text(&Maps::default(), &tuned)).unwrap();
+        let sites = vec![site("chain", &[dir.path()], None)];
+        let o = outcome_of(Ok(report(&[""])), HrcMode::Never, &edf, pre(sites.clone()), Some((false, &ShdValues::default())), &mut HashSet::new());
+        assert!(!o.shaders[0].written && o.shaders[0].values == tuned);
+        assert_eq!(o.files, [edf.to_string_lossy()], "only what was written is listed");
+        let o = outcome_of(Ok(report(&[""])), HrcMode::Never, &edf, pre(sites), Some((true, &ShdValues::default())), &mut HashSet::new());
+        assert!(o.shaders[0].written && o.shaders[0].values == ShdValues::default());
+    }
+
+    #[test]
+    fn saving_a_shd_writes_the_sliders_values_and_only_to_a_shd() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("chain.shd");
+        let values = ShdValues { shininess: 40.0, reflection_max: 0.2, ..ShdValues::default() };
+        save_shd(&path, &Maps::default(), &values).unwrap();
+        assert_eq!(parse_shd(&std::fs::read_to_string(&path).unwrap()).1, values);
+        assert!(save_shd(&dir.path().join("chain.edf"), &Maps::default(), &values).is_err());
     }
 
     fn bike_report() -> Value {

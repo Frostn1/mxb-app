@@ -363,6 +363,79 @@ struct Mounts {
     fork_origin: [f32; 3],
 }
 
+/// Where the game hangs the fork (`fsusp`, fully extended) in the steer's frame:
+/// `front_upper - front_lower - (0, front_length, 0)`, or `front_upper` when the .geom has no
+/// `front_lower`. Most bikes' `front_lower` is `(0, -front_length, 0)`, which makes it
+/// `front_upper`; the 2024 YZ250F's puts the fork 27 mm lower and 22.5 mm back, and only there
+/// do its own tubes and lowers meet.
+fn fork_hang(
+    g: &std::collections::HashMap<String, [f32; 3]>,
+    sc: &std::collections::HashMap<String, f32>,
+) -> Option<[f32; 3]> {
+    let front_upper = *g.get("front_upper")?;
+    Some(match (g.get("front_lower"), sc.get("front_length")) {
+        (Some(&fl), Some(&len)) => v_sub(v_sub(front_upper, fl), [0.0, len, 0.0]),
+        _ => front_upper,
+    })
+}
+
+/// The shock's length with the swingarm turned `deg` about the pivot (+ lifts the axle), for a
+/// "Linkage Rod Chassis" rear: the rocker rides the swingarm at `rocker_swingarm`, its rod end
+/// (`rocker_length` out, at `ref_angle` in the rocker) is held `rod_length` from `rod_chassis`,
+/// and the shock runs from `shock_chassis` to the rocker's `shock_rocker`. `None` where the rod
+/// can't reach.
+fn shock_length(
+    g: &std::collections::HashMap<String, [f32; 3]>,
+    sc: &std::collections::HashMap<String, f32>,
+    deg: f32,
+) -> Option<f32> {
+    let pivot = *g.get("chassis_rsusp_min")?;
+    let joint = *g.get("rsusp_joint")?;
+    let q = v_add(pivot, rot_x(v_sub(*g.get("rocker_swingarm")?, joint), deg));
+    let qc = v_sub(*g.get("rod_chassis")?, q);
+    let (r1, r2) = (*sc.get("rocker_length")?, *sc.get("rod_length")?);
+    let d = v_dot(qc, qc).sqrt();
+    if d < 1e-9 {
+        return None;
+    }
+    let a = (r1 * r1 - r2 * r2 + d * d) / (2.0 * d);
+    if r1 * r1 < a * a {
+        return None;
+    }
+    let (uy, uz) = (qc[1] / d, qc[2] / d);
+    let h = (r1 * r1 - a * a).sqrt();
+    let rod_end = [0.0, q[1] + a * uy - h * uz, q[2] + a * uz + h * uy];
+    let phi = (rod_end[2] - q[2]).atan2(rod_end[1] - q[1]).to_degrees();
+    let ref_angle = sc.get("ref_angle").copied().unwrap_or(-90.0);
+    let s = v_add(q, rot_x(*g.get("shock_rocker")?, phi + ref_angle));
+    let shock = v_sub(s, *g.get("shock_chassis")?);
+    Some(v_dot(shock, shock).sqrt())
+}
+
+/// How far (degrees, negative = down) the swingarm hangs below its authored pose with the shock
+/// fully out: the bike on its stand, as the game's Bike Selection shows it. Where the rod goes
+/// straight first (the 2023 CRF250R's, ~12° down), that is where the rear tops out. `None`
+/// when the .geom has no linkage to solve, or it doesn't reach full length within 60°.
+fn rear_extension(
+    g: &std::collections::HashMap<String, [f32; 3]>,
+    sc: &std::collections::HashMap<String, f32>,
+) -> Option<f32> {
+    let full = sc.get("shock_minlength")? + sc.get("rear_length")?;
+    let mut prev: Option<(f32, f32)> = None;
+    for i in 0..=600 {
+        let deg = -(i as f32) * 0.1;
+        let Some(l) = shock_length(g, sc, deg) else {
+            return prev.map(|(d, _)| d);
+        };
+        if l >= full {
+            let (pd, pl) = prev?;
+            return Some(if l > pl { pd + (deg - pd) * (full - pl) / (l - pl) } else { deg });
+        }
+        prev = Some((deg, l));
+    }
+    None
+}
+
 fn mounts(
     g: &std::collections::HashMap<String, [f32; 3]>,
     sc: &std::collections::HashMap<String, f32>,
@@ -371,9 +444,8 @@ fn mounts(
     let pivot = *g.get("chassis_rsusp_min")?;
     let steer_joint = *g.get("steer_joint")?;
     let rsusp_joint = *g.get("rsusp_joint")?;
-    let front_upper = *g.get("front_upper")?;
     let rake = -sc.get("rakeangle_min").copied().unwrap_or(0.0);
-    let fork_origin = v_add(rot_x(v_sub(front_upper, steer_joint), rake), head);
+    let fork_origin = v_add(rot_x(v_sub(fork_hang(g, sc)?, steer_joint), rake), head);
     Some(Mounts {
         rake,
         head,
@@ -443,6 +515,10 @@ pub struct BikeRig {
     /// grips) is turned by `rake` about x and then moved by this, exactly as the steer
     /// mesh's vertices were.
     pub steer_origin: [f32; 3],
+    /// How far the rear axle sits below as-authored with the shock fully out (mm, a pose's
+    /// `rearDrop`): the bike on its stand, as Bike Selection shows it. Solved from the .geom's
+    /// linkage; `None` when it has none or it doesn't reach.
+    pub rear_extended_drop: Option<f32>,
 }
 
 impl BikeRig {
@@ -516,6 +592,10 @@ pub fn assemble_bike(nodes: &mut [EdfNode], geom_bytes: &[u8]) -> Option<BikeRig
         seat: g.get("seat_height_ref").copied(),
         chassis_origin: [0.0; 3],
         steer_origin: v_sub(head, rot_x(steer_joint, rake)),
+        rear_extended_drop: axles.zip(rear_extension(&g, &sc)).map(|((_, rear), deg)| {
+            let hung = v_add(pivot, rot_x(v_sub(rear, pivot), deg));
+            (rear[1] - hung[1]) * 1000.0
+        }),
     };
 
     for n in nodes.iter_mut() {
@@ -719,7 +799,10 @@ fn valid_material_record(b: &[u8], o: usize, textures: usize) -> bool {
     if w(0) != 0 || w(7) != 0 {
         return false;
     }
-    if (1..7).any(|k| !(f(k) > 0.0 && f(k) <= 1.0)) {
+    // Zero is a real term: an untextured black material writes all six as 0.0. A table
+    // made only of those is what a run of zero bytes looks like, so [`valid_table`] wants
+    // one record that shades.
+    if (1..7).any(|k| !(0.0..=1.0).contains(&f(k))) {
         return false;
     }
     if w(8) != 0 || w(9) != 0 || w(10) != 0 || w(12) != 0 {
@@ -730,6 +813,13 @@ fn valid_material_record(b: &[u8], o: usize, textures: usize) -> bool {
     // mod that ships `_n`/`_s`/`_r` sheets fills it in, and demanding zero threw out the whole
     // table with it, leaving every submesh unbound and the bike grey.
     w(11) as usize <= textures && w(13) as usize <= textures
+}
+
+/// `count` valid records at `o + 4`, at least one of them shading something.
+fn valid_table(b: &[u8], o: usize, count: usize, textures: usize) -> bool {
+    let rec = |k: usize| o + 4 + MAT_STRIDE * k;
+    (0..count).all(|k| valid_material_record(b, rec(k), textures))
+        && (0..count).any(|k| (1..7).any(|i| f32le(b, rec(k) + i * 4) > 0.0))
 }
 
 /// One node's material table: LOCAL material id -> position in the model's declared colour
@@ -747,7 +837,7 @@ pub fn node_material_table(b: &[u8], node_start: usize, textures: usize) -> Vec<
         if u32le(b, o) as usize != count {
             continue;
         }
-        if (0..count).all(|k| valid_material_record(b, o + 4 + MAT_STRIDE * k, textures)) {
+        if valid_table(b, o, count, textures) {
             return (0..count)
                 .map(|k| {
                     let one = u32le(b, o + 4 + MAT_STRIDE * k + MAT_TEX_FROM_REC) as usize;
@@ -777,7 +867,7 @@ pub fn declared_colors(b: &[u8], external: &[String]) -> Vec<String> {
     let embedded = embedded_textures(b);
     let mut slots: Vec<(usize, String)> = embedded
         .iter()
-        .filter(|t| !is_companion_texture(&t.name))
+        .filter(|t| !is_companion_among(&t.name, &embedded))
         .map(|t| (t.data_off, t.name.clone()))
         .collect();
     for name in external {
@@ -858,10 +948,22 @@ pub fn is_exporter_companion(name: &str) -> bool {
 /// gfx-referenced ones (chain, `w_plate`) — so dropping any shifts every later material
 /// onto the wrong texture, which is why the filter lives in one place.
 pub fn color_textures(b: &[u8]) -> Vec<EmbeddedTexture> {
-    embedded_textures(b)
-        .into_iter()
-        .filter(|t| !is_companion_texture(&t.name))
-        .collect()
+    let all = embedded_textures(b);
+    let keep: Vec<bool> = all.iter().map(|t| !is_companion_among(&t.name, &all)).collect();
+    all.into_iter().zip(keep).filter_map(|(t, k)| k.then_some(t)).collect()
+}
+
+/// [`is_companion_texture`], unless the model also carries this name's own `_n`, `_s` or
+/// `_r`: then it is a colour sheet that only sounds like a map. `bracket_bump` beside
+/// `bracket_bump_n` is a seat bracket, and taking it for a bump map slid every later
+/// material onto its neighbour's sheet.
+fn is_companion_among(name: &str, all: &[EmbeddedTexture]) -> bool {
+    is_companion_texture(name)
+        && !all.iter().any(|t| {
+            let t = t.name.to_ascii_lowercase();
+            let n = name.to_ascii_lowercase();
+            ["_n", "_s", "_r"].iter().any(|suf| t == format!("{n}{suf}"))
+        })
 }
 
 // Record layout from `width`: | width u32 | height u32 | md5[16] | u32 | data_size u32 | pad[8] | data |
@@ -1291,8 +1393,13 @@ fn collect_sub_cands(b: &[u8]) -> Vec<SubCand> {
         if u32le(b, p + 12) == 0x3F80_0000 && b[p..p + 12].iter().all(|&x| x == 0) {
             if let Some(mb) = p.checked_sub(48) {
                 if read_mat4(b, mb).is_some() {
-                    let o = mb + SUB_MAT_BACK;
-                    if let Some((ts, tc, vs, vc)) = read_sub_group(b, o, MAX_COUNT, MAX_COUNT) {
+                    // Usually 148 bytes on; a group that writes one more word ahead of its
+                    // block sits at 152 (Frost Converter's KTM 250 SX-F shock and spring).
+                    let hit = SUB_MAT_BACKS.iter().find_map(|back| {
+                        let o = mb + back;
+                        read_sub_group(b, o, MAX_COUNT, MAX_COUNT).map(|g| (o, g))
+                    });
+                    if let Some((o, (ts, tc, vs, vc))) = hit {
                         out.push(SubCand {
                             block_off: o,
                             tri_start: ts,
@@ -1349,11 +1456,7 @@ fn chain_submeshes(
             .iter()
             .filter(|c| c.tri_start == run_t && c.vert_start == run_v && in_bounds(c))
             .min_by_key(|c| c.block_off.abs_diff(prev_off))?;
-        let name = if next.block_off >= 252 {
-            read_cname(b, next.block_off - 252)
-        } else {
-            String::new()
-        };
+        let name = sub_name(b, next.block_off);
         out.push(RawSub {
             name,
             tri_start: run_t,
@@ -1429,6 +1532,25 @@ fn detect_submeshes_window(
 
 // Submesh matrix at block_off - 148; its parent a further 280 bytes back.
 const SUB_MAT_BACK: usize = 148;
+// Every gap a matrix-anchored block has been seen at, nearest first.
+const SUB_MAT_BACKS: [usize; 2] = [SUB_MAT_BACK, SUB_MAT_BACK + 4];
+
+/// How far behind `block_off` its placement matrix sits: the first of [`SUB_MAT_BACKS`] that
+/// reads as one, else the usual gap.
+fn sub_mat_back(b: &[u8], block_off: usize) -> usize {
+    SUB_MAT_BACKS
+        .into_iter()
+        .find(|back| block_off.checked_sub(*back).is_some_and(|m| read_mat4(b, m).is_some()))
+        .unwrap_or(SUB_MAT_BACK)
+}
+
+/// A group's name, which sits 104 bytes ahead of its matrix.
+fn sub_name(b: &[u8], block_off: usize) -> String {
+    match block_off.checked_sub(sub_mat_back(b, block_off) + 104) {
+        Some(o) => read_cname(b, o),
+        None => String::new(),
+    }
+}
 const SUB_MAT_PARENT_STEP: usize = 280;
 // Node orientation matrix occupies name+104 .. name+168; the parent walk must stop
 // before it, or the orientation is applied twice (flips the swingarm forward).
@@ -1443,7 +1565,7 @@ fn submesh_transform(
     node_matrix_once: bool,
 ) -> Vec<Mat4> {
     let mut chain = Vec::new();
-    let Some(base) = block_off.checked_sub(SUB_MAT_BACK) else {
+    let Some(base) = block_off.checked_sub(sub_mat_back(b, block_off)) else {
         return chain;
     };
     // A node's first geometry group has no matrix of its own: its block sits at name+252, so
@@ -1996,6 +2118,100 @@ mod tests {
     /// typed arrays. A silent mismatch here would not fail anything — it would draw a bike
     /// made of noise — so the round trip is asserted rather than assumed.
     #[test]
+    fn the_fork_hangs_at_front_upper_minus_front_lower() {
+        let base = "chassis_steer = 0, 1.0061, 0.3377
+chassis_rsusp_min = 0, 0.4808, -0.1766
+steer_joint = 0, -0.0851, 0
+rsusp_joint = 0, 0.0006, -0.0007
+front_upper = 0, -0.5002, 0.0216
+fwheel = 0, -0.3344, 0.0631
+rwheel_min = 0, 0.0202, -0.5652
+rwheel_max = 0, 0.0202, -0.6062
+rakeangle_min = 26.9
+";
+        let axle = |extra: &str| {
+            let geom = format!("{base}{extra}");
+            wheel_axles(geom.as_bytes()).unwrap().0
+        };
+        let plain = axle("");
+        // front_lower = (0, -front_length, 0): the same as no front_lower.
+        let same = axle("front_lower = 0, -0.31, 0
+front_length = 0.31
+");
+        assert!((0..3).all(|k| (plain[k] - same[k]).abs() < 1e-6), "{plain:?} {same:?}");
+        // The YZ250F's: the fork (and its axle) 27 mm further down and 22.5 mm further back,
+        // in the steer's frame.
+        let yz = axle("front_lower = 0, -0.283, 0.0225
+front_length = 0.31
+");
+        let d = rot_x([yz[0] - plain[0], yz[1] - plain[1], yz[2] - plain[2]], 26.9);
+        assert!((d[1] + 0.0270).abs() < 1e-4 && (d[2] + 0.0225).abs() < 1e-4, "{d:?}");
+    }
+
+    /// On its stand the shock is fully out: the swingarm hangs where the linkage puts the shock
+    /// at `shock_minlength + rear_length`. The 2024 YZ250F's and the 2023 KTM 250 SX-F's own
+    /// numbers; the KTM is authored fully compressed, so it hangs further.
+    #[test]
+    fn the_swingarm_hangs_at_full_shock_length() {
+        let parse = |s: &str| (parse_geom(s.as_bytes()), parse_geom_scalars(s.as_bytes()));
+        let (g, sc) = parse(
+            "chassis_rsusp_min = 0, 0.4808, -0.1766
+rsusp_joint = 0, 0.0006, -0.0007
+rear_length = 0.125
+shock_minlength = 0.324
+shock_chassis = 0, 0.7706, -0.1578
+rocker_swingarm = 0, -0.0351, -0.1803
+rocker_length = 0.039
+rod_chassis = 0, 0.3936, -0.2153
+rod_length = 0.136
+shock_rocker = 0, 0.0544, 0.0309
+ref_angle = -90
+",
+        );
+        let yz = rear_extension(&g, &sc).unwrap();
+        assert!((yz + 20.1).abs() < 0.2, "{yz}");
+        assert!((shock_length(&g, &sc, yz).unwrap() - 0.449).abs() < 1e-3);
+        let (g, sc) = parse(
+            "chassis_rsusp_min = 0, 0.4835, -0.1957
+rsusp_joint = 0, 0, 0
+rear_length = 0.129
+shock_minlength = 0.337
+shock_chassis = 0, 0.7881, -0.14
+rocker_swingarm = 0, -0.032, -0.1786
+rocker_length = 0.042
+rod_chassis = 0, 0.3908, -0.1961
+rod_length = 0.148
+shock_rocker = 0, 0.0743, 0.0418
+ref_angle = -90
+",
+        );
+        assert!((shock_length(&g, &sc, 0.0).unwrap() - 0.337).abs() < 1e-3, "authored compressed");
+        let ktm = rear_extension(&g, &sc).unwrap();
+        assert!((ktm + 29.6).abs() < 0.2, "{ktm}");
+        // The CRF250R's rod goes straight before its shock is fully out: it tops out there.
+        let (g, sc) = parse(
+            "chassis_rsusp_min = 0, 0.4599, -0.2118
+rsusp_joint = 0, 0, 0
+rear_length = 0.133
+shock_minlength = 0.317
+shock_chassis = 0, 0.7347, -0.2019
+rocker_swingarm = 0, -0.0534, -0.1565
+rocker_length = 0.045
+rod_chassis = 0, 0.3589, -0.2524
+rod_length = 0.15
+shock_rocker = 0, 0.0427, 0.0394
+ref_angle = -90
+",
+        );
+        let crf = rear_extension(&g, &sc).unwrap();
+        assert!(crf < -10.0 && crf > -14.0, "{crf}");
+        assert!(shock_length(&g, &sc, crf - 0.1).is_none());
+        // No linkage in the file: nothing to solve, the bike stands as authored.
+        let (g, sc) = parse("chassis_rsusp_min = 0, 0.48, -0.17\nrsusp_joint = 0, 0, 0\n");
+        assert!(rear_extension(&g, &sc).is_none());
+    }
+
+    #[test]
     fn mesh_arrays_survive_the_base64_round_trip() {
         use base64::{engine::general_purpose::STANDARD, Engine as _};
 
@@ -2106,6 +2322,29 @@ mod tests {
                 .copy_from_slice(&one_based.to_le_bytes());
         }
         b
+    }
+
+    #[test]
+    fn a_black_material_does_not_lose_the_table() {
+        // The KTM 250 SX-F's steer: a handlebar range on an untextured black material, its
+        // six terms all 0.0, between two textured ones.
+        let mut b = material_table_bytes(&[2, 0, 4], 512);
+        let r = 512 - 4 - MAT_STRIDE * 3 + 4 + MAT_STRIDE;
+        for s in 1..7 {
+            b[r + s * 4..r + s * 4 + 4].copy_from_slice(&0.0f32.to_le_bytes());
+        }
+        assert_eq!(node_material_table(&b, 512, 4), vec![Some(1), None, Some(3)]);
+        // Nothing but zeros is not a table.
+        assert!(node_material_table(&vec![0u8; 1024], 512, 4).is_empty());
+    }
+
+    #[test]
+    fn a_sheet_with_its_own_maps_is_a_colour_sheet_whatever_it_ends_in() {
+        let t = |name: &str| EmbeddedTexture { name: name.into(), width: 0, height: 0, data_off: 0, data_len: 0 };
+        let all = [t("bracket_bump"), t("bracket_bump_n"), t("seat_bump")];
+        assert!(!is_companion_among("bracket_bump", &all));
+        assert!(is_companion_among("seat_bump", &all));
+        assert!(is_companion_among("bracket_bump_n", &all));
     }
 
     #[test]
@@ -3634,7 +3873,7 @@ pub fn uses_companion_slots(b: &[u8]) -> bool {
             if u32le(b, o) as usize != count {
                 continue;
             }
-            if (0..count).all(|k| valid_material_record(b, o + 4 + MAT_STRIDE * k, textures)) {
+            if valid_table(b, o, count, textures) {
                 if (0..count).any(|k| u32le(b, o + 4 + MAT_STRIDE * k + 52) != 0) {
                     return true;
                 }
@@ -3797,3 +4036,4 @@ fn is_part_name(name: &str) -> bool {
         "chassis" | "steer" | "fsusp" | "rsusp" | "swingarm" | "fwheel" | "rwheel" | "rwheela"
     )
 }
+

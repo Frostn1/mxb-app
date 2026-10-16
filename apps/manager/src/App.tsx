@@ -27,6 +27,7 @@ import { UpdateProvider } from "./Context/Update";
 import RuntimeBanner from "./Components/RuntimeBanner/RuntimeBanner";
 import SigninGate from "@frost/shared/Components/SigninGate/SigninGate";
 import SurveyPrompt from "@frost/shared/Components/Survey/SurveyPrompt";
+import SupportPrompt from "@frost/shared/Components/Support/SupportPrompt";
 import UpdateBanner from "./Components/UpdateBanner/UpdateBanner";
 import type { Config, GameId, GameInfo } from "@frost/shared/types";
 import { invoke } from "@tauri-apps/api/core";
@@ -242,6 +243,7 @@ const App = () => {
                 is in `crates/core/src/survey.rs`, not here. Mounted last so it sits over the
                 shell and under the sign-in wall. */}
             <SurveyPrompt />
+            <SupportPrompt />
           </UpdateProvider>
         </TooltipProvider>
       </FrostmodProvider>

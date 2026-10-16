@@ -1175,7 +1175,7 @@ export function exportPaintProxy(
 }
 
 /** A model read straight from a file: its meshes and the textures it carries. */
-export type LooseModel = { nodes: EdfNode[]; textures: PaintTexture[] };
+export type LooseModel = { nodes: EdfNode[]; textures: PaintTexture[]; /** Texture names the meshes use that no file supplied. */ missing: string[] };
 
 /** Read any model file — a loose `.edf`, or every mesh in a `.pkz` or a folder. */
 export function loadModelFile(path: string): Promise<LooseModel> {
@@ -4119,6 +4119,13 @@ export function serversWithPaintSync(
   servers: { name: string; address: string }[],
 ): Promise<Record<string, number>> {
   return invoke<Record<string, number>>("servers_with_paint_sync", { servers });
+}
+
+/** The addresses among `servers` run by somebody with the supporter pack. Best-effort. */
+export function supporterServers(
+  servers: { name: string; address: string }[],
+): Promise<string[]> {
+  return invoke<string[]>("supporter_servers", { servers });
 }
 
 /** What track a server is running, matched against what you have and what you could get. */

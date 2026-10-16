@@ -52,6 +52,9 @@ import {
 } from "@/lib/autoInstall";
 import { useSteamLink } from "@/lib/useSteamLink";
 import { useT } from "@/i18n";
+import SupporterBadge from "@frost/shared/Components/Supporter/SupporterBadge";
+import { recheckSupporter, useSupporter } from "@frost/shared/api/supporter";
+import SupporterEmailLink from "@frost/shared/Components/Supporter/SupporterEmailLink";
 
 /** Where a row's status dot sits on the three states any account can be in. */
 type Tone = "on" | "off" | "none";
@@ -69,7 +72,14 @@ export default function Accounts() {
   tRef.current = t;
 
   const [steamId, setSteamId] = useState<string | null>(null);
-  const { linking, linkSteam } = useSteamLink({ onLinked: setSteamId });
+  const { supporter } = useSupporter();
+  // A fresh link may be the account that holds the supporter pack, so ask again.
+  const { linking, linkSteam } = useSteamLink({
+    onLinked: (id) => {
+      setSteamId(id);
+      void recheckSupporter().catch(() => {});
+    },
+  });
 
   const [shopIn, setShopIn] = useState<boolean | null>(null);
   const [hubIn, setHubIn] = useState<boolean | null>(null);
@@ -210,6 +220,7 @@ export default function Accounts() {
         icon={<ShieldCheck className="size-4" />}
         tone={steamId ? "on" : "off"}
         name={t("accounts.steam")}
+        badge={supporter && steamId ? <SupporterBadge /> : undefined}
         status={
           steamId ? t("settings.steamLinkedAs", { id: steamId }) : t("accounts.steamNot")
         }
@@ -228,6 +239,13 @@ export default function Accounts() {
               : t("settings.steamLinkBtn")}
         </Button>
       </Row>
+      {/* A coffee on Buy Me a Coffee unlocks the supporter pack once its email is linked here.
+          Needs the Steam link, since the pack is kept by Steam id. */}
+      {steamId && !supporter && (
+        <div className="pb-2 pl-12">
+          <SupporterEmailLink />
+        </div>
+      )}
 
       {storeRow("shop", t("accounts.shop"), shopIn)}
       {storeRow("hub", t("accounts.hub"), hubIn)}
@@ -280,11 +298,14 @@ function Row({
   name,
   status,
   note,
+  badge,
   children,
 }: {
   icon: React.ReactNode;
   tone: Tone;
   name: string;
+  /** Beside the name — the supporter pack on the Steam row. */
+  badge?: React.ReactNode;
   status: string;
   /** The line under the status: what this account is actually for, or how it is read. */
   note?: string;
@@ -300,6 +321,7 @@ function Row({
           <span className="flex items-center gap-2 font-cond text-[12.5px] font-semibold tracking-[-0.01em]">
             <span className={cn("inline-block size-2 flex-none rounded-full", DOT[tone])} />
             {name}
+            {badge}
           </span>
           <span className="text-[12px] text-muted-foreground">{status}</span>
           {note && (

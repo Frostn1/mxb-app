@@ -142,6 +142,7 @@ import {
   type Point,
 } from "./paint";
 import type { EdfNode, PaintTexture } from "@frost/shared/types";
+import { supportMoment } from "@frost/shared/api/support";
 
 /**
  * The paint designer: layers on a sheet, the sheet on the model, and a `.pnt` at the end.
@@ -1200,6 +1201,7 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
       toast.success(t("designer.exportedPsd", { count: written, dir }), {
         description: t("designer.psdWatching"),
       });
+      supportMoment();
     } catch (e) {
       toast.error(String(e).replace(/^Error:\s*/, ""));
     } finally {
@@ -2532,6 +2534,7 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
         toast.success(t("paints.saved", { path: outcome.path }), {
           description: blank ? t("designer.blankSheetsSkipped", { count: blank }) : undefined,
         });
+        supportMoment();
         setUnsaved(false);
         // Best effort: failing to note a recent must never look like a failed save.
         void designerRecentNote({

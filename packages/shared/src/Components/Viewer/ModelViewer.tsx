@@ -1204,10 +1204,27 @@ function makeEdfMaterial(
   t: THREE.Texture | null,
   tex: Map<string, THREE.Texture>,
   envMap: THREE.Texture,
+  rubber: ReadonlySet<string> = NO_RUBBER,
+  // The game's reading of a normal map's alpha: where it is clear the sheet has no specular.
+  specMask = false,
 ) {
   // The number-plate planes are the game's to draw on, not ours — see `isDecalPlane`.
   if (isDecalPlane(name)) {
     return makeHiddenMaterial();
+  }
+  // A tyre sheet (`tyre_texture` in the tyres mod): rubber, with its tread and sidewall relief
+  // at full strength, and none of the paint's sheen.
+  if (name && rubber.has(name.toLowerCase())) {
+    return new THREE.MeshStandardMaterial({
+      map: t ?? undefined,
+      normalMap: tex.get(`${name.toLowerCase()}_n`) ?? null,
+      color: t ? 0xffffff : 0x1a1a1a,
+      metalness: 0,
+      roughness: 0.88,
+      envMap,
+      envMapIntensity: 0.15,
+      side: THREE.DoubleSide,
+    });
   }
   // The sheet's own normal map, if it has one: `plastics_n` beside `plastics`. Bikes carry
   // them the same way riders do, and until now only the rider read them — so a bike's
@@ -1215,7 +1232,7 @@ function makeEdfMaterial(
   // in the sheet nobody looked at. A paint may supply its own, which then replaces the
   // model's by name like any other sheet.
   const normalMap = (name && tex.get(`${name.toLowerCase()}_n`)) || null;
-  return new THREE.MeshStandardMaterial({
+  const material = new THREE.MeshStandardMaterial({
     map: t ?? undefined,
     normalMap,
     // Gentle: these sheets are authored for the game's own lighting, and at full strength
@@ -1234,13 +1251,57 @@ function makeEdfMaterial(
     // Inconsistent winding — render both sides so the bike isn't see-through.
     side: THREE.DoubleSide,
   });
+  material.userData.sheet = name?.toLowerCase() ?? null;
+  if (specMask && normalMap) {
+    // MX Bikes keeps the specular mask in the normal map's alpha. Masked-out texels lose their
+    // highlight (full roughness) instead of the whole sheet shining evenly.
+    material.onBeforeCompile = (shader) => {
+      shader.fragmentShader = shader.fragmentShader.replace(
+        "#include <roughnessmap_fragment>",
+        `float roughnessFactor = roughness;
+#ifdef USE_NORMALMAP
+roughnessFactor = mix(1.0, roughnessFactor, clamp(texture2D(normalMap, vNormalMapUv).a, 0.0, 1.0));
+#endif`,
+      );
+    };
+    material.customProgramCacheKey = () => "edf-specmask";
+  }
+  return material;
 }
+
+/**
+ * How a `.shd` makes a sheet look: its specular shininess and the range its reflection runs
+ * over. The viewer's own materials are PBR, so these are mapped onto roughness and the
+ * strength of the room's reflection. The stock values (shininess 6, reflection 0 to 0.5 at
+ * exponent 1) come out as the look every sheet already has.
+ */
+export interface Shader {
+  shininess: number;
+  reflectionMin: number;
+  reflectionMax: number;
+  reflectionExp: number;
+}
+
+/** A `.shd`'s values for each sheet, by lowercase sheet name. */
+export type Shaders = Record<string, Shader>;
+
+export function lookOf(s: Shader): { roughness: number; envMapIntensity: number } {
+  const roughness = THREE.MathUtils.clamp(0.55 * Math.pow(6 / Math.max(s.shininess, 1), 0.3), 0.1, 0.95);
+  const fall = s.reflectionMin + (s.reflectionMax - s.reflectionMin) * Math.pow(0.5, Math.max(s.reflectionExp, 0) - 1);
+  return { roughness, envMapIntensity: THREE.MathUtils.clamp(fall, 0, 3) };
+}
+
+const NO_RUBBER: ReadonlySet<string> = new Set();
 
 function useEdfMeshes(
   nodes: EdfNode[] | null | undefined,
   tex: Map<string, THREE.Texture>,
+  rubber: ReadonlySet<string> = NO_RUBBER,
+  shaders: Shaders | null = null,
+  focus: string | null = null,
 ) {
   const list = useMemo(() => nodes ?? [], [nodes]);
+  const invalidate = useThree((s) => s.invalidate);
   const geoms = useNodeGeometries(list);
   const gl = useThree((s) => s.gl);
   const env = useMemo(() => roomReflection(gl), [gl]);
@@ -1252,17 +1313,47 @@ function useEdfMeshes(
       list.map((n) =>
         n.submeshes.length
           ? n.submeshes.map((sm) =>
-              makeEdfMaterial(sm.texture, submeshTexture(sm.texture, tex), tex, env),
+              makeEdfMaterial(sm.texture, submeshTexture(sm.texture, tex), tex, env, rubber, !!shaders),
             )
           : // No submesh table → whole-node binding (the model's primary body texture).
-            [makeEdfMaterial(n.texture, submeshTexture(n.texture, tex), tex, env)],
+            [makeEdfMaterial(n.texture, submeshTexture(n.texture, tex), tex, env, rubber, !!shaders)],
       ),
-    [list, tex, env],
+    // Whether a `.shd` is in play, not its values: those move the materials in place.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [list, tex, env, rubber, !!shaders],
   );
   useEffect(
     () => () => materials.forEach((a) => a.forEach((m) => m.dispose())),
     [materials],
   );
+  // A `.shd` being tuned moves the materials in place: rebuilding them per slider step would
+  // restart every texture lookup, and under `frameloop="demand"` nothing redraws by itself.
+  useEffect(() => {
+    if (!shaders) return;
+    for (const row of materials) {
+      for (const m of row) {
+        const shader = shaders[m.userData.sheet as string];
+        if (!shader || !(m instanceof THREE.MeshStandardMaterial)) continue;
+        const look = lookOf(shader);
+        m.roughness = look.roughness;
+        m.envMapIntensity = look.envMapIntensity;
+      }
+    }
+    invalidate();
+  }, [materials, shaders, invalidate]);
+
+  // The sheet being looked at glows, so a `.shd` picked in a list shows where it lands.
+  useEffect(() => {
+    for (const row of materials) {
+      for (const m of row) {
+        if (!(m instanceof THREE.MeshStandardMaterial)) continue;
+        const on = !!focus && m.userData.sheet === focus;
+        m.emissive.set(on ? 0x3b82f6 : 0x000000);
+        m.emissiveIntensity = on ? 0.55 : 0;
+      }
+    }
+    invalidate();
+  }, [materials, focus, invalidate]);
 
   return { geoms, materials };
 }
@@ -1488,6 +1579,18 @@ export function settledPose(rig: BikeRig | null | undefined, nodes: EdfNode[]): 
   return { ...NEUTRAL_POSE, rearDrop: levelRearDrop(rig, nodes, 0) ?? REAR_DEFAULT_MM };
 }
 
+/**
+ * The rear axle where the settled stance draws it: the swingarm turned about the pivot by
+ * the same angle `EdfMesh` turns it, for an overlay to find the rear wheel by.
+ */
+export function settledRearAxle(rig: BikeRig | null | undefined, nodes: EdfNode[]): Vec3 | null {
+  if (!rig?.rearAxle) return null;
+  const a = swingAngleForAxleY(rig, rig.rearAxle[1] - settledPose(rig, nodes).rearDrop / 1000) ?? 0;
+  const pivot = new THREE.Vector3(...rig.pivot);
+  const v = new THREE.Vector3(...rig.rearAxle).sub(pivot).applyAxisAngle(X_AXIS, a).add(pivot);
+  return [v.x, v.y, v.z];
+}
+
 /** Turn a group about a point that isn't the origin. */
 function About({
   at,
@@ -1514,15 +1617,23 @@ function EdfMesh({
   highlight,
   rig,
   pose = NEUTRAL_POSE,
+  rubber,
+  shaders,
+  focus,
 }: {
   nodes: EdfNode[];
   textures: Map<string, THREE.Texture>;
   highlight?: Int32Array | null;
+  /** A sheet (lower-case) to light up. */
+  focus?: string | null;
   /** The joints to pose about. Absent (an unassembled bike, or gear) draws one rigid group. */
   rig?: BikeRig | null;
   pose?: BikePose;
+  /** Tyre sheets, lower-case, drawn as rubber. */
+  rubber?: ReadonlySet<string>;
+  shaders?: Shaders | null;
 }) {
-  const { geoms, materials } = useEdfMeshes(nodes, textures);
+  const { geoms, materials } = useEdfMeshes(nodes, textures, rubber, shaders ?? null, focus ?? null);
   const groups = useMemo<PoseGroup[]>(
     () => nodes.map((n) => (rig ? poseGroup(n.name) : "static")),
     [nodes, rig],
@@ -1792,6 +1903,7 @@ function SideBySide({
   onRiderPose,
   onGrab,
   place,
+  rubber,
 }: {
   nodes: EdfNode[];
   textures: Map<string, THREE.Texture>;
@@ -1811,6 +1923,7 @@ function SideBySide({
   onGrab?: (bone: string) => void;
   /** Where each half has been moved to, on top of the arrangement below. */
   place?: Record<PlaceTarget, Placement>;
+  rubber?: ReadonlySet<string>;
 }) {
   const at = useMemo(() => {
     const bike = partBounds(nodes);
@@ -1836,6 +1949,7 @@ function SideBySide({
               textures={textures}
               highlight={highlight}
               rig={rig}
+              rubber={rubber}
               pose={pose}
             />
           </Placed>
@@ -1899,6 +2013,7 @@ export function BikeOnGround({
   onGrab,
   place,
   seat = null,
+  rubber,
 }: {
   nodes: EdfNode[];
   textures: Map<string, THREE.Texture>;
@@ -1917,6 +2032,7 @@ export function BikeOnGround({
   place?: Record<PlaceTarget, Placement>;
   /** The bike's seat, in the frame its vertices came back in — see {@link canSeatRider}. */
   seat?: Vec3 | null;
+  rubber?: ReadonlySet<string>;
 }) {
   const seated = seat != null && !!riderParts?.length;
   const at = useMemo(() => {
@@ -1941,6 +2057,7 @@ export function BikeOnGround({
             textures={textures}
             highlight={highlight}
             rig={rig}
+            rubber={rubber}
             pose={pose}
           />
         </Placed>
@@ -1970,7 +2087,7 @@ type Framing = "default" | "solo" | "pair" | "onBike";
 
 // Default camera looks down over a bike/rider; a solo gear item gets a level, closer view,
 // and a bike-plus-rider pair is roughly twice as wide, so it starts further back.
-function CameraRig({ frame }: { frame: Framing }) {
+function CameraRig({ frame, view }: { frame: Framing; view?: ViewerView | null }) {
   const camera = useThree((s) => s.camera);
   // OrbitControls (`makeDefault`) owns the camera each frame, so moves must go through
   // the controls and be committed with `update()`.
@@ -1979,6 +2096,18 @@ function CameraRig({ frame }: { frame: Framing }) {
     | null;
   const invalidate = useThree((s) => s.invalidate);
   useEffect(() => {
+    if (view) {
+      camera.position.set(...view.position);
+      camera.updateProjectionMatrix();
+      if (controls) {
+        controls.target.set(...view.target);
+        controls.update();
+      } else {
+        camera.lookAt(...view.target);
+      }
+      invalidate();
+      return;
+    }
     const [x, y, z] =
       frame === "solo"
         ? [1.25, 0.35, 1.7]
@@ -1999,7 +2128,7 @@ function CameraRig({ frame }: { frame: Framing }) {
     // Moving the camera by hand changes no React state, so under `frameloop="demand"`
     // nothing would repaint and the reframe wouldn't show until the next interaction.
     invalidate();
-  }, [frame, camera, controls, invalidate]);
+  }, [frame, view, camera, controls, invalidate]);
   return null;
 }
 
@@ -2316,6 +2445,16 @@ function FrameOnChange({ token }: { token?: number }) {
   return null;
 }
 
+/**
+ * A camera to look through: where it stands and what it looks at, in the viewer's frame (the
+ * bike centred, +y up, +z ahead). Handing a new object moves the camera there; the person can
+ * orbit away from it as usual.
+ */
+export interface ViewerView {
+  position: [number, number, number];
+  target: [number, number, number];
+}
+
 export interface ModelViewerProps {
   mode: ViewerMode;
   texture?: PaintTexture | null;
@@ -2426,8 +2565,19 @@ export interface ModelViewerProps {
   loading?: boolean;
   noStandIn?: boolean;
   className?: string;
+  /** Start from this camera instead of the default framing (see [`ViewerView`]). */
+  view?: ViewerView | null;
+  /** The tyre sheets the wheels wear (a `BikeModel`'s `tyreTextures`), drawn as rubber. */
+  tyreTextures?: string[] | null;
   /** Drawn in the bike's own frame, beside a lone bike: markers, handles. */
   bikeOverlay?: React.ReactNode;
+  /**
+   * A `.shd`'s values for each sheet, by lowercase name, for a lone model: the Convert screen's
+   * sliders, so the shininess and reflection being tuned show as they move.
+   */
+  shaders?: Shaders | null;
+  /** A sheet (lower-case name) of a lone model to light up: the `.shd` picked in Convert. */
+  focusSheet?: string | null;
 }
 
 export function ModelViewer({
@@ -2456,7 +2606,15 @@ export function ModelViewer({
   className,
   grounded = true,
   bikeOverlay,
+  view = null,
+  tyreTextures = null,
+  shaders = null,
+  focusSheet = null,
 }: ModelViewerProps) {
+  const rubber = useMemo(
+    () => new Set((tyreTextures ?? []).map((t) => t.toLowerCase())),
+    [tyreTextures],
+  );
   // Photo mode takes the dots away by not handing the rider anything to write a pose back
   // through — the handles exist only where a caller asked to edit one.
   const poseEdit = photo ? undefined : onRiderPose;
@@ -2556,7 +2714,7 @@ export function ModelViewer({
         >
           <Sky scene={look} />
           <FrameOnChange token={frameToken} />
-          <CameraRig frame={frame} />
+          <CameraRig frame={frame} view={view} />
           <CaptureBridge onReady={onCaptureReady} />
           <ambientLight intensity={look.ambient} />
           {/* Even sky/ground fill so matte paint reads its true colour. */}
@@ -2589,6 +2747,7 @@ export function ModelViewer({
                 riderParts={riderParts!}
                 overrides={overrides}
                 rig={rig}
+                rubber={rubber}
                 pose={pose}
                 attitude={bikeAttitude}
                 riderPose={riderPose}
@@ -2605,6 +2764,7 @@ export function ModelViewer({
                 parts={riderParts!}
                 overrides={overrides}
                 rig={rig}
+                rubber={rubber}
                 pose={pose}
                 attitude={bikeAttitude}
                 riderPose={riderPose}
@@ -2620,6 +2780,9 @@ export function ModelViewer({
                     textures={texMap}
                     highlight={highlight}
                     rig={rig}
+                    rubber={rubber}
+                    shaders={shaders}
+                    focus={focusSheet}
                     pose={pose}
                   />
                   {bikeOverlay}

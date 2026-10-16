@@ -168,6 +168,15 @@ fn main() {
             mxb_core::survey::survey_answer,
             mxb_core::survey::survey_dismiss,
             mxb_core::survey::set_survey_enabled,
+            mxb_core::supporter::supporter_status,
+            mxb_core::supporter::supporter_refresh,
+            mxb_core::supporter::supporter_email_send,
+            mxb_core::supporter::supporter_email_confirm,
+            mxb_core::support::support_due,
+            mxb_core::support::support_shown,
+            mxb_core::support::support_later,
+            mxb_core::support::support_opened,
+            mxb_core::support::support_never,
             mxb_core::uninstall::uninstall_info,
             mxb_core::uninstall::uninstall_app,
             steam_link_start,
@@ -332,6 +341,13 @@ fn main() {
             fbx2edf::commands::fbx_output_paths,
             fbx2edf::commands::fbx_read_text,
             fbx2edf::commands::fbx_convert,
+            fbx2edf::commands::fbx_write_shd,
+            fbx2edf::commands::fbx_scripts,
+            fbx2edf::commands::fbx_scripts_last,
+            fbx2edf::commands::fbx_scripts_save,
+            fbx2edf::commands::fbx_scripts_remove,
+            fbx2edf::commands::fbx_watch,
+            fbx2edf::commands::fbx_unwatch,
             initial_view,
         ])
         .setup(|app| {
@@ -356,6 +372,11 @@ fn main() {
             // it answers the question counters cannot, which is whether any of this is any
             // good. Nothing is fetched or asked when either switch is off.
             mxb_core::survey::start(app.handle(), usage::STUDIO);
+            // Whether the account has the supporter pack, cached for offline use.
+            mxb_core::supporter::start(app.handle());
+            // The support card's launch count. Counted whatever the build; whether it is ever shown
+            // is decided in `support::due`.
+            mxb_core::support::start(app.handle(), usage::STUDIO);
             // Where a rider's own ground images are kept. Set here rather than passed down,
             // because a track is generated from a program and nothing else, and a program
             // names its sheets rather than carrying them.

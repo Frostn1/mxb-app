@@ -19,6 +19,7 @@ import {
 } from "../api/trackgen";
 import { useT } from "@/i18n";
 import type { TKey } from "@/i18n";
+import { supportMoment } from "@frost/shared/api/support";
 
 /**
  * The track build, held above the tab it was started from.
@@ -203,6 +204,7 @@ export function TrackBuildProvider({
           toast.success(tRef.current("track.rideIt"), {
             description: result.installed ?? result.pkz ?? result.dir,
           });
+          supportMoment();
           onInstalledRef.current?.();
         }
       } catch (e) {

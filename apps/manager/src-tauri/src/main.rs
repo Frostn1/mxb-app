@@ -4386,6 +4386,29 @@ async fn servers_with_paint_sync(
     Ok(match_presence(&counts, &registry, &servers))
 }
 
+/// The browser rows run by somebody with the supporter pack, by address, for a small badge.
+///
+/// Best-effort like [`servers_with_paint_sync`]: no control plane means no badges.
+#[tauri::command]
+async fn supporter_servers(app: tauri::AppHandle, servers: Vec<ServerRow>) -> Vec<String> {
+    let cfg = config::load_or_detect(&app).unwrap_or_default();
+    let token = Some(cfg.cp_token.as_str()).filter(|t| !t.trim().is_empty());
+    let registry = paintsync::registry(token).await.unwrap_or_default();
+    match_supporters(&registry, &servers)
+}
+
+/// Each row whose address resolves to a registered server whose owner has the pack.
+fn match_supporters(registry: &[paintsync::RegisteredServer], servers: &[ServerRow]) -> Vec<String> {
+    servers
+        .iter()
+        .filter(|row| {
+            let key = paintsync::server_key_for(registry, &row.address);
+            registry.iter().any(|s| s.supporter && s.id == key)
+        })
+        .map(|row| row.address.clone())
+        .collect()
+}
+
 /// Resolve each browser row to the number of synced riders standing on it.
 ///
 /// Split out from the command because this is the whole of the thinking: a server is recorded
@@ -8998,6 +9021,11 @@ fn main() {
             // it answers the question counters cannot, which is whether any of this is any
             // good. Nothing is fetched or asked when either switch is off.
             mxb_core::survey::start(handle, usage::MANAGER);
+            // Whether the account has the supporter pack, cached for offline use.
+            mxb_core::supporter::start(handle);
+            // The support card's launch count. Counted whatever the build; whether it is ever shown
+            // is decided in `support::due`.
+            mxb_core::support::start(handle, usage::MANAGER);
             // Warm an empty address book from the shared one, once, before anybody needs it.
             // The Servers tab already rebuilds its whole list with `GETINFO` when the master
             // won't answer — but only from addresses this install has been told about, so on a
@@ -9224,7 +9252,16 @@ fn main() {
             mxb_core::survey::survey_answer,
             mxb_core::survey::survey_dismiss,
             mxb_core::survey::set_survey_enabled,
+            mxb_core::supporter::supporter_status,
+            mxb_core::supporter::supporter_refresh,
+            mxb_core::supporter::supporter_email_send,
+            mxb_core::supporter::supporter_email_confirm,
             mxb_core::searchmiss::report_search_miss,
+            mxb_core::support::support_due,
+            mxb_core::support::support_shown,
+            mxb_core::support::support_later,
+            mxb_core::support::support_opened,
+            mxb_core::support::support_never,
             mxb_core::uninstall::uninstall_info,
             mxb_core::uninstall::uninstall_app,
             set_launch_at_startup,
@@ -9315,6 +9352,7 @@ fn main() {
             savedservers::probe_saved_servers,
             server_riders,
             servers_with_paint_sync,
+            supporter_servers,
             guess_server_track,
             server_track_previews,
             invalidate_server_track_cache,
@@ -11208,6 +11246,32 @@ mod paint_sync_badge_tests {
         assert_eq!(got.get("1.2.3.4:54210"), Some(&3), "{got:?}");
     }
 
+    /// Only a registered server whose owner has the pack is marked, matched by address with or
+    /// without its port the way paint sync matches it.
+    #[test]
+    fn a_supporters_server_is_marked_by_address() {
+        let server = |id: &str, address: &str, supporter: bool| paintsync::RegisteredServer {
+            id: id.into(),
+            name: id.into(),
+            region: "eu".into(),
+            address: address.into(),
+            supporter,
+        };
+        let registry = vec![
+            server("fan", "5.6.7.8:54210", true),
+            server("other", "9.9.9.9:54210", false),
+        ];
+        let got = match_supporters(
+            &registry,
+            &[
+                row("Fan's", "5.6.7.8:54210"),
+                row("Other's", "9.9.9.9:54210"),
+                row("Unlisted", "1.1.1.1:54210"),
+            ],
+        );
+        assert_eq!(got, vec!["5.6.7.8:54210".to_string()]);
+    }
+
     /// A registered server's riders are recorded under its registry id, which is neither its
     /// address nor its name — that is what the registry is fetched for.
     #[test]
@@ -11217,6 +11281,7 @@ mod paint_sync_badge_tests {
             name: "MXB EU 1".into(),
             region: "eu".into(),
             address: "5.6.7.8:54210".into(),
+            supporter: false,
         }];
         let counts = counts(&[("mxb-eu-1", 6)]);
         let got = match_presence(&counts, &registry, &[row("MXB EU 1", "5.6.7.8:54210")]);

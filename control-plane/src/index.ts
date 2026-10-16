@@ -35,6 +35,8 @@ import { stripeWebhook } from "./billing";
 import { steamResult, redirectPage } from "./page";
 import { pinGuidFromSteam, rememberLink, steamIdFor } from "./steamlink";
 import { bmacWebhook } from "./bmac";
+import { confirmEmailCode, sendEmailCode } from "./supporteremail";
+import { isSupporter, supporterOwnerSql } from "./supporters";
 import { pruneCrashes, putCrash } from "./crashes";
 import { pruneLockAttempts } from "./lockpermit";
 import { pruneReports, putReport } from "./diagnostics";
@@ -566,6 +568,15 @@ async function route(request: Request, env: Env): Promise<Response> {
   // is the point of the flow, and entitlement is checked per asset when it is asked for.
   if (method === "POST" && path === "/v1/steam/login") return steamLogin(request, account, env);
   if (method === "GET" && path === "/v1/entitlements") return listEntitlements(account, env);
+  // Linking a Buy Me a Coffee address to this account, for the supporter pack.
+  if (method === "POST" && path === "/v1/supporter/email") {
+    const r = await sendEmailCode(request, account, env);
+    return json(r.status, r.body);
+  }
+  if (method === "POST" && path === "/v1/supporter/email/confirm") {
+    const r = await confirmEmailCode(request, account, env);
+    return json(r.status, r.body);
+  }
 
   // Status for a set of secured files the app found on disk, so it can show a locked `.mxbsecure`
   // with its registered name and why it's locked — without the content key. Public title, plus
@@ -926,7 +937,7 @@ async function steamReturn(request: Request, url: URL, env: Env): Promise<Respon
  */
 async function listEntitlements(account: Account, env: Env): Promise<Response> {
   const steamId = await steamIdFor(env, account);
-  if (!steamId) return json(200, { steamId: null, assets: [] });
+  if (!steamId) return json(200, { steamId: null, assets: [], supporter: false });
 
   const rows = await env.DB.prepare(
     "SELECT e.asset_id, a.title, e.source, e.granted_at" +
@@ -940,6 +951,8 @@ async function listEntitlements(account: Account, env: Env): Promise<Response> {
 
   return json(200, {
     steamId,
+    // The supporter pack (`supporters.ts`). Cosmetic only; the app caches it for offline use.
+    supporter: await isSupporter(env, steamId),
     assets: (rows.results ?? []).map((r) => ({
       assetId: r.asset_id,
       title: r.title,
@@ -1749,10 +1762,14 @@ async function getPaint(sha256: string, account: Account, env: Env): Promise<Res
  * free. Everything else here is what a player needs in order to connect.
  */
 async function listServers(env: Env): Promise<Response> {
+  // `supporter`: the owner has the supporter pack, for a small badge in the browser.
   const servers = await env.DB.prepare(
-    "SELECT id, name, region, address FROM servers WHERE published = 1 ORDER BY region, name",
-  ).all<{ id: string; name: string; region: string; address: string }>();
-  return json(200, { servers: servers.results });
+    `SELECT s.id, s.name, s.region, s.address, ${supporterOwnerSql("s.owner_account_id")} AS supporter` +
+      " FROM servers s WHERE s.published = 1 ORDER BY s.region, s.name",
+  ).all<{ id: string; name: string; region: string; address: string; supporter: number }>();
+  return json(200, {
+    servers: (servers.results ?? []).map((r) => ({ ...r, supporter: r.supporter === 1 })),
+  });
 }
 
 /** How many servers one account may register. Enough for a small league, not a botnet. */

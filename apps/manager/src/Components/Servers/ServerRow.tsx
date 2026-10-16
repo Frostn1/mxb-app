@@ -4,6 +4,7 @@ import type { CatalogTrack, MasterServer } from "@frost/shared/api/mods";
 import { cn } from "@frost/shared/lib/utils";
 import { useT } from "@/i18n";
 import { classLine } from "@/lib/serverClasses";
+import SupporterBadge from "@frost/shared/Components/Supporter/SupporterBadge";
 
 /** Latency to colour, the steps the tile uses. */
 function pingTone(ms: number): string {
@@ -28,6 +29,8 @@ interface Props {
   favourite: boolean;
   /** Riders on this server running paint sync. */
   paintSync: number;
+  /** Run by somebody with the supporter pack. */
+  supporter?: boolean;
   /** Accepted friends currently on this server. */
   friends?: number;
   /** The player's place, when they're in line for this server. */
@@ -52,6 +55,7 @@ const ServerRow = memo(function ServerRow({
   selected,
   favourite,
   paintSync,
+  supporter = false,
   friends = 0,
   queuePosition,
   onSelect,
@@ -106,6 +110,7 @@ const ServerRow = memo(function ServerRow({
           <span className="truncate text-[12.5px] font-semibold" title={s.name}>
             {s.name || t("serverBrowser.unnamed")}
           </span>
+          {supporter && <SupporterBadge compact />}
           {queuePosition !== null && (
             <Hourglass
               className="size-3 shrink-0 text-primary"

@@ -101,6 +101,9 @@ pub struct Status {
     pub recorder_version: Option<String>,
     /// The recorder that ran is older than the one the HUD and the spoken cues need.
     pub recorder_outdated: bool,
+    /// The recorder that ran keeps drawing the line and the hints after Coach is switched off
+    /// or closed: it predates `coach.ini` (see `link.rs`).
+    pub recorder_no_clear: bool,
 }
 
 #[tauri::command]
@@ -117,6 +120,7 @@ pub fn coach_status(app: AppHandle) -> Status {
         recorder_outdated: recorder_version
             .as_deref()
             .is_some_and(|v| !crate::hud::at_least(v, crate::hud::RECORDER_NEEDS)),
+        recorder_no_clear: recorder_version.as_deref().is_some_and(|v| !crate::hud::at_least(v, crate::link::CLEAR_NEEDS)),
         recorder_version,
     }
 }
@@ -141,6 +145,15 @@ pub struct LapSummary {
     pub issue: Option<String>,
     #[serde(default)]
     pub crashed: bool,
+    /// The game put the bike back on the track during it (see `telemetry::Lap::reset`).
+    #[serde(default)]
+    pub reset: bool,
+    /// Part of the track was cut (see `telemetry::Lap::cut`).
+    #[serde(default)]
+    pub cut: bool,
+    /// The stint's first lap, from standstill (see `telemetry::Lap::warmup`).
+    #[serde(default)]
+    pub warmup: bool,
     /// How long it took by the recording, for a lap the game left untimed.
     #[serde(default)]
     pub ridden_ms: i32,
@@ -149,6 +162,12 @@ pub struct LapSummary {
 impl LapSummary {
     pub(crate) fn comparable(&self) -> bool {
         self.whole && !self.invalid
+    }
+
+    /// A lap worth racing and drawing as the line: comparable, and ridden at pace with no crash,
+    /// reset or cut. The reference and the in-game line only ever come from these.
+    pub(crate) fn clean(&self) -> bool {
+        self.comparable() && !self.crashed && !self.reset && !self.cut && !self.warmup
     }
 }
 
@@ -207,6 +226,9 @@ pub(crate) fn summarize(path: &Path, rec: &Recording) -> SessionSummary {
             whole: l.whole,
             issue: l.issue.map(str::to_owned),
             crashed: l.crashed,
+            reset: l.reset,
+            cut: l.cut,
+            warmup: l.warmup,
             ridden_ms: l.ridden_ms,
         })
         .collect();
@@ -312,7 +334,9 @@ struct Indexed {
 
 fn index_path(app: &AppHandle) -> Option<PathBuf> {
     // v4: stints carry the event they belong to, and laps the file they're in.
-    Some(config::data_dir(app)?.join("coach").join("index-v4.json"))
+    // v5: laps say whether they had a reset, a cut or were the warm-up, so a lap summarised
+    // before that isn't taken for a clean one.
+    Some(config::data_dir(app)?.join("coach").join("index-v5.json"))
 }
 
 /// Every recording in `dirs`, summarised one stint at a time, with `index_file` as a cache
@@ -505,14 +529,18 @@ impl LapRef {
     }
 }
 
-/// The fastest comparable lap on this track, other than `exclude`, across every session the
-/// rider has ridden here. The same bike wins over a faster lap on a different one: a 250 and a
-/// 450 don't take a corner the same way.
+/// The fastest clean lap on this track, other than `exclude`, across every session the rider has
+/// ridden here. The same bike wins over a faster lap on a different one: a 250 and a 450 don't
+/// take a corner the same way.
+///
+/// Clean, not just whole: a lap with a crash, a reset or a cut in it, or the warm-up out of the
+/// pits, was taken here before and drawn in the game as the line to ride, through the scenery
+/// wherever the bike had been thrown (GAMING PROFI 2, v0.1.24). None until there is a clean one.
 fn best_reference(sessions: &[SessionSummary], track_id: &str, bike_id: &str, exclude: Option<(&str, i32)>) -> Option<LapRef> {
     sessions
         .iter()
         .filter(|s| s.track_id == track_id)
-        .flat_map(|s| s.laps.iter().filter(|l| l.comparable()).map(move |l| (s, l)))
+        .flat_map(|s| s.laps.iter().filter(|l| l.clean()).map(move |l| (s, l)))
         .filter(|(_, l)| exclude != Some((l.path.as_str(), l.num)))
         .min_by_key(|(s, l)| (s.bike_id != bike_id, l.time_ms))
         .map(|(s, l)| LapRef::of(s, l, RefKind::Own))
@@ -635,7 +663,7 @@ fn ideal_pool(sessions: &[SessionSummary], summary: &SessionSummary) -> Result<I
     let sections = analysis::sections(&trace(&load(&grid.path)?, grid.lap)?);
     let on_this_bike = sessions
         .iter()
-        .any(|s| s.track_id == summary.track_id && s.bike_id == summary.bike_id && s.laps.iter().any(|l| l.comparable()));
+        .any(|s| s.track_id == summary.track_id && s.bike_id == summary.bike_id && s.laps.iter().any(|l| l.clean()));
     let mut laps: Vec<(i32, Trace)> = Vec::new();
     let mut meta: Vec<(String, i32, usize)> = Vec::new();
     for (si, s) in sessions.iter().filter(|s| s.track_id == summary.track_id).enumerate() {
@@ -644,7 +672,9 @@ fn ideal_pool(sessions: &[SessionSummary], summary: &SessionSummary) -> Result<I
         }
         for st in &s.stints {
             let Ok(rec) = load(&st.path) else { continue };
-            for l in rec.laps().iter().filter(|l| l.whole && !l.invalid) {
+            // Clean laps only: a reset is a section crossed in no time, and the stitched line would
+            // run through wherever a crash threw the bike.
+            for l in rec.laps().iter().filter(|l| l.clean()) {
                 if let Some(t) = Trace::new(l, rec.event.track_length) {
                     laps.push((laps.len() as i32, t));
                     meta.push((st.path.clone(), l.num, si + 1));
@@ -1538,16 +1568,33 @@ pub fn coach_write_cues(
         false => (path, lap),
     };
     let ref_arg_given = ref_path.is_some() || ideal.unwrap_or(false);
-    let out = review_sync(app.clone(), path.clone(), lap, ref_path, ref_lap, None, ideal)?;
+    let mut out = review_sync(app.clone(), path.clone(), lap, ref_path, ref_lap, None, ideal)?;
     let rec = load(&path)?;
+    let sessions = all_sessions(&app);
     // The lap the calls are placed on, and the one the HUD races. The ideal lap can't be
     // either: there is no line to draw a ghost from and no ghost to run a gap against, so the
     // fastest lap on the track stands in and the rider is told which lap that is.
+    //
+    // Nor can a lap with a crash, a reset or a cut in it, or the warm-up. With nothing faster to
+    // hold it against, the review is of the lap on its own and names that lap as its reference:
+    // the first lap of a session, crashes and all, became the line in the game. The fastest clean
+    // lap stands in for any of those, and with none yet there is no line at all.
     let ghost = match out.reference.kind {
-        RefKind::Ideal => best_reference(&all_sessions(&app), &out.track_id, &rec.event.bike_id, None)
-            .ok_or("There's no whole lap on this track for the in-game HUD to race against.")?,
-        _ => out.reference.clone(),
+        RefKind::Ideal => best_reference(&sessions, &out.track_id, &rec.event.bike_id, None),
+        _ if lap_is_clean(&sessions, &out.reference.path, out.reference.lap) => Some(out.reference.clone()),
+        _ => best_reference(&sessions, &out.track_id, &rec.event.bike_id, None),
     };
+    let Some(ghost) = ghost else {
+        clear_hud_sheet(&app, &rec)?;
+        return Err("There's no clean lap on this track yet, so there's no line to draw in the game.".into());
+    };
+    // The calls are about where this lap loses time to the line, so a lap that stood in for an
+    // unclean reference is the one it is reviewed against.
+    let here = (ghost.path.as_str(), ghost.lap);
+    let stood_in = out.reference.kind != RefKind::Ideal && here != (out.reference.path.as_str(), out.reference.lap);
+    if stood_in && here != (path.as_str(), lap) {
+        out = review_sync(app.clone(), path.clone(), lap, Some(ghost.path.clone()), Some(ghost.lap), None, None)?;
+    }
     let r = &ghost;
     let ref_rec = if r.path == path { None } else { Some(load(&r.path)?) };
     // The line the HUD draws: the fastest lap (today's), the ideal lap stitched from the laps that
@@ -1564,7 +1611,6 @@ pub fn coach_write_cues(
     match want_line {
         "chosen" => line.kind = "chosen".into(),
         "ideal" => {
-            let sessions = all_sessions(&app);
             let summary = match sessions.iter().find(|s| s.stints.iter().any(|x| x.path == path)) {
                 Some(s) => s.clone(),
                 None => summarize(Path::new(&path), &rec),
@@ -1581,7 +1627,7 @@ pub fn coach_write_cues(
         }
         // The fastest lap on the track, whatever reference the review is held against.
         _ if ref_arg_given => {
-            if let Some(g) = best_reference(&all_sessions(&app), &out.track_id, &rec.event.bike_id, None) {
+            if let Some(g) = best_reference(&sessions, &out.track_id, &rec.event.bike_id, None) {
                 fast = own_fast(&g)?;
                 line_id = format!("{}#{}", g.path, g.lap);
             }
@@ -1634,6 +1680,37 @@ pub fn coach_write_cues(
     // heard, and it would be wrong to count it against them.
     write_history(&app, &rec.event.track_id, &rec.event.bike_id, &next);
     Ok(CuesOut { file: file.display().to_string(), cues, ghost, line })
+}
+
+/// Whether lap `num` of the recording at `path` is clean (see [`LapSummary::clean`]): from the
+/// sessions already read when it is one of them, else from the file (an imported lap).
+fn lap_is_clean(sessions: &[SessionSummary], path: &str, num: i32) -> bool {
+    match sessions.iter().flat_map(|s| s.laps.iter()).find(|l| l.path == path && l.num == num) {
+        Some(l) => l.clean(),
+        None => load(path)
+            .ok()
+            .is_some_and(|rec| summarize(Path::new(path), &rec).laps.iter().any(|l| l.num == num && l.clean())),
+    }
+}
+
+/// With no clean lap to draw, the HUD sheet for this track and bike says so: a sheet with no line
+/// in it, which the recorder takes as "draw nothing" rather than keeping a line made of a bad lap.
+fn clear_hud_sheet(app: &AppHandle, rec: &Recording) -> Result<(), String> {
+    let dir = sheets_dir(&load_config(app)).ok_or("The game's user folder wasn't found.")?;
+    fs::create_dir_all(&dir).map_err(err)?;
+    let hud_name = crate::hudsheet::file_name(&rec.event.track_id, &rec.event.bike_id);
+    let hud_path = dir.join(&hud_name);
+    let key = "none".to_string();
+    if hud_path.exists() && hud_keys().lock().map_or(false, |m| m.get(&hud_name) == Some(&key)) {
+        return Ok(());
+    }
+    let tmp = dir.join(format!("{hud_name}.tmp"));
+    fs::write(&tmp, crate::hudsheet::write_empty(rec.event.track_length)).map_err(err)?;
+    move_into_place(&tmp, &hud_path).map_err(err)?;
+    if let Ok(mut m) = hud_keys().lock() {
+        m.insert(hud_name, key);
+    }
+    Ok(())
 }
 
 /// The session's lines and its track, with the stint the lap under review was ridden in.
@@ -1993,6 +2070,9 @@ mod tests {
                     whole,
                     issue: None,
                     crashed: false,
+                    reset: false,
+                    cut: false,
+                    warmup: false,
                     ridden_ms: time_ms,
                 })
                 .collect(),
@@ -2085,6 +2165,38 @@ mod tests {
             stint("20261001-000500-000", "kx450", 1, &[(0, 60_000)]),
         ]);
         assert_eq!(out.len(), 1, "fifteen minutes, over the end of a month");
+    }
+
+    /// The line in the game is the fastest clean lap: never one with a crash, a reset or a cut,
+    /// and never the warm-up, however fast. The next best clean lap stands in, a faster clean lap
+    /// takes over as soon as it is on disk, and with no clean lap there is no line at all
+    /// (GAMING PROFI 2: the first lap, crashes and all, was drawn off the track).
+    #[test]
+    fn the_line_is_the_fastest_clean_lap() {
+        let laps = [(1, 50_000, true), (2, 52_000, true), (3, 53_000, true), (4, 51_000, true), (5, 60_000, true)];
+        let mut s = session("a", "indiana", "kx450", &laps);
+        s.laps[0].warmup = true; // the out lap, quickest only on paper
+        s.laps[1].crashed = true;
+        s.laps[2].reset = true;
+        s.laps[3].cut = true;
+        let r = best_reference(&[s.clone()], "indiana", "kx450", None).expect("lap 5 is clean");
+        assert_eq!(r.lap, 5, "the only clean lap, slow as it is");
+
+        // Only laps with something wrong in them: no line rather than a bad one.
+        let mut bad = s.clone();
+        bad.laps.truncate(4);
+        assert!(best_reference(&[bad], "indiana", "kx450", None).is_none());
+
+        // A faster clean lap arrives: it is the line now.
+        s.laps.push(session("a", "indiana", "kx450", &[(6, 55_000, true)]).laps.remove(0));
+        assert_eq!(best_reference(&[s.clone()], "indiana", "kx450", None).unwrap().lap, 6);
+        // And a faster one with a crash in it doesn't take over.
+        let mut crash = session("a", "indiana", "kx450", &[(7, 49_000, true)]).laps.remove(0);
+        crash.crashed = true;
+        s.laps.push(crash);
+        assert_eq!(best_reference(&[s.clone()], "indiana", "kx450", None).unwrap().lap, 6);
+        assert!(lap_is_clean(&[s.clone()], "a", 6));
+        assert!(!lap_is_clean(&[s], "a", 7));
     }
 
     #[test]

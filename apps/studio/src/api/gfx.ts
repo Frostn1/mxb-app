@@ -23,7 +23,10 @@ export interface GfxSaved {
 }
 
 export const gfxOpen = (path: string) => invoke<GfxFile>("gfx_open", { path });
-export const gfxPreview = (path: string) => invoke<BikeModel>("gfx_preview", { path }).then(reviveMesh);
+/** The model under the markers, and the sheets it draws that no loose file supplied. */
+export type GfxPreview = BikeModel & { missing: string[]; texturesPacked: boolean };
+
+export const gfxPreview = (path: string) => invoke<GfxPreview>("gfx_preview", { path }).then(reviveMesh);
 export const gfxSave = (path: string, edits: [string, string][]) => invoke<GfxSaved>("gfx_save", { path, edits });
 
 /** Which part's frame a point is written in. */

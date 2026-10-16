@@ -121,6 +121,9 @@ pub struct BikeModel {
     /// installed falls back to the bike's own, and the picker has to show that rather than
     /// claim a pack that isn't on screen.
     pub tyres: Option<String>,
+    /// The tyre sheets that mod's `gfx.cfg` names (`tyre_texture`), which the viewer draws as
+    /// rubber rather than with the paint's sheen. Empty when the bike drew no wheels.
+    pub tyre_textures: Vec<String>,
     /// Whether the parts were placed into one frame by the bike's `.geom`.
     ///
     /// False means every node still sits in its own local frame, so a vertex's position says
@@ -438,6 +441,52 @@ pub fn load_bike_model_blocking(
     build_bike_model(&source, key, files, installed, tyres, pick, t0)
 }
 
+/// The Gfx tab's bike: its loose files, later folders layered over earlier ones, assembled by
+/// the `.geom` and wearing the wheels the bike names. The bike's own `.pkz` is read for its
+/// `.geom` alone, so no texture is ever taken from it; a sheet only the archive holds stays
+/// missing.
+pub fn load_gfx_bike_model_blocking(dirs: &[&std::path::Path]) -> Result<BikeModel, String> {
+    let t0 = std::time::Instant::now();
+    let Some(first) = dirs.first() else { return Err("no folder".into()) };
+    let tyres = tyres_dir_for(first);
+    let stamps: Vec<String> = dirs.iter().map(|d| format!("{}{}", d.display(), folder_stamp(d))).collect();
+    let key = format!(
+        "gfx#{}{}#t{:x}",
+        stamps.join("|"),
+        packed_stamp(first),
+        tyres.as_deref().map(tyres_stamp).unwrap_or(0),
+    );
+    if let Some(m) = cached_bike(&key) {
+        return Ok(m);
+    }
+    let _gate = gate::enter(&key);
+    if let Some(m) = cached_bike(&key) {
+        return Ok(m);
+    }
+    let mut files: Vec<(String, Vec<u8>)> = packed_layer(first)
+        .into_iter()
+        .filter(|(n, _)| n.to_ascii_lowercase().ends_with(".geom"))
+        .collect();
+    for dir in dirs {
+        let mut loose = Vec::new();
+        for entry in std::fs::read_dir(dir).map_err(|e| format!("{}: {e}", dir.display()))?.flatten() {
+            let path = entry.path();
+            let name = path.file_name().and_then(|n| n.to_str()).map(str::to_string);
+            if path.is_file() && name.as_deref().is_some_and(wanted_bike_file) {
+                if let (Some(name), Some(bytes)) = (name, read_bike_file(&path)) {
+                    loose.push((name, bytes));
+                }
+            }
+        }
+        overlay_files(&mut files, loose);
+    }
+    if !files.iter().any(|(n, _)| bikefiles::is_mesh(n)) {
+        return Err(format!("no .edf mesh in {}", first.display()));
+    }
+    let installed = installed_paints(first);
+    build_bike_model(&first.display().to_string(), key, files, installed, tyres, None, t0)
+}
+
 /// Why a bike came back with nothing to draw, in words the player can act on.
 ///
 /// Three unrelated faults land here and they want three different answers: a mesh that never
@@ -571,6 +620,7 @@ pub fn build_bike_model(
     // Wheels last, and only onto a bike that arrived: a mesh that didn't read has to go on
     // reading as "none of this bike arrived", not as a pair of wheels hanging in the air.
     let mut tyres = None;
+    let mut tyre_textures = Vec::new();
     let mut wheel_count = 0;
     if let Some(set) = tyre_set.as_ref().filter(|_| !nodes.is_empty()) {
         let (mut wheels, meshes) = wheel_nodes(&set.files);
@@ -578,6 +628,7 @@ pub fn build_bike_model(
             log::warn!("[viewer] {label}: tyres '{}' hold no readable wheel mesh", set.name);
         } else {
             tyres = Some(set.name.clone());
+            tyre_textures = tyre_sheets(&set.files);
         }
         wheel_count = wheels.len();
         nodes.append(&mut wheels);
@@ -774,6 +825,7 @@ pub fn build_bike_model(
         paints,
         base: model_base,
         tyres,
+        tyre_textures,
         assembled,
         rig,
         wheels: wheel_count,
@@ -1078,6 +1130,23 @@ pub fn wheel_nodes(files: &[(String, Vec<u8>)]) -> (Vec<edf::EdfNode>, Vec<&Vec<
         }
     }
     (nodes, used)
+}
+
+/// The tyre sheets a tyres mod's `gfx.cfg` names: each wheel's `tyre_texture`, in order, once.
+pub fn tyre_sheets(files: &[(String, Vec<u8>)]) -> Vec<String> {
+    let Some((_, bytes)) = files.iter().find(|(n, _)| n.to_ascii_lowercase().ends_with("gfx.cfg")) else {
+        return Vec::new();
+    };
+    let gfx = cfg::parse(bytes);
+    let mut out: Vec<String> = Vec::new();
+    for part in ["front_wheel", "rear_wheel"] {
+        if let Some(t) = gfx.block(part).and_then(|p| p.get("tyre_texture")).map(str::trim) {
+            if !t.is_empty() && !out.iter().any(|o| o.eq_ignore_ascii_case(t)) {
+                out.push(t.to_string());
+            }
+        }
+    }
+    out
 }
 
 pub fn is_chain(sm: &edf::Submesh) -> bool {
@@ -1911,9 +1980,84 @@ pub fn load_pkz_mesh(pkz: &std::path::Path, entry: &str) -> Option<Vec<edf::EdfN
 /// A model read straight from a file: its meshes, bound to the textures they name, and those
 /// textures as the file carries them.
 #[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct LooseModel {
     pub nodes: Vec<edf::EdfNode>,
     pub textures: Vec<paint::PaintTexture>,
+    /// Texture names the meshes use that neither the file nor the folders around it supplied.
+    pub missing: Vec<String>,
+}
+
+/// The folders a loose model's pictures are looked for in, nearest first: beside the `.edf`,
+/// its `paints` and `textures` folders, then a `Textures` folder next to the folder it is in
+/// (an export project keeps `EDF/` and `Textures/` side by side).
+pub fn texture_search_dirs(edf: &std::path::Path) -> Vec<PathBuf> {
+    let Some(dir) = edf.parent() else { return Vec::new() };
+    let child = crate::library::resolve_child;
+    let mut dirs = vec![dir.to_path_buf(), child(dir, "paints"), child(dir, "textures")];
+    if let Some(up) = dir.parent() {
+        dirs.push(child(up, "textures"));
+    }
+    dirs
+}
+
+/// The sheets a bike's parts draw that its first paint doesn't carry, looked for loose around
+/// `edf` the way [`load_model_file_blocking`] looks; what turns up joins every paint and the
+/// base. Returns the names still missing.
+pub fn fill_loose_textures(model: &mut BikeModel, edf: &std::path::Path) -> Vec<String> {
+    let mut wanted: Vec<String> = Vec::new();
+    for n in &model.nodes {
+        let names: Vec<&String> = if n.submeshes.is_empty() {
+            n.texture.iter().collect()
+        } else {
+            n.submeshes.iter().filter_map(|s| s.texture.as_ref()).collect()
+        };
+        for t in names {
+            let key = t.to_ascii_lowercase();
+            if key != "hide" && key != "face" && !wanted.contains(&key) {
+                wanted.push(key);
+            }
+        }
+    }
+    let have: std::collections::HashSet<String> = model
+        .paints
+        .first()
+        .map(|p| p.textures.iter().map(|t| t.name.to_ascii_lowercase()).collect())
+        .unwrap_or_default();
+    let dirs = texture_search_dirs(edf);
+    let mut missing = Vec::new();
+    for name in wanted.into_iter().filter(|n| !have.contains(n)) {
+        let found = find_texture_file(&dirs, &name)
+            .and_then(|f| std::fs::read(&f).ok())
+            .and_then(|bytes| paint::decode_image(&name, &bytes));
+        match found {
+            Some(t) => {
+                for p in &mut model.paints {
+                    p.textures.push(t.clone());
+                }
+                model.base.push(t);
+            }
+            None => missing.push(name),
+        }
+    }
+    missing
+}
+
+/// `name.<ext>` in `dirs`, for the picture formats the converter reads, matched without
+/// regard to case, the first folder that has it winning.
+pub fn find_texture_file(dirs: &[PathBuf], name: &str) -> Option<PathBuf> {
+    const EXTS: [&str; 6] = ["tga", "png", "dds", "bmp", "jpg", "jpeg"];
+    for dir in dirs {
+        let Ok(entries) = std::fs::read_dir(dir) else { continue };
+        let files: Vec<PathBuf> = entries.filter_map(Result::ok).map(|e| e.path()).filter(|p| p.is_file()).collect();
+        for ext in EXTS {
+            let want = format!("{name}.{ext}").to_ascii_lowercase();
+            if let Some(hit) = files.iter().find(|p| p.file_name().is_some_and(|f| f.to_string_lossy().to_ascii_lowercase() == want)) {
+                return Some(hit.clone());
+            }
+        }
+    }
+    None
 }
 
 /// Any model on disk — a loose `.edf`, or every mesh in a `.pkz`, `.zip` or folder. A bar pad,
@@ -1966,7 +2110,14 @@ pub fn load_model_file_blocking(path: &str) -> Result<LooseModel, String> {
         edf::to_right_handed(&mut part);
         keep_lod0(&mut part);
         bind_textures(&mut part, data, &Default::default(), &Default::default());
-        for t in edf::color_textures(data) {
+        // The colour sheets, then each one's `_n` tangent normal map: the game reads its alpha
+        // as the specular mask, so it travels whole (see the viewer's materials).
+        let colours: Vec<String> = edf::color_textures(data).into_iter().map(|t| t.name.to_ascii_lowercase()).collect();
+        let wanted_texture = |name: &str| {
+            let n = name.to_ascii_lowercase();
+            colours.contains(&n) || n.strip_suffix("_n").is_some_and(|base| colours.iter().any(|c| c == base))
+        };
+        for t in edf::embedded_textures(data).into_iter().filter(|t| wanted_texture(&t.name)) {
             if textures.iter().any(|h| h.name.eq_ignore_ascii_case(&t.name)) {
                 continue;
             }
@@ -1980,7 +2131,32 @@ pub fn load_model_file_blocking(path: &str) -> Result<LooseModel, String> {
     if nodes.is_empty() {
         return Err("There's no readable model in there.".into());
     }
-    Ok(LooseModel { nodes, textures })
+    // What the meshes name that the file doesn't carry: found beside it the way the game finds
+    // a picture, else reported so the view can say what it is drawing without.
+    let mut wanted: Vec<String> = Vec::new();
+    for n in &nodes {
+        for t in n.texture.iter().chain(n.submeshes.iter().filter_map(|s| s.texture.as_ref())) {
+            let key = t.to_ascii_lowercase();
+            if key != "hide" && key != "face" && !wanted.contains(&key) {
+                wanted.push(key);
+            }
+        }
+    }
+    let dirs = if p.is_file() { texture_search_dirs(p) } else { Vec::new() };
+    let mut missing = Vec::new();
+    for name in wanted {
+        if textures.iter().any(|t| t.name.eq_ignore_ascii_case(&name)) {
+            continue;
+        }
+        let found = find_texture_file(&dirs, &name)
+            .and_then(|f| std::fs::read(&f).ok())
+            .and_then(|bytes| paint::decode_image(&name, &bytes));
+        match found {
+            Some(t) => textures.push(t),
+            None => missing.push(name),
+        }
+    }
+    Ok(LooseModel { nodes, textures, missing })
 }
 
 /// The stock rider profiles the game itself ships. They're the fallback for a custom model
@@ -3958,6 +4134,7 @@ mod viewer_tests {
             }],
             base: vec![tex("plastics", "t-own"), tex("wheel", "t-shared")],
             tyres: None,
+            tyre_textures: Vec::new(),
             assembled: true,
             rig: None,
             wheels: 0,
@@ -4163,6 +4340,30 @@ mod viewer_tests {
         ] {
             std::fs::write(dir.join(file), body).unwrap();
         }
+    }
+
+    /// The tyre sheets come off the mod's own gfx.cfg, front then rear, each once.
+    #[test]
+    fn tyre_sheets_are_the_wheels_tyre_textures() {
+        let gfx = "front_wheel
+{
+	tyre_texture = fgeomax
+}
+rear_wheel
+{
+	tyre_texture = rgeomax
+}
+                   cockpit
+{
+	front_wheel
+	{
+		tyre_texture = fgeomax
+	}
+}
+";
+        let files = vec![("oem_mx/gfx.cfg".to_string(), gfx.as_bytes().to_vec())];
+        assert_eq!(super::tyre_sheets(&files), ["fgeomax", "rgeomax"]);
+        assert!(super::tyre_sheets(&[]).is_empty());
     }
 
     fn tyre_file_names(set: &super::TyreSet) -> Vec<&str> {
@@ -5527,4 +5728,27 @@ pub fn unpack_paint_blocking(path: String) -> Result<Vec<paint::PaintTexture>, S
         }
     }
     Ok(textures)
+}
+
+#[cfg(test)]
+mod texture_search_tests {
+    use super::*;
+
+    #[test]
+    fn a_texture_is_found_beside_the_edf_or_in_a_sibling_textures_folder_whatever_the_case() {
+        let root = std::env::temp_dir().join(format!("mxb-tex-{}", std::process::id()));
+        let edf_dir = root.join("EDF");
+        let tex_dir = root.join("Textures");
+        std::fs::create_dir_all(&edf_dir).unwrap();
+        std::fs::create_dir_all(&tex_dir).unwrap();
+        std::fs::write(tex_dir.join("Frame.TGA"), b"x").unwrap();
+        std::fs::write(edf_dir.join("plastics.png"), b"x").unwrap();
+        let dirs = texture_search_dirs(&edf_dir.join("bike.edf"));
+        // Windows keeps the spelling it was asked with, so compare the way the file system does.
+        let same = |hit: Option<PathBuf>, want: PathBuf| hit.is_some_and(|h| h.to_string_lossy().eq_ignore_ascii_case(&want.to_string_lossy()));
+        assert!(same(find_texture_file(&dirs, "frame"), tex_dir.join("Frame.TGA")));
+        assert!(same(find_texture_file(&dirs, "plastics"), edf_dir.join("plastics.png")));
+        assert_eq!(find_texture_file(&dirs, "nothing"), None);
+        let _ = std::fs::remove_dir_all(&root);
+    }
 }

@@ -7,6 +7,14 @@ import {
   type ReactNode,
 } from "react";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { useSupporter } from "../api/supporter";
+import {
+  ACCENT_PROPS,
+  accentVars,
+  isPackColorway,
+  parseAccent,
+  type PackColorway,
+} from "../lib/accent";
 
 export type ThemeMode = "light" | "dark" | "system";
 
@@ -26,6 +34,17 @@ export const COLORWAYS = [
   "retro",
 ] as const;
 export type Colorway = (typeof COLORWAYS)[number];
+export type AnyColorway = Colorway | PackColorway;
+
+
+export {
+  PACK_COLORWAYS,
+  PACK_SWATCH,
+  accentVars,
+  isPackColorway,
+  parseAccent,
+  type PackColorway,
+} from "../lib/accent";
 
 /**
  * How big the interface is drawn, as a multiplier.
@@ -56,9 +75,12 @@ interface ThemeContextValue {
   /** What's actually applied right now (system resolved). */
   resolved: "light" | "dark";
   setTheme: (mode: ThemeMode) => void;
-  /** The palette applied on top of light/dark. */
-  colorway: Colorway;
-  setColorway: (colorway: Colorway) => void;
+  /** The palette picked. A pack colorway without the pack is drawn as `frost`. */
+  colorway: AnyColorway;
+  setColorway: (colorway: AnyColorway) => void;
+  /** The custom accent (supporter pack), `#rrggbb`, or null for the colorway's own. */
+  accent: string | null;
+  setAccent: (accent: string | null) => void;
   /** How big the interface is drawn. 1 is the design size. */
   scale: UiScale;
   setScale: (scale: UiScale) => void;
@@ -69,6 +91,7 @@ const ThemeContext = createContext<ThemeContextValue | null>(null);
 const STORAGE_KEY = "frost-theme";
 const COLORWAY_KEY = "frost-colorway";
 const SCALE_KEY = "frost-ui-scale";
+const ACCENT_KEY = "frost-accent";
 
 /** The in-game overlay loads the same bundle with `?overlay=1` — see `main.tsx`. */
 const IS_OVERLAY = new URLSearchParams(window.location.search).has("overlay");
@@ -80,9 +103,13 @@ function readStored(): ThemeMode {
   return v ? (v as ThemeMode) : "system";
 }
 
-function readStoredColorway(): Colorway {
-  const v = localStorage.getItem(COLORWAY_KEY);
-  return COLORWAYS.includes(v as Colorway) ? (v as Colorway) : "frost";
+function readStoredColorway(): AnyColorway {
+  const v = localStorage.getItem(COLORWAY_KEY) ?? "";
+  return COLORWAYS.includes(v as Colorway) || isPackColorway(v) ? (v as AnyColorway) : "frost";
+}
+
+function readStoredAccent(): string | null {
+  return parseAccent(localStorage.getItem(ACCENT_KEY));
 }
 
 function readStoredScale(): UiScale {
@@ -107,7 +134,9 @@ export function ThemeProvider({
 }) {
   const stored = () => (localStorage.getItem(STORAGE_KEY) ? readStored() : defaultTheme);
   const [theme, setThemeState] = useState<ThemeMode>(stored);
-  const [colorway, setColorwayState] = useState<Colorway>(readStoredColorway);
+  const [colorway, setColorwayState] = useState<AnyColorway>(readStoredColorway);
+  const [accent, setAccentState] = useState<string | null>(readStoredAccent);
+  const { supporter } = useSupporter();
   const [scale, setScaleState] = useState<UiScale>(readStoredScale);
   const [systemDark, setSystemDark] = useState(systemPrefersDark);
 
@@ -126,6 +155,7 @@ export function ThemeProvider({
       if (e.key === STORAGE_KEY) setThemeState(readStored());
       if (e.key === COLORWAY_KEY) setColorwayState(readStoredColorway());
       if (e.key === SCALE_KEY) setScaleState(readStoredScale());
+      if (e.key === ACCENT_KEY) setAccentState(readStoredAccent());
     };
     window.addEventListener("storage", onStorage);
     return () => window.removeEventListener("storage", onStorage);
@@ -145,8 +175,19 @@ export function ThemeProvider({
   }, [resolved]);
 
   useEffect(() => {
-    document.documentElement.dataset.colorway = colorway;
-  }, [colorway]);
+    document.documentElement.dataset.colorway =
+      isPackColorway(colorway) && !supporter ? "frost" : colorway;
+  }, [colorway, supporter]);
+
+  // Inline on <html>, so it outranks whichever colorway's rules are in play.
+  useEffect(() => {
+    const style = document.documentElement.style;
+    for (const prop of ACCENT_PROPS) style.removeProperty(prop);
+    if (!supporter || !accent) return;
+    for (const [prop, value] of Object.entries(accentVars(accent, resolved))) {
+      style.setProperty(prop, value);
+    }
+  }, [accent, supporter, resolved]);
 
   // Zoom is per-webview and does not persist across launches, so it is applied on mount as
   // well as on change. Never to the overlay: it is sized against the game's screen, not the
@@ -163,7 +204,14 @@ export function ThemeProvider({
     setThemeState(mode);
   };
 
-  const setColorway = (next: Colorway) => {
+  const setAccent = (next: string | null) => {
+    const clean = parseAccent(next);
+    if (clean) localStorage.setItem(ACCENT_KEY, clean);
+    else localStorage.removeItem(ACCENT_KEY);
+    setAccentState(clean);
+  };
+
+  const setColorway = (next: AnyColorway) => {
     localStorage.setItem(COLORWAY_KEY, next);
     setColorwayState(next);
   };
@@ -174,8 +222,8 @@ export function ThemeProvider({
   };
 
   const value = useMemo(
-    () => ({ theme, resolved, setTheme, colorway, setColorway, scale, setScale }),
-    [theme, resolved, colorway, scale],
+    () => ({ theme, resolved, setTheme, colorway, setColorway, accent, setAccent, scale, setScale }),
+    [theme, resolved, colorway, accent, scale],
   );
 
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;

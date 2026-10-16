@@ -851,4 +851,9 @@ export const en = {
   "gfx.cockpitDiffers": "Cockpit copy differs",
   "gfx.inUse": "In use",
   "gfx.unassembled": "Parts not assembled",
+  "gfx.dotLeftgrip": "L grip",
+  "gfx.dotRightgrip": "R grip",
+  "gfx.rearSprocket": "Rear sprocket",
+  "gfx.rearSprocketTitle": "Rear axle, in line with the engine sprocket",
+  "gfx.texturesInPkz": "Textures in a .pkz",
 } as const;

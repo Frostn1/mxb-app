@@ -1,7 +1,7 @@
 [package]
 # The binary is `frost-converter.exe`: the name scripts call it by.
 name = "frost-converter"
-version = "0.1.0"
+version = "0.1.4"
 description = "Frost Converter: FBX to EDF for MX Bikes"
 authors = ["Frost"]
 edition = "2021"
@@ -13,6 +13,9 @@ tauri-build = { version = "2", features = [] }
 # The converter and its batch: the same crate Frost's Studio's Convert tab runs. The engine is
 # private; see crates/fbx2edf.
 fbx2edf = { path = "../../../crates/fbx2edf", features = ["tauri"] }
+# The 3D viewer's two commands: a converted model read back, and its pictures. The same ones
+# the Studio registers for the viewer the Convert screen shows the result in.
+mxb-core = { path = "../../../crates/core" }
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
 tauri-plugin-log = "2"

@@ -14,6 +14,7 @@ import {
 import { Switch } from "@frost/shared/Components/ui/switch";
 import { useT } from "@/i18n";
 import { writePaintProxy, type ProxyTarget } from "./proxyExport";
+import { supportMoment } from "@frost/shared/api/support";
 
 /**
  * Asks the one thing a painting proxy leaves to the creator — whether their model's own look
@@ -35,6 +36,7 @@ export function ProxyDialog({ target, onClose }: { target: ProxyTarget | null; o
       toast.success(t("designer.exportedProxy", { dir }), {
         description: t("designer.exportedProxyDesc", { kept: res.triangles, of: res.sourceTriangles }),
       });
+      supportMoment();
       onClose();
     } catch (e) {
       toast.error(String(e).replace(/^Error:\s*/, ""));

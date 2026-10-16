@@ -846,4 +846,9 @@ export const ptBR: Translation = {
   "gfx.cockpitDiffers": "A cópia cockpit é diferente",
   "gfx.inUse": "Em uso",
   "gfx.unassembled": "Peças não montadas",
+  "gfx.dotLeftgrip": "Manopla E",
+  "gfx.dotRightgrip": "Manopla D",
+  "gfx.rearSprocket": "Coroa",
+  "gfx.rearSprocketTitle": "Eixo traseiro, alinhado ao pinhão",
+  "gfx.texturesInPkz": "Texturas em um .pkz",
 };

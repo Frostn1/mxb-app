@@ -848,4 +848,9 @@ export const it: Translation = {
   "gfx.cockpitDiffers": "La copia cockpit è diversa",
   "gfx.inUse": "In uso",
   "gfx.unassembled": "Parti non assemblate",
+  "gfx.dotLeftgrip": "Manopola S",
+  "gfx.dotRightgrip": "Manopola D",
+  "gfx.rearSprocket": "Corona",
+  "gfx.rearSprocketTitle": "Asse posteriore, in linea con il pignone",
+  "gfx.texturesInPkz": "Texture in un .pkz",
 };

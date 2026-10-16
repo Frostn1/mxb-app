@@ -1,5 +1,98 @@
 # Changelog
 
+## Unreleased — Frost's Studio and Frost Converter: one-line .shd files
+
+### Fixed
+- **.shd files written on one line.** The Preview sliders now show the values of a .shd with its blocks on one line, as the Blender kit writes them, not the stock ones.
+
+## Unreleased — Frost's Studio: Gfx assembles the bike again
+
+### Fixed
+- **Gfx assembly and wheels.** The Gfx tab takes a bike's .geom from its .pkz again, so the parts are assembled and the wheels and the Rear sprocket marker show. No texture is taken from the .pkz.
+
+## 2026-10-16 — Frost Converter v0.1.4 — Name the .edf, Preview and Watch
+
+### Added
+- **Output name for Convert.** When one model is converted, an optional name field sets the .edf's file name. Leave it empty for the usual name. `.edf` is added when missing, and characters Windows file names can't hold are removed. A bike's shadow stays `shadow_model.edf`, the .shd files keep their material names, and the .hrc files point at the new name. The command line has `--name NAME` too.
+- **Saved export scripts.** Convert remembers the last export script you used and puts it back when the app starts. Save a script under its name to pick it again later from a short list, and remove the ones you don't need. They are kept in the app's own config folder, not next to your files.
+- **Convert and Preview tabs.** Convert keeps the files, layout, output, name and export script, with the rarely used settings under More. After converting, Preview opens with the model, the .shd list beside the view (it scrolls on its own, each material opens on click and lights up in the view) and one Open folder in Files written.
+- **Watch.** In Preview, tick Watch and the model is converted again whenever a source file is saved, so the view follows your export.
+- **Textures found beside the model.** Preview looks for the pictures a model uses beside the .edf, in its paints and textures folders and in a Textures folder next to it, whatever their case, and lists the ones it can't find.
+
+### Fixed
+- **Blotchy Preview.** The Preview now uses the model's _n normal map, and its alpha as the specular mask, the way the game does.
+- **Models drawn grey in the 3D view.** A mesh with an untextured black material, or a sheet whose name ends in _bump, lost its texture bindings.
+- **Shock and spring textures.** Parts that sit a little further from their placement in the file get their own texture instead of the frame's.
+
+## 2026-10-16 — Frost's Studio v0.7.6 — Gfx labels, Name the .edf, Preview and Watch
+
+### Added
+- **Gfx labels.** Each dot on the bike has a label (L grip, R grip, Engine sprocket, Exhaust, the levers), and hovering one shows its gfx.cfg key.
+- **Gfx rear sprocket and chain.** On an assembled bike, a fixed Rear sprocket marker on the rear axle, in line with the engine sprocket, and the chain run between the two. gfx.cfg has no key for it.
+- **Gfx reopens the last bike** when the tab opens.
+- **Output name for Convert.** When one model is converted, an optional name field sets the .edf's file name. Leave it empty for the usual name. `.edf` is added when missing, and characters Windows file names can't hold are removed. A bike's shadow stays `shadow_model.edf`, the .shd files keep their material names, and the .hrc files point at the new name. The command line has `--name NAME` too.
+- **Saved export scripts.** Convert remembers the last export script you used and puts it back when the app starts. Save a script under its name to pick it again later from a short list, and remove the ones you don't need. They are kept in the app's own config folder, not next to your files.
+- **Convert and Preview tabs.** Convert keeps the files, layout, output, name and export script, with the rarely used settings under More. After converting, Preview opens with the model, the .shd list beside the view (it scrolls on its own, each material opens on click and lights up in the view) and one Open folder in Files written.
+- **Watch.** In Preview, tick Watch and the model is converted again whenever a source file is saved, so the view follows your export.
+- **Textures found beside the model.** Preview looks for the pictures a model uses beside the .edf, in its paints and textures folders and in a Textures folder next to it, whatever their case, and lists the ones it can't find.
+
+### Fixed
+- **Blotchy Preview.** The Preview now uses the model's _n normal map, and its alpha as the specular mask, the way the game does.
+- **Models drawn grey in the 3D view.** A mesh with an untextured black material, or a sheet whose name ends in _bump, lost its texture bindings.
+- **Shock and spring textures.** Parts that sit a little further from their placement in the file get their own texture instead of the frame's.
+- **Gfx textures.** The Gfx tab draws a bike from its loose files only and never opens a .pkz. It looks for missing sheets in the folders around the model and says "Textures in a .pkz" when the rest could only be packed.
+
+## 2026-10-15 — Frost Converter v0.1.3 — .shd files you can find
+
+### Fixed
+- **Every material gets a .shd.** A .shd is written beside the .edf in every layout, also for colour-only models. An existing one is kept unless Overwrite is ticked.
+
+### Added
+- **Files written.** After converting, a list of the files with Open folder.
+- **3D view** of the converted model.
+- **Shine sliders.** Shininess and reflection per material; the view follows and the .shd is saved.
+
+## 2026-10-15 — Frost's Studio v0.7.5 — .shd files you can find
+
+### Fixed
+- **Every material gets a .shd.** A .shd is written beside the .edf in every layout, also for colour-only models. An existing one is kept unless Overwrite is ticked.
+
+### Added
+- **Files written.** After converting, a list of the files with Open folder.
+- **3D view** of the converted model.
+- **Shine sliders.** Shininess and reflection per material; the view follows and the .shd is saved.
+
+## 2026-10-15 — Frost Converter v0.1.2 — Convert for any object
+
+### Fixed
+- **Objects that aren't bike parts.** With the One model layout, a chain or any other object converts without asking for a bike part.
+- **Export script drop.** A dropped export script goes to its slot, not the file list.
+
+## 2026-10-15 — Frost's Studio v0.7.4 — Convert for any object
+
+### Fixed
+- **Convert for objects that aren't bike parts.** With the One model layout, a chain or any other object converts without asking for a bike part.
+- **Export script drop.** A dropped export script goes to its slot, not the file list.
+- **Track builder.** The start-over buttons no longer spill off the screen.
+
+## 2026-10-13 — MXB Coach v0.1.25 — Cleaner racing line, cut markers
+
+### Fixed
+- **The racing line comes only from your fastest clean lap.** Crash, warm-up and cut laps no longer count. The line in the game clears when Coach is off or closed.
+
+### Added
+- **Track cuts.** A new panel shows where you cut, by marker.
+- **Cut markers on the minimap** and **cut markers on the track** are two switches in Settings.
+- **Recorder update prompt.** Coach asks you to update the recorder when it is older than 0.49.13.
+
+## 2026-10-13 — Frost Converter v0.1.1 — Fewer game crashes
+
+### Fixed
+- **Fixes game crashes on some bikes.** Empty nodes like brake_lever and clutch_lever, duplicate materials and non-power-of-two textures no longer crash the game.
+
+### Added
+- **Export scripts are picked up automatically.** Drop an export script with your files and it is picked up automatically.
+
 ## 2026-10-12 — v0.20.3 — Mod browsing
 
 ### Fixed
