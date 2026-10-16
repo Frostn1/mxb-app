@@ -1955,6 +1955,48 @@ pub fn texture_search_dirs(edf: &std::path::Path) -> Vec<PathBuf> {
     dirs
 }
 
+/// The sheets a bike's parts draw that its first paint doesn't carry, looked for loose around
+/// `edf` the way [`load_model_file_blocking`] looks; what turns up joins every paint and the
+/// base. Returns the names still missing.
+pub fn fill_loose_textures(model: &mut BikeModel, edf: &std::path::Path) -> Vec<String> {
+    let mut wanted: Vec<String> = Vec::new();
+    for n in &model.nodes {
+        let names: Vec<&String> = if n.submeshes.is_empty() {
+            n.texture.iter().collect()
+        } else {
+            n.submeshes.iter().filter_map(|s| s.texture.as_ref()).collect()
+        };
+        for t in names {
+            let key = t.to_ascii_lowercase();
+            if key != "hide" && key != "face" && !wanted.contains(&key) {
+                wanted.push(key);
+            }
+        }
+    }
+    let have: std::collections::HashSet<String> = model
+        .paints
+        .first()
+        .map(|p| p.textures.iter().map(|t| t.name.to_ascii_lowercase()).collect())
+        .unwrap_or_default();
+    let dirs = texture_search_dirs(edf);
+    let mut missing = Vec::new();
+    for name in wanted.into_iter().filter(|n| !have.contains(n)) {
+        let found = find_texture_file(&dirs, &name)
+            .and_then(|f| std::fs::read(&f).ok())
+            .and_then(|bytes| paint::decode_image(&name, &bytes));
+        match found {
+            Some(t) => {
+                for p in &mut model.paints {
+                    p.textures.push(t.clone());
+                }
+                model.base.push(t);
+            }
+            None => missing.push(name),
+        }
+    }
+    missing
+}
+
 /// `name.<ext>` in `dirs`, for the picture formats the converter reads, matched without
 /// regard to case, the first folder that has it winning.
 pub fn find_texture_file(dirs: &[PathBuf], name: &str) -> Option<PathBuf> {

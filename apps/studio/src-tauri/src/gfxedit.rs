@@ -114,26 +114,57 @@ pub async fn gfx_open(path: String) -> Result<GfxFile, String> {
         .map_err(|e| e.to_string())?
 }
 
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GfxPreview {
+    #[serde(flatten)]
+    pub model: viewer::BikeModel,
+    /// Sheets the parts draw that no loose file supplied.
+    pub missing: Vec<String>,
+    /// Some are missing and a `.pkz` sits where they could be. Only its name is looked at.
+    pub textures_packed: bool,
+}
+
+/// Whether there's a `.pkz` beside the bike or in its folders. Never opened.
+fn has_pkz(bike_dir: &Path) -> bool {
+    let any_in = |d: &Path| {
+        std::fs::read_dir(d).is_ok_and(|it| {
+            it.flatten().any(|e| e.path().extension().is_some_and(|x| x.eq_ignore_ascii_case("pkz")))
+        })
+    };
+    mxb_core::library::sibling_pkz(bike_dir).is_file()
+        || any_in(bike_dir)
+        || any_in(&mxb_core::library::resolve_child(bike_dir, "paints"))
+}
+
 /// The model to draw under the markers: the bike as it stands, or the picked FrostMod model
-/// as applying it would leave the bike.
+/// as applying it would leave the bike, with any sheet it lacks looked for loose beside it.
 #[tauri::command]
-pub async fn gfx_preview(path: String) -> Result<viewer::BikeModel, String> {
+pub async fn gfx_preview(path: String) -> Result<GfxPreview, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let r = resolve(&path)?;
-        match (&r.variant, r.active, mods_path(&r.bike_dir)) {
-            (Some(v), false, Some(mods)) => {
-                let bike = r.bike_dir.file_name().unwrap_or_default().to_string_lossy().into_owned();
-                viewer::preview_model_swap_blocking(&mods, &bike, v, None)
-            }
-            (Some(_), false, None) => {
-                let dir = r.gfx.parent().unwrap_or(&r.bike_dir).to_string_lossy().into_owned();
-                viewer::load_bike_model_blocking(dir, None)
-            }
-            _ => viewer::load_bike_model_blocking(r.bike_dir.to_string_lossy().into_owned(), None),
-        }
+        let mut model = preview_model(&r)?;
+        let dir = r.gfx.parent().unwrap_or(&r.bike_dir);
+        let missing = viewer::fill_loose_textures(&mut model, &dir.join("model.edf"));
+        let textures_packed = !missing.is_empty() && has_pkz(&r.bike_dir);
+        Ok(GfxPreview { model, missing, textures_packed })
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+fn preview_model(r: &Resolved) -> Result<viewer::BikeModel, String> {
+    match (&r.variant, r.active, mods_path(&r.bike_dir)) {
+        (Some(v), false, Some(mods)) => {
+            let bike = r.bike_dir.file_name().unwrap_or_default().to_string_lossy().into_owned();
+            viewer::preview_model_swap_blocking(&mods, &bike, v, None)
+        }
+        (Some(_), false, None) => {
+            let dir = r.gfx.parent().unwrap_or(&r.bike_dir).to_string_lossy().into_owned();
+            viewer::load_bike_model_blocking(dir, None)
+        }
+        _ => viewer::load_bike_model_blocking(r.bike_dir.to_string_lossy().into_owned(), None),
+    }
 }
 
 #[derive(serde::Serialize)]

@@ -7,8 +7,8 @@ import { Button } from "@frost/shared/Components/ui/button";
 import { Input } from "@frost/shared/Components/ui/input";
 import { Switch } from "@frost/shared/Components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@frost/shared/Components/ui/select";
-import { ModelViewer } from "@frost/shared/Components/Viewer/ModelViewer";
-import type { BikeModel, EdfNode, Vec3 } from "@frost/shared/types";
+import { ModelViewer, settledRearAxle } from "@frost/shared/Components/Viewer/ModelViewer";
+import type { EdfNode, Vec3 } from "@frost/shared/types";
 import { PaneActive, UnsavedRegistry } from "../../Shell/ContextBar";
 import {
   AXES,
@@ -22,12 +22,20 @@ import {
   mirrorGrip,
   outOfStep,
   type GfxFile,
+  type GfxPreview,
   type ReloadOutcome,
 } from "@/api/gfx";
 import { useT, type TKey } from "@/i18n";
-import { GfxMarkers, type Marker } from "./GfxMarkers";
+import { GfxMarkers, toView, type Marker } from "./GfxMarkers";
 
 const COLOR = { steer: "#7cb8ff", chassis: "#ffb020", lever: "#b8b8b8" };
+/** The label beside each dot. */
+const DOT: Record<string, TKey> = {
+  leftgrip: "gfx.dotLeftgrip",
+  rightgrip: "gfx.dotRightgrip",
+  engine: "gfx.engine",
+  exhaust: "gfx.exhaust",
+};
 const REMEMBER = "studio.gfx";
 
 type Status = { kind: "saved"; reload: ReloadOutcome | null } | { kind: "error"; text: string } | null;
@@ -44,7 +52,7 @@ export default function GfxEditor() {
   const [path, setPath] = useState<string | null>(null);
   const [file, setFile] = useState<GfxFile | null>(null);
   const [values, setValues] = useState<Record<string, string>>({});
-  const [model, setModel] = useState<BikeModel | null>(null);
+  const [model, setModel] = useState<GfxPreview | null>(null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState<Status>(null);
@@ -187,16 +195,34 @@ export default function GfxEditor() {
       const at = vec(p.path);
       if (!at) continue;
       const dir = p.id === "exhaust" ? vec("chassis/exhaust/dir") ?? undefined : undefined;
-      out.push({ id: p.id, at, frame: p.frame, dir, color: COLOR[p.frame] });
+      out.push({ id: p.id, at, frame: p.frame, dir, color: COLOR[p.frame], label: t(DOT[p.id]), title: p.path });
+    }
+    // gfx.cfg has no key for the rear sprocket: the game hangs the chain on the rear axle, in
+    // line with the engine sprocket.
+    const axle = nodes ? settledRearAxle(rig, nodes) : null;
+    const engine = vec("chassis/chain/engine");
+    if (axle && engine && !linkedEngine) {
+      const x = toView(engine, "chassis", rig).x;
+      out.push({
+        id: "rearsprocket",
+        at: [0, 0, 0],
+        frame: "chassis",
+        view: [x, axle[1], axle[2]],
+        fixed: true,
+        color: COLOR.chassis,
+        label: t("gfx.rearSprocket"),
+        title: t("gfx.rearSprocketTitle"),
+      });
     }
     for (const l of LEVERS) {
       const name = values[`${l.path}/name`];
       const view = name && nodes ? leverPoint(nodes, name) : null;
-      if (view) out.push({ id: l.id, at: [0, 0, 0], frame: "chassis", view, fixed: true, color: COLOR.lever });
+      if (view)
+        out.push({ id: l.id, at: [0, 0, 0], frame: "chassis", view, fixed: true, color: COLOR.lever, label: t(`gfx.${l.id}` as TKey), title: `${l.path}/name = ${name}` });
     }
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [values, nodes, linkedEngine]);
+  }, [values, nodes, rig, linkedEngine, t]);
 
   const textures = useMemo(() => model?.paints[0]?.textures ?? [], [model]);
   const differs = file ? outOfStep(file.fields) : [];
@@ -350,12 +376,24 @@ export default function GfxEditor() {
                 className="absolute inset-0"
                 bikeOverlay={
                   model ? (
-                    <GfxMarkers markers={markers} rig={rig} selected={selected} onSelect={setSelected} onMove={movePoint} />
+                    <GfxMarkers
+                      markers={markers}
+                      rig={rig}
+                      selected={selected}
+                      onSelect={setSelected}
+                      onMove={movePoint}
+                      chain={["engine", "rearsprocket"]}
+                    />
                   ) : null
                 }
               />
               {loading && <Loader2 className="absolute left-1/2 top-1/2 size-5 -translate-x-1/2 -translate-y-1/2 animate-spin text-muted-foreground" />}
-              {model && !rig && <p className="absolute left-3 top-3 text-[11.5px] text-muted-foreground">{t("gfx.unassembled")}</p>}
+              {model && (!rig || model.texturesPacked) && (
+                <div className="absolute left-3 top-3 grid gap-0.5 text-[11.5px] text-muted-foreground">
+                  {!rig && <p>{t("gfx.unassembled")}</p>}
+                  {model.texturesPacked && <p title={model.missing.join(", ")}>{t("gfx.texturesInPkz")}</p>}
+                </div>
+              )}
             </div>
           )}
         </div>

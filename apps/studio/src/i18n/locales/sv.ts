@@ -787,4 +787,9 @@ export const sv: Translation = {
   "gfx.cockpitDiffers": "Cockpitkopian skiljer sig",
   "gfx.inUse": "Används",
   "gfx.unassembled": "Delarna är inte monterade",
+  "gfx.dotLeftgrip": "V grepp",
+  "gfx.dotRightgrip": "H grepp",
+  "gfx.rearSprocket": "Bakdrev",
+  "gfx.rearSprocketTitle": "Bakaxeln, i linje med framdrevet",
+  "gfx.texturesInPkz": "Texturer i en .pkz",
 };
