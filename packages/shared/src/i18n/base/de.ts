@@ -320,6 +320,7 @@ export const de: Record<keyof typeof en, string> = {
   "convert.noShd": "Keine .shd",
   "convert.makeShd": "Fehlende .shd erstellen",
   "convert.modelFolder": "Modellordner",
+  "convert.notAssembled": "Nicht zusammengesetzt: keine Bike-Daten",
   "convert.highlight": "Hervorheben",
   "convert.outName": "Ausgabename",
   "convert.script": "Export-Skript",

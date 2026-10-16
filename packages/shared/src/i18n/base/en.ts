@@ -326,6 +326,7 @@ export const en = {
   "convert.noShd": "No .shd",
   "convert.makeShd": "Make missing .shd",
   "convert.modelFolder": "Model folder",
+  "convert.notAssembled": "Not assembled: no bike data",
   "convert.highlight": "Highlight",
   "convert.outName": "Output name",
   "convert.script": "Export script",

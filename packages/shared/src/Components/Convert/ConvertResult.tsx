@@ -5,8 +5,9 @@ import { Slider } from "../ui/controls";
 import { cn } from "../../lib/utils";
 import { ErrorBoundary } from "../ErrorBoundary";
 import { ModelViewer, type Shaders } from "../Viewer/ModelViewer";
-import { loadModelFile, revealInExplorer, type LooseModel } from "../../api/mods";
-import { nameOf, STOCK_SHD, writeShd, type Outcome, type ShdFile, type ShdValues } from "../../api/convert";
+import { loadBikeModel, loadModelFile, revealInExplorer, type LooseModel } from "../../api/mods";
+import type { BikeModel } from "../../types";
+import { dirOf, nameOf, STOCK_SHD, writeShd, type Outcome, type ShdFile, type ShdValues } from "../../api/convert";
 import { useT } from "../../i18n/context";
 
 /** How long a slider rests before its `.shd` is written: dragging is many values, one file. */
@@ -134,6 +135,23 @@ function PreviewBody({ output, source, noShd, outcome, onShdSaved }: { output: s
     } else setFlash(null);
   };
 
+  // Bike parts: the folder's own .hrc files and the bike's .geom put each part where it sits on
+  // the assembled bike, instead of every part at its own origin. `null` until it has answered.
+  const parts = outcome.hrc.length > 0;
+  const [bike, setBike] = useState<BikeModel | null | undefined>(parts ? undefined : null);
+  useEffect(() => {
+    if (!parts) return;
+    let alive = true;
+    setBike(undefined);
+    loadBikeModel(dirOf(output))
+      .then((b) => alive && setBike(b))
+      .catch(() => alive && setBike(null));
+    return () => {
+      alive = false;
+    };
+  }, [parts, output]);
+  const assembled = !!bike?.assembled && bike.nodes.length > 0;
+
   useEffect(() => {
     let alive = true;
     setModel(null);
@@ -190,14 +208,31 @@ function PreviewBody({ output, source, noShd, outcome, onShdSaved }: { output: s
       <div className="relative h-[46%] min-h-[220px] flex-none overflow-hidden rounded-lg border border-border bg-card lg:h-auto lg:min-h-0 lg:flex-1">
         {failed ? (
           <p className="flex h-full items-center justify-center px-6 text-center text-[12px] text-muted-foreground">{t("convert.viewFailed", { why: failed })}</p>
-        ) : !model ? (
+        ) : !model || bike === undefined ? (
           <div className="flex h-full items-center justify-center text-muted-foreground">
             <Loader2 className="size-4 animate-spin" />
           </div>
         ) : (
           <ErrorBoundary compact label="convert-view">
-            <ModelViewer mode="bike" nodes={model.nodes} textures={model.textures} shaders={shaders} focusSheet={flash} hideHints className="absolute inset-0" />
+            {assembled && bike ? (
+              <ModelViewer
+                mode="bike"
+                nodes={bike.nodes}
+                rig={bike.rig}
+                textures={bike.paints[0]?.textures ?? bike.base}
+                tyreTextures={bike.tyreTextures}
+                shaders={shaders}
+                focusSheet={flash}
+                hideHints
+                className="absolute inset-0"
+              />
+            ) : (
+              <ModelViewer mode="bike" nodes={model.nodes} textures={model.textures} shaders={shaders} focusSheet={flash} hideHints className="absolute inset-0" />
+            )}
           </ErrorBoundary>
+        )}
+        {model && parts && bike !== undefined && !assembled && (
+          <p className="absolute left-2 top-2 rounded-md bg-background/85 px-2 py-1 text-[11.5px] text-muted-foreground">{t("convert.notAssembled")}</p>
         )}
         {model && (model.missing.length > 0 || model.unreadable.length > 0) && (
           <div className="absolute bottom-2 left-2 right-2 grid gap-0.5 rounded-md bg-background/85 px-2 py-1 text-[11.5px] text-amber-600 dark:text-amber-400">

@@ -321,6 +321,7 @@ export const sv: Record<keyof typeof en, string> = {
   "convert.noShd": "Ingen .shd",
   "convert.makeShd": "Skapa saknade .shd",
   "convert.modelFolder": "Modellmapp",
+  "convert.notAssembled": "Inte ihopsatt: inga cykeldata",
   "convert.highlight": "Markera",
   "convert.outName": "Utdatanamn",
   "convert.script": "Exportskript",

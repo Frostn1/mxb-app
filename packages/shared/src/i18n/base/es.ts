@@ -319,6 +319,7 @@ export const es: Record<keyof typeof en, string> = {
   "convert.noShd": "Sin .shd",
   "convert.makeShd": "Crear .shd que falten",
   "convert.modelFolder": "Carpeta del modelo",
+  "convert.notAssembled": "Sin montar: faltan datos de la moto",
   "convert.highlight": "Resaltar",
   "convert.outName": "Nombre de salida",
   "convert.script": "Script de exportación",
