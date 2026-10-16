@@ -441,14 +441,21 @@ pub fn load_bike_model_blocking(
     build_bike_model(&source, key, files, installed, tyres, pick, t0)
 }
 
-/// A bike from its loose files only, later folders layered over earlier ones. No `.pkz` is
-/// opened, the bike's own or a tyre pack's: what only an archive holds (a `.geom`, wheels,
-/// packed sheets) is simply not drawn.
-pub fn load_loose_bike_model_blocking(dirs: &[&std::path::Path]) -> Result<BikeModel, String> {
+/// The Gfx tab's bike: its loose files, later folders layered over earlier ones, assembled by
+/// the `.geom` and wearing the wheels the bike names. The bike's own `.pkz` is read for its
+/// `.geom` alone, so no texture is ever taken from it; a sheet only the archive holds stays
+/// missing.
+pub fn load_gfx_bike_model_blocking(dirs: &[&std::path::Path]) -> Result<BikeModel, String> {
     let t0 = std::time::Instant::now();
     let Some(first) = dirs.first() else { return Err("no folder".into()) };
+    let tyres = tyres_dir_for(first);
     let stamps: Vec<String> = dirs.iter().map(|d| format!("{}{}", d.display(), folder_stamp(d))).collect();
-    let key = format!("loose#{}", stamps.join("|"));
+    let key = format!(
+        "gfx#{}{}#t{:x}",
+        stamps.join("|"),
+        packed_stamp(first),
+        tyres.as_deref().map(tyres_stamp).unwrap_or(0),
+    );
     if let Some(m) = cached_bike(&key) {
         return Ok(m);
     }
@@ -456,7 +463,10 @@ pub fn load_loose_bike_model_blocking(dirs: &[&std::path::Path]) -> Result<BikeM
     if let Some(m) = cached_bike(&key) {
         return Ok(m);
     }
-    let mut files = Vec::new();
+    let mut files: Vec<(String, Vec<u8>)> = packed_layer(first)
+        .into_iter()
+        .filter(|(n, _)| n.to_ascii_lowercase().ends_with(".geom"))
+        .collect();
     for dir in dirs {
         let mut loose = Vec::new();
         for entry in std::fs::read_dir(dir).map_err(|e| format!("{}: {e}", dir.display()))?.flatten() {
@@ -474,7 +484,7 @@ pub fn load_loose_bike_model_blocking(dirs: &[&std::path::Path]) -> Result<BikeM
         return Err(format!("no .edf mesh in {}", first.display()));
     }
     let installed = installed_paints(first);
-    build_bike_model(&first.display().to_string(), key, files, installed, None, None, t0)
+    build_bike_model(&first.display().to_string(), key, files, installed, tyres, None, t0)
 }
 
 /// Why a bike came back with nothing to draw, in words the player can act on.

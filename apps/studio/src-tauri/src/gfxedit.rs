@@ -143,14 +143,14 @@ pub async fn gfx_preview(path: String) -> Result<GfxPreview, String> {
     .map_err(|e| e.to_string())?
 }
 
-/// Loose files only: the bike folder, and a FrostMod model not in use laid over it. A
-/// `.pkz` is never opened here.
+/// The bike folder, and a FrostMod model not in use laid over it. Of the bike's `.pkz` only
+/// the `.geom` is taken (see `load_gfx_bike_model_blocking`).
 fn preview_model(r: &Resolved) -> Result<viewer::BikeModel, String> {
     let own = r.gfx.parent().unwrap_or(&r.bike_dir);
     if own == r.bike_dir {
-        viewer::load_loose_bike_model_blocking(&[&r.bike_dir])
+        viewer::load_gfx_bike_model_blocking(&[&r.bike_dir])
     } else {
-        viewer::load_loose_bike_model_blocking(&[&r.bike_dir, own])
+        viewer::load_gfx_bike_model_blocking(&[&r.bike_dir, own])
     }
 }
 
