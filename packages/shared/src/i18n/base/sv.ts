@@ -285,6 +285,7 @@ export const sv: Record<keyof typeof en, string> = {
   "convert.fast": "Snabbläge",
   "convert.shaders": "Shaders",
   "convert.noShd": "Ingen .shd",
+  "convert.highlight": "Markera",
   "convert.outName": "Utdatanamn",
   "convert.script": "Exportskript",
   "convert.loadScript": "Läs in fil",

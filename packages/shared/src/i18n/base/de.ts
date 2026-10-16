@@ -284,6 +284,7 @@ export const de: Record<keyof typeof en, string> = {
   "convert.fast": "Schnellmodus",
   "convert.shaders": "Shader",
   "convert.noShd": "Keine .shd",
+  "convert.highlight": "Hervorheben",
   "convert.outName": "Ausgabename",
   "convert.script": "Export-Skript",
   "convert.loadScript": "Datei laden",

@@ -290,6 +290,7 @@ export const en = {
   "convert.fast": "Fast mode",
   "convert.shaders": "Shaders",
   "convert.noShd": "No .shd",
+  "convert.highlight": "Highlight",
   "convert.outName": "Output name",
   "convert.script": "Export script",
   "convert.loadScript": "Load a file",
