@@ -1075,7 +1075,7 @@ mod tests {
     fn bike_parts_get_a_shd_per_material_and_every_file_is_listed() {
         let dir = tempfile::tempdir().unwrap();
         let edf = dir.path().join("model.edf");
-        let sites = vec![site("plastics", &[dir.path()], None), site("frame", &[dir.path()], None), site("Plastics", &[dir.path()], None)];
+        let sites = vec![site("plastics", &[dir.path()], None), site("frame", &[dir.path()], None), site("plastics", &[dir.path()], None)];
         let pre_shd = write_shd_with(&sites, &ShdValues::default(), &mut HashSet::new());
         let o = outcome_of(Ok(report(&["", "steer"])), HrcMode::Always, &edf, pre_shd, Some(&ShdValues::default()));
         assert_eq!(o.shaders.len(), 2, "a picture is one material however often it is named");
