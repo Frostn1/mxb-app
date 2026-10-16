@@ -517,10 +517,96 @@ pub fn decode_image(name: &str, bytes: &[u8]) -> Option<PaintTexture> {
     let img = image::codecs::tga::TgaDecoder::new(Cursor::new(bytes))
         .ok()
         .and_then(|d| image::DynamicImage::from_decoder(d).ok())
-        .or_else(|| image::load_from_memory(bytes).ok())?;
-    let rgba = img.to_rgba8();
-    let (w, h) = (rgba.width(), rgba.height());
-    Some(store_rgba(name, w, h, rgba.into_raw()))
+        .or_else(|| image::load_from_memory(bytes).ok());
+    if let Some(img) = img {
+        let rgba = img.to_rgba8();
+        let (w, h) = (rgba.width(), rgba.height());
+        return Some(store_rgba(name, w, h, rgba.into_raw()));
+    }
+    // The `image` crate is strict about TGA headers (a grey map with alpha bits set in its
+    // descriptor is refused, for one), and the game isn't: read the file by hand.
+    let (w, h, rgba) = decode_tga_lenient(bytes)?;
+    Some(store_rgba(name, w, h, rgba))
+}
+
+/// A TGA read leniently: colour-mapped, true-colour and grey, plain or run-length, 8 to 32
+/// bits, either row order. Top row first, RGBA.
+pub fn decode_tga_lenient(b: &[u8]) -> Option<(u32, u32, Vec<u8>)> {
+    if b.len() < 18 {
+        return None;
+    }
+    let (id_len, cmap_type, kind) = (b[0] as usize, b[1], b[2]);
+    let cmap_len = u16::from_le_bytes([b[5], b[6]]) as usize;
+    let cmap_depth = b[7] as usize;
+    let (w, h) = (u16::from_le_bytes([b[12], b[13]]) as usize, u16::from_le_bytes([b[14], b[15]]) as usize);
+    let (bpp, desc) = (b[16] as usize, b[17]);
+    if w == 0 || h == 0 || w * h > 1 << 28 || !matches!(kind, 1 | 2 | 3 | 9 | 10 | 11) || !matches!(bpp, 8 | 15 | 16 | 24 | 32) {
+        return None;
+    }
+    let px = bpp.div_ceil(8);
+    let cmap_bytes = if cmap_type == 1 { cmap_len * cmap_depth.div_ceil(8) } else { 0 };
+    let mut at = 18 + id_len + cmap_bytes;
+    let palette = b.get(18 + id_len..at)?;
+    let total = w * h * px;
+    let mut raw = Vec::with_capacity(total);
+    if kind >= 9 {
+        while raw.len() < total {
+            let head = *b.get(at)?;
+            at += 1;
+            let n = (head & 0x7f) as usize + 1;
+            if head & 0x80 != 0 {
+                let p = b.get(at..at + px)?;
+                at += px;
+                for _ in 0..n {
+                    raw.extend_from_slice(p);
+                }
+            } else {
+                raw.extend_from_slice(b.get(at..at + n * px)?);
+                at += n * px;
+            }
+        }
+        raw.truncate(total);
+    } else {
+        raw.extend_from_slice(b.get(at..at + total)?);
+    }
+    let five = |lo: u8, hi: u8| {
+        let v = u16::from_le_bytes([lo, hi]);
+        let c = |s: u16| (((v >> s) & 31) as u8 * 255 + 15) / 31;
+        [c(10), c(5), c(0), 255]
+    };
+    let entry = |i: usize| -> Option<[u8; 4]> {
+        let d = cmap_depth.div_ceil(8);
+        let e = palette.get(i * d..i * d + d)?;
+        Some(match d {
+            2 => five(e[0], e[1]),
+            3 => [e[2], e[1], e[0], 255],
+            _ => [e[2], e[1], e[0], e[3]],
+        })
+    };
+    let mut rgba = Vec::with_capacity(w * h * 4);
+    for p in raw.chunks_exact(px) {
+        let c = match (kind & 7, px) {
+            (3, 1) => [p[0], p[0], p[0], 255],
+            (3, _) => [p[0], p[0], p[0], p[1]],
+            (1, 1) => entry(p[0] as usize)?,
+            (1, _) => entry(u16::from_le_bytes([p[0], p[1]]) as usize)?,
+            (_, 1) => [p[0], p[0], p[0], 255],
+            (_, 2) => five(p[0], p[1]),
+            (_, 3) => [p[2], p[1], p[0], 255],
+            _ => [p[2], p[1], p[0], p[3]],
+        };
+        rgba.extend_from_slice(&c);
+    }
+    // Rows are stored bottom first unless the descriptor's top-origin bit says otherwise.
+    if desc & 0x20 == 0 {
+        let row = w * 4;
+        let mut flipped = Vec::with_capacity(rgba.len());
+        for y in (0..h).rev() {
+            flipped.extend_from_slice(&rgba[y * row..(y + 1) * row]);
+        }
+        rgba = flipped;
+    }
+    Some((w as u32, h as u32, rgba))
 }
 
 /// Whether the viewer can do anything with a texture of this name.
@@ -543,6 +629,52 @@ pub fn unpack_file(path: &Path) -> Result<Vec<PaintTexture>> {
         .into_par_iter()
         .map(into_texture)
         .collect())
+}
+
+#[cfg(test)]
+mod tga_tests {
+    use super::*;
+
+    /// A TGA header: `kind`, size, depth and descriptor, no id and no palette.
+    fn header(kind: u8, w: u16, h: u16, bpp: u8, desc: u8) -> Vec<u8> {
+        let mut b = vec![0, 0, kind, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+        b.extend_from_slice(&w.to_le_bytes());
+        b.extend_from_slice(&h.to_le_bytes());
+        b.extend_from_slice(&[bpp, desc]);
+        b
+    }
+
+    #[test]
+    fn a_grey_map_with_alpha_bits_in_its_descriptor_still_reads() {
+        // 2x2, bottom row first (descriptor bit 5 clear), 8 alpha bits set as some exporters do.
+        let mut b = header(3, 2, 2, 8, 0x08);
+        b.extend_from_slice(&[10, 20, 30, 40]);
+        let (w, h, rgba) = decode_tga_lenient(&b).unwrap();
+        assert_eq!((w, h), (2, 2));
+        // Top row is the second stored row: 30, 40.
+        assert_eq!(&rgba[..8], &[30, 30, 30, 255, 40, 40, 40, 255]);
+        assert_eq!(&rgba[8..], &[10, 10, 10, 255, 20, 20, 20, 255]);
+    }
+
+    #[test]
+    fn run_length_and_top_origin_and_bgr_are_read() {
+        // 4x1 RLE grey: a run of 3 sevens, then one raw 9. Top-left origin.
+        let mut b = header(11, 4, 1, 8, 0x20);
+        b.extend_from_slice(&[0x82, 7, 0x00, 9]);
+        let (_, _, rgba) = decode_tga_lenient(&b).unwrap();
+        assert_eq!(rgba.iter().step_by(4).copied().collect::<Vec<_>>(), [7, 7, 7, 9]);
+        // 1x1 true colour stored BGR.
+        let mut c = header(2, 1, 1, 24, 0x20);
+        c.extend_from_slice(&[1, 2, 3]);
+        assert_eq!(decode_tga_lenient(&c).unwrap().2, [3, 2, 1, 255]);
+    }
+
+    #[test]
+    fn nonsense_is_refused_not_panicked_on() {
+        assert!(decode_tga_lenient(&[0; 5]).is_none());
+        assert!(decode_tga_lenient(&header(3, 4, 4, 8, 0)).is_none(), "pixels missing");
+        assert!(decode_tga_lenient(&header(7, 1, 1, 8, 0)).is_none(), "unknown type");
+    }
 }
 
 #[cfg(test)]

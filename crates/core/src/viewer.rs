@@ -1986,19 +1986,56 @@ pub struct LooseModel {
     pub textures: Vec<paint::PaintTexture>,
     /// Texture names the meshes use that neither the file nor the folders around it supplied.
     pub missing: Vec<String>,
+    /// Picture files that were found for a name but couldn't be read.
+    pub unreadable: Vec<String>,
 }
 
 /// The folders a loose model's pictures are looked for in, nearest first: beside the `.edf`,
 /// its `paints` and `textures` folders, then a `Textures` folder next to the folder it is in
 /// (an export project keeps `EDF/` and `Textures/` side by side).
-pub fn texture_search_dirs(edf: &std::path::Path) -> Vec<PathBuf> {
-    let Some(dir) = edf.parent() else { return Vec::new() };
+pub fn texture_search_dirs(edf: &std::path::Path, near: Option<&std::path::Path>) -> Vec<PathBuf> {
     let child = crate::library::resolve_child;
-    let mut dirs = vec![dir.to_path_buf(), child(dir, "paints"), child(dir, "textures")];
-    if let Some(up) = dir.parent() {
-        dirs.push(child(up, "textures"));
+    let mut dirs: Vec<PathBuf> = Vec::new();
+    let mut add = |d: PathBuf| {
+        if !dirs.contains(&d) {
+            dirs.push(d);
+        }
+    };
+    // The model's folder, then the source FBX's: an export keeps its pictures beside the FBX,
+    // and the FBX's own embedded media in a `<name>.fbm` folder next to it.
+    for file in std::iter::once(edf).chain(near) {
+        let Some(dir) = file.parent() else { continue };
+        add(dir.to_path_buf());
+        add(child(dir, "paints"));
+        add(child(dir, "textures"));
+        if let Some(stem) = file.file_stem() {
+            add(child(dir, &format!("{}.fbm", stem.to_string_lossy())));
+        }
+        if let Ok(entries) = std::fs::read_dir(dir) {
+            let mut fbm: Vec<PathBuf> = entries
+                .filter_map(Result::ok)
+                .map(|e| e.path())
+                .filter(|p| p.is_dir() && p.extension().is_some_and(|x| x.eq_ignore_ascii_case("fbm")))
+                .collect();
+            fbm.sort();
+            fbm.into_iter().for_each(&mut add);
+        }
+        if let Some(up) = dir.parent() {
+            add(child(up, "textures"));
+        }
     }
     dirs
+}
+
+/// The picture a mesh names, from `dirs`: `Ok` when found and read, `Err(None)` when no file
+/// of that name exists, `Err(Some(file))` when there is one that couldn't be read.
+pub fn resolve_loose_texture(dirs: &[PathBuf], name: &str) -> Result<paint::PaintTexture, Option<String>> {
+    let file = find_texture_file(dirs, name).ok_or(None)?;
+    let label = file.file_name().map(|f| f.to_string_lossy().into_owned());
+    std::fs::read(&file)
+        .ok()
+        .and_then(|bytes| paint::decode_image(name, &bytes))
+        .ok_or(label)
 }
 
 /// The sheets a bike's parts draw that its first paint doesn't carry, looked for loose around
@@ -2024,20 +2061,17 @@ pub fn fill_loose_textures(model: &mut BikeModel, edf: &std::path::Path) -> Vec<
         .first()
         .map(|p| p.textures.iter().map(|t| t.name.to_ascii_lowercase()).collect())
         .unwrap_or_default();
-    let dirs = texture_search_dirs(edf);
+    let dirs = texture_search_dirs(edf, None);
     let mut missing = Vec::new();
     for name in wanted.into_iter().filter(|n| !have.contains(n)) {
-        let found = find_texture_file(&dirs, &name)
-            .and_then(|f| std::fs::read(&f).ok())
-            .and_then(|bytes| paint::decode_image(&name, &bytes));
-        match found {
-            Some(t) => {
+        match resolve_loose_texture(&dirs, &name) {
+            Ok(t) => {
                 for p in &mut model.paints {
                     p.textures.push(t.clone());
                 }
                 model.base.push(t);
             }
-            None => missing.push(name),
+            Err(_) => missing.push(name),
         }
     }
     missing
@@ -2063,13 +2097,19 @@ pub fn find_texture_file(dirs: &[PathBuf], name: &str) -> Option<PathBuf> {
 /// Any model on disk — a loose `.edf`, or every mesh in a `.pkz`, `.zip` or folder. A bar pad,
 /// a seat, a fork guard: parts that come as a file rather than as an installed bike or gear.
 #[tauri::command]
-pub async fn load_model_file(path: String) -> Result<LooseModel, String> {
-    tauri::async_runtime::spawn_blocking(move || load_model_file_blocking(&path))
+pub async fn load_model_file(path: String, near: Option<String>) -> Result<LooseModel, String> {
+    tauri::async_runtime::spawn_blocking(move || load_model_file_near(&path, near.as_deref().map(std::path::Path::new)))
         .await
         .map_err(|e| format!("load_model_file task failed: {e}"))?
 }
 
 pub fn load_model_file_blocking(path: &str) -> Result<LooseModel, String> {
+    load_model_file_near(path, None)
+}
+
+/// [`load_model_file_blocking`], also looking for pictures around `near`, the source file the
+/// model was made from.
+pub fn load_model_file_near(path: &str, near: Option<&std::path::Path>) -> Result<LooseModel, String> {
     let p = std::path::Path::new(path);
     if crate::securesource::is_secured(p) {
         return Err("A locked file can't be opened here.".into());
@@ -2142,21 +2182,19 @@ pub fn load_model_file_blocking(path: &str) -> Result<LooseModel, String> {
             }
         }
     }
-    let dirs = if p.is_file() { texture_search_dirs(p) } else { Vec::new() };
-    let mut missing = Vec::new();
+    let dirs = if p.is_file() { texture_search_dirs(p, near) } else { Vec::new() };
+    let (mut missing, mut unreadable) = (Vec::new(), Vec::new());
     for name in wanted {
         if textures.iter().any(|t| t.name.eq_ignore_ascii_case(&name)) {
             continue;
         }
-        let found = find_texture_file(&dirs, &name)
-            .and_then(|f| std::fs::read(&f).ok())
-            .and_then(|bytes| paint::decode_image(&name, &bytes));
-        match found {
-            Some(t) => textures.push(t),
-            None => missing.push(name),
+        match resolve_loose_texture(&dirs, &name) {
+            Ok(t) => textures.push(t),
+            Err(None) => missing.push(name),
+            Err(Some(file)) => unreadable.push(file),
         }
     }
-    Ok(LooseModel { nodes, textures, missing })
+    Ok(LooseModel { nodes, textures, missing, unreadable })
 }
 
 /// The stock rider profiles the game itself ships. They're the fallback for a custom model
@@ -5734,6 +5772,54 @@ pub fn unpack_paint_blocking(path: String) -> Result<Vec<paint::PaintTexture>, S
 mod texture_search_tests {
     use super::*;
 
+    fn tga(w: u16, h: u16, desc: u8) -> Vec<u8> {
+        let mut b = vec![0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+        b.extend_from_slice(&w.to_le_bytes());
+        b.extend_from_slice(&h.to_le_bytes());
+        b.extend_from_slice(&[8, desc]);
+        b.extend(std::iter::repeat(128u8).take(w as usize * h as usize));
+        b
+    }
+
+    /// One folder holding the model, its FBX and capitalised pictures, as a modder keeps them.
+    #[test]
+    fn capitalised_pictures_beside_the_model_are_found_and_unreadable_ones_are_named() {
+        let root = std::env::temp_dir().join(format!("mxb-one-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        for f in ["Gold_d", "Gold_n", "Gold_r", "Woody", "Woody_n", "Woody_r"] {
+            std::fs::write(root.join(format!("{f}.tga")), tga(4, 4, 0x08)).unwrap();
+        }
+        std::fs::write(root.join("Woody_s.tga"), b"").unwrap();
+        std::fs::write(root.join("Woody.shd"), b"").unwrap();
+        std::fs::write(root.join("model2.edf"), b"").unwrap();
+        std::fs::write(root.join("model2.fbx"), b"").unwrap();
+        let dirs = texture_search_dirs(&root.join("model2.edf"), Some(&root.join("model2.fbx")));
+        for name in ["woody_r", "gold_d", "woody", "woody_n"] {
+            assert!(resolve_loose_texture(&dirs, name).is_ok(), "{name}");
+        }
+        // No such picture: a material that has none.
+        assert_eq!(resolve_loose_texture(&dirs, "protection").err(), Some(None));
+        // A file is there but it is not a picture: say which.
+        assert_eq!(resolve_loose_texture(&dirs, "woody_s").err(), Some(Some("Woody_s.tga".to_string())));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The FBX's embedded-media folder next to a source that lives somewhere else.
+    #[test]
+    fn the_fbx_s_fbm_folder_is_searched_beside_the_source() {
+        let root = std::env::temp_dir().join(format!("mxb-fbm-{}", std::process::id()));
+        let (out, src) = (root.join("out"), root.join("src"));
+        std::fs::create_dir_all(&out).unwrap();
+        std::fs::create_dir_all(src.join("model2.fbm")).unwrap();
+        std::fs::create_dir_all(src.join("Other.FBM")).unwrap();
+        std::fs::write(src.join("model2.fbm").join("Woody.tga"), tga(4, 4, 0)).unwrap();
+        std::fs::write(src.join("Other.FBM").join("Gold_d.tga"), tga(4, 4, 0)).unwrap();
+        let dirs = texture_search_dirs(&out.join("model2.edf"), Some(&src.join("model2.fbx")));
+        assert!(resolve_loose_texture(&dirs, "woody").is_ok());
+        assert!(resolve_loose_texture(&dirs, "gold_d").is_ok(), "any .fbm folder beside the FBX");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     #[test]
     fn a_texture_is_found_beside_the_edf_or_in_a_sibling_textures_folder_whatever_the_case() {
         let root = std::env::temp_dir().join(format!("mxb-tex-{}", std::process::id()));
@@ -5743,7 +5829,7 @@ mod texture_search_tests {
         std::fs::create_dir_all(&tex_dir).unwrap();
         std::fs::write(tex_dir.join("Frame.TGA"), b"x").unwrap();
         std::fs::write(edf_dir.join("plastics.png"), b"x").unwrap();
-        let dirs = texture_search_dirs(&edf_dir.join("bike.edf"));
+        let dirs = texture_search_dirs(&edf_dir.join("bike.edf"), None);
         // Windows keeps the spelling it was asked with, so compare the way the file system does.
         let same = |hit: Option<PathBuf>, want: PathBuf| hit.is_some_and(|h| h.to_string_lossy().eq_ignore_ascii_case(&want.to_string_lossy()));
         assert!(same(find_texture_file(&dirs, "frame"), tex_dir.join("Frame.TGA")));

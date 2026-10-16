@@ -94,6 +94,26 @@ pub fn remove(dir: &Path, name: &str) -> Result<Scripts, String> {
     Ok(s)
 }
 
+/// Rename the script saved as `from` to `to`, keeping its place in the list. A name another
+/// saved script already has is refused rather than written over it.
+pub fn rename(dir: &Path, from: &str, to: &str) -> Result<Scripts, String> {
+    let to = clean_name(to);
+    if to.is_empty() {
+        return Err("A script needs a name.".into());
+    }
+    let mut s = load(dir);
+    let i = s.saved.iter().position(|x| x.name.eq_ignore_ascii_case(from.trim())).ok_or("No script by that name.")?;
+    if s.saved.iter().enumerate().any(|(k, x)| k != i && x.name.eq_ignore_ascii_case(&to)) {
+        return Err(format!("There is already a script called {to}."));
+    }
+    if s.last.as_ref().is_some_and(|l| l.name.eq_ignore_ascii_case(&s.saved[i].name) && l.text == s.saved[i].text) {
+        s.last = s.last.map(|l| Script { name: to.clone(), ..l });
+    }
+    s.saved[i].name = to;
+    store(dir, &s)?;
+    Ok(s)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -143,6 +163,32 @@ mod tests {
         assert!(set_last(d.path(), "x", &"a".repeat(MAX_BYTES + 1)).is_err());
         assert_eq!(clean_name("a\u{7}b\n"), "ab");
         assert_eq!(clean_name(&"n".repeat(100)).len(), MAX_NAME);
+    }
+
+    #[test]
+    fn two_scripts_with_different_names_are_both_kept() {
+        let d = tempfile::tempdir().unwrap();
+        save(d.path(), "Rotations", "[Hierarchy]
+steer_rot = 1 2 3").unwrap();
+        let s = save(d.path(), "Bike B", "[Hierarchy]
+fsusp_rot = 4 5 6").unwrap();
+        let names: Vec<&str> = s.saved.iter().map(|x| x.name.as_str()).collect();
+        assert_eq!(names, ["Bike B", "Rotations"]);
+        assert_eq!(load(d.path()).saved.len(), 2);
+    }
+
+    #[test]
+    fn renaming_keeps_the_text_and_place_and_refuses_a_taken_name() {
+        let d = tempfile::tempdir().unwrap();
+        save(d.path(), "a", "one").unwrap();
+        save(d.path(), "b", "two").unwrap();
+        let s = rename(d.path(), "A", "Renamed").unwrap();
+        assert_eq!(s.saved.iter().map(|x| (x.name.as_str(), x.text.as_str())).collect::<Vec<_>>(), [("b", "two"), ("Renamed", "one")]);
+        assert!(rename(d.path(), "b", "renamed").is_err());
+        assert!(rename(d.path(), "b", "  ").is_err());
+        assert!(rename(d.path(), "missing", "x").is_err());
+        // Only its own case changing is fine.
+        assert_eq!(rename(d.path(), "b", "B").unwrap().saved[0].name, "B");
     }
 
     #[test]

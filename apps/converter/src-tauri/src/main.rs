@@ -69,6 +69,7 @@ fn main() {
             fbx2edf::commands::fbx_scripts_last,
             fbx2edf::commands::fbx_scripts_save,
             fbx2edf::commands::fbx_scripts_remove,
+            fbx2edf::commands::fbx_scripts_rename,
             fbx2edf::commands::fbx_watch,
             fbx2edf::commands::fbx_unwatch,
             mxb_core::viewer::load_model_file,

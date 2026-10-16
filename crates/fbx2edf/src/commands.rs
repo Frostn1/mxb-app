@@ -104,6 +104,12 @@ pub fn fbx_scripts_save(app: tauri::AppHandle, name: String, text: String) -> Re
     scripts::save(&scripts_dir(&app)?, &name, &text)
 }
 
+/// Rename a saved script.
+#[tauri::command]
+pub fn fbx_scripts_rename(app: tauri::AppHandle, from: String, to: String) -> Result<Scripts, String> {
+    scripts::rename(&scripts_dir(&app)?, &from, &to)
+}
+
 /// Remove a saved script.
 #[tauri::command]
 pub fn fbx_scripts_remove(app: tauri::AppHandle, name: String) -> Result<Scripts, String> {
@@ -126,13 +132,14 @@ pub async fn fbx_convert(
     options: Options,
     hrc: HrcMode,
     overwrite_shd: Option<bool>,
+    write_shd: Option<bool>,
     shd: Option<ShdValues>,
 ) -> Result<Vec<Outcome>, String> {
     if RUNNING.swap(true, Ordering::SeqCst) {
         return Err("A batch is already converting.".into());
     }
     let shd = Shd {
-        make: true,
+        make: write_shd.unwrap_or(true),
         overwrite: overwrite_shd.unwrap_or(false),
         values: shd.unwrap_or_default(),
     };

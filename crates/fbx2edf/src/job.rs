@@ -1160,6 +1160,20 @@ mod tests {
         assert!(o.shaders[0].written && o.shaders[0].values == ShdValues::default());
     }
 
+    /// Shaders: Never. No `.shd` is written and one already there is left as it is.
+    #[test]
+    fn never_writes_no_shd_and_leaves_an_existing_one_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let edf = dir.path().join("chain.edf");
+        std::fs::write(dir.path().join("chain.shd"), "mine").unwrap();
+        let sites = vec![site("chain", &[dir.path()], None), site("frame", &[dir.path()], None)];
+        let o = outcome_of(Ok(report(&[""])), HrcMode::Never, &edf, pre(sites), None, &mut HashSet::new());
+        assert_eq!(std::fs::read_to_string(dir.path().join("chain.shd")).unwrap(), "mine");
+        assert!(!dir.path().join("frame.shd").exists());
+        assert_eq!(o.files, [edf.to_string_lossy()]);
+        assert!(o.shaders.is_empty() && o.shd.is_empty());
+    }
+
     #[test]
     fn saving_a_shd_writes_the_sliders_values_and_only_to_a_shd() {
         let dir = tempfile::tempdir().unwrap();

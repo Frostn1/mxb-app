@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased — Frost's Studio and Frost Converter: named export scripts
+
+### Fixed
+- **Preview highlight.** Opening a .shd card no longer tints its material while you tune it. A Highlight tick, off by default, flashes the material for a moment when its card opens.
+- **Shaders: Always / If none / Never.** Under More, Never writes no .shd and leaves the ones there alone; Always writes over them. The Preview then says No .shd.
+- **Saved export scripts.** Save asks for a name, so a second script no longer replaces the first. The same name asks Replace?, and each saved script can be renamed or removed.
+- **Preview textures.** Pictures are also found in the FBX's .fbm folder and beside the FBX, and a TGA the strict reader refused (a grey map with alpha bits set, for one) is read. A name with no file, and a file that can't be read, are told apart.
+
 ## Unreleased — Frost's Studio and Frost Converter: one-line .shd files
 
 ### Fixed
