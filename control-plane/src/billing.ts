@@ -23,6 +23,7 @@
  */
 
 import { tokenMatches } from "./auth";
+import { applyBlendEvent, shopConfig } from "./blendshop";
 import { ALREADY_SEATED, PAID_FAILED_ERROR, alert, deleteServer, freezeServer, roomToPlace, seatPaid, type Deps, type Result } from "./hosting";
 import type { ServerType } from "./hostregions";
 
@@ -90,7 +91,7 @@ async function setRow(env: Env, deps: Deps, serverId: string, fields: Partial<Bi
 
 // ---- Stripe REST ---------------------------------------------------------------------------
 
-type StripeResult<T> = { ok: true; body: T } | { ok: false; status: number; error: string };
+export type StripeResult<T> = { ok: true; body: T } | { ok: false; status: number; error: string };
 
 /** Stripe's form encoding, flattened: `{ a: { b: "c" } }` -> `a[b]=c`. */
 export function formEncode(params: Record<string, unknown>, prefix = ""): string[] {
@@ -104,7 +105,7 @@ export function formEncode(params: Record<string, unknown>, prefix = ""): string
   return out;
 }
 
-async function stripe<T>(
+export async function stripe<T>(
   cfg: { secretKey: string },
   deps: Deps,
   method: "GET" | "POST" | "DELETE",
@@ -132,8 +133,8 @@ async function stripe<T>(
   }
 }
 
-/** The Stripe customer for a Steam account, made on first use. */
-async function customerFor(env: Env, deps: Deps, cfg: BillingConfig, steamId: string): Promise<string | null> {
+/** The Stripe customer for a Steam account, made on first use. Shared by hosting and the Blends shop. */
+export async function customerFor(env: Env, deps: Deps, cfg: { secretKey: string }, steamId: string): Promise<string | null> {
   const known = await env.DB.prepare("SELECT customer_id FROM host_billing_customers WHERE steam_id = ?")
     .bind(steamId)
     .first<{ customer_id: string }>();
@@ -558,12 +559,16 @@ export async function applyEvent(env: Env, deps: Deps, event: StripeEvent): Prom
   }
 }
 
-/** `POST /v1/stripe/webhook`. Signature first, then once per event id. */
+/**
+ * `POST /v1/stripe/webhook`. Signature first, then once per event id. One endpoint for hosting
+ * and the Blends shop (`blendshop.ts`): each side ignores the other's events.
+ */
 export async function stripeWebhook(request: Request, env: Env, deps: Deps): Promise<Response> {
   const reply = (status: number, body: unknown) =>
     new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
   const cfg = billingConfig(env);
-  if (!cfg) {
+  const webhookSecret = cfg?.webhookSecret ?? shopConfig(env)?.webhookSecret;
+  if (!webhookSecret) {
     const missing = (["STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET", "STRIPE_PRICE_MXBSERVER", "STRIPE_PRICE_LEGACY"] as const).filter(
       (k) => !env[k]?.trim(),
     );
@@ -571,7 +576,7 @@ export async function stripeWebhook(request: Request, env: Env, deps: Deps): Pro
   }
   const raw = await request.text();
   if (raw.length > 512 * 1024) return reply(413, { error: "too large" });
-  if (!(await verifyStripeSignature(raw, request.headers.get("Stripe-Signature"), cfg.webhookSecret, deps.now()))) {
+  if (!(await verifyStripeSignature(raw, request.headers.get("Stripe-Signature"), webhookSecret, deps.now()))) {
     return reply(400, { error: "bad signature" });
   }
   let event: StripeEvent;
@@ -586,7 +591,8 @@ export async function stripeWebhook(request: Request, env: Env, deps: Deps): Pro
     .run();
   if (!claimed.meta.changes) return reply(200, { received: true, duplicate: true });
   try {
-    await applyEvent(env, deps, event);
+    if (cfg) await applyEvent(env, deps, event);
+    await applyBlendEvent(env, deps, event);
   } catch (err) {
     // Let Stripe deliver it again.
     await env.DB.prepare("DELETE FROM host_billing_events WHERE id = ?").bind(event.id).run();
