@@ -317,6 +317,8 @@ export const ptBR: Record<keyof typeof en, string> = {
   "convert.fast": "Modo rápido",
   "convert.shaders": "Shaders",
   "convert.noShd": "Sem .shd",
+  "convert.makeShd": "Criar .shd ausentes",
+  "convert.modelFolder": "Pasta do modelo",
   "convert.highlight": "Destacar",
   "convert.outName": "Nome de saída",
   "convert.script": "Script de exportação",

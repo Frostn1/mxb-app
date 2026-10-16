@@ -37,11 +37,13 @@ export interface Outcome {
   error: string | null;
   /** The `.hrc` files written beside a bike's `.edf`. */
   hrc: string[];
-  /** The `.shd` files written for its textures: `bike.shd: normal bike_n, reflection bike_r`. */
+  /** The `.shd` files made in the model's folder: `bike.shd: normal bike_n, reflection bike_r`. */
   shd: string[];
-  /** Every file this model wrote, in full: the `.edf`, its `.shd` files, its `.hrc` files. */
+  /** What was written beside the `.edf`: the `.edf` and its `.hrc` files. */
   files: string[];
-  /** Each material's `.shd` beside the `.edf`, written now or already there. */
+  /** The `.shd` files this conversion made in the model's folder, where the converter reads them. */
+  shdFiles: string[];
+  /** Each material's `.shd` in the model's folder, written now or already there. */
   shaders: ShdFile[];
   /** A map used by name because the material doesn't link it, `.hrc` files kept or replaced. */
   notes: string[];
@@ -108,16 +110,13 @@ export const renameScript = (from: string, to: string) => invoke<KeptScripts>("f
 export const removeScript = (name: string) => invoke<KeptScripts>("fbx_scripts_remove", { name });
 export const readText = (path: string) => invoke<string>("fbx_read_text", { path });
 
-/** When `.shd` files are written: over the ones there, only where there is none, or not at all. */
-export type ShdMode = "always" | "ifNone" | "never";
-
 export function convertFiles(
   pairs: { input: string; output: string }[],
   options: ConvertOptions,
   hrc: HrcMode,
-  shd: ShdMode = "ifNone",
+  makeShd = true,
 ): Promise<Outcome[]> {
-  return invoke<Outcome[]>("fbx_convert", { pairs, options, hrc, overwriteShd: shd === "always", writeShd: shd !== "never" });
+  return invoke<Outcome[]>("fbx_convert", { pairs, options, hrc, writeShd: makeShd });
 }
 
 /** Write a material's `.shd` with these values: what the sliders do. */

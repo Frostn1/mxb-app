@@ -319,6 +319,8 @@ export const sv: Record<keyof typeof en, string> = {
   "convert.fast": "Snabbläge",
   "convert.shaders": "Shaders",
   "convert.noShd": "Ingen .shd",
+  "convert.makeShd": "Skapa saknade .shd",
+  "convert.modelFolder": "Modellmapp",
   "convert.highlight": "Markera",
   "convert.outName": "Utdatanamn",
   "convert.script": "Exportskript",
