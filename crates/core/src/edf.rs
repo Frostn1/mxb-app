@@ -799,7 +799,10 @@ fn valid_material_record(b: &[u8], o: usize, textures: usize) -> bool {
     if w(0) != 0 || w(7) != 0 {
         return false;
     }
-    if (1..7).any(|k| !(f(k) > 0.0 && f(k) <= 1.0)) {
+    // Zero is a real term: an untextured black material writes all six as 0.0. A table
+    // made only of those is what a run of zero bytes looks like, so [`valid_table`] wants
+    // one record that shades.
+    if (1..7).any(|k| !(0.0..=1.0).contains(&f(k))) {
         return false;
     }
     if w(8) != 0 || w(9) != 0 || w(10) != 0 || w(12) != 0 {
@@ -810,6 +813,13 @@ fn valid_material_record(b: &[u8], o: usize, textures: usize) -> bool {
     // mod that ships `_n`/`_s`/`_r` sheets fills it in, and demanding zero threw out the whole
     // table with it, leaving every submesh unbound and the bike grey.
     w(11) as usize <= textures && w(13) as usize <= textures
+}
+
+/// `count` valid records at `o + 4`, at least one of them shading something.
+fn valid_table(b: &[u8], o: usize, count: usize, textures: usize) -> bool {
+    let rec = |k: usize| o + 4 + MAT_STRIDE * k;
+    (0..count).all(|k| valid_material_record(b, rec(k), textures))
+        && (0..count).any(|k| (1..7).any(|i| f32le(b, rec(k) + i * 4) > 0.0))
 }
 
 /// One node's material table: LOCAL material id -> position in the model's declared colour
@@ -827,7 +837,7 @@ pub fn node_material_table(b: &[u8], node_start: usize, textures: usize) -> Vec<
         if u32le(b, o) as usize != count {
             continue;
         }
-        if (0..count).all(|k| valid_material_record(b, o + 4 + MAT_STRIDE * k, textures)) {
+        if valid_table(b, o, count, textures) {
             return (0..count)
                 .map(|k| {
                     let one = u32le(b, o + 4 + MAT_STRIDE * k + MAT_TEX_FROM_REC) as usize;
@@ -857,7 +867,7 @@ pub fn declared_colors(b: &[u8], external: &[String]) -> Vec<String> {
     let embedded = embedded_textures(b);
     let mut slots: Vec<(usize, String)> = embedded
         .iter()
-        .filter(|t| !is_companion_texture(&t.name))
+        .filter(|t| !is_companion_among(&t.name, &embedded))
         .map(|t| (t.data_off, t.name.clone()))
         .collect();
     for name in external {
@@ -938,10 +948,22 @@ pub fn is_exporter_companion(name: &str) -> bool {
 /// gfx-referenced ones (chain, `w_plate`) — so dropping any shifts every later material
 /// onto the wrong texture, which is why the filter lives in one place.
 pub fn color_textures(b: &[u8]) -> Vec<EmbeddedTexture> {
-    embedded_textures(b)
-        .into_iter()
-        .filter(|t| !is_companion_texture(&t.name))
-        .collect()
+    let all = embedded_textures(b);
+    let keep: Vec<bool> = all.iter().map(|t| !is_companion_among(&t.name, &all)).collect();
+    all.into_iter().zip(keep).filter_map(|(t, k)| k.then_some(t)).collect()
+}
+
+/// [`is_companion_texture`], unless the model also carries this name's own `_n`, `_s` or
+/// `_r`: then it is a colour sheet that only sounds like a map. `bracket_bump` beside
+/// `bracket_bump_n` is a seat bracket, and taking it for a bump map slid every later
+/// material onto its neighbour's sheet.
+fn is_companion_among(name: &str, all: &[EmbeddedTexture]) -> bool {
+    is_companion_texture(name)
+        && !all.iter().any(|t| {
+            let t = t.name.to_ascii_lowercase();
+            let n = name.to_ascii_lowercase();
+            ["_n", "_s", "_r"].iter().any(|suf| t == format!("{n}{suf}"))
+        })
 }
 
 // Record layout from `width`: | width u32 | height u32 | md5[16] | u32 | data_size u32 | pad[8] | data |
@@ -1371,8 +1393,13 @@ fn collect_sub_cands(b: &[u8]) -> Vec<SubCand> {
         if u32le(b, p + 12) == 0x3F80_0000 && b[p..p + 12].iter().all(|&x| x == 0) {
             if let Some(mb) = p.checked_sub(48) {
                 if read_mat4(b, mb).is_some() {
-                    let o = mb + SUB_MAT_BACK;
-                    if let Some((ts, tc, vs, vc)) = read_sub_group(b, o, MAX_COUNT, MAX_COUNT) {
+                    // Usually 148 bytes on; a group that writes one more word ahead of its
+                    // block sits at 152 (Frost Converter's KTM 250 SX-F shock and spring).
+                    let hit = SUB_MAT_BACKS.iter().find_map(|back| {
+                        let o = mb + back;
+                        read_sub_group(b, o, MAX_COUNT, MAX_COUNT).map(|g| (o, g))
+                    });
+                    if let Some((o, (ts, tc, vs, vc))) = hit {
                         out.push(SubCand {
                             block_off: o,
                             tri_start: ts,
@@ -1429,11 +1456,7 @@ fn chain_submeshes(
             .iter()
             .filter(|c| c.tri_start == run_t && c.vert_start == run_v && in_bounds(c))
             .min_by_key(|c| c.block_off.abs_diff(prev_off))?;
-        let name = if next.block_off >= 252 {
-            read_cname(b, next.block_off - 252)
-        } else {
-            String::new()
-        };
+        let name = sub_name(b, next.block_off);
         out.push(RawSub {
             name,
             tri_start: run_t,
@@ -1509,6 +1532,25 @@ fn detect_submeshes_window(
 
 // Submesh matrix at block_off - 148; its parent a further 280 bytes back.
 const SUB_MAT_BACK: usize = 148;
+// Every gap a matrix-anchored block has been seen at, nearest first.
+const SUB_MAT_BACKS: [usize; 2] = [SUB_MAT_BACK, SUB_MAT_BACK + 4];
+
+/// How far behind `block_off` its placement matrix sits: the first of [`SUB_MAT_BACKS`] that
+/// reads as one, else the usual gap.
+fn sub_mat_back(b: &[u8], block_off: usize) -> usize {
+    SUB_MAT_BACKS
+        .into_iter()
+        .find(|back| block_off.checked_sub(*back).is_some_and(|m| read_mat4(b, m).is_some()))
+        .unwrap_or(SUB_MAT_BACK)
+}
+
+/// A group's name, which sits 104 bytes ahead of its matrix.
+fn sub_name(b: &[u8], block_off: usize) -> String {
+    match block_off.checked_sub(sub_mat_back(b, block_off) + 104) {
+        Some(o) => read_cname(b, o),
+        None => String::new(),
+    }
+}
 const SUB_MAT_PARENT_STEP: usize = 280;
 // Node orientation matrix occupies name+104 .. name+168; the parent walk must stop
 // before it, or the orientation is applied twice (flips the swingarm forward).
@@ -1523,7 +1565,7 @@ fn submesh_transform(
     node_matrix_once: bool,
 ) -> Vec<Mat4> {
     let mut chain = Vec::new();
-    let Some(base) = block_off.checked_sub(SUB_MAT_BACK) else {
+    let Some(base) = block_off.checked_sub(sub_mat_back(b, block_off)) else {
         return chain;
     };
     // A node's first geometry group has no matrix of its own: its block sits at name+252, so
@@ -2280,6 +2322,29 @@ ref_angle = -90
                 .copy_from_slice(&one_based.to_le_bytes());
         }
         b
+    }
+
+    #[test]
+    fn a_black_material_does_not_lose_the_table() {
+        // The KTM 250 SX-F's steer: a handlebar range on an untextured black material, its
+        // six terms all 0.0, between two textured ones.
+        let mut b = material_table_bytes(&[2, 0, 4], 512);
+        let r = 512 - 4 - MAT_STRIDE * 3 + 4 + MAT_STRIDE;
+        for s in 1..7 {
+            b[r + s * 4..r + s * 4 + 4].copy_from_slice(&0.0f32.to_le_bytes());
+        }
+        assert_eq!(node_material_table(&b, 512, 4), vec![Some(1), None, Some(3)]);
+        // Nothing but zeros is not a table.
+        assert!(node_material_table(&vec![0u8; 1024], 512, 4).is_empty());
+    }
+
+    #[test]
+    fn a_sheet_with_its_own_maps_is_a_colour_sheet_whatever_it_ends_in() {
+        let t = |name: &str| EmbeddedTexture { name: name.into(), width: 0, height: 0, data_off: 0, data_len: 0 };
+        let all = [t("bracket_bump"), t("bracket_bump_n"), t("seat_bump")];
+        assert!(!is_companion_among("bracket_bump", &all));
+        assert!(is_companion_among("seat_bump", &all));
+        assert!(is_companion_among("bracket_bump_n", &all));
     }
 
     #[test]
@@ -3808,7 +3873,7 @@ pub fn uses_companion_slots(b: &[u8]) -> bool {
             if u32le(b, o) as usize != count {
                 continue;
             }
-            if (0..count).all(|k| valid_material_record(b, o + 4 + MAT_STRIDE * k, textures)) {
+            if valid_table(b, o, count, textures) {
                 if (0..count).any(|k| u32le(b, o + 4 + MAT_STRIDE * k + 52) != 0) {
                     return true;
                 }
@@ -3971,3 +4036,4 @@ fn is_part_name(name: &str) -> bool {
         "chassis" | "steer" | "fsusp" | "rsusp" | "swingarm" | "fwheel" | "rwheel" | "rwheela"
     )
 }
+

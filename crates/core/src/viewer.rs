@@ -441,6 +441,42 @@ pub fn load_bike_model_blocking(
     build_bike_model(&source, key, files, installed, tyres, pick, t0)
 }
 
+/// A bike from its loose files only, later folders layered over earlier ones. No `.pkz` is
+/// opened, the bike's own or a tyre pack's: what only an archive holds (a `.geom`, wheels,
+/// packed sheets) is simply not drawn.
+pub fn load_loose_bike_model_blocking(dirs: &[&std::path::Path]) -> Result<BikeModel, String> {
+    let t0 = std::time::Instant::now();
+    let Some(first) = dirs.first() else { return Err("no folder".into()) };
+    let stamps: Vec<String> = dirs.iter().map(|d| format!("{}{}", d.display(), folder_stamp(d))).collect();
+    let key = format!("loose#{}", stamps.join("|"));
+    if let Some(m) = cached_bike(&key) {
+        return Ok(m);
+    }
+    let _gate = gate::enter(&key);
+    if let Some(m) = cached_bike(&key) {
+        return Ok(m);
+    }
+    let mut files = Vec::new();
+    for dir in dirs {
+        let mut loose = Vec::new();
+        for entry in std::fs::read_dir(dir).map_err(|e| format!("{}: {e}", dir.display()))?.flatten() {
+            let path = entry.path();
+            let name = path.file_name().and_then(|n| n.to_str()).map(str::to_string);
+            if path.is_file() && name.as_deref().is_some_and(wanted_bike_file) {
+                if let (Some(name), Some(bytes)) = (name, read_bike_file(&path)) {
+                    loose.push((name, bytes));
+                }
+            }
+        }
+        overlay_files(&mut files, loose);
+    }
+    if !files.iter().any(|(n, _)| bikefiles::is_mesh(n)) {
+        return Err(format!("no .edf mesh in {}", first.display()));
+    }
+    let installed = installed_paints(first);
+    build_bike_model(&first.display().to_string(), key, files, installed, None, None, t0)
+}
+
 /// Why a bike came back with nothing to draw, in words the player can act on.
 ///
 /// Three unrelated faults land here and they want three different answers: a mesh that never
@@ -1953,6 +1989,48 @@ pub fn texture_search_dirs(edf: &std::path::Path) -> Vec<PathBuf> {
         dirs.push(child(up, "textures"));
     }
     dirs
+}
+
+/// The sheets a bike's parts draw that its first paint doesn't carry, looked for loose around
+/// `edf` the way [`load_model_file_blocking`] looks; what turns up joins every paint and the
+/// base. Returns the names still missing.
+pub fn fill_loose_textures(model: &mut BikeModel, edf: &std::path::Path) -> Vec<String> {
+    let mut wanted: Vec<String> = Vec::new();
+    for n in &model.nodes {
+        let names: Vec<&String> = if n.submeshes.is_empty() {
+            n.texture.iter().collect()
+        } else {
+            n.submeshes.iter().filter_map(|s| s.texture.as_ref()).collect()
+        };
+        for t in names {
+            let key = t.to_ascii_lowercase();
+            if key != "hide" && key != "face" && !wanted.contains(&key) {
+                wanted.push(key);
+            }
+        }
+    }
+    let have: std::collections::HashSet<String> = model
+        .paints
+        .first()
+        .map(|p| p.textures.iter().map(|t| t.name.to_ascii_lowercase()).collect())
+        .unwrap_or_default();
+    let dirs = texture_search_dirs(edf);
+    let mut missing = Vec::new();
+    for name in wanted.into_iter().filter(|n| !have.contains(n)) {
+        let found = find_texture_file(&dirs, &name)
+            .and_then(|f| std::fs::read(&f).ok())
+            .and_then(|bytes| paint::decode_image(&name, &bytes));
+        match found {
+            Some(t) => {
+                for p in &mut model.paints {
+                    p.textures.push(t.clone());
+                }
+                model.base.push(t);
+            }
+            None => missing.push(name),
+        }
+    }
+    missing
 }
 
 /// `name.<ext>` in `dirs`, for the picture formats the converter reads, matched without

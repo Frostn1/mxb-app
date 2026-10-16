@@ -1579,6 +1579,18 @@ export function settledPose(rig: BikeRig | null | undefined, nodes: EdfNode[]): 
   return { ...NEUTRAL_POSE, rearDrop: levelRearDrop(rig, nodes, 0) ?? REAR_DEFAULT_MM };
 }
 
+/**
+ * The rear axle where the settled stance draws it: the swingarm turned about the pivot by
+ * the same angle `EdfMesh` turns it, for an overlay to find the rear wheel by.
+ */
+export function settledRearAxle(rig: BikeRig | null | undefined, nodes: EdfNode[]): Vec3 | null {
+  if (!rig?.rearAxle) return null;
+  const a = swingAngleForAxleY(rig, rig.rearAxle[1] - settledPose(rig, nodes).rearDrop / 1000) ?? 0;
+  const pivot = new THREE.Vector3(...rig.pivot);
+  const v = new THREE.Vector3(...rig.rearAxle).sub(pivot).applyAxisAngle(X_AXIS, a).add(pivot);
+  return [v.x, v.y, v.z];
+}
+
 /** Turn a group about a point that isn't the origin. */
 function About({
   at,
