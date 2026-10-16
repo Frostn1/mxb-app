@@ -9254,6 +9254,8 @@ fn main() {
             mxb_core::survey::set_survey_enabled,
             mxb_core::supporter::supporter_status,
             mxb_core::supporter::supporter_refresh,
+            mxb_core::supporter::supporter_email_send,
+            mxb_core::supporter::supporter_email_confirm,
             mxb_core::searchmiss::report_search_miss,
             mxb_core::support::support_due,
             mxb_core::support::support_shown,

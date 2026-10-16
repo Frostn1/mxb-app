@@ -61,6 +61,13 @@ async function fillPersonal(DB: DB, id: string) {
     DB.prepare(
       "INSERT INTO guid_claims (account_id, guid, first_seen_at, last_seen_at) VALUES (?, ?, ?, ?)",
     ).bind(id, "FF011000013A7C2E91", NOW, NOW),
+    DB.prepare(
+      "INSERT INTO supporter_emails (account_id, steam_id, email_hash, confirmed_at) VALUES (?, ?, ?, ?)",
+    ).bind(id, "76561198000000001", "e".repeat(64), NOW),
+    DB.prepare(
+      "INSERT INTO supporter_email_codes (account_id, email_hash, code_hash, expires_at, window_start)" +
+        " VALUES (?, ?, ?, ?, ?)",
+    ).bind(id, "e".repeat(64), "c".repeat(64), NOW, NOW),
   ]);
 }
 
@@ -99,6 +106,8 @@ describe("erasing an account", () => {
       "client_module_seen",
       "client_crashes",
       "guid_claims",
+      "supporter_emails",
+      "supporter_email_codes",
     ]) {
       expect(await count(DB, table, "acc-1"), table).toBe(0);
     }
