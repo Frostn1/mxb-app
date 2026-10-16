@@ -4,7 +4,7 @@
 -- any row is unrevoked. Keyed by Steam id for the reason `entitlements` is: it outlives an
 -- account being erased and re-made, and it is what the shop's buyers sign in with.
 --
--- 0072 rather than 0071 because the Blends shop branch already holds 0071.
+-- 0073 because the Blends shop branch (#1099) already holds 0071 and 0072.
 CREATE TABLE supporters (
   steam_id    TEXT NOT NULL,
   source      TEXT NOT NULL CHECK (source IN ('manual', 'bmac', 'stripe')),
