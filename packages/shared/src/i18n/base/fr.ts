@@ -237,6 +237,11 @@ export const fr: Record<keyof typeof en, string> = {
   "survey.setting.label": "Questions occasionnelles",
   "survey.setting.desc":
     "Permet à l'app de demander votre avis de temps en temps.",
+  "support.title": "Soutenir Frost",
+  "support.body": "Les applis vous plaisent ? Offrez-moi un café.",
+  "support.support": "Soutenir",
+  "support.later": "Me le rappeler plus tard",
+  "support.never": "Ne plus afficher",
   "uninstall.label": "Désinstaller {{app}}",
   "uninstall.desc": "Supprime cette app. Votre jeu et les autres apps restent.",
   "uninstall.manual": "Installée par votre gestionnaire de paquets. Supprimez-la là-bas :",

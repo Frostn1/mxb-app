@@ -100,6 +100,7 @@ import {
 import { useGearPaints } from "@frost/shared/lib/useGearPaints";
 import { copyText } from "../../lib/clipboard";
 import { DownloadBar, PRESET_BUNDLE_SLUG, UploadBar } from "../Share/TransferBar";
+import { supportMoment } from "@frost/shared/api/support";
 
 // Its own chunk: the 3D viewer brings three.js with it, and the list mustn't wait on that.
 const PresetPreview = lazy(() => import("./PresetPreview"));
@@ -1240,6 +1241,7 @@ function ImportDialog({
     try {
       await presetBundleImport(text.trim());
       toast.success(`Imported “${preview.name}” with all assets installed.`);
+      supportMoment();
       onImported();
     } catch (e) {
       toast.error(String(e).replace(/^Error:\s*/, ""));

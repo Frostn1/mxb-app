@@ -237,6 +237,11 @@ export const ptBR: Record<keyof typeof en, string> = {
   "survey.setting.label": "Perguntas ocasionais",
   "survey.setting.desc":
     "Deixa o app pedir feedback de vez em quando.",
+  "support.title": "Apoie o Frost",
+  "support.body": "Curte os apps? Me paga um café.",
+  "support.support": "Apoiar",
+  "support.later": "Lembrar depois",
+  "support.never": "Não mostrar de novo",
   "uninstall.label": "Desinstalar {{app}}",
   "uninstall.desc": "Remove este app. Seu jogo e os outros apps ficam.",
   "uninstall.manual": "Instalado pelo seu gerenciador de pacotes. Remova por lá:",

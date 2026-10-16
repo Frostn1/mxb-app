@@ -55,6 +55,7 @@ import {
   DialogFooter,
 } from "@frost/shared/Components/ui/dialog";
 import { cn } from "@frost/shared/lib/utils";
+import { supportMoment } from "@frost/shared/api/support";
 
 /** "2h ago", from unix seconds. `0` means it never happened. */
 function ago(seconds: number, t: TFunc<TKey>): string {
@@ -300,6 +301,7 @@ export function LiveSharesDialog({
       try {
         const done = await liveShareSync(code);
         toast.success(t("share.installed", { count: done.items.length }));
+        supportMoment();
         onChanged?.();
         load();
       } catch (e) {
