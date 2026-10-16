@@ -5657,3 +5657,111 @@ mod texture_search_tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 }
+
+/// The settings the Convert preview reads the game's own files with: the MXB App's saved ones
+/// when there are any, else the Steam install found on this machine. Read only: nothing is
+/// written and nothing from the game folder is copied out.
+fn context_config(app: &tauri::AppHandle) -> config::AppConfig {
+    config::load(app).unwrap_or_default()
+}
+
+/// The stock rider's body, for showing a piece of gear where it is worn. `None` when the game
+/// folder isn't found.
+#[tauri::command]
+pub async fn context_rider_body(app: tauri::AppHandle) -> Result<Option<RiderPart>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let cfg = context_config(&app);
+        Ok(load_rider_body(&cfg, "", Vec::new()))
+    })
+    .await
+    .map_err(|e| format!("context_rider_body task failed: {e}"))?
+}
+
+/// The stock bikes in the game's `bikes.pkz`, by folder name.
+pub fn stock_bike_names(pkz: &std::path::Path) -> Vec<String> {
+    let mut names: Vec<String> = pkz::entry_names(pkz)
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|e| {
+            let e = e.replace('\\', "/");
+            let mut parts = e.split('/');
+            (parts.next()?.eq_ignore_ascii_case("bikes")).then_some(())?;
+            let bike = parts.next()?;
+            // A bike is a folder with its own mesh: `bikes/<name>/<name>.edf`.
+            let file = parts.next()?;
+            (parts.next().is_none() && file.to_ascii_lowercase() == format!("{}.edf", bike.to_ascii_lowercase()))
+                .then(|| bike.to_string())
+        })
+        .collect();
+    names.sort();
+    names.dedup();
+    names
+}
+
+#[tauri::command]
+pub async fn context_bikes(app: tauri::AppHandle) -> Vec<String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        resolve_game_pkz(&context_config(&app), "bikes.pkz").map(|p| stock_bike_names(&p)).unwrap_or_default()
+    })
+    .await
+    .unwrap_or_default()
+}
+
+/// A stock bike with the converted `edf` and the `.hrc` files written beside it laid over its
+/// own files, the way the game reads a bike: the `.hrc` files pick which mesh draws each part,
+/// so a part the conversion wrote replaces the stock one and the rest stay stock. Read only.
+#[tauri::command]
+pub async fn context_bike(app: tauri::AppHandle, bike: String, edf: String, hrc: Vec<String>) -> Result<BikeModel, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let pkz = resolve_game_pkz(&context_config(&app), "bikes.pkz").ok_or_else(|| "The game folder wasn't found.".to_string())?;
+        let prefix = format!("bikes/{}/", bike.to_ascii_lowercase());
+        let mut files = pkz::read_selected(&pkz, |n| n.replace('\\', "/").to_ascii_lowercase().starts_with(&prefix) && wanted_bike_file(n))
+            .map_err(|e| format!("{e:#}"))?;
+        if files.is_empty() {
+            return Err(format!("No stock bike called {bike}."));
+        }
+        let base = |n: &str| n.replace('\\', "/").rsplit('/').next().unwrap_or(n).to_string();
+        for f in &mut files {
+            f.0 = base(&f.0);
+        }
+        let edf_path = std::path::Path::new(&edf);
+        let dir = edf_path.parent().map(std::path::Path::to_path_buf).unwrap_or_default();
+        let mut mine = Vec::new();
+        let bytes = std::fs::read(edf_path).map_err(|e| format!("{edf}: {e}"))?;
+        mine.push((base(&edf), pkz::read_sidecar_blob(&bytes).unwrap_or(bytes)));
+        for name in &hrc {
+            let name = base(name);
+            if let Ok(b) = std::fs::read(dir.join(&name)) {
+                mine.push((name, b));
+            }
+        }
+        overlay_files(&mut files, mine);
+        let key = format!("context#{}#{}#{:x}", bike, edf, mtime_nanos(edf_path));
+        build_bike_model(&format!("{bike} with {}", base(&edf)), key, files, Vec::new(), None, None, std::time::Instant::now())
+    })
+    .await
+    .map_err(|e| format!("context_bike task failed: {e}"))?
+}
+
+#[cfg(test)]
+mod context_tests {
+    use super::*;
+
+    #[test]
+    fn stock_bikes_are_the_folders_holding_their_own_mesh() {
+        let dir = std::env::temp_dir().join(format!("mxb-context-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("bikes.pkz");
+        let f = std::fs::File::create(&p).unwrap();
+        let mut z = zip::ZipWriter::new(f);
+        let o = zip::write::SimpleFileOptions::default();
+        for n in ["bikes/450xf/450xf.edf", "bikes/450xf/450xf_s.edf", "bikes/450xf/paints/a.pnt", "bikes/250x/250x.edf", "bikes/junk/readme.txt", "other/x/x.edf"] {
+            use std::io::Write;
+            z.start_file(n, o).unwrap();
+            z.write_all(b"x").unwrap();
+        }
+        z.finish().unwrap();
+        assert_eq!(stock_bike_names(&p), ["250x", "450xf"]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}

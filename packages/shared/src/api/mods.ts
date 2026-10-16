@@ -1349,6 +1349,25 @@ export function loadRiderModel(loadout: Loadout): Promise<RiderModel> {
   return invoke<RiderModel>("load_rider_model", { loadout }).then(reviveMesh);
 }
 
+/**
+ * The stock rider's body from the player's game folder, read only, for showing a piece of
+ * gear where it is worn. `null` when the game isn't found.
+ */
+export function contextRiderBody(): Promise<RiderPart | null> {
+  return invoke<RiderPart | null>("context_rider_body").then(reviveMesh);
+}
+
+/** The stock bikes in the player's game folder, by name. */
+export const contextBikes = () => invoke<string[]>("context_bikes");
+
+/**
+ * A stock bike with a converted `.edf` and its `.hrc` files laid over it: the parts the
+ * conversion wrote replace the stock ones and the rest stay stock. Read only.
+ */
+export function contextBike(bike: string, edf: string, hrc: string[]): Promise<BikeModel> {
+  return invoke<BikeModel>("context_bike", { bike, edf, hrc }).then(reviveMesh);
+}
+
 export function loadRiderBodyModel(profile: string): Promise<EdfNode[]> {
   return invoke<EdfNode[]>("load_rider_body_model", { profile }).then(reviveMesh);
 }
