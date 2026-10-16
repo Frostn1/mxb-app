@@ -7,6 +7,7 @@ import { useConfig } from "@frost/shared/Context/Config";
 import SurveySetting from "@frost/shared/Components/Survey/SurveySetting";
 import UninstallSetting from "@frost/shared/Components/Uninstall/UninstallSetting";
 import { useTheme, type ThemeMode } from "@frost/shared/Context/Theme";
+import SupporterLooks from "@frost/shared/Components/Supporter/SupporterLooks";
 import { APP_NAME, LOCALE_OPTIONS, useI18n, useT } from "@/i18n";
 import TrackModelSettings from "./TrackModelSettings";
 
@@ -95,6 +96,7 @@ export default function Settings() {
               ]}
             />
           </div>
+          <SupporterLooks />
         </div>
 
         <div className="mt-10">
