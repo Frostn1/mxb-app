@@ -84,6 +84,17 @@ pub fn scan(paths: &[String]) -> Vec<Found> {
     out
 }
 
+/// How long a watched source rests before it counts as saved: an exporter writes in pieces.
+pub const WATCH_SETTLE: std::time::Duration = std::time::Duration::from_millis(700);
+
+/// The watched source `changed` is, if any: the same file whatever the case or the slashes,
+/// and not a `.bak` or temporary neighbour.
+pub fn watched_match<'a>(watched: &'a [PathBuf], changed: &Path) -> Option<&'a PathBuf> {
+    let key = |p: &Path| p.to_string_lossy().replace('/', "\\").to_lowercase();
+    let c = key(changed);
+    watched.iter().find(|w| key(w) == c)
+}
+
 /// A model to write: its FBX, and whether it is a bike's shadow.
 #[derive(Debug, Clone, Deserialize)]
 pub struct Model {
@@ -821,6 +832,14 @@ mod tests {
         assert!(o.files.iter().any(|f| f.ends_with("chain.shd")));
         let hrc = std::fs::read_to_string(dir.path().join("steer.hrc")).unwrap();
         assert!(hrc.contains("scene = race.edf"), "{hrc}");
+    }
+
+    #[test]
+    fn a_change_matches_only_a_watched_file_whatever_its_spelling() {
+        let watched = vec![PathBuf::from("C:/m/Bike.fbx"), PathBuf::from("C:/m/shadow.fbx")];
+        assert_eq!(watched_match(&watched, Path::new(r"c:\m\bike.FBX")), Some(&watched[0]));
+        assert_eq!(watched_match(&watched, Path::new("C:/m/bike.fbx.tmp")), None);
+        assert_eq!(watched_match(&watched, Path::new("C:/m/other.fbx")), None);
     }
 
     #[test]
