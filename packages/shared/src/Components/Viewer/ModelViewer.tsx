@@ -1282,6 +1282,7 @@ function useEdfMeshes(
   tex: Map<string, THREE.Texture>,
   rubber: ReadonlySet<string> = NO_RUBBER,
   shaders: Shaders | null = null,
+  focus: string | null = null,
 ) {
   const list = useMemo(() => nodes ?? [], [nodes]);
   const invalidate = useThree((s) => s.invalidate);
@@ -1322,6 +1323,19 @@ function useEdfMeshes(
     }
     invalidate();
   }, [materials, shaders, invalidate]);
+
+  // The sheet being looked at glows, so a `.shd` picked in a list shows where it lands.
+  useEffect(() => {
+    for (const row of materials) {
+      for (const m of row) {
+        if (!(m instanceof THREE.MeshStandardMaterial)) continue;
+        const on = !!focus && m.userData.sheet === focus;
+        m.emissive.set(on ? 0x3b82f6 : 0x000000);
+        m.emissiveIntensity = on ? 0.55 : 0;
+      }
+    }
+    invalidate();
+  }, [materials, focus, invalidate]);
 
   return { geoms, materials };
 }
@@ -1575,10 +1589,13 @@ function EdfMesh({
   pose = NEUTRAL_POSE,
   rubber,
   shaders,
+  focus,
 }: {
   nodes: EdfNode[];
   textures: Map<string, THREE.Texture>;
   highlight?: Int32Array | null;
+  /** A sheet (lower-case) to light up. */
+  focus?: string | null;
   /** The joints to pose about. Absent (an unassembled bike, or gear) draws one rigid group. */
   rig?: BikeRig | null;
   pose?: BikePose;
@@ -1586,7 +1603,7 @@ function EdfMesh({
   rubber?: ReadonlySet<string>;
   shaders?: Shaders | null;
 }) {
-  const { geoms, materials } = useEdfMeshes(nodes, textures, rubber, shaders ?? null);
+  const { geoms, materials } = useEdfMeshes(nodes, textures, rubber, shaders ?? null, focus ?? null);
   const groups = useMemo<PoseGroup[]>(
     () => nodes.map((n) => (rig ? poseGroup(n.name) : "static")),
     [nodes, rig],
@@ -2529,6 +2546,8 @@ export interface ModelViewerProps {
    * sliders, so the shininess and reflection being tuned show as they move.
    */
   shaders?: Shaders | null;
+  /** A sheet (lower-case name) of a lone model to light up: the `.shd` picked in Convert. */
+  focusSheet?: string | null;
 }
 
 export function ModelViewer({
@@ -2560,6 +2579,7 @@ export function ModelViewer({
   view = null,
   tyreTextures = null,
   shaders = null,
+  focusSheet = null,
 }: ModelViewerProps) {
   const rubber = useMemo(
     () => new Set((tyreTextures ?? []).map((t) => t.toLowerCase())),
@@ -2732,6 +2752,7 @@ export function ModelViewer({
                     rig={rig}
                     rubber={rubber}
                     shaders={shaders}
+                    focus={focusSheet}
                     pose={pose}
                   />
                   {bikeOverlay}

@@ -1175,7 +1175,7 @@ export function exportPaintProxy(
 }
 
 /** A model read straight from a file: its meshes and the textures it carries. */
-export type LooseModel = { nodes: EdfNode[]; textures: PaintTexture[] };
+export type LooseModel = { nodes: EdfNode[]; textures: PaintTexture[]; /** Texture names the meshes use that no file supplied. */ missing: string[] };
 
 /** Read any model file — a loose `.edf`, or every mesh in a `.pkz` or a folder. */
 export function loadModelFile(path: string): Promise<LooseModel> {

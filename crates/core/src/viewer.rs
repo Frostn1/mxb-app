@@ -1934,9 +1934,42 @@ pub fn load_pkz_mesh(pkz: &std::path::Path, entry: &str) -> Option<Vec<edf::EdfN
 /// A model read straight from a file: its meshes, bound to the textures they name, and those
 /// textures as the file carries them.
 #[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct LooseModel {
     pub nodes: Vec<edf::EdfNode>,
     pub textures: Vec<paint::PaintTexture>,
+    /// Texture names the meshes use that neither the file nor the folders around it supplied.
+    pub missing: Vec<String>,
+}
+
+/// The folders a loose model's pictures are looked for in, nearest first: beside the `.edf`,
+/// its `paints` and `textures` folders, then a `Textures` folder next to the folder it is in
+/// (an export project keeps `EDF/` and `Textures/` side by side).
+pub fn texture_search_dirs(edf: &std::path::Path) -> Vec<PathBuf> {
+    let Some(dir) = edf.parent() else { return Vec::new() };
+    let child = crate::library::resolve_child;
+    let mut dirs = vec![dir.to_path_buf(), child(dir, "paints"), child(dir, "textures")];
+    if let Some(up) = dir.parent() {
+        dirs.push(child(up, "textures"));
+    }
+    dirs
+}
+
+/// `name.<ext>` in `dirs`, for the picture formats the converter reads, matched without
+/// regard to case, the first folder that has it winning.
+pub fn find_texture_file(dirs: &[PathBuf], name: &str) -> Option<PathBuf> {
+    const EXTS: [&str; 6] = ["tga", "png", "dds", "bmp", "jpg", "jpeg"];
+    for dir in dirs {
+        let Ok(entries) = std::fs::read_dir(dir) else { continue };
+        let files: Vec<PathBuf> = entries.filter_map(Result::ok).map(|e| e.path()).filter(|p| p.is_file()).collect();
+        for ext in EXTS {
+            let want = format!("{name}.{ext}").to_ascii_lowercase();
+            if let Some(hit) = files.iter().find(|p| p.file_name().is_some_and(|f| f.to_string_lossy().to_ascii_lowercase() == want)) {
+                return Some(hit.clone());
+            }
+        }
+    }
+    None
 }
 
 /// Any model on disk — a loose `.edf`, or every mesh in a `.pkz`, `.zip` or folder. A bar pad,
@@ -2003,7 +2036,32 @@ pub fn load_model_file_blocking(path: &str) -> Result<LooseModel, String> {
     if nodes.is_empty() {
         return Err("There's no readable model in there.".into());
     }
-    Ok(LooseModel { nodes, textures })
+    // What the meshes name that the file doesn't carry: found beside it the way the game finds
+    // a picture, else reported so the view can say what it is drawing without.
+    let mut wanted: Vec<String> = Vec::new();
+    for n in &nodes {
+        for t in n.texture.iter().chain(n.submeshes.iter().filter_map(|s| s.texture.as_ref())) {
+            let key = t.to_ascii_lowercase();
+            if key != "hide" && key != "face" && !wanted.contains(&key) {
+                wanted.push(key);
+            }
+        }
+    }
+    let dirs = if p.is_file() { texture_search_dirs(p) } else { Vec::new() };
+    let mut missing = Vec::new();
+    for name in wanted {
+        if textures.iter().any(|t| t.name.eq_ignore_ascii_case(&name)) {
+            continue;
+        }
+        let found = find_texture_file(&dirs, &name)
+            .and_then(|f| std::fs::read(&f).ok())
+            .and_then(|bytes| paint::decode_image(&name, &bytes));
+        match found {
+            Some(t) => textures.push(t),
+            None => missing.push(name),
+        }
+    }
+    Ok(LooseModel { nodes, textures, missing })
 }
 
 /// The stock rider profiles the game itself ships. They're the fallback for a custom model
@@ -5575,4 +5633,27 @@ pub fn unpack_paint_blocking(path: String) -> Result<Vec<paint::PaintTexture>, S
         }
     }
     Ok(textures)
+}
+
+#[cfg(test)]
+mod texture_search_tests {
+    use super::*;
+
+    #[test]
+    fn a_texture_is_found_beside_the_edf_or_in_a_sibling_textures_folder_whatever_the_case() {
+        let root = std::env::temp_dir().join(format!("mxb-tex-{}", std::process::id()));
+        let edf_dir = root.join("EDF");
+        let tex_dir = root.join("Textures");
+        std::fs::create_dir_all(&edf_dir).unwrap();
+        std::fs::create_dir_all(&tex_dir).unwrap();
+        std::fs::write(tex_dir.join("Frame.TGA"), b"x").unwrap();
+        std::fs::write(edf_dir.join("plastics.png"), b"x").unwrap();
+        let dirs = texture_search_dirs(&edf_dir.join("bike.edf"));
+        // Windows keeps the spelling it was asked with, so compare the way the file system does.
+        let same = |hit: Option<PathBuf>, want: PathBuf| hit.is_some_and(|h| h.to_string_lossy().eq_ignore_ascii_case(&want.to_string_lossy()));
+        assert!(same(find_texture_file(&dirs, "frame"), tex_dir.join("Frame.TGA")));
+        assert!(same(find_texture_file(&dirs, "plastics"), edf_dir.join("plastics.png")));
+        assert_eq!(find_texture_file(&dirs, "nothing"), None);
+        let _ = std::fs::remove_dir_all(&root);
+    }
 }

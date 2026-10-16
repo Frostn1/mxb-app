@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { FileBox, FolderOpen, Loader2, RotateCcw } from "lucide-react";
+import { ChevronRight, Eye, FileBox, FolderOpen, Loader2, RotateCcw } from "lucide-react";
 import { Button } from "../ui/button";
 import { Slider } from "../ui/controls";
+import { cn } from "../../lib/utils";
 import { ErrorBoundary } from "../ErrorBoundary";
 import { ModelViewer, type Shaders } from "../Viewer/ModelViewer";
 import { loadModelFile, revealInExplorer, type LooseModel } from "../../api/mods";
@@ -11,21 +12,94 @@ import { useT } from "../../i18n/context";
 /** How long a slider rests before its `.shd` is written: dragging is many values, one file. */
 const SAVE_AFTER = 250;
 
-const head = "text-[11px] font-semibold uppercase tracking-[0.09em] text-faint";
+const head = "text-[11px] font-semibold tracking-[0.09em] text-faint";
+
+/** Every file a conversion wrote, with the one Open folder. */
+export function WrittenFiles({ outcome }: { outcome: Outcome }) {
+  const t = useT();
+  return (
+    <section className="mt-5">
+      <div className="flex items-center">
+        <h3 className={head}>{t("convert.written")}</h3>
+        {outcome.files.length > 0 && (
+          <Button size="sm" variant="ghost" className="ml-auto" onClick={() => void revealInExplorer(outcome.files[0])}>
+            <FolderOpen className="size-3.5" /> {t("convert.openFolder")}
+          </Button>
+        )}
+      </div>
+      <ul className="border border-border bg-card text-[12px]">
+        {outcome.files.map((f) => (
+          <li key={f} className="flex items-center gap-2 border-b border-border/60 px-3 py-1.5 last:border-b-0" title={f}>
+            <FileBox className="size-3.5 flex-none text-muted-foreground" />
+            <span className="select-text truncate font-mono">{nameOf(f)}</span>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
 
 /**
- * What a converted model came to: every file written, the model in 3D, and its materials'
- * `.shd` values on sliders. The view follows the sliders as they move and each change is
- * written to the `.shd` beside the `.edf`.
+ * The Preview tab: the last conversion in 3D with its materials' `.shd` values on sliders, the
+ * view large beside a list that scrolls on its own (stacked on a narrow window, the view on
+ * top). The view follows the sliders as they move and each change is written to the `.shd`
+ * beside the `.edf`; picking a material lights it up in the view.
  *
- * Mount it per conversion (`key`): the values start from what the conversion left on disk.
+ * `watching` converts again whenever a source file is saved (see Convert).
  */
-export default function ConvertResult({ output, outcome }: { output: string; outcome: Outcome }) {
+export function ConvertPreview({
+  last,
+  running,
+  watching,
+  canWatch,
+  onWatch,
+  onConvert,
+}: {
+  last: { key: string; output: string; outcome: Outcome } | null;
+  running: boolean;
+  watching: boolean;
+  canWatch: boolean;
+  onWatch: (on: boolean) => void;
+  onConvert: () => void;
+}) {
+  const t = useT();
+  if (!last)
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-3 text-[12.5px] text-muted-foreground">
+        {running ? <Loader2 className="size-5 animate-spin" /> : <Eye className="size-6" />}
+        {t("convert.previewEmpty")}
+        {!running && (
+          <Button size="sm" variant="outline" onClick={onConvert}>
+            {t("convert.tabConvert")}
+          </Button>
+        )}
+      </div>
+    );
+  return (
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="flex flex-none items-center gap-3 px-6 pt-3 text-[12px]">
+        <label className="flex items-center gap-2">
+          <input type="checkbox" checked={watching} disabled={!canWatch} onChange={(e) => onWatch(e.target.checked)} />
+          {t("convert.watch")}
+        </label>
+        <span className="ml-auto flex-none truncate font-mono text-[11.5px] text-muted-foreground" title={last.output}>
+          {nameOf(last.output)}
+        </span>
+      </div>
+      <PreviewBody key={last.key} output={last.output} outcome={last.outcome} />
+    </div>
+  );
+}
+
+/** Mount per conversion (`key`): the values start from what the conversion left on disk. */
+function PreviewBody({ output, outcome }: { output: string; outcome: Outcome }) {
   const t = useT();
   const [model, setModel] = useState<LooseModel | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
   const [values, setValues] = useState<Record<string, ShdValues>>(() => Object.fromEntries(outcome.shaders.map((f) => [f.path, f.values])));
   const [saveError, setSaveError] = useState<string | null>(null);
+  /** The material picked in the list: lit in the view, its sliders open. */
+  const [focus, setFocus] = useState<string | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -71,54 +145,41 @@ export default function ConvertResult({ output, outcome }: { output: string; out
   const shaders = useMemo<Shaders>(() => Object.fromEntries(outcome.shaders.map((f) => [f.name.toLowerCase(), values[f.path] ?? f.values])), [outcome.shaders, values]);
 
   return (
-    <div className="mt-5 grid gap-6">
-      <section>
-        <div className="flex items-center">
-          <h3 className={head}>{t("convert.written")}</h3>
-          {outcome.files.length > 0 && (
-            <Button size="sm" variant="ghost" className="ml-auto" onClick={() => void revealInExplorer(outcome.files[0])}>
-              <FolderOpen className="size-3.5" /> {t("convert.openFolder")}
-            </Button>
-          )}
-        </div>
-        <p className="mb-2 text-[11.5px] text-muted-foreground">{t("convert.writtenHint")}</p>
-        <ul className="border border-border bg-card text-[12px]">
-          {outcome.files.map((f) => (
-            <li key={f} className="flex items-center gap-2 border-b border-border/60 px-3 py-1.5 last:border-b-0" title={f}>
-              <FileBox className="size-3.5 flex-none text-muted-foreground" />
-              <span className="select-text truncate font-mono">{nameOf(f)}</span>
-            </li>
-          ))}
-        </ul>
-      </section>
+    <div className="flex min-h-0 flex-1 flex-col gap-4 px-6 pb-5 pt-3 lg:flex-row">
+      <div className="relative h-[46%] min-h-[220px] flex-none overflow-hidden rounded-lg border border-border bg-card lg:h-auto lg:min-h-0 lg:flex-1">
+        {failed ? (
+          <p className="flex h-full items-center justify-center px-6 text-center text-[12px] text-muted-foreground">{t("convert.viewFailed", { why: failed })}</p>
+        ) : !model ? (
+          <div className="flex h-full items-center justify-center text-muted-foreground">
+            <Loader2 className="size-4 animate-spin" />
+          </div>
+        ) : (
+          <ErrorBoundary compact label="convert-view">
+            <ModelViewer mode="bike" nodes={model.nodes} textures={model.textures} shaders={shaders} focusSheet={focus} hideHints className="absolute inset-0" />
+          </ErrorBoundary>
+        )}
+        {model && model.missing.length > 0 && (
+          <p className="absolute bottom-2 left-2 right-2 truncate rounded-md bg-background/85 px-2 py-1 text-[11.5px] text-amber-600 dark:text-amber-400" title={model.missing.join(", ")}>
+            {t("convert.texturesMissing", { count: model.missing.length, names: model.missing.join(", ") })}
+          </p>
+        )}
+      </div>
 
-      <section>
-        <h3 className={head}>{t("convert.view")}</h3>
-        <p className="mb-2 text-[11.5px] text-muted-foreground">{t("convert.viewHint")}</p>
-        <div className="relative h-[340px] overflow-hidden rounded-lg border border-border bg-card">
-          {failed ? (
-            <p className="flex h-full items-center justify-center px-6 text-center text-[12px] text-muted-foreground">{t("convert.viewFailed", { why: failed })}</p>
-          ) : !model ? (
-            <div className="flex h-full items-center justify-center text-muted-foreground">
-              <Loader2 className="size-4 animate-spin" />
-            </div>
-          ) : (
-            <ErrorBoundary compact label="convert-view">
-              <ModelViewer mode="bike" nodes={model.nodes} textures={model.textures} shaders={shaders} hideHints className="absolute inset-0" />
-            </ErrorBoundary>
-          )}
-        </div>
-      </section>
-
-      <section>
+      <section className="min-h-0 flex-1 overflow-y-auto lg:w-[360px] lg:flex-none">
         <h3 className={head}>{t("convert.shaders")}</h3>
-        <p className="mb-2 text-[11.5px] text-muted-foreground">{t("convert.shadersHint")}</p>
         {outcome.shaders.length === 0 ? (
           <p className="text-[12px] text-muted-foreground">{t("convert.noShaders")}</p>
         ) : (
-          <div className="grid gap-3">
+          <div className="grid gap-2">
             {outcome.shaders.map((f) => (
-              <Material key={f.path} file={f} values={values[f.path] ?? f.values} onChange={(v) => change(f, v)} />
+              <Material
+                key={f.path}
+                file={f}
+                values={values[f.path] ?? f.values}
+                open={focus === f.name.toLowerCase()}
+                onToggle={() => setFocus((cur) => (cur === f.name.toLowerCase() ? null : f.name.toLowerCase()))}
+                onChange={(v) => change(f, v)}
+              />
             ))}
           </div>
         )}
@@ -128,35 +189,41 @@ export default function ConvertResult({ output, outcome }: { output: string; out
   );
 }
 
-function Material({ file, values, onChange }: { file: ShdFile; values: ShdValues; onChange: (v: ShdValues) => void }) {
+/** One material: a line (name, kept, reset) that opens its sliders and lights it in the view. */
+function Material({ file, values, open, onToggle, onChange }: { file: ShdFile; values: ShdValues; open: boolean; onToggle: () => void; onChange: (v: ShdValues) => void }) {
   const t = useT();
   const set = (k: keyof ShdValues) => (n: number) => onChange({ ...values, [k]: n });
   const stock = (Object.keys(STOCK_SHD) as (keyof ShdValues)[]).every((k) => values[k] === STOCK_SHD[k]);
   return (
-    <div className="rounded-lg border border-border bg-card/40 px-3.5 py-3">
-      <div className="mb-2 flex items-center gap-2">
-        <span className="min-w-0 flex-1 truncate font-mono text-[12px]" title={file.path}>
-          {file.name}.shd
-        </span>
+    <div className={cn("rounded-lg border bg-card/40", open ? "border-primary/50" : "border-border")}>
+      <div className="flex items-center gap-2 px-3 py-1.5">
+        <button className="flex min-w-0 flex-1 cursor-default items-center gap-1.5 text-left" aria-expanded={open} onClick={onToggle}>
+          <ChevronRight className={cn("size-3.5 flex-none text-muted-foreground transition-transform", open && "rotate-90")} />
+          <span className="min-w-0 flex-1 truncate font-mono text-[12px]" title={file.path}>
+            {file.name}.shd
+          </span>
+        </button>
         {!file.written && <span className="flex-none rounded-full bg-muted px-2 py-0.5 text-[10.5px] text-muted-foreground">{t("convert.shdKept")}</span>}
         <Button size="sm" variant="ghost" className="h-6 px-1.5" disabled={stock} title={t("convert.resetShd")} onClick={() => onChange({ ...STOCK_SHD })}>
           <RotateCcw className="size-3.5" />
         </Button>
       </div>
-      <div className="grid gap-1.5">
-        <Control label={t("convert.shininess")}>
-          <Slider editable value={values.shininess} min={0} max={100} step={1} onChange={set("shininess")} format={(v) => String(v)} />
-        </Control>
-        <Control label={t("convert.reflectionMin")}>
-          <Slider editable value={values.reflectionMin} min={0} max={1} step={0.01} onChange={set("reflectionMin")} format={(v) => v.toFixed(2)} />
-        </Control>
-        <Control label={t("convert.reflectionMax")}>
-          <Slider editable value={values.reflectionMax} min={0} max={1} step={0.01} onChange={set("reflectionMax")} format={(v) => v.toFixed(2)} />
-        </Control>
-        <Control label={t("convert.reflectionExp")}>
-          <Slider editable value={values.reflectionExp} min={0} max={4} step={0.1} onChange={set("reflectionExp")} format={(v) => v.toFixed(1)} />
-        </Control>
-      </div>
+      {open && (
+        <div className="grid gap-1.5 px-3.5 pb-3 pt-1">
+          <Control label={t("convert.shininess")}>
+            <Slider editable value={values.shininess} min={0} max={100} step={1} onChange={set("shininess")} format={(v) => String(v)} />
+          </Control>
+          <Control label={t("convert.reflectionMin")}>
+            <Slider editable value={values.reflectionMin} min={0} max={1} step={0.01} onChange={set("reflectionMin")} format={(v) => v.toFixed(2)} />
+          </Control>
+          <Control label={t("convert.reflectionMax")}>
+            <Slider editable value={values.reflectionMax} min={0} max={1} step={0.01} onChange={set("reflectionMax")} format={(v) => v.toFixed(2)} />
+          </Control>
+          <Control label={t("convert.reflectionExp")}>
+            <Slider editable value={values.reflectionExp} min={0} max={4} step={0.1} onChange={set("reflectionExp")} format={(v) => v.toFixed(1)} />
+          </Control>
+        </div>
+      )}
     </div>
   );
 }
