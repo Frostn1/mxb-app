@@ -299,6 +299,9 @@ pub struct AppConfig {
     /// [`crate::support`]. Per app because this file is shared, and turning the card off in
     /// one app says nothing about the other.
     pub support: BTreeMap<String, SupportState>,
+    /// Whether the signed-in account has the supporter pack, as last read — see
+    /// [`crate::supporter`]. Cached so themes and the badge work offline.
+    pub supporter: SupporterCache,
     /// Live share codes this machine publishes, and the key that lets it update each one.
     ///
     /// The key is why this is stored at all: publishing a live share needs no account, so
@@ -431,9 +434,18 @@ pub struct SupportState {
     pub snooze_until: u64,
     /// "Don't show again".
     pub never: bool,
-    /// Known to support the project already. Nothing sets this yet; it is where an account
-    /// check will land, and the card already honours it.
+    /// Known to support the project already. The account's own answer lives in
+    /// [`AppConfig::supporter`]; either one keeps the card away.
     pub supporter: bool,
+}
+
+/// The supporter pack, as the control plane last said — see [`crate::supporter`].
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct SupporterCache {
+    pub supporter: bool,
+    /// Unix milliseconds of that answer. `0` means never asked.
+    pub checked_at: u64,
 }
 
 /// Toggle combo used until the player picks another one.
@@ -538,6 +550,7 @@ impl Default for AppConfig {
             survey_enabled: true,
             survey: SurveyState::default(),
             support: BTreeMap::new(),
+            supporter: SupporterCache::default(),
             published_shares: Vec::new(),
             live_subscriptions: Vec::new(),
             replay: crate::replay::Recording::default(),

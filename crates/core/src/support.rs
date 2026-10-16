@@ -179,7 +179,9 @@ pub fn due(app: &AppHandle, trigger: Trigger) -> bool {
         return false;
     }
     let Ok(cfg) = config::load(app) else { return false };
-    decide(&state_of(&cfg, app_id), trigger, now_ms(), cfg.survey.last_shown)
+    let mut state = state_of(&cfg, app_id);
+    state.supporter |= crate::supporter::is_supporter(&cfg);
+    decide(&state, trigger, now_ms(), cfg.survey.last_shown)
 }
 
 // ── The commands the webview calls ──────────────────────────────────────────────────────

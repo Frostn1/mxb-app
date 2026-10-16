@@ -168,6 +168,8 @@ fn main() {
             mxb_core::survey::survey_answer,
             mxb_core::survey::survey_dismiss,
             mxb_core::survey::set_survey_enabled,
+            mxb_core::supporter::supporter_status,
+            mxb_core::supporter::supporter_refresh,
             mxb_core::support::support_due,
             mxb_core::support::support_shown,
             mxb_core::support::support_later,
@@ -368,6 +370,8 @@ fn main() {
             // it answers the question counters cannot, which is whether any of this is any
             // good. Nothing is fetched or asked when either switch is off.
             mxb_core::survey::start(app.handle(), usage::STUDIO);
+            // Whether the account has the supporter pack, cached for offline use.
+            mxb_core::supporter::start(app.handle());
             // The support card's launch count. Counted whatever the build; whether it is ever shown
             // is decided in `support::due`.
             mxb_core::support::start(app.handle(), usage::STUDIO);
