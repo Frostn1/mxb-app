@@ -55,7 +55,7 @@ export function ConvertPreview({
   onWatch,
   onConvert,
 }: {
-  last: { key: string; output: string; outcome: Outcome } | null;
+  last: { key: string; output: string; source: string; outcome: Outcome } | null;
   running: boolean;
   watching: boolean;
   canWatch: boolean;
@@ -86,13 +86,13 @@ export function ConvertPreview({
           {nameOf(last.output)}
         </span>
       </div>
-      <PreviewBody key={last.key} output={last.output} outcome={last.outcome} />
+      <PreviewBody key={last.key} output={last.output} source={last.source} outcome={last.outcome} />
     </div>
   );
 }
 
 /** Mount per conversion (`key`): the values start from what the conversion left on disk. */
-function PreviewBody({ output, outcome }: { output: string; outcome: Outcome }) {
+function PreviewBody({ output, source, outcome }: { output: string; source: string; outcome: Outcome }) {
   const t = useT();
   const [model, setModel] = useState<LooseModel | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
@@ -105,13 +105,13 @@ function PreviewBody({ output, outcome }: { output: string; outcome: Outcome }) 
     let alive = true;
     setModel(null);
     setFailed(null);
-    loadModelFile(output)
+    loadModelFile(output, source)
       .then((m) => alive && setModel(m))
       .catch((e) => alive && setFailed(String(e).replace(/^Error:\s*/, "")));
     return () => {
       alive = false;
     };
-  }, [output]);
+  }, [output, source]);
 
   // One pending write per file; leaving writes whatever is waiting, so a slider let go of and
   // then closed is not lost.
@@ -158,10 +158,11 @@ function PreviewBody({ output, outcome }: { output: string; outcome: Outcome }) 
             <ModelViewer mode="bike" nodes={model.nodes} textures={model.textures} shaders={shaders} focusSheet={focus} hideHints className="absolute inset-0" />
           </ErrorBoundary>
         )}
-        {model && model.missing.length > 0 && (
-          <p className="absolute bottom-2 left-2 right-2 truncate rounded-md bg-background/85 px-2 py-1 text-[11.5px] text-amber-600 dark:text-amber-400" title={model.missing.join(", ")}>
-            {t("convert.texturesMissing", { count: model.missing.length, names: model.missing.join(", ") })}
-          </p>
+        {model && (model.missing.length > 0 || model.unreadable.length > 0) && (
+          <div className="absolute bottom-2 left-2 right-2 grid gap-0.5 rounded-md bg-background/85 px-2 py-1 text-[11.5px] text-amber-600 dark:text-amber-400">
+            {model.missing.length > 0 && <p className="truncate" title={model.missing.join(", ")}>{t("convert.texturesMissing", { names: model.missing.join(", ") })}</p>}
+            {model.unreadable.length > 0 && <p className="truncate" title={model.unreadable.join(", ")}>{t("convert.texturesUnreadable", { names: model.unreadable.join(", ") })}</p>}
+          </div>
         )}
       </div>
 

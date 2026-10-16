@@ -127,7 +127,7 @@ export default function Convert({ active, storageKey, opened }: { active: boolea
   const [watch, setWatch] = useState(false);
   const [watchPaths, setWatchPaths] = useState<string[]>([]);
   /** The last conversion that worked: what the Preview shows, kept while the next one runs. */
-  const [last, setLast] = useState<{ key: string; output: string; outcome: Outcome } | null>(null);
+  const [last, setLast] = useState<{ key: string; output: string; source: string; outcome: Outcome } | null>(null);
   const redo = useRef(false);
   const [saved, setSaved] = useState<SavedScript[]>([]);
 
@@ -366,7 +366,7 @@ export default function Convert({ active, storageKey, opened }: { active: boolea
   const converted = (jobs ?? []).filter((j): j is Job & { status: { state: "done"; outcome: Outcome } } => j.status.state === "done" && !!j.status.outcome.report);
   const shown = running ? undefined : (converted.find((j) => j.input === picked) ?? converted[0]);
   useEffect(() => {
-    if (shown) setLast({ key: `${runs}:${shown.output}`, output: shown.output, outcome: shown.status.outcome });
+    if (shown) setLast({ key: `${runs}:${shown.output}`, output: shown.output, source: shown.input, outcome: shown.status.outcome });
     else if (!jobs && !running) setLast(null);
   }, [shown, runs, jobs, running]);
 
