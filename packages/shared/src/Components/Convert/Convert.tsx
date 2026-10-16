@@ -415,7 +415,6 @@ export default function Convert({ active, storageKey, opened }: { active: boolea
         ) : (
           <div className="flex h-full min-h-0">
       <section className="flex w-[340px] flex-none flex-col gap-4 overflow-y-auto border-r border-border px-6 py-4">
-        <h2 className="text-[11px] font-semibold uppercase tracking-[0.09em] text-faint">{t("convert.title")}</h2>
         <fieldset disabled={running} className="contents">
           <Field label={t("convert.output")}>
             <Segmented
@@ -476,7 +475,6 @@ export default function Convert({ active, storageKey, opened }: { active: boolea
           {single && (
             <Field label={t("convert.outName")}>
               <Input className="h-8" value={s.outName} placeholder="model.edf" onChange={(e) => set("outName", e.target.value)} />
-              <p className="mt-1 text-[11.5px] text-muted-foreground">{t("convert.outNameHint")}</p>
             </Field>
           )}
 
@@ -539,7 +537,7 @@ export default function Convert({ active, storageKey, opened }: { active: boolea
           </div>
 
           <details className="group rounded-lg border border-border px-3 py-2">
-            <summary className="cursor-default select-none text-[11px] font-semibold uppercase tracking-[0.09em] text-faint">{t("convert.more")}</summary>
+            <summary className="cursor-default select-none text-[11px] font-semibold tracking-[0.09em] text-faint">{t("convert.more")}</summary>
             <div className="mt-3 grid gap-4">
                         <Field label={t("convert.mergeTitle")}>
                           <div className="flex items-center gap-3">
@@ -606,7 +604,6 @@ export default function Convert({ active, storageKey, opened }: { active: boolea
 
                         <Field label={t("convert.shaders")}>
                           <div className="grid gap-1.5 text-[12.5px]">
-                            <p className="text-[11.5px] text-muted-foreground">{t("convert.shdAlways")}</p>
                             <label className="flex items-center gap-2">
                               <input type="checkbox" checked={s.overwriteShd} onChange={(e) => set("overwriteShd", e.target.checked)} />
                               {t("convert.overwriteShd")}
@@ -627,7 +624,7 @@ export default function Convert({ active, storageKey, opened }: { active: boolea
 
       <section className={cn("relative flex min-w-0 flex-1 flex-col", over && "bg-primary-tint")}>
         <div className="flex flex-none items-center gap-2 px-6 pb-2.5 pt-4">
-          <h2 className="text-[11px] font-semibold uppercase tracking-[0.09em] text-faint">{t("convert.files")}</h2>
+          <h2 className="text-[11px] font-semibold tracking-[0.09em] text-faint">{t("convert.files")}</h2>
           <div className="ml-auto flex items-center gap-2">
             {files.length > 0 && (
               <Button
@@ -705,7 +702,7 @@ function Field({ label, action, children }: { label: string; action?: React.Reac
   return (
     <div>
       <div className="mb-1.5 flex items-center justify-between">
-        <span className="text-[10.5px] font-semibold uppercase tracking-[0.09em] text-faint">{label}</span>
+        <span className="text-[10.5px] font-semibold tracking-[0.09em] text-faint">{label}</span>
         {action}
       </div>
       {children}

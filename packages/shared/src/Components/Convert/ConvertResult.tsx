@@ -12,7 +12,7 @@ import { useT } from "../../i18n/context";
 /** How long a slider rests before its `.shd` is written: dragging is many values, one file. */
 const SAVE_AFTER = 250;
 
-const head = "text-[11px] font-semibold uppercase tracking-[0.09em] text-faint";
+const head = "text-[11px] font-semibold tracking-[0.09em] text-faint";
 
 /** Every file a conversion wrote, with the one Open folder. */
 export function WrittenFiles({ outcome }: { outcome: Outcome }) {
@@ -27,7 +27,6 @@ export function WrittenFiles({ outcome }: { outcome: Outcome }) {
           </Button>
         )}
       </div>
-      <p className="mb-2 text-[11.5px] text-muted-foreground">{t("convert.writtenHint")}</p>
       <ul className="border border-border bg-card text-[12px]">
         {outcome.files.map((f) => (
           <li key={f} className="flex items-center gap-2 border-b border-border/60 px-3 py-1.5 last:border-b-0" title={f}>
@@ -79,11 +78,10 @@ export function ConvertPreview({
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex flex-none items-center gap-3 px-6 pt-3 text-[12px]">
-        <label className="flex items-center gap-2" title={t("convert.watchHint")}>
+        <label className="flex items-center gap-2">
           <input type="checkbox" checked={watching} disabled={!canWatch} onChange={(e) => onWatch(e.target.checked)} />
           {t("convert.watch")}
         </label>
-        <span className="min-w-0 truncate text-[11.5px] text-muted-foreground">{t("convert.watchHint")}</span>
         <span className="ml-auto flex-none truncate font-mono text-[11.5px] text-muted-foreground" title={last.output}>
           {nameOf(last.output)}
         </span>
@@ -164,7 +162,6 @@ function PreviewBody({ output, outcome }: { output: string; outcome: Outcome }) 
 
       <section className="min-h-0 flex-1 overflow-y-auto lg:w-[360px] lg:flex-none">
         <h3 className={head}>{t("convert.shaders")}</h3>
-        <p className="mb-2 text-[11.5px] text-muted-foreground">{t("convert.shadersHint")}</p>
         {outcome.shaders.length === 0 ? (
           <p className="text-[12px] text-muted-foreground">{t("convert.noShaders")}</p>
         ) : (
