@@ -2346,7 +2346,7 @@ function DensitySlider({ value, onChange }: { value: number; onChange: (v: numbe
   const span = DENSITY_RANGE.max - DENSITY_RANGE.min;
   const word = value < 0.9 ? "sparse" : value > 1.1 ? "packed" : "real";
   return (
-    <label className="flex items-center gap-2">
+    <label className="flex items-center w-full gap-2">
       <span className="font-cond text-[10px] font-semibold uppercase tracking-[0.22em] text-faint">
         {t("track.density")}
       </span>
