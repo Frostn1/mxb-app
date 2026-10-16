@@ -62,9 +62,9 @@ pub async fn fbx_is_bike(path: String) -> Result<bool, String> {
 
 /// Where each model is written (see [`job::output_paths`]).
 #[tauri::command]
-pub fn fbx_output_paths(models: Vec<Model>, folder: Option<String>, bike: bool) -> Vec<String> {
+pub fn fbx_output_paths(models: Vec<Model>, folder: Option<String>, bike: bool, name: Option<String>) -> Vec<String> {
     let folder = folder.filter(|f| !f.is_empty()).map(PathBuf::from);
-    job::output_paths(&models, folder.as_deref(), bike)
+    job::output_paths(&models, folder.as_deref(), bike, name.as_deref())
         .into_iter()
         .map(|p| p.to_string_lossy().into_owned())
         .collect()

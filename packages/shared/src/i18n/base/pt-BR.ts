@@ -279,6 +279,8 @@ export const ptBR: Record<keyof typeof en, string> = {
   "convert.fast": "Modo rápido",
   "convert.shaders": "Shaders",
   "convert.overwriteShd": "Substituir .shd existentes",
+  "convert.outName": "Nome de saída",
+  "convert.outNameHint": "Opcional. Vazio mantém o nome usual; .edf é adicionado.",
   "convert.script": "Script de exportação",
   "convert.loadScript": "Carregar arquivo",
   "convert.scriptNoSection": "Nenhuma seção [Hierarchy].",

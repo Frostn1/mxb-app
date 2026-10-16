@@ -17,6 +17,7 @@ Usage: frost-converter <FBX files or folders> [options]
   --parts | --whole    Layout. Default: bike parts when the first model is a bike.
   --main NAME          The main part with --parts. Default: chassis.
   --fbx-name           Name a bike's file after its FBX. Default: model.edf.
+  --name NAME          Name the .edf (one model only). Default: the FBX's or model.edf.
   --hrc MODE           always, if-none or never. Default: if-none.
   --no-shd             Don't write .shd files.
   --overwrite-shd      Write over .shd files already there.
@@ -67,6 +68,7 @@ struct Args {
     layout: Option<&'static str>,
     main: Option<String>,
     fbx_name: bool,
+    name: Option<String>,
     hrc: HrcMode,
     shd: Shd,
     options: Options,
@@ -81,6 +83,7 @@ fn parse(args: &[String]) -> Result<Option<Args>, String> {
         layout: None,
         main: None,
         fbx_name: false,
+        name: None,
         hrc: HrcMode::IfNone,
         shd: Shd::default(),
         // The window's defaults: scale 1, no merging, the file's normals, every core.
@@ -99,6 +102,7 @@ fn parse(args: &[String]) -> Result<Option<Args>, String> {
             "--whole" => a.layout = Some("whole"),
             "--main" => a.main = Some(value(&mut it, arg)?),
             "--fbx-name" => a.fbx_name = true,
+            "--name" => a.name = Some(value(&mut it, arg)?),
             "--hrc" => {
                 a.hrc = match value(&mut it, arg)?.to_ascii_lowercase().as_str() {
                     "always" => HrcMode::Always,
@@ -185,7 +189,7 @@ fn convert(mut a: Args) -> Result<bool, String> {
     if let Some(out) = &a.out {
         std::fs::create_dir_all(out).map_err(|e| format!("{}: {e}", out.display()))?;
     }
-    let outputs = job::output_paths(&models, a.out.as_deref(), layout == "parts" && !a.fbx_name);
+    let outputs = job::output_paths(&models, a.out.as_deref(), layout == "parts" && !a.fbx_name, a.name.as_deref());
     let pairs: Vec<(PathBuf, PathBuf)> = models.iter().map(|m| PathBuf::from(&m.path)).zip(outputs).collect();
     let total = pairs.len();
     let json = a.json;

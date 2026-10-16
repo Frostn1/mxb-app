@@ -48,6 +48,8 @@ interface Settings {
   overwriteShd: boolean;
   /** A bike's file: `model.edf`, the name MX Bikes loads, or the FBX's own name as before. */
   naming: "model" | "fbx";
+  /** A name for the .edf when one model is written; empty keeps the usual name. */
+  outName: string;
   hrc: HrcMode;
 }
 
@@ -67,6 +69,7 @@ const DEFAULTS: Settings = {
   scriptName: "",
   overwriteShd: false,
   naming: "model",
+  outName: "",
   hrc: "ifNone",
 };
 
@@ -125,6 +128,8 @@ export default function Convert({ active, storageKey, opened }: { active: boolea
 
   const models = useMemo(() => files.filter((f) => f.kind !== "params"), [files]);
   const chosen = useMemo(() => models.filter((f) => !off.has(f.path)), [models, off]);
+  // The name field is for one .edf; a bike's shadow keeps the name the game loads.
+  const single = chosen.filter((f) => f.kind !== "shadow").length === 1;
   const script = s.script.trim() ? checkScript(s.script, s.layout) : null;
   const settings = s.script.trim() ? scriptSettings(s.script) : [];
 
@@ -255,7 +260,7 @@ export default function Convert({ active, storageKey, opened }: { active: boolea
     const list = chosen.map((f) => ({ path: f.path, shadow: f.kind === "shadow" }));
     let outs: string[];
     try {
-      outs = await outputPaths(list, s.out === "folder" && s.folder ? s.folder : null, s.layout === "parts" && s.naming === "model");
+      outs = await outputPaths(list, s.out === "folder" && s.folder ? s.folder : null, s.layout === "parts" && s.naming === "model", single ? s.outName : null);
     } catch (e) {
       return setError(String(e));
     }
@@ -404,6 +409,13 @@ export default function Convert({ active, storageKey, opened }: { active: boolea
                 />
               </Field>
             </>
+          )}
+
+          {single && (
+            <Field label={t("convert.outName")}>
+              <Input className="h-8" value={s.outName} placeholder="model.edf" onChange={(e) => set("outName", e.target.value)} />
+              <p className="mt-1 text-[11.5px] text-muted-foreground">{t("convert.outNameHint")}</p>
+            </Field>
           )}
 
           <div className="grid grid-cols-2 gap-3">

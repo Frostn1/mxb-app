@@ -279,6 +279,8 @@ export const fr: Record<keyof typeof en, string> = {
   "convert.fast": "Mode rapide",
   "convert.shaders": "Shaders",
   "convert.overwriteShd": "Écraser les .shd existants",
+  "convert.outName": "Nom de sortie",
+  "convert.outNameHint": "Facultatif. Vide : le nom habituel ; .edf est ajouté.",
   "convert.script": "Script d'export",
   "convert.loadScript": "Charger un fichier",
   "convert.scriptNoSection": "Aucune section [Hierarchy].",
