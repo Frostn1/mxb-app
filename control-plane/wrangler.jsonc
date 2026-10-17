@@ -59,6 +59,14 @@
     // The Blends shop on mxbsecure.com/blends (`blendshop.ts`). "off" keeps it shut; "test" opens it
     // with a Stripe test key only, "live" with a live key only. Prices come from the site.
     "MXB_BLENDS_SHOP": "off",
+    // The Terms version a supporter-pack buyer agrees to (`supporterpack.ts`). The same date as
+    // TERMS_VERSION in mxbsecure-site's src/lib/legal.ts; change both together.
+    "MXB_TERMS_VERSION": "2026-10-17",
+    // The supporter pack's currency (price: MXB_SUPPORTER_PACK_CENTS, default 1000).
+    "MXB_SUPPORTER_PACK_CURRENCY": "eur",
+    // The From line on the supporter-pack email code (`supporteremail.ts`); also needs the
+    // RESEND_API_KEY secret and mxbsecure.com verified in Resend.
+    "SUPPORTER_MAIL_FROM": "Frost <noreply@mxbsecure.com>",
     // Refuses a usage report that carries no valid build signature. Off, and it must stay off
     // until signed builds are the ones in the field — turning it on early drops everybody's
     // numbers and says nothing. The key itself is a secret; see `src/env.d.ts`.
