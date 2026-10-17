@@ -19,6 +19,8 @@ export interface ConvertOptions {
   useFileNormals?: boolean;
   /** Two textures at once rather than one per core. */
   lowMemory?: boolean;
+  /** "0" writes no skin at all (every mesh rigid); left out, the converter writes one only for a whole rider. */
+  skin?: "0";
 }
 
 export interface ConvertReport {

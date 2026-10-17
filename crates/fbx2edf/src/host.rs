@@ -24,6 +24,9 @@ pub struct Options {
     pub use_file_normals: bool,
     /// Two textures at once rather than one per core, for a machine short of memory.
     pub low_memory: bool,
+    /// "auto" (the converter's own: a skin only for a whole rider), "1" or "0". Left out, the
+    /// parameter file's `skin` or the default stands.
+    pub skin: Option<String>,
 }
 
 /// What a batch says as it goes. `index` is the pair's place in the batch.
@@ -64,6 +67,9 @@ fn params(o: &Options) -> anyhow::Result<crate::params::Params> {
     }
     if let Some(d) = o.merge_distance {
         p.merge_distance = d;
+    }
+    if let Some(s) = o.skin.as_deref() {
+        p.skin = crate::stock::SkinMode::parse(s)?;
     }
     if o.use_file_normals {
         p.normals = Normals::FromFile;
