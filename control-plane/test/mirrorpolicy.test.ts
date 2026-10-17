@@ -3,6 +3,7 @@ import { upsertPost, writeMirrorVersion, type Category } from "../src/mirror";
 import { mirrorFile } from "../src/mirrorfetch";
 import { activeBikes, bikeKey, evictUnused, modelTerms, supported, wantLiveTracks } from "../src/mirrorpolicy";
 import { getAsset, publicModRoutes, searchAssets } from "../src/modapi";
+import { checkLinks, RECHECK_MS } from "../src/linkhealth";
 import { addAccount, d1 } from "./d1sqlite";
 import { fakeBucket, fakeFetch, fakeQueue, nodeHasher } from "./modfakes";
 
@@ -166,6 +167,22 @@ describe("prepare: the Download button's wait", () => {
     expect(e.MIRROR_QUEUE.sent).toEqual([]);
   });
 
+  it("marks a link the host answered 404 as broken, in prepare and on the mod", async () => {
+    const e = env();
+    const { asset, pub, version } = await post(e, 1, "gone-mx", [22]);
+    await e.DB.prepare("UPDATE mod_files SET status = 'failed', error = 'gdrive: the file is gone (404)' WHERE version_id = ?")
+      .bind(version)
+      .run();
+    expect(await body(await prep(e, pub))).toEqual({ state: "original", source: "https://x.example/gone-mx.zip", broken: true });
+    const res = await getAsset(asset, new URL("https://api/x"), e);
+    expect((res.body as { files: { broken: boolean }[] }).files[0].broken).toBe(true);
+
+    await e.DB.prepare("UPDATE mod_files SET status = 'failed', error = 'larger than 2147483648 bytes' WHERE version_id = ?")
+      .bind(version)
+      .run();
+    expect(await body(await prep(e, pub))).toEqual({ state: "original", source: "https://x.example/gone-mx.zip" });
+  });
+
   it("answers 404 for a file the mod doesn't have", async () => {
     const e = env();
     const { pub } = await post(e, 1, "hills-mx", [22]);
@@ -229,5 +246,61 @@ describe("live-server tracks", () => {
     expect([...e.ASSET_MIRROR.objects.keys()]).toEqual([`x/${"a".repeat(64)}`]);
     expect(await status(e, cold.version)).toBe("idle");
     expect(await status(e, live.version)).toBe("done");
+  });
+});
+
+describe("link health", () => {
+  const files = async (e: Env, asset: number) =>
+    ((await getAsset(asset, new URL("https://api/x"), e)).body as { files: { link: string | null; broken: boolean }[] }).files;
+
+  it("checks unstored links gently, marks a 404 broken and a live one ok", async () => {
+    const e = env();
+    const dead = await post(e, 1, "dead-mx", [22], "https://x.example/dead.zip");
+    const live = await post(e, 2, "live-mx", [22], "https://y.example/live.zip");
+    const mega = await post(e, 3, "mega-mx", [22], "https://mega.nz/file/abc#key");
+    const f = fakeFetch([
+      [/x\.example/, () => new Response(null, { status: 404 })],
+      [/y\.example/, () => new Response(null, { status: 200 })],
+    ]);
+    const sleeps: number[] = [];
+    const r = await checkLinks(e, { fetch: f, now: NOW, sleep: async (ms) => void sleeps.push(ms) });
+    expect(r).toEqual({ checked: 2, broken: 1 });
+    expect(f.calls).toEqual(["HEAD https://x.example/dead.zip", "HEAD https://y.example/live.zip"]);
+    expect(sleeps).toEqual([1000]);
+    expect((await files(e, dead.asset))[0]).toMatchObject({ link: "broken", broken: true });
+    expect((await files(e, live.asset))[0]).toMatchObject({ link: "ok", broken: false });
+    expect((await files(e, mega.asset))[0]).toMatchObject({ link: null, broken: false });
+
+    // Nothing is due again until the recheck interval has passed.
+    expect(await checkLinks(e, { fetch: f, now: NOW + 1000, sleep: async () => {} })).toEqual({ checked: 0, broken: 0 });
+    expect((await checkLinks(e, { fetch: f, now: NOW + RECHECK_MS + 1, sleep: async () => {} })).checked).toBe(2);
+  });
+
+  it("says nothing on a refusal or a rate limit, and revives a link found alive again", async () => {
+    const e = env();
+    const { asset, version } = await post(e, 1, "back-mx", [22], "https://x.example/back.zip");
+    await e.DB.prepare("UPDATE mod_files SET status = 'failed', error = 'direct: the file is gone (404)' WHERE version_id = ?").bind(version).run();
+    expect((await files(e, asset))[0]).toMatchObject({ link: "broken", broken: true });
+    await checkLinks(e, { fetch: fakeFetch([[/x\.example/, () => new Response(null, { status: 429 })]]), now: NOW, sleep: async () => {} });
+    expect((await files(e, asset))[0]).toMatchObject({ link: "broken" });
+    await checkLinks(e, { fetch: fakeFetch([[/x\.example/, () => new Response(null, { status: 200 })]]), now: NOW + RECHECK_MS + 1, sleep: async () => {} });
+    expect((await files(e, asset))[0]).toMatchObject({ link: "ok", broken: false });
+    expect(await status(e, version)).toBe("idle");
+  });
+
+  it("reads Drive's own answers: a 404 and a sign-in bounce are broken", async () => {
+    const e = env();
+    const gone = await post(e, 1, "drive-gone", [22], "https://drive.google.com/file/d/GONE/view?usp=sharing");
+    const priv = await post(e, 2, "drive-private", [22], "https://drive.google.com/file/d/PRIV/view?usp=sharing");
+    const ok = await post(e, 3, "drive-ok", [22], "https://drive.google.com/file/d/OKAY/view?usp=sharing");
+    const f = fakeFetch([
+      [/GONE/, () => new Response("<title>Google Drive - Page Not Found</title>", { status: 404 })],
+      [/PRIV/, () => Object.defineProperty(new Response("<title>Sign in</title>"), "url", { value: "https://accounts.google.com/ServiceLogin?x" })],
+      [/OKAY/, () => new Response("<title>E10.zip - Google Drive</title>")],
+    ]);
+    await checkLinks(e, { fetch: f, now: NOW, sleep: async () => {} });
+    expect((await files(e, gone.asset))[0].link).toBe("broken");
+    expect((await files(e, priv.asset))[0].link).toBe("broken");
+    expect((await files(e, ok.asset))[0].link).toBe("ok");
   });
 });

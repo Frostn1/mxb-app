@@ -6,7 +6,8 @@
  * does runs here, and nothing here answers a user request:
  *
  *  - the cron: walk mxb-mods.com, queue live-server tracks, evict unused copies (`mirror.ts`,
- *    `mirrorpolicy.ts`), and tidy upload sessions (`uploadcheck.ts`);
+ *    `mirrorpolicy.ts`), check a few original links (`linkhealth.ts`), and tidy upload sessions
+ *    (`uploadcheck.ts`);
  *  - the `mxb-mirror` queue: fetch a mirrored file into R2 (`mirrorfetch.ts`, `mirrorhosts.ts`:
  *    MediaFire, Drive and its virus-scan form, MEGA decryption, folders), or check and publish
  *    an upload from quarantine (`uploadcheck.ts`, `modscan.ts`);
@@ -20,12 +21,15 @@
 import { runMirror, type MirrorJob } from "../src/mirror";
 import { consumeMirror, deadLetters } from "../src/mirrorfetch";
 import { expireUploads } from "../src/uploadcheck";
+import { checkLinks } from "../src/linkhealth";
 
 export const DLQ = "mxb-mirror-dlq";
 
 export default {
   async scheduled(_event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
-    ctx.waitUntil(Promise.all([runMirror(env), expireUploads(env)]).then(() => undefined));
+    // Link health (`linkhealth.ts`) is a few gentle checks a run; a failure there stops nothing else.
+    const links = checkLinks(env).catch((err) => console.error(JSON.stringify({ msg: "link check failed", error: String(err) })));
+    ctx.waitUntil(Promise.all([runMirror(env), expireUploads(env), links]).then(() => undefined));
   },
 
   async queue(batch: MessageBatch<MirrorJob>, env: Env): Promise<void> {

@@ -35,7 +35,8 @@ import { decodeEntities } from "./trackcatalog";
 import { evictUnused, wantLiveTracks } from "./mirrorpolicy";
 import { newPublicId } from "./modids";
 import { fetcherRouter, pagesViaFetcher } from "./fetcherroute";
-import { isModsHost, MAX_IMAGE_BYTES, MAX_IMAGES, parsePostBody, type PostImage } from "./modbody";
+import { contentRegion, isModsHost, MAX_IMAGE_BYTES, MAX_IMAGES, parsePostBody, type PostImage } from "./modbody";
+import { hostKind } from "./mirrorhosts";
 
 export const UA = "mxbsecure-mirror/1 (+https://mxbsecure.com/mods)";
 /** The product token robots.txt groups are matched against. */
@@ -62,8 +63,9 @@ const PAGES_PER_RUN = 40;
 const PAGE_QUEUE_TARGET = 60;
 /** How long a queued page read stays leased before it is assumed lost and sent again. */
 export const PAGE_LEASE_MS = 60 * MINUTE;
-/** The page parser. A row read by an older one is read again (rows from before pictures: 0). */
-export const PAGE_REV = 1;
+/** The page parser. A row read by an older one is read again (rows from before pictures: 0;
+ *  1: before links in the post's own text were taken as downloads too). */
+export const PAGE_REV = 2;
 /** Pages read side by side in one consumer invocation. One: the gentle rate. */
 export const PAGE_LANES = 1;
 /** Files handed to the queue per run. The queue consumer's own concurrency is the other cap. */
@@ -231,6 +233,48 @@ export function parseDownloads(html: string): DownloadOption[] {
     });
   }
   return out;
+}
+
+/** A file a link in the post's text names by its extension: mod archives and MX Bikes files. */
+const FILE_EXT = /\.(zip|rar|7z|pkz|pnt|edf|tga|dds|trk|hdr|wav|ogg)$/i;
+/** Most links read from a post's own text, so a link dump can't grow a mod's file list unbounded. */
+const MAX_BODY_LINKS = 12;
+
+/**
+ * Download links in the post's own text, beyond the theme's download blocks. Authors often put an
+ * alternative mirror ("MEGA here", "Drive backup") in the description; every one is a way to the
+ * file when another host has dropped it. Taken: links to a file host (MediaFire, Drive, MEGA,
+ * Dropbox, OneDrive, Pixeldrain) and direct links to a file (by extension, or one of
+ * mxb-mods.com's own uploads). Not taken: pages, socials, shops, Proton (can't be fetched), and
+ * anything already in `known`. Never the default: the post's own blocks stay the recommended set.
+ */
+export function parseBodyLinks(html: string, known: Iterable<string> = []): DownloadOption[] {
+  const seen = new Set([...known].map((u) => u.trim()));
+  const out: DownloadOption[] = [];
+  const region = contentRegion(html);
+  const re = /<a\b[^>]*\bhref=(?:"([^"]+)"|'([^']+)')[^>]*>([\s\S]*?)<\/a>/gi;
+  for (let m; (m = re.exec(region)) && out.length < MAX_BODY_LINKS; ) {
+    const url = decodeEntities((m[1] ?? m[2] ?? "").trim());
+    if (!/^https?:\/\//i.test(url) || seen.has(url)) continue;
+    const host = hostOf(url);
+    const kind = hostKind(url);
+    const path = url.split(/[?#]/)[0];
+    const wanted =
+      ["mediafire", "gdrive", "mega", "dropbox", "onedrive", "pixeldrain"].includes(kind) ||
+      (kind === "direct" && (isModsHost(host) ? /\/wp-content\/uploads\//i.test(path) : FILE_EXT.test(path)));
+    if (!wanted) continue;
+    seen.add(url);
+    const text = stripTags(m[3]).replace(/\s+/g, " ").trim();
+    const label = (text && !/^https?:\/\//i.test(text) ? text : host).slice(0, 200);
+    out.push({ url, host, label, isDefault: false, isServer: mentionsServer(text) || mentionsServer(urlFileName(url)) });
+  }
+  return out;
+}
+
+/** Every download a post offers: its download blocks first, in page order, then links in its text. */
+export function parseAllDownloads(html: string): DownloadOption[] {
+  const blocks = parseDownloads(html);
+  return [...blocks, ...parseBodyLinks(html, blocks.map((d) => d.url))];
 }
 
 /** "Made for Beta 19" → "Beta 19", as the app normalises it. */
@@ -1143,7 +1187,7 @@ export interface ParsedPage {
 
 /** The page, or null when it is Cloudflare's interstitial rather than the post. */
 export function parsePage(html: string, asset: Pick<DueAsset, "thumb_src">): ParsedPage | null {
-  const downloads = parseDownloads(html);
+  const downloads = parseAllDownloads(html);
   if (downloads.length === 0 && isChallenge(html)) return null;
   return {
     downloads,
@@ -1357,10 +1401,10 @@ export async function writeMirrorVersion(
       stmts.push(
         env.DB.prepare(
           `INSERT INTO mod_files (version_id, idx, part, rel, url, host, label, is_server, is_default, status,
-             attempts, due_at, sha256, filename, error, fetched_at)
+             attempts, due_at, sha256, filename, error, fetched_at, link_state, link_checked_at)
            SELECT ?1, ?2, p.part, p.rel, p.url, p.host, CASE WHEN p.part = 0 THEN ?3 ELSE p.label END, ?4, ?5,
              CASE WHEN p.status = 'queued' THEN 'pending' ELSE p.status END,
-             p.attempts, p.due_at, p.sha256, p.filename, p.error, p.fetched_at
+             p.attempts, p.due_at, p.sha256, p.filename, p.error, p.fetched_at, p.link_state, p.link_checked_at
            FROM mod_files p
            WHERE p.version_id = ?6 AND p.idx = (
              SELECT idx FROM mod_files WHERE version_id = ?6 AND part = 0 AND url = ?7 ORDER BY idx LIMIT 1)`,
