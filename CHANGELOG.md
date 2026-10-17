@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-10-17 — Frost Converter v0.1.7 — Bike visible again
+
+### Fixed
+- **Bike invisible in game after 0.1.6 / 0.7.8.** A picture with no maps no longer gets a .shd written before converting. The converter baked that values-only .shd into the model, which 0.1.5 never did, so the .edf is the same as 0.1.5's again.
+
+## 2026-10-17 — Frost's Studio v0.7.9 — Bike visible again
+
+### Fixed
+- **Bike invisible in game after 0.1.6 / 0.7.8.** A picture with no maps no longer gets a .shd written before converting. The converter baked that values-only .shd into the model, which 0.1.5 never did, so the .edf is the same as 0.1.5's again.
+
 ## 2026-10-16 — Frost Converter v0.1.6 — .shd files stay with the model
 
 ### Changed

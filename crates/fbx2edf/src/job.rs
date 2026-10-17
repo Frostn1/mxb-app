@@ -539,16 +539,14 @@ fn site_maps(site: &host::ShdSite) -> Option<(PathBuf, Maps, Vec<String>)> {
 /// The `.shd` to write for one picture before converting, if any, in the picture's own folder
 /// (the model's folder, never beside the `.edf`): the converter reads `<name>.shd` there and
 /// builds the maps it names, and the shininess and reflection, into the model. A picture with
-/// maps gets one beside them; one with none still gets the values alone. A `.shd` the converter
+/// maps gets one beside them; one with none gets none, because the converter would bake a
+/// values-only `.shd` into the model, which the conversions before it never had. A `.shd` the converter
 /// already reads is left alone unless `overwrite`.
 pub fn plan_shd(site: &host::ShdSite, overwrite: bool, values: &ShdValues) -> Option<ShdPlan> {
     if site.shd.is_some() && !overwrite {
         return None;
     }
-    let (dir, maps, notes) = match site_maps(site) {
-        Some(found) => found,
-        None => (site.dirs.first()?.clone(), Maps::default(), Vec::new()),
-    };
+    let (dir, maps, notes) = site_maps(site)?;
     let file = format!("{}.shd", site.name);
     let path = dir.join(&file);
     if path.exists() && !overwrite {
@@ -829,6 +827,7 @@ mod tests {
         // .shd files are named by their material's picture, whatever the .edf is called.
         let dir = tempfile::tempdir().unwrap();
         let edf = dir.path().join("race.edf");
+        std::fs::write(dir.path().join("chain_n.tga"), b"x").unwrap();
         let sites = vec![site("chain", &[dir.path()], None)];
         let pre_shd = write_shd_with(&sites, &ShdValues::default(), &mut HashSet::new());
         let o = outcome_of(Ok(report(&["", "steer", "fsusp"])), HrcMode::Always, &edf, pre_shd, Some(&ShdValues::default()));
@@ -938,7 +937,7 @@ mod tests {
         assert!(plan_shd(&site("bike", &[&root], existing.clone()), false, &ShdValues::default()).is_none(), "the converter's own is kept");
         assert!(plan_shd(&site("bike", &[&root], None), false, &ShdValues::default()).is_none(), "nor one it would miss");
         assert_eq!(plan_shd(&site("bike", &[&root], existing), true, &ShdValues::default()).unwrap().path, root.join("bike.shd"));
-        assert_eq!(plan_shd(&site("frame", &[&root], None), true, &ShdValues::default()).unwrap().path, root.join("frame.shd"), "no maps: the values alone, in the picture's folder");
+        assert!(plan_shd(&site("frame", &[&root], None), true, &ShdValues::default()).is_none(), "no maps, no .shd: the model must convert as it always did");
     }
 
     #[test]
@@ -1056,6 +1055,7 @@ mod tests {
         let src = tempfile::tempdir().unwrap();
         let out = tempfile::tempdir().unwrap();
         std::fs::write(src.path().join("bike_n.tga"), b"x").unwrap();
+        std::fs::write(src.path().join("chain_n.tga"), b"x").unwrap();
         let edf = out.path().join("bike.edf");
         let sites = vec![site("bike", &[src.path()], None), site("chain", &[src.path()], None)];
         let pre_shd = write_shd_with(&sites, &ShdValues::default(), &mut HashSet::new());
@@ -1065,9 +1065,20 @@ mod tests {
         assert_eq!(o.files, [edf.to_string_lossy()]);
         assert_eq!(o.shd_files.len(), 2);
         assert!(o.shaders.iter().all(|f| Path::new(&f.path).starts_with(src.path()) && f.written));
-        let chain = std::fs::read_to_string(src.path().join("chain.shd")).unwrap();
-        assert_eq!(chain, shd_text(&Maps::default(), &ShdValues::default()), "a picture with no maps still gets one");
         assert_eq!(o.shaders[0].maps.normal.as_deref(), Some("bike_n.tga"));
+    }
+
+    /// 0.1.6 wrote a values-only `.shd` for a picture with no maps before converting, so the
+    /// converter baked it into the model: nothing is written for one now.
+    #[test]
+    fn a_picture_with_no_maps_gets_no_shd_before_converting() {
+        let dir = tempfile::tempdir().unwrap();
+        let edf = dir.path().join("model.edf");
+        let sites = vec![site("frame", &[dir.path()], None)];
+        let pre_shd = write_shd_with(&sites, &ShdValues::default(), &mut HashSet::new());
+        let o = outcome_of(Ok(report(&[""])), HrcMode::Never, &edf, pre_shd, Some(&ShdValues::default()));
+        assert!(!dir.path().join("frame.shd").exists());
+        assert!(o.shd_files.is_empty() && o.shaders.is_empty());
     }
 
     /// A chain worn round the neck: one object, one plain colour picture, no maps.
@@ -1075,6 +1086,9 @@ mod tests {
     fn bike_parts_get_a_shd_per_material_and_every_file_is_listed() {
         let dir = tempfile::tempdir().unwrap();
         let edf = dir.path().join("model.edf");
+        for f in ["plastics_n.tga", "frame_n.tga"] {
+            std::fs::write(dir.path().join(f), b"x").unwrap();
+        }
         let sites = vec![site("plastics", &[dir.path()], None), site("frame", &[dir.path()], None), site("plastics", &[dir.path()], None)];
         let pre_shd = write_shd_with(&sites, &ShdValues::default(), &mut HashSet::new());
         let o = outcome_of(Ok(report(&["", "steer"])), HrcMode::Always, &edf, pre_shd, Some(&ShdValues::default()));
