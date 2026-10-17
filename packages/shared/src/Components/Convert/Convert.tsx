@@ -56,6 +56,8 @@ interface Settings {
   makeShd: boolean;
   /** A bike's file: `model.edf`, the name MX Bikes loads, or the FBX's own name as before. */
   naming: "model" | "fbx";
+  /** Whether a skin in the FBX is written (for a whole rider) or every mesh is kept rigid. */
+  riderSkin: "auto" | "off";
   /** A name for the .edf when one model is written; empty keeps the usual name. */
   outName: string;
   hrc: HrcMode;
@@ -77,6 +79,7 @@ const DEFAULTS: Settings = {
   scriptName: "",
   makeShd: true,
   naming: "model",
+  riderSkin: "auto",
   outName: "",
   hrc: "ifNone",
 };
@@ -286,6 +289,7 @@ export default function Convert({ active, storageKey, opened }: { active: boolea
       mergeDistance: merge as number,
       ...(s.normals === "file" ? { useFileNormals: true } : { recalcNormals: angle as number }),
       lowMemory: !s.fast,
+      ...(s.riderSkin === "off" ? { skin: "0" as const } : {}),
     };
   };
 
@@ -660,6 +664,18 @@ export default function Convert({ active, storageKey, opened }: { active: boolea
                           <input type="checkbox" checked={s.fast} onChange={(e) => set("fast", e.target.checked)} />
                           {t("convert.fast")}
                         </label>
+
+                        <Field label={t("convert.riderSkin")}>
+                          <Segmented
+                            size="sm"
+                            value={s.riderSkin}
+                            onChange={(v) => set("riderSkin", v)}
+                            options={[
+                              { value: "auto", label: t("convert.skinAuto") },
+                              { value: "off", label: t("convert.skinOff") },
+                            ]}
+                          />
+                        </Field>
 
                         <Field label={t("convert.shaders")}>
                           <label className="flex items-center gap-2 text-[12.5px]">
