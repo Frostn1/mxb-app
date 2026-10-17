@@ -87,6 +87,12 @@ interface Env {
     RESEND_API_KEY?: string;
     /** The From line on that email, e.g. `Frost <noreply@mxbsecure.com>`. */
     SUPPORTER_MAIL_FROM?: string;
+    /** The supporter pack's price in minor units (`supporterpack.ts`). Default 1000. */
+    MXB_SUPPORTER_PACK_CENTS?: string;
+    /** Its currency, ISO 4217 lower-case. Default usd, the shop's. */
+    MXB_SUPPORTER_PACK_CURRENCY?: string;
+    /** The Terms version a pack buyer agrees to (YYYY-MM-DD). Without it the pack isn't on sale. */
+    MXB_TERMS_VERSION?: string;
     /** Anthropic API key, for writing track programs. Without it `/v1/track/generate`
      *  answers 503 — the app says track generation isn't available and everything else
      *  carries on. Spend is capped by the endpoint itself: one Opus call per request, at
@@ -217,6 +223,14 @@ interface Env {
      *  `bearer` or `query:<name>`. With `SHOP_CATALOG_KEY`, lets the track catalogue find sold
      *  tracks and their prices. Unset means mxb-mods.com only. */
     SHOP_CATALOG_AUTH?: string;
+    /** The Blends shop (`blendshop.ts`): `test` or `live` opens it, anything else (unset) keeps it
+     *  shut. It also needs `STRIPE_SECRET_KEY` of the same kind, `STRIPE_WEBHOOK_SECRET` and
+     *  `MXB_WEB_SESSION_KEY`. A var in `wrangler.jsonc`, so opening it is a reviewable diff. */
+    MXB_BLENDS_SHOP?: string;
+    /** Where the shop reads its prices. Defaults to `${MXB_SITE_ORIGIN}/shop/blends.json`. */
+    MXB_BLENDS_CATALOG_URL?: string;
+    /** Stripe Tax code for a Blend. Defaults to `txcd_10000000`. */
+    MXB_BLENDS_TAX_CODE?: string;
     /** The shop catalogue's key. A secret. */
     SHOP_CATALOG_KEY?: string;
   }

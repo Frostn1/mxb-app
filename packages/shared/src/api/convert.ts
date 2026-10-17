@@ -19,6 +19,8 @@ export interface ConvertOptions {
   useFileNormals?: boolean;
   /** Two textures at once rather than one per core. */
   lowMemory?: boolean;
+  /** "0" writes no skin at all (every mesh rigid); left out, the converter writes one only for a whole rider. */
+  skin?: "0";
 }
 
 export interface ConvertReport {
@@ -37,11 +39,13 @@ export interface Outcome {
   error: string | null;
   /** The `.hrc` files written beside a bike's `.edf`. */
   hrc: string[];
-  /** The `.shd` files written for its textures: `bike.shd: normal bike_n, reflection bike_r`. */
+  /** The `.shd` files made in the model's folder: `bike.shd: normal bike_n, reflection bike_r`. */
   shd: string[];
-  /** Every file this model wrote, in full: the `.edf`, its `.shd` files, its `.hrc` files. */
+  /** What was written beside the `.edf`: the `.edf` and its `.hrc` files. */
   files: string[];
-  /** Each material's `.shd` beside the `.edf`, written now or already there. */
+  /** The `.shd` files this conversion made in the model's folder, where the converter reads them. */
+  shdFiles: string[];
+  /** Each material's `.shd` in the model's folder, written now or already there. */
   shaders: ShdFile[];
   /** A map used by name because the material doesn't link it, `.hrc` files kept or replaced. */
   notes: string[];
@@ -104,6 +108,7 @@ export const keptScripts = () => invoke<KeptScripts>("fbx_scripts");
 /** Remember the script just used; empty text forgets it. */
 export const rememberScript = (name: string, text: string) => invoke<KeptScripts>("fbx_scripts_last", { name, text });
 export const saveScript = (name: string, text: string) => invoke<KeptScripts>("fbx_scripts_save", { name, text });
+export const renameScript = (from: string, to: string) => invoke<KeptScripts>("fbx_scripts_rename", { from, to });
 export const removeScript = (name: string) => invoke<KeptScripts>("fbx_scripts_remove", { name });
 export const readText = (path: string) => invoke<string>("fbx_read_text", { path });
 
@@ -111,9 +116,9 @@ export function convertFiles(
   pairs: { input: string; output: string }[],
   options: ConvertOptions,
   hrc: HrcMode,
-  overwriteShd = false,
+  makeShd = true,
 ): Promise<Outcome[]> {
-  return invoke<Outcome[]>("fbx_convert", { pairs, options, hrc, overwriteShd });
+  return invoke<Outcome[]>("fbx_convert", { pairs, options, hrc, writeShd: makeShd });
 }
 
 /** Write a material's `.shd` with these values: what the sliders do. */

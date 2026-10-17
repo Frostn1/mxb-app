@@ -5,12 +5,17 @@ import { Slider } from "../ui/controls";
 import { cn } from "../../lib/utils";
 import { ErrorBoundary } from "../ErrorBoundary";
 import { ModelViewer, type Shaders } from "../Viewer/ModelViewer";
-import { loadModelFile, revealInExplorer, type LooseModel } from "../../api/mods";
-import { nameOf, STOCK_SHD, writeShd, type Outcome, type ShdFile, type ShdValues } from "../../api/convert";
+import { loadBikeModel, loadModelFile, revealInExplorer, type LooseModel } from "../../api/mods";
+import type { BikeModel } from "../../types";
+import { dirOf, nameOf, STOCK_SHD, writeShd, type Outcome, type ShdFile, type ShdValues } from "../../api/convert";
 import { useT } from "../../i18n/context";
 
 /** How long a slider rests before its `.shd` is written: dragging is many values, one file. */
 const SAVE_AFTER = 250;
+/** How long after the last .shd write the model is converted again (with Watch on). */
+const CONVERT_AFTER = 900;
+/** How long a material stays lit after its card opens. */
+const FLASH_MS = 600;
 
 const head = "text-[11px] font-semibold tracking-[0.09em] text-faint";
 
@@ -27,15 +32,27 @@ export function WrittenFiles({ outcome }: { outcome: Outcome }) {
           </Button>
         )}
       </div>
-      <ul className="border border-border bg-card text-[12px]">
-        {outcome.files.map((f) => (
-          <li key={f} className="flex items-center gap-2 border-b border-border/60 px-3 py-1.5 last:border-b-0" title={f}>
-            <FileBox className="size-3.5 flex-none text-muted-foreground" />
-            <span className="select-text truncate font-mono">{nameOf(f)}</span>
-          </li>
-        ))}
-      </ul>
+      <FileList files={outcome.files} />
+      {outcome.shdFiles.length > 0 && (
+        <>
+          <h3 className={cn(head, "mt-4")}>{t("convert.modelFolder")}</h3>
+          <FileList files={outcome.shdFiles} />
+        </>
+      )}
     </section>
+  );
+}
+
+function FileList({ files }: { files: string[] }) {
+  return (
+    <ul className="border border-border bg-card text-[12px]">
+      {files.map((f) => (
+        <li key={f} className="flex items-center gap-2 border-b border-border/60 px-3 py-1.5 last:border-b-0" title={f}>
+          <FileBox className="size-3.5 flex-none text-muted-foreground" />
+          <span className="select-text truncate font-mono">{nameOf(f)}</span>
+        </li>
+      ))}
+    </ul>
   );
 }
 
@@ -53,13 +70,16 @@ export function ConvertPreview({
   watching,
   canWatch,
   onWatch,
+  onShdSaved,
   onConvert,
 }: {
-  last: { key: string; output: string; outcome: Outcome } | null;
+  last: { key: string; output: string; source: string; noShd: boolean; outcome: Outcome } | null;
   running: boolean;
   watching: boolean;
   canWatch: boolean;
   onWatch: (on: boolean) => void;
+  /** A `.shd` in the model's folder was edited: the model wants converting again to carry it. */
+  onShdSaved: () => void;
   onConvert: () => void;
 }) {
   const t = useT();
@@ -86,13 +106,13 @@ export function ConvertPreview({
           {nameOf(last.output)}
         </span>
       </div>
-      <PreviewBody key={last.key} output={last.output} outcome={last.outcome} />
+      <PreviewBody key={last.key} output={last.output} source={last.source} noShd={last.noShd} outcome={last.outcome} onShdSaved={onShdSaved} />
     </div>
   );
 }
 
 /** Mount per conversion (`key`): the values start from what the conversion left on disk. */
-function PreviewBody({ output, outcome }: { output: string; outcome: Outcome }) {
+function PreviewBody({ output, source, noShd, outcome, onShdSaved }: { output: string; source: string; noShd: boolean; outcome: Outcome; onShdSaved: () => void }) {
   const t = useT();
   const [model, setModel] = useState<LooseModel | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
@@ -100,25 +120,64 @@ function PreviewBody({ output, outcome }: { output: string; outcome: Outcome }) 
   const [saveError, setSaveError] = useState<string | null>(null);
   /** The material picked in the list: lit in the view, its sliders open. */
   const [focus, setFocus] = useState<string | null>(null);
+  /** Light a material up for a moment when its card opens: off unless asked, never while tuning. */
+  const [highlight, setHighlight] = useState(false);
+  const [flash, setFlash] = useState<string | null>(null);
+  const flashTimer = useRef(0);
+  useEffect(() => () => window.clearTimeout(flashTimer.current), []);
+  const toggle = (name: string) => {
+    const opening = focus !== name;
+    setFocus(opening ? name : null);
+    window.clearTimeout(flashTimer.current);
+    if (opening && highlight) {
+      setFlash(name);
+      flashTimer.current = window.setTimeout(() => setFlash(null), FLASH_MS);
+    } else setFlash(null);
+  };
+
+  // Bike parts: the folder's own .hrc files and the bike's .geom put each part where it sits on
+  // the assembled bike, instead of every part at its own origin. `null` until it has answered.
+  const parts = outcome.hrc.length > 0;
+  const [bike, setBike] = useState<BikeModel | null | undefined>(parts ? undefined : null);
+  useEffect(() => {
+    if (!parts) return;
+    let alive = true;
+    setBike(undefined);
+    loadBikeModel(dirOf(output))
+      .then((b) => alive && setBike(b))
+      .catch(() => alive && setBike(null));
+    return () => {
+      alive = false;
+    };
+  }, [parts, output]);
+  const assembled = !!bike?.assembled && bike.nodes.length > 0;
 
   useEffect(() => {
     let alive = true;
     setModel(null);
     setFailed(null);
-    loadModelFile(output)
+    loadModelFile(output, source)
       .then((m) => alive && setModel(m))
       .catch((e) => alive && setFailed(String(e).replace(/^Error:\s*/, "")));
     return () => {
       alive = false;
     };
-  }, [output]);
+  }, [output, source]);
 
   // One pending write per file; leaving writes whatever is waiting, so a slider let go of and
   // then closed is not lost.
   const pending = useRef(new Map<string, { file: ShdFile; values: ShdValues; timer: number }>());
+  // The converter reads the .shd in the model's folder and bakes it into the .edf, so an edit
+  // is carried by converting again: once the sliders have been still a moment.
+  const again = useRef(0);
+  useEffect(() => () => window.clearTimeout(again.current), []);
   const save = (file: ShdFile, v: ShdValues) =>
     writeShd(file.path, file.maps, v).then(
-      () => setSaveError(null),
+      () => {
+        setSaveError(null);
+        window.clearTimeout(again.current);
+        again.current = window.setTimeout(onShdSaved, CONVERT_AFTER);
+      },
       (e) => setSaveError(String(e).replace(/^Error:\s*/, "")),
     );
   useEffect(() => {
@@ -149,26 +208,50 @@ function PreviewBody({ output, outcome }: { output: string; outcome: Outcome }) 
       <div className="relative h-[46%] min-h-[220px] flex-none overflow-hidden rounded-lg border border-border bg-card lg:h-auto lg:min-h-0 lg:flex-1">
         {failed ? (
           <p className="flex h-full items-center justify-center px-6 text-center text-[12px] text-muted-foreground">{t("convert.viewFailed", { why: failed })}</p>
-        ) : !model ? (
+        ) : !model || bike === undefined ? (
           <div className="flex h-full items-center justify-center text-muted-foreground">
             <Loader2 className="size-4 animate-spin" />
           </div>
         ) : (
           <ErrorBoundary compact label="convert-view">
-            <ModelViewer mode="bike" nodes={model.nodes} textures={model.textures} shaders={shaders} focusSheet={focus} hideHints className="absolute inset-0" />
+            {assembled && bike ? (
+              <ModelViewer
+                mode="bike"
+                nodes={bike.nodes}
+                rig={bike.rig}
+                textures={bike.paints[0]?.textures ?? bike.base}
+                tyreTextures={bike.tyreTextures}
+                shaders={shaders}
+                focusSheet={flash}
+                hideHints
+                className="absolute inset-0"
+              />
+            ) : (
+              <ModelViewer mode="bike" nodes={model.nodes} textures={model.textures} shaders={shaders} focusSheet={flash} hideHints className="absolute inset-0" />
+            )}
           </ErrorBoundary>
         )}
-        {model && model.missing.length > 0 && (
-          <p className="absolute bottom-2 left-2 right-2 truncate rounded-md bg-background/85 px-2 py-1 text-[11.5px] text-amber-600 dark:text-amber-400" title={model.missing.join(", ")}>
-            {t("convert.texturesMissing", { count: model.missing.length, names: model.missing.join(", ") })}
-          </p>
+        {model && parts && bike !== undefined && !assembled && (
+          <p className="absolute left-2 top-2 rounded-md bg-background/85 px-2 py-1 text-[11.5px] text-muted-foreground">{t("convert.notAssembled")}</p>
+        )}
+        {model && (model.missing.length > 0 || model.unreadable.length > 0) && (
+          <div className="absolute bottom-2 left-2 right-2 grid gap-0.5 rounded-md bg-background/85 px-2 py-1 text-[11.5px] text-amber-600 dark:text-amber-400">
+            {model.missing.length > 0 && <p className="truncate" title={model.missing.join(", ")}>{t("convert.texturesMissing", { names: model.missing.join(", ") })}</p>}
+            {model.unreadable.length > 0 && <p className="truncate" title={model.unreadable.join(", ")}>{t("convert.texturesUnreadable", { names: model.unreadable.join(", ") })}</p>}
+          </div>
         )}
       </div>
 
       <section className="min-h-0 flex-1 overflow-y-auto lg:w-[360px] lg:flex-none">
-        <h3 className={head}>{t("convert.shaders")}</h3>
+        <div className="flex items-center">
+          <h3 className={head}>{t("convert.shaders")}</h3>
+          <label className="ml-auto flex items-center gap-1.5 text-[11.5px] text-muted-foreground">
+            <input type="checkbox" checked={highlight} onChange={(e) => setHighlight(e.target.checked)} />
+            {t("convert.highlight")}
+          </label>
+        </div>
         {outcome.shaders.length === 0 ? (
-          <p className="text-[12px] text-muted-foreground">{t("convert.noShaders")}</p>
+          <p className="text-[12px] text-muted-foreground">{t(noShd ? "convert.noShd" : "convert.noShaders")}</p>
         ) : (
           <div className="grid gap-2">
             {outcome.shaders.map((f) => (
@@ -177,7 +260,7 @@ function PreviewBody({ output, outcome }: { output: string; outcome: Outcome }) 
                 file={f}
                 values={values[f.path] ?? f.values}
                 open={focus === f.name.toLowerCase()}
-                onToggle={() => setFocus((cur) => (cur === f.name.toLowerCase() ? null : f.name.toLowerCase()))}
+                onToggle={() => toggle(f.name.toLowerCase())}
                 onChange={(v) => change(f, v)}
               />
             ))}

@@ -1,14 +1,55 @@
 # Changelog
 
-## Unreleased — Frost's Studio and Frost Converter: one-line .shd files
+## 2026-10-17 — Frost Converter v0.1.7 — Weighted gear stays put
 
 ### Fixed
+- **Weighted gear no longer follows a bone.** A necklace or prop that was weighted or parented to an armature in Blender is converted rigid again, as before 0.1.1; the skin is written only for a whole rider. Under More, Rider skin Off never writes one.
+- **Bike invisible in game after 0.1.6 / 0.7.8.** A picture with no maps no longer gets a .shd written before converting. The converter baked that values-only .shd into the model, which 0.1.5 never did, so the .edf is the same as 0.1.5's again.
+
+## 2026-10-17 — Frost's Studio v0.7.9 — Weighted gear stays put
+
+### Fixed
+- **Weighted gear no longer follows a bone.** A necklace or prop that was weighted or parented to an armature in Blender is converted rigid again, as before 0.1.1; the skin is written only for a whole rider. Under More, Rider skin Off never writes one.
+- **Bike invisible in game after 0.1.6 / 0.7.8.** A picture with no maps no longer gets a .shd written before converting. The converter baked that values-only .shd into the model, which 0.1.5 never did, so the .edf is the same as 0.1.5's again.
+
+## 2026-10-16 — Frost Converter v0.1.6 — .shd files stay with the model
+
+### Changed
+- **Shaders.** Convert no longer writes a .shd beside the .edf. Make missing .shd (on by default, under More) writes one only where a picture has none, in the model's folder where the converter reads it, and never writes over one. Files written lists them under Model folder. The Preview sliders edit that .shd and, with Watch on, convert again to carry the change.
+
+### Fixed
+- **Bike parts in Preview.** Parts now sit where they do on the assembled bike, placed by the .hrc files and the bike's .geom, instead of each at its own origin. Without a .geom the Preview says Not assembled.
+
+## 2026-10-16 — Frost's Studio v0.7.8 — .shd files stay with the model
+
+### Changed
+- **Shaders.** Convert no longer writes a .shd beside the .edf. Make missing .shd (on by default, under More) writes one only where a picture has none, in the model's folder where the converter reads it, and never writes over one. Files written lists them under Model folder. The Preview sliders edit that .shd and, with Watch on, convert again to carry the change.
+
+### Fixed
+- **Bike parts in Preview.** Parts now sit where they do on the assembled bike, placed by the .hrc files and the bike's .geom, instead of each at its own origin. Without a .geom the Preview says Not assembled.
+
+## 2026-10-16 — Frost Converter v0.1.5 — Named export scripts
+
+### Fixed
+- **Saved export scripts.** Save asks for a name, so a second script no longer replaces the first. The same name asks Replace?, and each saved script can be renamed or removed.
+- **Shaders: Always / If none / Never.** Under More, Never writes no .shd and leaves the ones there alone; Always writes over them. The Preview then says No .shd.
+- **Preview highlight.** Opening a .shd card no longer tints its material while you tune it. A Highlight tick, off by default, flashes the material for a moment when its card opens.
+- **Preview textures.** Pictures are also found in the FBX's .fbm folder and beside the FBX, and a TGA the strict reader refused (a grey map with alpha bits set, for one) is read. A name with no file, and a file that can't be read, are told apart.
 - **.shd files written on one line.** The Preview sliders now show the values of a .shd with its blocks on one line, as the Blender kit writes them, not the stock ones.
 
-## Unreleased — Frost's Studio: Gfx assembles the bike again
+## 2026-10-16 — Frost's Studio v0.7.7 — Named export scripts, Gfx assembles again
+
+### Added
+- **Support card.** A small card asking for a coffee shows after an export or a track build, or every tenth launch, at most once a week. Remind me later and Don't show again are on it.
+- **Supporter pack.** Settings has the supporter themes (Night, Works, Lime) and an accent colour, for accounts with the pack. A Buy Me a Coffee supporter links the email they paid with to get it.
 
 ### Fixed
 - **Gfx assembly and wheels.** The Gfx tab takes a bike's .geom from its .pkz again, so the parts are assembled and the wheels and the Rear sprocket marker show. No texture is taken from the .pkz.
+- **Saved export scripts.** Save asks for a name, so a second script no longer replaces the first. The same name asks Replace?, and each saved script can be renamed or removed.
+- **Shaders: Always / If none / Never.** Under More, Never writes no .shd and leaves the ones there alone; Always writes over them. The Preview then says No .shd.
+- **Preview highlight.** Opening a .shd card no longer tints its material while you tune it. A Highlight tick, off by default, flashes the material for a moment when its card opens.
+- **Preview textures.** Pictures are also found in the FBX's .fbm folder and beside the FBX, and a TGA the strict reader refused (a grey map with alpha bits set, for one) is read. A name with no file, and a file that can't be read, are told apart.
+- **.shd files written on one line.** The Preview sliders now show the values of a .shd with its blocks on one line, as the Blender kit writes them, not the stock ones.
 
 ## 2026-10-16 — Frost Converter v0.1.4 — Name the .edf, Preview and Watch
 

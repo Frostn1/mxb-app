@@ -104,6 +104,12 @@ pub fn fbx_scripts_save(app: tauri::AppHandle, name: String, text: String) -> Re
     scripts::save(&scripts_dir(&app)?, &name, &text)
 }
 
+/// Rename a saved script.
+#[tauri::command]
+pub fn fbx_scripts_rename(app: tauri::AppHandle, from: String, to: String) -> Result<Scripts, String> {
+    scripts::rename(&scripts_dir(&app)?, &from, &to)
+}
+
 /// Remove a saved script.
 #[tauri::command]
 pub fn fbx_scripts_remove(app: tauri::AppHandle, name: String) -> Result<Scripts, String> {
@@ -118,22 +124,22 @@ pub fn fbx_write_shd(path: String, maps: Maps, values: ShdValues) -> Result<(), 
 
 /// Convert a batch. Each pair's progress and outcome is sent as it happens, and every outcome
 /// is returned at the end, in order. Each model gets a `.shd` per material beside its `.edf`
-/// (`overwrite_shd` writes over the ones there), with `shd` the values they start from.
+/// (only where there is none, in the model's folder; `write_shd` false writes none), with `shd` the values they start from.
 #[tauri::command]
 pub async fn fbx_convert(
     app: tauri::AppHandle,
     pairs: Vec<Pair>,
     options: Options,
     hrc: HrcMode,
-    overwrite_shd: Option<bool>,
+    write_shd: Option<bool>,
     shd: Option<ShdValues>,
 ) -> Result<Vec<Outcome>, String> {
     if RUNNING.swap(true, Ordering::SeqCst) {
         return Err("A batch is already converting.".into());
     }
     let shd = Shd {
-        make: true,
-        overwrite: overwrite_shd.unwrap_or(false),
+        make: write_shd.unwrap_or(true),
+        overwrite: false,
         values: shd.unwrap_or_default(),
     };
     let result = tauri::async_runtime::spawn_blocking(move || {

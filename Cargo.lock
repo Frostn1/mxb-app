@@ -2137,7 +2137,7 @@ dependencies = [
 
 [[package]]
 name = "frost-converter"
-version = "0.1.4"
+version = "0.1.7"
 dependencies = [
  "fbx2edf",
  "log",
@@ -2153,7 +2153,7 @@ dependencies = [
 
 [[package]]
 name = "frost-studio"
-version = "0.7.6"
+version = "0.7.9"
 dependencies = [
  "ab_glyph",
  "anyhow",

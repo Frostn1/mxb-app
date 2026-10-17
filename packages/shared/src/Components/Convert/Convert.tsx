@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
-import { CheckCircle2, FileBox, FileCode2, FilePlus, FolderOpen, FolderPlus, Layers, Loader2, Play, TriangleAlert, X } from "lucide-react";
+import { CheckCircle2, FileBox, FileCode2, FilePlus, FolderOpen, FolderPlus, Layers, Loader2, Pencil, Play, TriangleAlert, X } from "lucide-react";
 import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
@@ -22,6 +22,7 @@ import {
   readText,
   rememberScript,
   removeScript,
+  renameScript,
   saveScript,
   scanPaths,
   scriptSettings,
@@ -51,9 +52,12 @@ interface Settings {
   script: string;
   /** The file the script came from, when it was dropped or loaded rather than typed. */
   scriptName: string;
-  overwriteShd: boolean;
+  /** Write a `.shd` where a material has none, in the model's folder (never beside the `.edf`). */
+  makeShd: boolean;
   /** A bike's file: `model.edf`, the name MX Bikes loads, or the FBX's own name as before. */
   naming: "model" | "fbx";
+  /** Whether a skin in the FBX is written (for a whole rider) or every mesh is kept rigid. */
+  riderSkin: "auto" | "off";
   /** A name for the .edf when one model is written; empty keeps the usual name. */
   outName: string;
   hrc: HrcMode;
@@ -73,15 +77,21 @@ const DEFAULTS: Settings = {
   fast: true,
   script: "",
   scriptName: "",
-  overwriteShd: false,
+  makeShd: true,
   naming: "model",
+  riderSkin: "auto",
   outName: "",
   hrc: "ifNone",
 };
 
 function load(key: string): Settings {
   try {
-    return { ...DEFAULTS, ...JSON.parse(localStorage.getItem(key) ?? "{}") };
+    const saved = JSON.parse(localStorage.getItem(key) ?? "{}");
+    // Shaders used to be Always / If none / Never (and before that a tick to write over them).
+    if (saved.makeShd === undefined && saved.shd !== undefined) saved.makeShd = saved.shd !== "never";
+    delete saved.shd;
+    delete saved.overwriteShd;
+    return { ...DEFAULTS, ...saved };
   } catch {
     return DEFAULTS;
   }
@@ -126,8 +136,9 @@ export default function Convert({ active, storageKey, opened }: { active: boolea
   const [watch, setWatch] = useState(false);
   const [watchPaths, setWatchPaths] = useState<string[]>([]);
   /** The last conversion that worked: what the Preview shows, kept while the next one runs. */
-  const [last, setLast] = useState<{ key: string; output: string; outcome: Outcome } | null>(null);
+  const [last, setLast] = useState<{ key: string; output: string; source: string; noShd: boolean; outcome: Outcome } | null>(null);
   const redo = useRef(false);
+  const watchRef = useRef(false);
   const [saved, setSaved] = useState<SavedScript[]>([]);
 
   // The last script used comes back with the app, and the saved ones are listed.
@@ -278,12 +289,30 @@ export default function Convert({ active, storageKey, opened }: { active: boolea
       mergeDistance: merge as number,
       ...(s.normals === "file" ? { useFileNormals: true } : { recalcNormals: angle as number }),
       lowMemory: !s.fast,
+      ...(s.riderSkin === "off" ? { skin: "0" as const } : {}),
     };
   };
 
-  const saveCurrent = () => {
-    const name = s.scriptName.replace(/\.[^.]*$/, "") || "Script";
-    saveScript(name, s.script).then((k) => setSaved(k.saved)).catch((e) => setError(String(e)));
+  /** The name box under the script: saving it as a new entry, or renaming a saved one. */
+  const [naming, setNaming] = useState<{ from?: string; value: string; confirm: boolean } | null>(null);
+  const takenName = (n: string, except?: string) => saved.some((x) => x.name.toLowerCase() === n.trim().toLowerCase() && x.name.toLowerCase() !== except?.toLowerCase());
+  const startSave = () => {
+    const file = s.scriptName.replace(/\.[^.]*$/, "").trim();
+    let value = file;
+    for (let n = 1; !value; n++) if (!takenName(`Script ${n}`)) value = `Script ${n}`;
+    setNaming({ value, confirm: false });
+  };
+  const submitName = () => {
+    if (!naming) return;
+    const name = naming.value.trim();
+    if (!name) return;
+    if (naming.from === undefined) {
+      if (takenName(name) && !naming.confirm) return setNaming({ ...naming, confirm: true });
+      saveScript(name, s.script).then((k) => setSaved(k.saved)).catch((e) => setError(String(e)));
+    } else {
+      renameScript(naming.from, name).then((k) => setSaved(k.saved)).catch((e) => setError(String(e)));
+    }
+    setNaming(null);
   };
   const pickSaved = (x: SavedScript) => {
     setS((p) => ({ ...p, script: x.text, scriptName: x.name }));
@@ -321,7 +350,7 @@ export default function Convert({ active, storageKey, opened }: { active: boolea
         batch.map((j) => ({ input: j.input, output: j.output })),
         o,
         s.hrc,
-        s.overwriteShd,
+        s.makeShd,
       );
       setRuns((n) => n + 1);
       setJobs((js) => js && js.map((j, i) => ({ ...j, status: { state: "done", outcome: results[i] } })));
@@ -343,14 +372,15 @@ export default function Convert({ active, storageKey, opened }: { active: boolea
   const runRef = useRef(run);
   runRef.current = run;
   const runningRef = useRef(running);
+  watchRef.current = watch;
   runningRef.current = running;
 
   const converted = (jobs ?? []).filter((j): j is Job & { status: { state: "done"; outcome: Outcome } } => j.status.state === "done" && !!j.status.outcome.report);
   const shown = running ? undefined : (converted.find((j) => j.input === picked) ?? converted[0]);
   useEffect(() => {
-    if (shown) setLast({ key: `${runs}:${shown.output}`, output: shown.output, outcome: shown.status.outcome });
+    if (shown) setLast({ key: `${runs}:${shown.output}`, output: shown.output, source: shown.input, noShd: !s.makeShd, outcome: shown.status.outcome });
     else if (!jobs && !running) setLast(null);
-  }, [shown, runs, jobs, running]);
+  }, [shown, runs, jobs, running, s.makeShd]);
 
   // Watch: a source saved over converts again and the Preview follows.
   const watchKey = JSON.stringify(watchPaths);
@@ -410,6 +440,11 @@ export default function Convert({ active, storageKey, opened }: { active: boolea
             watching={watch}
             canWatch={!!last}
             onWatch={setWatch}
+            onShdSaved={() => {
+              if (!watchRef.current) return;
+              if (runningRef.current) redo.current = true;
+              else void runRef.current(true);
+            }}
             onConvert={() => setView("convert")}
           />
         ) : (
@@ -484,7 +519,7 @@ export default function Convert({ active, storageKey, opened }: { active: boolea
             action={
               <span className="flex gap-3">
                 {s.script.trim() && (
-                  <button className="cursor-default text-[11px] text-muted-foreground hover:text-foreground" onClick={saveCurrent}>
+                  <button className="cursor-default text-[11px] text-muted-foreground hover:text-foreground" onClick={startSave}>
                     {t("convert.saveScript")}
                   </button>
                 )}
@@ -502,12 +537,40 @@ export default function Convert({ active, storageKey, opened }: { active: boolea
               placeholder={"[Hierarchy]\nsteer_rot = -90 180 0"}
               className="w-full rounded-lg border border-input bg-transparent p-2 font-mono text-[11.5px] placeholder:text-faint"
             />
+            {naming && (
+              <div className="mt-1.5 flex items-center gap-1.5">
+                <Input
+                  className="h-7 min-w-0 flex-1 text-[12px]"
+                  autoFocus
+                  value={naming.value}
+                  onChange={(e) => setNaming({ ...naming, value: e.target.value, confirm: false })}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") submitName();
+                    if (e.key === "Escape") setNaming(null);
+                  }}
+                />
+                <Button size="sm" variant="outline" className="h-7" disabled={!naming.value.trim()} onClick={submitName}>
+                  {naming.from === undefined ? (naming.confirm ? t("convert.replaceScript") : t("convert.saveScript")) : t("convert.renameScript")}
+                </Button>
+                <Button size="sm" variant="ghost" className="h-7 px-1.5" aria-label={t("convert.cancelScript")} title={t("convert.cancelScript")} onClick={() => setNaming(null)}>
+                  <X className="size-3.5" />
+                </Button>
+              </div>
+            )}
             {saved.length > 0 && (
               <div className="mt-1.5 flex flex-wrap gap-1.5" aria-label={t("convert.savedScripts")}>
                 {saved.map((x) => (
                   <span key={x.name} className={cn("flex items-center rounded-md border border-input text-[11.5px]", x.text === s.script && "border-primary/50 bg-primary/[0.07]")}>
                     <button className="cursor-default px-2 py-0.5 hover:text-foreground" title={t("convert.useScript")} onClick={() => pickSaved(x)}>
                       {x.name}
+                    </button>
+                    <button
+                      className="cursor-default px-1 py-0.5 text-muted-foreground hover:text-foreground"
+                      title={t("convert.renameScript")}
+                      aria-label={t("convert.renameScript")}
+                      onClick={() => setNaming({ from: x.name, value: x.name, confirm: false })}
+                    >
+                      <Pencil className="size-3" />
                     </button>
                     <button
                       className="cursor-default px-1 py-0.5 text-muted-foreground hover:text-destructive"
@@ -602,13 +665,23 @@ export default function Convert({ active, storageKey, opened }: { active: boolea
                           {t("convert.fast")}
                         </label>
 
+                        <Field label={t("convert.riderSkin")}>
+                          <Segmented
+                            size="sm"
+                            value={s.riderSkin}
+                            onChange={(v) => set("riderSkin", v)}
+                            options={[
+                              { value: "auto", label: t("convert.skinAuto") },
+                              { value: "off", label: t("convert.skinOff") },
+                            ]}
+                          />
+                        </Field>
+
                         <Field label={t("convert.shaders")}>
-                          <div className="grid gap-1.5 text-[12.5px]">
-                            <label className="flex items-center gap-2">
-                              <input type="checkbox" checked={s.overwriteShd} onChange={(e) => set("overwriteShd", e.target.checked)} />
-                              {t("convert.overwriteShd")}
-                            </label>
-                          </div>
+                          <label className="flex items-center gap-2 text-[12.5px]">
+                            <input type="checkbox" checked={s.makeShd} onChange={(e) => set("makeShd", e.target.checked)} />
+                            {t("convert.makeShd")}
+                          </label>
                         </Field>
             </div>
           </details>
