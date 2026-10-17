@@ -2105,19 +2105,31 @@ fn parse_gdrive_confirm(html: &str) -> Option<(String, Vec<(String, String)>)> {
     (!params.is_empty()).then_some((action, params))
 }
 
+use percent_encoding::percent_decode_str;
+
+fn decode_name(raw: &str) -> String {
+    percent_decode_str(raw).decode_utf8_lossy().into_owned()
+}
+
 fn filename_from(resp: &reqwest::Response, url: &str) -> String {
     if let Some(cd) = resp
         .headers()
         .get(reqwest::header::CONTENT_DISPOSITION)
         .and_then(|v| v.to_str().ok())
     {
-        if let Some(c) = Regex::new(r#"filename\*?=(?:UTF-8''|")?([^";]+)"#)
+        if let Some(c) = Regex::new(r#"filename(\*)?=(?:UTF-8''|")?([^";]+)"#)
             .unwrap()
             .captures(cd)
         {
-            let name = c[1].trim().trim_matches('"');
-            if is_usable_filename(name) {
-                return sanitize(name);
+            let raw = c[2].trim().trim_matches('"');
+            // `filename*=` is percent-encoded by spec; plain `filename=` is not.
+            let name = if c.get(1).is_some() {
+                decode_name(raw)
+            } else {
+                raw.to_string()
+            };
+            if is_usable_filename(&name) {
+                return sanitize(&name);
             }
         }
     }
@@ -2135,6 +2147,9 @@ fn filename_from(resp: &reqwest::Response, url: &str) -> String {
         "download.bin".to_string()
     }
 }
+
+
+    // ...URL fallback unchanged (optionally decode there too)
 
 /// Whether a name a server handed us can be used as a file name at all.
 ///

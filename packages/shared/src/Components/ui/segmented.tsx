@@ -24,7 +24,7 @@ export function Segmented<T extends string>({
   return (
     <div
       className={cn(
-        "inline-flex gap-0.5 rounded-lg border border-input bg-card p-[3px]",
+        "inline-flex gap-0.5 w-full rounded-lg border border-input bg-card p-[3px]",
         className,
       )}
     >
@@ -36,7 +36,7 @@ export function Segmented<T extends string>({
             type="button"
             onClick={() => onChange(opt.value)}
             className={cn(
-              "cursor-default rounded-md font-semibold transition-colors",
+              "cursor-default rounded-md flex-1 font-semibold transition-colors",
               size === "sm" ? "px-3.5 py-1 text-[11.5px]" : "px-4 py-[5px] text-[12.5px]",
               active
                 ? "bg-secondary text-foreground"
