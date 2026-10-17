@@ -8,7 +8,9 @@ import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import {
+  parseAllDownloads,
   parseAuthor,
+  parseBodyLinks,
   parseDownloads,
   parseImage,
   listingUrl,
@@ -138,6 +140,25 @@ describe("reading a recorded mxb-mods post", () => {
       ["mediafire.com", false],
       ["drive.google.com", true],
     ]);
+  });
+
+  it("takes download links from the post's text too, after the blocks, never as the default", () => {
+    const post = `<div class="entry-content">
+      <p>Backup on <a href="https://mega.nz/file/AbC#key">MEGA here</a>, or
+      <a href="https://www.dropbox.com/s/xyz/pack.zip?dl=0">Dropbox</a>.
+      Server files: <a href="https://cdn.example.org/files/track_server.pkz">server pack</a>.
+      Watch <a href="https://www.youtube.com/watch?v=abcdefghijk">the video</a>,
+      see <a href="https://mxb-mods.com/some-other-post/">this</a>, a <a href="https://example.org/page">page</a>,
+      and <a href="https://drive.google.com/file/d/1u9cRFbFHLgbhZAZeZc15u3E852nTdmnP/view">again</a>.</p>
+    </div><div id="instructions"></div>`;
+    const known = ["https://drive.google.com/file/d/1u9cRFbFHLgbhZAZeZc15u3E852nTdmnP/view"];
+    expect(parseBodyLinks(post, known).map((d) => [d.host, d.label, d.isDefault, d.isServer])).toEqual([
+      ["mega.nz", "MEGA here", false, false],
+      ["dropbox.com", "Dropbox", false, false],
+      ["cdn.example.org", "server pack", false, true],
+    ]);
+    // The recorded post has no extra links in its text: its blocks are all of it.
+    expect(parseAllDownloads(html)).toEqual(parseDownloads(html));
   });
 
   it("knows a picture by its bytes", () => {

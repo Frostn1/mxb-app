@@ -22,6 +22,7 @@
  * cacheable for a minute; the routes are rate-limited per address.
  */
 
+import { linkBroken } from "./linkhealth";
 import { ASSET_TYPES, hex, LEASE_MS, SYNCED_KEY, type AssetType, type MirrorJob } from "./mirror";
 import { safeBlocks } from "./modbody";
 import { activeBikes, supported, touchBlob } from "./mirrorpolicy";
@@ -247,6 +248,8 @@ interface FileRow {
   size: number | null;
   bucket: string | null;
   r2_key: string | null;
+  error: string | null;
+  link_state: string | null;
 }
 
 /** The version a request names (`?version=<seq>`), else the current one. */
@@ -287,7 +290,7 @@ export async function getAsset(id: number, url: URL, env: Env): Promise<{ status
   if (!asset) return { status: 404, body: { error: "no such mod" } };
   const { results } = await env.DB.prepare(
     `SELECT f.idx, f.part, f.rel, f.url, f.host, f.label, f.is_server, f.is_default, f.status, f.sha256, f.filename,
-       b.size, b.bucket, b.r2_key
+       f.error, f.link_state, b.size, b.bucket, b.r2_key
      FROM mod_files f LEFT JOIN mod_blobs b ON b.sha256 = f.sha256
      WHERE f.version_id = ? ORDER BY f.idx, f.part`,
   )
@@ -327,6 +330,11 @@ export async function getAsset(id: number, url: URL, env: Env): Promise<{ status
             : f.status === "idle"
               ? "original"
               : "mirroring",
+      // The original link's health (`linkhealth.ts`): "broken" when the host says the file is
+      // gone or not shared, "ok" when it answered, null when unchecked or uncheckable (MEGA).
+      link: linkBroken(f) ? "broken" : f.link_state === "ok" ? "ok" : null,
+      // Kept for clients that read only this: a dead original and no copy of ours.
+      broken: !stored && linkBroken(f),
       filename: f.filename,
       size: f.size,
       sha256: stored ? f.sha256 : null,
@@ -435,7 +443,7 @@ export type PrepareState =
   /** A share whose files are listed as parts: read the mod again. */
   | { state: "folder" }
   /** Not ours and not coming (a host refusal, a quota, too big, policy): use `source`. */
-  | { state: "original"; source: string | null };
+  | { state: "original"; source: string | null; broken?: boolean };
 
 /**
  * Queue the copy of a file that isn't stored, and say where it stands.
@@ -456,13 +464,13 @@ export async function prepareFile(
   const version = visible ? await versionOf(env, id, url) : null;
   if (!version) return { status: 404, body: { error: "no such mod" } };
   const file = await env.DB.prepare(
-    `SELECT f.url, f.status, a.public_id, a.source, a.type, a.bike, b.r2_key
+    `SELECT f.url, f.status, f.error, f.link_state, a.public_id, a.source, a.type, a.bike, b.r2_key
      FROM mod_files f JOIN mod_versions v ON v.id = f.version_id JOIN mod_assets a ON a.id = v.asset_id
      LEFT JOIN mod_blobs b ON b.sha256 = f.sha256
      WHERE f.version_id = ? AND f.idx = ? AND f.part = ?`,
   )
     .bind(version.id, idx, part)
-    .first<{ url: string | null; status: string; public_id: string; source: string; type: string; bike: string; r2_key: string | null }>();
+    .first<{ url: string | null; status: string; error: string | null; link_state: string | null; public_id: string; source: string; type: string; bike: string; r2_key: string | null }>();
   if (!file) return { status: 404, body: { error: "no such file" } };
   if (file.status === "done" && file.r2_key) {
     const path = part > 0 ? `${idx}/${part}` : `${idx}`;
@@ -479,7 +487,8 @@ export async function prepareFile(
   if (file.status === "queued" || file.status === "pending" || file.status === "fetcher") {
     return { status: 200, body: { state: "mirroring" } };
   }
-  return { status: 200, body: { state: "original", source: file.url } };
+  const broken = linkBroken(file);
+  return { status: 200, body: broken ? { state: "original", source: file.url, broken } : { state: "original", source: file.url } };
 }
 
 /** A mirrored mod by its source post's slug: how the MXB App, which browses mxb-mods, finds our copy. */
