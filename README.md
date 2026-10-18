@@ -6,7 +6,6 @@
 
 **[mxbsecure.com/app](https://mxbsecure.com/app)** · [Download for Windows](https://get.mxbsecure.com/app/windows) · [Everything from mxbsecure](https://mxbsecure.com)
 
-[![CI](https://github.com/Frostn1/mxb-app/actions/workflows/ci.yml/badge.svg)](https://github.com/Frostn1/mxb-app/actions/workflows/ci.yml)
 [![Latest release](https://img.shields.io/github/v/release/Frostn1/mxb-app?sort=semver&label=release&color=0071e3)](https://mxbsecure.com/app)
 [![Release date](https://img.shields.io/github/release-date/Frostn1/mxb-app?label=released&color=0071e3)](https://github.com/Frostn1/mxb-app/releases)
 [![Downloads](https://img.shields.io/github/downloads/Frostn1/mxb-app/total?label=downloads&color=0071e3)](https://mxbsecure.com/app)
@@ -103,8 +102,7 @@ Each of these is a tab in the app.
   end, rather than showing a bare error — see "Is MX Bikes down, or is it you?" below.
 - **Studio** — opens [Frost's Studio](https://mxbsecure.com/studio), or gets it for
   you. The Designer, the Paint, Track and Rider studios, Replay and content locking are
-  all there now, in their own app ([`apps/studio`](apps/studio/)). Both apps read the same
-  folders, so nothing moves.
+  all there now, in their own app. Both apps read the same folders, so nothing moves.
 - **Race mode** — MX Bikes loads every mod in the folder at startup, so a preset
   names the track it races on and everything else steps aside into a holding
   folder until you bring it back.
@@ -203,27 +201,19 @@ Running through all of it:
 | Path | What it is |
 | --- | --- |
 | [`apps/manager/`](apps/manager/) | **MXB App** — browse, install, manage, launch. React frontend, Rust backend. |
-| [`apps/studio/`](apps/studio/) | **Frost's Studio** — the paint Designer, Paint Studio, Track Studio, the rider rig, the Replay recorder and every paid plugin's panels. Ships from [`Frostn1/frost-studio`](https://github.com/Frostn1/frost-studio). |
 | [`crates/core/`](crates/core/) | Shared Rust: the game's own file formats, and the model pipeline both apps draw with. |
 | [`packages/shared/`](packages/shared/) | Shared TypeScript: the 3D viewer, the UI primitives, the API client and the base dictionary. |
-| [`control-plane/`](control-plane/) | The Cloudflare Worker paint sync, plugin licensing and server registration talk to. |
-| [`server-agent/`](server-agent/) | Moved: mxb-agent is server code and lives in the private server repo now. |
-| [`docs/replay/`](docs/replay/) | How MXB Replay and the Studio's recorder agree on a take — the contract the in-game DLL writes to. |
-| [`scripts/`](scripts/) | Release plumbing — changelog sections, Discord notes, the Linux AppImage fix-up. |
-| [`site/`](site/) | The landing page published by [`pages.yml`](.github/workflows/pages.yml). |
+| [`site/`](site/) | The old landing page; the live one is [mxbsecure.com/app](https://mxbsecure.com/app). |
 
-The repo is a bun + Cargo workspace holding two applications. They share one copy of the
-file-format and 3D code (`crates/core`, `packages/shared`) and one config folder, so a bike
-the Studio paints is a bike the manager already knows about.
+The repo is a bun + Cargo workspace holding the MXB App and the file-format and 3D code it
+is built on (`crates/core`, `packages/shared`). The other mxbsecure apps are not open source.
 
 ## Development
 
-Prerequisites: [Node.js](https://nodejs.org/) 20+ (CI builds on 20; the
-control-plane Worker needs 22) and the
+Prerequisites: [Node.js](https://nodejs.org/) 20+ and the
 [Rust toolchain](https://www.rust-lang.org/tools/install), plus the
 [Tauri system dependencies](https://tauri.app/start/prerequisites/) for your OS.
-On Linux that includes `libasound2-dev` — see
-[`ci.yml`](.github/workflows/ci.yml) for the full apt list.
+On Linux that includes `libasound2-dev`.
 
 ```sh
 bun install          # install frontend dependencies
@@ -248,11 +238,6 @@ cargo test --workspace    # unit tests — catalog parsing, download resolution,
                      # routing, the game's file formats. Tests needing a real MX
                      # Bikes asset are #[ignore]d.
 ```
-
-[`ci.yml`](.github/workflows/ci.yml) runs on every push to `main` and every PR:
-the frontend typecheck/lint/build, `cargo test` on Linux *and* Windows, the
-control plane, the server agent, and a PowerShell parse of the generated
-server-bootstrap scripts.
 
 > MX Bikes is a Windows game, so a real install is a Windows one — but the app
 > launches it on macOS through a CrossOver, Whisky or Wine bottle, and on Linux
@@ -300,52 +285,12 @@ WooCommerce Store API.
 
 ## Releases
 
-Releases are built in CI by
-[`.github/workflows/release.yml`](.github/workflows/release.yml) — it compiles
-Windows, macOS and Linux bundles and attaches them to a GitHub Release.
-
-Write the version's `CHANGELOG.md` section **before** tagging. The release body
-and the Discord announcement are both composed from it by
-[`scripts/changelog-section.sh`](scripts/changelog-section.sh), which finds a
-section by the `v<version>` in its heading — so work still sitting under an
-"Unreleased" heading ships notes that never mention it.
-
-Then make sure `apps/manager/package.json`, `apps/manager/src-tauri/tauri.conf.json`
-and `apps/manager/src-tauri/Cargo.toml` all carry the version, and push a matching tag:
-
-```sh
-git tag -a v0.13.0 -m "v0.13.0 — what it's called"
-git push origin v0.13.0
-```
-
-A **suffixed** tag — `v0.13.0-beta.3`, `v0.13.0-rc.2` — builds the same three
-platforms but publishes as a **pre-release**: GitHub keeps it off
-`releases/latest`, which is the endpoint the in-app updater reads, so existing
-installs are never offered it, and it's announced in the beta Discord channel
-rather than the release one. Tagging the plain `v0.13.0` afterwards is what ships
-it to everyone. The workflow decides both of those purely from the `-` in the tag,
-so neither is set by hand.
-
-The workflow **publishes** the release with the installers attached
-(`releaseDraft: false`), renames the bundles to `MXB-App-<ver>-<arch>.<ext>` and
-patches `latest.json` so self-update keeps verifying.
-
-The Linux build takes one detour on the way: it goes through
-[`scripts/tauri-build.sh`](scripts/tauri-build.sh), which runs the same `tauri build` the
-other platforms do and then takes the bundled libwayland back out of the AppImage and signs
-it again — [`scripts/appimage-drop-bundled-wayland.sh`](scripts/appimage-drop-bundled-wayland.sh)
-says why, and needs only `squashfs-tools`. It works on an AppImage that has already been
-downloaded too, which is how to hand a Linux tester a fixed build without cutting a tag:
-
-```sh
-scripts/appimage-drop-bundled-wayland.sh MXB-App-0.13.0-amd64.AppImage
-```
-
-A tag can also be created from the GitHub web UI — **Releases → Draft a new
-release → Create new tag on publish** — which is the way to cut one without a
-terminal. **Actions → Release → Run workflow** is *not*: a `workflow_dispatch`
-build tags itself `v<run number>`, leaves the running app without its version, and
-skips the announcement. It's for testing that a build compiles, not for shipping.
+Releases are published here, on this repo's
+[Releases](https://github.com/Frostn1/mxb-app/releases) page, by the mxbsecure release
+pipeline: signed Windows, macOS and Linux bundles plus the signed `latest.json` the in-app
+updater reads. A suffixed tag (`v0.13.0-beta.3`) is a pre-release and stays off
+`releases/latest`, so only the beta channel sees it. Each version's notes are its
+[`CHANGELOG.md`](CHANGELOG.md) section.
 
 ## Roadmap
 
