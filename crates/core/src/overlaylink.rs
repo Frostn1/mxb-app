@@ -412,12 +412,26 @@ mod tests {
         rx.recv_timeout(Duration::from_secs(5)).expect("an event")
     }
 
+    /// Dial the way the apps do, on every tick, until the link is up or the deadline passes. One
+    /// dial can miss on a loaded machine (the listener thread not scheduled inside the connect or
+    /// handshake window); the apps simply dial again, so the test does too.
+    fn dial_until_up(link: &Link, within: Duration) -> bool {
+        let deadline = std::time::Instant::now() + within;
+        while !link.dial() {
+            if std::time::Instant::now() >= deadline {
+                return false;
+            }
+            std::thread::yield_now();
+        }
+        true
+    }
+
     #[test]
     fn two_links_in_one_process_talk() {
         let dir = temp_dir("talk");
         let (manager, mrx) = start(App::Manager, &dir);
         let (coach, crx) = start(App::Coach, &dir);
-        assert!(coach.dial(), "coach finds the manager by its file");
+        assert!(dial_until_up(&coach, Duration::from_secs(20)), "coach finds the manager by its file");
 
         match next(&crx) {
             Event::Up(p) => assert_eq!((p.app, p.tabs), (App::Manager, vec!["presets".to_string()])),

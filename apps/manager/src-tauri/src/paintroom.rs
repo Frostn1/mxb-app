@@ -29,6 +29,7 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 
 use crate::config::AppConfig;
+use crate::modelsync::RiderModels;
 use crate::paintsync::{
     self, control_plane, safe_dest, sha256_bytes, BikeLoadout, Manifest, PaintEntry, PullOutcome,
 };
@@ -99,9 +100,14 @@ pub fn rooms_unavailable() -> bool {
 /// Set when the rider's own look changed, so the room re-joins with it. A join is what tells
 /// everyone else on the server; `PUT /v1/loadouts` alone would not reach the room.
 static LOOK_CHANGED: AtomicBool = AtomicBool::new(false);
+static MODELS_CHANGED: AtomicBool = AtomicBool::new(false);
 
 pub fn note_look_changed() {
     LOOK_CHANGED.store(true, Ordering::SeqCst);
+}
+
+pub fn note_models_changed() {
+    MODELS_CHANGED.store(true, Ordering::SeqCst);
 }
 
 // ── Wire ─────────────────────────────────────────────────────────────────────
@@ -150,6 +156,8 @@ pub struct RoomRider {
     pub joined_at: u64,
     #[serde(default)]
     pub paints: Vec<PaintEntry>,
+    #[serde(default)]
+    pub models: Option<RiderModels>,
 }
 
 impl RoomRider {
@@ -192,6 +200,12 @@ pub enum JoinReply {
     RateLimited(Duration),
 }
 
+pub enum ModelsUpdate<'a> {
+    Keep,
+    Set(&'a RiderModels),
+    Clear,
+}
+
 /// Say which server this rider is on, and — when `bikes` is given — what they are wearing.
 ///
 /// Idempotent, so it doubles as the heartbeat while the room's socket is down. Leaving
@@ -200,12 +214,18 @@ pub async fn join(
     token: &str,
     server: &ServerRef,
     bikes: Option<&[BikeLoadout]>,
+    models: ModelsUpdate<'_>,
 ) -> anyhow::Result<JoinReply> {
     // `viewOnly`: this app installs view-only paints for the session only and deletes them
     // when the game exits (`viewonly.rs`). Without it the control plane never sends one.
     let mut body = serde_json::json!({ "server": server, "caps": ["viewOnly"] });
     if let Some(bikes) = bikes {
         body["bikes"] = serde_json::to_value(bikes)?;
+    }
+    match models {
+        ModelsUpdate::Keep => {}
+        ModelsUpdate::Set(models) => body["models"] = serde_json::to_value(models)?,
+        ModelsUpdate::Clear => body["models"] = serde_json::Value::Null,
     }
     let resp = paintsync::client()?
         .post(format!("{}/v1/paintsync/join", control_plane()))
@@ -483,14 +503,14 @@ pub struct Grid {
 }
 
 /// What a rider's look amounts to, for telling a real change from a repeat.
-fn look_of(rider: &RoomRider) -> Vec<(String, String)> {
+fn look_of(rider: &RoomRider) -> (Vec<(String, String)>, Option<RiderModels>) {
     let mut look: Vec<(String, String)> = rider
         .paints
         .iter()
         .map(|p| (p.rel_dest.to_ascii_lowercase(), p.sha256.to_ascii_lowercase()))
         .collect();
     look.sort();
-    look
+    (look, rider.models.clone())
 }
 
 /// View-only paints are pulled until the memory-only version lands: whatever the control plane
@@ -936,7 +956,6 @@ pub fn install_picks(
             let held = index.sha_of(&dest);
             if held.as_deref() == Some(pick.sha256.as_str()) {
                 out.already_had += 1;
-                manifest.claim(&pick.rel_dest, &pick.sha256);
                 continue;
             }
             if !manifest.owns(&pick.rel_dest, held.as_deref()) {
@@ -1018,7 +1037,7 @@ pub fn cleanup_received(
             // The player has made it theirs since.
             continue;
         }
-        if std::fs::remove_file(&dest).is_ok() {
+        if crate::safedelete::trash(&mods_dir.to_string_lossy(), &dest).is_ok() {
             manifest.forget(&rel_dest);
             paintsync::prune_empty(mods_dir, dest.parent());
             removed += 1;
@@ -1191,7 +1210,9 @@ pub fn apply_grid(cfg: &AppConfig, local: &mut Local, riders: &[&RoomRider], now
     let session_out = install_picks(&mods_dir, &session_picks, &mut local.session, &mut local.index, &mut manifest);
     for pick in &session_picks {
         if let Some(dest) = safe_dest(&mods_dir, &pick.rel_dest) {
-            if local.index.sha_of(&dest).as_deref() == Some(pick.sha256.as_str()) {
+            if local.index.sha_of(&dest).as_deref() == Some(pick.sha256.as_str())
+                && manifest.owns(&pick.rel_dest, Some(pick.sha256.as_str()))
+            {
                 journal.claim(&pick.rel_dest, &pick.sha256);
             }
         }
@@ -1267,6 +1288,38 @@ pub struct Session {
     /// installed yet. Retried every tick until [`Self::local_ready_to_apply`] allows it —
     /// this rider's own next pits visit, or the session ending.
     pending_apply: bool,
+    /// Last completed local model hash, while a fresh one is allowed to finish beside the
+    /// immediate paint join.
+    models: Option<RiderModels>,
+    models_task: Option<tauri::async_runtime::JoinHandle<RiderModels>>,
+}
+
+fn rider_looks(grid: &Grid) -> String {
+    crate::modelsync::encode_rider_looks(
+        grid.riders()
+            .filter_map(|r| r.models.as_ref().map(|models| (r.rider_name.as_str(), models))),
+    )
+}
+
+fn signal_rider_looks(app: &tauri::AppHandle, grid: &Grid) {
+    if !crate::frostmod::is_running()
+        || !crate::frostmod::rider_looks_supported(
+            crate::frostmod_manage::installed_version(app).as_deref(),
+        )
+    {
+        return;
+    }
+    let _ = crate::frostmod::signal_set_rider_looks(&rider_looks(grid));
+}
+
+fn clear_rider_looks(app: &tauri::AppHandle) {
+    if crate::frostmod::is_running()
+        && crate::frostmod::rider_looks_supported(
+            crate::frostmod_manage::installed_version(app).as_deref(),
+        )
+    {
+        let _ = crate::frostmod::signal_set_rider_looks("");
+    }
 }
 
 impl Session {
@@ -1363,7 +1416,7 @@ impl Session {
             _ => false,
         };
         if !same {
-            self.leave_current(&token).await;
+            self.leave_current(app, &token).await;
             if let Some(server) = desired {
                 self.current = Some(Current {
                     server,
@@ -1374,7 +1427,7 @@ impl Session {
                     retry_at: Instant::now(),
                     backoff: BACKOFF_MIN,
                 });
-                return self.join(app, cfg, &token, true).await;
+                return self.join(app, cfg, &token, true, false).await;
             }
             return Tick::Live;
         }
@@ -1386,15 +1439,43 @@ impl Session {
             }
         }
 
+        if self.models_task.as_ref().is_some_and(|task| task.inner().is_finished()) {
+            let task = self.models_task.take().expect("checked above");
+            match task.await {
+                Ok(models) => self.models = Some(models),
+                Err(e) => log::warn!("[room] model hashing failed: {e}"),
+            }
+            if cfg.paint_sync_models
+                && self.current.as_ref().is_some_and(|c| {
+                    !c.key.is_empty() || Instant::now() >= c.retry_at
+                })
+            {
+                return self.join(app, cfg, &token, false, true).await;
+            }
+        }
+
+        if MODELS_CHANGED.swap(false, Ordering::SeqCst) {
+            if !cfg.paint_sync_models {
+                self.models = None;
+                clear_rider_looks(app);
+            }
+            if self.current.as_ref().is_some_and(|c| {
+                !c.key.is_empty() || Instant::now() >= c.retry_at
+            }) {
+                return self.join(app, cfg, &token, cfg.paint_sync_models, true).await;
+            }
+        }
+
         // A join that hasn't been answered yet — rate limited, or the network was down.
         if self.current.as_ref().is_some_and(|c| c.key.is_empty()) {
             if self.current.as_ref().is_some_and(|c| Instant::now() >= c.retry_at) {
-                return self.join(app, cfg, &token, true).await;
+                return self.join(app, cfg, &token, true, false).await;
             }
             return Tick::Live;
         }
 
         // What the room said.
+        let old_looks = cfg.paint_sync_models.then(|| rider_looks(&self.grid));
         let events = self.current.as_ref().and_then(|c| c.room.as_ref()).map(Room::drain).unwrap_or_default();
         let mut changed = false;
         let mut arrived = false;
@@ -1418,6 +1499,9 @@ impl Session {
             cur.retry_at = Instant::now() + cur.backoff;
             cur.backoff = (cur.backoff * 2).min(HEARTBEAT);
         }
+        if old_looks.as_deref().is_some_and(|old| old != rider_looks(&self.grid)) {
+            signal_rider_looks(app, &self.grid);
+        }
         if changed || (self.pending_apply && self.local_ready_to_apply()) {
             // Either the grid moved, or an earlier apply was queued because the local rider
             // was on track and this tick finds them back in the pits — either way there is
@@ -1437,7 +1521,7 @@ impl Session {
         let look_changed = LOOK_CHANGED.swap(false, Ordering::SeqCst);
         let due = self.current.as_ref().is_some_and(|c| c.last_beat.elapsed() >= HEARTBEAT);
         if look_changed {
-            return self.join(app, cfg, &token, true).await;
+            return self.join(app, cfg, &token, true, false).await;
         }
         if due {
             let pinged = match self.current.as_mut() {
@@ -1452,26 +1536,52 @@ impl Session {
                 None => true,
             };
             if !pinged {
-                return self.join(app, cfg, &token, false).await;
+                return self.join(app, cfg, &token, false, false).await;
             }
         }
         Tick::Live
     }
 
     /// Join the current server, upload what it lacks, and bring the grid in.
-    async fn join(&mut self, app: &tauri::AppHandle, cfg: &AppConfig, token: &str, with_look: bool) -> Tick {
+    async fn join(
+        &mut self,
+        app: &tauri::AppHandle,
+        cfg: &AppConfig,
+        token: &str,
+        with_look: bool,
+        force_models: bool,
+    ) -> Tick {
         let Some(server) = self.current.as_ref().map(|c| c.server.clone()) else { return Tick::Live };
         if with_look {
-            // This join carries the look, so a change noted before it is already covered.
+            // This join carries the paint look and starts the current model snapshot, so
+            // changes noted before it are already covered.
             LOOK_CHANGED.store(false, Ordering::SeqCst);
+            MODELS_CHANGED.store(false, Ordering::SeqCst);
         }
         let profile = crate::sync_profile(cfg);
+        if with_look && cfg.paint_sync_models && self.models_task.is_none() {
+            if let Some(profile) = profile.clone() {
+                let cfg = (*cfg).clone();
+                self.models_task = Some(tauri::async_runtime::spawn_blocking(move || {
+                    crate::modelsync::own_models(&cfg, &profile)
+                }));
+            } else {
+                self.models = Some(RiderModels::default());
+            }
+        }
         let mut look = match (&profile, with_look) {
             (Some(p), true) => paintsync::local_look(cfg, p).ok(),
             _ => None,
         };
         let bikes = look.as_ref().map(|l| l.bikes.as_slice());
-        let reply = join(token, &server, bikes).await;
+        let models = if !cfg.paint_sync_models && (with_look || force_models) {
+            ModelsUpdate::Clear
+        } else if cfg.paint_sync_models {
+            self.models.as_ref().map(ModelsUpdate::Set).unwrap_or(ModelsUpdate::Keep)
+        } else {
+            ModelsUpdate::Keep
+        };
+        let reply = join(token, &server, bikes, models).await;
 
         let Some(cur) = self.current.as_mut() else { return Tick::Live };
         cur.last_beat = Instant::now();
@@ -1495,6 +1605,7 @@ impl Session {
             }
         };
         ROOMS.store(1, Ordering::SeqCst);
+        let first_join = cur.key.is_empty();
         if cur.key != joined.server {
             log::info!("[room] on {}", joined.server);
         }
@@ -1511,7 +1622,15 @@ impl Session {
             }
         }
 
+        let old_looks = rider_looks(&self.grid);
         let changed = self.grid.replace(joined.riders);
+        if cfg.paint_sync_models {
+            if first_join || (force_models && with_look) || old_looks != rider_looks(&self.grid) {
+                signal_rider_looks(app, &self.grid);
+            }
+        } else if first_join && !force_models {
+            clear_rider_looks(app);
+        }
         if changed || self.current.as_ref().is_some_and(|c| c.room.is_none()) {
             self.reconcile(app, cfg, token, false).await;
         }
@@ -1601,17 +1720,23 @@ impl Session {
             log::warn!("[room] couldn't record the sync: {e:#}");
         }
         crate::emit_sync(app, crate::SyncEvent::pulled(&out));
-        if out.installed > 0 {
+        if full_reload_after_paints(out.installed, crate::serverhold::on_server_now()) {
             let _ = crate::frostmod::signal_reload();
+            crate::refresh_live_look(app);
+        } else if out.installed > 0 {
+            log::info!(
+                "[room] on a server: paint refresh only; a content reload now would drop every rider"
+            );
             crate::refresh_live_look(app);
         } else if arrived {
             crate::refresh_live_look(app);
         }
     }
 
-    async fn leave_current(&mut self, token: &str) {
+    async fn leave_current(&mut self, app: &tauri::AppHandle, token: &str) {
         let Some(cur) = self.current.take() else { return };
         set_room_riders(None);
+        clear_rider_looks(app);
         // Dropping the room closes its socket.
         drop(cur.room);
         self.grid.clear();
@@ -1630,18 +1755,30 @@ impl Session {
             return;
         }
         match crate::voice::signal::account(app, cfg).await {
-            Ok(token) => self.leave_current(&token).await,
+            Ok(token) => self.leave_current(app, &token).await,
             Err(_) => {
                 self.current = None;
                 self.grid.clear();
+                clear_rider_looks(app);
             }
         }
     }
 }
 
+pub(crate) fn full_reload_after_paints(installed: usize, on_server: bool) -> bool {
+    installed > 0 && !on_server
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn paints_only_full_reload_off_a_server() {
+        assert!(full_reload_after_paints(1, false));
+        assert!(!full_reload_after_paints(1, true));
+        assert!(!full_reload_after_paints(0, false));
+    }
 
     fn sha(n: u8) -> String {
         sha256_bytes(&[n])
@@ -1659,7 +1796,7 @@ mod tests {
     }
 
     fn rider(name: &str, joined_at: u64, paints: Vec<PaintEntry>) -> RoomRider {
-        RoomRider { rider_name: name.into(), guid: None, joined_at, paints }
+        RoomRider { rider_name: name.into(), guid: None, joined_at, paints, models: None }
     }
 
     const RED: &str = "bikes/KTM450/paints/Red.pnt";
@@ -1877,6 +2014,29 @@ mod tests {
         let out = install_picks(&mods, &pick(&t), &mut store, &mut index, &mut manifest);
         assert_eq!((out.installed, out.kept_yours), (0, 1));
         assert_eq!(std::fs::read(&dest).unwrap(), b"my own red");
+    }
+
+    #[test]
+    fn an_identical_preexisting_paint_is_never_claimed_or_cleaned_up() {
+        let (mods, store_dir) = scratch("identical-yours");
+        let root = mods.parent().unwrap().to_path_buf();
+        let bytes = b"the player's existing paint";
+        let sha = sha256_bytes(bytes);
+        let dest = safe_dest(&mods, RED).unwrap();
+        std::fs::create_dir_all(dest.parent().unwrap()).unwrap();
+        std::fs::write(&dest, bytes).unwrap();
+        let mut store = PaintStore::open(store_dir);
+        let (mut index, mut manifest) = (HashIndex::default(), Manifest::default());
+        let out = install_picks(&mods, &pick(&sha), &mut store, &mut index, &mut manifest);
+        assert_eq!(out.already_had, 1);
+        assert!(!manifest.owns(RED, Some(&sha)), "matching bytes do not transfer ownership");
+        store.mark_used(&sha, 0);
+        assert_eq!(cleanup_received(&mods, &mut store, &mut index, &mut manifest, 10 * DAY), 0);
+        let cfg = AppConfig { mods_path: root.to_string_lossy().into_owned(), ..Default::default() };
+        assert_eq!(crate::paintsync::remove_installed(&cfg).removed, 0);
+        assert_eq!(crate::viewonly::sweep(&mods, None).removed, 0);
+        assert_eq!(std::fs::read(&dest).unwrap(), bytes);
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]
@@ -2111,14 +2271,20 @@ mod paint_room_live {
             }],
         }];
 
-        let JoinReply::Joined(joined) = join(&ann, &server, Some(&look)).await.unwrap() else {
+        let JoinReply::Joined(joined) =
+            join(&ann, &server, Some(&look), ModelsUpdate::Keep).await.unwrap()
+        else {
             panic!("paint rooms must be deployed");
         };
         assert_eq!(joined.missing, vec![sha.clone()], "a new paint is reported missing");
         let sources = HashMap::from([(sha.clone(), src)]);
         assert_eq!(upload_missing(&ann, &sources, &joined.missing).await, 1);
 
-        let JoinReply::Joined(seen) = join(&bob, &server, Some(&[])).await.unwrap() else { unreachable!() };
+        let JoinReply::Joined(seen) =
+            join(&bob, &server, Some(&[]), ModelsUpdate::Keep).await.unwrap()
+        else {
+            unreachable!()
+        };
         assert_eq!(seen.server, joined.server, "both land on one key");
         let riders: Vec<&RoomRider> = seen.riders.iter().collect();
         assert_eq!(riders.len(), 1);

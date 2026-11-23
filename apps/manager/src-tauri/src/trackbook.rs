@@ -34,8 +34,9 @@ use std::path::{Path, PathBuf};
 /// Version 9 recognizes the Shop's `SPX ARL SX` and spaced `ARL FINALS RD 02` identities.
 /// Version 10 retires misses written before the final spaced-round identity normalization.
 /// Version 11 makes round numbers match whole: `RD01` once "matched" `ROUND 17` because the
-/// compact `round1` is a string prefix of `round17`.
-pub const VERSION: u32 = 11;
+/// compact `round1` is a string prefix of `round17`. Version 12 retires matches that folded one
+/// number onto another (`Walnut 1` for a server on `Walnut 2`).
+pub const VERSION: u32 = 12;
 
 /// How long a found track is trusted. A page does not move, and if it ever does the worst
 /// case is a dead link on one panel until the row ages out.

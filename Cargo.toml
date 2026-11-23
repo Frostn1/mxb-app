@@ -12,10 +12,13 @@ members = [
     "vendor/mega",
     "crates/core",
     "apps/manager/src-tauri",
+    "apps/coach/src-tauri",
+    "apps/servers/src-tauri",
+    "apps/cinema/src-tauri",
 ]
 # `tools/mxb-fetcher` builds on its own on a bare Linux box (its README), with its own lockfile
 # and none of the apps' dependencies.
-exclude = [".sidecar-src", "tools/mxb-fetcher"]
+exclude = [".sidecar-src"]
 
 # The profiles live here because Cargo IGNORES `[profile.*]` in a non-root workspace member —
 # it warns, in the middle of a long build log, and otherwise silently gives you the defaults.

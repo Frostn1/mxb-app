@@ -221,6 +221,14 @@ pub async fn set_friends_presence(app: AppHandle, enabled: bool) -> Result<(), S
     Ok(())
 }
 
+/// Close (or bring back) the ReShade busy-server warning for this install.
+#[tauri::command]
+pub fn set_reshade_warning_dismissed(app: AppHandle, dismissed: bool) -> Result<(), String> {
+    let mut cfg = crate::config::load(&app).unwrap_or_default();
+    cfg.reshade_warning_dismissed = dismissed;
+    crate::config::save(&app, &cfg).map_err(|e| format!("{e:#}"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

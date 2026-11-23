@@ -1,0 +1,142 @@
+{
+  "manifestVersion": 1,
+  "id": "mxbsecure.dunes-theme",
+  "name": "Dunes",
+  "version": "1.0.2",
+  "author": "mxbsecure",
+  "description": "Sand and sunset themes with a dune-line backdrop, pill buttons and a condensed display face.",
+  "homepage": "https://github.com/Frostn1/mxb-app/blob/main/docs/extensions.md",
+  "permissions": [],
+  "categories": [
+    "themes"
+  ],
+  "tags": [
+    "sand",
+    "sunset",
+    "font",
+    "backdrop"
+  ],
+  "screenshots": [
+    "store/1.webp",
+    "store/2.webp"
+  ],
+  "contributes": {
+    "themes": [
+      {
+        "id": "dunes",
+        "label": "Dunes",
+        "dark": {
+          "window": "#120d08",
+          "background": "#17110b",
+          "foreground": "#f4ead9",
+          "card": "#221911",
+          "cardForeground": "#f4ead9",
+          "popover": "#2b2016",
+          "popoverForeground": "#f4ead9",
+          "primary": "#f0a35e",
+          "primaryForeground": "#1a0f05",
+          "secondary": "#2e2318",
+          "secondaryForeground": "#f4ead9",
+          "muted": "#221911",
+          "mutedForeground": "#b9a68d",
+          "accent": "rgba(240, 163, 94, 0.16)",
+          "accentForeground": "#f6bd88",
+          "border": "rgba(244, 234, 217, 0.12)",
+          "input": "rgba(244, 234, 217, 0.18)",
+          "ring": "#f0a35e"
+        },
+        "light": {
+          "window": "#efe4d2",
+          "background": "#f8f1e6",
+          "foreground": "#2a1d10",
+          "card": "#fffaf2",
+          "cardForeground": "#2a1d10",
+          "popover": "#fffaf2",
+          "popoverForeground": "#2a1d10",
+          "primary": "#c2671f",
+          "primaryForeground": "#ffffff",
+          "secondary": "#ece0cc",
+          "secondaryForeground": "#2a1d10",
+          "muted": "#efe4d2",
+          "mutedForeground": "#7a6650",
+          "accent": "rgba(194, 103, 31, 0.12)",
+          "accentForeground": "#a3540f",
+          "border": "rgba(42, 29, 16, 0.13)",
+          "input": "rgba(42, 29, 16, 0.18)",
+          "ring": "#c2671f"
+        },
+        "radius": "0.5rem",
+        "background": "dune-lines",
+        "buttonStyle": "pill",
+        "fonts": {
+          "display": "condensed"
+        }
+      },
+      {
+        "id": "dusk",
+        "label": "Dusk",
+        "dark": {
+          "window": "#0d0a14",
+          "background": "#120e1a",
+          "card": "#1c1626",
+          "popover": "#251d31",
+          "secondary": "#2a2136",
+          "muted": "#1c1626",
+          "primary": "#ff7a59",
+          "primaryForeground": "#1a0a05",
+          "accent": "rgba(255, 122, 89, 0.16)",
+          "accentForeground": "#ff9c82",
+          "ring": "#ff7a59"
+        },
+        "background": "sunset"
+      }
+    ],
+    "buttonStyles": [
+      {
+        "id": "pill",
+        "label": "Pill",
+        "radius": "999px",
+        "weight": 700
+      },
+      {
+        "id": "caps",
+        "label": "Square caps",
+        "radius": "2px",
+        "uppercase": true,
+        "letterSpacing": 0.06,
+        "weight": 700
+      }
+    ],
+    "backgrounds": [
+      {
+        "id": "dune-lines",
+        "label": "Dune lines",
+        "image": "assets/dunes.png",
+        "opacity": 0.55,
+        "position": "bottom",
+        "size": "cover"
+      },
+      {
+        "id": "sunset",
+        "label": "Sunset glow",
+        "gradient": {
+          "angle": 180,
+          "stops": [
+            "rgba(255, 122, 89, 0)",
+            "rgba(255, 122, 89, 0.10)",
+            "rgba(120, 60, 160, 0.16)"
+          ]
+        },
+        "opacity": 1
+      }
+    ],
+    "fonts": [
+      {
+        "id": "condensed",
+        "family": "Barlow Condensed",
+        "src": "fonts/barlowcondensed-600-latin.woff2",
+        "weight": "600"
+      }
+    ]
+  }
+}

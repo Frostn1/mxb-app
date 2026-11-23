@@ -1,0 +1,22 @@
+{
+  "manifestVersion": 1,
+  "id": "yourname.my-extension",
+  "name": "My Extension",
+  "version": "0.1.0",
+  "author": "Your Name",
+  "description": "What it adds, in one sentence.",
+  "permissions": ["game.state"],
+  "contributes": {
+    "views": [{ "id": "main", "title": "My tab", "entry": "view/index.html" }],
+    "themes": [
+      {
+        "id": "mine",
+        "label": "My theme",
+        "dark": { "primary": "#22c55e", "primaryForeground": "#04140a", "ring": "#22c55e" },
+        "light": { "primary": "#15803d", "ring": "#15803d" }
+      }
+    ],
+    "commands": [{ "id": "hello", "title": "Say hello" }],
+    "settings": [{ "key": "greeting", "type": "string", "label": "Greeting", "default": "Hello" }]
+  }
+}

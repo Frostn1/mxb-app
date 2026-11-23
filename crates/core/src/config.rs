@@ -116,6 +116,9 @@ pub struct AppConfig {
     /// Tell accepted friends which server this rider is on. On by default for anyone with an
     /// account; off sends nothing and clears what was sent.
     pub friends_presence: bool,
+    /// The "ReShade can crash busy servers" bar was closed. Per install, until the person
+    /// asks to see it again from Settings -> ReShade.
+    pub reshade_warning_dismissed: bool,
     /// Extra command-line flags for `frostmod.exe`, exactly as they would be typed. Empty
     /// for everyone who hasn't been asked for one: these are FrostMod's diagnostics, and
     /// they carry their own warnings (`--force-overjump-off` is offline-only). Appended
@@ -208,6 +211,9 @@ pub struct AppConfig {
     /// have it on too, so a default of off is a slower start. That is the right trade until
     /// the freeze is understood on Windows — see `tasks/`.
     pub paint_sync_enabled: bool,
+    /// Share model-swap identities through PaintSync. Separate and off by default because
+    /// FrostMod also needs `modelsync=1` before it will use them.
+    pub paint_sync_models: bool,
     /// Show the mxbsecure content-locking tab. Off by default and behind this flag because
     /// it is experimental and only does anything in a full build (the packer is the
     /// gitignored `mxbsecure` sidecar) — see [`crate::content_secure_available`].
@@ -515,6 +521,7 @@ impl Default for AppConfig {
             auto_run_frostmod: true,
             queue_restart_game: false,
             friends_presence: true,
+            reshade_warning_dismissed: false,
             frostmod_args: String::new(),
             instant_refresh: true,
             watch_mods_reload: true,
@@ -534,6 +541,7 @@ impl Default for AppConfig {
             voice_enabled: false,
             paint_sync_rev: PAINT_SYNC_REV,
             paint_sync_enabled: false,
+            paint_sync_models: false,
             mxbsecure_enabled: false,
             voice_input_device: String::new(),
             voice_output_device: String::new(),

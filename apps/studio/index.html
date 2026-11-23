@@ -1,0 +1,18 @@
+<!doctype html>
+<!-- coach-skin carries the palette/type/radius (Coach's look); studio-skin layers the
+     editor's own structural rules (docks, panels, sliders) on top of it. Both on <html>
+     so Radix portals get them too. skin-follows-colorway lets a colorway other than frost
+     (the free ones and the Style Pack's) replace the coach palette, as in fbx3edf; without
+     it the coach palette won over every colorway and the Style Pack did nothing here. -->
+<html lang="en" class="coach-skin studio-skin skin-follows-colorway">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/logo.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Studio</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

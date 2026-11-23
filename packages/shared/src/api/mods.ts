@@ -7,6 +7,10 @@ import type {
   ModsDehydrated,
   HealthReport,
   ReshadeHealth,
+  GraphicsPreset,
+  GraphicsPresetOutcome,
+  GraphicsPresetStatus,
+  HiresConverted,
   TrainersRepaired,
   BikeModels,
   BikeSounds,
@@ -69,6 +73,7 @@ import type {
 } from "../types";
 import type { BaseTKey } from "../i18n/core";
 import { isHost, readDownloadPrefs, type DownloadPrefs } from "../lib/downloadPrefs";
+import { RecentPromiseCache } from "../lib/recentPromiseCache";
 
 /** Results per page (mirrors `PER_PAGE` in the Rust backend). */
 export const SEARCH_PAGE_SIZE = 24;
@@ -99,6 +104,8 @@ export interface ModType {
  *  `reshade::SUBPATH` in the backend. Declared here rather than beside the mod type that
  *  uses it because that one is a `const` array evaluated at module load. */
 export const RESHADE_SUBPATH = "reshade";
+/** Native game plugins live beside the game, not in the Documents mods tree. */
+export const GAME_PLUGINS_SUBPATH = "plugins";
 
 /** Routes an install by what the download holds, each item to its own folder, through the
  *  review sheet. For a category that mixes kinds of mod, like Bikelife's liveries and
@@ -184,9 +191,8 @@ export const MOD_TYPES: ModType[] = [
     installSubpath: "mods/tracks",
     categories: [
       { id: 22, label: "browseCat.all" },
-      { id: 300, label: "browseCat.beginner" },
-      { id: 301, label: "browseCat.intermediate" },
-      { id: 302, label: "browseCat.pro" },
+      // Beginner / Intermediate / Pro (300-302) were deleted from mxb-mods and answer 400; the
+      // tracks they held now sit directly under Tracks. Check ids against /categories.
       { id: 119, label: "browseCat.assets" },
     ],
   },
@@ -654,7 +660,37 @@ export function searchMods(
   page = 1,
   sort: ModSort = "newest",
 ): Promise<ModSummary[]> {
-  return invoke<ModSummary[]>("search_mods", { query, categoryId, page, sort });
+  return invoke<unknown>("search_mods", { query, categoryId, page, sort }).then(cleanSummaries);
+}
+
+const str = (v: unknown): string | null => (typeof v === "string" && v ? v : null);
+
+/**
+ * Listing rows the grid can render without checking each field: rows without a numeric id
+ * and a slug are dropped (everything is keyed by them), text fields are always strings and
+ * the optional ones are `null` rather than missing. A non-array answer is an empty page.
+ */
+export function cleanSummaries(rows: unknown): ModSummary[] {
+  if (!Array.isArray(rows)) return [];
+  const out: ModSummary[] = [];
+  for (const r of rows) {
+    if (!r || typeof r !== "object") continue;
+    const m = r as Record<string, unknown>;
+    const id = m.id;
+    const slug = str(m.slug);
+    if (typeof id !== "number" || !Number.isFinite(id) || !slug) continue;
+    out.push({
+      id,
+      slug,
+      title: str(m.title) ?? slug,
+      link: str(m.link) ?? "",
+      date: str(m.date) ?? "",
+      image: str(m.image),
+      categoryId: typeof m.categoryId === "number" ? m.categoryId : 0,
+      author: str(m.author),
+    });
+  }
+  return out;
 }
 
 /**
@@ -691,14 +727,30 @@ export function onShopVerify(cb: (e: ModsVerify) => void): Promise<UnlistenFn> {
   return listen<ModsVerify>("shop-verify", (e) => cb(e.payload));
 }
 
+/** A file the user clicked on the shop's own page, while the check window showed it. */
+export interface ShopDownloadSaved {
+  /** Where it landed: the user's Downloads folder. */
+  path: string;
+  name: string;
+  success: boolean;
+}
+
+export function onShopDownloadSaved(cb: (e: ShopDownloadSaved) => void): Promise<UnlistenFn> {
+  return listen<ShopDownloadSaved>("shop-download-saved", (e) => cb(e.payload));
+}
+
 /** Community scores for the given post ids, keyed by id. Ids the site didn't answer for
  *  are absent — ratings decorate a card, so a miss shows no stars rather than an error. */
 export function getModRatings(ids: number[]): Promise<Record<string, ModRating>> {
   return invoke<Record<string, ModRating>>("get_mod_ratings", { ids });
 }
 
+const installedModsCache = new RecentPromiseCache<string, InstalledMod[]>(10_000);
+
 export function getInstalledMods(subpath: string): Promise<InstalledMod[]> {
-  return invoke<InstalledMod[]>("get_installed_mods", { subpath });
+  return installedModsCache.get(subpath, () =>
+    invoke<InstalledMod[]>("get_installed_mods", { subpath }),
+  );
 }
 
 export function scanLibrary(subpath: string): Promise<LibraryEntry[]> {
@@ -907,6 +959,37 @@ export function deleteReshadePreset(name: string): Promise<void> {
 
 /** The no-effects preset — matches `reshade::OFF`, which resolves it to a real file. */
 export const RESHADE_OFF = "Off";
+
+/** The Graphics preset setting's state — see `reshade_pack` in the backend. */
+export function graphicsPresetStatus(): Promise<GraphicsPresetStatus> {
+  return invoke<GraphicsPresetStatus>("graphics_preset_status");
+}
+
+/**
+ * Switch the Graphics preset. From Off this downloads ReShade from reshade.me (checksum-
+ * pinned) and installs it; Off restores whatever was there before. When the player's own
+ * ReShade is in the way nothing changes and `needsConfirm` says what it is — ask, then call
+ * again with `replaceExisting`.
+ */
+export function setGraphicsPreset(
+  preset: GraphicsPreset,
+  replaceExisting = false,
+): Promise<GraphicsPresetOutcome> {
+  return invoke<GraphicsPresetOutcome>("set_graphics_preset", { preset, replaceExisting });
+}
+
+/**
+ * Open the folder photo mode saves screenshots into, or with `hires` MX Bikes' own F10 folder
+ * (`hrsshots`). Either is made if no shot has been taken yet.
+ */
+export function openPhotoFolder(hires = false): Promise<void> {
+  return invoke<void>("open_photo_folder", { hires });
+}
+
+/** Write a PNG beside every F10 TGA that has none. The TGAs stay. */
+export function convertHiresShots(): Promise<HiresConverted> {
+  return invoke<HiresConverted>("convert_hires_shots");
+}
 
 export function applySoundSwap(bike: string, target: string): Promise<SwapApplyOutcome> {
   return invoke<SwapApplyOutcome>("apply_sound_swap", { bike, target });
@@ -1830,7 +1913,7 @@ export function buildDestinations(
   sound = false,
   categories: string[] = [],
   bikeTargets: string[] = [],
-): { options: DestOption[]; guess: string; suggestions: string[] } {
+): { options: DestOption[]; guess: string; suggestions: string[]; derived: boolean } {
   const seen = new Set<string>([""]);
   const options: DestOption[] = [
     {
@@ -1901,6 +1984,20 @@ export function buildDestinations(
     if (f && !(newBike && ownedByABike(f))) add(f, { label: f });
   }
 
+  // A track post names its discipline (mxb-mods files KMX-Mesquite MX under Motocross), and a
+  // library sorted by discipline has a folder of that name. That is the post deciding, so it
+  // outranks the folder used last time: without it a one-click install of an MX track went
+  // wherever the previous track went, which was `supercross`.
+  let derived = false;
+  if (modType.id === "tracks") {
+    const named = trackFolderFromCategories(options, categories);
+    if (named) {
+      guess = named;
+      derived = true;
+      suggestions.push(named);
+    }
+  }
+
   // Tracks live in folders — a series, a season, a pack — and the root is where they're
   // hardest to find again. Once the library has any folder at all, that's a likelier home
   // for the next track than the root the picker used to fall back to.
@@ -1908,7 +2005,18 @@ export function buildDestinations(
     guess = options.find((o) => o.value)?.value ?? "";
   }
 
-  return { options, guess, suggestions };
+  return { options, guess, suggestions, derived };
+}
+
+/** The existing track folder one of the post's categories names, whole path first, then by its
+ *  last segment (`2024/motocross`). Empty when none does. */
+function trackFolderFromCategories(options: DestOption[], categories: string[]): string {
+  const want = new Set(categories.map((c) => c.trim().toLowerCase()).filter(Boolean));
+  const folders = options.map((o) => o.value).filter(Boolean);
+  const leaf = (f: string) => f.split("/").pop()!.toLowerCase();
+  return (
+    folders.find((f) => want.has(f.toLowerCase())) ?? folders.find((f) => want.has(leaf(f))) ?? ""
+  );
 }
 
 export const STOCK_RIDER_PROFILES = ["default_mx", "default_sm"];
@@ -2445,6 +2553,7 @@ export function resolveInitialFolder(
   guess: string,
   livery = false,
   sound = false,
+  // `derived` is also how a track's categories naming its folder reaches here, with no target.
   rider: { target: RiderTarget | null; derived: boolean } | null = null,
 ): string {
   const remembered = localStorage.getItem(destStorageKey(game, modType)) ?? "";
@@ -2453,6 +2562,8 @@ export function resolveInitialFolder(
   // `""`. For tracks that's the root, the one destination worth talking someone out of, so
   // let the guess (the first existing folder) have it.
   if (modType.id === "tracks" && !remembered && guess) return guess;
+  // The post's categories named a track folder (`derived` from `buildDestinations`).
+  if (modType.id === "tracks" && rider?.derived && guess) return guess;
   if (modType.id === "bikes" && rememberedIsPaints && !livery) return guess;
   // Liveries and sounds are *per bike*, so the folder used last time is the previous bike's,
   // not this mod's. Whenever we could work out which bike this one is for — its categories
@@ -2582,8 +2693,23 @@ export async function quickDestination(
     bikeTargets = await scanBikeTargets().catch(() => []);
   }
   const livery = isLiveryContext(modType, categoryId);
-  const { options, guess } = buildDestinations(modType, title, installed, livery, false, categories, bikeTargets);
-  return { destFolder: resolveInitialFolder(game, modType, options, guess, livery), installed, bikeTargets };
+  const { options, guess, derived } = buildDestinations(
+    modType,
+    title,
+    installed,
+    livery,
+    false,
+    categories,
+    bikeTargets,
+  );
+  return {
+    destFolder: resolveInitialFolder(game, modType, options, guess, livery, false, {
+      target: null,
+      derived,
+    }),
+    installed,
+    bikeTargets,
+  };
 }
 
 export function onInstallProgress(
@@ -2765,8 +2891,21 @@ export function launchStallReason(): Promise<string | null> {
  * Resolves to `already_running` when the game is already up — the connect flag is only
  * read at startup, so a running copy can't be steered into a server.
  */
-export function joinServer(address: string): Promise<LaunchOutcome> {
-  return invoke<LaunchOutcome>("join_server", { address });
+export function joinServer(address: string, hint?: JoinHint): Promise<LaunchOutcome> {
+  return invoke<LaunchOutcome>("join_server", { address, hint: hint ?? null });
+}
+
+/** What the server list knows about a row being joined. A passworded server is launched
+ *  through the game's own password dialog, since `-directconnect` never asks for one. */
+export interface JoinHint {
+  passworded: boolean;
+  name: string;
+  lanAddress: string;
+}
+
+/** The {@link JoinHint} for a listed server. */
+export function joinHint(s: { passworded: boolean; name: string; lanAddress: string }): JoinHint {
+  return { passworded: s.passworded, name: s.name, lanAddress: s.lanAddress };
 }
 
 /** Join from the app's live server list, selecting a compatible installed bike first when
@@ -2775,8 +2914,14 @@ export function joinListedServer(
   address: string,
   categories: string[],
   bikes: string[],
+  hint?: JoinHint,
 ): Promise<LaunchOutcome> {
-  return invoke<LaunchOutcome>("join_listed_server", { address, categories, bikes });
+  return invoke<LaunchOutcome>("join_listed_server", {
+    address,
+    categories,
+    bikes,
+    hint: hint ?? null,
+  });
 }
 
 /**
@@ -2795,8 +2940,14 @@ export function closeAndJoinListedServer(
   address: string,
   categories: string[],
   bikes: string[],
+  hint?: JoinHint,
 ): Promise<LaunchOutcome> {
-  return invoke<LaunchOutcome>("close_and_join_listed_server", { address, categories, bikes });
+  return invoke<LaunchOutcome>("close_and_join_listed_server", {
+    address,
+    categories,
+    bikes,
+    hint: hint ?? null,
+  });
 }
 
 /** Is MX Bikes currently running? Probes for real on all three platforms — under Wine and
@@ -2964,6 +3115,22 @@ export function setNantrap(enabled: boolean): Promise<void> {
   return invoke<void>("set_nantrap", { enabled });
 }
 
+/** Aussie mode (high-ping riding): whether the installed FrostMod supports it, and if it is on. */
+export interface AussieMode {
+  supported: boolean;
+  enabled: boolean;
+  gameRunning: boolean;
+}
+
+export function aussiemodeState(): Promise<AussieMode> {
+  return invoke<AussieMode>("aussiemode_state");
+}
+
+/** Write or remove `aussiemode=1` in FrostMod's cfg. Takes effect on the next game start. */
+export function setAussiemode(enabled: boolean): Promise<void> {
+  return invoke<void>("set_aussiemode", { enabled });
+}
+
 export function setInstantRefresh(enabled: boolean): Promise<void> {
   return invoke<void>("set_instant_refresh", { enabled });
 }
@@ -2992,6 +3159,27 @@ export function setVoiceEnabled(enabled: boolean): Promise<void> {
 /** Share this rider's look with the grid, and install the grid's back. */
 export function setPaintSyncEnabled(enabled: boolean): Promise<void> {
   return invoke<void>("set_paint_sync_enabled", { enabled });
+}
+
+/** Share model-swap identities alongside paints. */
+export function setPaintSyncModels(enabled: boolean): Promise<void> {
+  return invoke<void>("set_paint_sync_models", { enabled });
+}
+
+export interface RiderModels {
+  rider?: string;
+  helmet?: string;
+  boots?: string;
+  bikes?: { bikeId: string; swap: string }[];
+}
+
+/** The public rider shape returned by PaintSync joins and room arrivals. */
+export interface PaintSyncRiderView {
+  riderName: string;
+  guid: string | null;
+  joinedAt: number;
+  paints: { slot: string; fileName: string; sha256: string; size: number; relDest: string; viewOnly?: true }[];
+  models?: RiderModels;
 }
 
 /** Whether paint sync can run here. It needs Game Integration installed and set to start. */
@@ -3192,7 +3380,10 @@ export const MODS_WATCH_SLUG = "__mods_watch__";
 export function onFrostmodReload(
   cb: (payload: FrostmodReload) => void,
 ): Promise<UnlistenFn> {
-  return listen<FrostmodReload>("frostmod-reload", (event) => cb(event.payload));
+  return listen<FrostmodReload>("frostmod-reload", (event) => {
+    installedModsCache.clear();
+    cb(event.payload);
+  });
 }
 
 /**
@@ -3540,6 +3731,7 @@ export interface ExperimentalState {
   enrolled: boolean;
   /** Whether paint sync is running at all. Off is a setting, not a missing account. */
   paintSyncEnabled: boolean;
+  paintSyncModels: boolean;
   riderName: string;
   /** What paint sync last achieved — present so a cold start can say so straight away. */
   sync: SyncState;
@@ -4009,6 +4201,7 @@ export type FrostmodCommandOutcome =
   | "not_running"
   | "write_failed"
   | "unsupported"
+  | "held"
   | "withheld";
 
 /**
@@ -4218,6 +4411,11 @@ export function serverTrackCatalog(tracks: string[]): Promise<Record<string, Cat
 
 export type ServerAction = "start" | "stop" | "restart";
 
+/** Close (or bring back) the ReShade busy-server warning for this install. */
+export function setReshadeWarningDismissed(dismissed: boolean): Promise<void> {
+  return invoke<void>("set_reshade_warning_dismissed", { dismissed });
+}
+
 export function listServers(): Promise<ServerRef[]> {
   return invoke<ServerRef[]>("list_servers");
 }
@@ -4280,9 +4478,21 @@ export type DeepLink =
     }
   | { kind: "install"; /** The catalog mod's public id, a lowercase UUID. */ id: string };
 
-/** An `mxb://` link was opened. */
+/**
+ * An `mxb://` link was opened.
+ *
+ * The event carries nothing: the link is taken from the backend, which parsed and checked it.
+ * The app's two remote-origin windows can emit events, so a `deep-link` event's payload is not
+ * something to trust; one we didn't send finds nothing to take.
+ */
 export function onDeepLink(cb: (link: DeepLink) => void): Promise<UnlistenFn> {
-  return listen<DeepLink>("deep-link", (event) => cb(event.payload));
+  return listen("deep-link", () => {
+    void invoke<DeepLink | null>("take_deep_link")
+      .then((link) => {
+        if (link) cb(link);
+      })
+      .catch(() => {});
+  });
 }
 
 /**

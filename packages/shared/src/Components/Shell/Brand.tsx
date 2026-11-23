@@ -1,4 +1,5 @@
 import { open as openUrl } from "@tauri-apps/plugin-shell";
+import { useExtensionBrand } from "../../extensions/ExtensionHost";
 
 /** Who releases the app. The byline in the title bar goes here. */
 const ABOUT_URL = "https://mxbsecure.com/about";
@@ -11,10 +12,16 @@ const ABOUT_URL = "https://mxbsecure.com/about";
  * mono; the byline sits on the same baseline so the bar keeps its height.
  */
 export default function Brand({ name }: { name: string }) {
+  // An extension theme may bring a mark and its own wordmark. The byline stays: who releases
+  // the app is not a look.
+  const ext = useExtensionBrand();
   return (
     <div data-tauri-drag-region className="flex select-none items-baseline gap-2">
+      {ext.logo && (
+        <img src={ext.logo} alt="" draggable={false} className="h-5 max-w-[120px] self-center object-contain" />
+      )}
       <span className="font-cond text-[16px] font-extrabold leading-none tracking-[-0.06em]">
-        {name}
+        {ext.wordmark ?? name}
       </span>
       {/* The byline is a link, and says so only on hover: a permanent underline in the title
           bar would read as chrome rather than as a credit. */}

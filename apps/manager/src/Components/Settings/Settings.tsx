@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 import { open as pickFolder, save as pickSavePath } from "@tauri-apps/plugin-dialog";
 import { open as openUrl } from "@tauri-apps/plugin-shell";
+import CrashProtection from "../Protection/CrashProtection";
 import { getVersion } from "@tauri-apps/api/app";
 import { toast } from "sonner";
 import PaintSync from "./PaintSync";
@@ -59,6 +60,9 @@ import {
   nantrapState,
   setNantrap,
   type NanTrap,
+  aussiemodeState,
+  setAussiemode,
+  type AussieMode,
   setGamePath,
   setInstantRefresh,
   setLaunchAtStartup,
@@ -130,8 +134,12 @@ import GameSwitcher from "../Shell/GameSwitcher";
 import { ContextBarLeft, ContextBarRight } from "../Shell/ContextBar";
 import { useViewActive } from "../Shell/RetainedView";
 import ReshadeCard from "./ReshadeCard";
+import GraphicsPresetCard from "./GraphicsPresetCard";
 import SupportersCard from "./SupportersCard";
 import SupporterLooks from "@frost/shared/Components/Supporter/SupporterLooks";
+import { AppearancePickers } from "@frost/shared/extensions/ExtensionsPage";
+import { colorwayActive } from "@frost/shared/extensions/appearance";
+import { parsePick, setPick, useExtensions } from "@frost/shared/extensions/store";
 import {
   COLORWAYS,
   COLORWAY_SWATCH,
@@ -144,6 +152,7 @@ import {
 } from "@frost/shared/Context/Theme";
 import { APP_NAME, Trans } from "@/i18n";
 import { useI18n, type LocalePref, type TKey } from "@/i18n";
+import { usePetOn } from "../Pet/PetCorner";
 import { getLocale, LOCALE_OPTIONS } from "@/i18n";
 import {
   KNOWN_HOSTS,
@@ -186,12 +195,14 @@ export type SectionId =
   | "game"
   | "accounts"
   | "folder"
+  | "graphics"
   | "general"
   | "downloads"
   | "overlay"
   | "voice"
   | "appearance"
   | "frostmod"
+  | "protection"
   | "reshade"
   | "logs"
   | "paintsync"
@@ -229,6 +240,7 @@ const GROUPS: {
     sections: [
       { id: "paintsync", label: "settings.paintSync" },
       { id: "frostmod", label: "settings.frostmod" },
+      { id: "protection", label: "protection.section" },
       { id: "voice", label: "voice.section" },
       { id: "overlay", label: "overlay.section" },
     ],
@@ -238,6 +250,7 @@ const GROUPS: {
     sections: [
       { id: "game", label: "game.label" },
       { id: "folder", label: "settings.gameFolder" },
+      { id: "graphics", label: "graphics.section" },
       { id: "accounts", label: "accounts.section" },
     ],
   },
@@ -314,6 +327,7 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
   // bottle on macOS. The app starts FrostMod in whichever prefix holds the game.
   const hasFrostmod = isWindows || platform === "linux" || isMac;
   const { theme, setTheme, colorway, setColorway, scale, setScale } = useTheme();
+  const pickedTheme = parsePick(useExtensions().picks.theme);
   // Which download to take when a mod offers several — see `lib/downloadPrefs`.
   const [dlPrefs, setDlPrefsState] = useState<DownloadPrefs>(readDownloadPrefs);
   const setDlPrefs = useCallback((next: DownloadPrefs) => {
@@ -368,8 +382,11 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
     ...g,
     sections: g.sections.filter(
       (s) =>
-        ((s.id !== "frostmod" && s.id !== "paintsync") || (hasFrostmod && caps.frostmod)) &&
+        ((s.id !== "frostmod" && s.id !== "paintsync" && s.id !== "protection") ||
+          (hasFrostmod && caps.frostmod)) &&
         (s.id !== "game" || multiGame) &&
+        // The presets are tuned for MX Bikes alone.
+        (s.id !== "graphics" || game.id === "mxb") &&
         (s.id !== "secure" || secureAvailable),
     ),
   })).filter((g) => g.sections.length > 0);
@@ -623,6 +640,7 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
   const watchModsReload = config.watchModsReload ?? true;
   const [texCompress, setTexCompress] = useState<TexCompress | null>(null);
   const [nanTrap, setNanTrap] = useState<NanTrap | null>(null);
+  const [aussieMode, setAussieModeState] = useState<AussieMode | null>(null);
   const raceMode = config.raceMode ?? false;
   // What Race mode is holding aside right now. Read once and then kept current by the event,
   // since the moves happen on a join and the restore on the game's exit, neither of which
@@ -1087,6 +1105,22 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
     }
   };
 
+  const loadAussieMode = useCallback(() => {
+    aussiemodeState().then(setAussieModeState).catch(() => setAussieModeState(null));
+  }, []);
+  useEffect(() => {
+    loadAussieMode();
+  }, [loadAussieMode, status?.version]);
+
+  const toggleAussieMode = async (v: boolean) => {
+    try {
+      await setAussiemode(v);
+      loadAussieMode();
+    } catch (e) {
+      toast.error(t("settings.updateFailed"), { description: String(e) });
+    }
+  };
+
   const toggleWatchModsReload = async (v: boolean) => {
     try {
       await setWatchModsReload(v);
@@ -1357,6 +1391,7 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
   const reloadGame = async () => {
     const outcome = await reload();
     if (outcome === "signaled") toast.success(t("frostmod.reloadedGame"));
+    else if (outcome === "held") toast.info(t("frostmod.reloadHeld"));
     else if (outcome === "not_running")
       toast.info(t("settings.frostmodNotRunningHint"));
     else toast.info(t("settings.reloadUnavailable"));
@@ -2296,6 +2331,8 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
           {/* appearance */}
           {active === "appearance" && (
           <Section title={t("settings.appearance")}>
+            <PetToggle />
+            <div className="my-3 h-px bg-border" />
             <div className="flex items-center justify-between">
               <span className="text-[12.5px] text-foreground/85">
                 {t("settings.theme")}
@@ -2330,11 +2367,14 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
                         type="button"
                         title={label}
                         aria-label={label}
-                        aria-pressed={colorway === c}
-                        onClick={() => setColorway(c)}
+                        aria-pressed={colorwayActive(c, colorway, pickedTheme)}
+                        onClick={() => {
+                          setPick("theme", null);
+                          setColorway(c);
+                        }}
                         className={cn(
                           "size-6 cursor-default rounded-full border transition-shadow",
-                          colorway === c
+                          colorwayActive(c, colorway, pickedTheme)
                             ? "border-primary ring-2 ring-primary/40"
                             : "border-input hover:border-foreground/30",
                         )}
@@ -2345,7 +2385,7 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
                     );
                   })}
                 </div>
-                {!isPackColorway(colorway) && (
+                {!pickedTheme && !isPackColorway(colorway) && (
                   <span className="text-[11px] text-muted-foreground">
                     {t(COLORWAY_LABEL[colorway])}
                   </span>
@@ -2354,6 +2394,11 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
             </div>
 
             <SupporterLooks />
+
+            {/* Looks from installed extensions. Managing them is the Extensions tab's job. */}
+            <div className="mt-3">
+              <AppearancePickers builtins={false} />
+            </div>
 
             {/* The webview's own zoom, so it moves type, spacing and icons together.
                 Scaling the root font instead would leave the app's 778 pixel-valued
@@ -2405,6 +2450,15 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
               </Select>
             </div>
           </Section>
+          )}
+
+          {/* What FrostMod's crash guards stopped on this PC, and every known crash with its
+              share of the reports and status. Opened from the home strip and the note after a
+              session as well as from here. */}
+          {hasFrostmod && caps.frostmod && active === "protection" && (
+            <Section title={t("protection.section")} desc={t("protection.sectionDesc")}>
+              <CrashProtection />
+            </Section>
           )}
 
           {/* frostmod — a Win32 DLL injected into the game, so it has nothing to do where
@@ -2698,6 +2752,22 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
                   />
                 )}
 
+                {/* Opt-in, off unless the player turns it on; the key is only written then. */}
+                {status?.installed && aussieMode && (
+                  <ToggleRow
+                    label={t("settings.aussieMode")}
+                    desc={
+                      aussieMode.supported
+                        ? t("settings.aussieModeDesc") +
+                          (aussieMode.gameRunning ? " " + t("settings.texCompressRunning") : "")
+                        : t("settings.aussieModeNeeds")
+                    }
+                    checked={aussieMode.enabled}
+                    onChange={toggleAussieMode}
+                    disabled={!aussieMode.supported}
+                  />
+                )}
+
                 <ToggleRow
                   label={t("settings.raceMode")}
                   desc={t("settings.raceModeDesc", { app: APP_NAME || "MXB App" })}
@@ -2792,6 +2862,14 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
                 </Button>
               )}
             </div>
+          </Section>
+          )}
+
+          {/* graphics — the one-click ReShade presets. Setup rather than Advanced: it is a
+              choice any player makes, and Off puts the game folder back as it was. */}
+          {active === "graphics" && (
+          <Section title={t("graphics.section")} desc={t("graphics.sectionDesc")}>
+            <GraphicsPresetCard />
           </Section>
           )}
 
@@ -2930,6 +3008,10 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
           {/* about */}
           {active === "about" && (
           <Section title={t("settings.about")}>
+            <p className="text-[12px] leading-relaxed text-muted-foreground">
+              The unofficial MX Bikes app. Plugins and Extensions are coming soon.
+              Not affiliated with PiBoSo / MX Bikes.
+            </p>
             <div className="flex flex-wrap items-center gap-3 text-[12px] text-muted-foreground">
               <span>{shownVersion ? `mxb-app v${shownVersion}` : "mxb-app"}</span>
               {experimental?.prerelease && (
@@ -3187,6 +3269,13 @@ function formatWhen(ms: number | null): string {
   const time = d.toLocaleTimeString(getLocale(), { hour: "2-digit", minute: "2-digit" });
   const sameDay = new Date().toDateString() === d.toDateString();
   return sameDay ? time : `${formatDateShort(d.toISOString())} ${time}`;
+}
+
+/** Pip in the corner of the app, on until turned off. */
+function PetToggle() {
+  const { t } = useI18n();
+  const [on, setOn] = usePetOn();
+  return <ToggleRow label={t("settings.pet")} desc={t("settings.petDesc")} checked={on} onChange={setOn} />;
 }
 
 function ToggleRow({

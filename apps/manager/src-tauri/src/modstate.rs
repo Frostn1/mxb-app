@@ -81,6 +81,8 @@ pub struct StateOutcome {
     pub deleted: usize,
     /// `(rel, reason)` for every move that didn't happen.
     pub failed: Vec<(String, String)>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub left: Vec<String>,
 }
 
 impl StateOutcome {
@@ -267,15 +269,17 @@ pub fn scan_with(
 /// helmet, goggles, suit, gloves, boots, protection, tyres and model swap to installed
 /// files for the share-a-preset flow. The preset's own `content` adds what a loadout can't
 /// express: the track, and the support packs the player pinned.
-fn keep_keys(cfg: &AppConfig, preset: &Preset) -> (BTreeSet<String>, Vec<bundle::UnresolvedSlot>) {
+fn keep_keys(cfg: &AppConfig, preset: &Preset) -> anyhow::Result<(BTreeSet<String>, Vec<bundle::UnresolvedSlot>)> {
     let mut keys = BTreeSet::new();
-    let mut unresolved = Vec::new();
-
-    if let Ok(plan) = bundle::plan_detailed(cfg, &preset.loadout, None) {
-        for a in &plan.assets {
-            keys.insert(key(&format!("mods/{}", a.rel_dest)));
-        }
-        unresolved = plan.unresolved;
+    // This used to be `if let Ok(..)`, which read a loadout that could not be resolved at all
+    // as one that needs nothing, and `plan` then set aside every bike, helmet and paint the
+    // player had. A whole failure now stops the apply. A single slot that isn't installed
+    // (a helmet paint they deleted) stays a warning on the plan, as before: it only means
+    // that one item has nothing on disk to keep.
+    let plan = bundle::plan_detailed(cfg, &preset.loadout, None)
+        .map_err(|e| anyhow::anyhow!("couldn't resolve the preset loadout: {e:#}"))?;
+    for a in &plan.assets {
+        keys.insert(key(&format!("mods/{}", a.rel_dest)));
     }
 
     if let Some(content) = preset.content.as_ref() {
@@ -286,12 +290,12 @@ fn keep_keys(cfg: &AppConfig, preset: &Preset) -> (BTreeSet<String>, Vec<bundle:
         }
     }
 
-    (keys, unresolved)
+    Ok((keys, plan.unresolved))
 }
 
 /// What [`apply`] would do, without doing it.
-pub fn plan(cfg: &AppConfig, preset: &Preset, sound_bikes: &[String]) -> StatePlan {
-    let (keys, unresolved) = keep_keys(cfg, preset);
+pub fn plan(cfg: &AppConfig, preset: &Preset, sound_bikes: &[String]) -> anyhow::Result<StatePlan> {
+    let (keys, unresolved) = keep_keys(cfg, preset)?;
     let mods = scan(cfg, sound_bikes);
 
     let mut out = StatePlan {
@@ -311,7 +315,16 @@ pub fn plan(cfg: &AppConfig, preset: &Preset, sound_bikes: &[String]) -> StatePl
             out.disable.push(m);
         }
     }
-    out
+    let enabled_bikes = out.keep.iter().chain(&out.disable).filter(|m| m.enabled && m.category == "bike").count();
+    let disabled_bikes = out.disable.iter().filter(|m| m.category == "bike").count();
+    let missing_named_bike = preset.content.as_ref().is_some_and(|content| content.keep.iter().any(|wanted| {
+        let wanted = key(wanted);
+        wanted.starts_with("mods/bikes/") && !out.keep.iter().chain(&out.disable).any(|m| key(&m.rel) == wanted)
+    }));
+    if missing_named_bike && enabled_bikes > 0 && disabled_bikes.saturating_mul(10) > enabled_bikes.saturating_mul(9) {
+        anyhow::bail!("the preset's named bike was not found and it would disable {disabled_bikes} of {enabled_bikes} bikes; no mods were disabled");
+    }
+    Ok(out)
 }
 
 /// Is this mod in the keep set? Either named outright, or living inside a kept folder — a
@@ -344,6 +357,9 @@ pub(crate) fn set_one(mods_path: &str, rel: &str, enabled: bool) -> anyhow::Resu
         disabled_path(mods_path, rel)
     };
 
+    crate::safedelete::check_target(mods_path, &from)?;
+    crate::safedelete::check_target(mods_path, &to)?;
+
     // Already where it's wanted, or never there to begin with. Not an error: a plan can be
     // a few seconds stale, and a no-op is the right answer either way.
     if !from.exists() {
@@ -362,16 +378,8 @@ pub(crate) fn set_one(mods_path: &str, rel: &str, enabled: bool) -> anyhow::Resu
     if let Some(parent) = to.parent() {
         fs::create_dir_all(parent)?;
     }
-    // Rename within the volume; the copy fallback is for the exotic case of a mods folder
-    // spanning a mount point.
-    if fs::rename(&from, &to).is_err() {
-        copy_tree(&from, &to)?;
-        if from.is_dir() {
-            fs::remove_dir_all(&from)?;
-        } else {
-            fs::remove_file(&from)?;
-        }
-    }
+    // Refuse an exotic cross-volume layout instead of deleting the only source after a copy.
+    fs::rename(&from, &to)?;
     prune_empty(mods_path, from.parent());
     Ok(true)
 }
@@ -416,22 +424,6 @@ fn prune_empty(mods_path: &str, dir: Option<&Path>) {
     }
 }
 
-fn copy_tree(from: &Path, to: &Path) -> anyhow::Result<()> {
-    if from.is_file() {
-        if let Some(parent) = to.parent() {
-            fs::create_dir_all(parent)?;
-        }
-        fs::copy(from, to)?;
-        return Ok(());
-    }
-    fs::create_dir_all(to)?;
-    for e in fs::read_dir(from)? {
-        let e = e?;
-        copy_tree(&e.path(), &to.join(e.file_name()))?;
-    }
-    Ok(())
-}
-
 /// Enable or disable a specific set of mods.
 pub fn set_many(cfg: &AppConfig, rels: &[String], enabled: bool) -> StateOutcome {
     let mut out = StateOutcome::default();
@@ -462,7 +454,7 @@ pub fn delete_many(cfg: &AppConfig, rels: &[String]) -> StateOutcome {
             if !target.exists() {
                 anyhow::bail!("not there any more");
             }
-            crate::trashbin::move_to_trash(&target)?;
+            crate::safedelete::trash(&cfg.mods_path, &target)?;
             Ok(())
         });
         match result {
@@ -515,6 +507,25 @@ mod delete_tests {
         assert!(!parked.exists());
 
         let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn delete_many_refuses_roots_and_escaping_paths() {
+        let root = std::env::temp_dir().join(format!("frost-modstate-refuse-{}", std::process::id()));
+        let outside = root.parent().unwrap().join("frost-modstate-outside");
+        let _ = fs::remove_dir_all(&root);
+        let _ = fs::remove_dir_all(&outside);
+        fs::create_dir_all(root.join("mods/bikes")).unwrap();
+        fs::create_dir_all(root.join("mods/tracks")).unwrap();
+        fs::create_dir_all(&outside).unwrap();
+        let cfg = AppConfig { mods_path: root.to_string_lossy().into_owned(), ..Default::default() };
+        let rels = vec![String::new(), "mods".into(), "mods/bikes".into(), "mods/tracks".into(), "../frost-modstate-outside".into()];
+        let out = delete_many(&cfg, &rels);
+        assert_eq!(out.deleted, 0);
+        assert_eq!(out.failed.len(), rels.len());
+        assert!(root.join("mods/bikes").is_dir() && root.join("mods/tracks").is_dir() && outside.is_dir());
+        let _ = fs::remove_dir_all(root);
+        let _ = fs::remove_dir_all(outside);
     }
 
     /// Parking has to work the same when `mods_path` *is* the mods tree — the `C:\mods`
@@ -600,11 +611,33 @@ pub fn restore_all(cfg: &AppConfig) -> StateOutcome {
         }
     }
 
-    // The shadow tree is scaffolding, not content — once it's empty it shouldn't linger.
-    if out.failed.is_empty() {
-        let _ = fs::remove_dir_all(&shadow);
+    prune_empty_tree(&shadow);
+    collect_leftovers(&shadow, &shadow, &mut out.left);
+    for rel in &out.left {
+        log::warn!("left unrecognised disabled content in place: {rel}");
     }
     out
+}
+
+fn prune_empty_tree(dir: &Path) {
+    let Ok(rd) = fs::read_dir(dir) else { return };
+    let children: Vec<PathBuf> = rd.flatten().map(|e| e.path()).collect();
+    for child in children.iter().filter(|p| p.is_dir()) {
+        prune_empty_tree(child);
+    }
+    if fs::read_dir(dir).map(|mut rd| rd.next().is_none()).unwrap_or(false) {
+        let _ = fs::remove_dir(dir);
+    }
+}
+
+fn collect_leftovers(root: &Path, dir: &Path, out: &mut Vec<String>) {
+    let Ok(rd) = fs::read_dir(dir) else { return };
+    for entry in rd.flatten() {
+        let path = entry.path();
+        if let Some(rel) = rel_under(root, &path) { out.push(rel); }
+        if path.is_dir() { collect_leftovers(root, &path, out); }
+    }
+    out.sort();
 }
 
 /// Collect what's parked under `dir` as `mods/…` rel paths. A folder parked whole — an
@@ -778,6 +811,19 @@ mod tests {
         let _ = fs::remove_dir_all(&root);
     }
 
+    #[test]
+    fn restore_leaves_unrecognised_shadow_content_and_removes_only_empty_dirs() {
+        let root = tmp("restore-leftovers");
+        let unknown = root.join("mxbapp_disabled/bikes/MyBike/deep/x.edf");
+        touch(&unknown);
+        fs::create_dir_all(root.join("mxbapp_disabled/tracks/empty/nested")).unwrap();
+        let out = restore_all(&cfg_at(&root));
+        assert!(unknown.is_file());
+        assert!(!root.join("mxbapp_disabled/tracks").exists());
+        assert!(out.left.iter().any(|p| p.ends_with("x.edf")));
+        let _ = fs::remove_dir_all(&root);
+    }
+
     /// A preset keeps its track and its pinned packs; everything else steps aside.
     #[test]
     fn a_preset_keeps_its_track_and_pinned_mods() {
@@ -796,7 +842,7 @@ mod tests {
             },
         );
 
-        let first = plan(&cfg, &p, &[]);
+        let first = plan(&cfg, &p, &[]).unwrap();
         assert_eq!(first.keep.len(), 2);
         let disabled: Vec<&str> = first.disable.iter().map(|m| m.name.as_str()).collect();
         assert_eq!(disabled.len(), 2, "{disabled:?}");
@@ -811,9 +857,26 @@ mod tests {
         assert!(root.join("mxbapp_disabled/bikes/Some Other Bike.pkz").is_file());
 
         // Applying it again is a no-op, not an error.
-        let again = apply(&cfg, &plan(&cfg, &p, &[]));
+        let again = apply(&cfg, &plan(&cfg, &p, &[]).unwrap());
         assert_eq!(again.touched(), 0, "{:?}", again.failed);
 
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_preset_whose_bike_is_missing_never_disables_the_library() {
+        let root = tmp("unresolved-loadout");
+        touch(&root.join("mods/bikes/User One.pkz"));
+        touch(&root.join("mods/bikes/User Two.pkz"));
+        let cfg = cfg_at(&root);
+        let p = preset_with(
+            "Broken",
+            Loadout { helmet: "Not Installed".into(), ..Default::default() },
+            PresetContent { keep: vec!["mods/bikes/Gone.pkz".into()], ..Default::default() },
+        );
+        assert!(plan(&cfg, &p, &[]).is_err(), "every bike would have been set aside");
+        assert!(root.join("mods/bikes/User One.pkz").is_file());
+        assert!(!root.join("mxbapp_disabled").exists());
         let _ = fs::remove_dir_all(&root);
     }
 
@@ -832,7 +895,7 @@ mod tests {
                 keep: vec![],
             },
         );
-        let plan = plan(&cfg, &p, &[]);
+        let plan = plan(&cfg, &p, &[]).unwrap();
         assert_eq!(plan.enable.len(), 1);
 
         let out = apply(&cfg, &plan);
@@ -960,7 +1023,7 @@ mod tests {
         let cfg = cfg_at(&root);
         let p = helmet_preset("AGV", "Wanted", vec![]);
 
-        let plan = plan(&cfg, &p, &[]);
+        let plan = plan(&cfg, &p, &[]).unwrap();
         let disabled: Vec<&str> = plan.disable.iter().map(|m| m.name.as_str()).collect();
         for gone in ["Other.pnt", "Tinted.pnt", "Kit.pnt", "Fox", "Alpinestars"] {
             assert!(disabled.contains(&gone), "{gone} should step aside: {disabled:?}");
@@ -1000,7 +1063,7 @@ mod tests {
         let cfg = cfg_at(&root);
         let p = helmet_preset("AGV", "Wanted", vec!["mods/rider/helmets/Fox".into()]);
 
-        let plan = plan(&cfg, &p, &[]);
+        let plan = plan(&cfg, &p, &[]).unwrap();
         let disabled: Vec<&str> = plan.disable.iter().map(|m| m.name.as_str()).collect();
         assert!(!disabled.contains(&"Fox"), "{disabled:?}");
         assert!(disabled.contains(&"Alpinestars"), "{disabled:?}");

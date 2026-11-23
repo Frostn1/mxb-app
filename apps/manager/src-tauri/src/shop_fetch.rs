@@ -383,6 +383,15 @@ pub async fn download(app: &AppHandle, slug: &str, url: &str, dir: &Path) -> any
 
     *lock(download_dir()) = Some(dir.to_path_buf());
     *lock(download_state()) = Download::default();
+    // Only while this download runs. Left behind, it sent the next file the user clicked on the
+    // shown page into a staging directory that was already gone.
+    struct Requested;
+    impl Drop for Requested {
+        fn drop(&mut self) {
+            *lock(download_dir()) = None;
+        }
+    }
+    let _requested = Requested;
 
     crate::install::emit_progress(app, slug, "downloading", Some(0), None);
     window.navigate(url.parse()?)?;
@@ -477,7 +486,7 @@ async fn wait_for_finish(app: &AppHandle, slug: &str, path: &Path) -> anyhow::Re
             if size == 0 {
                 anyhow::bail!("the download finished but wrote nothing");
             }
-            crate::install::emit_progress(app, slug, "downloading", Some(size), None);
+            crate::install::emit_progress_done(app, slug, "downloading", Some(size), None);
             return Ok(());
         }
         if let Ok(meta) = std::fs::metadata(path) {
@@ -498,15 +507,23 @@ async fn wait_for_finish(app: &AppHandle, slug: &str, path: &Path) -> anyhow::Re
 fn on_download(event: tauri::webview::DownloadEvent<'_>) -> bool {
     match event {
         tauri::webview::DownloadEvent::Requested { url, destination } => {
-            let Some(dir) = lock(download_dir()).clone() else {
-                log::warn!("the shop window asked to download {url} with nowhere to put it");
-                return false;
-            };
             let name = destination
                 .file_name()
                 .map(|n| n.to_string_lossy().into_owned())
                 .filter(|n| !n.trim().is_empty())
                 .unwrap_or_else(|| "purchase.zip".to_string());
+            let Some(dir) = lock(download_dir()).clone() else {
+                // Not one of ours: the user clicked a file on the page while the check window
+                // was up. It used to be refused, which looked to them like a dead button.
+                let Some(target) = unrequested_target(dirs_next::download_dir(), &name) else {
+                    log::warn!("the shop window asked to download {url} with no Downloads folder");
+                    return false;
+                };
+                log::info!("shop download the user started -> {}", target.display());
+                *destination = target.clone();
+                lock(unrequested()).insert(url.to_string(), target);
+                return true;
+            };
             let target = dir.join(sanitize(&name));
             log::info!("shop download starting -> {}", target.display());
             *destination = target.clone();
@@ -518,10 +535,65 @@ fn on_download(event: tauri::webview::DownloadEvent<'_>) -> bool {
             // `Requested` is the only record of where the file went. `success` is what this
             // event is actually for.
             log::info!("shop download finished (success={success}, path={path:?}) for {url}");
+            if let Some(target) = lock(unrequested()).remove(url.as_str()) {
+                saved(target, success);
+                return true;
+            }
             lock(download_state()).outcome = Some(success);
             true
         }
         _ => true,
+    }
+}
+
+/// Tells the main window a file the user clicked on the shop page has landed. Payload:
+/// [`Saved`]. The main window offers to install it, through the same review a drop gets.
+pub const SAVED_EVENT: &str = "shop-download-saved";
+
+#[derive(Debug, Clone, serde::Serialize)]
+struct Saved {
+    path: String,
+    name: String,
+    success: bool,
+}
+
+/// Files the user started on the shown page, by URL, until they finish.
+fn unrequested() -> &'static Mutex<std::collections::HashMap<String, PathBuf>> {
+    static MAP: OnceLock<Mutex<std::collections::HashMap<String, PathBuf>>> = OnceLock::new();
+    MAP.get_or_init(Mutex::default)
+}
+
+/// Where a file the user clicked goes: their Downloads folder, under the name the shop gave
+/// it, never over a file already there (`Track (1).pkz`, `Track (2).pkz`, …).
+fn unrequested_target(downloads: Option<PathBuf>, suggested: &str) -> Option<PathBuf> {
+    let dir = downloads?;
+    let name = sanitize(suggested);
+    let first = dir.join(&name);
+    if !first.exists() {
+        return Some(first);
+    }
+    let (stem, ext) = match name.rsplit_once('.') {
+        Some((stem, ext)) if !stem.is_empty() => (stem.to_string(), format!(".{ext}")),
+        _ => (name.clone(), String::new()),
+    };
+    (1..1000)
+        .map(|n| dir.join(format!("{stem} ({n}){ext}")))
+        .find(|p| !p.exists())
+}
+
+fn saved(target: PathBuf, success: bool) {
+    let Ok(app) = app() else { return };
+    let payload = Saved {
+        name: target
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default(),
+        path: target.to_string_lossy().into_owned(),
+        success,
+    };
+    // The main window only: the shop window runs the remote site.
+    if let Err(e) = tauri::Emitter::emit_to(app, crate::MAIN_WINDOW, SAVED_EVENT, payload) {
+        log::warn!("could not tell the main window a shop download landed: {e}");
     }
 }
 
@@ -688,6 +760,32 @@ mod tests {
     fn an_ordinary_filename_is_left_alone() {
         assert_eq!(sanitize("Sunshine MX PRO.pkz"), "Sunshine MX PRO.pkz");
         assert_eq!(sanitize("track-v1.2.zip"), "track-v1.2.zip");
+    }
+
+    /// RShep clicked his purchases on the shown page and got nothing: with no install waiting,
+    /// the download was refused. It lands in Downloads now, without overwriting anything there
+    /// and without a name that can leave the folder.
+    #[test]
+    fn a_file_the_user_clicked_goes_to_downloads() {
+        let dir = std::env::temp_dir().join(format!("frost-test-shop-dl-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let first = unrequested_target(Some(dir.clone()), "Track PRO.pkz").unwrap();
+        assert_eq!(first, dir.join("Track PRO.pkz"));
+        std::fs::write(&first, b"x").unwrap();
+        let second = unrequested_target(Some(dir.clone()), "Track PRO.pkz").unwrap();
+        assert_eq!(second, dir.join("Track PRO (1).pkz"));
+        std::fs::write(&second, b"x").unwrap();
+        assert_eq!(
+            unrequested_target(Some(dir.clone()), "Track PRO.pkz").unwrap(),
+            dir.join("Track PRO (2).pkz")
+        );
+
+        let hostile = unrequested_target(Some(dir.clone()), "../../evil.pkz").unwrap();
+        assert_eq!(hostile.parent(), Some(dir.as_path()));
+        assert_eq!(unrequested_target(None, "Track.pkz"), None);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

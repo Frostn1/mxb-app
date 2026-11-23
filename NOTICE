@@ -1,0 +1,16 @@
+MXB App and the other apps in this repository
+Copyright (c) 2026 Sean Dahan (Frostn1)
+
+The code in this repository is licensed under the PolyForm Strict License 1.0.0 (LICENSE).
+You may read it and use it for noncommercial purposes. You may not distribute it, or change it
+or build new works on it.
+
+Earlier code stays MIT. Everything published in this repository up to and including commit
+67ada637d85c0d672e4c667b2fe831bf186b540c (2026-10-18) was released under the MIT License
+(LICENSE-MIT), and that grant for those versions is not withdrawn. The PolyForm Strict License
+applies to every change made after that commit.
+
+Contributions from outside contributors stay under the license they were contributed under.
+
+Third-party code keeps its own license. vendor/mega is MIT OR Apache-2.0
+(vendor/mega/LICENSE-MIT, vendor/mega/LICENSE-APACHE).

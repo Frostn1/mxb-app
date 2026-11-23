@@ -1,0 +1,37 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <header><h1>Coach</h1><span id="sub" class="muted"></span></header>
+    <section id="last" class="card" hidden>
+      <div class="row">
+        <div>
+          <div class="label">Last session</div>
+          <div id="lastTitle" class="title"></div>
+          <div id="lastMeta" class="muted"></div>
+        </div>
+        <div class="stats">
+          <div><div class="label">Best</div><div id="lastBest" class="big"></div></div>
+          <div><div class="label">Average</div><div id="lastAvg" class="big"></div></div>
+          <div><div class="label">Clean laps</div><div id="lastClean" class="big"></div></div>
+        </div>
+      </div>
+      <div id="bars" class="bars"></div>
+    </section>
+    <h2>Personal bests</h2>
+    <table>
+      <thead><tr><th>Track</th><th>Bike</th><th class="num">Best</th><th class="num">Avg clean</th><th class="num">Spread</th><th class="num">Clean laps</th></tr></thead>
+      <tbody id="pbs"></tbody>
+    </table>
+    <h2>Recent sessions</h2>
+    <table>
+      <thead><tr><th>When</th><th>Track</th><th>Bike</th><th>Type</th><th class="num">Best</th><th class="num">Laps</th></tr></thead>
+      <tbody id="recent"></tbody>
+    </table>
+    <p id="empty" class="muted" hidden></p>
+    <script src="app.js"></script>
+  </body>
+</html>

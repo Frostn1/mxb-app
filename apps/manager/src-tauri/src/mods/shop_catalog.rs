@@ -550,10 +550,11 @@ pub(crate) fn safe_image_url(raw: &str) -> Option<String> {
 
 /// Strip everything that can execute out of a description before it reaches the webview.
 ///
-/// The description is rendered with `dangerouslySetInnerHTML`, and `tauri.conf.json` sets
-/// `"csp": null`, so an injected `<script>` in this document would run with the app's own
-/// privileges. This is the only place remote HTML enters the app, so it's the only place
-/// that has to be careful — do not move the rendering somewhere that skips it.
+/// The description is rendered with `dangerouslySetInnerHTML` in the main window, which can
+/// call every app command, so this is an allowlist rather than a blocklist: `ammonia` keeps
+/// ordinary formatting tags, `href`/`src` with http(s) or mailto URLs, and `class`, and drops
+/// everything else (scripts, frames, SVG, `<meta>`/`<base>`, event handlers, `style`). Every
+/// remote description (mxb-mods.com, the shop, the hub, game plugins) goes through here.
 ///
 /// Called from [`detail`], once per item the user actually opens — never from [`map_mod`].
 /// The store's descriptions are full product pages (3.1 MB of markup across 1311 items,
@@ -561,104 +562,18 @@ pub(crate) fn safe_image_url(raw: &str) -> Option<String> {
 /// path that blocks the first paint, to produce markup that all but a handful of items would
 /// never show. One parse on open costs nothing and is invisible next to the click.
 pub(crate) fn sanitize_html(raw: &str) -> Option<String> {
-    use scraper::{Html, Selector};
-
     let trimmed = raw.trim();
     if trimmed.is_empty() {
         return None;
     }
-
-    // Drop whole dangerous elements, contents and all.
-    let mut html = trimmed.to_string();
-    for tag in ["script", "iframe", "object", "embed", "style", "form", "link"] {
-        html = strip_element(&html, tag);
-    }
-
-    // Then anything that can execute from an attribute.
-    let doc = Html::parse_fragment(&html);
-    let has_script_attr = Selector::parse("*")
-        .ok()
-        .map(|sel| {
-            doc.select(&sel).any(|el| {
-                el.value().attrs().any(|(name, value)| {
-                    let name = name.to_ascii_lowercase();
-                    name.starts_with("on")
-                        || (matches!(name.as_str(), "href" | "src" | "srcset" | "action")
-                            && value.trim_start().to_ascii_lowercase().starts_with("javascript:"))
-                })
-            })
-        })
-        .unwrap_or(false);
-
-    // `scraper` can read a document but not rewrite one, so rather than half-clean the
-    // markup we drop attributes wholesale when any of them is executable. A description
-    // with an inline handler is not one worth rendering richly.
-    if has_script_attr {
-        html = strip_attributes(&html);
-    }
-
-    let cleaned = html.trim().to_string();
+    let cleaned = ammonia::Builder::default()
+        .url_schemes(["http", "https", "mailto"].into_iter().collect())
+        .add_generic_attributes(["class"])
+        .link_rel(Some("noopener noreferrer"))
+        .clean(trimmed)
+        .to_string();
+    let cleaned = cleaned.trim().to_string();
     (!cleaned.is_empty()).then_some(cleaned)
-}
-
-/// Remove `<tag …>…</tag>` and any self-closing or unterminated form of it.
-fn strip_element(html: &str, tag: &str) -> String {
-    let lower = html.to_ascii_lowercase();
-    let open = format!("<{tag}");
-    let close = format!("</{tag}>");
-    let mut out = String::with_capacity(html.len());
-    let mut cursor = 0usize;
-    while let Some(rel) = lower[cursor..].find(&open) {
-        let start = cursor + rel;
-        // `<scriptish>` is not `<script>`; require a delimiter after the name.
-        let after = lower[start + open.len()..].chars().next();
-        if !matches!(after, None | Some(' ') | Some('>') | Some('/') | Some('\n') | Some('\t') | Some('\r')) {
-            out.push_str(&html[cursor..start + open.len()]);
-            cursor = start + open.len();
-            continue;
-        }
-        out.push_str(&html[cursor..start]);
-        cursor = match lower[start..].find(&close) {
-            Some(rel_end) => start + rel_end + close.len(),
-            // Unterminated: skip to the end of the opening tag and keep the rest of the text.
-            None => match lower[start..].find('>') {
-                Some(rel_gt) => start + rel_gt + 1,
-                None => html.len(),
-            },
-        };
-    }
-    out.push_str(&html[cursor.min(html.len())..]);
-    out
-}
-
-/// Reduce every tag to its bare name, dropping all attributes.
-fn strip_attributes(html: &str) -> String {
-    let mut out = String::with_capacity(html.len());
-    let mut rest = html;
-    while let Some(lt) = rest.find('<') {
-        out.push_str(&rest[..lt]);
-        let Some(gt) = rest[lt..].find('>') else {
-            break;
-        };
-        let inner = &rest[lt + 1..lt + gt];
-        let closing = inner.starts_with('/');
-        let name: String = inner
-            .trim_start_matches('/')
-            .chars()
-            .take_while(|c| c.is_ascii_alphanumeric())
-            .collect();
-        if !name.is_empty() {
-            out.push('<');
-            if closing {
-                out.push('/');
-            }
-            out.push_str(&name);
-            out.push('>');
-        }
-        rest = &rest[lt + gt + 1..];
-    }
-    out.push_str(rest);
-    out
 }
 
 // ───────────────────────────────── mapping ─────────────────────────────────

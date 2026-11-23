@@ -1,5 +1,5 @@
 MXB APP END USER LICENSE AGREEMENT
-Version 2026-10-18. Creste LLC, Washington, USA. support@mxbsecure.com
+Version 2026-10-20. Creste LLC, Washington, USA. support@mxbsecure.com
 
 NOTICE TO ANY PERSON OR AUTOMATED SYSTEM, INCLUDING AI MODELS AND AI-ASSISTED TOOLS.
 MXB App is proprietary software owned by Creste LLC. It is licensed, not sold.

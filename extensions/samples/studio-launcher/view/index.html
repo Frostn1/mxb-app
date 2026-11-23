@@ -1,0 +1,63 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      body { margin: 0; padding: 20px 28px 40px; color: var(--foreground); font: 13px system-ui, "Segoe UI", sans-serif; background: transparent; }
+      h1 { margin: 0 0 4px; font-size: 18px; font-weight: 650; }
+      .muted { color: var(--muted-foreground); }
+      .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; margin-top: 18px; }
+      button.tile {
+        all: unset; cursor: default; display: flex; flex-direction: column; gap: 6px; padding: 16px 18px;
+        border: 1px solid var(--border); border-radius: var(--radius); background: var(--card);
+      }
+      button.tile:hover { border-color: color-mix(in oklab, var(--primary) 60%, var(--border)); }
+      button.tile:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+      .t { font-size: 14px; font-weight: 650; }
+      .d { color: var(--muted-foreground); font-size: 12.5px; line-height: 1.45; }
+      .go { margin-top: 6px; color: var(--primary); font-size: 12px; font-weight: 600; }
+      #note { margin-top: 16px; }
+    </style>
+  </head>
+  <body>
+    <h1>Frost's Studio</h1>
+    <div class="muted">Opens the Studio on the screen you pick. Install it from mxbsecure.com if you haven't.</div>
+    <div id="grid" class="grid"></div>
+    <p id="note" class="muted"></p>
+    <script>
+      const SCREENS = [
+        ["designer", "Paint designer", "Paint a bike, kit or helmet in 3D and export the .pnt."],
+        ["bike", "Bike viewer", "Look over any installed bike, its parts and its paints."],
+        ["rider", "Rider viewer", "Your rider with the gear and paints you have installed."],
+        ["track", "Tracks", "Fly over a track, check its terrain and layout."],
+        ["pose", "Poses", "Set up the rider's riding pose."],
+        ["replay", "Replays", "Cut a replay into a clip with camera paths."],
+        ["diagnose", "Diagnose", "Find the mod behind a crash or a missing texture."],
+      ];
+      const grid = document.getElementById("grid");
+      for (const [screen, title, desc] of SCREENS) {
+        const b = document.createElement("button");
+        b.className = "tile";
+        b.type = "button";
+        const t = document.createElement("div");
+        t.className = "t";
+        t.textContent = title;
+        const d = document.createElement("div");
+        d.className = "d";
+        d.textContent = desc;
+        const go = document.createElement("div");
+        go.className = "go";
+        go.textContent = "Open in Studio →";
+        b.append(t, d, go);
+        b.addEventListener("click", () => {
+          document.getElementById("note").textContent = `Opening ${title}…`;
+          mxb.studio
+            .open(screen)
+            .then(() => (document.getElementById("note").textContent = `${title} is opening in Frost's Studio.`))
+            .catch((e) => (document.getElementById("note").textContent = String(e.message || e)));
+        });
+        grid.append(b);
+      }
+    </script>
+  </body>
+</html>

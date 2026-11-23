@@ -9,17 +9,20 @@ import {
 } from "react";
 import { toast } from "sonner";
 import TopRail from "../Shell/TopRail";
-import { ContextSlots } from "../Shell/ContextBar";
+import { ContextBarLeft, ContextSlots } from "../Shell/ContextBar";
 import PurchaseWatcher from "../Shell/PurchaseWatcher";
 import { isModsView, type DashboardView, type ModsView } from "../Shell/nav";
 import RetainedView from "../Shell/RetainedView";
 import { parsePluginView, usePlugins } from "@frost/shared/lib/usePlugins";
+import { ExtensionFrame, ExtensionRuntime, useExtensionViews } from "@frost/shared/extensions/ExtensionHost";
+import { useExtensionData } from "../../lib/extensionData";
 import Servers from "../Servers/Servers";
 import DropZone from "../Dropzone/DropZone";
 import RuntimeBanner, { ProfileBanner } from "../RuntimeBanner/RuntimeBanner";
 import HealthBanner from "../RuntimeBanner/HealthBanner";
 import UpdateBanner from "../UpdateBanner/UpdateBanner";
 import SecurePrompt from "./SecurePrompt";
+import ProtectionWatcher from "../Protection/ProtectionWatcher";
 import GameIntegrationConsent from "../GameIntegration/GameIntegrationConsent";
 import type { SectionId } from "../Settings/Settings";
 import { LoadingMark } from "../Shell/LoadingMark";
@@ -55,7 +58,9 @@ const MyMods = lazy(() => import("../MyMods/MyMods"));
 const Locker = lazy(() => import("../Locker/Locker"));
 const Presets = lazy(() => import("../Presets/Presets"));
 const Manage = lazy(() => import("../Manage/Manage"));
+const GamePlugins = lazy(() => import("../GamePlugins/GamePlugins"));
 const Settings = lazy(() => import("../Settings/Settings"));
+const Marketplace = lazy(() => import("@frost/shared/extensions/Marketplace"));
 
 interface DashboardProps {
   /** True while the Welcome slideshow is still up. The tour waits for it to close
@@ -113,6 +118,11 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
     const p = plugins.find((x) => x.manifest.id === ref.plugin);
     return p?.panels.find((panel) => panel.id === ref.panel) ?? null;
   })();
+  // Extensions' tabs. Each is a sandboxed frame (see `extensions/sandbox.ts`); a view whose
+  // extension was disabled or removed mid-session falls through to Settings like a plugin's.
+  useExtensionData(game.id);
+  const extViews = useExtensionViews();
+  const extPanel = view.startsWith("ext:") ? (extViews.find((v) => v.route === view) ?? null) : null;
   // Which page is open, as the usage counters name it.
   //
   // Derived and counted by an effect rather than inside `navigate`, because plenty of
@@ -122,7 +132,9 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
   // without touching this.
   const page = view.startsWith("plugin:")
     ? "view.plugin"   // one bucket: naming each panel would be unbounded cardinality
-    : `view.${view}`;
+    : view.startsWith("ext:")
+      ? "view.extension"
+      : `view.${view}`;
   useEffect(() => {
     track(page);
   }, [page]);
@@ -153,6 +165,10 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
     },
     [navigate],
   );
+  // Crash protection: the home strip, the note after a session and the page, wherever FrostMod
+  // is running for this game.
+  const protectionOn = !!game?.caps?.frostmod && integrationChoice === "enabled";
+  const openProtection = useCallback(() => openSettingsSection("protection"), [openSettingsSection]);
 
   // First-run interactive tour — shown once, gated on a localStorage flag. Also
   // re-triggerable from Settings via the TourContext below.
@@ -298,7 +314,7 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
   const lastDetailSlug = useRef("");
   if (selectedSlug) lastDetailSlug.current = selectedSlug;
 
-  const builtInsActive = pluginPanel === null;
+  const builtInsActive = pluginPanel === null && extPanel === null;
   const modsActive = builtInsActive && isModsView(view) && !selectedSlug;
   const detailActive = builtInsActive && isModsView(view) && Boolean(selectedSlug);
 
@@ -326,6 +342,8 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
           there is nowhere to install to before the MX Bikes folder is known. The overlay
           window renders its own tree and deliberately gets no drop target. */}
       <DropZone />
+      {/* Extensions' invisible pages, theme forwarding and auto-update. */}
+      <ExtensionRuntime onOpen={(route) => navigate(route as DashboardView)} />
       <CatalogInstall link={installLink} onClose={closeInstallLink} />
       {/* Nothing on screen: it watches a store the app just opened in the browser and queues
           whatever turns up as a new purchase. Here because it needs the install queue and has
@@ -333,9 +351,11 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
       <PurchaseWatcher />
       <GameIntegrationConsent paused={welcomeActive} />
       <SecurePrompt onOpenSettings={openSettingsSection} />
+      {protectionOn && <ProtectionWatcher onOpen={openProtection} />}
       <TopRail
         view={view}
         plugins={plugins}
+        extViews={extViews.map((v) => ({ route: v.route, title: v.view.title }))}
         onNavigate={navigate}
         leftRef={setCtxLeft}
         rightRef={setCtxRight}
@@ -377,6 +397,14 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
               <pluginPanel.component />
             </ContextSlots.Provider>
           )}
+          {extPanel && (
+            <ExtensionFrame
+              key={`${extPanel.ext.id}@${extPanel.ext.version}/${extPanel.view.id}`}
+              ext={extPanel.ext}
+              entry={extPanel.view.entry}
+              title={extPanel.view.title}
+            />
+          )}
           <Suspense
             fallback={
               <div className="flex h-full items-center justify-center">
@@ -407,7 +435,10 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
             />
           </RetainedView>
           <RetainedView active={builtInsActive && view === "servers"} slots={ctxSlots}>
-            <Servers link={serverLink} />
+            <Servers
+              link={serverLink}
+              onOpenProtection={protectionOn ? openProtection : undefined}
+            />
           </RetainedView>
           <RetainedView active={builtInsActive && view === "ranked"} slots={ctxSlots}>
             <Ranked onFindServers={() => setView("servers")} />
@@ -451,10 +482,18 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
           <RetainedView active={builtInsActive && view === "manage"} slots={ctxSlots}>
             <Manage />
           </RetainedView>
+          <RetainedView active={builtInsActive && view === "extensions"} slots={ctxSlots}>
+            <Marketplace TabsSlot={ContextBarLeft} />
+          </RetainedView>
+          <RetainedView active={builtInsActive && view === "gameplugins"} slots={ctxSlots}>
+            <GamePlugins onOpenSettings={openSettingsSection} />
+          </RetainedView>
           <RetainedView
             active={
               builtInsActive &&
-              (view === "settings" || (view.startsWith("plugin:") && pluginPanel === null))
+              (view === "settings" ||
+                (view.startsWith("plugin:") && pluginPanel === null) ||
+                (view.startsWith("ext:") && extPanel === null))
             }
             slots={ctxSlots}
           >

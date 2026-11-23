@@ -14,7 +14,7 @@ import { Button } from "@frost/shared/Components/ui/button";
 import { Input } from "@frost/shared/Components/ui/input";
 import { Switch } from "@frost/shared/Components/ui/switch";
 import { cn } from "@frost/shared/lib/utils";
-import { useT } from "@/i18n";
+import { useT, type TFunc, type TKey } from "@/i18n";
 import {
   friendsHidePresence,
   friendsRemove,
@@ -36,6 +36,18 @@ type ActionKind = JoinAction["kind"];
 
 function errorText(e: unknown): string {
   return typeof e === "string" ? e : String(e);
+}
+
+/** `1723459200000` -> `2 minutes ago`. The paint-sync wording, which already exists in every
+ *  language the app speaks. */
+function ago(t: TFunc<TKey>, at: number): string {
+  const secs = Math.max(0, Math.round((Date.now() - at) / 1000));
+  if (secs < 60) return t("sync.agoJustNow");
+  const mins = Math.round(secs / 60);
+  if (mins < 60) return t("sync.agoMinutes", { count: mins });
+  const hours = Math.round(mins / 60);
+  if (hours < 24) return t("sync.agoHours", { count: hours });
+  return t("sync.agoDays", { count: Math.round(hours / 24) });
 }
 
 /**
@@ -320,7 +332,11 @@ const FriendCard = ({
           {friend.riderName}
         </div>
         <div className="truncate text-[11.5px] text-muted-foreground" title={p?.serverName}>
-          {p ? t("friends.on", { server: p.serverName }) : t("friends.offline")}
+          {p
+            ? t("friends.on", { server: p.serverName })
+            : friend.lastSeenAt
+              ? t("friends.lastSeen", { ago: ago(t, friend.lastSeenAt) })
+              : t("friends.offline")}
           {p?.riders != null && p.riders > 0 && <span className="text-faint"> · {p.riders}</span>}
         </div>
       </div>

@@ -7,10 +7,13 @@ mod bikeswap;
 mod bundle;
 mod cancel;
 mod mxbmrp3;
+mod protection;
+mod frostserver_local;
 pub(crate) use mxb_core::cfg;
 mod trackbook;
 mod trainerfix;
 mod trashbin;
+mod safedelete;
 
 pub(crate) use mxb_core::cloudfiles;
 pub(crate) use mxb_core::config;
@@ -26,8 +29,9 @@ mod frostmod;
 mod frostmod_manage;
 pub(crate) use mxb_core::game;
 pub(crate) use mxb_core::{docsdir, gamefolders};
-mod fileinfo;
+use mxb_core::fileinfo;
 mod gameproc;
+mod gameplugins;
 mod viewonly;
 mod gamecache;
 mod crashlog;
@@ -36,6 +40,8 @@ mod hub_session;
 mod identity;
 mod imgcache;
 mod install;
+#[cfg(test)]
+mod install_layouts_tests;
 mod ledger;
 pub(crate) use mxb_core::library;
 mod liveshare;
@@ -100,14 +106,17 @@ use mxb_core::steamid;
 mod secure_install;
 mod secure_launch;
 mod server_admin;
+mod serverhold;
 
 pub(crate) use mxb_core::presets;
 mod paintroom;
 mod paintsync;
+mod modelsync;
 mod racemode;
 mod ranked;
 mod health;
 mod reshade;
+mod reshade_pack;
 mod tyres;
 mod savedservers;
 mod serverbook;
@@ -224,6 +233,52 @@ fn setup_ready(cfg: Option<&AppConfig>) -> bool {
 fn is_configured(app: tauri::AppHandle) -> bool {
     let cfg = config::load_or_detect(&app);
     setup_ready(cfg.as_ref())
+}
+
+#[cfg(test)]
+mod csp_tests {
+    /// The main window renders remote HTML (mod descriptions) and can call every app command,
+    /// so it must ship with a CSP that refuses inline event handlers and plugins. Extension
+    /// views are srcdoc frames that inherit this policy and run inline `<script>`, which is why
+    /// `script-src-elem` allows inline while `script-src-attr` does not.
+    #[test]
+    fn the_main_window_has_a_content_security_policy() {
+        let conf: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.conf.json")).expect("tauri.conf.json parses");
+        let csp = conf["app"]["security"]["csp"].as_str().expect("csp is set, not null");
+        for needed in ["default-src 'self'", "script-src-attr 'none'", "object-src 'none'", "frame-src 'none'"] {
+            assert!(csp.contains(needed), "{needed} missing from {csp}");
+        }
+        assert!(!csp.contains("unsafe-eval"), "{csp}");
+    }
+
+    /// The sources one directive allows, or nothing when the policy doesn't set it.
+    fn directive<'a>(csp: &'a str, name: &str) -> Vec<&'a str> {
+        csp.split(';')
+            .map(str::trim)
+            .find_map(|d| {
+                let mut words = d.split_whitespace();
+                (words.next() == Some(name)).then(|| words.collect())
+            })
+            .unwrap_or_default()
+    }
+
+    /// A paid plugin's panels arrive as source text and are loaded with `import()` of a `blob:`
+    /// URL (`packages/shared/src/lib/pluginHost.ts`), after the backend has checked the license
+    /// and the bundle hash. A module `import()` is governed by `script-src-elem`, so without
+    /// `blob:` there every paid plugin fails with "Failed to fetch dynamically imported module".
+    /// A `blob:` URL can only be minted by script already running in the app, so this lets
+    /// nothing new in.
+    #[test]
+    fn paid_plugin_modules_can_be_imported_from_blob_urls() {
+        let conf: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.conf.json")).expect("tauri.conf.json parses");
+        let csp = conf["app"]["security"]["csp"].as_str().expect("csp is set, not null");
+        for name in ["script-src-elem", "script-src"] {
+            assert!(directive(csp, name).contains(&"blob:"), "{name} must allow blob: modules: {csp}");
+        }
+        assert!(directive(csp, "script-src-attr").contains(&"'none'"), "{csp}");
+    }
 }
 
 #[cfg(test)]
@@ -519,9 +574,16 @@ async fn shop_catalog_refresh(
 }
 
 #[tauri::command]
-fn get_installed_mods(app: tauri::AppHandle, subpath: String) -> Result<Vec<InstalledMod>, String> {
-    let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
-    library::scan_mods(&cfg.mods_path, &subpath).map_err(|e| format!("{e:#}"))
+async fn get_installed_mods(
+    app: tauri::AppHandle,
+    subpath: String,
+) -> Result<Vec<InstalledMod>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+        library::scan_mods(&cfg.mods_path, &subpath).map_err(|e| format!("{e:#}"))
+    })
+    .await
+    .map_err(|e| format!("get_installed_mods task failed: {e}"))?
 }
 
 /// Rate-limit for the Library-scan trigger. Switching tabs fires a scan each time, and
@@ -1015,6 +1077,137 @@ async fn set_reshade_enabled(
     .map_err(|e| format!("set_reshade_enabled task failed: {e}"))?
 }
 
+/// MX Bikes' own high-res screenshots (F10) land in `hrsshots/`, beside `profiles/` in the
+/// game's user folder.
+fn hires_dir(cfg: &config::AppConfig) -> Option<std::path::PathBuf> {
+    cfg.profiles_dir().parent().map(|p| p.join("hrsshots"))
+}
+
+/// [`reshade_pack::status`] plus the F10-shot folder, which only the config knows.
+fn graphics_status(cfg: &config::AppConfig) -> reshade_pack::Status {
+    let mut s = reshade_pack::status(&cfg.reshade_dir(), cfg.game().exe);
+    if let Some(d) = hires_dir(cfg) {
+        s.hires_pending = reshade_pack::hires_shots(&d).len() as u32;
+        s.hires_folder = d.to_string_lossy().into_owned();
+    }
+    s
+}
+
+/// The Graphics preset setting (Off / MXB Clean / MXB Photo) — see [`reshade_pack`].
+#[tauri::command]
+async fn graphics_preset_status(app: tauri::AppHandle) -> Result<reshade_pack::Status, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+        Ok(graphics_status(&cfg))
+    })
+    .await
+    .map_err(|e| format!("graphics_preset_status task failed: {e}"))?
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GraphicsPresetOutcome {
+    status: reshade_pack::Status,
+    /// The player's own ReShade (or another `opengl32.dll`) is in the way. Nothing was
+    /// changed; ask, then call again with `replaceExisting`.
+    needs_confirm: Option<reshade_pack::Existing>,
+    game_running: bool,
+}
+
+/// Switch the Graphics preset. Off restores whatever the player had before; Clean or Photo
+/// from Off downloads ReShade from reshade.me and the effects from their repositories, each
+/// checksum-pinned, and installs them. Clean ↔ Photo only rewrites `PresetPath`.
+#[tauri::command]
+async fn set_graphics_preset(
+    app: tauri::AppHandle,
+    preset: String,
+    replace_existing: bool,
+) -> Result<GraphicsPresetOutcome, String> {
+    use reshade_pack::{Choice, Outcome};
+    let choice = Choice::parse(&preset).ok_or_else(|| format!("unknown preset {preset:?}"))?;
+    let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+    let dir = cfg.reshade_dir();
+    let exe = cfg.game().exe;
+
+    let before = reshade_pack::status(&dir, exe);
+    // Installing or removing swaps the DLL the running game holds open; switching between
+    // our two presets is only a config edit ReShade picks up itself.
+    let swaps_dll = before.installed == (choice == Choice::Off);
+    if swaps_dll && gameproc::is_game_running() {
+        return Err("Close the game first — it has the graphics files open.".into());
+    }
+
+    let run = {
+        let dir = dir.clone();
+        move |payload: Option<reshade_pack::Payload>| {
+            let dir = dir.clone();
+            async move {
+                tauri::async_runtime::spawn_blocking(move || {
+                    reshade_pack::set(&dir, exe, choice, replace_existing, payload.as_ref())
+                        .map_err(|e| format!("{e:#}"))
+                })
+                .await
+                .map_err(|e| format!("set_graphics_preset task failed: {e}"))?
+            }
+        }
+    };
+
+    let mut outcome = run(None).await?;
+    if outcome == Outcome::NeedsPayload {
+        let client = install::build_download_client().map_err(|e| format!("{e:#}"))?;
+        let payload = reshade_pack::fetch(&client)
+            .await
+            .map_err(|e| format!("Couldn't download ReShade: {e:#}"))?;
+        outcome = run(Some(payload)).await?;
+    }
+    let needs_confirm = match outcome {
+        Outcome::NeedsConfirm(e) => Some(e),
+        _ => {
+            log::info!("[reshade] graphics preset set to {preset}");
+            None
+        }
+    };
+    Ok(GraphicsPresetOutcome {
+        status: graphics_status(&cfg),
+        needs_confirm,
+        game_running: gameproc::is_game_running(),
+    })
+}
+
+/// Open the folder ReShade saves photo-mode shots into (`hires: false`) or MX Bikes' own F10
+/// folder (`hires: true`). Neither exists before the first shot, so it is made here when the
+/// player asks for it first.
+#[tauri::command]
+async fn open_photo_folder(app: tauri::AppHandle, hires: bool) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+        let dir = if hires {
+            hires_dir(&cfg)
+        } else {
+            reshade_pack::photos_dir(&cfg.reshade_dir(), cfg.game().exe)
+        }
+        .ok_or_else(|| "the game folder isn't set".to_string())?;
+        std::fs::create_dir_all(&dir).map_err(|e| format!("{e:#}"))?;
+        library::open_folder(&dir.to_string_lossy()).map_err(|e| format!("{e:#}"))
+    })
+    .await
+    .map_err(|e| format!("open_photo_folder task failed: {e}"))?
+}
+
+/// Write a PNG beside every F10 TGA in `hrsshots/` that has none. The TGAs stay.
+#[tauri::command]
+async fn convert_hires_shots(app: tauri::AppHandle) -> Result<reshade_pack::HiresConverted, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+        let dir = hires_dir(&cfg).ok_or_else(|| "the game's user folder isn't known".to_string())?;
+        let out = reshade_pack::convert_hires_shots(&dir);
+        log::info!("[reshade] F10 shots: {} converted, {} failed", out.converted, out.failed.len());
+        Ok(out)
+    })
+    .await
+    .map_err(|e| format!("convert_hires_shots task failed: {e}"))?
+}
+
 /// Move empty folders out of `mods/tyres` (they crash the bike list). Re-scans on the
 /// backend, so the UI never passes a path. Returns where each folder went.
 #[tauri::command]
@@ -1422,6 +1615,28 @@ async fn share_logs(app: tauri::AppHandle) -> Result<logs::ShareResult, String> 
         .map_err(|e| format!("{e:#}"))
 }
 
+/// FrostServer in a dedicated-server folder on this PC: what is there, the newest release,
+/// and the running server's protection report.
+#[tauri::command]
+async fn frostserver_local_status(app: tauri::AppHandle, folder: String) -> frostserver_local::Status {
+    let game = config::load_or_detect(&app).map(|c| std::path::PathBuf::from(c.install_dir()));
+    frostserver_local::status(std::path::Path::new(&folder), game.as_deref()).await
+}
+
+/// Install or update FrostServer in that folder (never the player's own game folder).
+#[tauri::command]
+async fn frostserver_local_install(app: tauri::AppHandle, folder: String) -> Result<String, String> {
+    let game = config::load_or_detect(&app).map(|c| std::path::PathBuf::from(c.install_dir()));
+    frostserver_local::install(std::path::Path::new(&folder), game.as_deref()).await
+}
+
+/// What FrostMod's crash guards caught on this PC, newest first, with the table of known
+/// crashes. Empty `caught` where FrostMod has never caught anything (or does not run).
+#[tauri::command]
+fn protection_report(app: tauri::AppHandle) -> protection::Report {
+    protection::report(&frostmod_manage::frostmod_dir(&app))
+}
+
 /// Whether the last session ended by crashing, and a dump is sitting here unasked about.
 ///
 /// The small JSON report has already gone on its own (see [`crate::crashreports`]); this is
@@ -1812,7 +2027,10 @@ fn clear_game_cache(app: tauri::AppHandle) -> Result<gamecache::CacheInfo, Strin
         return Err("Close MX Bikes before clearing its cache.".into());
     }
     let cfg = config::load(&app).unwrap_or_default();
-    gamecache::clear(&library::mods_root(&cfg.mods_path))
+    gamecache::clear(
+        &library::mods_root(&cfg.mods_path),
+        std::path::Path::new(cfg.mods_path.trim()),
+    )
 }
 
 /// Whether this build can lock content with mxbsecure — the packer is the gitignored
@@ -3393,9 +3611,22 @@ fn handle_deep_link(app: &tauri::AppHandle, urls: &[String]) {
         return;
     };
     show_main(app);
-    if let Err(e) = app.emit(DEEP_LINK_EVENT, link) {
+    // The event only says "a link arrived"; the UI then asks for it with `take_deep_link`.
+    // The two remote-origin windows may emit events, and an event's payload can't be told
+    // apart from ours, so the link itself only ever comes from here.
+    *PENDING_DEEP_LINK.lock().unwrap_or_else(|p| p.into_inner()) = Some(link);
+    if let Err(e) = app.emit(DEEP_LINK_EVENT, ()) {
         log::warn!("[deep-link] couldn't hand the link to the UI: {e}");
     }
+}
+
+/// The last link [`handle_deep_link`] parsed, until the UI takes it.
+static PENDING_DEEP_LINK: std::sync::Mutex<Option<DeepLink>> = std::sync::Mutex::new(None);
+
+/// The link behind the latest `deep-link` event, once. `None` for an event we didn't send.
+#[tauri::command]
+fn take_deep_link() -> Option<DeepLink> {
+    PENDING_DEEP_LINK.lock().unwrap_or_else(|p| p.into_inner()).take()
 }
 
 /// Coalesces a burst of look changes into a single publish.
@@ -3821,6 +4052,12 @@ fn live_server_key() -> Option<String> {
         .then(|| voice::session::room_key(&session.server_name))
 }
 
+/// True while FrostMod reports the game in an online session; a full content reload then
+/// drops every remote rider.
+pub(crate) fn game_on_a_server() -> bool {
+    live_server_key().is_some()
+}
+
 /// The session FrostMod is publishing, if any.
 ///
 /// One reader for the whole app, held open across calls: opening the mapping is the
@@ -3992,8 +4229,13 @@ async fn pull_rosters(
     // paints are already here, and there is nothing for the game to re-read. Asking it to
     // rescan the mods folder anyway, every time a rider joined, is work done to a process
     // that is mid-race.
-    if outcome.installed > 0 {
+    if paintroom::full_reload_after_paints(outcome.installed, serverhold::on_server_now()) {
         let _ = frostmod::signal_reload();
+    } else if outcome.installed > 0 {
+        log::info!(
+            "[sync] on a server: paint refresh only; a content reload now would drop every rider"
+        );
+        refresh_live_look(app);
     }
     Ok(outcome)
 }
@@ -4046,21 +4288,31 @@ async fn cp_servers(app: tauri::AppHandle) -> Result<Vec<paintsync::RegisteredSe
 async fn join_server(
     app: tauri::AppHandle,
     address: String,
+    hint: Option<JoinHint>,
 ) -> Result<gameproc::LaunchOutcome, String> {
-    tauri::async_runtime::spawn_blocking(move || join_server_now(app, address))
+    tauri::async_runtime::spawn_blocking(move || join_server_now(app, address, hint))
         .await
         .map_err(|e| format!("join_server task failed: {e}"))?
 }
 
 /// [`join_server`]'s body, for the callers already off the main thread.
-fn join_server_now(app: tauri::AppHandle, address: String) -> Result<gameproc::LaunchOutcome, String> {
+fn join_server_now(
+    app: tauri::AppHandle,
+    address: String,
+    hint: Option<JoinHint>,
+) -> Result<gameproc::LaunchOutcome, String> {
     let cfg = config::load_or_detect(&app).unwrap_or_default();
     let cfg = repair_game_folders(&app, "join", true, true).unwrap_or(cfg);
     // Race mode goes first: the game mounts the mods folder as it starts, so whatever is
     // going to step aside has to have done it by then. A no-op when it's off, and when the
     // game is already up (which `gameproc::join` is about to report anyway).
     racemode::before_join(&app, &cfg, &address);
-    let outcome = gameproc::join(&cfg, &address);
+    // `-directconnect` never asks for a password, so a locked server goes through the
+    // game's own password dialog instead.
+    let outcome = match password_prompt(hint.as_ref(), || serverbook::load(&app), &address) {
+        Some((lan, name)) => gameproc::join_locked(&cfg, &address, &lan, &name),
+        None => gameproc::join(&cfg, &address),
+    };
     match &outcome {
         // The session watcher restores at exit; this covers a launch that never arrives.
         Ok(gameproc::LaunchOutcome::Launched) => racemode::watch_launch(&app),
@@ -4078,6 +4330,39 @@ fn join_server_now(app: tauri::AppHandle, address: String) -> Result<gameproc::L
         sync_paints_soon(&app, Some(address));
     }
     Ok(outcome)
+}
+
+/// What the server list knows about a server being joined from it. Sent by the browser, which
+/// has every field for every row; a typed address arrives without one.
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct JoinHint {
+    pub passworded: bool,
+    pub name: String,
+    pub lan_address: String,
+}
+
+/// `(lan, name)` for the password dialog when the server being joined needs a password, or
+/// `None` for a direct join. The list's own row decides when the join came with one; only a
+/// bare address falls back to the book (which only a `worldnet` build writes).
+fn password_prompt(
+    hint: Option<&JoinHint>,
+    book: impl FnOnce() -> Vec<serverbook::Entry>,
+    address: &str,
+) -> Option<(String, String)> {
+    match hint {
+        Some(h) => h.passworded.then(|| (h.lan_address.clone(), h.name.clone())),
+        None => locked_server(&book(), address).map(|r| (r.lan_address.clone(), r.name.clone())),
+    }
+}
+
+/// The book's row for `address` when that server needs a password.
+fn locked_server<'a>(book: &'a [serverbook::Entry], address: &str) -> Option<&'a WorldServer> {
+    let address = gameproc::parse_server_address(address).ok()?;
+    book.iter()
+        .map(|e| &e.row)
+        .find(|r| gameproc::parse_server_address(&r.address).ok().as_deref() == Some(address.as_str()))
+        .filter(|r| r.passworded)
 }
 
 /// Point the active profile at a bike this server will accept before starting the game.
@@ -4133,9 +4418,10 @@ async fn join_listed_server(
     address: String,
     categories: Vec<String>,
     bikes: Vec<String>,
+    hint: Option<JoinHint>,
 ) -> Result<gameproc::LaunchOutcome, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        join_listed_server_now(app, address, categories, bikes)
+        join_listed_server_now(app, address, categories, bikes, hint)
     })
     .await
     .map_err(|e| format!("join_listed_server task failed: {e}"))?
@@ -4148,13 +4434,14 @@ pub(crate) fn join_listed_server_now(
     address: String,
     categories: Vec<String>,
     bikes: Vec<String>,
+    hint: Option<JoinHint>,
 ) -> Result<gameproc::LaunchOutcome, String> {
     if gameproc::is_game_running() {
         return Ok(gameproc::LaunchOutcome::AlreadyRunning);
     }
     let cfg = config::load_or_detect(&app).unwrap_or_default();
     select_bike_for_listed_server(&cfg, &categories, &bikes)?;
-    join_server_now(app, address)
+    join_server_now(app, address, hint)
 }
 
 /// Close the running game, then join `address` with the copy that replaces it.
@@ -4173,7 +4460,7 @@ async fn close_and_join(
     address: String,
 ) -> Result<gameproc::LaunchOutcome, String> {
     if !gameproc::is_game_running() {
-        return join_server(app, address).await;
+        return join_server(app, address, None).await;
     }
     if !serverqueue::close_and_settle().await {
         return Err(format!(
@@ -4181,7 +4468,7 @@ async fn close_and_join(
             game::active().display
         ));
     }
-    join_server(app, address).await
+    join_server(app, address, None).await
 }
 
 /// Close the running game, select a bike accepted by the listed server, then launch into it.
@@ -4191,6 +4478,7 @@ async fn close_and_join_listed_server(
     address: String,
     categories: Vec<String>,
     bikes: Vec<String>,
+    hint: Option<JoinHint>,
 ) -> Result<gameproc::LaunchOutcome, String> {
     if gameproc::is_game_running() && !serverqueue::close_and_settle().await {
         return Err(format!(
@@ -4198,7 +4486,7 @@ async fn close_and_join_listed_server(
             game::active().display
         ));
     }
-    join_listed_server(app, address, categories, bikes).await
+    join_listed_server(app, address, categories, bikes, hint).await
 }
 
 /// Wait in line for a full server; the app launches into it when a slot is ours.
@@ -5922,15 +6210,81 @@ fn name_answers(id: &str, title: &str) -> Option<bool> {
     if want.is_empty() || got.is_empty() {
         return None;
     }
-    if want == got {
+    if want == got || want.replace(' ', "") == got.replace(' ', "") {
         return Some(true);
     }
-    let wanted: Vec<&str> = want.split(' ').collect();
-    let have: Vec<&str> = got.split(' ').collect();
+    // A different number, year or edition is a different track: `Walnut 1` is not `Walnut 2`,
+    // and a title carrying a version the id lacks (or the reverse) is not the same one.
+    if version_of(id) != version_of(title) {
+        return None;
+    }
+    // Zero padding is not a difference: `RD01` and `RD1` are the same round.
+    let unpadded = |w: &str| -> String {
+        if !w.is_empty() && w.bytes().all(|b| b.is_ascii_digit()) {
+            match w.trim_start_matches('0') {
+                "" => "0".into(),
+                t => t.into(),
+            }
+        } else {
+            w.into()
+        }
+    };
+    let (want, got) = (split_digits(id), split_digits(title));
+    let wanted: Vec<String> = want.split(' ').map(unpadded).collect();
+    let have: Vec<String> = got.split(' ').map(unpadded).collect();
+    if wanted == have {
+        return Some(true);
+    }
     if !wanted.iter().all(|w| have.contains(w)) {
         return None;
     }
     (wanted.len() * 2 >= have.len()).then_some(false)
+}
+
+/// `fold_name`, with letters and digits also parted: `walnut2` is `walnut 2`.
+fn split_digits(raw: &str) -> String {
+    let mut spaced = String::with_capacity(raw.len() + 4);
+    let mut prev: Option<char> = None;
+    for c in raw.chars() {
+        if let Some(p) = prev {
+            if (p.is_alphabetic() && c.is_numeric()) || (p.is_numeric() && c.is_alphabetic()) {
+                spaced.push(' ');
+            }
+        }
+        spaced.push(c);
+        prev = Some(c);
+    }
+    fold_name(&spaced)
+}
+
+/// The version tokens of a name, in order: every number (`2`, `02`, `2026`, and the 2 of `v2`
+/// or `mk2`) and the roman numerals II to IX. Trailing zeros after another number are dropped
+/// (`Walnut 1.0` is `1`), and so is zero padding (`RD01` is `RD1`). Mirrors the control
+/// plane's `versionOf`, so the app and the server agree on which tracks are different.
+fn version_of(raw: &str) -> Vec<String> {
+    let folded = split_digits(raw);
+    let mut out: Vec<String> = Vec::new();
+    for (i, w) in folded.split(' ').enumerate() {
+        if !w.is_empty() && w.chars().all(|c| c.is_ascii_digit()) {
+            out.push(w.trim_start_matches('0').to_string());
+        } else if i > 0 {
+            let n = match w {
+                "ii" => "2",
+                "iii" => "3",
+                "iv" => "4",
+                "vi" => "6",
+                "vii" => "7",
+                "viii" => "8",
+                "ix" => "9",
+                _ => continue,
+            };
+            out.push(n.to_string());
+        }
+    }
+    while out.len() > 1 && out.last().is_some_and(|v| v.is_empty()) {
+        out.pop();
+    }
+    out
 }
 
 /// Whether a product's categories say it is a track. An empty list is allowed through: a
@@ -5938,6 +6292,40 @@ fn name_answers(id: &str, title: &str) -> Option<bool> {
 fn sells_tracks(categories: &[String]) -> bool {
     categories.is_empty()
         || categories.iter().any(|c| c.to_ascii_lowercase().contains("track"))
+}
+
+#[cfg(test)]
+mod numbered_track_tests {
+    use super::{name_answers, version_of};
+
+    /// mxb-mods' free "Walnut 1.0" must never answer a server running the paid "Walnut 2".
+    #[test]
+    fn a_different_number_is_a_different_track() {
+        assert_eq!(name_answers("walnut2", "Walnut 1.0"), None);
+        assert_eq!(name_answers("Walnut_2", "Walnut 1"), None);
+        assert_eq!(name_answers("walnut", "Walnut 1"), None);
+        assert_eq!(name_answers("walnut2", "Walnut 2"), Some(true));
+        assert_eq!(name_answers("walnut1", "Walnut 1.0"), Some(false));
+        assert_eq!(name_answers("fox_raceway_2023", "Fox Raceway 2026"), None);
+        assert_eq!(name_answers("fox_raceway", "Fox Raceway 2026"), None);
+        assert_eq!(name_answers("hangtown_v2", "Hangtown"), None);
+        assert_eq!(name_answers("hangtown_ii", "Hangtown III"), None);
+        assert_eq!(name_answers("2026_ARLMX_RD01_PALA", "2026 ARLMX RD2 PALA"), None);
+        assert_eq!(name_answers("2026_ARLMX_RD01_PALA", "2026 ARLMX RD1 PALA"), Some(true));
+        // Unchanged behaviour for names without a version.
+        assert_eq!(name_answers("forest", "Forest MX"), Some(false));
+        assert_eq!(name_answers("forest", "Club Forest Racing Park Winter Edition"), None);
+        assert_eq!(name_answers("Farm14", "Farm 14"), Some(true));
+    }
+
+    #[test]
+    fn versions_read_the_same_however_spelled() {
+        assert_eq!(version_of("walnut2"), ["2"]);
+        assert_eq!(version_of("Walnut 2.0"), ["2"]);
+        assert_eq!(version_of("Walnut II"), ["2"]);
+        assert_eq!(version_of("RD01"), ["1"]);
+        assert!(version_of("Walnut").is_empty());
+    }
 }
 
 #[cfg(test)]
@@ -6520,6 +6908,22 @@ fn nantrap_state(app: tauri::AppHandle) -> frostmod_manage::NanTrap {
     frostmod_manage::nantrap_state(&app)
 }
 
+/// Whether Aussie mode applies to the installed FrostMod, and if it is on.
+#[tauri::command]
+fn aussiemode_state(app: tauri::AppHandle) -> frostmod_manage::AussieMode {
+    frostmod_manage::aussiemode_state(&app)
+}
+
+/// Write or remove `aussiemode=1` in `frostmod_radar.cfg`. Off by default; FrostMod reads it
+/// at game start.
+#[tauri::command]
+fn set_aussiemode(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
+    if !frostmod_manage::aussiemode_state(&app).supported {
+        return Err("Aussie mode needs FrostMod 0.52.0 or newer".into());
+    }
+    frostmod_manage::set_aussiemode(&app, enabled).map_err(|e| format!("{e:#}"))
+}
+
 /// Write or remove `nantrap=1` in `frostmod_radar.cfg`. Off by default; FrostMod reads it
 /// at game start.
 #[tauri::command]
@@ -6628,6 +7032,16 @@ fn set_paint_sync_enabled(app: tauri::AppHandle, enabled: bool) -> Result<(), St
             live_sync_session(&app, None);
         }
     }
+    Ok(())
+}
+
+/// Share model-swap ids inside the existing PaintSync room.
+#[tauri::command]
+fn set_paint_sync_models(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
+    let mut cfg = config::load(&app).unwrap_or_default();
+    cfg.paint_sync_models = enabled;
+    config::save(&app, &cfg).map_err(|e| format!("{e:#}"))?;
+    paintroom::note_models_changed();
     Ok(())
 }
 
@@ -8122,7 +8536,7 @@ async fn mods_state_plan(
     tauri::async_runtime::spawn_blocking(move || {
         let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
         let preset = preset_by_name(&app, &name)?;
-        Ok(modstate::plan(&cfg, &preset, &sound_bikes_of(&app)))
+        modstate::plan(&cfg, &preset, &sound_bikes_of(&app)).map_err(|e| format!("{e:#}"))
     })
     .await
     .map_err(|e| format!("mods_state_plan task failed: {e}"))?
@@ -8223,7 +8637,8 @@ async fn mods_state_apply(
             )?)
         };
 
-        let plan = modstate::plan(&cfg, &preset, &sound_bikes_of(&app));
+        let plan = modstate::plan(&cfg, &preset, &sound_bikes_of(&app))
+            .map_err(|e| format!("{e:#}"))?;
         let out = with_watcher_parked(&app, &cfg, || modstate::apply(&cfg, &plan));
         Ok(finish_state_op(out, look))
     })
@@ -8594,6 +9009,13 @@ fn main() {
         std::process::exit(code);
     }
 
+    // `MXB App --mcp`: the stdio MCP bridge an AI agent's client launches. It relays to the
+    // running app and never starts one, so it goes before the single-instance guard for the
+    // same reason as the ticket helper above. See `extmcp.rs`.
+    if let Some(code) = mxb_core::extmcp::bridge_cli() {
+        std::process::exit(code);
+    }
+
     begin_graphics_attempt();
 
     let builder = tauri::Builder::default();
@@ -8695,6 +9117,9 @@ fn main() {
         .manage(voice::Monitor::default())
         .manage(voice::session::Session::default())
         .setup(|app| {
+            // The loopback endpoint the MCP bridge talks to. It answers nothing until the
+            // person turns on "Let AI agents connect".
+            mxb_core::extmcp::start(app.handle().clone());
             log::info!("MXB App {} starting", env!("CARGO_PKG_VERSION"));
             // Before anything can seal or unseal a key, which loads `mxbsecure.dll` into this
             // process: an older install's DLL left beside the exe killed the app on start.
@@ -8997,6 +9422,7 @@ fn main() {
                 });
             }
             sessionwatch::start(handle);
+            serverhold::start();
             // The link to MXB Coach: one overlay key for both apps.
             overlay::start_link(handle);
             secure_launch::watch(handle);
@@ -9105,6 +9531,37 @@ fn main() {
             // wrapper below infer what it is wrapping.
             let handler: fn(tauri::ipc::Invoke<tauri::Wry>) -> bool = tauri::generate_handler![
             window_painted,
+            take_deep_link,
+            friends::set_reshade_warning_dismissed,
+            mxb_core::extensions::ext_list,
+            mxb_core::extensions::ext_inspect_file,
+            mxb_core::extensions::ext_inspect_url,
+            mxb_core::extensions::ext_install,
+            mxb_core::extensions::ext_set_enabled,
+            mxb_core::extensions::ext_set_auto_update,
+            mxb_core::extensions::ext_set_permissions,
+            mxb_core::extensions::ext_uninstall,
+            mxb_core::extensions::ext_set_developer_mode,
+            mxb_core::extensions::ext_read_text,
+            mxb_core::extensions::ext_read_asset,
+            mxb_core::extensions::ext_check_updates,
+            mxb_core::extensions::ext_coach_sessions,
+            mxb_core::extmcp::ext_mcp_reply,
+            mxb_core::extmcp::ext_mcp_status,
+            mxb_core::extmcp::ext_set_mcp_enabled,
+            mxb_core::extensions::ext_catalog_search,
+            mxb_core::extensions::ext_catalog_get,
+            mxb_core::extensions::ext_catalog_latest,
+            mxb_core::extensions::ext_catalog_inspect,
+            mxb_core::extensions::ext_catalog_installed,
+            mxb_core::extensions::ext_catalog_rate,
+            mxb_core::extensions::ext_catalog_my_rating,
+            mxb_core::extpublish::ext_publish_check,
+            mxb_core::extpublish::ext_author_key_backup,
+            mxb_core::extpublish::ext_author_key_restore,
+            mxb_core::extpublish::ext_publish,
+            mxb_core::extpublish::ext_my_listings,
+            mxb_core::extpublish::ext_request_verified,
             studio_install,
             launch_studio,
             scan_rider_targets,
@@ -9190,6 +9647,10 @@ fn main() {
             delete_reshade_preset,
             health_check,
             set_reshade_enabled,
+            graphics_preset_status,
+            set_graphics_preset,
+            open_photo_folder,
+            convert_hires_shots,
             move_empty_tyre_folders,
             detect_loose_swaps,
             register_loose_swaps,
@@ -9226,6 +9687,9 @@ fn main() {
             logs_info,
             share_logs,
             crash_dumps_waiting,
+            protection_report,
+            frostserver_local_status,
+            frostserver_local_install,
             crash_dumps_offered,
             open_logs_folder,
             export_logs,
@@ -9238,6 +9702,19 @@ fn main() {
             set_seen_version,
             mxbmrp3::mxbmrp3_status,
             mxbmrp3::set_mxbmrp3_dismissed,
+            gameplugins::game_plugins_list,
+            gameplugins::game_plugins_latest,
+            gameplugins::game_plugin_set_enabled,
+            gameplugins::game_plugin_uninstall,
+            gameplugins::game_plugins_disable_all,
+            gameplugins::game_plugins_restore,
+            gameplugins::game_plugin_open_config,
+            gameplugins::game_plugin_reveal,
+            gameplugins::game_plugin_set_race_off,
+            gameplugins::game_plugin_install,
+            gameplugins::game_plugin_detail,
+            gameplugins::game_plugin_read_config,
+            gameplugins::game_plugin_write_config,
             set_profiles_path,
             profile_problem,
             detect_game_path,
@@ -9283,6 +9760,8 @@ fn main() {
             set_texcompress,
             nantrap_state,
             set_nantrap,
+            aussiemode_state,
+            set_aussiemode,
             set_instant_refresh,
             overlay_toggle,
             overlay_hide,
@@ -9298,6 +9777,7 @@ fn main() {
             set_voice_proximity,
             set_voice_enabled,
             set_paint_sync_enabled,
+            set_paint_sync_models,
             paint_sync_readiness,
             remove_synced_paints,
             paint_policies,
@@ -9507,9 +9987,14 @@ mod server_track_tests {
         assert_eq!(name_answers("Briarcliff MX", "briarcliff_mx"), Some(true));
         assert_eq!(name_answers("mmx_supercross", "MMX Supercross"), Some(true));
         assert_eq!(
-            name_answers("mmx_supercross", "MMX Supercross 2024"),
+            name_answers("mmx_supercross", "MMX Supercross Arena"),
             Some(false),
             "a longer title is still worth offering, labelled as a guess",
+        );
+        assert_eq!(
+            name_answers("mmx_supercross", "MMX Supercross 2024"),
+            None,
+            "a year the id doesn't carry is another edition, not a longer name",
         );
         assert_eq!(name_answers("", "Anything"), None);
     }
@@ -10110,7 +10595,17 @@ mod window_tests {
 
 #[cfg(test)]
 mod deep_link_tests {
-    use super::{parse_deep_link, DeepLink};
+    use super::{parse_deep_link, take_deep_link, DeepLink, PENDING_DEEP_LINK};
+
+    /// The UI reads a link from the backend, not from the event. An event anyone else emits
+    /// on `deep-link` (the remote-origin windows can emit events) finds nothing to take.
+    #[test]
+    fn a_deep_link_is_taken_from_the_backend_once() {
+        assert_eq!(take_deep_link(), None, "nothing parsed, nothing to take");
+        *PENDING_DEEP_LINK.lock().unwrap() = parse_deep_link("mxb://enroll?code=abc");
+        assert_eq!(take_deep_link(), Some(DeepLink::Enroll { code: "abc".into() }));
+        assert_eq!(take_deep_link(), None, "taken once");
+    }
 
     fn enroll_code(url: &str) -> Option<String> {
         match parse_deep_link(url) {
@@ -10773,6 +11268,7 @@ fn experimental_state(app: tauri::AppHandle) -> serde_json::Value {
         // "the control plane knows who this is" — which is what every caller wanted.
         "enrolled": !cfg.cp_token.trim().is_empty(),
         "paintSyncEnabled": cfg.paint_sync_enabled,
+        "paintSyncModels": cfg.paint_sync_models,
         "riderName": cfg.cp_rider_name,
         "guid": cfg.cp_guid,
         // What paint sync last managed, so the panel can say so on a cold start rather than
@@ -11297,5 +11793,42 @@ mod paint_sync_badge_tests {
         let counts = counts(&[("somewhere else", 3)]);
         let got = match_presence(&counts, &[], &[row("Quiet Server", "9.9.9.9:54210")]);
         assert!(got.is_empty(), "{got:?}");
+    }
+}
+
+#[cfg(test)]
+mod locked_server_tests {
+    use super::*;
+
+    fn entry(address: &str, passworded: bool) -> serverbook::Entry {
+        serverbook::Entry {
+            row: WorldServer { address: address.into(), name: "S".into(), passworded, ..Default::default() },
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn only_a_book_row_marked_passworded_takes_the_password_dialog() {
+        let book = [entry("203.0.113.10:54210", true), entry("203.0.113.11:54210", false)];
+        assert!(locked_server(&book, "203.0.113.10").is_some(), "default port still matches");
+        assert!(locked_server(&book, "203.0.113.11:54210").is_none());
+        assert!(locked_server(&book, "203.0.113.12:54210").is_none());
+    }
+
+    /// The public build has no book, so the browser's own row has to be enough.
+    #[test]
+    fn a_listed_passworded_server_prompts_with_no_book_at_all() {
+        let hint = JoinHint { passworded: true, name: "Bennys dedi".into(), lan_address: "10.0.0.2:54323".into() };
+        assert_eq!(
+            password_prompt(Some(&hint), Vec::new, "51.81.210.185:54323"),
+            Some(("10.0.0.2:54323".to_string(), "Bennys dedi".to_string()))
+        );
+        // The list's row wins over a stale book, both ways.
+        let open = JoinHint { passworded: false, ..hint };
+        let book = || vec![entry("51.81.210.185:54323", true)];
+        assert_eq!(password_prompt(Some(&open), book, "51.81.210.185:54323"), None);
+        // A typed address still falls back to the book.
+        assert!(password_prompt(None, book, "51.81.210.185:54323").is_some());
+        assert!(password_prompt(None, Vec::new, "51.81.210.185:54323").is_none());
     }
 }

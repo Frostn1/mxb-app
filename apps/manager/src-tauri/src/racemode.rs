@@ -323,6 +323,9 @@ fn allow_list(mods_root: &Path, hidden: &[String]) -> Vec<String> {
         entries.sort_by_key(|e| e.file_name());
         for e in entries {
             let name = e.file_name().to_string_lossy().into_owned();
+            if rel.eq_ignore_ascii_case("bikes") && crate::library::is_frostmod_shadow_bike(&name) {
+                continue;
+            }
             let child = format!("{rel}/{name}");
             let k = key(&child);
             if hidden.contains(&k) {
@@ -752,6 +755,9 @@ pub fn before_join(app: &tauri::AppHandle, cfg: &AppConfig, address: &str) {
         log::info!("[race] the game is already running; leaving the mods folder alone");
         return;
     }
+    if let Err(e) = crate::gameplugins::race_park(app, cfg) {
+        log::warn!("[race] couldn't set aside game plugins: {e:#}");
+    }
     let Some(path) = journal_path(app) else { return };
     let _held = LOCK.lock().unwrap_or_else(|p| p.into_inner());
 
@@ -773,7 +779,12 @@ pub fn before_join(app: &tauri::AppHandle, cfg: &AppConfig, address: &str) {
             && crate::trackstock::find(&cfg.install_dir(), &row.track).is_some(),
     };
     let items = inventory(cfg, &crate::sound_bikes_of(app));
-    let rels = match set_aside(&needs, &items, &player(cfg), &synced_paints(cfg)) {
+    let player = player(cfg);
+    if player.bike_id.trim().is_empty() {
+        log::warn!("[race] couldn't resolve the selected bike; nothing was set aside");
+        return;
+    }
+    let rels = match set_aside(&needs, &items, &player, &synced_paints(cfg)) {
         Ok(rels) if rels.is_empty() => {
             log::info!("[race] {}: everything installed is needed; nothing set aside", row.name);
             return;
@@ -883,6 +894,9 @@ fn restore_locked(app: &tauri::AppHandle, cfg: &AppConfig, path: &Path, why: &st
 ///
 /// Safe to call from anywhere and as often as anyone likes: with no journal it's a no-op.
 pub fn restore_if_idle(app: &tauri::AppHandle, why: &str) {
+    if let Err(e) = crate::gameplugins::race_restore(app) {
+        log::warn!("[race] couldn't restore game plugins: {e:#}");
+    }
     let Some(path) = journal_path(app) else { return };
     if !path.exists() {
         return;

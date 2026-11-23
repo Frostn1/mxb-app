@@ -1,0 +1,92 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      body { margin: 0; padding: 20px 28px 40px; color: var(--foreground); font: 13px system-ui, "Segoe UI", sans-serif; background: transparent; }
+      h1 { margin: 0 0 4px; font-size: 18px; font-weight: 650; }
+      h2 { margin: 24px 0 8px; font-size: 11.5px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted-foreground); }
+      .muted { color: var(--muted-foreground); }
+      .totals { display: flex; gap: 36px; margin-top: 14px; }
+      .big { font-size: 26px; font-weight: 650; font-variant-numeric: tabular-nums; }
+      .label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted-foreground); }
+      .stack { display: flex; height: 14px; border-radius: 7px; overflow: hidden; margin-top: 18px; background: color-mix(in oklab, var(--foreground) 10%, transparent); }
+      .stack > i { display: block; height: 100%; }
+      .legend { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 10px; font-size: 12px; }
+      .legend span::before { content: ""; display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 6px; background: var(--c); }
+      table { width: 100%; border-collapse: collapse; }
+      th { text-align: left; font-weight: 500; color: var(--muted-foreground); font-size: 11.5px; padding: 6px 4px; border-bottom: 1px solid var(--border); }
+      td { padding: 8px 4px; border-bottom: 1px solid var(--border); }
+      .num { text-align: right; font-variant-numeric: tabular-nums; }
+      .name { max-width: 520px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    </style>
+    <script src="../summary.js"></script>
+  </head>
+  <body>
+    <h1>Library</h1>
+    <div id="status" class="muted">Reading your mods…</div>
+    <div class="totals">
+      <div><div class="label">Mods</div><div id="count" class="big">–</div></div>
+      <div><div class="label">On disk</div><div id="total" class="big">–</div></div>
+      <div><div class="label">Largest type</div><div id="top" class="big">–</div></div>
+    </div>
+    <div id="stack" class="stack"></div>
+    <div id="legend" class="legend"></div>
+    <h2>By type</h2>
+    <table><thead><tr><th>Type</th><th class="num">Mods</th><th class="num">Size</th><th class="num">Share</th></tr></thead><tbody id="types"></tbody></table>
+    <h2>Biggest mods</h2>
+    <table><thead><tr><th>Name</th><th>Type</th><th class="num">Size</th></tr></thead><tbody id="biggest"></tbody></table>
+    <script>
+      const $ = (id) => document.getElementById(id);
+      // Shades of the theme's own accent, so the chart follows every theme.
+      const shade = (i) => `color-mix(in oklab, var(--primary) ${[100, 62, 38, 24, 15][Math.min(i, 4)]}%, transparent)`;
+      const td = (text, cls) => {
+        const e = document.createElement("td");
+        e.textContent = text;
+        if (cls) e.className = cls;
+        return e;
+      };
+      const tr = (...cells) => {
+        const r = document.createElement("tr");
+        r.append(...cells);
+        return r;
+      };
+
+      mxb.mods
+        .list()
+        .then((mods) => {
+          const s = summarise(mods);
+          $("status").textContent = s.count ? "Sizes are on disk, as installed." : "No mods installed yet.";
+          $("count").textContent = String(s.count);
+          $("total").textContent = bytes(s.total);
+          $("top").textContent = s.types[0] ? typeLabel(s.types[0].type) : "–";
+          $("stack").replaceChildren(
+            ...s.types.map((t, i) => {
+              const b = document.createElement("i");
+              b.style.width = `${(100 * t.size) / Math.max(1, s.total)}%`;
+              b.style.background = shade(i);
+              b.title = `${typeLabel(t.type)}: ${bytes(t.size)}`;
+              return b;
+            }),
+          );
+          $("legend").replaceChildren(
+            ...s.types.map((t, i) => {
+              const l = document.createElement("span");
+              l.style.setProperty("--c", shade(i));
+              l.textContent = `${typeLabel(t.type)} ${bytes(t.size)}`;
+              return l;
+            }),
+          );
+          $("types").replaceChildren(
+            ...s.types.map((t) => tr(td(typeLabel(t.type)), td(String(t.count), "num"), td(bytes(t.size), "num"), td(`${Math.round((100 * t.size) / Math.max(1, s.total))}%`, "num"))),
+          );
+          $("biggest").replaceChildren(...s.biggest.map((m) => tr(td(m.name, "name"), td(typeLabel(m.type)), td(bytes(m.size), "num"))));
+        })
+        .catch((e) => {
+          $("status").textContent = String(e.message || e).includes("permission")
+            ? "Reading your mod list isn't allowed. Turn it on in Extensions → Installed."
+            : String(e.message || e);
+        });
+    </script>
+  </body>
+</html>

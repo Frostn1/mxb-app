@@ -402,7 +402,7 @@ fn inspect_zip_under(
         format!("{p}/")
     });
     let entries: Vec<(usize, String)> = (0..archive.len())
-        .filter_map(|i| archive.by_index(i).ok().map(|f| (i, f.name().replace('\\', "/"))))
+        .filter_map(|i| archive.by_index(i).ok().map(|f| (i, f.name().map(|n| n.replace('\\', "/")).unwrap_or_default())))
         .filter(|(_, n)| match &keep {
             None => true,
             Some(k) => n.to_ascii_lowercase().starts_with(k),
@@ -1131,7 +1131,7 @@ fn extract_plain(path: &Path, out_dir: &Path) -> Result<Vec<String>> {
         if !entry.is_file() {
             continue;
         }
-        let rel = entry.name().replace('\\', "/");
+        let rel = entry.name()?.replace('\\', "/");
         let Some(dest) = safe_dest(out_dir, &rel) else {
             continue;
         };
@@ -1215,8 +1215,8 @@ fn write_pkz(mut files: Vec<(String, PathBuf)>, to: &Path) -> Result<u64> {
     files.sort_by(|a, b| a.0.cmp(&b.0));
     let file = std::fs::File::create(to).with_context(|| format!("create {to:?}"))?;
     let mut zip = zip::ZipWriter::new(file);
-    let opts: zip::write::FileOptions<'_, ()> =
-        zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+    let opts: zip::write::SimpleFileOptions =
+        zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
     for (name, path) in files {
         zip.start_file(&name, opts)?;
         zip.write_all(&std::fs::read(&path).with_context(|| format!("read {path:?}"))?)?;
@@ -1345,7 +1345,7 @@ mod tests {
 
         let mut zip = zip::ZipArchive::new(std::fs::File::open(&pkz).unwrap()).unwrap();
         let mut names: Vec<String> = (0..zip.len())
-            .map(|i| zip.by_index(i).unwrap().name().to_string())
+            .map(|i| zip.by_index(i).unwrap().name().unwrap().to_string())
             .collect();
         names.sort();
         assert_eq!(names, ["mytrack/mytrack.map", "mytrack/sub/deep.tga"]);

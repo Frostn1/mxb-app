@@ -34,7 +34,7 @@
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime};
 
 use notify::{RecommendedWatcher, RecursiveMode};
@@ -54,6 +54,14 @@ const SETTLE: Duration = Duration::from_secs(3);
 /// Upper bound on settling. A download that trickles in for minutes shouldn't hold
 /// the reload forever — past this we act on what has landed so far.
 const MAX_SETTLE: Duration = Duration::from_secs(45);
+
+/// How long an in-app placement owns the watcher keys it wrote. The watcher settles after
+/// three seconds, but a large copy can leave filesystem notifications queued behind it; keep
+/// the exact keys around long enough for those late notifications without muting unrelated
+/// hand-dropped mods.
+const INSTALLED_KEY_TTL: Duration = Duration::from_secs(60);
+
+static INSTALLED_KEYS: OnceLock<Mutex<HashMap<String, Instant>>> = OnceLock::new();
 
 /// How far into a game session auto-reload stays quiet when the mods tree sits on a sync
 /// provider. Long enough to cover the game's own startup content walk, which is the window
@@ -269,10 +277,7 @@ impl Pending {
     fn take_settled_batch(&mut self, now: Instant) -> Option<(Vec<String>, Batch)> {
         let since = |t: Option<Instant>| t.map(|t| now.saturating_duration_since(t));
         let quiet = since(self.last_seen).is_none_or(|d| d >= SETTLE);
-        let overdue = !self.capped && since(self.first_seen).is_some_and(|d| d >= MAX_SETTLE);
-        if !quiet && !overdue {
-            return None;
-        }
+        let kind = self.settled_kind(now)?;
         let capped = !quiet;
         if capped {
             log::info!(
@@ -284,13 +289,26 @@ impl Pending {
         let taken = std::mem::take(self);
         self.capped = capped;
         self.last_seen = last_seen;
-        let kind = match (taken.content, taken.beyond_rider) {
+        Some((taken.mods.into_iter().collect(), kind))
+    }
+
+    fn settled_kind(&self, now: Instant) -> Option<Batch> {
+        let since = |t: Option<Instant>| t.map(|t| now.saturating_duration_since(t));
+        let quiet = since(self.last_seen).is_none_or(|d| d >= SETTLE);
+        let overdue = !self.capped && since(self.first_seen).is_some_and(|d| d >= MAX_SETTLE);
+        if !quiet && !overdue {
+            return None;
+        }
+        Some(match (self.content, self.beyond_rider) {
             (false, _) => Batch::Paints,
             (true, false) => Batch::Gear,
             (true, true) => Batch::Content,
-        };
-        Some((taken.mods.into_iter().collect(), kind))
+        })
     }
+}
+
+fn hold_for_server(kind: Batch, on_server: bool) -> bool {
+    on_server && matches!(kind, Batch::Content | Batch::Gear)
 }
 
 /// Is this a paint file: a `.pnt` in a bike's `paints` folder, or a rider model's
@@ -463,6 +481,52 @@ fn mod_key(root: &Path, path: &Path) -> Option<String> {
     Some(format!("{kind}/{name}"))
 }
 
+/// Remember the mods an in-app placement just wrote. [`crate::install::place_mod_with`] calls
+/// this after a successful placement and before it signals FrostMod itself, so the watcher can
+/// still reconcile the disk ledger without asking FrostMod to reload the same mods again.
+pub(crate) fn note_installed(root: &Path, paths: &[PathBuf]) {
+    let now = Instant::now();
+    let keys: BTreeSet<String> = paths
+        .iter()
+        .filter_map(|path| mod_key(root, path))
+        .map(|key| key.to_ascii_lowercase())
+        .collect();
+    if keys.is_empty() {
+        return;
+    }
+    let mut noted = INSTALLED_KEYS
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    noted.retain(|_, at| now.saturating_duration_since(*at) < INSTALLED_KEY_TTL);
+    noted.extend(keys.into_iter().map(|key| (key, now)));
+}
+
+/// Remove watcher keys recently written by the installer. Kept pure so expiry and mixed
+/// installer/manual batches can be checked without touching process-global state.
+fn filter_installed_keys(
+    mods: Vec<String>,
+    installed: &HashMap<String, Instant>,
+    now: Instant,
+) -> Vec<String> {
+    mods.into_iter()
+        .filter(|key| {
+            installed
+                .get(&key.to_ascii_lowercase())
+                .is_none_or(|at| now.saturating_duration_since(*at) >= INSTALLED_KEY_TTL)
+        })
+        .collect()
+}
+
+fn watcher_only_keys(mods: Vec<String>, now: Instant) -> Vec<String> {
+    let Some(installed) = INSTALLED_KEYS.get() else {
+        return mods;
+    };
+    let mut installed = installed.lock().unwrap_or_else(|e| e.into_inner());
+    installed.retain(|_, at| now.saturating_duration_since(*at) < INSTALLED_KEY_TTL);
+    filter_installed_keys(mods, &installed, now)
+}
+
 /// Every mod a changed path belongs to.
 ///
 /// Usually exactly one. More than one when the change landed in a folder several mods
@@ -565,6 +629,7 @@ fn settle_then_reload(app: AppHandle, pending: Arc<Mutex<Pending>>, live: Arc<At
     // Read once, not once a second: the provider is a property of the configured path.
     let cloud = crate::config::load(&app).ok().and_then(|c| crate::cloudfiles::mods_provider(&c));
     let mut held = false;
+    let mut server_held = false;
 
     let mods = loop {
         std::thread::sleep(SETTLE / 3);
@@ -594,10 +659,23 @@ fn settle_then_reload(app: AppHandle, pending: Arc<Mutex<Pending>>, live: Arc<At
                 continue;
             }
         }
-        let settled = pending
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .take_settled_batch(Instant::now());
+        let mut pending = pending.lock().unwrap_or_else(|e| e.into_inner());
+        let now = Instant::now();
+        if pending
+            .settled_kind(now)
+            .is_some_and(|kind| hold_for_server(kind, crate::serverhold::on_server_now()))
+        {
+            if !server_held {
+                server_held = true;
+                log::info!(
+                    "mods watcher: holding the reload while the game is on a server; a content reload \
+                     mid-session drops every rider. It fires when the session ends."
+                );
+            }
+            continue;
+        }
+        let settled = pending.take_settled_batch(now);
+        drop(pending);
         if let Some(batch) = settled {
             break batch;
         }
@@ -611,6 +689,14 @@ fn settle_then_reload(app: AppHandle, pending: Arc<Mutex<Pending>>, live: Arc<At
     // update the record of what the library holds — including anything deleted by hand,
     // which no in-app action would have told us about.
     crate::ledger_reconcile_detached(&app);
+    let before = mods.len();
+    let mods = watcher_only_keys(mods, Instant::now());
+    if mods.is_empty() {
+        log::debug!(
+            "mods watcher: reconciled {before} installer-written mod(s); FrostMod was already reloaded"
+        );
+        return;
+    }
     match kind {
         Batch::Content => reload(&app, mods),
         Batch::Gear => refresh_gear(&app, mods),
@@ -641,6 +727,9 @@ fn refresh_gear(app: &AppHandle, mods: Vec<String>) {
     match crate::frostmod::signal_refresh_gear() {
         crate::frostmod::CommandOutcome::Signaled => {
             log::info!("mods watcher: rider gear changed -> gear refresh: {mods:?}");
+        }
+        crate::frostmod::CommandOutcome::Held => {
+            log::info!("mods watcher: rider gear refresh held until the online session is safely over: {mods:?}");
         }
         other => {
             log::info!("mods watcher: rider gear changed, but no gear refresh ({other:?}) - full reload");
@@ -693,6 +782,37 @@ fn reload(app: &AppHandle, mods: Vec<String>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn server_holds_content_and_gear_but_not_paints() {
+        assert!(hold_for_server(Batch::Content, true));
+        assert!(hold_for_server(Batch::Gear, true));
+        assert!(!hold_for_server(Batch::Paints, true));
+        assert!(!hold_for_server(Batch::Content, false));
+        assert!(!hold_for_server(Batch::Gear, false));
+        assert!(!hold_for_server(Batch::Paints, false));
+    }
+
+    #[test]
+    fn installer_keys_are_filtered_until_the_note_expires() {
+        let t0 = Instant::now();
+        let now = t0 + INSTALLED_KEY_TTL;
+        let installed = HashMap::from([
+            ("tracks/red bud".to_string(), now),
+            ("bikes/ktm 450".to_string(), t0),
+        ]);
+        let mods = vec![
+            "tracks/Red Bud".to_string(),
+            "tracks/Iron Man".to_string(),
+            "bikes/KTM 450".to_string(),
+        ];
+
+        assert_eq!(
+            filter_installed_keys(mods, &installed, now),
+            vec!["tracks/Iron Man".to_string(), "bikes/KTM 450".to_string()],
+            "only a fresh, exact installer key is suppressed",
+        );
+    }
 
     /// Paint files are recognised by folder and extension, case-insensitively, for bikes
     /// and for rider gear; nothing else is.

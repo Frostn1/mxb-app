@@ -9,7 +9,7 @@
 [![Latest release](https://img.shields.io/github/v/release/Frostn1/mxb-app?sort=semver&label=release&color=0071e3)](https://mxbsecure.com/app)
 [![Release date](https://img.shields.io/github/release-date/Frostn1/mxb-app?label=released&color=0071e3)](https://github.com/Frostn1/mxb-app/releases)
 [![Downloads](https://img.shields.io/github/downloads/Frostn1/mxb-app/total?label=downloads&color=0071e3)](https://mxbsecure.com/app)
-[![License: MIT](https://img.shields.io/badge/license-MIT-0071e3)](LICENSE)
+[![License: PolyForm Strict 1.0.0](https://img.shields.io/badge/license-PolyForm%20Strict%201.0.0-0071e3)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-0071e3)](#download)
 [![mxbsecure](https://img.shields.io/badge/mxbsecure-.com-0b0b0c)](https://mxbsecure.com)
 

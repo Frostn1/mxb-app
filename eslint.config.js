@@ -25,6 +25,13 @@ export default tseslint.config(
     languageOptions: { globals: globals.node },
   },
   {
+    // Extension views run in a sandboxed browser frame with `window.mxb` as their whole API.
+    files: ["extensions/**/*.{js,mjs}"],
+    // Classic scripts: a helper file's top-level functions are used by the page that loads it.
+    languageOptions: { sourceType: "script", globals: { ...globals.browser, mxb: "readonly" } },
+    rules: { "@typescript-eslint/no-unused-vars": ["error", { vars: "local" }] },
+  },
+  {
     files: ["**/*.{ts,tsx}"],
     languageOptions: {
       ecmaVersion: 2020,
@@ -51,7 +58,8 @@ export default tseslint.config(
       "packages/shared/src/Components/Viewer/ModelViewer.tsx",
       "packages/shared/src/Components/Viewer/PoseHandles.tsx",
       "packages/shared/src/Components/Viewer/TrackViewer.tsx",
-      "apps/studio/src/Components/Studio/Gfx/GfxMarkers.tsx",
+      "apps/converter/src/Gfx/GfxMarkers.tsx",
+      "apps/converter/src/Gfx/GfxHands.tsx",
     ],
     rules: { "react/no-unknown-property": "off" },
   },

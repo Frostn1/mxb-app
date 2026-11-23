@@ -1,5 +1,6 @@
 import {
   createContext,
+  useCallback,
   useContext,
   useEffect,
   useMemo,
@@ -11,7 +12,10 @@ import { hasLooks, useSupporter } from "../api/supporter";
 import {
   ACCENT_PROPS,
   accentVars,
+  drawnColorway,
+  isFreeNow,
   isPackColorway,
+  nextFreeEnd,
   parseAccent,
   type PackColorway,
 } from "../lib/accent";
@@ -38,6 +42,9 @@ export type AnyColorway = Colorway | PackColorway;
 
 
 export {
+  FREE_UNTIL,
+  colorwayUnlocked,
+  isFreeNow,
   PACK_COLORWAYS,
   PACK_SWATCH,
   accentVars,
@@ -92,6 +99,8 @@ const STORAGE_KEY = "frost-theme";
 const COLORWAY_KEY = "frost-colorway";
 const SCALE_KEY = "frost-ui-scale";
 const ACCENT_KEY = "frost-accent";
+/** The pick before a free pack colorway was tried, to go back to when it stops being free. */
+const BEFORE_FREE_KEY = "frost-colorway-before-free";
 
 /** The in-game overlay loads the same bundle with `?overlay=1` — see `main.tsx`. */
 const IS_OVERLAY = new URLSearchParams(window.location.search).has("overlay");
@@ -139,6 +148,17 @@ export function ThemeProvider({
   const looks = hasLooks(useSupporter());
   const [scale, setScaleState] = useState<UiScale>(readStoredScale);
   const [systemDark, setSystemDark] = useState(systemPrefersDark);
+  // Bumped when a free colorway goes back to the pack, so a window left open over midnight
+  // on Oct 31 falls back without a restart.
+  const [freeTick, setFreeTick] = useState(0);
+  useEffect(() => {
+    const end = nextFreeEnd();
+    if (!end) return;
+    // setTimeout overflows past ~24.8 days; re-arm from a shorter wait instead.
+    const wait = Math.min(end.getTime() - Date.now() + 1000, 2 ** 31 - 1);
+    const id = window.setTimeout(() => setFreeTick((n) => n + 1), wait);
+    return () => window.clearTimeout(id);
+  }, [freeTick]);
 
   // Track OS theme changes for `system`.
   useEffect(() => {
@@ -175,9 +195,13 @@ export function ThemeProvider({
   }, [resolved]);
 
   useEffect(() => {
-    document.documentElement.dataset.colorway =
-      isPackColorway(colorway) && !looks ? "frost" : colorway;
-  }, [colorway, looks]);
+    document.documentElement.dataset.colorway = drawnColorway(
+      colorway,
+      looks,
+      new Date(),
+      localStorage.getItem(BEFORE_FREE_KEY),
+    );
+  }, [colorway, looks, freeTick]);
 
   // Inline on <html>, so it outranks whichever colorway's rules are in play.
   useEffect(() => {
@@ -211,10 +235,14 @@ export function ThemeProvider({
     setAccentState(clean);
   };
 
-  const setColorway = (next: AnyColorway) => {
+  const setColorway = useCallback((next: AnyColorway) => {
+    // Trying a colorway that's only free for now: remember what to go back to afterwards.
+    if (next !== colorway && !looks && isFreeNow(next) && !isPackColorway(colorway)) {
+      localStorage.setItem(BEFORE_FREE_KEY, colorway);
+    }
     localStorage.setItem(COLORWAY_KEY, next);
     setColorwayState(next);
-  };
+  }, [colorway, looks]);
 
   const setScale = (next: UiScale) => {
     localStorage.setItem(SCALE_KEY, String(next));
@@ -223,7 +251,7 @@ export function ThemeProvider({
 
   const value = useMemo(
     () => ({ theme, resolved, setTheme, colorway, setColorway, accent, setAccent, scale, setScale }),
-    [theme, resolved, colorway, accent, scale],
+    [theme, resolved, colorway, setColorway, accent, scale],
   );
 
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;

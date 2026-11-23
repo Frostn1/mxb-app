@@ -1,0 +1,63 @@
+{
+  "manifestVersion": 1,
+  "id": "mxbsecure.coach-laps",
+  "name": "Coach Laps",
+  "version": "1.0.4",
+  "author": "mxbsecure",
+  "description": "Your recent MXB Coach sessions inside MXB App: best laps, clean-lap pace and consistency per track, and the last session's laps.",
+  "homepage": "https://github.com/Frostn1/mxb-app/blob/main/docs/extensions.md",
+  "permissions": [
+    "coach.read",
+    "mcp.tools"
+  ],
+  "categories": [
+    "tabs",
+    "game",
+    "ai-tools"
+  ],
+  "tags": [
+    "coach",
+    "laps",
+    "telemetry",
+    "stats"
+  ],
+  "screenshots": [
+    "store/1.webp"
+  ],
+  "contributes": {
+    "views": [
+      {
+        "id": "laps",
+        "title": "Coach",
+        "entry": "view/index.html"
+      }
+    ],
+    "main": "main.html",
+    "settings": [
+      {
+        "key": "sessions",
+        "type": "enum",
+        "label": "Sessions to list",
+        "options": [
+          "5",
+          "10",
+          "20"
+        ],
+        "default": "10"
+      }
+    ],
+    "mcp": {
+      "tools": [
+        {
+          "name": "best_laps",
+          "description": "The rider's best clean lap per track and bike from MXB Coach, with lap counts, fastest first.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": false
+          }
+        }
+      ]
+    }
+  }
+}

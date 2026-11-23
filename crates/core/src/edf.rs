@@ -170,6 +170,124 @@ fn mat_point(m: &Mat4, p: [f32; 3]) -> [f32; 3] {
     ]
 }
 
+/// `a * b`, row-major: `b` applies first.
+fn mat_mul(a: &Mat4, b: &Mat4) -> Mat4 {
+    let mut out = [0f32; 16];
+    for r in 0..4 {
+        for c in 0..4 {
+            out[r * 4 + c] = (0..4).map(|k| a[r * 4 + k] * b[k * 4 + c]).sum();
+        }
+    }
+    out
+}
+
+const IDENTITY: Mat4 = [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0];
+
+/// An object's nodes as its own node list states them: see [`node_frames`].
+#[derive(Default)]
+struct ObjectNodes {
+    /// Each node's vertex range and the matrix taking it to the object's frame.
+    frames: Vec<(std::ops::Range<usize>, Mat4)>,
+    /// Every node's groups, named after the node, in file order.
+    groups: Vec<RawSub>,
+}
+
+/// A node whose vertices carry skinning keys after its groups.
+const DEFORM: u32 = 0x1_0000;
+
+/// Where each node of an object puts its vertices: the vertex range its groups cover and the
+/// matrix from the node's frame to the object's, its own matrix taken through every parent's.
+///
+/// An object is its materials, then `vc` at `vc_off` and the vertex lanes (72 bytes a vertex),
+/// the triangles, and the node list. Each node is `name[100]`, flags, its matrix (row-major,
+/// translation in the last column), 64 bytes, its parent (1-based, 0 for none), its children,
+/// its groups (`mat, t0, tn, v0, vn, tail`), the first vertex, skinning keys when
+/// [`DEFORM`] is set, then its bounds. A stock bike's chassis is eleven nodes deep (the engine,
+/// its sprocket, the shock, its linkage...), each placed from its parent: the offsets the
+/// matrices used to be guessed at put the engine 70 cm under the frame.
+///
+/// `None` when the bytes don't read as that, so the caller goes on as before.
+fn node_frames(b: &[u8], vc_off: usize) -> Option<ObjectNodes> {
+    let word = |o: usize| (o + 4 <= b.len()).then(|| u32le(b, o) as usize);
+    let vc = word(vc_off)?;
+    let mut o = vc_off.checked_add(4)?.checked_add(vc.checked_mul(72)?)?;
+    let tc = word(o)?;
+    o = o.checked_add(4)?.checked_add(tc.checked_mul(12)?)?;
+    let count = word(o)?;
+    if count == 0 || count > 4096 {
+        return None;
+    }
+    o += 4;
+    let mut worlds: Vec<Mat4> = Vec::with_capacity(count);
+    let mut out = ObjectNodes::default();
+    for _ in 0..count {
+        let name = read_cname(b, o);
+        o += 100;
+        let flags = word(o)? as u32;
+        o += 4;
+        if o + 128 > b.len() {
+            return None;
+        }
+        let mut m = [0f32; 16];
+        for (k, slot) in m.iter_mut().enumerate() {
+            *slot = f32le(b, o + k * 4);
+        }
+        if !m.iter().all(|v| v.is_finite() && v.abs() < MODEL_EXTENT) {
+            return None;
+        }
+        o += 128;
+        let parent = word(o)?;
+        let children = word(o + 4)?;
+        if children > 4096 {
+            return None;
+        }
+        o += 8 + children * 4;
+        let groups = word(o)?;
+        if groups > 65536 {
+            return None;
+        }
+        o += 8;
+        let (mut lo, mut hi, mut verts) = (usize::MAX, 0usize, 0usize);
+        for g in 0..groups {
+            let at = o + g * 24;
+            let (v0, vn) = (word(at + 12)?, word(at + 16)?);
+            out.groups.push(RawSub {
+                name: name.clone(),
+                tri_start: word(at + 4)?,
+                tri_count: word(at + 8)?,
+                block_off: at,
+                vert_start: v0,
+                vert_count: vn,
+                mat: Some(word(at)? as u32),
+            });
+            lo = lo.min(v0);
+            hi = hi.max(v0.checked_add(vn)?);
+            verts = verts.checked_add(vn)?;
+        }
+        o += groups * 24 + 4;
+        if flags & DEFORM != 0 {
+            if word(o)? != 1 {
+                return None;
+            }
+            let keys = word(o + 4)?;
+            o = o.checked_add(8)?.checked_add(keys.checked_mul(verts)?.checked_mul(10)?.checked_add(keys)?.checked_mul(4)?)?;
+        }
+        o += 24;
+        if o > b.len() || hi > vc {
+            return None;
+        }
+        let world = match parent.checked_sub(1).and_then(|p| worlds.get(p)) {
+            Some(up) => mat_mul(up, &m),
+            None => m,
+        };
+        worlds.push(world);
+        if groups > 0 && hi > lo {
+            out.frames.push((lo..hi, world));
+        }
+    }
+    Some(out)
+}
+
 // Rotation only (for normals — no translation).
 fn mat_dir(m: &Mat4, p: [f32; 3]) -> [f32; 3] {
     [
@@ -256,18 +374,127 @@ pub fn parse_gear(b: &[u8]) -> Vec<EdfNode> {
 // Parse keeping exactly the nodes the bike's .hrc declares as level0; empty slice
 // falls back to level0_only's name heuristic.
 pub fn parse_with_levels(b: &[u8], level0: &[String]) -> Vec<EdfNode> {
-    parse_impl(b, level0, false, MODEL_EXTENT)
+    let nodes = parse_nodes(b, level0, false, MODEL_EXTENT, true);
+    // A bike whose `.edf` ends with an object directory states each object's bounds, which
+    // says which of the two node readings (see `parse_gear`) this exporter's meshes want. The
+    // usual one is kept unless it puts a part outside its own object and the other doesn't:
+    // the stock bikes' swingarm came out turned end for end, ahead of its pivot.
+    let Some(dir) = object_directory(b) else { return nodes };
+    let first = object_misfit(b, &dir, &nodes);
+    if first <= 0.01 {
+        return nodes;
+    }
+    let other = parse_nodes(b, level0, true, MODEL_EXTENT, true);
+    if object_misfit(b, &dir, &other) < first {
+        return other;
+    }
+    nodes
+}
+
+/// Every mesh node's name, LOD levels included (`neckbrace`, `neckbraceb`, `neckbracec`), in
+/// file order: what a `.hrc` `name =` line can find. [`parse`] keeps only the top level.
+pub fn node_names(b: &[u8]) -> Vec<String> {
+    scan_nodes(b, true, MODEL_EXTENT, false).0.into_iter().map(|n| n.name).collect()
 }
 
 fn parse_impl(b: &[u8], level0: &[String], node_matrix_once: bool, extent: f32) -> Vec<EdfNode> {
+    parse_nodes(b, level0, node_matrix_once, extent, false)
+}
+
+/// The bounds an object states for itself in its directory entry (the root's are the file
+/// header's): min x, y, z then max x, y, z.
+fn object_bounds(b: &[u8], at: usize) -> Option<[f32; 6]> {
+    if at + 24 > b.len() {
+        return None;
+    }
+    let mut out = [0f32; 6];
+    for (k, v) in out.iter_mut().enumerate() {
+        *v = f32::from_le_bytes(b[at + k * 4..at + k * 4 + 4].try_into().ok()?);
+    }
+    let sane = out.iter().all(|v| v.is_finite() && v.abs() < MODEL_EXTENT)
+        && (0..3).all(|k| out[k] <= out[k + 3]);
+    sane.then_some(out)
+}
+
+/// How far, in metres summed over the nodes, the nodes stick out of the bounds their object
+/// states. Nodes of an object with no readable bounds count nothing.
+fn object_misfit(b: &[u8], dir: &[(String, usize)], nodes: &[EdfNode]) -> f32 {
+    let mut out = 0.0;
+    for n in nodes {
+        let obj = n.name.split('/').next().unwrap_or(&n.name).to_ascii_lowercase();
+        let at = match dir.iter().find(|(d, _)| d.eq_ignore_ascii_case(&obj)) {
+            Some((_, off)) => *off,
+            None if obj.starts_with(ROOT_OBJECT) => 4,
+            None => continue,
+        };
+        let Some(bb) = object_bounds(b, at) else { continue };
+        let (mut lo, mut hi) = ([f32::MAX; 3], [f32::MIN; 3]);
+        for p in n.positions.as_chunks::<3>().0 {
+            for k in 0..3 {
+                lo[k] = lo[k].min(p[k]);
+                hi[k] = hi[k].max(p[k]);
+            }
+        }
+        if lo[0] > hi[0] {
+            continue;
+        }
+        for k in 0..3 {
+            out += (bb[k] - lo[k]).max(0.0) + (hi[k] - bb[k + 3]).max(0.0);
+        }
+    }
+    out
+}
+
+fn parse_nodes(
+    b: &[u8],
+    level0: &[String],
+    node_matrix_once: bool,
+    extent: f32,
+    // A bike: its meshes are kept by the object they sit in, when the file says.
+    bike: bool,
+) -> Vec<EdfNode> {
+    let (mut nodes, starts) = scan_nodes(b, node_matrix_once, extent, bike);
+    if let Some(dir) = object_directory(b).filter(|_| bike) {
+        if let Some(kept) = by_object(&mut nodes, &starts, &dir, level0) {
+            return kept;
+        }
+    }
+    if level0.is_empty() {
+        return level0_only(nodes);
+    }
+    let want: std::collections::HashSet<String> =
+        level0.iter().map(|n| n.to_ascii_lowercase()).collect();
+    if !nodes
+        .iter()
+        .any(|n| want.contains(&n.name.to_ascii_lowercase()))
+    {
+        log::warn!("edf: .hrc level0 {level0:?} matched no node — using the name heuristic");
+        return level0_only(nodes);
+    }
+    nodes
+        .into_iter()
+        .filter(|n| want.contains(&n.name.to_ascii_lowercase()))
+        .collect()
+}
+
+/// Every mesh node in the file, every LOD level of it, with where each node's block starts.
+fn scan_nodes(b: &[u8], node_matrix_once: bool, extent: f32, bike: bool) -> (Vec<EdfNode>, Vec<usize>) {
     let n = b.len();
     if !is_edf(b) {
-        return Vec::new();
+        return (Vec::new(), Vec::new());
     }
     let mut nodes = Vec::new();
+    // Where each node's block starts, for the object directory below.
+    let mut starts: Vec<usize> = Vec::new();
     let cands = collect_sub_cands(b);
     // Only needed to bound a material's texture index, so count them once.
     let textures = embedded_textures(b).len();
+    // Placing each node through its parents (`node_frames`) is for a bike laid out the way the
+    // game's own are: objects listed in a directory. A single-object `.edf` with no directory
+    // (a whole bike exported as one model, its parts under `model` and `chassis` empties) keeps
+    // the reading it had before: run through the empties as well, its chassis turned on its
+    // side and auto-line chain found no sprocket where it had found one.
+    let framed = bike && object_directory(b).is_some();
     let mut o = HEADER_START;
 
     while o + 8 <= n {
@@ -297,6 +524,9 @@ fn parse_impl(b: &[u8], level0: &[String], node_matrix_once: bool, extent: f32) 
                     if let (true, Some(name)) = (ok, plausible_name(b, iend)) {
                         // `o` is the node's vertex-count word — its material table ends there.
                         let mats = node_material_table(b, o, textures);
+                        // A bike's object says where each of its nodes sits; see `node_frames`.
+                        let frames = if framed { node_frames(b, o).filter(|f| !f.frames.is_empty()) } else { None };
+                        starts.push(o);
                         nodes.push(read_node(
                             b,
                             &cands,
@@ -308,6 +538,7 @@ fn parse_impl(b: &[u8], level0: &[String], node_matrix_once: bool, extent: f32) 
                             name,
                             mats,
                             node_matrix_once,
+                            frames,
                         ));
                         o = iend; // jump past this block
                         continue;
@@ -318,22 +549,7 @@ fn parse_impl(b: &[u8], level0: &[String], node_matrix_once: bool, extent: f32) 
         // Resync one byte at a time: nodes after the texture blob land unaligned.
         o += 1;
     }
-    if level0.is_empty() {
-        return level0_only(nodes);
-    }
-    let want: std::collections::HashSet<String> =
-        level0.iter().map(|n| n.to_ascii_lowercase()).collect();
-    if !nodes
-        .iter()
-        .any(|n| want.contains(&n.name.to_ascii_lowercase()))
-    {
-        log::warn!("edf: .hrc level0 {level0:?} matched no node — using the name heuristic");
-        return level0_only(nodes);
-    }
-    nodes
-        .into_iter()
-        .filter(|n| want.contains(&n.name.to_ascii_lowercase()))
-        .collect()
+    (nodes, starts)
 }
 
 fn v_dot(a: [f32; 3], b: [f32; 3]) -> f32 {
@@ -692,25 +908,129 @@ fn plausible_name(b: &[u8], o: usize) -> Option<String> {
         None
     }
 }
+/// The object directory a bike's `.edf` ends with: each object the `.hrc`s name (`steera`,
+/// `fsuspb`, ...) and the byte offset its meshes start at. Everything before the first entry is
+/// the root object, the chassis. Laid out as `[count u32][count x (name[100], offset u32)]`,
+/// then the footer `EXT\0` and that block's size plus 12.
+///
+/// One object can hold many meshes, and their names are the modeller's (`bike`, `forks`,
+/// `fork_guards`), not the object's, so this is what says which part a mesh belongs to.
+pub fn object_directory(b: &[u8]) -> Option<Vec<(String, usize)>> {
+    const ENTRY: usize = 104;
+    let n = b.len();
+    if n < HEADER_START + 12 || &b[n - 8..n - 4] != b"EXT\0" {
+        return None;
+    }
+    let ext = n - 8;
+    let mut count = 1usize;
+    while count <= 1024 {
+        let at = ext.checked_sub(ENTRY * count + 4)?;
+        if at < HEADER_START {
+            return None;
+        }
+        if u32le(b, at) as usize == count {
+            let mut out = Vec::with_capacity(count);
+            for i in 0..count {
+                let e = at + 4 + i * ENTRY;
+                let raw = &b[e..e + 100];
+                let name = &raw[..raw.iter().position(|&c| c == 0)?];
+                if name.is_empty() || !name.iter().all(|c| c.is_ascii_graphic()) {
+                    return None;
+                }
+                let off = u32le(b, e + 100) as usize;
+                if off < HEADER_START || off >= at || out.last().is_some_and(|(_, p): &(String, usize)| *p >= off) {
+                    return None;
+                }
+                out.push((String::from_utf8_lossy(name).into_owned(), off));
+            }
+            return Some(out);
+        }
+        count += 1;
+    }
+    None
+}
+
+/// The root object's name: the chassis, whose `.hrc` names no object.
+const ROOT_OBJECT: &str = "chassis";
+
+/// Keep the meshes of the wanted objects (the `.hrc`s' level0, or with none every object that
+/// isn't a lower LOD) and name each after its object, `fsuspa/forks`, so the part it belongs
+/// to is in its name the way the assembly and the pose read it. A mesh already named exactly
+/// after its object keeps its name. `None` when no wanted object is in the directory, so the
+/// caller goes on by mesh name as before.
+fn by_object(
+    nodes: &mut Vec<EdfNode>,
+    starts: &[usize],
+    dir: &[(String, usize)],
+    level0: &[String],
+) -> Option<Vec<EdfNode>> {
+    let lower = |s: &str| s.to_ascii_lowercase();
+    let in_dir = |name: &str| dir.iter().any(|(d, _)| lower(d) == lower(name));
+    let want: std::collections::HashSet<String> = if level0.is_empty() {
+        std::iter::once(ROOT_OBJECT.to_string())
+            .chain(dir.iter().map(|(d, _)| lower(d)).filter(|d| lod_base(d) == *d))
+            .collect()
+    } else {
+        level0.iter().map(|n| lower(n)).collect()
+    };
+    // The root object is the one `.hrc` that names no object: the wanted name the directory
+    // doesn't hold, when only one is missing (a tyre set's `fwheel`), else the chassis.
+    let absent: Vec<&String> = want.iter().filter(|w| !in_dir(w)).collect();
+    let root = match absent.as_slice() {
+        [one] => Some((*one).clone()),
+        _ => absent.iter().find(|w| w.starts_with(ROOT_OBJECT)).map(|w| (*w).clone()),
+    };
+    if root.is_none() && !want.iter().any(|w| in_dir(w)) {
+        return None;
+    }
+    let object_of = |start: usize| -> Option<String> {
+        match dir.iter().rev().find(|(_, off)| *off <= start) {
+            Some((name, _)) => Some(lower(name)),
+            None => root.clone(),
+        }
+    };
+    let objects: Vec<Option<String>> =
+        starts.iter().map(|&s| object_of(s).filter(|o| want.contains(o))).collect();
+    // Nothing kept: hand the nodes back untouched for the name match.
+    if objects.iter().all(Option::is_none) {
+        return None;
+    }
+    let kept = std::mem::take(nodes)
+        .into_iter()
+        .zip(objects)
+        .filter_map(|(mut nd, obj)| {
+            let obj = obj?;
+            if lower(&nd.name) != obj {
+                nd.name = format!("{obj}/{}", nd.name);
+            }
+            Some(nd)
+        })
+        .collect();
+    Some(kept)
+}
+
+/// A node or object name without its `b`/`c` LOD tag; level0 is the one equal to it.
+fn lod_base(name: &str) -> String {
+    let bytes = name.as_bytes();
+    match bytes.iter().position(|c| c.is_ascii_digit()) {
+        // Tagged name: strip a `b`/`c` immediately before the first digit.
+        Some(d) if d >= 1 && (bytes[d - 1] == b'b' || bytes[d - 1] == b'c') => {
+            let mut s = name.to_string();
+            s.remove(d - 1);
+            s
+        }
+        // Untagged name: strip a trailing `b`/`c` LOD suffix.
+        None if bytes.len() > 1 && matches!(bytes[bytes.len() - 1], b'b' | b'c') => {
+            name[..name.len() - 1].to_string()
+        }
+        _ => name.to_string(),
+    }
+}
+
 // Group LOD variants by base name, keeping level0 (the untagged node).
 fn level0_only(nodes: Vec<EdfNode>) -> Vec<EdfNode> {
     use std::collections::HashMap;
-    let base = |name: &str| -> String {
-        let bytes = name.as_bytes();
-        match bytes.iter().position(|c| c.is_ascii_digit()) {
-            // Tagged name: strip a `b`/`c` immediately before the first digit.
-            Some(d) if d >= 1 && (bytes[d - 1] == b'b' || bytes[d - 1] == b'c') => {
-                let mut s = name.to_string();
-                s.remove(d - 1);
-                s
-            }
-            // Untagged name: strip a trailing `b`/`c` LOD suffix.
-            None if bytes.len() > 1 && matches!(bytes[bytes.len() - 1], b'b' | b'c') => {
-                name[..name.len() - 1].to_string()
-            }
-            _ => name.to_string(),
-        }
-    };
+    let base = lod_base;
     // Level0 is the node whose name IS the base; prefer that exact match, fall back to most triangles.
     let mut best: HashMap<String, usize> = HashMap::new();
     for (i, nd) in nodes.iter().enumerate() {
@@ -975,6 +1295,11 @@ const TEX_PAD_LEN: usize = 8;
 // Name's first char to `width`: either -100 or -104 depending on the record; probe both.
 const TEX_W_FROM_NAME: [usize; 2] = [100, 104];
 
+// A byte an embedded-texture name may hold.
+fn is_name_byte(c: u8) -> bool {
+    c.is_ascii_alphanumeric() || matches!(c, b'.' | b'_' | b'-')
+}
+
 // A null-terminated embedded-texture name at `o`: 1-39 name-safe chars (may lead with a digit).
 //
 // One character counts: the Bell Moto 10 "O" pack names its goggle sheet `O`, and skipping it
@@ -989,7 +1314,7 @@ fn tex_name(b: &[u8], o: usize) -> Option<String> {
         if c == 0 {
             break;
         }
-        if !(c.is_ascii_alphanumeric() || matches!(c, b'.' | b'_' | b'-')) {
+        if !is_name_byte(c) {
             return None;
         }
         e += 1;
@@ -1005,7 +1330,12 @@ fn tex_name(b: &[u8], o: usize) -> Option<String> {
 pub fn embedded_textures(b: &[u8]) -> Vec<EmbeddedTexture> {
     // A sky dome is the big one: Indiana's is 8192x2048, and a 4096 ceiling threw the whole
     // sheet away, so a 23 MB file read as a model carrying no picture at all.
-    const SIZES: [u32; 9] = [64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384];
+    //
+    // And a flat colour is the small one: a converter writes a plain material as a 16x16
+    // sheet. Below 64 a record is only taken when its payload inflates to exactly its own
+    // pixels, since a stray pair of tiny words is far likelier to be found by the scan.
+    const SIZES: [u32; 15] = [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384];
+    const SMALL: u32 = 64;
     let mut out = Vec::new();
     let mut o = 0usize;
     // Where the last accepted record ended. The next one starts exactly there, and at that
@@ -1018,8 +1348,12 @@ pub fn embedded_textures(b: &[u8]) -> Vec<EmbeddedTexture> {
         // alphanumeric about a quarter of the time, and the record after it was being
         // dropped: a two-sheet model came back with one sheet, and which one depended on
         // how its pixels happened to compress.
+        //
+        // A boundary is the end of a name, not just of a word: `wp_inner_chrome`'s tail
+        // `inner_chrome` is no name of its own, and taking it read the bytes one off, a 16x16
+        // sheet as a 4096x4096 one that never decoded.
         if !b[o].is_ascii_alphanumeric()
-            || (o > 0 && o != resume && b[o - 1].is_ascii_alphanumeric())
+            || (o > 0 && o != resume && is_name_byte(b[o - 1]))
         {
             o += 1;
             continue;
@@ -1046,13 +1380,17 @@ pub fn embedded_textures(b: &[u8]) -> Vec<EmbeddedTexture> {
             {
                 continue;
             }
-            out.push(EmbeddedTexture {
-                name,
+            let t = EmbeddedTexture {
+                name: name.clone(),
                 width: w,
                 height: h,
                 data_off,
                 data_len,
-            });
+            };
+            if (w < SMALL || h < SMALL) && inflate_texture(b, &t).is_none() {
+                continue;
+            }
+            out.push(t);
             o = data_off + data_len; // records don't overlap — skip the payload
             resume = o;
             continue 'scan;
@@ -1097,7 +1435,22 @@ fn read_node(
     materials: Vec<Option<usize>>,
     // See `submesh_transform`: whether a one-group node takes its orientation once.
     node_matrix_once: bool,
+    // Each node's vertices and the matrix that places them, read off the object's own node
+    // list (`node_frames`). When given, it places the geometry instead of the matrices found
+    // by offset below.
+    frames: Option<ObjectNodes>,
 ) -> EdfNode {
+    // The groups the node list states, when it was read: exact, where `detect_submeshes`
+    // finds them by pattern.
+    let (frames, stated) = match frames {
+        Some(f) if f.groups.iter().map(|g| g.tri_count).sum::<usize>() == raw_tris
+            && f.groups.iter().all(|g| g.tri_start + g.tri_count <= raw_tris) =>
+        {
+            (Some(f.frames), Some(f.groups))
+        }
+        Some(f) => (Some(f.frames), None),
+        None => (None, None),
+    };
     // Positions: contiguous vc*3 f32.
     let mut positions = Vec::with_capacity(vc * 3);
     for i in 0..vc * 3 {
@@ -1121,7 +1474,10 @@ fn read_node(
     // body and its kit. Merging those into one submesh makes every range wear the first
     // range's texture (the KX250's front fender comes out in bare metal), so split them
     // back out and let each bind its own. Ranges number upward from the group's material.
-    let raw_subs: Vec<RawSub> = detect_submeshes(b, cands, iend, raw_tris, vc)
+    let raw_subs: Vec<RawSub> = if let Some(stated) = stated {
+        stated
+    } else {
+        detect_submeshes(b, cands, iend, raw_tris, vc)
         .into_iter()
         .flat_map(|s| {
             let ranges =
@@ -1146,7 +1502,8 @@ fn read_node(
                 })
                 .collect()
         })
-        .collect();
+        .collect()
+    };
     // Covers the node when the submesh triangle counts sum to the raw total.
     let covers =
         !raw_subs.is_empty() && raw_subs.iter().map(|s| s.tri_count).sum::<usize>() == raw_tris;
@@ -1158,7 +1515,9 @@ fn read_node(
     let mut placed_vert = vec![false; vc];
     let mut placed = false;
     let skip_place = std::env::var_os("MXB_NO_PLACE").is_some(); // dev: render raw authored space
-    if let (false, Some(node_mat)) = (skip_place, read_mat4(b, iend + NODE_MAT_OFF)) {
+    // With the object's own frames the first node's matrix is one of them, rigid or not.
+    let node_mat = read_mat4(b, iend + NODE_MAT_OFF).or_else(|| frames.as_ref().map(|_| IDENTITY));
+    if let (false, Some(node_mat)) = (skip_place, node_mat) {
         placed = true;
         // A node with no submesh table is one piece in one frame, so the node matrix alone
         // places it — over every vertex, there being no per-group ranges to walk.
@@ -1170,7 +1529,11 @@ fn read_node(
         // lying on its side. The `.edf` header's own AABB is the check — see
         // `placed_chassis_matches_header_aabb` and the gear diagnostic: placed geometry
         // has to land where the file says the model sits.
-        let ranges: Vec<(std::ops::Range<usize>, Vec<Mat4>)> = if raw_subs.is_empty() {
+        // The object's own frames are the whole chain, node to object: `node_mat` adds nothing.
+        let own = frames.is_some();
+        let ranges: Vec<(std::ops::Range<usize>, Vec<Mat4>)> = if let Some(frames) = frames {
+            frames.into_iter().map(|(r, m)| (r, vec![m])).collect()
+        } else if raw_subs.is_empty() {
             vec![(0..vc, Vec::new())]
         } else {
             raw_subs
@@ -1194,8 +1557,10 @@ fn read_node(
                     pos = mat_point(m, pos);
                     nrm = mat_dir(m, nrm);
                 }
-                pos = mat_point(&node_mat, pos);
-                nrm = mat_dir(&node_mat, nrm);
+                if !own {
+                    pos = mat_point(&node_mat, pos);
+                    nrm = mat_dir(&node_mat, nrm);
+                }
                 positions[p..p + 3].copy_from_slice(&pos);
                 normals[n..n + 3].copy_from_slice(&nrm);
             }
@@ -1807,7 +2172,7 @@ fn bone_name(b: &[u8], o: usize) -> Option<String> {
         if c == 0 {
             break;
         }
-        if !(c.is_ascii_alphanumeric() || matches!(c, b'.' | b'_' | b'-')) {
+        if !is_name_byte(c) {
             return None;
         }
         e += 1;
@@ -2355,6 +2720,53 @@ ref_angle = -90
             node_material_table(&b, 512, 3),
             vec![Some(2), Some(0), None]
         );
+    }
+
+    /// One embedded-texture record: the name in its 104-byte field, then width, height, a
+    /// digest, the payload size (counting its 8 pad bytes), the pad and the DEFLATE payload.
+    fn texture_record(name: &str, w: u32, h: u32, rgba: &[u8]) -> Vec<u8> {
+        use std::io::Write;
+        let mut z = flate2::write::DeflateEncoder::new(Vec::new(), flate2::Compression::best());
+        z.write_all(rgba).unwrap();
+        let data = z.finish().unwrap();
+        let mut b = name.as_bytes().to_vec();
+        b.resize(104, 0);
+        b.extend(w.to_le_bytes());
+        b.extend(h.to_le_bytes());
+        b.extend([0x5a; 16]);
+        b.extend(0u32.to_le_bytes());
+        b.extend((data.len() as u32 + 8).to_le_bytes());
+        b.extend([0u8; 8]);
+        b.extend(data);
+        b
+    }
+
+    /// A flat colour is written as a 16x16 sheet. Dropping it lost the sheet, and the scan
+    /// then took its name's tail (`inner_chrome`) for a name of its own, read the size one byte
+    /// off as 4096x4096 and handed the viewer a sheet that never decoded.
+    #[test]
+    fn small_sheets_are_read_and_a_names_tail_is_no_name() {
+        let mut b = vec![0u8; 8];
+        b.extend(texture_record("wp_inner_chrome", 16, 16, &[200u8; 16 * 16 * 4]));
+        b.extend(texture_record("ktm25", 64, 64, &[7u8; 64 * 64 * 4]));
+        b.extend([0u8; 160]);
+        let found: Vec<(String, u32, u32)> =
+            embedded_textures(&b).into_iter().map(|t| (t.name, t.width, t.height)).collect();
+        assert_eq!(found, vec![("wp_inner_chrome".into(), 16, 16), ("ktm25".into(), 64, 64)]);
+        let t = &embedded_textures(&b)[0];
+        assert_eq!(inflate_texture(&b, t).map(|p| p.len()), Some(16 * 16 * 4));
+    }
+
+    /// A small size is only taken when its payload inflates to exactly its pixels.
+    #[test]
+    fn a_small_record_that_does_not_inflate_is_not_a_texture() {
+        let mut b = vec![0u8; 8];
+        let mut rec = texture_record("junk", 16, 16, &[1u8; 16 * 16 * 4]);
+        let n = rec.len();
+        rec[n - 4..].copy_from_slice(&[0xff; 4]);
+        b.extend(rec);
+        b.extend([0u8; 160]);
+        assert!(embedded_textures(&b).is_empty());
     }
 
     /// A model declares more texture slots than it embeds — the Bell Moto 10 leaves its
@@ -4037,3 +4449,201 @@ fn is_part_name(name: &str) -> bool {
     )
 }
 
+
+#[cfg(test)]
+mod object_tests {
+    use super::*;
+
+    /// An `.edf`-shaped buffer: header, `body` bytes of mesh, then the object directory and
+    /// its `EXT` footer, the way the stock bikes lay it out.
+    fn with_directory(body: usize, objects: &[(&str, usize)]) -> Vec<u8> {
+        let mut b = b"EDF\0".to_vec();
+        b.resize(HEADER_START + body, 0xab);
+        let start = b.len();
+        b.extend_from_slice(&[0, 0, 0, 0]);
+        b.extend_from_slice(&(objects.len() as u32).to_le_bytes());
+        for (name, off) in objects {
+            let mut slot = name.as_bytes().to_vec();
+            slot.push(0);
+            slot.resize(100, 0xcd);
+            b.extend_from_slice(&slot);
+            b.extend_from_slice(&(*off as u32).to_le_bytes());
+        }
+        let size = (b.len() - start + 8) as u32;
+        b.extend_from_slice(b"EXT\0");
+        b.extend_from_slice(&size.to_le_bytes());
+        b
+    }
+
+    fn mesh(name: &str) -> EdfNode {
+        EdfNode {
+            name: name.into(),
+            positions: vec![0.0; 9],
+            uvs: Vec::new(),
+            normals: Vec::new(),
+            indices: vec![0, 1, 2],
+            submeshes: Vec::new(),
+            texture: None,
+            placed: true,
+            materials: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn the_directory_is_read_and_a_bad_one_is_not() {
+        let b = with_directory(1000, &[("rsuspa", 400), ("steera", 600), ("fsuspa", 800), ("chassisb", 900)]);
+        let dir = object_directory(&b).expect("a directory");
+        let names: Vec<&str> = dir.iter().map(|(n, _)| n.as_str()).collect();
+        assert_eq!(names, ["rsuspa", "steera", "fsuspa", "chassisb"]);
+        assert_eq!(dir[1].1, 600);
+        // Offsets out of order: not a directory.
+        assert!(object_directory(&with_directory(1000, &[("steera", 600), ("rsuspa", 400)])).is_none());
+        // No footer: nothing.
+        let mut cut = b.clone();
+        cut.truncate(b.len() - 8);
+        assert!(object_directory(&cut).is_none());
+    }
+
+    /// Every mesh of an object is kept and named after it, so the assembly places all of them;
+    /// a lower LOD's meshes are left out. Before, only a mesh named exactly like the `.hrc`'s
+    /// object was kept, and a bike whose meshes carry the modeller's names lost the rest.
+    #[test]
+    fn meshes_go_with_the_object_they_sit_in() {
+        let dir = vec![("rsuspa".to_string(), 400), ("steera".to_string(), 600), ("fsuspa".to_string(), 800), ("chassisb".to_string(), 900)];
+        let all = || vec![mesh("bike"), mesh("bike_parts"), mesh("swingarm"), mesh("steering"), mesh("forks"), mesh("fork_guards"), mesh("bike")];
+        let starts = [100, 200, 450, 650, 820, 850, 950];
+        let want: Vec<String> = ["chassis", "steera", "fsuspa", "rsuspa", "steer", "fsusp", "rsusp"].iter().map(|s| s.to_string()).collect();
+        let mut nodes = all();
+        let kept = by_object(&mut nodes, &starts, &dir, &want).expect("kept");
+        let names: Vec<&str> = kept.iter().map(|n| n.name.as_str()).collect();
+        assert_eq!(names, ["chassis/bike", "chassis/bike_parts", "rsuspa/swingarm", "steera/steering", "fsuspa/forks", "fsuspa/fork_guards"]);
+        // With no .hrc to go on, the LOD0 objects are kept the same way.
+        let mut nodes = all();
+        assert_eq!(by_object(&mut nodes, &starts, &dir, &[]).expect("kept").len(), 6);
+        // The one wanted object the directory doesn't name is the root (a tyre set's `fwheel`).
+        let mut nodes = all();
+        let kept = by_object(&mut nodes, &starts, &dir, &["fwheel".to_string()]).expect("kept");
+        assert_eq!(kept.iter().map(|n| n.name.as_str()).collect::<Vec<_>>(), ["fwheel/bike", "fwheel/bike_parts"]);
+        // Level0 names the directory doesn't know: left to the name match.
+        let mut nodes = all();
+        assert!(by_object(&mut nodes, &starts, &dir, &["frame".to_string(), "fork".to_string()]).is_none());
+        assert_eq!(nodes.len(), 7, "the nodes are handed back untouched");
+    }
+}
+
+#[cfg(test)]
+mod node_frame_tests {
+    use super::*;
+
+    fn put(b: &mut Vec<u8>, w: u32) {
+        b.extend_from_slice(&w.to_le_bytes());
+    }
+
+    /// A node with one group over `v0..v0+vn`, translated by `t`, under `parent` (1-based).
+    fn node(b: &mut Vec<u8>, name: &str, t: [f32; 3], parent: u32, v0: u32, vn: u32, t0: u32) {
+        let mut slot = name.as_bytes().to_vec();
+        slot.resize(100, 0);
+        b.extend_from_slice(&slot);
+        put(b, 0); // flags
+        let m = [1.0, 0.0, 0.0, t[0], 0.0, 1.0, 0.0, t[1], 0.0, 0.0, 1.0, t[2], 0.0, 0.0, 0.0, 1.0f32];
+        for v in m {
+            b.extend_from_slice(&v.to_le_bytes());
+        }
+        b.extend_from_slice(&[0u8; 64]);
+        put(b, parent);
+        put(b, 0); // no children listed
+        put(b, 1); // one group
+        put(b, 0);
+        for w in [3, t0, 1, v0, vn, 0] {
+            put(b, w); // mat, t0, tn, v0, vn, tail
+        }
+        put(b, v0); // first vertex
+        b.extend_from_slice(&[0u8; 24]); // bounds
+    }
+
+    /// The engine hangs from the frame and the sprocket from the engine: each is placed
+    /// through its parents, the way the stock bikes' chassis is built.
+    #[test]
+    fn a_node_is_placed_through_its_parents() {
+        let mut b = Vec::new();
+        put(&mut b, 9); // vc
+        b.extend_from_slice(&vec![0u8; 9 * 72]);
+        put(&mut b, 3); // tc
+        b.extend_from_slice(&[0u8; 36]);
+        put(&mut b, 3); // nodes
+        node(&mut b, "bike", [0.0, 0.0, 0.0], 0, 0, 3, 0);
+        node(&mut b, "engine", [0.0, 0.7, 0.1], 1, 3, 3, 1);
+        node(&mut b, "sprocket", [-0.06, -0.25, -0.2], 2, 6, 3, 2);
+        let got = node_frames(&b, 0).expect("reads");
+        let at = |i: usize| mat_point(&got.frames[i].1, [0.0; 3]);
+        assert_eq!(got.frames[1].0, 3..6);
+        let s = at(2);
+        assert!((s[0] + 0.06).abs() < 1e-6 && (s[1] - 0.45).abs() < 1e-6 && (s[2] + 0.1).abs() < 1e-6, "{s:?}");
+        let groups: Vec<(&str, usize, Option<u32>)> =
+            got.groups.iter().map(|g| (g.name.as_str(), g.tri_start, g.mat)).collect();
+        assert_eq!(groups, [("bike", 0, Some(3)), ("engine", 1, Some(3)), ("sprocket", 2, Some(3))]);
+        // A list that runs past the end isn't one.
+        assert!(node_frames(&b[..b.len() - 30], 0).is_none());
+    }
+
+    /// A whole bike exported as one model, the way a One model conversion writes it: one object,
+    /// no directory, a `model` empty turning Z-up to Y-up, a `chassis` empty under it with a
+    /// turn of its own, and the frame under that. 0.5.0 read this without the `chassis` empty's
+    /// turn, which is where auto-line chain finds the sprocket (the same bike converted as parts
+    /// gives the same point); 0.5.1 ran the vertices through every parent and lost it.
+    #[test]
+    fn a_bike_with_no_object_directory_reads_as_before() {
+        let vc = 9u32;
+        let mut b = vec![0u8; HEADER_START];
+        b[0..4].copy_from_slice(b"EDF\0");
+        put(&mut b, vc);
+        let mut attrs = vec![0u8; vc as usize * 72];
+        for i in 0..vc as usize {
+            let p = [0.05 * (i % 3) as f32, 0.1 + 0.02 * i as f32, -0.03 * (i / 3) as f32];
+            for (k, v) in p.iter().enumerate() {
+                attrs[(i * 3 + k) * 4..][..4].copy_from_slice(&v.to_le_bytes());
+            }
+        }
+        b.extend_from_slice(&attrs);
+        put(&mut b, 3); // tc
+        for w in [0, 1, 2, 3, 4, 5, 6, 7, 8] {
+            put(&mut b, w);
+        }
+        put(&mut b, 3); // nodes
+        let rx = [1.0, 0.0, 0.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0f32];
+        let turn = [-1.0, 0.0, 0.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0f32];
+        let frame = [1.0, 0.0, 0.0, 0.04, 0.0, 1.0, 0.0, 0.3, 0.0, 0.0, 1.0, -0.6, 0.0, 0.0, 0.0, 1.0f32];
+        let mut record = |name: &str, m: [f32; 16], parent: u32, groups: &[[u32; 6]], first: u32| {
+            let mut slot = name.as_bytes().to_vec();
+            slot.resize(100, 0);
+            b.extend_from_slice(&slot);
+            put(&mut b, if groups.is_empty() { 0x1000 } else { 0 });
+            for v in m {
+                b.extend_from_slice(&v.to_le_bytes());
+            }
+            b.extend_from_slice(&[0u8; 64]);
+            put(&mut b, parent);
+            put(&mut b, 0); // no children listed
+            put(&mut b, groups.len() as u32);
+            put(&mut b, 0);
+            for g in groups {
+                for w in g {
+                    put(&mut b, *w);
+                }
+            }
+            put(&mut b, first);
+            b.extend_from_slice(&[0u8; 24]);
+        };
+        record("model", rx, 0, &[], 0);
+        record("chassis", turn, 1, &[], 0);
+        record("frame", frame, 2, &[[0, 0, 3, 0, vc, 0]], 0);
+        // The node list reads, and running through it would place the frame differently.
+        assert!(node_frames(&b, HEADER_START).is_some_and(|f| !f.frames.is_empty()));
+        assert!(object_directory(&b).is_none());
+        let before = parse_impl(&b, &["model".to_string()], false, MODEL_EXTENT);
+        let now = parse_with_levels(&b, &["model".to_string()]);
+        assert_eq!(before.len(), 1, "the synthetic object parses");
+        assert_eq!(now.len(), before.len());
+        assert_eq!(now[0].positions, before[0].positions, "placed as 0.5.0 placed it");
+    }
+}

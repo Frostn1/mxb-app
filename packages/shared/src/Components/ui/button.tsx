@@ -8,7 +8,7 @@ import { cn } from "../../lib/utils";
 export const CHIP = "bg-foreground/[0.10] text-foreground hover:bg-foreground/[0.18]";
 
 const buttonVariants = cva(
-  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md font-cond font-semibold tracking-[-0.01em] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 cursor-default select-none",
+  "mxb-btn inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md font-cond font-semibold tracking-[-0.01em] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 cursor-default select-none",
   {
     variants: {
       variant: {

@@ -193,6 +193,9 @@ pub fn scan_installed_bikes(mods_path: &str) -> Vec<BikeIdentity> {
     if let Ok(rd) = std::fs::read_dir(&dir) {
         for e in rd.flatten() {
             let p = e.path();
+            if crate::library::is_frostmod_shadow_bike(&e.file_name().to_string_lossy()) {
+                continue;
+            }
             let is_candidate = p.is_dir()
                 || p.extension()
                     .and_then(|x| x.to_str())
@@ -311,6 +314,7 @@ engine
         tmp_bike(&bikes, "MX1_A", "MX1 OEM");
         tmp_bike(&bikes, "MX2_B", "MX2 OEM");
         tmp_bike(&bikes, "MX1_C", "MX1 OEM");
+        tmp_bike(&bikes, "MX1_A~09af12bc", "MX1 OEM");
         // A non-bike folder (no .ini/.cfg) must be skipped.
         std::fs::create_dir_all(bikes.join("_screenshots")).unwrap();
 

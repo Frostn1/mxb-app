@@ -1,0 +1,42 @@
+# CI for the public repo. GitHub-hosted runners only: a pull request from a fork must never run
+# on a self-hosted machine. No secrets, read-only token. Releases are built from the private repo.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend:
+    name: Frontend (checks, typecheck, lint, tests)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - run: bun run check:secure-boundary
+      - run: bun run check:eula
+      - run: bun run check:no-ban-guids
+      - run: bun run typecheck
+      - run: bun run lint
+      - run: bun run --filter @frost/servers test
+      - run: bun run --filter @frost/studio test
+      - run: bun test apps/manager/test/extensions.test.ts
+
+  rust:
+    name: Rust (test, without the private modules)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+      # Studio's Rust side builds on the private track generator, so it is not a workspace member
+      # here; everything else builds and tests without any private module.
+      - run: cargo test --workspace --locked

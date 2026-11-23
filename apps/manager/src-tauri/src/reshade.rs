@@ -188,14 +188,17 @@ fn resolve_preset_path(game_dir: &Path, raw: &str) -> Option<PathBuf> {
 /// the build was, and neither the overlay's title string nor the resource layout is a
 /// documented interface — so a miss costs a missing line in the UI, never a wrong write.
 fn probe_dll(path: &Path) -> Option<Option<String>> {
-    let bytes = fs::read(path).ok()?;
-    if contains(&bytes, RESHADE_MARKER) {
-        return Some(version_near_marker(&bytes));
+    probe_bytes(&fs::read(path).ok()?)
+}
+
+fn probe_bytes(bytes: &[u8]) -> Option<Option<String>> {
+    if contains(bytes, RESHADE_MARKER) {
+        return Some(version_near_marker(bytes));
     }
     // Strings in the PE version resource are UTF-16LE, and some builds carry the name only
     // there. Drop the high byte off the ASCII range and re-run both scans over that rather
     // than writing wide-character variants of each.
-    let narrowed = narrow_utf16(&bytes);
+    let narrowed = narrow_utf16(bytes);
     contains(&narrowed, RESHADE_MARKER).then(|| version_near_marker(&narrowed))
 }
 
@@ -207,6 +210,12 @@ fn probe_dll(path: &Path) -> Option<Option<String>> {
 /// a real ReShade install apart from an unrelated DLL wearing the same name.
 pub fn is_reshade_dll(path: &Path) -> bool {
     probe_dll(path).is_some()
+}
+
+/// [`is_reshade_dll`] for bytes already in memory — a download not yet written anywhere.
+#[cfg_attr(not(test), allow(dead_code))]
+pub fn is_reshade_dll_bytes(bytes: &[u8]) -> bool {
+    probe_bytes(bytes).is_some()
 }
 
 fn contains(haystack: &[u8], needle: &[u8]) -> bool {
@@ -464,7 +473,12 @@ pub fn status(reshade_path: &str) -> Status {
             .map(|n| (*n).to_string())
     };
 
-    let have = scan_available(&shaders_dir(&game_dir));
+    // The one-click pack keeps its effects in its own folder, which its `ReShade.ini` names
+    // as the search path — so those count as installed too.
+    let mut have = scan_available(&shaders_dir(&game_dir));
+    let pack = scan_available(&crate::reshade_pack::pack_dir(&game_dir).join("Shaders"));
+    have.files.extend(pack.files);
+    have.techniques.extend(pack.techniques);
     let has_shaders = !have.is_empty();
 
     let active_path = fs::read_to_string(config_path(&game_dir))
@@ -771,6 +785,9 @@ pub struct Health {
     /// `ReShade.ini` / `ReShade.log` — traces of an install, even with no DLL left.
     pub config: bool,
     pub log: bool,
+    /// It is MXB App's own one-click graphics preset ([`crate::reshade_pack`]), switched on
+    /// by the player from Settings — not a hand install to warn them about.
+    pub managed: bool,
 }
 
 impl Health {
@@ -790,6 +807,9 @@ impl Health {
             "not active".into()
         };
         let mut extra = Vec::new();
+        if self.managed {
+            extra.push("MXB App graphics preset".into());
+        }
         if !self.other_dlls.is_empty() {
             extra.push(format!("unused dll: {}", self.other_dlls.join(", ")));
         }
@@ -848,6 +868,7 @@ pub fn health(dir: &str) -> Health {
     out.addons.sort_by_key(|a| a.to_lowercase());
     out.config = resolve_child(&game_dir, CONFIG).is_file();
     out.log = resolve_child(&game_dir, LOG).is_file();
+    out.managed = crate::reshade_pack::is_installed(dir);
     out
 }
 

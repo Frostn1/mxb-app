@@ -133,10 +133,7 @@ impl RdfBootstrap {
 
 fn timing_line(block: &Scope, name: &str) -> Result<TimingLine> {
     Ok(TimingLine {
-        line: block
-            .one_value("line")?
-            .parse()
-            .with_context(|| format!("{name}.line is not an unsigned integer"))?,
+        line: whole_number(block.one_value("line")?, &format!("{name}.line"))?,
         long: finite_f32(block.one_value("long")?, &format!("{name}.long"))?,
         left: finite_f32(block.one_value("left")?, &format!("{name}.left"))?,
         right: finite_f32(block.one_value("right")?, &format!("{name}.right"))?,
@@ -144,10 +141,7 @@ fn timing_line(block: &Scope, name: &str) -> Result<TimingLine> {
 }
 
 fn stall_count(block: &Scope, name: &str) -> Result<usize> {
-    let count: usize = block
-        .one_value("numstalls")?
-        .parse()
-        .with_context(|| format!("{name}.numstalls is not an unsigned integer"))?;
+    let count = whole_number(block.one_value("numstalls")?, &format!("{name}.numstalls"))? as usize;
     if !(1..=MAX_STALLS).contains(&count) {
         bail!("{name}.numstalls must be between 1 and {MAX_STALLS}, got {count}");
     }
@@ -196,6 +190,20 @@ fn indexed_stalls(block: &Scope, prefix: &str, count: usize, owner: &str) -> Res
             })
         })
         .collect()
+}
+
+/// An unsigned integer field. Track tools write these as `0` or as `0.000000`; both load.
+fn whole_number(raw: &str, field: &str) -> Result<u32> {
+    if let Ok(value) = raw.parse::<u32>() {
+        return Ok(value);
+    }
+    let value: f64 = raw
+        .parse()
+        .with_context(|| format!("{field} is not an unsigned integer"))?;
+    if !value.is_finite() || value < 0.0 || value.fract() != 0.0 || value > f64::from(u32::MAX) {
+        bail!("{field} is not an unsigned integer");
+    }
+    Ok(value as u32)
 }
 
 fn finite_f32(raw: &str, field: &str) -> Result<f32> {
@@ -343,6 +351,16 @@ fn parse_scope(lines: &[(usize, &str)], at: &mut usize, nested: bool) -> Result<
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn whole_numbers_load_written_as_integers_or_integral_floats() {
+        assert_eq!(super::whole_number("0", "x").unwrap(), 0);
+        assert_eq!(super::whole_number("0.000000", "x").unwrap(), 0);
+        assert_eq!(super::whole_number("30.000000", "x").unwrap(), 30);
+        for bad in ["0.5", "-1", "-1.000000", "nan", "inf", "x", ""] {
+            assert!(super::whole_number(bad, "x").is_err(), "{bad}");
+        }
+    }
+
     use super::*;
 
     const VALID: &str = r#"

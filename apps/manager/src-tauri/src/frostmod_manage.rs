@@ -128,6 +128,7 @@ fn version_path(app: &AppHandle) -> PathBuf {
 const RADAR_CFG_FILE: &str = "frostmod_radar.cfg";
 const TEXCOMPRESS_KEY: &str = "texcompress";
 const NANTRAP_KEY: &str = "nantrap";
+const AUSSIEMODE_KEY: &str = "aussiemode";
 
 fn radar_cfg_path(app: &AppHandle) -> PathBuf {
     frostmod_dir(app).join(RADAR_CFG_FILE)
@@ -253,6 +254,27 @@ pub fn nantrap_state(app: &AppHandle) -> NanTrap {
 
 pub fn set_nantrap(app: &AppHandle, enabled: bool) -> std::io::Result<()> {
     set_nantrap_at(&radar_cfg_path(app), enabled)
+}
+
+/// Snapshot for Settings: whether the installed FrostMod honours `aussiemode`, and its state.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AussieMode {
+    pub supported: bool,
+    pub enabled: bool,
+    pub game_running: bool,
+}
+
+pub fn aussiemode_state(app: &AppHandle) -> AussieMode {
+    let supported = crate::frostmod::aussiemode_supported(installed_version(app).as_deref());
+    let enabled =
+        std::fs::read_to_string(radar_cfg_path(app)).is_ok_and(|t| key_on(&t, AUSSIEMODE_KEY));
+    AussieMode { supported, enabled, game_running: crate::gameproc::is_game_running() }
+}
+
+/// Write or remove `aussiemode=1`; every other line in the file is kept as it was.
+pub fn set_aussiemode(app: &AppHandle, enabled: bool) -> std::io::Result<()> {
+    set_key_at(&radar_cfg_path(app), AUSSIEMODE_KEY, enabled)
 }
 
 /// FrostMod's server-browser filter file (its stock default hides Kaizo).

@@ -1,0 +1,2754 @@
+// Windows: no console window behind the app in a release build.
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
+//! MXB Servers: one window for every mxbserver — health, build, session, riders and logs.
+//!
+//! Each server is reached over SSH: its observe port gives `/readyz` and `/status` with no credentials, and its admin API
+//! (the `[admin] listen` of its config, default 127.0.0.1:9810) takes riders and session
+//! controls with a bearer token from the OS keychain. Config, `systemctl` and `journalctl -u
+//! mxbserver` go through `remote.sh` over SSH. There is no mxb-agent. Nothing listens on the
+//! internet for this.
+
+mod config;
+mod hosted;
+mod local;
+mod ssh;
+mod store;
+mod uploads;
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn only_the_zip_signature_is_a_package_the_server_can_run() {
+        assert!(super::is_zip_magic(&[b'P', b'K', 3, 4, 9]));
+        assert!(!super::is_zip_magic(&[0x25, 0x80, 0xba, 0x8d]));
+        assert!(!super::is_zip_magic(b"PK"));
+    }
+
+    #[test]
+    fn a_protected_local_file_is_detected_from_its_first_bytes() {
+        let dir = std::env::temp_dir().join(format!("msm-magic-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let protected = dir.join("a.pkz");
+        let zip = dir.join("b.pkz");
+        std::fs::write(&protected, [0x25, 0x80, 0xba, 0x8d, 1, 2, 3]).unwrap();
+        std::fs::write(&zip, [b'P', b'K', 3, 4, 1, 2]).unwrap();
+        assert!(super::is_protected_file(&protected));
+        assert!(!super::is_protected_file(&zip));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_rotation_with_a_protected_package_is_blocked_with_the_reason() {
+        let protected = vec!["WDR_R02.pkz".to_string()];
+        let blocked = super::protected_picks(["a.pkz", "WDR_R02.pkz", "WDR_R02.pkz"], &protected);
+        assert_eq!(blocked, vec!["WDR_R02.pkz".to_string()]);
+        assert!(super::protected_message(&blocked).contains("protected package"));
+        assert!(super::protected_picks(["a.pkz"], &protected).is_empty());
+    }
+
+    #[test]
+    fn the_config_names_exactly_the_picked_tracks() {
+        let paths = vec!["content/tracks/a.pkz".to_string(), "content/tracks/WDR_R02.pkz".to_string()];
+        let picked = vec!["a.pkz".to_string()];
+        assert_eq!(super::picked_references(&picked, &paths, "content/tracks", "content/tracks/"), vec!["content/tracks/a.pkz".to_string()]);
+    }
+
+    #[test]
+    fn an_unchanged_file_keeps_its_remembered_hash() {
+        let key = ("p.pkz".to_string(), 10, 5);
+        assert_eq!(super::cached_hash(&key), None);
+        super::remember_hash(key.clone(), "abc");
+        assert_eq!(super::cached_hash(&key).as_deref(), Some("abc"));
+        assert_eq!(super::cached_hash(&("p.pkz".to_string(), 11, 5)), None);
+    }
+    #[test]
+    fn the_admin_port_comes_from_the_listen_address() {
+        assert_eq!(super::parse_admin_listen("127.0.0.1:9810"), Some(9810));
+        assert_eq!(super::parse_admin_listen("[::1]:9811\n"), Some(9811));
+        assert_eq!(super::parse_admin_listen("127.0.0.1"), None);
+        assert_eq!(super::parse_admin_listen("127.0.0.1:0"), None);
+    }
+
+    #[test]
+    fn admin_errors_name_the_token_problem() {
+        assert!(super::admin_error(401, "", true).contains("refused the admin token"));
+        assert!(super::admin_error(403, "", true).contains("read scope"));
+        assert!(super::admin_error(403, "", false).contains("isn't allowed"));
+        let refusal = r#"{"error":"refused","message":"the race runs until it is over"}"#;
+        assert_eq!(
+            super::admin_error(409, refusal, true),
+            "the race runs until it is over"
+        );
+        assert_eq!(
+            super::admin_error(500, "", true),
+            "The admin API answered HTTP 500."
+        );
+    }
+
+    #[test]
+    fn a_server_that_holds_the_track_keys_for_a_restart_is_too_old_for_live_rotation() {
+        let live = serde_json::json!({
+            "applied": [], "deferred": ["rotation.tracks"], "restart_required": []
+        });
+        assert!(!super::track_keys_need_restart(&live));
+        let old = serde_json::json!({
+            "applied": [], "restart_required": ["server.listen", "rotation.tracks"]
+        });
+        assert!(super::track_keys_need_restart(&old));
+        let other = serde_json::json!({ "restart_required": ["server.listen"] });
+        assert!(!super::track_keys_need_restart(&other));
+    }
+
+    #[test]
+    fn a_query_value_is_percent_encoded() {
+        assert_eq!(super::query_value("755 Compound"), "755%20Compound");
+        assert_eq!(super::query_value("A&B=c+d/é"), "A%26B%3Dc%2Bd%2F%C3%A9");
+        assert_eq!(super::query_value("Plain-Track_1.x~"), "Plain-Track_1.x~");
+    }
+
+    #[test]
+    fn a_track_name_is_the_last_path_part() {
+        assert_eq!(super::track_name("tracks/smokey.pkz"), "smokey.pkz");
+        assert_eq!(super::track_name(r"C:\tracks\a.pkz"), "a.pkz");
+        assert_eq!(super::track_name("a.pkz"), "a.pkz");
+    }
+
+    #[test]
+    fn local_tail_returns_the_last_lines() {
+        let path =
+            std::env::temp_dir().join(format!("mxb-servers-tail-{}.log", crate::store::new_id()));
+        let text: String = (1..=50)
+            .map(|i| {
+                format!(
+                    "line {i}
+"
+                )
+            })
+            .collect();
+        std::fs::write(&path, text).unwrap();
+        let tail = super::local_tail(path.to_str().unwrap(), 3).unwrap();
+        assert_eq!(tail, ["line 48", "line 49", "line 50"]);
+        assert_eq!(
+            super::local_tail(path.to_str().unwrap(), 500)
+                .unwrap()
+                .len(),
+            50
+        );
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn tracks_outside_the_package_folder_are_named_by_absolute_path() {
+        // prod: package = "../tracks/755-Compound.pkz", files only in content/ and content/tracks/.
+        let home = "/home/mxb/mxbserver";
+        let paths: Vec<String> = [
+            "content/tracks/755-Compound.pkz",
+            "content/tracks/WDR.MX.26.R01.pkz",
+            "content/zd-blackwood-server.pkz",
+        ]
+        .iter()
+        .map(|p| format!("{home}/{p}"))
+        .collect();
+        let package_dir = format!("{home}/tracks");
+        assert_eq!(
+            super::track_reference("755-Compound.pkz", &paths, &package_dir, "../tracks/"),
+            format!("{home}/content/tracks/755-Compound.pkz")
+        );
+        assert_eq!(
+            super::track_reference("zd-blackwood-server.pkz", &paths, &package_dir, "../tracks/"),
+            format!("{home}/content/zd-blackwood-server.pkz")
+        );
+        // In the package's own folder, or unknown: written beside the package as before.
+        let beside = vec![format!("{package_dir}/a.pkz")];
+        assert_eq!(super::track_reference("a.pkz", &beside, &package_dir, "../tracks/"), "../tracks/a.pkz");
+        assert_eq!(super::track_reference("new.pkz", &[], &package_dir, "../tracks/"), "../tracks/new.pkz");
+    }
+
+    #[test]
+    fn upload_names_are_made_safe_without_making_the_user_rename_them() {
+        assert_eq!(
+            super::safe_remote_filename("My Track (Final).pkz"),
+            "My_Track_Final_.pkz"
+        );
+        assert_eq!(super::safe_remote_filename("track.pkz"), "track.pkz");
+    }
+
+    #[test]
+    fn legacy_pairing_code_becomes_connection_fields() {
+        use base64::Engine;
+        let body = br#"{"url":"https://mx.example.com:9443","token":"0123456789abcdef"}"#;
+        let code = format!(
+            "mxb-agent:{}",
+            base64::engine::general_purpose::STANDARD.encode(body)
+        );
+        let parsed = super::parse_legacy_pairing(&code).unwrap();
+        assert_eq!(parsed.host, "mx.example.com");
+        assert_eq!(parsed.port, 9443);
+        assert!(parsed.tls);
+        assert_eq!(parsed.token, "0123456789abcdef");
+    }
+
+    fn pairing(url: &str) -> String {
+        use base64::Engine;
+        let body = format!(r#"{{"url":"{url}","token":"0123456789abcdef"}}"#);
+        format!("mxb-agent:{}", base64::engine::general_purpose::STANDARD.encode(body))
+    }
+
+    /// The token controls the whole host, so it never crosses the network in the clear.
+    #[test]
+    fn a_plain_http_agent_on_another_machine_is_refused() {
+        for url in [
+            "http://mx.example.com:8787",
+            "http://203.0.113.5:8787",
+            "http://192.168.1.20:8787",
+            "http://[2001:db8::1]:8787",
+            "http://localhost.example.com:8787",
+        ] {
+            let err = super::parse_legacy_pairing(&pairing(url)).err();
+            assert_eq!(err.as_deref(), Some(super::PLAIN_HTTP_REFUSED), "{url}");
+        }
+    }
+
+    #[test]
+    fn plain_http_is_still_fine_on_this_machine() {
+        for url in ["http://127.0.0.1:8787", "http://localhost:8787", "http://[::1]:8787"] {
+            let parsed = super::parse_legacy_pairing(&pairing(url)).unwrap_or_else(|e| panic!("{url}: {e}"));
+            assert!(!parsed.tls);
+        }
+    }
+
+    #[test]
+    fn loopback_hosts() {
+        for host in ["127.0.0.1", "127.8.9.1", "::1", "[::1]", "localhost", "LOCALHOST"] {
+            assert!(super::is_loopback_host(host), "{host}");
+        }
+        for host in ["10.0.0.1", "example.com", "0.0.0.0", "localhost.evil", "::"] {
+            assert!(!super::is_loopback_host(host), "{host}");
+        }
+    }
+}
+
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use std::sync::Arc;
+use std::time::Duration;
+use store::{Server, ServerKind, Store};
+use tauri::{Emitter, Manager, RunEvent, State, WindowEvent};
+
+struct App {
+    store: Store,
+    tunnels: Arc<ssh::Tunnels>,
+    /// Track uploads, owned here so they outlive every screen.
+    uploads: Arc<uploads::Uploads>,
+    http: reqwest::Client,
+    /// Admin API ports found in each SSH server's config, by server id.
+    admin_ports: std::sync::Mutex<std::collections::HashMap<String, u16>>,
+    /// The claim code of the last `mxbservers://` link, until the screen takes it.
+    pending_claim: std::sync::Mutex<Option<String>>,
+}
+
+/// A server as the UI sees it: the stored fields and whether a token is in the keychain.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ServerView {
+    #[serde(flatten)]
+    server: Server,
+    has_token: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LegacyPairing {
+    host: String,
+    port: u16,
+    tls: bool,
+    token: String,
+}
+
+/// Why a plain `http://` agent on another machine is refused: the bearer token would cross the
+/// network unencrypted, and it controls the whole host.
+const PLAIN_HTTP_REFUSED: &str = concat!(
+    "This agent uses plain HTTP, which would send its token unencrypted. ",
+    "Turn on TLS on the agent (an https:// address) or connect over SSH."
+);
+
+/// Whether `host` is this machine: `localhost`, 127.0.0.0/8 or ::1. A URL's host may carry
+/// IPv6 brackets.
+fn is_loopback_host(host: &str) -> bool {
+    let host = host.trim_start_matches('[').trim_end_matches(']');
+    host.eq_ignore_ascii_case("localhost")
+        || host
+            .parse::<std::net::IpAddr>()
+            .is_ok_and(|ip| ip.is_loopback())
+}
+
+fn parse_legacy_pairing(blob: &str) -> Result<LegacyPairing, String> {
+    use base64::Engine;
+    let encoded = blob
+        .trim()
+        .strip_prefix("mxb-agent:")
+        .ok_or("Paste the whole mxb-agent pairing line.")?;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(encoded.trim())
+        .map_err(|_| "That pairing code is damaged.".to_string())?;
+    let value: Value =
+        serde_json::from_slice(&bytes).map_err(|_| "That pairing code is damaged.".to_string())?;
+    let raw_url = value["url"]
+        .as_str()
+        .ok_or("That pairing code has no address.")?;
+    let token = value["token"]
+        .as_str()
+        .ok_or("That pairing code has no token.")?
+        .trim();
+    if !store::valid_agent_token(token) {
+        return Err("That pairing code has an invalid token.".into());
+    }
+    let url =
+        reqwest::Url::parse(raw_url).map_err(|_| "That pairing code has an invalid address.")?;
+    let tls = match url.scheme() {
+        "http" => false,
+        "https" => true,
+        _ => return Err("The agent address must use HTTP or HTTPS.".into()),
+    };
+    if url.username() != ""
+        || url.password().is_some()
+        || url.query().is_some()
+        || url.fragment().is_some()
+        || !matches!(url.path(), "" | "/")
+    {
+        return Err(
+            "The agent address must not contain credentials, a path, query, or fragment.".into(),
+        );
+    }
+    let host = url.host_str().ok_or("The agent address has no host.")?;
+    if !tls && !is_loopback_host(host) {
+        return Err(PLAIN_HTTP_REFUSED.into());
+    }
+    Ok(LegacyPairing {
+        host: host.to_string(),
+        port: url
+            .port_or_known_default()
+            .ok_or("The agent address has no port.")?,
+        tls,
+        token: token.to_string(),
+    })
+}
+
+#[tauri::command]
+fn legacy_pairing(blob: String) -> Result<LegacyPairing, String> {
+    parse_legacy_pairing(&blob)
+}
+
+fn view(server: Server) -> ServerView {
+    let has_token = store::token(&server.id).is_some();
+    ServerView { server, has_token }
+}
+
+#[tauri::command]
+fn servers_list(app: State<'_, App>) -> Vec<ServerView> {
+    app.store.load().into_iter().map(view).collect()
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SaveRequest {
+    server: Server,
+    /// `None` keeps the stored token, `Some("")` removes it, anything else replaces it.
+    token: Option<String>,
+}
+
+#[tauri::command]
+fn servers_save(app: State<'_, App>, request: SaveRequest) -> Result<ServerView, String> {
+    let mut server = request.server;
+    let previous_kind = (!server.id.is_empty())
+        .then(|| app.store.get(&server.id).ok().map(|saved| saved.kind))
+        .flatten();
+    server.name = server.name.trim().to_string();
+    server.host = server.host.trim().to_string();
+    server.key_path = server
+        .key_path
+        .map(|k| k.trim().to_string())
+        .filter(|k| !k.is_empty());
+    if server.id.is_empty() {
+        server.id = store::new_id();
+    }
+    // A hosted server is added only by a claim, and only its name can change here.
+    let saved_hosted = app
+        .store
+        .get(&server.id)
+        .ok()
+        .filter(|saved| saved.kind == ServerKind::Hosted);
+    match saved_hosted {
+        Some(saved) => {
+            if request.token.is_some() {
+                return Err("A hosted server's link can't be edited. Open it again from servers.mxbsecure.com.".into());
+            }
+            server = Server {
+                name: server.name,
+                ..saved
+            };
+            store::validate(&server)?;
+            app.store.upsert(server.clone())?;
+            return Ok(view(server));
+        }
+        None if server.kind == ServerKind::Hosted => {
+            return Err("Add a hosted server with its code.".into())
+        }
+        None => {}
+    }
+    store::validate(&server)?;
+    match request.token.as_deref().map(str::trim) {
+        None if previous_kind.is_some_and(|kind| kind != server.kind) => {
+            store::clear_token(&server.id)
+        }
+        None => {}
+        Some("") => store::clear_token(&server.id),
+        Some(token)
+            if (server.kind == ServerKind::Native && store::valid_token(token))
+                || (server.kind == ServerKind::Legacy && store::valid_agent_token(token)) =>
+        {
+            store::set_token(&server.id, token)?
+        }
+        Some(_) if server.kind == ServerKind::Legacy => {
+            return Err("That doesn't look like an mxb-agent token.".into())
+        }
+        Some(_) => return Err("That doesn't look like an admin token (id.secret).".into()),
+    }
+    app.store.upsert(server.clone())?;
+    app.tunnels.close_server(&server.id);
+    app.admin_ports
+        .lock()
+        .ok()
+        .map(|mut p| p.remove(&server.id));
+    Ok(view(server))
+}
+
+#[tauri::command]
+fn servers_remove(app: State<'_, App>, id: String) -> Result<(), String> {
+    app.tunnels.close_server(&id);
+    app.admin_ports.lock().ok().map(|mut p| p.remove(&id));
+    store::clear_token(&id);
+    app.store.remove(&id)
+}
+
+async fn local_port(app: &App, server: &Server, remote: u16) -> Result<u16, String> {
+    let server = server.clone();
+    // Opening a tunnel waits on ssh, so it runs on the blocking pool.
+    let tunnels = Arc::clone(&app.tunnels);
+    tauri::async_runtime::spawn_blocking(move || tunnels.port(&server, remote))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// Why a request got no HTTP answer.
+enum Miss {
+    /// The SSH connection itself failed: the host is down, the key is wrong, ...
+    Ssh(String),
+    /// SSH is fine (or the server is on this PC) but nothing answered on the port.
+    NoAnswer(String),
+}
+
+impl Miss {
+    fn text(self) -> String {
+        match self {
+            Miss::Ssh(e) => format!("can't reach the server over SSH: {e}"),
+            Miss::NoAnswer(e) => format!("no answer from the server: {e}"),
+        }
+    }
+}
+
+async fn fetch(
+    app: &App,
+    server: &Server,
+    remote: u16,
+    path: &str,
+    token: Option<&str>,
+) -> Result<(u16, String), Miss> {
+    send(app, server, remote, reqwest::Method::GET, path, token, None).await
+}
+
+/// `send_once`, and for a server over SSH one more try on a fresh tunnel: a request that fails
+/// on an old tunnel may just mean the SSH connection dropped, and only a new one can tell
+/// "SSH is down" from "the server isn't running". A request that changes something is retried
+/// only when it never connected, so it can't be done twice.
+async fn send(
+    app: &App,
+    server: &Server,
+    remote: u16,
+    method: reqwest::Method,
+    path: &str,
+    token: Option<&str>,
+    body: Option<&Value>,
+) -> Result<(u16, String), Miss> {
+    match send_once(app, server, remote, &method, path, token, body).await {
+        Err((Miss::NoAnswer(_), false)) if !server.local => {
+            send_once(app, server, remote, &method, path, token, body)
+                .await
+                .map_err(|(miss, _)| miss)
+        }
+        other => other.map_err(|(miss, _)| miss),
+    }
+}
+
+/// One request. The error says whether the request may have reached the server (so a request
+/// that changes something must not be repeated).
+async fn send_once(
+    app: &App,
+    server: &Server,
+    remote: u16,
+    method: &reqwest::Method,
+    path: &str,
+    token: Option<&str>,
+    body: Option<&Value>,
+) -> Result<(u16, String), (Miss, bool)> {
+    // A server on this PC is reached directly; any other through its SSH tunnel.
+    let port = if server.local {
+        remote
+    } else {
+        local_port(app, server, remote)
+            .await
+            .map_err(|e| (Miss::Ssh(e), false))?
+    };
+    let mut request = app
+        .http
+        .request(method.clone(), format!("http://127.0.0.1:{port}{path}"));
+    if let Some(token) = token {
+        request = request.bearer_auth(token);
+    }
+    if let Some(body) = body {
+        request = request
+            .header("Content-Type", "application/json")
+            .body(body.to_string());
+    }
+    match request.send().await {
+        Ok(response) => {
+            let status = response.status().as_u16();
+            let body = response
+                .text()
+                .await
+                .map_err(|e| (Miss::NoAnswer(e.to_string()), true))?;
+            Ok((status, body))
+        }
+        Err(error) => {
+            app.tunnels.reset(&server.id, remote);
+            // Past the connect step a change may already have been made: don't repeat it.
+            let sent = *method != reqwest::Method::GET && !error.is_connect();
+            Err((Miss::NoAnswer(error.to_string()), sent))
+        }
+    }
+}
+
+/// Call the authenticated mxb-agent used by Legacy connecting. Unlike native SSH servers,
+/// this is a direct agent connection and therefore works with the official Windows host.
+async fn legacy_request(
+    app: &App,
+    server: &Server,
+    method: reqwest::Method,
+    path: &str,
+    body: Option<&Value>,
+) -> Result<(u16, String), String> {
+    let token = store::token(&server.id).ok_or("No mxb-agent token is saved for this server.")?;
+    let host = if server.local {
+        "127.0.0.1"
+    } else {
+        server.host.as_str()
+    };
+    // Never send the token over plain HTTP to another machine, whatever was saved before.
+    if !server.agent_tls && !is_loopback_host(host) {
+        return Err(PLAIN_HTTP_REFUSED.into());
+    }
+    let scheme = if server.agent_tls { "https" } else { "http" };
+    let host = if host.contains(':') {
+        format!("[{host}]")
+    } else {
+        host.to_string()
+    };
+    let url = format!("{scheme}://{host}:{}{}", server.observe_port, path);
+    let mut request = app.http.request(method, url).bearer_auth(token);
+    if let Some(body) = body {
+        request = request
+            .header(reqwest::header::CONTENT_TYPE, "application/json")
+            .body(body.to_string());
+    }
+    let response = request
+        .send()
+        .await
+        .map_err(|e| format!("can't reach mxb-agent: {e}"))?;
+    let status = response.status().as_u16();
+    let text = response.text().await.map_err(|e| e.to_string())?;
+    Ok((status, text))
+}
+
+fn json_answer(code: u16, body: &str, label: &str) -> Result<Value, String> {
+    let value: Value = serde_json::from_str(body).map_err(|e| format!("{label}: {e}"))?;
+    if (200..300).contains(&code) {
+        Ok(value)
+    } else {
+        Err(value["error"]
+            .as_str()
+            .map(str::to_string)
+            .unwrap_or_else(|| format!("{label} answered HTTP {code}")))
+    }
+}
+
+/// One word for how a server is doing, and the detail behind it.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct StatusReport {
+    /// "online" (ready for riders), "starting" (running, not ready yet), "offline" (reached,
+    /// but the server isn't running) or "unreachable" (SSH itself failed).
+    state: &'static str,
+    detail: String,
+    status: Option<Value>,
+}
+
+#[tauri::command]
+async fn server_status(app: State<'_, App>, id: String) -> Result<StatusReport, String> {
+    let server = app.store.managed(&id)?;
+    let report = |state, detail: String| StatusReport {
+        state,
+        detail,
+        status: None,
+    };
+    if server.kind == ServerKind::Legacy {
+        let (code, body) =
+            match legacy_request(&app, &server, reqwest::Method::GET, "/status", None).await {
+                Ok(answer) => answer,
+                Err(error) => return Ok(report("unreachable", error)),
+            };
+        if code != 200 {
+            return Ok(report(
+                "unreachable",
+                format!("mxb-agent answered HTTP {code}"),
+            ));
+        }
+        let status: Value =
+            serde_json::from_str(&body).map_err(|e| format!("legacy status: {e}"))?;
+        let running = status["game"]["running"].as_bool().unwrap_or(false);
+        return Ok(StatusReport {
+            state: if running { "online" } else { "offline" },
+            detail: if running {
+                "Official dedicated server is running.".into()
+            } else {
+                "mxb-agent is connected; the dedicated server is stopped.".into()
+            },
+            status: Some(status),
+        });
+    }
+    if !server.local {
+        let tunnels = Arc::clone(&app.tunnels);
+        let port = server.observe_port.to_string();
+        let out = blocking(move || tunnels.run_script(&server, REMOTE_SH, &["observe", &port], 20))
+            .await?;
+        if !out.success {
+            return Ok(report("offline", out.text()));
+        }
+        let encoded = out
+            .field("status_b64")
+            .ok_or("the server returned no status")?;
+        use base64::Engine;
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(encoded)
+            .map_err(|e| e.to_string())?;
+        let status: Value = serde_json::from_slice(&bytes).map_err(|e| format!("/status: {e}"))?;
+        let ready = out.field("ready") == Some("1");
+        let build = status["build_id"].as_str().unwrap_or("?");
+        return Ok(StatusReport {
+            state: if ready { "online" } else { "starting" },
+            detail: if ready {
+                format!("ready for riders · build {build}")
+            } else {
+                format!("running but not ready for riders yet · build {build}")
+            },
+            status: Some(status),
+        });
+    }
+    let (code, body) = match fetch(&app, &server, server.observe_port, "/status", None).await {
+        Ok(answer) => answer,
+        Err(Miss::Ssh(e)) => {
+            return Ok(report(
+                "unreachable",
+                format!("SSH to {} failed: {e}", server.host),
+            ))
+        }
+        Err(Miss::NoAnswer(e)) => {
+            return Ok(report(
+                "offline",
+                format!(
+                    "nothing answers on port {} ({e}); the server isn't running",
+                    server.observe_port
+                ),
+            ))
+        }
+    };
+    if code != 200 {
+        return Ok(report("offline", format!("/status answered HTTP {code}")));
+    }
+    let status: Value = serde_json::from_str(&body).map_err(|e| format!("/status: {e}"))?;
+    let ready = match fetch(&app, &server, server.observe_port, "/readyz", None).await {
+        Ok((200, _)) => true,
+        Ok(_) => false,
+        Err(Miss::Ssh(e)) => {
+            return Ok(report(
+                "unreachable",
+                format!("SSH to {} failed: {e}", server.host),
+            ))
+        }
+        Err(Miss::NoAnswer(e)) => {
+            return Ok(report(
+                "offline",
+                format!("the server stopped answering ({e})"),
+            ))
+        }
+    };
+    let build = status["build_id"].as_str().unwrap_or("?").to_string();
+    Ok(StatusReport {
+        state: if ready { "online" } else { "starting" },
+        detail: if ready {
+            format!("ready for riders · build {build}")
+        } else {
+            format!("running but not ready for riders yet · build {build}")
+        },
+        status: Some(status),
+    })
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TokenCheck {
+    ok: bool,
+    message: String,
+}
+
+/// The admin API's loopback port for `server`: the one saved with it, else the port of the
+/// `[admin] listen` in the server's config (read over SSH once, then remembered), else mxbserver's
+/// default, 9810.
+async fn admin_port(app: &App, server: &Server) -> Result<u16, String> {
+    if let Some(port) = server.admin_port {
+        return Ok(port);
+    }
+    if server.local {
+        return Err(
+            "Set the admin port first (the [admin] listen port in the server's config).".into(),
+        );
+    }
+    if let Some(port) = app
+        .admin_ports
+        .lock()
+        .ok()
+        .and_then(|ports| ports.get(&server.id).copied())
+    {
+        return Ok(port);
+    }
+    let tunnels = Arc::clone(&app.tunnels);
+    let remote = server.clone();
+    let observe = server.observe_port.to_string();
+    let out =
+        blocking(move || tunnels.run_script(&remote, REMOTE_SH, &["admin-addr", &observe], 30))
+            .await?;
+    if !out.success {
+        return Err(out.text());
+    }
+    let port = parse_admin_listen(out.field("admin").unwrap_or(""))
+        .ok_or("The server's [admin] listen address is not host:port.")?;
+    if let Ok(mut ports) = app.admin_ports.lock() {
+        ports.insert(server.id.clone(), port);
+    }
+    Ok(port)
+}
+
+/// The port of an `[admin] listen` value such as `127.0.0.1:9810` or `[::1]:9810`.
+fn parse_admin_listen(listen: &str) -> Option<u16> {
+    let port = listen.trim().rsplit_once(':')?.1.parse::<u16>().ok()?;
+    (port != 0).then_some(port)
+}
+
+const NO_TOKEN: &str = "No admin token is saved for this server. On the server run `mxbserver admin token new --id app --scope control`, add the printed entry to its tokens file, and save the token in this server's settings.";
+
+/// One sentence for a non-2xx answer of the admin API. `control` says the call needs the
+/// `control` scope, which is what a 403 then means.
+fn admin_error(code: u16, body: &str, control: bool) -> String {
+    let detail = serde_json::from_str::<Value>(body)
+        .ok()
+        .and_then(|v| v["message"].as_str().map(str::to_string))
+        .filter(|m| !m.is_empty());
+    match code {
+        401 => "The server refused the admin token: it's mistyped, or was revoked. Save a fresh one in this server's settings.".into(),
+        403 if control => "This admin token only has read scope, so it can't control the server. Create a control token (`mxbserver admin token new --id app --scope control`), add it to the server's tokens file, and save it in this server's settings.".into(),
+        403 => "The admin token is valid but isn't allowed to do that.".into(),
+        429 => "The server is rate-limiting the admin API; try again in a few seconds.".into(),
+        _ => detail.unwrap_or_else(|| format!("The admin API answered HTTP {code}.")),
+    }
+}
+
+/// Call mxbserver's own admin API with the token saved for this server, through the SSH tunnel
+/// (or straight to loopback for a server on this PC). `control` marks a call that needs the
+/// `control` scope. Returns the JSON answer.
+async fn admin_call(
+    app: &App,
+    server: &Server,
+    method: reqwest::Method,
+    path: &str,
+    body: Option<&Value>,
+    control: bool,
+) -> Result<Value, String> {
+    let token = store::token(&server.id).ok_or(NO_TOKEN)?;
+    let port = admin_port(app, server).await?;
+    let (code, text) = send(app, server, port, method, path, Some(&token), body)
+        .await
+        .map_err(|miss| match miss {
+            Miss::NoAnswer(_) => format!(
+                "Nothing answers on admin port {port}. Is mxbserver running, with an [admin] section in its config (default 127.0.0.1:9810)?"
+            ),
+            other => other.text(),
+        })?;
+    if !(200..300).contains(&code) {
+        return Err(admin_error(code, &text, control));
+    }
+    if text.trim().is_empty() {
+        return Ok(Value::Null);
+    }
+    serde_json::from_str(&text).map_err(|e| format!("{path}: {e}"))
+}
+
+/// A GET of the admin API that treats 404 (a server older than the endpoint) as "not
+/// supported": `{"supported": false}` instead of an error.
+async fn admin_get_optional(app: &App, server: &Server, path: &str) -> Result<Value, String> {
+    let token = store::token(&server.id).ok_or(NO_TOKEN)?;
+    let port = admin_port(app, server).await?;
+    let (code, text) = send(app, server, port, reqwest::Method::GET, path, Some(&token), None)
+        .await
+        .map_err(|miss| match miss {
+            Miss::NoAnswer(_) => format!(
+                "Nothing answers on admin port {port}. Is mxbserver running, with an [admin] section in its config (default 127.0.0.1:9810)?"
+            ),
+            other => other.text(),
+        })?;
+    if code == 404 {
+        return Ok(serde_json::json!({ "supported": false }));
+    }
+    if !(200..300).contains(&code) {
+        return Err(admin_error(code, &text, false));
+    }
+    serde_json::from_str(&text).map_err(|e| format!("{path}: {e}"))
+}
+
+/// The admin `/v1/cuts`: cut detection settings, the penalties, and per track the outline and zones.
+#[tauri::command]
+async fn server_cuts(app: State<'_, App>, id: String) -> Result<Value, String> {
+    let server = app.store.managed(&id)?;
+    if server.kind == ServerKind::Legacy {
+        return Ok(serde_json::json!({ "supported": false }));
+    }
+    admin_get_optional(&app, &server, "/v1/cuts").await
+}
+
+/// Percent-encode a query value (everything but the RFC 3986 unreserved characters).
+fn query_value(text: &str) -> String {
+    text.bytes()
+        .map(|b| match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => (b as char).to_string(),
+            other => format!("%{other:02X}"),
+        })
+        .collect()
+}
+
+/// The admin `/v1/cuts/outline?track=`: one track's outline from its TRH, whether or not cut
+/// detection is on. `{"supported": false}` for a server older than the route; `{"status":
+/// "unknown_track"}` when the server has no package for that track.
+#[tauri::command]
+async fn server_cut_outline(app: State<'_, App>, id: String, track: String) -> Result<Value, String> {
+    let server = app.store.managed(&id)?;
+    if server.kind == ServerKind::Legacy {
+        return Ok(serde_json::json!({ "supported": false }));
+    }
+    let token = store::token(&server.id).ok_or(NO_TOKEN)?;
+    let port = admin_port(&app, &server).await?;
+    let path = format!("/v1/cuts/outline?track={}", query_value(&track));
+    let (code, text) = send(&app, &server, port, reqwest::Method::GET, &path, Some(&token), None)
+        .await
+        .map_err(|miss| match miss {
+            Miss::NoAnswer(_) => format!(
+                "Nothing answers on admin port {port}. Is mxbserver running, with an [admin] section in its config (default 127.0.0.1:9810)?"
+            ),
+            other => other.text(),
+        })?;
+    if code == 404 {
+        let known = serde_json::from_str::<Value>(&text).ok().is_some_and(|v| v["error"] == "unknown_track");
+        return Ok(if known {
+            serde_json::json!({ "status": "unknown_track", "track": track })
+        } else {
+            serde_json::json!({ "supported": false })
+        });
+    }
+    if !(200..300).contains(&code) {
+        return Err(admin_error(code, &text, false));
+    }
+    serde_json::from_str(&text).map_err(|e| format!("{path}: {e}"))
+}
+
+/// The admin `/v1/events` (its `cuts.recent` feeds the cut map).
+#[tauri::command]
+async fn server_cut_events(app: State<'_, App>, id: String) -> Result<Value, String> {
+    let server = app.store.managed(&id)?;
+    if server.kind == ServerKind::Legacy {
+        return Ok(serde_json::json!({ "supported": false }));
+    }
+    admin_get_optional(&app, &server, "/v1/events").await
+}
+/// Try the saved admin token against `/v1/server` and say plainly what happened. A dry-run
+/// config reload (changes nothing) tells whether it also has the `control` scope.
+#[tauri::command]
+async fn server_test_token(app: State<'_, App>, id: String) -> Result<TokenCheck, String> {
+    let server = app.store.managed(&id)?;
+    let fail = |message: String| Ok(TokenCheck { ok: false, message });
+    if server.kind == ServerKind::Legacy {
+        return match legacy_request(&app, &server, reqwest::Method::GET, "/capabilities", None)
+            .await
+        {
+            Ok((200, _)) => Ok(TokenCheck {
+                ok: true,
+                message: "mxb-agent connected.".into(),
+            }),
+            Ok((401, _)) => fail("mxb-agent refused this token.".into()),
+            Ok((code, _)) => fail(format!("mxb-agent answered HTTP {code}.")),
+            Err(error) => fail(error),
+        };
+    }
+    if let Err(error) = admin_call(
+        &app,
+        &server,
+        reqwest::Method::GET,
+        "/v1/server",
+        None,
+        false,
+    )
+    .await
+    {
+        return fail(error);
+    }
+    let dry_run = serde_json::json!({ "dry_run": true });
+    match admin_call(
+        &app,
+        &server,
+        reqwest::Method::POST,
+        "/v1/config/reload",
+        Some(&dry_run),
+        true,
+    )
+    .await
+    {
+        Err(error) if error.contains("read scope") => Ok(TokenCheck {
+            ok: true,
+            message: "Token works, but it is read-only: race and session controls need a control-scope token.".into(),
+        }),
+        _ => Ok(TokenCheck {
+            ok: true,
+            message: "Token works, with control scope.".into(),
+        }),
+    }
+}
+
+#[tauri::command]
+async fn server_riders(app: State<'_, App>, id: String) -> Result<Value, String> {
+    let server = app.store.managed(&id)?;
+    if server.kind == ServerKind::Legacy {
+        let (code, body) =
+            legacy_request(&app, &server, reqwest::Method::GET, "/players", None).await?;
+        let value = json_answer(code, &body, "legacy riders")?;
+        let riders = value["players"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(|player| {
+                serde_json::json!({
+                    "connection_id": player["id"], "entity_id": null,
+                    "name": player["name"], "bike": null, "state": "connected",
+                    "connected_seconds": 0, "laps": 0, "best_lap_seconds": null,
+                    "ping_ms": null, "guid": player["guid"]
+                })
+            })
+            .collect::<Vec<_>>();
+        return Ok(serde_json::json!({ "riders": riders }));
+    }
+    admin_call(
+        &app,
+        &server,
+        reqwest::Method::GET,
+        "/v1/riders",
+        None,
+        false,
+    )
+    .await
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TrackState {
+    installed: Vec<String>,
+    library: Vec<String>,
+    current: Option<String>,
+    rotation: Vec<String>,
+    /// Packages the server cannot run (encrypted/protected, not a zip): shown as such, never added.
+    protected: Vec<String>,
+}
+
+/// The file name of a track path from the config (`tracks/smokey.pkz` -> `smokey.pkz`).
+fn track_name(path: &str) -> String {
+    path.rsplit(['/', '\\']).next().unwrap_or(path).to_string()
+}
+
+/// The config text out of a `read` run of remote.sh, with its hash.
+fn read_config(out: &ssh::ScriptOutput) -> Result<(String, String), String> {
+    use base64::Engine;
+    let encoded = out
+        .field("config_b64")
+        .filter(|_| out.success)
+        .ok_or_else(|| format!("could not read the config: {}", out.text()))?;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(encoded)
+        .map_err(|e| e.to_string())?;
+    let text = String::from_utf8(bytes).map_err(|_| "the config is not UTF-8".to_string())?;
+    let sha = out.field("sha").unwrap_or("").to_string();
+    Ok((text, sha))
+}
+
+#[tauri::command]
+async fn server_tracks(app: State<'_, App>, id: String) -> Result<TrackState, String> {
+    let server = app.store.managed(&id)?;
+    if server.kind == ServerKind::Legacy {
+        let (tracks_code, tracks_body) =
+            legacy_request(&app, &server, reqwest::Method::GET, "/tracks", None).await?;
+        let tracks = json_answer(tracks_code, &tracks_body, "legacy tracks")?;
+        let (status_code, status_body) =
+            legacy_request(&app, &server, reqwest::Method::GET, "/status", None).await?;
+        let status = json_answer(status_code, &status_body, "legacy status")?;
+        let installed = tracks["tracks"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|v| v.as_str().map(str::to_string))
+            .collect::<Vec<_>>();
+        return Ok(TrackState {
+            library: installed.clone(),
+            installed,
+            current: status["server"]["track"].as_str().map(str::to_string),
+            rotation: Vec::new(),
+            protected: Vec::new(),
+        });
+    }
+    if server.local {
+        return Err("Track management for a server on this PC is not wired yet.".into());
+    }
+    let tunnels = Arc::clone(&app.tunnels);
+    let id = server.id.clone();
+    let snapshot = blocking(move || fetch_snapshot(&tunnels, &server)).await?;
+    snapshot_put(&id, &snapshot);
+    Ok(TrackState {
+        library: snapshot.names.clone(),
+        installed: snapshot.names.clone(),
+        current: snapshot.package.as_deref().map(track_name),
+        rotation: snapshot.rotation.iter().map(|t| track_name(t)).collect(),
+        protected: snapshot.protected.clone(),
+    })
+}
+
+
+/// The config and track listing of a server as last read, so a rotation change needs no read of
+/// its own: it writes against the remembered hash, which the host checks again (a config edited
+/// elsewhere since is refused, and the change is redone once on a fresh read).
+#[derive(Clone)]
+struct Snapshot {
+    text: String,
+    sha: String,
+    package: Option<String>,
+    rotation: Vec<String>,
+    package_dir: String,
+    paths: Vec<String>,
+    names: Vec<String>,
+    protected: Vec<String>,
+    at: std::time::Instant,
+}
+
+const SNAPSHOT_SECS: u64 = 120;
+
+fn snapshots() -> &'static std::sync::Mutex<std::collections::HashMap<String, Snapshot>> {
+    static MAP: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, Snapshot>>> =
+        std::sync::OnceLock::new();
+    MAP.get_or_init(Default::default)
+}
+
+fn snapshot_get(id: &str) -> Option<Snapshot> {
+    let map = snapshots().lock().ok()?;
+    map.get(id)
+        .filter(|s| s.at.elapsed().as_secs() < SNAPSHOT_SECS)
+        .cloned()
+}
+
+fn snapshot_put(id: &str, snapshot: &Snapshot) {
+    if let Ok(mut map) = snapshots().lock() {
+        map.insert(id.to_string(), snapshot.clone());
+    }
+}
+
+fn snapshot_forget(id: &str) {
+    if let Ok(mut map) = snapshots().lock() {
+        map.remove(id);
+    }
+}
+
+/// Read the config and list the tracks in ONE SSH connection (each connection costs a full
+/// handshake). Blocking.
+fn fetch_snapshot(tunnels: &ssh::Tunnels, server: &Server) -> Result<Snapshot, String> {
+    let port = server.observe_port.to_string();
+    let out = tunnels.run_script(server, REMOTE_SH, &["read-tracks", &port], 30)?;
+    if !out.success {
+        return Err(out.text());
+    }
+    let (text, sha) = read_config(&out)?;
+    let (package, rotation) = config::tracks(&text)?;
+    Ok(Snapshot {
+        text,
+        sha,
+        package,
+        rotation,
+        package_dir: out.field("dir").unwrap_or_default().to_string(),
+        paths: decode_field(&out, "paths_b64").lines().map(str::to_string).collect(),
+        names: listed_names(&out),
+        protected: decode_field(&out, "protected_b64").lines().map(str::trim).filter(|n| !n.is_empty()).map(str::to_string).collect(),
+        at: std::time::Instant::now(),
+    })
+}
+
+/// A package that starts with the zip signature `PK\x03\x04` is one the server can open. Anything
+/// else is a protected (encrypted) package: the server refuses it by design. Only the first four
+/// bytes are ever looked at.
+fn is_zip_magic(head: &[u8]) -> bool {
+    head.starts_with(&[b'P', b'K', 3, 4])
+}
+
+/// Whether the local file is a protected package (it starts with something other than the zip
+/// signature). An unreadable or too short file is not called protected here.
+fn is_protected_file(path: &std::path::Path) -> bool {
+    use std::io::Read;
+    let mut head = [0u8; 4];
+    std::fs::File::open(path)
+        .and_then(|mut f| f.read_exact(&mut head))
+        .is_ok_and(|()| !is_zip_magic(&head))
+}
+
+/// The names among the picked tracks (the current one and the rotation) that are protected.
+fn protected_picks<'a>(picked: impl IntoIterator<Item = &'a str>, protected: &[String]) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for name in picked {
+        if protected.iter().any(|p| p == name) && !out.iter().any(|o| o == name) {
+            out.push(name.to_string());
+        }
+    }
+    out
+}
+
+fn protected_message(names: &[String]) -> String {
+    format!(
+        "{} can't run on this server (protected package). Use the server version of the track instead.",
+        names.join(", ")
+    )
+}
+
+/// The config references for exactly the tracks the user picked, in their order: nothing else
+/// from the track folders is ever added.
+fn picked_references(names: &[String], paths: &[String], package_dir: &str, prefix: &str) -> Vec<String> {
+    names.iter().map(|n| track_reference(n, paths, package_dir, prefix)).collect()
+}
+
+/// Per-step timings of one action, logged as one line when it ends:
+/// `[msm-timing] apply_tracks total=412ms snapshot(cached)=0ms write=380ms reload=31ms`.
+struct Steps {
+    name: &'static str,
+    start: std::time::Instant,
+    last: std::time::Instant,
+    parts: Vec<String>,
+}
+
+impl Steps {
+    fn new(name: &'static str) -> Self {
+        let now = std::time::Instant::now();
+        Steps { name, start: now, last: now, parts: Vec::new() }
+    }
+    fn step(&mut self, label: &str) {
+        let now = std::time::Instant::now();
+        self.parts.push(format!("{label}={}ms", now.duration_since(self.last).as_millis()));
+        self.last = now;
+    }
+}
+
+impl Drop for Steps {
+    fn drop(&mut self) {
+        log::info!(
+            "[msm-timing] {} total={}ms {}",
+            self.name,
+            self.start.elapsed().as_millis(),
+            self.parts.join(" ")
+        );
+    }
+}
+fn decode_field(out: &ssh::ScriptOutput, field: &str) -> String {
+    use base64::Engine;
+    out.field(field)
+        .map(|b| {
+            base64::engine::general_purpose::STANDARD
+                .decode(b)
+                .unwrap_or_default()
+        })
+        .map(|b| String::from_utf8_lossy(&b).into_owned())
+        .unwrap_or_default()
+}
+
+/// The distinct track file names of a `tracks` run of remote.sh.
+fn listed_names(listing: &ssh::ScriptOutput) -> Vec<String> {
+    let mut names: Vec<String> = decode_field(listing, "tracks_b64")
+        .lines()
+        .map(str::trim)
+        .filter(|n| !n.is_empty())
+        .map(str::to_string)
+        .collect();
+    names.sort();
+    names.dedup();
+    names
+}
+
+/// How the config should name `name` in `[track] package` / `[rotation] tracks`: written
+/// beside the current package the way that path is written, or as the absolute path when the
+/// file lives in another folder (content/, content/tracks/).
+fn track_reference(name: &str, paths: &[String], package_dir: &str, prefix: &str) -> String {
+    let found = paths
+        .iter()
+        .find(|p| p.rsplit('/').next() == Some(name))
+        .map(String::as_str);
+    match found {
+        Some(path) if path.rsplit_once('/').map(|(d, _)| d) != Some(package_dir) => path.to_string(),
+        _ => format!("{prefix}{name}"),
+    }
+}
+
+/// Whether a reload's `restart_required` list still names the track keys: a server from before
+/// live rotation holds them for a restart.
+fn track_keys_need_restart(reload: &Value) -> bool {
+    reload["restart_required"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .any(|key| key == "track.package" || key == "rotation.tracks")
+}
+
+/// Rewrite the server's `[track] package` (and the `[rotation] tracks` when given) in its
+/// config over SSH and apply it. By default the running server reloads the file: the rotation
+/// takes effect at the next event, nobody is disconnected and nothing restarts, and a package
+/// uploaded a moment ago is picked up from the track folder. With `restart`, the host instead
+/// validates it, restarts the service with systemctl, and puts the old file back if the server
+/// doesn't come up.
+async fn apply_tracks(
+    app: &App,
+    server: Server,
+    current: &str,
+    rotation: Option<Vec<String>>,
+    restart: bool,
+) -> Result<Value, String> {
+    let bad =
+        |name: &str| name.is_empty() || name == ".." || name.contains(['/', '\\', '"', '\n', '\r']);
+    if bad(current) || rotation.iter().flatten().any(|name| bad(name)) {
+        return Err("Track names must be plain file names.".into());
+    }
+    let mut steps = Steps::new("apply_tracks");
+    let mut fresh = false;
+    loop {
+        let snapshot = match snapshot_get(&server.id).filter(|_| !fresh) {
+            Some(cached) => {
+                steps.step("snapshot(cached)");
+                cached
+            }
+            None => {
+                let (tunnels, target) = (Arc::clone(&app.tunnels), server.clone());
+                let read = blocking(move || fetch_snapshot(&tunnels, &target)).await?;
+                snapshot_put(&server.id, &read);
+                steps.step("snapshot(ssh)");
+                read
+            }
+        };
+        // New tracks sit beside the current package, written the way the config writes it.
+        let prefix = snapshot
+            .package
+            .as_deref()
+            .and_then(|p| p.rsplit_once('/'))
+            .map(|(dir, _)| format!("{dir}/"))
+            .unwrap_or_default();
+        let blocked = protected_picks(
+            std::iter::once(current).chain(rotation.iter().flatten().map(String::as_str)),
+            &snapshot.protected,
+        );
+        if !blocked.is_empty() {
+            return Err(protected_message(&blocked));
+        }
+        let new_rotation: Vec<String> = match &rotation {
+            Some(names) => picked_references(names, &snapshot.paths, &snapshot.package_dir, &prefix),
+            None => snapshot.rotation.clone(),
+        };
+        let current_reference = track_reference(current, &snapshot.paths, &snapshot.package_dir, &prefix);
+        let edited = config::set_tracks(&snapshot.text, &current_reference, &new_rotation)?;
+        if restart {
+            snapshot_forget(&server.id);
+            let (tunnels, target) = (Arc::clone(&app.tunnels), server.clone());
+            let (port, encoded, sha) = (server.observe_port.to_string(), b64(&edited), snapshot.sha.clone());
+            let out = blocking(move || {
+                tunnels.run_script(&target, REMOTE_SH, &["apply", &port, &encoded, &sha], 300)
+            })
+            .await?;
+            return match out.field("result") {
+                Some("applied") => Ok(serde_json::json!({ "result": "applied" })),
+                Some("rolled-back") => Err(format!(
+                    "The server did not come back with that track, so the old config is live again. {}",
+                    out.text()
+                )),
+                _ => Err(out.text()),
+            };
+        }
+        // The running server's own reload validates the file and the host puts the old one back
+        // if it refuses, so the slow run of the server binary on the host is skipped.
+        let applied = write_and_reload(app, &server, &snapshot.sha, &edited, true).await;
+        steps.step("write+reload");
+        let applied = match applied {
+            Err(e) if !fresh && e.contains("changed on the server") => {
+                snapshot_forget(&server.id);
+                fresh = true;
+                continue;
+            }
+            Err(e) => {
+                snapshot_forget(&server.id);
+                return Err(e);
+            }
+            Ok(applied) => applied,
+        };
+        if applied.result != "applied" {
+            snapshot_forget(&server.id);
+            return Err(applied.output);
+        }
+        // What the host holds now, so the next change needs no read either.
+        use sha2::Digest;
+        let (package, rotation_now) = config::tracks(&edited)?;
+        snapshot_put(
+            &server.id,
+            &Snapshot {
+                sha: format!("{:x}", sha2::Sha256::digest(edited.as_bytes())),
+                text: edited,
+                package,
+                rotation: rotation_now,
+                at: std::time::Instant::now(),
+                ..snapshot
+            },
+        );
+        let held = track_keys_need_restart(&applied.reload);
+        return Ok(serde_json::json!({
+            "result": "applied",
+            "live": !held,
+            // An older server held the new tracks for a restart: the file is saved, and the
+            // app offers the restart.
+            "restartRequired": held,
+            "deferred": applied.reload["deferred"].clone(),
+        }));
+    }
+}
+#[tauri::command]
+async fn server_set_track(app: State<'_, App>, id: String, track: String) -> Result<Value, String> {
+    let server = app.store.managed(&id)?;
+    if server.kind == ServerKind::Legacy {
+        let payload = serde_json::json!({ "track": track.trim() });
+        let (code, body) = legacy_request(
+            &app,
+            &server,
+            reqwest::Method::PUT,
+            "/config",
+            Some(&payload),
+        )
+        .await?;
+        return json_answer(code, &body, "select track");
+    }
+    if server.local {
+        return Err("Track selection for a server on this PC is not wired yet.".into());
+    }
+    apply_tracks(&app, server, track.trim(), None, false).await
+}
+
+#[tauri::command]
+async fn server_set_rotation(
+    app: State<'_, App>,
+    id: String,
+    tracks: Vec<String>,
+    restart: Option<bool>,
+) -> Result<Value, String> {
+    let server = app.store.managed(&id)?;
+    if server.kind == ServerKind::Legacy {
+        return Err(
+            "The official dedicated server has no live track rotation. Select one track at a time."
+                .into(),
+        );
+    }
+    if server.local {
+        return Err("Track rotation for a server on this PC is not wired yet.".into());
+    }
+    let mut tracks = tracks
+        .into_iter()
+        .map(|track| track.trim().to_string())
+        .filter(|track| !track.is_empty())
+        .collect::<Vec<_>>();
+    if tracks.is_empty() {
+        return Err("Add at least one track.".into());
+    }
+    let current = tracks.remove(0);
+    apply_tracks(&app, server, &current, Some(tracks), restart.unwrap_or(false)).await
+}
+
+/// Replace the server binary on the host (sha-checked upload, then `systemctl restart`; the old
+/// binary is put back if the new one doesn't come up).
+async fn install_version(
+    app: &App,
+    server: Server,
+    temporary: String,
+    name: String,
+    digest: String,
+    version: String,
+) -> Result<Value, String> {
+    let tunnels = Arc::clone(&app.tunnels);
+    let port = server.observe_port.to_string();
+    let out = blocking(move || {
+        tunnels.run_script(
+            &server,
+            REMOTE_SH,
+            &[
+                "install-version",
+                &port,
+                &temporary,
+                &name,
+                &digest,
+                &version,
+            ],
+            360,
+        )
+    })
+    .await?;
+    match out.field("result") {
+        Some("installed") => Ok(serde_json::json!({
+            "result": "installed",
+            "version": out.field("version").unwrap_or("")
+        })),
+        Some("rolled-back") => Err(format!(
+            "The new server build did not start, so the old one is running again. {}",
+            out.text()
+        )),
+        _ => Err(out.text()),
+    }
+}
+
+#[tauri::command]
+async fn server_update_github(app: State<'_, App>, id: String) -> Result<Value, String> {
+    let server = app.store.managed(&id)?;
+    if server.kind == ServerKind::Legacy {
+        return Err("GitHub updates are only for mxbserver.".into());
+    }
+    if server.local {
+        return Err("GitHub updates require a server connected over SSH.".into());
+    }
+    let tunnels = Arc::clone(&app.tunnels);
+    let upload_server = server.clone();
+    let (temporary, digest, version) = blocking(move || {
+        let gh = |args: &[&str]| -> Result<std::process::Output, String> {
+            let mut command = std::process::Command::new("gh");
+            command.args(args);
+            #[cfg(windows)]
+            {
+                use std::os::windows::process::CommandExt;
+                command.creation_flags(0x08000000);
+            }
+            command.output().map_err(|_| "GitHub CLI is not installed. Install gh and sign in once to update from the private repository.".to_string())
+        };
+        let listed = gh(&["run", "list", "--repo", "Frostn1/mxbserver", "--workflow", "mxbserver Linux", "--branch", "main", "--status", "success", "--limit", "1", "--json", "databaseId,headSha"])?;
+        if !listed.status.success() { return Err(String::from_utf8_lossy(&listed.stderr).trim().to_string()); }
+        let runs: Vec<Value> = serde_json::from_slice(&listed.stdout).map_err(|e| format!("couldn't read GitHub build metadata: {e}"))?;
+        let run = runs.first().ok_or("GitHub has no successful main build to install.")?;
+        let run_id = run["databaseId"].as_u64().ok_or("GitHub build has no run id")?.to_string();
+        let revision = run["headSha"].as_str().ok_or("GitHub build has no revision")?;
+        let version = format!("main@{}", &revision[..revision.len().min(12)]);
+        let dir = std::env::temp_dir().join(format!("mxb-servers-github-{}", store::new_id()));
+        std::fs::create_dir_all(&dir).map_err(|e| format!("couldn't create update folder: {e}"))?;
+        let dir_text = dir.to_string_lossy().to_string();
+        let downloaded = gh(&["run", "download", &run_id, "--repo", "Frostn1/mxbserver", "--name", "mxbserver-x86_64-unknown-linux-gnu-elf", "--dir", &dir_text])?;
+        if !downloaded.status.success() {
+            let _ = std::fs::remove_dir_all(&dir);
+            return Err(String::from_utf8_lossy(&downloaded.stderr).trim().to_string());
+        }
+        let binary = dir.join("mxbserver-x86_64-unknown-linux-gnu.elf");
+        let mut file = std::fs::File::open(&binary).map_err(|e| format!("GitHub artifact has no server binary: {e}"))?;
+        use sha2::Digest;
+        use std::io::Read;
+        let mut hash = sha2::Sha256::new();
+        let mut buffer = [0u8; 64 * 1024];
+        loop { let read = file.read(&mut buffer).map_err(|e| format!("couldn't read GitHub artifact: {e}"))?; if read == 0 { break; } hash.update(&buffer[..read]); }
+        let digest = format!("{:x}", hash.finalize());
+        let temporary = format!("mxb-servers-{}", store::new_id());
+        let uploaded = tunnels.upload(&upload_server, &binary.to_string_lossy(), &temporary, 300);
+        let _ = std::fs::remove_dir_all(&dir);
+        uploaded?;
+        Ok((temporary, digest, version))
+    }).await?;
+    install_version(&app, server, temporary, "mxbserver".into(), digest, version).await
+}
+
+/// Live session control through mxbserver's admin API: jump to practice, qualifying, warm-up or
+/// the race, end the current stage (`advance`), restart it, or `rotate` to the next track.
+/// Needs a control-scope token.
+#[tauri::command]
+async fn server_session(
+    app: State<'_, App>,
+    id: String,
+    action: String,
+    to: Option<String>,
+) -> Result<Value, String> {
+    let server = app.store.managed(&id)?;
+    if server.kind == ServerKind::Legacy {
+        return Err("The official dedicated server does not expose live session controls.".into());
+    }
+    let (path, body) = match action.as_str() {
+        "jump" => {
+            let destination = to.unwrap_or_default();
+            if !matches!(
+                destination.as_str(),
+                "practice" | "qualifying" | "warmup" | "race"
+            ) {
+                return Err("unknown session".into());
+            }
+            ("/v1/session/jump", serde_json::json!({ "to": destination }))
+        }
+        "advance" => ("/v1/session/advance", serde_json::json!({})),
+        "restart" => ("/v1/session/restart", serde_json::json!({})),
+        "rotate" => ("/v1/session/rotate", serde_json::json!({})),
+        // The running event again on the same track: riders go back to the pits and anything
+        // waiting for the next track load is loaded.
+        "reload" => ("/v1/session/reload", serde_json::json!({})),
+        "reset_ruts" => ("/v1/world/ruts/reset", serde_json::json!({})),
+        _ => return Err("unknown session action".into()),
+    };
+    admin_call(
+        &app,
+        &server,
+        reqwest::Method::POST,
+        path,
+        Some(&body),
+        true,
+    )
+    .await
+}
+
+/// Restart the mxbserver service on its host with systemctl (SIGINT + relaunch for a hand-started
+/// server) and wait until it answers again.
+#[tauri::command]
+async fn server_restart_service(app: State<'_, App>, id: String) -> Result<Value, String> {
+    let server = app.store.managed(&id)?;
+    if server.kind == ServerKind::Legacy {
+        return Err("Use the Restart button of the official server's controls.".into());
+    }
+    if server.local {
+        blocking(move || local::restart_now(&server)).await?;
+        return Ok(serde_json::json!({ "result": "restarted" }));
+    }
+    let tunnels = Arc::clone(&app.tunnels);
+    let port = server.observe_port.to_string();
+    let out = blocking(move || {
+        tunnels.run_script(&server, REMOTE_SH, &["service", &port, "restart"], 120)
+    })
+    .await?;
+    if out.field("result") == Some("restarted") {
+        Ok(serde_json::json!({ "result": "restarted" }))
+    } else {
+        Err(out.text())
+    }
+}
+
+#[tauri::command]
+async fn server_upload(
+    app: State<'_, App>,
+    id: String,
+    kind: String,
+    path: String,
+    version: Option<String>,
+) -> Result<Value, String> {
+    let server = app.store.managed(&id)?;
+    if server.kind == ServerKind::Legacy {
+        return Err("Legacy connecting uses tracks and game versions already installed on the official server host.".into());
+    }
+    if server.local {
+        return Err("Uploads for a server on this PC are not wired yet.".into());
+    }
+    if !matches!(kind.as_str(), "track" | "version") {
+        return Err("unknown upload type".into());
+    }
+    let file = std::path::Path::new(&path);
+    let original_name = file
+        .file_name()
+        .and_then(|v| v.to_str())
+        .ok_or("the file has no usable name")?
+        .to_string();
+    let name = if kind == "track" {
+        safe_remote_filename(&original_name)
+    } else {
+        original_name
+    };
+    if kind == "version"
+        && !name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_'))
+    {
+        return Err("The binary file name contains unsupported characters.".into());
+    }
+    if kind == "track" && !name.to_ascii_lowercase().ends_with(".pkz") {
+        return Err("Tracks must be .pkz packages.".into());
+    }
+    let version = version.unwrap_or_default();
+    if kind == "version"
+        && (version.trim().is_empty()
+            || version.len() > 80
+            || !version
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_' | '+')))
+    {
+        return Err(
+            "Use a short version label with letters, numbers, dots, dashes, underscores, or +."
+                .into(),
+        );
+    }
+    let maximum = if kind == "track" {
+        512 * 1024 * 1024
+    } else {
+        128 * 1024 * 1024
+    };
+    let digest = blocking({
+        let path = path.clone();
+        move || {
+            use sha2::Digest;
+            use std::io::Read;
+            let mut file =
+                std::fs::File::open(&path).map_err(|e| format!("could not read {path}: {e}"))?;
+            let size = file.metadata().map_err(|e| e.to_string())?.len();
+            if size == 0 || size > maximum {
+                return Err(format!(
+                    "the file must be between 1 byte and {} MiB",
+                    maximum / 1024 / 1024
+                ));
+            }
+            let mut hash = sha2::Sha256::new();
+            let mut buffer = [0u8; 64 * 1024];
+            loop {
+                let read = file
+                    .read(&mut buffer)
+                    .map_err(|e| format!("could not read {path}: {e}"))?;
+                if read == 0 {
+                    break;
+                }
+                hash.update(&buffer[..read]);
+            }
+            Ok(format!("{:x}", hash.finalize()))
+        }
+    })
+    .await?;
+    let temporary = format!("mxb-servers-{}", store::new_id());
+    let tunnels = Arc::clone(&app.tunnels);
+    let upload_server = server.clone();
+    let upload_path = path.clone();
+    let upload_name = temporary.clone();
+    blocking(move || tunnels.upload(&upload_server, &upload_path, &upload_name, 300)).await?;
+    if kind == "version" {
+        return install_version(&app, server, temporary, name, digest, version).await;
+    }
+    let tunnels = Arc::clone(&app.tunnels);
+    let port = server.observe_port.to_string();
+    let out = blocking(move || {
+        tunnels.run_script(
+            &server,
+            REMOTE_SH,
+            &["install-track", &port, &temporary, &name, &digest],
+            120,
+        )
+    })
+    .await?;
+    if out.field("installed").is_some() {
+        Ok(serde_json::json!({ "installed": out.field("installed") }))
+    } else {
+        Err(out.text())
+    }
+}
+
+const TRACK_UPLOAD_MAX: u64 = 512 * 1024 * 1024;
+const UPLOAD_ATTEMPTS: u32 = 3;
+
+fn publish_upload(
+    handle: &tauri::AppHandle,
+    uploads: &uploads::Uploads,
+    id: &str,
+    change: impl FnOnce(&mut uploads::UploadInfo),
+) {
+    if let Some(info) = uploads.update(id, change) {
+        let _ = handle.emit("upload-update", &info);
+    }
+}
+
+/// Start uploading a .pkz to a server. Returns at once; the transfer runs in the backend and
+/// reports through `upload-update` events and `upload_list`, whatever screen is showing.
+#[tauri::command]
+async fn upload_start(
+    handle: tauri::AppHandle,
+    app: State<'_, App>,
+    id: String,
+    path: String,
+) -> Result<uploads::UploadInfo, String> {
+    let server = app.store.managed(&id)?;
+    if server.kind == ServerKind::Legacy {
+        return Err("Legacy connecting uses tracks and game versions already installed on the official server host.".into());
+    }
+    if server.local {
+        return Err("Uploads for a server on this PC are not wired yet.".into());
+    }
+    if let Some(existing) = app.uploads.running(&id, &path) {
+        return Ok(existing);
+    }
+    let original = std::path::Path::new(&path)
+        .file_name()
+        .and_then(|v| v.to_str())
+        .ok_or("the file has no usable name")?
+        .to_string();
+    let name = safe_remote_filename(&original);
+    if !name.to_ascii_lowercase().ends_with(".pkz") {
+        return Err("Tracks must be .pkz packages.".into());
+    }
+    if is_protected_file(std::path::Path::new(&path)) {
+        return Err(format!("{original} is a protected package: the server cannot run it, so it is not uploaded."));
+    }
+    let bytes = std::fs::metadata(&path)
+        .map_err(|e| format!("could not read {path}: {e}"))?
+        .len();
+    if bytes == 0 || bytes > TRACK_UPLOAD_MAX {
+        return Err(format!(
+            "the file must be between 1 byte and {} MiB",
+            TRACK_UPLOAD_MAX / 1024 / 1024
+        ));
+    }
+    let info = uploads::UploadInfo {
+        id: store::new_id(),
+        server_id: server.id.clone(),
+        server_name: server.name.clone(),
+        path: path.clone(),
+        file_name: name.clone(),
+        bytes,
+        sent: 0,
+        speed: 0.0,
+        attempt: 1,
+        status: uploads::UploadStatus::Checking,
+        error: None,
+    };
+    let cancel = app.uploads.add(info.clone());
+    let _ = handle.emit("upload-update", &info);
+    let tunnels = Arc::clone(&app.tunnels);
+    let registry = Arc::clone(&app.uploads);
+    let upload_id = info.id.clone();
+    tauri::async_runtime::spawn(async move {
+        run_track_upload(handle, tunnels, registry, server, upload_id, path, name, cancel).await;
+    });
+    Ok(info)
+}
+
+type HashKey = (String, u64, u128);
+
+/// Path, size and modification time: a file with the same three has the same contents.
+fn file_key(path: &str) -> Option<HashKey> {
+    let meta = std::fs::metadata(path).ok()?;
+    let modified = meta.modified().ok()?.duration_since(std::time::UNIX_EPOCH).ok()?.as_nanos();
+    Some((path.to_string(), meta.len(), modified))
+}
+
+fn hash_cache() -> &'static std::sync::Mutex<std::collections::HashMap<HashKey, String>> {
+    static MAP: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<HashKey, String>>> =
+        std::sync::OnceLock::new();
+    MAP.get_or_init(Default::default)
+}
+
+fn cached_hash(key: &HashKey) -> Option<String> {
+    hash_cache().lock().ok()?.get(key).cloned()
+}
+
+fn remember_hash(key: HashKey, digest: &str) {
+    if let Ok(mut map) = hash_cache().lock() {
+        map.insert(key, digest.to_string());
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn run_track_upload(
+    handle: tauri::AppHandle,
+    tunnels: Arc<ssh::Tunnels>,
+    registry: Arc<uploads::Uploads>,
+    server: Server,
+    id: String,
+    path: String,
+    name: String,
+    cancel: Arc<std::sync::atomic::AtomicBool>,
+) {
+    use std::sync::atomic::Ordering;
+    let fail = |message: String| {
+        publish_upload(&handle, &registry, &id, |i| {
+            i.status = uploads::UploadStatus::Error;
+            i.speed = 0.0;
+            i.error = Some(message);
+        });
+    };
+    let stopped = || {
+        publish_upload(&handle, &registry, &id, |i| {
+            i.status = uploads::UploadStatus::Cancelled;
+            i.speed = 0.0;
+        });
+    };
+    // The hash the host checks the upload against, remembered per file (path, size, mtime) so an
+    // unchanged file is not hashed again.
+    let digest = blocking({
+        let (path, cancel) = (path.clone(), Arc::clone(&cancel));
+        move || {
+            use sha2::Digest;
+            use std::io::Read;
+            let key = file_key(&path);
+            if let Some(hit) = key.as_ref().and_then(cached_hash) {
+                return Ok(hit);
+            }
+            let mut file =
+                std::fs::File::open(&path).map_err(|e| format!("could not read {path}: {e}"))?;
+            let mut hash = sha2::Sha256::new();
+            let mut buffer = [0u8; 64 * 1024];
+            loop {
+                if cancel.load(Ordering::SeqCst) {
+                    return Ok(String::new());
+                }
+                let read = file
+                    .read(&mut buffer)
+                    .map_err(|e| format!("could not read {path}: {e}"))?;
+                if read == 0 {
+                    let digest = format!("{:x}", hash.finalize());
+                    if let Some(k) = key {
+                        remember_hash(k, &digest);
+                    }
+                    return Ok(digest);
+                }
+                hash.update(&buffer[..read]);
+            }
+        }
+    })
+    .await;
+    let digest = match digest {
+        Ok(_) if cancel.load(Ordering::SeqCst) => return stopped(),
+        Ok(d) => d,
+        Err(e) => return fail(e),
+    };
+    // Already on the host with the same contents? Then there is nothing to send.
+    let on_host = blocking({
+        let (tunnels, server, name, digest) = (Arc::clone(&tunnels), server.clone(), name.clone(), digest.clone());
+        move || {
+            let port = server.observe_port.to_string();
+            tunnels.run_script(&server, REMOTE_SH, &["has-track", &port, &name, &digest], 30)
+        }
+    })
+    .await;
+    if matches!(on_host, Ok(ref out) if out.field("match") == Some("1")) {
+        log::info!("[msm-timing] upload skipped: the host already has an identical file");
+        publish_upload(&handle, &registry, &id, |i| {
+            i.status = uploads::UploadStatus::Done;
+            i.sent = i.bytes;
+            i.speed = 0.0;
+        });
+        return;
+    }
+    let temporary = format!("mxb-servers-{}", store::new_id());
+    for attempt in 1..=UPLOAD_ATTEMPTS {
+        publish_upload(&handle, &registry, &id, |i| {
+            i.status = uploads::UploadStatus::Uploading;
+            i.attempt = attempt;
+            i.sent = 0;
+            i.error = None;
+        });
+        let result = blocking({
+            let (tunnels, server, path, temporary) = (
+                Arc::clone(&tunnels),
+                server.clone(),
+                path.clone(),
+                temporary.clone(),
+            );
+            let (handle, registry, id, cancel) = (
+                handle.clone(),
+                Arc::clone(&registry),
+                id.clone(),
+                Arc::clone(&cancel),
+            );
+            move || {
+                let mut meter = uploads::SpeedMeter::new();
+                let mut last_emit = std::time::Instant::now();
+                Ok(
+                    tunnels.upload_with_progress(&server, &path, &temporary, &cancel, |sent| {
+                        let now = std::time::Instant::now();
+                        let speed = meter.record(sent, now);
+                        if now.duration_since(last_emit) >= Duration::from_millis(200) {
+                            last_emit = now;
+                            publish_upload(&handle, &registry, &id, |i| {
+                                i.sent = sent;
+                                i.speed = speed;
+                            });
+                        }
+                    }),
+                )
+            }
+        })
+        .await;
+        match result {
+            Ok(Ok(())) => break,
+            Ok(Err(ssh::UploadError::Cancelled)) => return stopped(),
+            Ok(Err(ssh::UploadError::Failed(message))) => {
+                if attempt < UPLOAD_ATTEMPTS && uploads::transient(&message) {
+                    publish_upload(&handle, &registry, &id, |i| {
+                        i.status = uploads::UploadStatus::Retrying;
+                        i.speed = 0.0;
+                        i.error = Some(message);
+                    });
+                    for _ in 0..30 {
+                        if cancel.load(Ordering::SeqCst) {
+                            return stopped();
+                        }
+                        sleep(Duration::from_millis(100)).await;
+                    }
+                    continue;
+                }
+                return fail(message);
+            }
+            Err(e) => return fail(e),
+        }
+    }
+    publish_upload(&handle, &registry, &id, |i| {
+        i.status = uploads::UploadStatus::Installing;
+        i.sent = i.bytes;
+        i.speed = 0.0;
+        i.error = None;
+    });
+    let port = server.observe_port.to_string();
+    let server_id = server.id.clone();
+    let out = blocking(move || {
+        tunnels.run_script(
+            &server,
+            REMOTE_SH,
+            &["install-track", &port, &temporary, &name, &digest],
+            120,
+        )
+    })
+    .await;
+    match out {
+        Ok(out) if out.field("installed").is_some() => {
+            snapshot_forget(&server_id);
+            publish_upload(&handle, &registry, &id, |i| {
+                i.status = uploads::UploadStatus::Done;
+                i.speed = 0.0;
+            });
+        }
+        Ok(out) => fail(out.text()),
+        Err(e) => fail(e),
+    }
+}
+
+async fn sleep(duration: Duration) {
+    let _ = tauri::async_runtime::spawn_blocking(move || std::thread::sleep(duration)).await;
+}
+
+#[tauri::command]
+fn upload_list(app: State<'_, App>) -> Vec<uploads::UploadInfo> {
+    app.uploads.list()
+}
+
+/// Stop a running upload. Nothing else does: leaving a screen never cancels one.
+#[tauri::command]
+fn upload_cancel(app: State<'_, App>, id: String) -> bool {
+    app.uploads.cancel(&id)
+}
+
+/// Forget a finished (done, failed or cancelled) upload.
+#[tauri::command]
+fn upload_dismiss(app: State<'_, App>, id: String) {
+    app.uploads.dismiss(&id);
+}
+
+/// Quit now, after the screen confirmed losing any running uploads.
+#[tauri::command]
+fn quit_app(handle: tauri::AppHandle) {
+    handle.exit(0);
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TrackUploadCheck {
+    bytes: u64,
+    server_track: bool,
+    detail: String,
+    upload_name: String,
+    /// A protected package: refused before any upload.
+    protected: bool,
+    /// A server-version package of the same track found next to it or in Downloads.
+    alternative: Option<String>,
+}
+
+fn safe_remote_filename(name: &str) -> String {
+    let mut out = String::with_capacity(name.len());
+    for c in name.chars() {
+        let safe = if c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_') {
+            c
+        } else {
+            '_'
+        };
+        if safe != '_' || !out.ends_with('_') {
+            out.push(safe);
+        }
+    }
+    let cleaned = out.trim_matches(['.', '_', '-']).to_string();
+    if cleaned.is_empty() {
+        "track.pkz".into()
+    } else {
+        cleaned
+    }
+}
+
+/// A small server-version package of the same track: a `*server*.pkz` that starts with the same
+/// stem, beside the chosen file or in Downloads, and is a readable zip.
+fn server_alternative(file: &std::path::Path) -> Option<String> {
+    let stem = file.file_stem()?.to_str()?.to_ascii_lowercase();
+    let downloads = std::env::var_os("USERPROFILE")
+        .or_else(|| std::env::var_os("HOME"))
+        .map(|home| std::path::Path::new(&home).join("Downloads"));
+    let folders = [file.parent().map(std::path::Path::to_path_buf), downloads];
+    for folder in folders.into_iter().flatten() {
+        for entry in std::fs::read_dir(folder).ok()?.flatten() {
+            let path = entry.path();
+            let name = path.file_name()?.to_str()?.to_ascii_lowercase();
+            if path != file
+                && name.ends_with(".pkz")
+                && name.contains("server")
+                && name.starts_with(&stem)
+                && path.is_file()
+                && !is_protected_file(&path)
+            {
+                return Some(path.to_string_lossy().into_owned());
+            }
+        }
+    }
+    None
+}
+
+#[tauri::command]
+async fn inspect_track_upload(path: String) -> Result<TrackUploadCheck, String> {
+    blocking(move || {
+        let file = std::path::Path::new(&path);
+        if !file
+            .extension()
+            .and_then(|value| value.to_str())
+            .is_some_and(|value| value.eq_ignore_ascii_case("pkz"))
+        {
+            return Err("Choose a .pkz track package.".into());
+        }
+        let bytes = std::fs::metadata(file)
+            .map_err(|e| format!("could not read the selected file: {e}"))?
+            .len();
+        let upload_name = safe_remote_filename(
+            file.file_name()
+                .and_then(|value| value.to_str())
+                .unwrap_or("track.pkz"),
+        );
+        if bytes == 0 || bytes > 512 * 1024 * 1024 {
+            return Err("Track packages must be between 1 byte and 512 MiB.".into());
+        }
+        if is_protected_file(file) {
+            return Ok(TrackUploadCheck {
+                bytes,
+                server_track: false,
+                detail: "This is a protected track package. The server cannot run it, so it will not be uploaded.".into(),
+                upload_name,
+                protected: true,
+                alternative: server_alternative(file),
+            });
+        }
+        match mxb_content::TrackPackage::open(file) {
+            Ok(track) => Ok(TrackUploadCheck {
+                bytes,
+                server_track: true,
+                detail: format!("Server track package · {}", track.id),
+                upload_name,
+                protected: false,
+                alternative: None,
+            }),
+            Err(error) => Ok(TrackUploadCheck {
+                bytes,
+                server_track: false,
+                detail: format!("This does not look like a server track package: {error:#}"),
+                upload_name,
+                protected: false,
+                alternative: None,
+            }),
+        }
+    })
+    .await
+}
+
+#[tauri::command]
+async fn server_logs(app: State<'_, App>, id: String, lines: u32) -> Result<Vec<String>, String> {
+    let server = app.store.managed(&id)?;
+    if server.kind == ServerKind::Legacy {
+        let (code, body) =
+            legacy_request(&app, &server, reqwest::Method::GET, "/logs", None).await?;
+        let value = json_answer(code, &body, "legacy logs")?;
+        return Ok(value["lines"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|line| line.as_str().map(str::to_string))
+            .rev()
+            .take(lines.min(500) as usize)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .collect());
+    }
+    if server.local {
+        return local_tail(&server.log_path, lines);
+    }
+    let tunnels = Arc::clone(&app.tunnels);
+    let port = server.observe_port.to_string();
+    let count = lines.clamp(1, 2000).to_string();
+    // `journalctl -u mxbserver`, run on the host by the helper script.
+    let out =
+        blocking(move || tunnels.run_script(&server, REMOTE_SH, &["logs", &port, &count], 30))
+            .await?;
+    if !out.success {
+        return Err(out.text());
+    }
+    Ok(out.stdout.lines().map(str::to_string).collect())
+}
+
+/// The observe `/timing` feed: race numbers, names, laps and split times (no credentials, no
+/// GUIDs). The Events tab diffs it into lap finishes and time checks.
+#[tauri::command]
+async fn server_timing(app: State<'_, App>, id: String) -> Result<Value, String> {
+    let server = app.store.managed(&id)?;
+    if server.kind == ServerKind::Legacy {
+        return Ok(serde_json::json!({ "available": false }));
+    }
+    let (code, body) = fetch(&app, &server, server.observe_port, "/timing", None)
+        .await
+        .map_err(Miss::text)?;
+    json_answer(code, &body, "/timing")
+}
+
+#[tauri::command]
+async fn legacy_config(app: State<'_, App>, id: String) -> Result<Value, String> {
+    let server = app.store.managed(&id)?;
+    if server.kind != ServerKind::Legacy {
+        return Err("This server does not use Legacy connecting.".into());
+    }
+    let (code, body) = legacy_request(&app, &server, reqwest::Method::GET, "/status", None).await?;
+    json_answer(code, &body, "legacy settings")
+}
+
+#[tauri::command]
+async fn legacy_config_save(
+    app: State<'_, App>,
+    id: String,
+    name: String,
+    track: String,
+    max_clients: u32,
+) -> Result<Value, String> {
+    let server = app.store.managed(&id)?;
+    if server.kind != ServerKind::Legacy {
+        return Err("This server does not use Legacy connecting.".into());
+    }
+    let name = name.trim();
+    let track = track.trim();
+    if name.is_empty()
+        || name.len() > 100
+        || track.is_empty()
+        || max_clients == 0
+        || max_clients > 50
+    {
+        return Err("Enter a server name, an installed track, and 1–50 riders.".into());
+    }
+    let payload = serde_json::json!({ "name": name, "track": track, "maxClients": max_clients });
+    let (code, body) = legacy_request(
+        &app,
+        &server,
+        reqwest::Method::PUT,
+        "/config",
+        Some(&payload),
+    )
+    .await?;
+    json_answer(code, &body, "save legacy settings")
+}
+
+#[tauri::command]
+async fn legacy_process(app: State<'_, App>, id: String, action: String) -> Result<Value, String> {
+    let server = app.store.managed(&id)?;
+    if server.kind != ServerKind::Legacy || !matches!(action.as_str(), "start" | "stop" | "restart")
+    {
+        return Err("Unknown Legacy connecting action.".into());
+    }
+    let path = format!("/{action}");
+    let (code, body) = legacy_request(&app, &server, reqwest::Method::POST, &path, None).await?;
+    json_answer(code, &body, "legacy process control")
+}
+
+/// The last `lines` lines of a log file on this PC, reading at most its last 1 MiB.
+fn local_tail(path: &str, lines: u32) -> Result<Vec<String>, String> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut file = std::fs::File::open(path).map_err(|e| format!("{path}: {e}"))?;
+    let len = file.metadata().map_err(|e| e.to_string())?.len();
+    let start = len.saturating_sub(1 << 20);
+    file.seek(SeekFrom::Start(start))
+        .map_err(|e| e.to_string())?;
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes).map_err(|e| e.to_string())?;
+    let text = String::from_utf8_lossy(&bytes);
+    let all: Vec<&str> = text.lines().collect();
+    // A read that starts mid-file drops its first, partial line.
+    let skip = usize::from(start > 0 && !all.is_empty());
+    let from = all.len().saturating_sub(lines as usize).max(skip);
+    Ok(all[from..].iter().map(|l| l.to_string()).collect())
+}
+
+// ---- Config editing -------------------------------------------------------------------------
+
+/// The server-side helper for config editing, sent over SSH on stdin each time.
+const REMOTE_SH: &str = include_str!("remote.sh");
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ConfigState {
+    text: String,
+    sha: String,
+    path: String,
+    /// "systemd", "bare" (a hand-started process) or "local" (this PC).
+    mode: String,
+    values: serde_json::Map<String, Value>,
+    fields: &'static [config::Field],
+}
+
+fn b64(text: &str) -> String {
+    use base64::Engine;
+    base64::engine::general_purpose::STANDARD.encode(text)
+}
+
+async fn blocking<T: Send + 'static>(
+    f: impl FnOnce() -> Result<T, String> + Send + 'static,
+) -> Result<T, String> {
+    tauri::async_runtime::spawn_blocking(f)
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn config_load(app: State<'_, App>, id: String) -> Result<ConfigState, String> {
+    let server = app.store.managed(&id)?;
+    let (text, path, mode) = if server.local {
+        let (text, path) = blocking(move || local::read(&server)).await?;
+        (text, path.display().to_string(), "local".to_string())
+    } else {
+        let tunnels = Arc::clone(&app.tunnels);
+        let port = server.observe_port.to_string();
+        let out =
+            blocking(move || tunnels.run_script(&server, REMOTE_SH, &["read", &port], 30)).await?;
+        let detect_mode = out.field("mode").unwrap_or("").to_string();
+        let encoded = out
+            .field("config_b64")
+            .filter(|_| out.success)
+            .ok_or_else(|| format!("could not read the config: {}", out.text()))?;
+        use base64::Engine;
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(encoded)
+            .map_err(|e| e.to_string())?;
+        let text = String::from_utf8(bytes).map_err(|_| "the config is not UTF-8".to_string())?;
+        (
+            text,
+            out.field("config").unwrap_or("").to_string(),
+            detect_mode,
+        )
+    };
+    let values = config::read(&text)?;
+    Ok(ConfigState {
+        sha: config::sha256(&text),
+        text,
+        path,
+        mode,
+        values,
+        fields: config::FIELDS,
+    })
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Preview {
+    text: String,
+    diff: String,
+}
+
+/// The file with `changes` applied, and the diff. Pure: nothing leaves this PC.
+#[tauri::command]
+fn config_preview(
+    base: String,
+    changes: serde_json::Map<String, Value>,
+) -> Result<Preview, String> {
+    let text = config::apply(&base, &changes)?;
+    let diff = config::diff(&base, &text);
+    Ok(Preview { text, diff })
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Checked {
+    ok: bool,
+    output: String,
+}
+
+/// Run the candidate through the server's own parser: the server binary, once, for a second,
+/// on side ports, where the live config is.
+#[tauri::command]
+async fn config_validate(app: State<'_, App>, id: String, text: String) -> Result<Checked, String> {
+    let server = app.store.managed(&id)?;
+    if server.local {
+        let (ok, output) = blocking(move || local::validate(&server, &text)).await?;
+        return Ok(Checked { ok, output });
+    }
+    let tunnels = Arc::clone(&app.tunnels);
+    let encoded = b64(&text);
+    let port = server.observe_port.to_string();
+    let out = blocking(move || {
+        tunnels.run_script(&server, REMOTE_SH, &["validate", &port, &encoded], 120)
+    })
+    .await?;
+    Ok(Checked {
+        ok: out.field("valid") == Some("1"),
+        output: out.text(),
+    })
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ApplyResult {
+    /// "applied", "rolled-back" (not ready after the change; the backup is live again) or
+    /// "failed".
+    result: String,
+    backup: String,
+    output: String,
+}
+
+/// Back up the live config, replace it with `text` (only if the live one still hashes to
+/// `base_sha`), restart, and wait for `/readyz`; the backup goes back if it never comes.
+#[tauri::command]
+async fn config_apply(
+    app: State<'_, App>,
+    id: String,
+    base_sha: String,
+    text: String,
+) -> Result<ApplyResult, String> {
+    let server = app.store.managed(&id)?;
+    if !base_sha.chars().all(|c| c.is_ascii_hexdigit()) || base_sha.len() != 64 {
+        return Err("bad config hash".into());
+    }
+    if server.local {
+        let done = blocking(move || local::apply(&server, &base_sha, &text)).await?;
+        return Ok(ApplyResult {
+            result: done.result.to_string(),
+            backup: done.backup,
+            output: done.output,
+        });
+    }
+    let tunnels = Arc::clone(&app.tunnels);
+    let encoded = b64(&text);
+    let port = server.observe_port.to_string();
+    let out = blocking(move || {
+        tunnels.run_script(
+            &server,
+            REMOTE_SH,
+            &["apply", &port, &encoded, &base_sha],
+            300,
+        )
+    })
+    .await?;
+    match out.field("result") {
+        Some(result) => Ok(ApplyResult {
+            result: result.to_string(),
+            backup: out.field("backup").unwrap_or("").to_string(),
+            output: out.text(),
+        }),
+        None => Err(out.text()),
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LiveApply {
+    /// "applied" (the server reloaded it) or "failed" (nothing changed: the old file is back).
+    result: String,
+    backup: String,
+    output: String,
+    /// The server's reload answer: `applied`, `deferred`, `restart_required`, `changes`.
+    reload: Value,
+}
+
+/// Apply without a restart: check the new file with the server's own binary, back it up and
+/// replace it (no restart), then ask the running server to reload it through the admin API.
+/// Live settings apply at once, race rules at the next session, and restart-only ones are
+/// listed for the app to offer a restart. If the reload refuses it, the backup goes back.
+#[tauri::command]
+async fn config_apply_live(
+    app: State<'_, App>,
+    id: String,
+    base_sha: String,
+    text: String,
+    skip_check: Option<bool>,
+) -> Result<LiveApply, String> {
+    let server = app.store.managed(&id)?;
+    write_and_reload(&app, &server, &base_sha, &text, skip_check.unwrap_or(false)).await
+}
+
+/// The body of [`config_apply_live`]: write `text` (checked against `base_sha`), then reload.
+async fn write_and_reload(
+    app: &App,
+    server: &Server,
+    base_sha: &str,
+    text: &str,
+    skip_check: bool,
+) -> Result<LiveApply, String> {
+    if !base_sha.chars().all(|c| c.is_ascii_hexdigit()) || base_sha.len() != 64 {
+        return Err("bad config hash".into());
+    }
+    let (base_sha, text) = (base_sha.to_string(), text.to_string());
+    let (backup, output) = if server.local {
+        let target = server.clone();
+        blocking(move || local::write(&target, &base_sha, &text)).await?
+    } else {
+        let tunnels = Arc::clone(&app.tunnels);
+        let encoded = b64(&text);
+        let port = server.observe_port.to_string();
+        let target = server.clone();
+        let out = blocking(move || {
+            let mut args = vec!["write", port.as_str(), encoded.as_str(), base_sha.as_str()];
+            if skip_check {
+                args.push("skipcheck");
+            }
+            tunnels.run_script(&target, REMOTE_SH, &args, 300)
+        })
+        .await?;
+        if out.field("result") != Some("written") {
+            return Err(out.text());
+        }
+        (out.field("backup").unwrap_or("").to_string(), out.text())
+    };
+    let body = serde_json::json!({ "dry_run": false });
+    match admin_call(
+        app,
+        server,
+        reqwest::Method::POST,
+        "/v1/config/reload",
+        Some(&body),
+        true,
+    )
+    .await
+    {
+        Ok(reload) => Ok(LiveApply {
+            result: "applied".into(),
+            backup,
+            output,
+            reload,
+        }),
+        Err(error) => {
+            // The server runs on the old file still: put it back so the two agree.
+            let restored = if server.local {
+                let (target, path) = (server.clone(), backup.clone());
+                blocking(move || local::restore(&target, &path)).await
+            } else {
+                let tunnels = Arc::clone(&app.tunnels);
+                let port = server.observe_port.to_string();
+                let (target, path) = (server.clone(), backup.clone());
+                blocking(move || {
+                    let out = tunnels.run_script(&target, REMOTE_SH, &["restore", &port, &path], 60)?;
+                    if out.field("result") == Some("restored") {
+                        Ok(())
+                    } else {
+                        Err(out.text())
+                    }
+                })
+                .await
+            };
+            let output = match restored {
+                Ok(()) => format!("The server did not reload the new settings, so the previous file was put back: {error}"),
+                Err(why) => format!("The server did not reload the new settings ({error}), and putting the previous file back failed: {why}"),
+            };
+            Ok(LiveApply {
+                result: "failed".into(),
+                backup,
+                output,
+                reload: Value::Null,
+            })
+        }
+    }
+}
+
+/// The fast check for the Review step: the running server's own dry run (`/v1/config/validate`
+/// with the candidate: it parses the file, range-checks every value and classifies each change)
+/// over the admin tunnel that is already open. `checked: false` when that cannot answer (no
+/// token, an older server, nothing listening), so the caller falls back to the slow check over
+/// SSH. A refused file comes back as `checked: true, ok: false` with the server's reason.
+#[tauri::command]
+async fn config_check(app: State<'_, App>, id: String, text: String) -> Result<Value, String> {
+    let unchecked = || serde_json::json!({ "checked": false });
+    let server = app.store.managed(&id)?;
+    if server.kind == ServerKind::Legacy {
+        return Ok(unchecked());
+    }
+    let Some(token) = store::token(&server.id) else {
+        return Ok(unchecked());
+    };
+    let Ok(port) = admin_port(&app, &server).await else {
+        return Ok(unchecked());
+    };
+    let body = serde_json::json!({ "content": text });
+    let Ok((code, answer)) = send(
+        &app,
+        &server,
+        port,
+        reqwest::Method::POST,
+        "/v1/config/validate",
+        Some(&token),
+        Some(&body),
+    )
+    .await
+    else {
+        return Ok(unchecked());
+    };
+    match code {
+        200..=299 => Ok(serde_json::json!({
+            "checked": true,
+            "ok": true,
+            "classify": serde_json::from_str::<Value>(&answer).unwrap_or(Value::Null),
+        })),
+        400 => Ok(serde_json::json!({
+            "checked": true,
+            "ok": false,
+            "output": admin_error(code, &answer, false),
+        })),
+        _ => Ok(unchecked()),
+    }
+}
+
+/// How the running server would apply `text` (`/v1/config/validate` with `content`): each changed
+/// key's class. Nothing is written. `{"supported": false}` from a server too old to say.
+#[tauri::command]
+async fn config_classify(app: State<'_, App>, id: String, text: String) -> Result<Value, String> {
+    let server = app.store.managed(&id)?;
+    if server.kind == ServerKind::Legacy {
+        return Ok(serde_json::json!({ "supported": false }));
+    }
+    let body = serde_json::json!({ "content": text });
+    admin_call(
+        &app,
+        &server,
+        reqwest::Method::POST,
+        "/v1/config/validate",
+        Some(&body),
+        true,
+    )
+    .await
+}
+
+// ---- Hosted servers ------------------------------------------------------------------------
+
+/// Swap a claim code from servers.mxbsecure.com for a saved hosted server.
+#[tauri::command]
+async fn hosted_claim(app: State<'_, App>, code: String) -> Result<ServerView, String> {
+    let server = hosted::claim(&app.http, &app.store, &code).await?;
+    Ok(view(server))
+}
+
+/// The claim code of an `mxbservers://` link that arrived, once.
+#[tauri::command]
+fn hosted_take_pending(app: State<'_, App>) -> Option<String> {
+    app.pending_claim.lock().ok().and_then(|mut p| p.take())
+}
+
+#[tauri::command]
+async fn hosted_server(app: State<'_, App>, id: String) -> Result<Value, String> {
+    let server = app.store.get(&id)?;
+    hosted::get(&app.http, &server).await
+}
+
+#[tauri::command]
+async fn hosted_settings(app: State<'_, App>, id: String, settings: Value) -> Result<Value, String> {
+    let server = app.store.get(&id)?;
+    hosted::settings(&app.http, &server, &settings).await
+}
+
+#[tauri::command]
+async fn hosted_restart(app: State<'_, App>, id: String) -> Result<Value, String> {
+    let server = app.store.get(&id)?;
+    hosted::restart(&app.http, &server).await
+}
+
+/// The event the screen listens on when an `mxbservers://` link arrives.
+const HOSTED_LINK_EVENT: &str = "hosted-claim";
+
+fn raise(handle: &tauri::AppHandle) {
+    if let Some(window) = handle.get_webview_window("main") {
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+}
+
+/// Keep the code of the first link we answer, bring the window up, and tell the screen.
+fn handle_links<I: IntoIterator<Item = String>>(handle: &tauri::AppHandle, urls: I) {
+    let urls: Vec<String> = urls.into_iter().collect();
+    let Some(code) = urls.iter().find_map(|u| hosted::parse_link(u)) else {
+        if !urls.is_empty() {
+            log::warn!("[deep-link] ignored a link this app doesn't answer");
+        }
+        return;
+    };
+    if let Some(app) = handle.try_state::<App>() {
+        if let Ok(mut pending) = app.pending_claim.lock() {
+            *pending = Some(code);
+        }
+    }
+    raise(handle);
+    let _ = handle.emit(HOSTED_LINK_EVENT, ());
+}
+
+fn main() {
+    let builder = tauri::Builder::default();
+    // Windows delivers an `mxbservers://` link by starting the app with the URL as an argument;
+    // with the app already open, that second start lands here and hands the link over.
+    #[cfg(not(debug_assertions))]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+        raise(app);
+        #[cfg(any(windows, target_os = "linux"))]
+        {
+            use tauri_plugin_deep_link::DeepLinkExt;
+            app.deep_link().handle_cli_arguments(argv.iter());
+        }
+        #[cfg(not(any(windows, target_os = "linux")))]
+        let _ = argv;
+    }));
+    builder
+        .plugin(tauri_plugin_log::Builder::new().build())
+        .plugin(tauri_plugin_dialog::init())
+        // `mxbservers://hosted/claim?code=...`, opened by "Open in MSM" on servers.mxbsecure.com.
+        .plugin(tauri_plugin_deep_link::init())
+        .setup(|app| {
+            let dir = app.path().app_data_dir()?;
+            let http = reqwest::Client::builder()
+                .timeout(Duration::from_secs(5))
+                // Server connections are explicit; never leak their credentials to an OS proxy.
+                .no_proxy()
+                .build()?;
+            app.manage(App {
+                store: Store::new(dir),
+                tunnels: Arc::default(),
+                uploads: Arc::default(),
+                http,
+                admin_ports: Default::default(),
+                pending_claim: Default::default(),
+            });
+            {
+                use tauri_plugin_deep_link::DeepLinkExt;
+                // Registered at runtime too, so a build run from a folder still answers the scheme.
+                #[cfg(any(windows, target_os = "linux"))]
+                if let Err(e) = app.deep_link().register_all() {
+                    log::warn!("[deep-link] couldn't register mxbservers://: {e}");
+                }
+                // A link that started the app.
+                if let Ok(Some(urls)) = app.deep_link().get_current() {
+                    handle_links(app.handle(), urls.iter().map(|u| u.to_string()));
+                }
+                let handle = app.handle().clone();
+                app.deep_link().on_open_url(move |event| {
+                    handle_links(&handle, event.urls().iter().map(|u| u.to_string()));
+                });
+            }
+            Ok(())
+        })
+        .on_window_event(|window, event| {
+            // Quitting mid-upload loses it: ask the screen to confirm first.
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                if let Some(app) = window.try_state::<App>() {
+                    if app.uploads.active() > 0 {
+                        api.prevent_close();
+                        let _ = window.emit("quit-requested", ());
+                    }
+                }
+            }
+        })
+        .invoke_handler(tauri::generate_handler![
+            servers_list,
+            servers_save,
+            servers_remove,
+            legacy_pairing,
+            server_status,
+            server_riders,
+            server_cuts,
+            server_cut_outline,
+            server_cut_events,
+            server_tracks,
+            server_set_track,
+            server_set_rotation,
+            server_update_github,
+            server_session,
+            server_restart_service,
+            server_upload,
+            upload_start,
+            upload_list,
+            upload_cancel,
+            upload_dismiss,
+            quit_app,
+            inspect_track_upload,
+            server_logs,
+            server_timing,
+            server_test_token,
+            legacy_config,
+            legacy_config_save,
+            legacy_process,
+            config_load,
+            config_preview,
+            config_validate,
+            config_apply,
+            config_apply_live,
+            config_classify,
+            config_check,
+            hosted_claim,
+            hosted_take_pending,
+            hosted_server,
+            hosted_settings,
+            hosted_restart,
+        ])
+        .build(tauri::generate_context!())
+        .expect("error while building MXB Servers")
+        .run(|handle, event| {
+            // Close every ssh tunnel with the app.
+            if let RunEvent::Exit = event {
+                if let Some(app) = handle.try_state::<App>() {
+                    app.tunnels.close_all();
+                }
+            }
+        });
+}

@@ -30,6 +30,14 @@ describe("joinAction", () => {
     expect(joinAction({ ...base, missing: true, product: sold }).kind).toBe("buy");
   });
 
+  test("a free post that only resembles the track is a candidate, never a one-click install", () => {
+    // Server on Walnut 2; the free "Walnut 1" lookalike must not be installed or joined silently.
+    const lookalike = { source: "mods", exact: false, name: "Walnut 1.0", slug: "walnut-1-0" } as CatalogTrack;
+    expect(joinAction({ ...base, missing: true, product: lookalike }).kind).toBe("guess");
+    // A failed install retries only what was installed in the first place.
+    expect(joinAction({ ...base, missing: true, failed: true, product: lookalike }).kind).toBe("failed");
+  });
+
   test("a parked track is switched on, never downloaded", () => {
     const parked = "mods/tracks/supercross/Fakey Mx - FMX - Somewhere.pkz";
     expect(joinAction({ ...base, missing: true, product: free, inactive: parked })).toEqual({

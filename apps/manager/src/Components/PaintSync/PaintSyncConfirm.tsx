@@ -43,12 +43,9 @@ export default function PaintSyncConfirm({
     <Dialog open={open} onOpenChange={(next) => !busy && onOpenChange(next)}>
       <DialogContent className="max-w-[460px] gap-5">
         <div className="flex items-start gap-3">
-          <div className="grid size-10 flex-none place-items-center rounded-xl bg-primary/10 text-primary">
-            <Palette className="size-5" />
-          </div>
           <div className="flex min-w-0 flex-col gap-1.5">
             <DialogTitle className="text-[18px] leading-tight">
-              {t("paintSync.confirmTitle")}
+              <span className="inline-flex items-center gap-2"><Palette className="size-4 text-muted-foreground" />{t("paintSync.confirmTitle")}</span>
             </DialogTitle>
             <DialogDescription>{t("paintSync.what")}</DialogDescription>
           </div>

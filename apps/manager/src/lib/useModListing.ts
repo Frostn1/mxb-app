@@ -10,6 +10,7 @@ import {
 import type { ModRating, ModSummary } from "@frost/shared/types";
 import { clearListings, listingKey, readListing, writeListing } from "./listingCache";
 import { reportSearchMiss } from "./searchMiss";
+import { appendPage } from "./modPages";
 
 /** What one set of filters answered last time, kept by `listingCache`. */
 interface CachedPage {
@@ -126,18 +127,26 @@ export function useModListing(modType: ModType, enabled = true) {
 
     searchMods(debounced, categoryId, 1, activeSort)
       .then((res) => {
-        writeListing<CachedPage>(key, { mods: res, hasMore: res.length >= SEARCH_PAGE_SIZE });
+        const first = appendPage([], res, SEARCH_PAGE_SIZE);
+        writeListing<CachedPage>(key, first);
         // Reported even when the effect was superseded: the query settled for the 350 ms
         // debounce and genuinely found nothing. Deduped per session, text only.
         if (res.length === 0 && debounced) reportSearchMiss(debounced, categoryId);
         if (cancelled) return;
-        setMods(res);
-        setHasMore(res.length >= SEARCH_PAGE_SIZE);
+        setMods(first.mods);
+        setHasMore(first.hasMore);
       })
       // A refresh that fails behind a grid that is already up leaves it up: the player is
       // looking at real mods, and replacing them with an error would be a worse answer than
-      // the slightly older one on screen.
-      .catch((e) => !cancelled && !cached && setError(String(e)))
+      // the slightly older one on screen. With nothing cached the grid still holds the
+      // *previous* listing (another sort or category), which must not stay on screen as if
+      // it were this one: the merged "All sources" grid showed it under the new order.
+      .catch((e) => {
+        if (cancelled || cached) return;
+        setMods([]);
+        setHasMore(false);
+        setError(String(e));
+      })
       .finally(() => !cancelled && setLoading(false));
     return () => {
       cancelled = true;
@@ -173,15 +182,16 @@ export function useModListing(modType: ModType, enabled = true) {
     setLoadingMore(true);
     try {
       const res = await searchMods(debounced, categoryId, next, activeSort);
-      setMods((prev) => [...prev, ...res]);
-      setHasMore(res.length >= SEARCH_PAGE_SIZE);
+      const merged = appendPage(mods, res, SEARCH_PAGE_SIZE);
+      setMods(merged.mods);
+      setHasMore(merged.hasMore);
       setPage(next);
     } catch (e) {
       setError(String(e));
     } finally {
       setLoadingMore(false);
     }
-  }, [debounced, categoryId, activeSort, page]);
+  }, [debounced, categoryId, activeSort, page, mods]);
 
   const reload = useCallback(() => {
     // Nothing stored is worth painting once the player has asked for it again.

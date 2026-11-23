@@ -1,0 +1,49 @@
+{
+  "manifestVersion": 1,
+  "id": "mxbsecure.library-insights",
+  "name": "Library Insights",
+  "version": "1.0.1",
+  "author": "mxbsecure",
+  "description": "What your mods folder is made of: size by type, the biggest mods, and how many of each, at a glance. Also answers an AI assistant asking what you have installed.",
+  "homepage": "https://github.com/Frostn1/mxb-app/blob/main/docs/extensions.md",
+  "permissions": [
+    "mods.read",
+    "mcp.tools"
+  ],
+  "categories": [
+    "tabs",
+    "ai-tools"
+  ],
+  "tags": [
+    "library",
+    "mods",
+    "storage",
+    "stats"
+  ],
+  "screenshots": [
+    "store/1.webp"
+  ],
+  "contributes": {
+    "views": [
+      {
+        "id": "insights",
+        "title": "Library",
+        "entry": "view/index.html"
+      }
+    ],
+    "main": "main.html",
+    "mcp": {
+      "tools": [
+        {
+          "name": "library_summary",
+          "description": "The user's installed MX Bikes mods: count and total size per type, and the ten largest mods.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": false
+          }
+        }
+      ]
+    }
+  }
+}

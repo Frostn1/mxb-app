@@ -29,10 +29,29 @@ const GUID_OFFSET: usize = 0x000e_5522c;
 /// sibling `-connect`. Each takes the *next* argv as a string, copies it to a global, and
 /// sets a startup-mode enum — 2 for `-directconnect`, 3 for `-connect`.
 ///
-/// Which of the two we want, and the exact address form the game expects, still need
-/// confirming against the in-game `log.txt` on Windows. Both live here as single constants
-/// so that test flips one line rather than reshaping the call site.
+/// `-directconnect` takes a bare `host:port` and joins without ever asking for a password,
+/// so a passworded server can't be joined through it. That is what [`PROMPT_FLAG`] is for.
 const CONNECT_FLAG: &str = "-directconnect";
+
+/// The sibling flag that joins through the game's own "Server / Password" dialog.
+///
+/// Its value is a URL, read out of the decrypted exe and checked in-game (2026-11-01):
+///
+/// ```text
+/// mxbikes://<public>/<lan>/<name>/<locked>/<x>/<x>/<x>
+/// ```
+///
+/// - the scheme must be exactly `mxbikes`; every `%20` in the string becomes a space, and
+///   surrounding quotes are stripped
+/// - after `://` come exactly seven `/`-separated fields:
+///   1. public address and 2. LAN address, both parsed as `%lu.%lu.%lu.%lu:%lu` - IPv4 and
+///      a port, always; a bare port is "Invalid URL"
+///   3. the server name the dialog shows
+///   4. `1` opens the password dialog; anything else connects straight away
+///   5. to 7. unknown strings the game copies to globals; `x` reaches the dialog
+///
+/// See [`prompt_url`], which builds it.
+const PROMPT_FLAG: &str = "-connect";
 
 /// Port used when an address doesn't carry one. The dedicated server's default, and what
 /// every published MX Bikes server address omits.
@@ -1621,9 +1640,14 @@ fn steam_route(address: Option<&str>, steam_thinks_running: Option<bool>) -> Ste
 /// limited the address to characters a URL carries as they are.
 // Windows and Linux both hand Steam a URL; macOS goes through Wine and never does.
 #[cfg_attr(target_os = "macos", allow(dead_code))]
-fn steam_url(appid: &str, address: Option<&str>) -> String {
-    match address {
-        Some(addr) => format!("steam://rungameid/{appid}//{}", connect_args(addr).join("%20")),
+fn steam_url(appid: &str, join: Option<&Join>) -> String {
+    match join {
+        // A `%` inside an argument is escaped too, so the `%20` a prompt URL carries for a
+        // space in the server name reaches the game as `%20` rather than as a split.
+        Some(j) => format!(
+            "steam://rungameid/{appid}//{}",
+            j.args.iter().map(|a| a.replace('%', "%25")).collect::<Vec<_>>().join("%20")
+        ),
         None => format!("steam://rungameid/{appid}"),
     }
 }
@@ -1672,15 +1696,29 @@ fn find_steam_exe() -> Option<std::path::PathBuf> {
 /// that isn't digits or an address that doesn't survive [`parse_server_address`] unchanged
 /// is one that could carry an argument of its own.
 #[cfg_attr(not(windows), allow(dead_code))]
-fn applaunch_args(appid: &str, address: &str) -> anyhow::Result<Vec<String>> {
+fn applaunch_args(appid: &str, join: &Join) -> anyhow::Result<Vec<String>> {
     if appid.is_empty() || !appid.chars().all(|c| c.is_ascii_digit()) {
         anyhow::bail!("\"{appid}\" isn't a Steam app id");
     }
+    let address = join.address.as_str();
     if parse_server_address(address)? != address {
         anyhow::bail!("\"{address}\" isn't a normalized server address");
     }
+    let [flag, value] = &join.args;
+    let sound = match flag.as_str() {
+        CONNECT_FLAG => value == address,
+        PROMPT_FLAG => {
+            value.starts_with("mxbikes://")
+                && value.chars().all(|c| c.is_ascii_graphic() && c != '"')
+                && value["mxbikes://".len()..].split('/').count() == 7
+        }
+        _ => false,
+    };
+    if !sound {
+        anyhow::bail!("\"{flag} {value}\" isn't a connect argument we build");
+    }
     let mut args = vec!["-applaunch".to_string(), appid.to_string()];
-    args.extend(connect_args(address));
+    args.extend(join.args.iter().cloned());
     Ok(args)
 }
 
@@ -1690,12 +1728,12 @@ fn applaunch_args(appid: &str, address: &str) -> anyhow::Result<Vec<String>> {
 /// starts one) and we have no reason to wait on it. `Command` quotes each argv entry for
 /// us, and [`applaunch_args`] has already made sure none of them can become two.
 #[cfg(windows)]
-fn steam_applaunch(appid: &str, address: &str) -> anyhow::Result<()> {
+fn steam_applaunch(appid: &str, join: &Join) -> anyhow::Result<()> {
     use std::os::windows::process::CommandExt;
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
     const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
 
-    let args = applaunch_args(appid, address)?;
+    let args = applaunch_args(appid, join)?;
     let steam = find_steam_exe().ok_or_else(|| anyhow::anyhow!("couldn't find steam.exe"))?;
     log::info!("asking Steam to start the game: {} {}", steam.display(), args.join(" "));
     std::process::Command::new(&steam)
@@ -1875,7 +1913,15 @@ pub fn launch(cfg: &AppConfig) -> anyhow::Result<LaunchOutcome> {
 /// first.
 pub fn join(cfg: &AppConfig, address: &str) -> anyhow::Result<LaunchOutcome> {
     let address = parse_server_address(address)?;
-    launch_with(cfg, Some(&address))
+    launch_with(cfg, Some(&Join::direct(&address)))
+}
+
+/// [`join`] for a passworded server: the game opens its own password dialog instead of
+/// connecting blind and being turned away. `lan` and `name` are the server's as the list has
+/// them; see [`prompt_url`].
+pub fn join_locked(cfg: &AppConfig, address: &str, lan: &str, name: &str) -> anyhow::Result<LaunchOutcome> {
+    let address = parse_server_address(address)?;
+    launch_with(cfg, Some(&Join::locked(&address, lan, name)))
 }
 
 /// Normalize a user-supplied server address into the `host:port` form the connect flag
@@ -1934,6 +1980,63 @@ fn connect_args(address: &str) -> [String; 2] {
     [CONNECT_FLAG.to_string(), address.to_string()]
 }
 
+/// A server to start the game into: the normalized address, and the two argv entries that
+/// get it there.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Join {
+    address: String,
+    args: [String; 2],
+}
+
+impl Join {
+    /// `-directconnect address`: no password asked.
+    fn direct(address: &str) -> Self {
+        Join { address: address.to_string(), args: connect_args(address) }
+    }
+
+    /// Through the game's password dialog, when the address is one the URL can carry.
+    /// Anything else (a hostname) keeps the direct join, which is all it ever had.
+    fn locked(address: &str, lan: &str, name: &str) -> Self {
+        match prompt_url(address, lan, name) {
+            Some(url) => Join { address: address.to_string(), args: [PROMPT_FLAG.to_string(), url] },
+            None => Join::direct(address),
+        }
+    }
+}
+
+/// The [`PROMPT_FLAG`] value for a passworded server, or `None` when `address` isn't
+/// IPv4:port.
+///
+/// The LAN field takes the server's self-reported address only when it too is IPv4:port -
+/// the game rejects the whole URL otherwise - and repeats the public one when it isn't. The
+/// name is display-only, so it is cut down to what can't break the URL or the argv: printable
+/// ASCII, no `/` (a field separator), no `%`, `"` or `\`, and spaces sent as `%20` so the
+/// value is one argv with no whitespace in it.
+fn prompt_url(address: &str, lan: &str, name: &str) -> Option<String> {
+    let public: std::net::SocketAddrV4 = address.parse().ok()?;
+    let lan = lan
+        .trim()
+        .parse::<std::net::SocketAddrV4>()
+        .ok()
+        .filter(|a| a.port() > 0)
+        .unwrap_or(public);
+    let mut clean = String::new();
+    for c in name.chars() {
+        if c.is_whitespace() {
+            if !clean.is_empty() && !clean.ends_with(' ') {
+                clean.push(' ');
+            }
+        } else if c.is_ascii_graphic() && !matches!(c, '/' | '%' | '"' | '\\') {
+            clean.push(c);
+        }
+    }
+    let mut clean: String = clean.chars().take(64).collect::<String>().trim().to_string();
+    if clean.is_empty() {
+        clean = public.to_string();
+    }
+    Some(format!("mxbikes://{public}/{lan}/{}/1/x/x/x", clean.replace(' ', "%20")))
+}
+
 /// When the current game session was first noticed, or `None` if the game isn't up.
 static SESSION_SINCE: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
 
@@ -1951,8 +2054,9 @@ pub fn session_age() -> Option<std::time::Duration> {
     SESSION_SINCE.lock().ok().and_then(|slot| *slot).map(|at| at.elapsed())
 }
 
-/// Shared body of [`launch`] and [`join`] — `address` is already normalized.
-fn launch_with(cfg: &AppConfig, address: Option<&str>) -> anyhow::Result<LaunchOutcome> {
+/// Shared body of [`launch`] and [`join`] — the address in `join` is already normalized.
+fn launch_with(cfg: &AppConfig, join: Option<&Join>) -> anyhow::Result<LaunchOutcome> {
+    let address = join.map(|j| j.address.as_str());
     if is_game_running() {
         return Ok(LaunchOutcome::AlreadyRunning);
     }
@@ -1967,8 +2071,8 @@ fn launch_with(cfg: &AppConfig, address: Option<&str>) -> anyhow::Result<LaunchO
                 let appid = cfg.game().steam_appid;
                 if steam_says_installed(appid) == Some(true) {
                     log::warn!("{e:#}; Steam has {} installed, asking it to start the game", cfg.game().display);
-                    let started = match address {
-                        Some(addr) => steam_applaunch(appid, addr),
+                    let started = match join {
+                        Some(j) => steam_applaunch(appid, j),
                         None => shell_open(&steam_url(appid, None)),
                     };
                     return match started {
@@ -2016,8 +2120,8 @@ fn launch_with(cfg: &AppConfig, address: Option<&str>) -> anyhow::Result<LaunchO
                 ),
                 SteamRoute::AppLaunch => {
                     // `steam_route` only picks this with an address in hand.
-                    let addr = address.unwrap_or_default();
-                    match steam_applaunch(appid, addr) {
+                    let Some(j) = join else { unreachable!("AppLaunch without an address") };
+                    match steam_applaunch(appid, j) {
                         Ok(()) => {
                             watch_for_start("Steam", Some(dir.clone()));
                             return Ok(LaunchOutcome::Launched);
@@ -2028,7 +2132,7 @@ fn launch_with(cfg: &AppConfig, address: Option<&str>) -> anyhow::Result<LaunchO
                     }
                 }
                 SteamRoute::Url => {
-                    let url = steam_url(appid, address);
+                    let url = steam_url(appid, join);
                     match shell_open(&url) {
                         Ok(()) => {
                             watch_for_start("Steam", Some(dir.clone()));
@@ -2046,8 +2150,8 @@ fn launch_with(cfg: &AppConfig, address: Option<&str>) -> anyhow::Result<LaunchO
         // draws its own window and hiding the console would gain nothing.
         let mut cmd = std::process::Command::new(&exe);
         cmd.current_dir(&dir);
-        if let Some(addr) = address {
-            cmd.args(connect_args(addr));
+        if let Some(j) = join {
+            cmd.args(&j.args);
         }
         cmd.spawn().map_err(|e| spawn_error(&exe, &e))?;
         Ok(LaunchOutcome::Launched)
@@ -2060,7 +2164,7 @@ fn launch_with(cfg: &AppConfig, address: Option<&str>) -> anyhow::Result<LaunchO
         // us — spawns it. So a join here still meets Steam's approval dialog for the extra
         // command line, which Windows now sidesteps by running the exe; there is no
         // sidestep to offer when Steam owns the prefix.
-        let url = steam_url(cfg.game().steam_appid, address);
+        let url = steam_url(cfg.game().steam_appid, join);
         std::process::Command::new("xdg-open").arg(&url).spawn().map_err(|e| {
             anyhow::anyhow!("Couldn't ask Steam to launch {} ({url}): {e}", cfg.game().display)
         })?;
@@ -2071,7 +2175,7 @@ fn launch_with(cfg: &AppConfig, address: Option<&str>) -> anyhow::Result<LaunchO
     {
         let (prefix, runner) = prefix_and_runner(cfg, &exe)?;
 
-        let extra: Vec<String> = address.map(|a| connect_args(a).to_vec()).unwrap_or_default();
+        let extra: Vec<String> = join.map(|j| j.args.to_vec()).unwrap_or_default();
         let plan = crate::winehost::plan(&runner, &prefix, &exe, &extra);
         log::info!(
             "via {}: {} {:?}",
@@ -2172,7 +2276,7 @@ mod tests {
     #[test]
     fn encodes_the_separator_between_steam_launch_arguments() {
         assert_eq!(
-            steam_url("655500", Some("203.0.113.10:54210")),
+            steam_url("655500", Some(&Join::direct("203.0.113.10:54210"))),
             "steam://rungameid/655500//-directconnect%20203.0.113.10:54210"
         );
     }
@@ -2195,7 +2299,7 @@ mod tests {
     #[test]
     fn applaunch_args_start_the_app_and_connect_it() {
         assert_eq!(
-            applaunch_args("655500", "203.0.113.10:54210").unwrap(),
+            applaunch_args("655500", &Join::direct("203.0.113.10:54210")).unwrap(),
             ["-applaunch", "655500", "-directconnect", "203.0.113.10:54210"]
         );
     }
@@ -2203,7 +2307,7 @@ mod tests {
     #[test]
     fn applaunch_args_refuse_anything_that_could_become_a_second_argument() {
         for appid in ["", "655500 -x", "-1", "65a"] {
-            assert!(applaunch_args(appid, "203.0.113.10:54210").is_err(), "{appid:?}");
+            assert!(applaunch_args(appid, &Join::direct("203.0.113.10:54210")).is_err(), "{appid:?}");
         }
         for addr in [
             "203.0.113.10:54210 -log",
@@ -2212,8 +2316,51 @@ mod tests {
             " 203.0.113.10:54210",
             "203.0.113.10:54210\"",
         ] {
-            assert!(applaunch_args("655500", addr).is_err(), "{addr:?}");
+            assert!(applaunch_args("655500", &Join::direct(addr)).is_err(), "{addr:?}");
         }
+    }
+
+    #[test]
+    fn a_locked_server_goes_through_the_password_dialog_url() {
+        let j = Join::locked("51.81.210.185:54323", "", "Bennys dedi");
+        let url = "mxbikes://51.81.210.185:54323/51.81.210.185:54323/Bennys%20dedi/1/x/x/x";
+        assert_eq!(j.args, ["-connect".to_string(), url.to_string()]);
+        assert_eq!(applaunch_args("655500", &j).unwrap(), ["-applaunch", "655500", "-connect", url]);
+    }
+
+    #[test]
+    fn prompt_url_uses_the_lan_address_only_when_the_game_can_parse_it() {
+        let url = |lan| prompt_url("203.0.113.10:54210", lan, "S").unwrap();
+        assert_eq!(url("192.168.0.2:54210"), "mxbikes://203.0.113.10:54210/192.168.0.2:54210/S/1/x/x/x");
+        for bad in ["", "192.168.0.2", "54210", "lan.example:54210", "[::1]:54210", "192.168.0.2:0"] {
+            assert_eq!(url(bad), "mxbikes://203.0.113.10:54210/203.0.113.10:54210/S/1/x/x/x", "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn prompt_url_keeps_the_name_to_one_field_and_one_argv() {
+        let u = prompt_url("203.0.113.10:54210", "", "  EU / MX2  -log \"x\"\t50%  ").unwrap();
+        assert_eq!(u, "mxbikes://203.0.113.10:54210/203.0.113.10:54210/EU%20MX2%20-log%20x%2050/1/x/x/x");
+        assert_eq!(u["mxbikes://".len()..].split('/').count(), 7);
+        assert!(!u.chars().any(char::is_whitespace));
+        // Nothing printable left: the address stands in so the field is never empty.
+        assert_eq!(
+            prompt_url("203.0.113.10:54210", "", "///").unwrap(),
+            "mxbikes://203.0.113.10:54210/203.0.113.10:54210/203.0.113.10:54210/1/x/x/x"
+        );
+    }
+
+    #[test]
+    fn a_locked_hostname_falls_back_to_a_direct_join() {
+        assert_eq!(Join::locked("mx.example.com:54210", "", "S"), Join::direct("mx.example.com:54210"));
+    }
+
+    #[test]
+    fn a_locked_join_survives_the_steam_url_as_one_argument() {
+        assert_eq!(
+            steam_url("655500", Some(&Join::locked("203.0.113.10:54210", "", "A B"))),
+            "steam://rungameid/655500//-connect%20mxbikes://203.0.113.10:54210/203.0.113.10:54210/A%2520B/1/x/x/x"
+        );
     }
 
     #[test]

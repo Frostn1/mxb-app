@@ -142,6 +142,22 @@ function priceOf(item: MergedMod): number {
 }
 
 /** Interleaves the catalogues, so "All sources" is one list rather than three stacked. */
+/** Each source's items in the order that source gave them, taken one from each in turn. */
+export function interleaveBySource(items: MergedMod[]): MergedMod[] {
+  const queues = new Map<MergedMod["source"], MergedMod[]>();
+  for (const item of items) {
+    const q = queues.get(item.source);
+    if (q) q.push(item);
+    else queues.set(item.source, [item]);
+  }
+  const out: MergedMod[] = [];
+  const lists = [...queues.values()];
+  for (let i = 0; out.length < items.length; i++) {
+    for (const list of lists) if (i < list.length) out.push(list[i]);
+  }
+  return out;
+}
+
 export function sortMerged(items: MergedMod[], sort: ModsSort): MergedMod[] {
   const out = [...items];
   switch (sort) {
@@ -153,8 +169,11 @@ export function sortMerged(items: MergedMod[], sort: ModsSort): MergedMod[] {
       return out.sort((a, b) => priceOf(a) - priceOf(b));
     case "priceDesc":
       return out.sort((a, b) => priceOf(b) - priceOf(a));
-    // "Popular" has no shared meaning across three sites, so the merge keeps each source's
-    // own idea of it and falls back to newest for the interleave.
+    // "Popular" has no shared meaning across three sites (views on mxb-mods, the Hub's own
+    // ranking), so the merge keeps each source's own order and takes them in turn: the most
+    // popular of each first. Sorting by date here put the newest on top under "Most popular".
+    case "popular":
+      return interleaveBySource(out);
     default:
       return out.sort((a, b) => (b.updated ?? 0) - (a.updated ?? 0));
   }

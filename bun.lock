@@ -14,9 +14,57 @@
         "typescript-eslint": "^8.13.0",
       },
     },
+    "apps/cinema": {
+      "name": "@frost/cinema",
+      "version": "0.1.0",
+      "dependencies": {
+        "@frost/shared": "*",
+        "@tauri-apps/api": "^2.1.1",
+        "@tauri-apps/plugin-dialog": "^2.2.0",
+        "@tauri-apps/plugin-process": "^2.3.1",
+        "@tauri-apps/plugin-shell": "^2.2.0",
+        "lucide-react": "^1.24.0",
+        "react": "^18.3.1",
+        "react-dom": "^18.3.1",
+        "sonner": "^2.0.7",
+      },
+      "devDependencies": {
+        "@tailwindcss/vite": "^4.3.2",
+        "@tauri-apps/cli": "^2.1.0",
+        "@types/react": "^18.3.12",
+        "@types/react-dom": "^18.3.1",
+        "@vitejs/plugin-react": "^4.3.3",
+        "vite": "^5.4.10",
+      },
+    },
+    "apps/coach": {
+      "name": "@frost/coach",
+      "version": "0.1.27",
+      "dependencies": {
+        "@frost/shared": "*",
+        "@tauri-apps/api": "^2.1.1",
+        "@tauri-apps/plugin-clipboard-manager": "^2.3.3",
+        "@tauri-apps/plugin-dialog": "^2.2.0",
+        "@tauri-apps/plugin-process": "^2.3.1",
+        "@tauri-apps/plugin-shell": "^2.2.0",
+        "@tauri-apps/plugin-updater": "^2.10.1",
+        "lucide-react": "^1.24.0",
+        "react": "^18.3.1",
+        "react-dom": "^18.3.1",
+        "sonner": "^2.0.7",
+      },
+      "devDependencies": {
+        "@tailwindcss/vite": "^4.3.2",
+        "@tauri-apps/cli": "^2.1.0",
+        "@types/react": "^18.3.12",
+        "@types/react-dom": "^18.3.1",
+        "@vitejs/plugin-react": "^4.3.3",
+        "vite": "^5.4.10",
+      },
+    },
     "apps/manager": {
       "name": "@frost/manager",
-      "version": "0.20.3",
+      "version": "0.20.6",
       "dependencies": {
         "@frost/shared": "*",
         "@radix-ui/react-alert-dialog": "^1.1.19",
@@ -60,6 +108,64 @@
         "@types/three": "^0.160.0",
         "@vitejs/plugin-react": "^4.3.3",
         "vite": "^5.4.10",
+      },
+    },
+    "apps/servers": {
+      "name": "@frost/servers",
+      "version": "0.1.0",
+      "dependencies": {
+        "@frost/mxbsecure-ui": "*",
+        "@tauri-apps/api": "^2.1.1",
+        "@tauri-apps/plugin-dialog": "^2.2.0",
+        "lucide-react": "^1.24.0",
+        "react": "^18.3.1",
+        "react-dom": "^18.3.1",
+      },
+      "devDependencies": {
+        "@tailwindcss/vite": "^4.3.2",
+        "@tauri-apps/cli": "^2.1.0",
+        "@types/react": "^18.3.12",
+        "@types/react-dom": "^18.3.1",
+        "@vitejs/plugin-react": "^4.3.3",
+        "jsdom": "^25.0.1",
+        "tailwindcss": "^4.3.2",
+        "vite": "^5.4.10",
+        "vitest": "^2.1.0",
+      },
+    },
+    "apps/studio": {
+      "name": "@frost/studio",
+      "version": "0.10.0",
+      "dependencies": {
+        "@frost/shared": "*",
+        "@tauri-apps/api": "^2.1.1",
+        "@tauri-apps/plugin-dialog": "^2.2.0",
+        "@tauri-apps/plugin-process": "^2.3.1",
+        "@tauri-apps/plugin-shell": "^2.2.0",
+        "@tauri-apps/plugin-updater": "^2.10.1",
+        "lucide-react": "^1.24.0",
+        "react": "^18.3.1",
+        "react-dom": "^18.3.1",
+        "sonner": "^2.0.7",
+      },
+      "devDependencies": {
+        "@tailwindcss/vite": "^4.3.2",
+        "@tauri-apps/cli": "^2.1.0",
+        "@types/react": "^18.3.12",
+        "@types/react-dom": "^18.3.1",
+        "@vitejs/plugin-react": "^4.3.3",
+        "vite": "^5.4.10",
+      },
+    },
+    "packages/mxbsecure-ui": {
+      "name": "@frost/mxbsecure-ui",
+      "version": "0.0.0",
+      "dependencies": {
+        "@fontsource/geist-mono": "^5.3.0",
+        "react": "^18.3.1",
+      },
+      "devDependencies": {
+        "@types/react": "^18.3.12",
       },
     },
     "packages/shared": {
@@ -224,14 +330,20 @@
 
     "@fontsource/geist-mono": ["@fontsource/geist-mono@5.3.0", "", {}, "sha512-UtJ1BBBCVpMYdIcW7nEB45UAoAw5M53ZXs2t0ciPW+IokuAAIc56M8+kW5tXbRJCTpDw4XTtU7proT6NdQAHTg=="],
 
+    "@frost/cinema": ["@frost/cinema@workspace:apps/cinema"],
+
+    "@frost/coach": ["@frost/coach@workspace:apps/coach"],
 
 
     "@frost/manager": ["@frost/manager@workspace:apps/manager"],
 
+    "@frost/mxbsecure-ui": ["@frost/mxbsecure-ui@workspace:packages/mxbsecure-ui"],
 
+    "@frost/servers": ["@frost/servers@workspace:apps/servers"],
 
     "@frost/shared": ["@frost/shared@workspace:packages/shared"],
 
+    "@frost/studio": ["@frost/studio@workspace:apps/studio"],
 
     "@humanfs/core": ["@humanfs/core@0.19.2", "", { "dependencies": { "@humanfs/types": "^0.15.0" } }, "sha512-UhXNm+CFMWcbChXywFwkmhqjs3PRCmcSa/hfBgLIb7oQ5HNb1wS0icWsGtSAUNgefHeI+eBrA8I1fxmbHsGdvA=="],
 

@@ -309,7 +309,7 @@ async fn take_turn(
     let (app, key) = (app.clone(), key.to_string());
     let (categories, bikes) = (categories.to_vec(), bikes.to_vec());
     tauri::async_runtime::spawn_blocking(move || {
-        crate::join_listed_server_now(app, key, categories, bikes)
+        crate::join_listed_server_now(app, key, categories, bikes, None)
     })
     .await
     .map_err(|e| format!("queue join task failed: {e}"))?

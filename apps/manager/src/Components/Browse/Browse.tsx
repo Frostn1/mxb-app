@@ -7,6 +7,7 @@ import type { ModListing } from "../../lib/useModListing";
 import { useT } from "@/i18n";
 import ModCard from "./ModCard";
 import FeaturedMod from "./FeaturedMod";
+import { ListingBoundary, ListingError } from "./ListingError";
 import { useQuickInstall } from "./useQuickInstall";
 import { SearchBox } from "@frost/shared/Components/ui/search-box";
 import { Button } from "@frost/shared/Components/ui/button";
@@ -185,20 +186,9 @@ export default function Browse({
         onScroll={(e) => (scrollTop.current = e.currentTarget.scrollTop)}
         className="min-h-0 flex-1 overflow-y-auto px-7 pb-6"
       >
+        <ListingBoundary key={`${activeSort}|${categoryId}`} onRetry={reload}>
         {error ? (
-          <div className="mx-auto flex max-w-md flex-col items-center gap-3 py-20 text-center">
-            <p className="text-[13px] font-semibold text-destructive">
-              {t("browse.loadFailed")}
-            </p>
-            {/* The backend now explains blocks in plain words; show that on its own line
-                rather than glued to the heading, and keep it selectable for bug reports. */}
-            <p className="select-text text-[12.5px] leading-relaxed text-muted-foreground">
-              {error.replace(/^Error:\s*/, "")}
-            </p>
-            <Button variant="outline" size="sm" onClick={reload}>
-              {t("common.retry")}
-            </Button>
-          </div>
+          <ListingError message={error} onRetry={reload} />
         ) : loading ? (
           <div className="grid grid-cols-[repeat(auto-fill,minmax(clamp(178px,12vw,260px),1fr))] gap-3.5">
             {Array.from({ length: 8 }).map((_, i) => (
@@ -245,6 +235,7 @@ export default function Browse({
             )}
           </>
         )}
+        </ListingBoundary>
       </div>
 
       {selectionActive && (

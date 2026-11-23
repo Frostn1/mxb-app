@@ -1,7 +1,10 @@
 import { useState } from "react";
 import { Loader2, Palette } from "lucide-react";
+import { toast } from "sonner";
+import { setPaintSyncModels } from "@frost/shared/api/mods";
 import { Button } from "@frost/shared/Components/ui/button";
 import { Switch } from "@frost/shared/Components/ui/switch";
+import { useConfig } from "@frost/shared/Context/Config";
 import { cn } from "@frost/shared/lib/utils";
 import { useT, type TKey } from "@/i18n";
 import { usePaintSyncSetup, type PaintSyncStatus } from "../../lib/usePaintSyncSetup";
@@ -26,21 +29,34 @@ const STATUS_LABEL: Record<PaintSyncStatus, TKey> = {
  */
 export default function PaintSyncCard() {
   const t = useT();
+  const { config, reloadConfig } = useConfig();
   const setup = usePaintSyncSetup();
   const { status, busy, turnOff } = setup;
   const [confirming, setConfirming] = useState(false);
+  const [modelsBusy, setModelsBusy] = useState(false);
 
   const on = status === "on";
   const canTurnOn = status === "off" || status === "needsIntegration" || status === "paused";
+  const modelsOn = config.paintSyncModels ?? false;
+
+  const changeModels = async (enabled: boolean) => {
+    setModelsBusy(true);
+    try {
+      await setPaintSyncModels(enabled);
+      await reloadConfig();
+    } catch (error) {
+      toast.error(String(error));
+    } finally {
+      setModelsBusy(false);
+    }
+  };
 
   return (
-    <div className="flex min-w-0 flex-col gap-3 rounded-xl border border-primary/25 bg-card p-[18px]">
+    <div className="flex min-w-0 flex-col gap-3 rounded-xl border border-border bg-card p-[18px]">
       <div className="flex items-start gap-3">
-        <div className="grid size-10 flex-none place-items-center rounded-xl bg-primary/10 text-primary">
-          <Palette className="size-5" />
-        </div>
         <div className="flex min-w-0 flex-1 flex-col gap-1">
           <div className="flex items-center gap-2">
+            <Palette className="size-4 text-muted-foreground" />
             <span className="text-[15px] font-bold">{t("settings.paintSync")}</span>
             {status && (
               <span
@@ -78,7 +94,7 @@ export default function PaintSyncCard() {
       </div>
 
       {canTurnOn && (
-        <div className="flex flex-wrap items-center gap-3 pl-[52px]">
+        <div className="flex flex-wrap items-center gap-3">
           <Button size="sm" onClick={() => setConfirming(true)} disabled={busy}>
             {busy && <Loader2 className="size-3.5 animate-spin" />}
             {t(status === "paused" ? "paintSync.fix" : "paintSync.turnOn")}
@@ -91,7 +107,7 @@ export default function PaintSyncCard() {
         </div>
       )}
       {status === "paused" && (
-        <div className="pl-[52px]">
+        <div>
           <button
             type="button"
             onClick={() => void turnOff()}
@@ -101,6 +117,21 @@ export default function PaintSyncCard() {
           </button>
         </div>
       )}
+
+      <div className="flex items-start gap-3 border-t border-border/60 pt-3">
+        <div className="min-w-0 flex-1">
+          <div className="text-[12.5px] font-semibold">{t("paintSync.models")}</div>
+          <div className="mt-0.5 text-[11.5px] leading-relaxed text-muted-foreground">
+            {t("paintSync.modelsHelp")}
+          </div>
+        </div>
+        <Switch
+          checked={modelsOn}
+          disabled={!config.paintSyncEnabled || modelsBusy}
+          onCheckedChange={(enabled) => void changeModels(enabled)}
+          aria-label={t("paintSync.models")}
+        />
+      </div>
 
       <PaintSyncConfirm open={confirming} onOpenChange={setConfirming} setup={setup} />
     </div>

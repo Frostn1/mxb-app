@@ -12,6 +12,24 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+/// A bike folder FrostMod created to hold another rider's remapped model.
+/// `<bike>~<8 lowercase hex>` is an implementation detail, never a bike the app should list.
+pub fn is_frostmod_shadow_bike(name: &str) -> bool {
+    let bytes = name.as_bytes();
+    bytes.len() >= 9
+        && bytes[bytes.len() - 9] == b'~'
+        && bytes[bytes.len() - 8..]
+            .iter()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(b))
+}
+
+fn under_shadow_bike(base: &Path, path: &Path) -> bool {
+    path.strip_prefix(base)
+        .ok()
+        .and_then(|rel| rel.components().next())
+        .is_some_and(|part| is_frostmod_shadow_bike(&part.as_os_str().to_string_lossy()))
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct InstalledMod {
@@ -255,6 +273,11 @@ pub fn scan_mods(mods_path: &str, subpath: &str) -> anyhow::Result<Vec<Installed
 
     let mut items = Vec::new();
     for entry in linkwalk::walk(&dir).into_iter().filter_map(|e| e.ok()) {
+        if subpath.rsplit(['/', '\\']).next().is_some_and(|s| s.eq_ignore_ascii_case("bikes"))
+            && under_shadow_bike(&dir, entry.path())
+        {
+            continue;
+        }
         if !entry.file_type().is_file() {
             continue;
         }
@@ -372,6 +395,7 @@ pub fn scan_rider_targets(mods_path: &str) -> RiderTargets {
 /// writes a line per bike it knows.
 pub fn scan_bike_targets(mods_path: &str, profiles_dir: &Path) -> Vec<String> {
     let mut out = models_in(&mods_subdir(mods_path, "mods/bikes"));
+    out.retain(|bike| !is_frostmod_shadow_bike(bike));
     for profile in crate::presets::list_profiles(profiles_dir) {
         // A profile we can't read is one source short, never an error — the folders above
         // still stand on their own.
@@ -699,6 +723,9 @@ fn scan_bikes(dir: &Path, sound_bikes: &[String]) -> Vec<LibraryEntry> {
     }
 
     for entry in linkwalk::walk(dir).into_iter().filter_map(|e| e.ok()) {
+        if under_shadow_bike(dir, entry.path()) {
+            continue;
+        }
         if !entry.file_type().is_file() {
             continue;
         }
@@ -737,6 +764,9 @@ fn scan_bikes(dir: &Path, sound_bikes: &[String]) -> Vec<LibraryEntry> {
         .map(|e| strip_ext(&e.name).to_lowercase())
         .collect();
     for name in immediate_dirs(dir) {
+        if is_frostmod_shadow_bike(&name) {
+            continue;
+        }
         if packed_readable.contains(&name.to_lowercase()) {
             continue;
         }
@@ -958,6 +988,27 @@ mod tests {
         let out = scan_bike_targets(root.to_str().unwrap(), &root.join("nope"));
         assert_eq!(out, vec!["Some Bike".to_string()]);
         let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn frostmod_shadow_bikes_are_hidden_from_targets_and_library_scans() {
+        assert!(is_frostmod_shadow_bike("KTM450~09af12bc"));
+        for visible in ["KTM450", "KTM450~09AF12BC", "KTM450~09af12b", "KTM450~09af12bcx"] {
+            assert!(!is_frostmod_shadow_bike(visible), "{visible}");
+        }
+        let root = tmp("shadow-bikes");
+        let shadow = root.join("mods/bikes/KTM450~09af12bc");
+        touch(&shadow.join("KTM450.cfg"));
+        touch(&shadow.join("model.edf"));
+        touch(&shadow.join("paints/Remote.pnt"));
+        touch(&shadow.join("_modelsync.txt"));
+        touch(&root.join("mods/bikes/KTM450/KTM450.cfg"));
+
+        let targets = scan_bike_targets(root.to_str().unwrap(), &root.join("profiles"));
+        assert_eq!(targets, vec!["KTM450".to_string()]);
+        let entries = scan_library(root.to_str().unwrap(), "mods/bikes", &[], &crate::game::MXB).unwrap();
+        assert!(entries.iter().all(|e| !e.path.contains("KTM450~09af12bc")), "{entries:?}");
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]

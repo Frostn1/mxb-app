@@ -1,0 +1,63 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Server Watcher (background)</title>
+    <script src="watch.js"></script>
+  </head>
+  <body>
+    <script>
+      // Runs while the extension is enabled. Every minute: compare the server list and
+      // friends with the last look, and say what changed that the person asked about.
+      const seenFull = new Set(); // servers we already announced, until they empty again
+      let onlineBefore = null; // friend names riding last time; null until the first look
+
+      async function check(manual) {
+        const s = await mxb.settings.get();
+        if (s.quietInGame && !manual) {
+          try {
+            if ((await mxb.game.state()).running) return;
+          } catch {}
+        }
+        const min = Math.max(1, Number(s.minRiders) || 10);
+        const words = watchWords(s.tracks);
+        const servers = await mxb.servers.list();
+        const said = [];
+        for (const srv of servers) {
+          if (!isWatched(srv, words) || srv.passworded) continue;
+          const key = srv.address;
+          if (srv.players >= min && !seenFull.has(key)) {
+            seenFull.add(key);
+            said.push(`${srv.track || srv.name}: ${srv.players}/${srv.maxPlayers} on ${srv.name}`);
+          } else if (srv.players < Math.max(1, min - 4)) {
+            seenFull.delete(key);
+          }
+        }
+        // The first look only learns the room; it would announce everything that's already busy.
+        if (onlineBefore !== null || manual) said.forEach((m) => mxb.ui.toast(m, "info"));
+
+        if (s.friends) {
+          try {
+            const friends = (await mxb.friends.list()).filter((f) => f.online && f.server);
+            const now = new Set(friends.map((f) => f.name));
+            if (onlineBefore) {
+              for (const f of friends) {
+                if (!onlineBefore.has(f.name)) mxb.ui.toast(`${f.name} is riding on ${f.server}${f.track ? ` (${f.track})` : ""}`, "success");
+              }
+            }
+            onlineBefore = now;
+          } catch {
+            onlineBefore = onlineBefore ?? new Set();
+          }
+        } else {
+          onlineBefore = onlineBefore ?? new Set();
+        }
+        if (manual && said.length === 0) mxb.ui.toast("Nothing new on the servers you watch");
+      }
+
+      mxb.commands.on("checkNow", () => check(true).catch((e) => mxb.ui.toast(String(e.message || e), "error")));
+      check(false).catch(() => {});
+      setInterval(() => check(false).catch(() => {}), 60_000);
+    </script>
+  </body>
+</html>

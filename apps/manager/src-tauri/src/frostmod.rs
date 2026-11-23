@@ -15,6 +15,8 @@ pub enum ReloadOutcome {
     NotRunning,
     /// This platform can't talk to FrostMod (non-Windows dev builds).
     Unsupported,
+    /// Delayed until the game has been off an online server for five minutes.
+    Held,
 }
 
 #[cfg(windows)]
@@ -44,7 +46,7 @@ fn open_reload_event() -> ffi::Handle {
 
 /// Signal FrostMod to re-scan the mods folder. Best-effort.
 #[cfg(windows)]
-pub fn signal_reload() -> ReloadOutcome {
+pub(crate) fn signal_reload_now() -> ReloadOutcome {
     let handle = open_reload_event();
     if handle.is_null() {
         return ReloadOutcome::NotRunning;
@@ -88,7 +90,7 @@ pub fn reload_listener_present() -> bool {
 /// verb FrostMod v0.13.0 added for exactly this. A FrostMod too old to read that file is
 /// refused a start at all ([`reads_command_files`]), so anything running here can hear us.
 #[cfg(any(target_os = "linux", target_os = "macos"))]
-pub fn signal_reload() -> ReloadOutcome {
+pub(crate) fn signal_reload_now() -> ReloadOutcome {
     match send_command(command_json("reload_mods", "")) {
         CommandOutcome::Signaled => ReloadOutcome::Signaled,
         CommandOutcome::NotRunning => ReloadOutcome::NotRunning,
@@ -101,8 +103,18 @@ pub fn signal_reload() -> ReloadOutcome {
 }
 
 #[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
-pub fn signal_reload() -> ReloadOutcome {
+pub(crate) fn signal_reload_now() -> ReloadOutcome {
     ReloadOutcome::Unsupported
+}
+
+/// Signal a full content reload, or hold it while an online session is active.
+pub fn signal_reload() -> ReloadOutcome {
+    if crate::serverhold::on_server_now() {
+        crate::serverhold::hold(ReloadKind::Full, "full reload");
+        ReloadOutcome::Held
+    } else {
+        signal_reload_now()
+    }
 }
 
 /// The plugin copy the app installed while FrostMod runs as a game plugin.
@@ -234,10 +246,30 @@ pub fn gear_refresh_supported(tag: Option<&str>) -> bool {
     }
 }
 
+/// The oldest FrostMod that replaces remote riders' model-swap ids from a LOOKS payload.
+pub const RIDER_LOOKS_MIN_VERSION: &str = "v0.53.0";
+
+pub fn rider_looks_supported(tag: Option<&str>) -> bool {
+    match (tag.and_then(version_parts), version_parts(RIDER_LOOKS_MIN_VERSION)) {
+        (Some(have), Some(min)) => have >= min,
+        _ => false,
+    }
+}
+
+/// Replace FrostMod's complete remote-rider model map. Callers apply the version gate.
+pub fn signal_set_rider_looks(looks: &str) -> CommandOutcome {
+    send_command(mxb_core::frostmodcmd::rider_looks_json(looks))
+}
+
 /// Ask FrostMod to rebuild the rider gear lists (helmets, boots, rider models, protections
 /// and their paints). Callers clear [`gear_refresh_supported`] first.
 pub fn signal_refresh_gear() -> CommandOutcome {
-    send_command(command_json("refresh_gear", ""))
+    if crate::serverhold::on_server_now() {
+        crate::serverhold::hold(ReloadKind::Gear, "gear refresh");
+        CommandOutcome::Held
+    } else {
+        send_command(command_json("refresh_gear", ""))
+    }
 }
 
 /// The oldest FrostMod that handles `refresh_tracks` and `refresh_bikes` (frostmod#139). An
@@ -276,6 +308,18 @@ pub fn nantrap_supported(tag: Option<&str>) -> bool {
     }
 }
 
+/// The oldest FrostMod that reads `aussiemode=1` from `frostmod_radar.cfg` (other riders'
+/// collision bodies on the Beta 20 spring). An older one ignores the key.
+pub const AUSSIEMODE_MIN_VERSION: &str = "v0.52.0";
+
+/// Does the installed FrostMod, tagged `tag`, honour `aussiemode`? An unreadable tag is no.
+pub fn aussiemode_supported(tag: Option<&str>) -> bool {
+    match (tag.and_then(version_parts), version_parts(AUSSIEMODE_MIN_VERSION)) {
+        (Some(have), Some(min)) => have >= min,
+        _ => false,
+    }
+}
+
 /// Which of FrostMod's content refreshes to ask for. The smaller ones replay only some rows of
 /// its verified reload table, so they skip the slow lists:
 /// `Paints` the six paint lists; `Gear` the rider gear models and every paint list; `Tracks`
@@ -289,6 +333,10 @@ pub enum ReloadKind {
     Tracks,
     Bikes,
     Full,
+}
+
+fn held_kind(kind: ReloadKind, holding: bool) -> bool {
+    holding && kind != ReloadKind::Paints
 }
 
 /// The verb for `kind`, or `None` when the installed FrostMod (tagged `tag`) can't do that
@@ -307,13 +355,42 @@ pub fn reload_kind_verb(kind: ReloadKind, tag: Option<&str>) -> Option<&'static 
 /// full reload, on the reload event, for every FrostMod). A FrostMod too old for the kind, or
 /// a command that couldn't be delivered, gets the full reload instead.
 pub fn signal_reload_kind(kind: ReloadKind, tag: Option<&str>) -> ReloadOutcome {
+    if held_kind(kind, crate::serverhold::on_server_now()) {
+        crate::serverhold::hold(kind, "scoped content refresh");
+        return ReloadOutcome::Held;
+    }
+    signal_reload_kind_now(kind, tag)
+}
+
+pub(crate) fn signal_reload_kind_now(kind: ReloadKind, tag: Option<&str>) -> ReloadOutcome {
+    if kind == ReloadKind::Full {
+        return signal_reload_now();
+    }
     let Some(verb) = reload_kind_verb(kind, tag) else {
-        return signal_reload();
+        return signal_reload_now();
     };
     match send_command(command_json(verb, "")) {
         CommandOutcome::Signaled => ReloadOutcome::Signaled,
         CommandOutcome::Unsupported => ReloadOutcome::Unsupported,
-        _ => signal_reload(),
+        _ => signal_reload_now(),
+    }
+}
+
+pub(crate) fn signal_held_kind_now(kind: ReloadKind) -> ReloadOutcome {
+    if kind == ReloadKind::Full {
+        return signal_reload_now();
+    }
+    let verb = match kind {
+        ReloadKind::Paints => "refresh_paints",
+        ReloadKind::Gear => "refresh_gear",
+        ReloadKind::Tracks => "refresh_tracks",
+        ReloadKind::Bikes => "refresh_bikes",
+        ReloadKind::Full => unreachable!(),
+    };
+    match send_command(command_json(verb, "")) {
+        CommandOutcome::Signaled => ReloadOutcome::Signaled,
+        CommandOutcome::Unsupported => ReloadOutcome::Unsupported,
+        _ => signal_reload_now(),
     }
 }
 
@@ -675,6 +752,14 @@ mod tests {
         assert!(!gear_refresh_supported(None));
     }
 
+    #[test]
+    fn rider_looks_wait_for_v0_53_0() {
+        assert!(rider_looks_supported(Some("v0.53.0")));
+        assert!(rider_looks_supported(Some("v0.54.1")));
+        assert!(!rider_looks_supported(Some("v0.52.9")));
+        assert!(!rider_looks_supported(None));
+    }
+
     /// Only a FrostMod that handles `refresh_paints` is sent it: an older one drops it
     /// silently, which would read as a refresh that happened.
     #[test]
@@ -698,6 +783,16 @@ mod tests {
         assert_eq!(reload_kind_verb(ReloadKind::Bikes, Some("v0.50.0")), Some("refresh_bikes"));
         assert_eq!(reload_kind_verb(ReloadKind::Bikes, Some("v0.49.7")), None);
         assert_eq!(reload_kind_verb(ReloadKind::Tracks, None), None);
+    }
+
+    #[test]
+    fn server_hold_excludes_only_paints() {
+        assert!(held_kind(ReloadKind::Full, true));
+        assert!(held_kind(ReloadKind::Gear, true));
+        assert!(held_kind(ReloadKind::Tracks, true));
+        assert!(held_kind(ReloadKind::Bikes, true));
+        assert!(!held_kind(ReloadKind::Paints, true));
+        assert!(!held_kind(ReloadKind::Full, false));
     }
 
     use super::*;
@@ -739,6 +834,14 @@ mod tests {
         assert!(!reads_command_files(Some("v0.9.11")));
         assert!(!reads_command_files(None));
         assert!(!reads_command_files(Some("nightly")));
+    }
+
+    #[test]
+    fn aussiemode_needs_0_52_0() {
+        assert!(aussiemode_supported(Some("v0.52.0")));
+        assert!(aussiemode_supported(Some("v0.53.1")));
+        assert!(!aussiemode_supported(Some("v0.51.0")));
+        assert!(!aussiemode_supported(None));
     }
 
     #[test]

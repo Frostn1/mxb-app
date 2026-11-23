@@ -317,8 +317,8 @@ function Row({
 }) {
   return (
     <div className="flex items-start justify-between gap-4 rounded-lg px-1 py-2.5">
-      <div className="flex min-w-0 gap-3">
-        <span className="mt-0.5 grid size-8 flex-none place-items-center rounded-lg bg-foreground/[0.06] text-foreground/60">
+      <div className="flex min-w-0 gap-2">
+        <span className="mt-0.5 flex-none text-foreground/60">
           {icon}
         </span>
         <div className="flex min-w-0 flex-col gap-0.5">

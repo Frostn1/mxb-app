@@ -1,3 +1,4 @@
+use super::mxbmods_api::{self, Gate};
 use super::{DownloadOption, ModDetail, ModRating, ModSort, ModSource, ModSummary};
 use crate::mxb_session;
 use futures_util::StreamExt;
@@ -158,8 +159,8 @@ pub fn on_webview() -> bool {
     forced_to_webview() || WEBVIEW_TRANSPORT.load(std::sync::atomic::Ordering::Relaxed)
 }
 
-/// `GET` with backoff over the transient blocks above. Transport errors retry too, which
-/// is what `install::get_with_retry` already does for download hosts.
+/// `GET` with at most one retry over the transient blocks above, then a site-wide cooldown
+/// (see [`send`]). Transport errors get the one retry too.
 async fn get_with_retry(url: &str, params: &[(&str, String)]) -> anyhow::Result<Fetched> {
     get(url, params, Want::Api).await
 }
@@ -211,20 +212,96 @@ fn page_headers() -> reqwest::header::HeaderMap {
     headers
 }
 
-async fn get(url: &str, params: &[(&str, String)], want: Want) -> anyhow::Result<Fetched> {
-    if on_webview() {
-        // No backoff loop here: the bridge is a real browser, so a 429/503 it gets is one
-        // the site means, and it has its own timeout.
-        return match want {
-            Want::Api => crate::mxb_fetch::get(url, params).await,
-            Want::Page => crate::mxb_fetch::read_page(url).await,
-        };
-    }
+/// A site-wide cooldown after the site told us to back off (429/503), so a throttled user
+/// stops sending anything at all for a while instead of every card, page and keystroke
+/// trying again. Same [`Gate`] as the API client, separate instance per site.
+pub(crate) struct SiteCooldown {
+    gate: Gate,
+    /// The status that parked it, for the message a parked request fails with.
+    status: u16,
+}
 
-    const ATTEMPTS: u32 = 3;
-    let client = client()?;
-    let mut last_err: Option<anyhow::Error> = None;
+impl SiteCooldown {
+    pub(crate) const fn new() -> Self {
+        Self {
+            gate: Gate::new(mxbmods_api::FIRST_STEP, mxbmods_api::MAX_STEP),
+            status: 503,
+        }
+    }
+}
+
+fn site_cooldown() -> &'static Mutex<SiteCooldown> {
+    static MXB: Mutex<SiteCooldown> = Mutex::new(SiteCooldown::new());
+    static GPB: Mutex<SiteCooldown> = Mutex::new(SiteCooldown::new());
+    if mxb_session::site().domain == mxb_session::GPB_SITE.domain {
+        &GPB
+    } else {
+        &MXB
+    }
+}
+
+/// The error a request fails fast with while the site is cooling down.
+fn cooling_down(cooldown: &Mutex<SiteCooldown>) -> Option<anyhow::Error> {
+    let c = lock(cooldown);
+    c.gate
+        .until(Instant::now())
+        .map(|_| blocked_error(c.status, None))
+}
+
+fn note_throttled(cooldown: &Mutex<SiteCooldown>, status: u16, retry: Option<Duration>) {
+    let mut c = lock(cooldown);
+    let wait = c.gate.fail(Instant::now(), retry);
+    c.status = status;
+    log::warn!(
+        "{} answered {status}; sending it nothing for {wait:?}",
+        mxb_session::site().domain
+    );
+}
+
+fn note_ok(cooldown: &Mutex<SiteCooldown>) {
+    lock(cooldown).gate.succeed();
+}
+
+async fn get(url: &str, params: &[(&str, String)], want: Want) -> anyhow::Result<Fetched> {
+    let cooldown = site_cooldown();
+    if on_webview() {
+        // No retry here: the bridge is a real browser, so a 429/503 it gets is one the site
+        // means. It still parks the site like any other.
+        if let Some(e) = cooling_down(cooldown) {
+            return Err(e);
+        }
+        let fetched = match want {
+            Want::Api => crate::mxb_fetch::get(url, params).await?,
+            Want::Page => crate::mxb_fetch::read_page(url).await?,
+        };
+        if matches!(fetched.status, 429 | 503) {
+            let retry = mxbmods_api::retry_after(fetched.header("retry-after"));
+            note_throttled(cooldown, fetched.status, retry);
+        } else if fetched.is_success() {
+            note_ok(cooldown);
+        }
+        return Ok(fetched);
+    }
+    send(client()?, cooldown, url, params, want).await
+}
+
+/// One request over the HTTP client: at most two attempts, one second apart, and only for a
+/// transient status or a transport error. A `Retry-After` longer than that pause is obeyed
+/// rather than raced, and a 429/503 that survives parks the whole site ([`SiteCooldown`]):
+/// until it opens, every request fails fast without being sent. Nothing here loops.
+async fn send(
+    client: &Client,
+    cooldown: &Mutex<SiteCooldown>,
+    url: &str,
+    params: &[(&str, String)],
+    want: Want,
+) -> anyhow::Result<Fetched> {
+    const ATTEMPTS: u32 = 2;
+    const PAUSE: Duration = Duration::from_secs(1);
     for attempt in 1..=ATTEMPTS {
+        if let Some(e) = cooling_down(cooldown) {
+            return Err(e);
+        }
         let started = Instant::now();
         let req = client
             .get(url)
@@ -239,6 +316,9 @@ async fn get(url: &str, params: &[(&str, String)], want: Want) -> anyhow::Result
                 // Debug, not info: search runs on every keystroke, and a line per keystroke
                 // would bury the one failure worth reading. `MXB_LOG=debug` turns it on.
                 let fetched = into_fetched(resp).await;
+                if fetched.is_success() {
+                    note_ok(cooldown);
+                }
                 log::debug!(
                     "GET {} -> {} in {:?}",
                     path_of(url),
@@ -248,17 +328,17 @@ async fn get(url: &str, params: &[(&str, String)], want: Want) -> anyhow::Result
                 return Ok(fetched);
             }
             Ok(resp) => {
-                let status = resp.status();
-                if attempt == ATTEMPTS {
-                    return Ok(into_fetched(resp).await);
+                let status = resp.status().as_u16();
+                let fetched = into_fetched(resp).await;
+                let retry = mxbmods_api::retry_after(fetched.header("retry-after"));
+                if attempt == ATTEMPTS || retry.is_some_and(|r| r > PAUSE) {
+                    note_throttled(cooldown, status, retry);
+                    return Ok(fetched);
                 }
                 log::warn!(
-                    "GET {} -> {} (attempt {attempt}/{ATTEMPTS}), retrying in {}ms",
-                    path_of(url),
-                    status.as_u16(),
-                    500 * attempt
+                    "GET {} -> {status} (attempt {attempt}/{ATTEMPTS}), trying once more in {PAUSE:?}",
+                    path_of(url)
                 );
-                last_err = Some(anyhow::anyhow!("{status}"));
             }
             Err(e) => {
                 if attempt == ATTEMPTS {
@@ -269,12 +349,11 @@ async fn get(url: &str, params: &[(&str, String)], want: Want) -> anyhow::Result
                     "GET {} failed (attempt {attempt}/{ATTEMPTS}): {e}",
                     path_of(url)
                 );
-                last_err = Some(e.into());
             }
         }
-        tokio::time::sleep(std::time::Duration::from_millis(500 * attempt as u64)).await;
+        tokio::time::sleep(PAUSE).await;
     }
-    Err(last_err.unwrap_or_else(|| anyhow::anyhow!("request failed")))
+    Err(anyhow::anyhow!("request failed"))
 }
 
 /// Read a reqwest response into the transport-agnostic shape. A body that won't decode
@@ -488,14 +567,25 @@ pub async fn by_slug(slug: &str, category_id: u32) -> anyhow::Result<Option<ModS
     if slug.is_empty() {
         return Ok(None);
     }
-    // Our mirror first: it never meets the bot check. A mod it does not hold (new, or the
-    // mirror is behind) is asked of the site, which answers "no such post" itself.
-    super::mirror::mirror_then(
-        "slug lookup",
-        async { super::mirror::by_slug(&slug.to_lowercase(), category_id).await.map(Some) },
-        by_slug_site(slug, category_id),
-    )
-    .await
+    // The official API first (mxb-mods only). "No such mod" is its answer and stands; only a
+    // failure sends the lookup to the site, once.
+    if mxbmods_api::active() {
+        match mxbmods_api::api().by_slug(slug).await {
+            Ok(None) => return Ok(None),
+            Ok(Some(full)) => return Ok(slug_hit(&full, category_id)),
+            Err(e) => log::info!("slug lookup via the mxb-mods API failed ({e:#}); asking the site"),
+        }
+    }
+    by_slug_site(slug, category_id).await
+}
+
+/// A full API record as the answer to a slug lookup scoped to `category_id`: only when the
+/// mod is filed under that category, which is what `categories=` did on wp/v2.
+fn slug_hit(full: &Value, category_id: u32) -> Option<ModSummary> {
+    mxbmods_api::category_ids(full)
+        .contains(&u64::from(category_id))
+        .then(|| mxbmods_api::summary(full, category_id))
+        .flatten()
 }
 
 async fn by_slug_site(slug: &str, category_id: u32) -> anyhow::Result<Option<ModSummary>> {
@@ -527,16 +617,25 @@ pub async fn search(
     } else {
         ModSort::Newest
     };
+    let page = page.max(1);
 
-    // Our mirror first (newest and oldest, with or without search text); the site, and from
-    // there the WebView, only when it cannot answer: see `super::mirror`. Popular stays with
-    // the site, which is the only one that has view counts.
-    super::mirror::mirror_then(
-        "listing",
-        super::mirror::search(q, category_id, page, sort),
-        search_site(q, category_id, page, sort),
-    )
-    .await
+    if mxbmods_api::active() {
+        let api = mxbmods_api::api();
+        // Popular has no fallback: the site's popular-posts endpoint is gone, and asking it
+        // anyway is the traffic mxb-mods.com asked us to stop.
+        if let Some(range) = sort.api_range() {
+            return api.popular(range, category_id, page).await.map_err(|e| {
+                log::warn!("popular listing unavailable: {e:#}");
+                anyhow::anyhow!(mxbmods_api::POPULAR_UNAVAILABLE)
+            });
+        }
+        match api.mods(q, category_id, sort, page).await {
+            Ok(items) => return Ok(items),
+            // Once, to the site, which has its own cooldown.
+            Err(e) => log::info!("listing via the mxb-mods API failed ({e:#}); asking the site"),
+        }
+    }
+    search_site(q, category_id, page, sort).await
 }
 
 /// The site's own listing, which already falls back to the WebView when the HTTP client is refused.
@@ -558,8 +657,10 @@ async fn search_site(
     // The site publishes no author through its API — see `warm_feed_authors`. A date-ordered
     // listing asks the feed for them *while* the listing is being fetched rather than after
     // it: the feed pages depend only on which page was asked for, and waiting for them one
-    // after another behind the listing is what made "Load more" slow.
-    let items = if matches!(sort, ModSort::Newest) {
+    // after another behind the listing is what made "Load more" slow. Not for mxb-mods,
+    // whose official API names authors: this path is only its fallback, and the feed would be
+    // two more requests to a site that is already failing us.
+    let items = if matches!(sort, ModSort::Newest) && !mxbmods_api::active() {
         let (items, ()) = futures_util::join!(listing_fut, warm_feed_authors(category_id, q, page));
         items
     } else {
@@ -688,6 +789,10 @@ async fn total_count(q: &str, category_id: u32) -> anyhow::Result<u32> {
 /// differences are `limit`/`offset` instead of `page`, and that paging past the end
 /// returns an empty list rather than a 400.
 async fn popular(category_id: u32, page: u32, range: &str) -> anyhow::Result<Vec<ModSummary>> {
+    // gpb-mods.com only. mxb-mods.com removed the plugin; its popular list is the API's.
+    if mxbmods_api::active() {
+        anyhow::bail!(mxbmods_api::POPULAR_UNAVAILABLE);
+    }
     let url = format!(
         "{}{}",
         mxb_session::base(),
@@ -700,7 +805,7 @@ async fn popular(category_id: u32, page: u32, range: &str) -> anyhow::Result<Vec
         ("range", range.to_string()),
         ("order_by", "views".to_string()),
         ("limit", per_page.to_string()),
-        ("offset", ((page - 1) * per_page).to_string()),
+        ("offset", (page.saturating_sub(1) * per_page).to_string()),
         ("_embed", "author,wp:featuredmedia".to_string()),
     ];
 
@@ -715,8 +820,138 @@ async fn popular(category_id: u32, page: u32, range: &str) -> anyhow::Result<Vec
         .collect())
 }
 
+/// Everything a mod page shows that is not read off the rendered page.
+struct PostMeta {
+    id: u64,
+    title: String,
+    link: String,
+    date: String,
+    description_html: String,
+    images: Vec<String>,
+    categories: Vec<String>,
+    /// The API's author, used when the page carries no byline.
+    author: Option<String>,
+}
+
+/// The metadata from the official API (mxb-mods only). `Ok(None)` when it has no such mod,
+/// and an error when it couldn't answer; both send the caller to the site's own REST API.
+async fn detail_meta_api(slug: &str) -> anyhow::Result<Option<PostMeta>> {
+    let api = mxbmods_api::api();
+    let Some(full) = api.by_slug(slug).await? else {
+        return Ok(None);
+    };
+    let m = mxbmods_api::parse_meta(&full).ok_or_else(|| anyhow::anyhow!("unreadable mod record"))?;
+    // Names, not ids: the install picker ranks destinations by them. Cached for the session.
+    let names = api.categories().await?;
+    let mut images = m.images.clone();
+    if images.is_empty() {
+        images.extend(extract_images(&m.content_html));
+    }
+    if images.is_empty() {
+        images.extend(m.image.clone());
+    }
+    dedup(&mut images);
+    let mut categories: Vec<String> = m
+        .category_ids
+        .iter()
+        .filter_map(|id| names.get(id).cloned())
+        .collect();
+    dedup(&mut categories);
+    Ok(Some(PostMeta {
+        id: m.id,
+        title: m.title,
+        link: m.link,
+        date: m.date,
+        description_html: description_from(&m.content_html),
+        images,
+        categories,
+        author: m.author,
+    }))
+}
+
 pub async fn detail(slug: &str) -> anyhow::Result<ModDetail> {
-    // 1. Post metadata + description via the REST API.
+    // 1. Metadata: the official API where there is one, the site's REST API otherwise (or
+    //    when the API couldn't answer).
+    let api_meta = if mxbmods_api::active() {
+        match detail_meta_api(slug).await {
+            Ok(Some(m)) => Some(m),
+            Ok(None) => {
+                log::info!("the mxb-mods API has no '{slug}'; asking the site");
+                None
+            }
+            Err(e) => {
+                log::info!("mod metadata via the mxb-mods API failed ({e:#}); asking the site");
+                None
+            }
+        }
+    } else {
+        None
+    };
+    let meta = match api_meta {
+        Some(m) => m,
+        None => detail_meta_site(slug).await?,
+    };
+    let PostMeta {
+        id,
+        title,
+        link,
+        date,
+        description_html,
+        mut images,
+        categories,
+        author: api_author,
+    } = meta;
+
+    // 2. Download links + version from the rendered page HTML. A block here used to be
+    // swallowed: a 403 is `Ok(resp)`, so its error body went to the parsers and produced
+    // zero downloads — the page then said "No download link was found on this page"
+    // rather than "we couldn't read the page". Surface it instead.
+    let resp = get_page(&link).await?;
+    if !resp.is_success() {
+        return Err(refusal("the mod page", &resp));
+    }
+    let html = resp.body;
+    let (downloads, version) = (parse_downloads(&html), parse_version(&html));
+    let author = parse_author(&html);
+    // A post whose only picture is a featured image the REST API won't hand over
+    // (`rest_forbidden`) still names it on the page, so the gallery isn't left empty.
+    if images.is_empty() {
+        images.extend(parse_og_image(&html));
+    }
+    // Only call it a challenge when the page also yielded nothing, so a marker that turns
+    // up in a page that actually parsed can never turn a working mod into an error.
+    if downloads.is_empty() {
+        if let Some(marker) = challenge_marker(&html) {
+            return Err(challenge_error(marker, html.len()));
+        }
+        log::info!(
+            "no downloads parsed from '{slug}' ({} bytes) and it is not a challenge page",
+            html.len()
+        );
+    }
+
+    let (author, author_url) = match author {
+        Some((name, url)) => (Some(name), url),
+        None => (api_author, None),
+    };
+    Ok(ModDetail {
+        id,
+        slug: slug.to_string(),
+        title,
+        link,
+        date,
+        description_html,
+        images,
+        version,
+        author,
+        author_url,
+        downloads,
+        categories,
+    })
+}
+
+/// The metadata from the site's own REST API (gpb-mods, and mxb-mods' fallback).
+async fn detail_meta_site(slug: &str) -> anyhow::Result<PostMeta> {
     let url = format!("{}{}", mxb_session::base(), obfstr!("/wp-json/wp/v2/posts"));
     // `wp:term` rides along in the same request — the categories it brings back are what
     // tell the install picker which bike a livery is for.
@@ -755,82 +990,74 @@ pub async fn detail(slug: &str) -> anyhow::Result<ModDetail> {
     images.extend(extract_images(&content));
     dedup(&mut images);
 
-    let description_html = strip_images(&content);
+    let description_html = description_from(&content);
 
-    // 2. Download links + version from the rendered page HTML. A block here used to be
-    // swallowed: a 403 is `Ok(resp)`, so its error body went to the parsers and produced
-    // zero downloads — the page then said "No download link was found on this page"
-    // rather than "we couldn't read the page". Surface it instead.
-    let resp = get_page(&link).await?;
-    if !resp.is_success() {
-        return Err(refusal("the mod page", &resp));
-    }
-    let html = resp.body;
-    let (downloads, version) = (parse_downloads(&html), parse_version(&html));
-    let author = parse_author(&html);
-    // A post whose only picture is a featured image the REST API won't hand over
-    // (`rest_forbidden`) still names it on the page, so the gallery isn't left empty.
-    if images.is_empty() {
-        images.extend(parse_og_image(&html));
-    }
-    // Only call it a challenge when the page also yielded nothing, so a marker that turns
-    // up in a page that actually parsed can never turn a working mod into an error.
-    if downloads.is_empty() {
-        if let Some(marker) = challenge_marker(&html) {
-            return Err(challenge_error(marker, html.len()));
-        }
-        log::info!(
-            "no downloads parsed from '{slug}' ({} bytes) and it is not a challenge page",
-            html.len()
-        );
-    }
-
-    Ok(ModDetail {
+    Ok(PostMeta {
         id,
-        slug: slug.to_string(),
         title,
         link,
         date,
         description_html,
         images,
-        version,
-        author: author.as_ref().map(|(name, _)| name.clone()),
-        author_url: author.and_then(|(_, url)| url),
-        downloads,
         categories: term_names(&post),
+        author: None,
     })
+}
+
+/// Scores for a batch of post ids. Never an error: a rating decorates a card, so a blocked
+/// or slow request must never surface as a browsing error.
+///
+/// mxb-mods.com: one batched call per hundred ids to its official API, cached, failures
+/// included — see [`mxbmods_api::Api::ratings`]. gpb-mods.com: its admin-ajax endpoint, see
+/// [`site_ratings`].
+pub async fn ratings(ids: &[u64]) -> HashMap<u64, ModRating> {
+    if mxbmods_api::active() {
+        mxbmods_api::api().ratings(ids).await
+    } else {
+        site_ratings(ids).await
+    }
 }
 
 /// How long a fetched rating is trusted. Votes trickle in over days, so a stale score is
 /// harmless — but re-browsing a category shouldn't re-ask the site for the same 24 posts.
 const RATING_TTL: Duration = Duration::from_secs(10 * 60);
 
-/// Ratings cost one request each, so a page of results is a burst. Six at a time keeps
-/// that burst well under what the REST search already does in one shot.
-const RATING_CONCURRENCY: usize = 6;
+/// How long a rating that failed is left alone: the same id is not asked again for this long.
+const RATING_FAILURE_TTL: Duration = Duration::from_secs(10 * 60);
 
-fn rating_cache() -> &'static Mutex<HashMap<u64, (ModRating, Instant)>> {
-    static CACHE: std::sync::OnceLock<Mutex<HashMap<u64, (ModRating, Instant)>>> =
+/// The site's ratings cost one request each, so a page of results is a burst. Two at a time,
+/// and the batch stops at the first failure.
+const RATING_CONCURRENCY: usize = 2;
+
+/// Per id: the score (or `None` for one that failed) and when the entry expires.
+fn site_rating_cache() -> &'static Mutex<HashMap<u64, (Option<ModRating>, Instant)>> {
+    static CACHE: std::sync::OnceLock<Mutex<HashMap<u64, (Option<ModRating>, Instant)>>> =
         std::sync::OnceLock::new();
     CACHE.get_or_init(Default::default)
 }
 
-/// Scores for a batch of post ids, as the site's rating plugin reports them.
+/// Parked after a failed rating, so the rest of the batch (and the next one) send nothing.
+fn site_ratings_gate() -> &'static Mutex<Gate> {
+    static GATE: Mutex<Gate> = Mutex::new(Gate::new(mxbmods_api::FIRST_STEP, mxbmods_api::MAX_STEP));
+    &GATE
+}
+
+/// gpb-mods.com's scores, one admin-ajax request per id, two at a time.
 ///
-/// Ids we couldn't fetch are simply absent from the map: a rating is decoration on a mod
-/// card, so a blocked or slow request must never surface as a browsing error. That's also
-/// why this skips `get_with_retry` — one attempt each, no piling on a site that's already
-/// unhappy.
-pub async fn ratings(ids: &[u64]) -> HashMap<u64, ModRating> {
+/// A failure parks [`site_ratings_gate`]: requests not yet sent are dropped, and the id that
+/// failed is not asked again for [`RATING_FAILURE_TTL`]. Nothing is retried on the spot.
+async fn site_ratings(ids: &[u64]) -> HashMap<u64, ModRating> {
     let mut out = HashMap::new();
     let mut missing = Vec::new();
     {
-        let cache = lock(rating_cache());
+        let cache = lock(site_rating_cache());
         let now = Instant::now();
         for &id in ids {
             match cache.get(&id) {
-                Some((r, at)) if now.duration_since(*at) < RATING_TTL => {
-                    out.insert(id, *r);
+                Some((r, expires)) if now < *expires => {
+                    if let Some(r) = r {
+                        out.insert(id, *r);
+                    }
                 }
                 _ => missing.push(id),
             }
@@ -838,25 +1065,42 @@ pub async fn ratings(ids: &[u64]) -> HashMap<u64, ModRating> {
     }
     missing.sort_unstable();
     missing.dedup();
+    if missing.is_empty() || !lock(site_ratings_gate()).open(Instant::now()) {
+        return out;
+    }
 
-    let fetched: Vec<(u64, ModRating)> = futures_util::stream::iter(
-        missing
-            .into_iter()
-            .map(|id| async move { rating(id).await.ok().map(|r| (id, r)) }),
-    )
+    let fetched: Vec<(u64, Option<ModRating>)> = futures_util::stream::iter(missing.into_iter().map(|id| async move {
+        if !lock(site_ratings_gate()).open(Instant::now()) {
+            return None;
+        }
+        match rating(id).await {
+            Ok(r) => {
+                lock(site_ratings_gate()).succeed();
+                Some((id, Some(r)))
+            }
+            Err(e) => {
+                let wait = lock(site_ratings_gate()).fail(Instant::now(), None);
+                log::info!("rating for {id} failed ({e:#}); no more ratings for {wait:?}");
+                Some((id, None))
+            }
+        }
+    }))
     .buffer_unordered(RATING_CONCURRENCY)
     .filter_map(|r| async move { r })
     .collect()
     .await;
 
     {
-        let mut cache = lock(rating_cache());
+        let mut cache = lock(site_rating_cache());
         let now = Instant::now();
         for (id, r) in &fetched {
-            cache.insert(*id, (*r, now));
+            let ttl = if r.is_some() { RATING_TTL } else { RATING_FAILURE_TTL };
+            cache.insert(*id, (*r, now + ttl));
+            if let Some(r) = r {
+                out.insert(*id, *r);
+            }
         }
     }
-    out.extend(fetched);
     out
 }
 
@@ -867,8 +1111,13 @@ fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 }
 
 /// The rating plugin has no REST route; its front end reads scores from this admin-ajax
-/// action, which answers unauthenticated with `{voteCount, avgRating}`.
+/// action, which answers unauthenticated with `{voteCount, avgRating}`. gpb-mods.com only:
+/// mxb-mods.com's scores come from its API.
 async fn rating(id: u64) -> anyhow::Result<ModRating> {
+    let cooldown = site_cooldown();
+    if let Some(e) = cooling_down(cooldown) {
+        return Err(e);
+    }
     let url = format!("{}{}", mxb_session::base(), obfstr!("/wp-admin/admin-ajax.php"));
     let form = [
         ("action", "load_results".to_string()),
@@ -885,12 +1134,17 @@ async fn rating(id: u64) -> anyhow::Result<ModRating> {
             .form(&form);
         into_fetched(req.send().await?).await
     };
+    if matches!(resp.status, 429 | 503) {
+        note_throttled(cooldown, resp.status, mxbmods_api::retry_after(resp.header("retry-after")));
+    }
     if !resp.is_success() {
         anyhow::bail!("{}", resp.status);
     }
     let v: Value = resp.json()?;
+    let average = number(v.get("avgRating")).unwrap_or(0.0);
     Ok(ModRating {
-        average: number(v.get("avgRating")).unwrap_or(0.0) as f32,
+        // A NaN would reach the UI as `null` and break the stars.
+        average: if average.is_finite() { average as f32 } else { 0.0 },
         count: number(v.get("voteCount")).unwrap_or(0.0).max(0.0) as u32,
     })
 }
@@ -1211,7 +1465,7 @@ fn is_image_url(url: &str) -> bool {
 }
 
 /// Prefer full-res links (`<a href="…full.webp">`), falling back to `<img src>`.
-fn extract_images(content_html: &str) -> Vec<String> {
+pub(crate) fn extract_images(content_html: &str) -> Vec<String> {
     let doc = Html::parse_fragment(content_html);
     let a_sel = Selector::parse("a[href]").unwrap();
     let img_sel = Selector::parse("img[src]").unwrap();
@@ -1233,8 +1487,15 @@ fn extract_images(content_html: &str) -> Vec<String> {
     out
 }
 
+/// A post body as the mod page shows it: images out (they're in the gallery), then the same
+/// allowlist sanitiser the shop uses. The body comes from mxb-mods.com and is rendered as
+/// HTML in the main window, so it is never handed over unsanitised.
+pub(crate) fn description_from(content: &str) -> String {
+    super::shop_catalog::sanitize_html(&strip_images(content)).unwrap_or_default()
+}
+
 /// Remove image markup from the description (images are shown in the gallery).
-fn strip_images(html: &str) -> String {
+pub(crate) fn strip_images(html: &str) -> String {
     let a_img = Regex::new(r"(?is)<a\b[^>]*>\s*<img\b[^>]*>\s*</a>").unwrap();
     let img = Regex::new(r"(?is)<img\b[^>]*>").unwrap();
     let s = a_img.replace_all(html, "");
@@ -1430,6 +1691,24 @@ fn dedup(v: &mut Vec<String>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A post body is site-authored HTML rendered in the main window. Whatever a post holds,
+    /// what reaches the webview carries no script.
+    #[test]
+    fn a_post_body_is_sanitised_before_the_webview_sees_it() {
+        let body = r#"<p>Great track</p><svg onload="alert(1)"></svg>
+<details open ontoggle="alert(2)"><summary>x</summary></details>
+<a href="javascript:alert(3)">bad</a><a href="https://example.com/dl">good</a>
+<img src="https://example.com/a.png" onerror="alert(4)"><script>alert(5)</script>"#;
+        let html = description_from(body);
+        let lower = html.to_ascii_lowercase();
+        for bad in ["<svg", "<script", "javascript:", "onload", "ontoggle", "onerror", "alert("] {
+            assert!(!lower.contains(bad), "{bad} survived: {html}");
+        }
+        assert!(html.contains("Great track"), "{html}");
+        assert!(html.contains(r#"href="https://example.com/dl""#), "{html}");
+        assert!(!html.contains("<img"), "images still go to the gallery: {html}");
+    }
 
     /// The rendered pages are guarded far more tightly than the JSON API, and asking for one
     /// with the client's JSON-fetch defaults describes a request no browser makes: a script
@@ -1991,6 +2270,61 @@ mod client_tests {
         );
         assert_eq!(challenge_marker("window._cf_chl_opt = {};"), Some("cf_chl_opt"));
         assert_eq!(challenge_marker("<h1>MXB App</h1>"), None);
+    }
+
+    /// The old loop tried a 503 three times per call, and every card and keystroke made its
+    /// own call. Now: twice, then the whole site is parked and the next call sends nothing.
+    #[tokio::test]
+    async fn a_503_is_tried_at_most_twice_then_the_cooldown_sends_nothing() {
+        let (base, seen) = super::mxbmods_api::mock::serve(std::sync::Arc::new(|_| {
+            (503, vec![], "busy".to_string())
+        }));
+        let cooldown = Mutex::new(SiteCooldown::new());
+        let client = reqwest::Client::new();
+        let url = format!("{base}/wp-json/wp/v2/posts");
+
+        let first = send(&client, &cooldown, &url, &[], Want::Api).await.unwrap();
+        assert_eq!(first.status, 503);
+        assert_eq!(seen.lock().unwrap().len(), 2, "one retry, no more");
+
+        for _ in 0..5 {
+            let err = send(&client, &cooldown, &url, &[], Want::Api).await.err().expect("parked");
+            let blocked = err.downcast_ref::<Blocked>().expect("the existing blocked message");
+            assert_eq!(blocked.status, Some(503));
+            assert!(!blocked.clearable(), "a cooldown never opens the WebView check");
+        }
+        assert_eq!(seen.lock().unwrap().len(), 2, "parked: nothing more was sent");
+    }
+
+    /// A `Retry-After` longer than the one-second pause is obeyed, not raced.
+    #[tokio::test]
+    async fn a_429_with_retry_after_is_not_retried_on_the_spot() {
+        let (base, seen) = super::mxbmods_api::mock::serve(std::sync::Arc::new(|_| {
+            (429, vec![("Retry-After".to_string(), "120".to_string())], String::new())
+        }));
+        let cooldown = Mutex::new(SiteCooldown::new());
+        let client = reqwest::Client::new();
+        let url = format!("{base}/wp-admin/admin-ajax.php");
+
+        assert_eq!(send(&client, &cooldown, &url, &[], Want::Api).await.unwrap().status, 429);
+        assert_eq!(seen.lock().unwrap().len(), 1);
+        let err = send(&client, &cooldown, &url, &[], Want::Api).await.err().expect("parked");
+        assert_eq!(err.downcast_ref::<Blocked>().unwrap().status, Some(429));
+        let left = lock(&cooldown).gate.until(Instant::now()).unwrap();
+        assert!(left.saturating_duration_since(Instant::now()) > Duration::from_secs(100));
+        assert_eq!(seen.lock().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn a_slug_hit_must_be_filed_under_the_category() {
+        let full: Value = serde_json::from_str(
+            r#"{"id":7,"slug":"fort-red","title":"Fort Red","link":"https://mxb-mods.com/fort-red/",
+                "date":"2026-01-02T03:04:05Z","author":{"name":"someone"},"categories":[22,40]}"#,
+        )
+        .unwrap();
+        let hit = slug_hit(&full, 22).unwrap();
+        assert_eq!((hit.id, hit.title.as_str(), hit.category_id), (7, "Fort Red", 22));
+        assert!(slug_hit(&full, 29).is_none(), "a livery is not a track");
     }
 
     /// Log lines go on one line, and a Cloudflare block page is mostly indentation.

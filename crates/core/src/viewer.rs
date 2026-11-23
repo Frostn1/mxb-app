@@ -25,7 +25,7 @@ use tauri::State;
 
 use crate::paintwatch::{PaintWatcher, SourceWatcher};
 use crate::{
-    bikefiles, cfg, cloudfiles, config, edf, game, gate, library, lru, paint, paintwatch,
+    bikefiles, cfg, cloudfiles, config, edf, game, gate, geomfallback, library, lru, paint, paintwatch,
     pkz, presets, texstore,
 };
 
@@ -441,11 +441,19 @@ pub fn load_bike_model_blocking(
     build_bike_model(&source, key, files, installed, tyres, pick, t0)
 }
 
-/// The Gfx tab's bike: its loose files, later folders layered over earlier ones, assembled by
-/// the `.geom` and wearing the wheels the bike names. The bike's own `.pkz` is read for its
-/// `.geom` alone, so no texture is ever taken from it; a sheet only the archive holds stays
-/// missing.
-pub fn load_gfx_bike_model_blocking(dirs: &[&std::path::Path]) -> Result<BikeModel, String> {
+/// The Gfx tab's bike: the bike's own `.pkz` (unpacked in memory with the same reader MXB App
+/// uses), its loose files over that, later folders layered over earlier ones, assembled by the
+/// `.geom` and wearing the wheels the bike names. Of the archive only the model is taken (the
+/// meshes, `.hrc`s, `.geom` and `.cfg`s); no texture is taken from it, so a sheet only the
+/// archive holds stays missing. Nothing unpacked is ever written to disk.
+///
+/// A bike whose archive can't be read and that has no loose `.geom` (a model swap never ships
+/// one) is assembled with [`geomfallback::fallback_geom`]'s mounts (a sibling folder's
+/// `.geom`, the model's own shape, or a typical bike's) instead of being drawn in pieces. The
+/// second value says which mounts were used and whether the archive was read.
+pub fn load_gfx_bike_model_blocking(
+    dirs: &[&std::path::Path],
+) -> Result<(BikeModel, GfxBuild), String> {
     let t0 = std::time::Instant::now();
     let Some(first) = dirs.first() else { return Err("no folder".into()) };
     let tyres = tyres_dir_for(first);
@@ -456,17 +464,19 @@ pub fn load_gfx_bike_model_blocking(dirs: &[&std::path::Path]) -> Result<BikeMod
         packed_stamp(first),
         tyres.as_deref().map(tyres_stamp).unwrap_or(0),
     );
-    if let Some(m) = cached_bike(&key) {
-        return Ok(m);
+    // The model cache only holds models; which mounts placed one is kept beside it.
+    let cached = |key: &str| {
+        let src = gfx_sources().lock().ok()?.get(key).cloned()?;
+        cached_bike(key).map(|m| (m, src))
+    };
+    if let Some(hit) = cached(&key) {
+        return Ok(hit);
     }
     let _gate = gate::enter(&key);
-    if let Some(m) = cached_bike(&key) {
-        return Ok(m);
+    if let Some(hit) = cached(&key) {
+        return Ok(hit);
     }
-    let mut files: Vec<(String, Vec<u8>)> = packed_layer(first)
-        .into_iter()
-        .filter(|(n, _)| n.to_ascii_lowercase().ends_with(".geom"))
-        .collect();
+    let mut layers = Vec::new();
     for dir in dirs {
         let mut loose = Vec::new();
         for entry in std::fs::read_dir(dir).map_err(|e| format!("{}: {e}", dir.display()))?.flatten() {
@@ -478,13 +488,139 @@ pub fn load_gfx_bike_model_blocking(dirs: &[&std::path::Path]) -> Result<BikeMod
                 }
             }
         }
+        layers.push(loose);
+    }
+    // What a loose file replaces isn't unpacked: a model swap's mesh is the one drawn.
+    let loose_names: std::collections::HashSet<String> = layers
+        .iter()
+        .flatten()
+        .map(|(n, _)| n.rsplit(['/', '\\']).next().unwrap_or(n).to_ascii_lowercase())
+        .collect();
+    let (mut files, packed) = gfx_packed_layer(first, &loose_names);
+    for loose in layers {
         overlay_files(&mut files, loose);
     }
     if !files.iter().any(|(n, _)| bikefiles::is_mesh(n)) {
         return Err(format!("no .edf mesh in {}", first.display()));
     }
+    let source = if files.iter().any(|(n, _)| n.to_ascii_lowercase().ends_with(".geom")) {
+        geomfallback::GeomSource::Own
+    } else {
+        let (bytes, source) = geomfallback::fallback_geom(first, &files);
+        log::info!("[viewer] {}: no readable .geom, assembling with {source:?}", first.display());
+        files.push(("fallback.geom".to_string(), bytes));
+        source
+    };
     let installed = installed_paints(first);
-    build_bike_model(&first.display().to_string(), key, files, installed, tyres, None, t0)
+    let model = build_bike_model(&first.display().to_string(), key.clone(), files, installed, tyres, None, t0)?;
+    let build = GfxBuild { placement: source, packed };
+    if let Ok(mut s) = gfx_sources().lock() {
+        s.insert(key, build.clone());
+    }
+    Ok((model, build))
+}
+
+/// How a Gfx model was put together: whose mounts placed the parts, and what became of the
+/// bike's `.pkz`.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GfxBuild {
+    pub placement: geomfallback::GeomSource,
+    pub packed: PackedRead,
+}
+
+/// What the Gfx tab got out of the bike's `.pkz`.
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum PackedRead {
+    /// There is no `.pkz` for the bike: the loose files are all of it.
+    None,
+    /// Unpacked: its model is under the loose files.
+    Read,
+    /// There is one, but it wouldn't unpack (a format or lock this build can't open), so only
+    /// the loose files are drawn.
+    Unreadable,
+}
+
+/// The `.pkz`s that can hold a bike's model, likeliest first: one inside the folder named
+/// after it, the `<bike>.pkz` beside it, then any other inside it.
+fn bike_pkz_candidates(bike_dir: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let own = bike_dir.file_name().map(|n| n.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
+    let mut inside: Vec<std::path::PathBuf> = std::fs::read_dir(bike_dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.is_file() && p.extension().is_some_and(|x| x.eq_ignore_ascii_case("pkz")))
+        .collect();
+    inside.sort();
+    let named = |p: &std::path::PathBuf| {
+        p.file_stem().is_some_and(|s| s.to_string_lossy().to_ascii_lowercase() == own)
+    };
+    let mut out: Vec<std::path::PathBuf> = inside.iter().filter(|p| named(p)).cloned().collect();
+    let sibling = library::sibling_pkz(bike_dir);
+    if sibling.is_file() {
+        out.push(sibling);
+    }
+    out.extend(inside.into_iter().filter(|p| !named(p)));
+    out
+}
+
+/// Whether a file out of a bike's archive is part of its model: what the Gfx tab assembles
+/// from. Textures and paints are left in the archive.
+fn gfx_model_file(name: &str) -> bool {
+    bikefiles::is_mesh(name) || bikefiles::is_bike_setup(name)
+}
+
+/// The model out of the bike's `.pkz`, unpacked in memory by [`pkz::read_selected`] (the
+/// reader MXB App unpacks mods with), and what came of it. The first archive that holds a mesh
+/// or a `.geom` is the bike's; an archive that holds neither (a paint pack) is passed over.
+/// Files named in `skip` (lowercase file names the loose folder already has) aren't unpacked.
+fn gfx_packed_layer(
+    bike_dir: &std::path::Path,
+    skip: &std::collections::HashSet<String>,
+) -> (Vec<(String, Vec<u8>)>, PackedRead) {
+    let candidates = bike_pkz_candidates(bike_dir);
+    if candidates.is_empty() {
+        return (Vec::new(), PackedRead::None);
+    }
+    let base = |n: &str| n.rsplit(['/', '\\']).next().unwrap_or(n).to_ascii_lowercase();
+    let is_model = |n: &str| bikefiles::is_mesh(n) || n.to_ascii_lowercase().ends_with(".geom");
+    for pkz in &candidates {
+        // Whether the archive holds a model at all, skipped files included.
+        let any_model = std::cell::Cell::new(false);
+        let keep = |n: &str| {
+            if is_model(n) {
+                any_model.set(true);
+            }
+            gfx_model_file(n) && !skip.contains(&base(n))
+        };
+        match pkz::read_selected(pkz, keep) {
+            Ok(files) => {
+                let files: Vec<(String, Vec<u8>)> = files
+                    .into_iter()
+                    .map(|(n, d)| {
+                        let d = pkz::read_sidecar_blob(&d).unwrap_or(d);
+                        (n, d)
+                    })
+                    .collect();
+                if any_model.get() {
+                    log::info!("[viewer] {}: model unpacked from {pkz:?} ({} file(s))", bike_dir.display(), files.len());
+                    return (files, PackedRead::Read);
+                }
+                log::info!("[viewer] {}: {pkz:?} holds no model", bike_dir.display());
+            }
+            Err(e) => log::warn!("[viewer] {}: couldn't unpack {pkz:?} ({e:#})", bike_dir.display()),
+        }
+    }
+    (Vec::new(), PackedRead::Unreadable)
+}
+
+/// How each cached Gfx model was put together, by its cache key.
+fn gfx_sources() -> &'static std::sync::Mutex<std::collections::HashMap<String, GfxBuild>> {
+    static S: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, GfxBuild>>> =
+        std::sync::OnceLock::new();
+    S.get_or_init(Default::default)
 }
 
 /// Why a bike came back with nothing to draw, in words the player can act on.
@@ -856,7 +992,9 @@ pub fn bind_textures(
     };
 
     for n in nodes.iter_mut() {
-        let part = node_part.get(&n.name.to_ascii_lowercase());
+        // A mesh read by its object is named `object/mesh` (see `edf::object_directory`).
+        let lower = n.name.to_ascii_lowercase();
+        let part = node_part.get(&lower).or_else(|| node_part.get(lower.split('/').next()?));
         let overrides = part.and_then(|p| gfx.get(p)).map(|p| &p.textures);
         if n.materials.is_empty() {
             log::warn!("[viewer] node '{}' has no material table — falling back", n.name);
@@ -1046,6 +1184,10 @@ pub(crate) fn gather_tyre_files(
 
     let pkz = library::resolve_child(tyres_dir, &format!("{name}.pkz"));
     if !pkz.is_file() {
+        // The game's own tyres (`p_mx`, `m_sm`, ...) aren't mods: they're in its `tyres.pkz`.
+        if let Some(files) = stock_tyre_files(&name, want) {
+            return Some(TyreSet { name, files });
+        }
         log::warn!("[viewer] tyres '{name}' isn't installed — no wheels");
         return None;
     }
@@ -1056,6 +1198,21 @@ pub(crate) fn gather_tyre_files(
             None
         }
     }
+}
+
+/// A stock tyre set out of the game install's `tyres.pkz` (a plain zip, `tyres/<name>/...`),
+/// for a bike that names one of the game's own. `None` when the game isn't found or holds no
+/// such set.
+fn stock_tyre_files(name: &str, want: impl Fn(&str) -> bool + Copy) -> Option<Vec<(String, Vec<u8>)>> {
+    let install = crate::config::detect_game_path(&crate::game::MXB)?;
+    let pkz = std::path::Path::new(&install).join("tyres.pkz");
+    let prefix = format!("tyres/{}/", name.to_ascii_lowercase());
+    let files = pkz::read_selected(&pkz, |n| {
+        let n = n.replace('\\', "/").to_ascii_lowercase();
+        n.starts_with(&prefix) && want(&n)
+    })
+    .ok()?;
+    (!files.is_empty()).then_some(files)
 }
 
 /// The wheel nodes out of a tyres mod, textured and ready for the `.geom` to mount.
@@ -2042,6 +2199,11 @@ pub fn resolve_loose_texture(dirs: &[PathBuf], name: &str) -> Result<paint::Pain
 /// `edf` the way [`load_model_file_blocking`] looks; what turns up joins every paint and the
 /// base. Returns the names still missing.
 pub fn fill_loose_textures(model: &mut BikeModel, edf: &std::path::Path) -> Vec<String> {
+    fill_loose_textures_in(model, &texture_search_dirs(edf, None))
+}
+
+/// [`fill_loose_textures`], looking in `dirs` (nearest first).
+pub fn fill_loose_textures_in(model: &mut BikeModel, dirs: &[PathBuf]) -> Vec<String> {
     let mut wanted: Vec<String> = Vec::new();
     for n in &model.nodes {
         let names: Vec<&String> = if n.submeshes.is_empty() {
@@ -2061,10 +2223,9 @@ pub fn fill_loose_textures(model: &mut BikeModel, edf: &std::path::Path) -> Vec<
         .first()
         .map(|p| p.textures.iter().map(|t| t.name.to_ascii_lowercase()).collect())
         .unwrap_or_default();
-    let dirs = texture_search_dirs(edf, None);
     let mut missing = Vec::new();
     for name in wanted.into_iter().filter(|n| !have.contains(n)) {
-        match resolve_loose_texture(&dirs, &name) {
+        match resolve_loose_texture(dirs, &name) {
             Ok(t) => {
                 for p in &mut model.paints {
                     p.textures.push(t.clone());
@@ -2312,7 +2473,7 @@ pub fn read_pkz_entry(pkz: &std::path::Path, entry: &str) -> Option<Vec<u8>> {
         let mut zip = zip::ZipArchive::new(file).ok()?;
         for i in 0..zip.len() {
             let mut f = zip.by_index(i).ok()?;
-            if matches(f.name()) {
+            if f.name().is_ok_and(|n| matches(&n)) {
                 let mut buf = Vec::new();
                 std::io::Read::read_to_end(&mut f, &mut buf).ok()?;
                 return Some(buf);
@@ -2602,7 +2763,7 @@ pub fn pkz_paint_names(pkz: &std::path::Path, folder: &str, sub: &str) -> Vec<St
         let Ok(zip) = zip::ZipArchive::new(file) else {
             return Vec::new();
         };
-        return zip.file_names().filter_map(stem).collect();
+        return zip.file_names().filter_map(|n| n.ok().and_then(|n| stem(&n))).collect();
     }
     pkz::read_selected(pkz, |n| stem(n).is_some())
         .map(|hits| hits.iter().filter_map(|(n, _)| stem(n)).collect())
@@ -3436,7 +3597,7 @@ pub fn read_pkz_first(pkz: &std::path::Path, prefix: &str, ext: &str) -> Option<
     let mut hit = None;
     for i in 0..zip.len() {
         let f = zip.by_index(i).ok()?;
-        let n = f.name().replace('\\', "/");
+        let Ok(n) = f.name().map(|n| n.replace('\\', "/")) else { continue };
         if n.to_ascii_lowercase().starts_with(&prefix.to_ascii_lowercase())
             && n.to_ascii_lowercase().ends_with(ext)
         {
@@ -5835,6 +5996,127 @@ mod texture_search_tests {
         assert!(same(find_texture_file(&dirs, "frame"), tex_dir.join("Frame.TGA")));
         assert!(same(find_texture_file(&dirs, "plastics"), edf_dir.join("plastics.png")));
         assert_eq!(find_texture_file(&dirs, "nothing"), None);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+}
+
+#[cfg(test)]
+mod gfx_real_bike {
+    /// The Gfx tab's chassis points against a real bike: its gfx.cfg `chassis/chain/engine`,
+    /// taken through the rig the way the tab's `toView` takes it, has to land on the drawn
+    /// chassis (the engine sprocket), not somewhere else in the frame.
+    ///
+    /// `MXB_GFX_BIKE=<bike folder> cargo test gfx_engine_point -- --ignored --nocapture`
+    #[test]
+    #[ignore = "needs a real bike — set MXB_GFX_BIKE"]
+    fn gfx_engine_point_lands_on_the_drawn_chassis() {
+        let Ok(dir) = std::env::var("MXB_GFX_BIKE") else { return };
+        let dir = std::path::Path::new(&dir);
+        let (m, _) = super::load_gfx_bike_model_blocking(&[dir]).expect("load");
+        let bytes = std::fs::read(dir.join("gfx.cfg")).expect("gfx.cfg");
+        let fields = crate::gfxedit::read_fields(&crate::gfxedit::decode(&bytes).0);
+        let at = |k: &str| fields[&format!("chassis/chain/engine/{k}")].trim().parse::<f32>().unwrap();
+        let co = m.rig.map(|r| r.chassis_origin).unwrap_or([0.0; 3]);
+        let v = [-at("x") + co[0], at("y") + co[1], at("z") + co[2]];
+        let chassis = m.nodes.iter().find(|n| n.name.to_ascii_lowercase().starts_with("chassis")).expect("chassis");
+        let near = chassis
+            .positions
+            .chunks_exact(3)
+            .map(|p| ((p[0] - v[0]).powi(2) + (p[1] - v[1]).powi(2) + (p[2] - v[2]).powi(2)).sqrt())
+            .fold(f32::MAX, f32::min);
+        println!("engine point in view {v:?}, nearest chassis vertex {:.1} mm", near * 1000.0);
+        assert!(near < 0.03, "the engine point is {near} m from the chassis mesh");
+    }
+}
+
+#[cfg(test)]
+mod gfx_packed {
+    use super::{bike_pkz_candidates, gfx_packed_layer, PackedRead};
+    use std::path::Path;
+
+    fn zip_of(entries: &[(&str, &[u8])]) -> Vec<u8> {
+        use std::io::Write;
+        let mut buf = std::io::Cursor::new(Vec::new());
+        {
+            let mut w = zip::ZipWriter::new(&mut buf);
+            for (name, body) in entries {
+                w.start_file::<_, ()>(*name, zip::write::SimpleFileOptions::default()).unwrap();
+                w.write_all(body).unwrap();
+            }
+            w.finish().unwrap();
+        }
+        buf.into_inner()
+    }
+
+    fn names(files: &[(String, Vec<u8>)]) -> Vec<String> {
+        let mut n: Vec<String> = files.iter().map(|(n, _)| n.to_ascii_lowercase()).collect();
+        n.sort();
+        n
+    }
+
+    fn tmp(tag: &str) -> std::path::PathBuf {
+        let p = std::env::temp_dir().join(format!("gfx-packed-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&p);
+        std::fs::create_dir_all(&p).unwrap();
+        p
+    }
+
+    #[test]
+    fn the_model_comes_out_of_the_bikes_pkz_but_no_texture_does() {
+        let root = tmp("model");
+        let bike = root.join("2027 HONDA CR450F");
+        std::fs::create_dir_all(&bike).unwrap();
+        std::fs::write(bike.join("gfx.cfg"), "chassis { }").unwrap();
+        // A paint pack in the folder is passed over; the bike's own archive beside it is read.
+        std::fs::write(bike.join("a_paints.pkz"), zip_of(&[("plastics.tga", b"x")])).unwrap();
+        std::fs::write(
+            root.join("2027 HONDA CR450F.pkz"),
+            zip_of(&[
+                ("model.edf", b"edf"),
+                ("chassis.hrc", b"hrc"),
+                ("bike.geom", b"chassis_steer = 0, 1, 0.3"),
+                ("plastics.tga", b"tga"),
+                ("default.pnt", b"pnt"),
+            ]),
+        )
+        .unwrap();
+        let (files, packed) = gfx_packed_layer(&bike, &Default::default());
+        assert_eq!(packed, PackedRead::Read);
+        assert_eq!(names(&files), ["bike.geom", "chassis.hrc", "model.edf"]);
+        // A mesh the folder has loose isn't unpacked, and the archive still counts as read.
+        let skip = ["model.edf".to_string(), "bike.geom".to_string()].into_iter().collect();
+        let (files, packed) = gfx_packed_layer(&bike, &skip);
+        assert_eq!(packed, PackedRead::Read);
+        assert_eq!(names(&files), ["chassis.hrc"]);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_pkz_named_after_the_folder_comes_first_and_none_is_none() {
+        let root = tmp("order");
+        let bike = root.join("CR450F");
+        std::fs::create_dir_all(&bike).unwrap();
+        assert_eq!(gfx_packed_layer(&bike, &Default::default()).1, PackedRead::None);
+        std::fs::write(bike.join("aaa.pkz"), b"").unwrap();
+        std::fs::write(bike.join("cr450f.PKZ"), b"").unwrap();
+        std::fs::write(root.join("CR450F.pkz"), b"").unwrap();
+        let got: Vec<String> = bike_pkz_candidates(&bike)
+            .iter()
+            .map(|p| p.strip_prefix(&root).unwrap().to_string_lossy().replace('\\', "/"))
+            .collect();
+        assert_eq!(got, ["CR450F/cr450f.PKZ", "CR450F.pkz", "CR450F/aaa.pkz"]);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn an_archive_that_wont_unpack_is_said_so() {
+        let root = tmp("bad");
+        let bike = root.join("Locked");
+        std::fs::create_dir_all(&bike).unwrap();
+        std::fs::write(root.join("Locked.pkz"), b"not an archive at all").unwrap();
+        let (files, packed) = gfx_packed_layer(Path::new(&bike), &Default::default());
+        assert!(files.is_empty());
+        assert_eq!(packed, PackedRead::Unreadable);
         let _ = std::fs::remove_dir_all(&root);
     }
 }

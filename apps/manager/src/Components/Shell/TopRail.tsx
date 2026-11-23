@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type Ref } from "react";
-import { Play, Gamepad2, Loader2 } from "lucide-react";
+import { Play, Gamepad2, Loader2, Flag, Zap, Rocket, Gauge } from "lucide-react";
+import { useExtensionBrand } from "@frost/shared/extensions/ExtensionHost";
 import { toast } from "sonner";
 import { cn } from "@frost/shared/lib/utils";
 import type { LoadedPlugin } from "@frost/shared/lib/pluginHost";
@@ -24,6 +25,8 @@ const STALL_CHECK_MS = 47000;
 interface TopRailProps {
   view: DashboardView;
   plugins: LoadedPlugin[];
+  /** Extensions' tabs, folded into one trailing rail item like plugins' panels. */
+  extViews?: { route: string; title: string }[];
   onNavigate: (view: DashboardView) => void;
   /** Where the mounted screen portals its own toolbar — see `ContextBar`. */
   leftRef: Ref<HTMLDivElement>;
@@ -42,12 +45,14 @@ interface TopRailProps {
  * `data-tauri-drag-region={undefined}` by simply being a button — Tauri only drags from
  * elements carrying the attribute.
  */
-export default function TopRail({ view, plugins, onNavigate, leftRef, rightRef }: TopRailProps) {
+export default function TopRail({ view, plugins, extViews = [], onNavigate, leftRef, rightRef }: TopRailProps) {
   const t = useT();
   const { game } = useConfig();
   const caps = game.caps;
   const { running: gameRunning, refresh: refreshGame } = useGameRunning();
   const [starting, setStarting] = useState(false);
+  // An extension theme can rename the button and swap its icon; running/starting stay ours.
+  const ext = useExtensionBrand();
 
   // Drop out of "Starting…" once the game shows up — or once it's clear it isn't going
   // to, so a launch that failed silently doesn't leave the button stuck.
@@ -94,7 +99,7 @@ export default function TopRail({ view, plugins, onNavigate, leftRef, rightRef }
     refreshGame();
   }, [t, refreshGame]);
 
-  const items = visibleRail(plugins, (cap) => !cap || caps[cap]);
+  const items = visibleRail(plugins, (cap) => !cap || caps[cap], extViews);
   const active = railItemFor(view, items);
 
   return (
@@ -133,7 +138,7 @@ export default function TopRail({ view, plugins, onNavigate, leftRef, rightRef }
           disabled={gameRunning || starting}
           title={gameRunning ? t("game.running") : t("game.launch")}
           className={cn(
-            "flex h-8 cursor-default items-center rounded-full px-6 transition-colors",
+            "mxb-play flex h-8 cursor-default items-center rounded-full px-6 transition-colors",
             gameRunning || starting
               ? "border border-input text-muted-foreground"
               : "bg-primary text-primary-foreground hover:brightness-110 active:brightness-95",
@@ -145,10 +150,10 @@ export default function TopRail({ view, plugins, onNavigate, leftRef, rightRef }
             ) : starting ? (
               <Loader2 className="size-3.5 animate-spin" />
             ) : (
-              <Play className="size-3.5 fill-current" />
+              <PlayIcon icon={ext.playIcon} />
             )}
             <span className="font-cond text-[14.5px] font-bold tracking-[-0.02em]">
-              {gameRunning ? t("game.running") : starting ? t("game.starting") : t("game.play")}
+              {gameRunning ? t("game.running") : starting ? t("game.starting") : (ext.playLabel ?? t("game.play"))}
             </span>
           </span>
         </button>
@@ -172,6 +177,7 @@ export default function TopRail({ view, plugins, onNavigate, leftRef, rightRef }
 function visibleRail(
   plugins: LoadedPlugin[],
   hasCap: (cap?: keyof GameCaps) => boolean,
+  extViews: { route: string; title: string }[] = [],
 ): RailItem[] {
   const ok = (g: { cap?: keyof GameCaps }) => hasCap(g.cap);
 
@@ -197,5 +203,38 @@ function visibleRail(
       tabs: panels,
     });
   }
+  // Always there: the marketplace is how people find extensions in the first place. Each
+  // installed extension's tabs follow it in the context bar.
+  const extTabs = extViews.map((v, i) => ({
+    view: v.route as DashboardView,
+    label: "ext.section" as const,
+    rawLabel: v.title,
+    // One line, between the Marketplace and what was installed from it.
+    dividerBefore: i === 0,
+  }));
+  items.push({
+    id: "extensions",
+    label: "ext.section",
+    view: "extensions",
+    tabs: [{ view: "extensions", label: "ext.marketplace" }, ...extTabs],
+  });
   return items;
+}
+
+/** The Play button's icon: ours, or one from the fixed set an extension theme may pick. */
+function PlayIcon({ icon }: { icon: string | null }) {
+  switch (icon) {
+    case "none":
+      return null;
+    case "flag":
+      return <Flag className="size-3.5 fill-current" />;
+    case "bolt":
+      return <Zap className="size-3.5 fill-current" />;
+    case "rocket":
+      return <Rocket className="size-3.5" />;
+    case "gauge":
+      return <Gauge className="size-3.5" />;
+    default:
+      return <Play className="size-3.5 fill-current" />;
+  }
 }

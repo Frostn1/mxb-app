@@ -1,0 +1,2950 @@
+//! MXB Coach's commands: find the recorder's session files, list them, review a lap against a
+//! faster one, and put the recorder plugin where the game loads it.
+//!
+//! The recorder writes to `<game user folder>\mxbcoach\sessions\*.mxbc`. Summaries are cached
+//! in `<data dir>\coach\index.json`, keyed by path, size and modified time, so listing a
+//! folder of long sessions doesn't re-read every one of them.
+
+use std::collections::{HashMap, HashSet};
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, UNIX_EPOCH};
+
+use mxb_core::config::{self, AppConfig};
+use serde::{Deserialize, Serialize};
+use tauri::{AppHandle, Emitter, Manager};
+
+use crate::analysis::{self, Ideal, Review, Trace};
+use crate::i18n::{num, tr};
+use crate::telemetry::{self, Recording};
+
+const PLUGIN: &str = "mxbcoach.dlo";
+/// Built and released with FrostMod (`src/mxbcoach.cpp`). Published to the public release-only
+/// `frostmod-releases` (same tags and assets) so the source repo can go private; the source
+/// repo is the fallback until that mirror has a release. Asked in this order.
+const PLUGIN_REPOS: [&str; 2] = ["Frostn1/frostmod-releases", "Frostn1/frostmod"];
+
+fn plugin_url(repo: &str) -> String {
+    format!("https://github.com/{repo}/releases/latest/download/{PLUGIN}")
+}
+
+/// Which release that is. Same host the app's own updater already asks, once at startup.
+fn plugin_release(repo: &str) -> String {
+    format!("https://api.github.com/repos/{repo}/releases/latest")
+}
+/// What Coach last put in the plugins folder, remembered so a recorder the game has never run
+/// still has a known version. Nothing else can say: the recorder only writes `recorder.ini`
+/// once the game has loaded it, and versions before 0.23 never wrote one at all — which is
+/// exactly the case where every warning in the app stayed silent.
+///
+/// Kept in Coach's own folder rather than the shared `config.json`, because MXB App's `save`
+/// writes that file from its own struct and serde drops every key the struct has no field
+/// for: a note left there would last only until the manager next saved anything.
+const INSTALLED_FILE: &str = "recorder-installed.json";
+
+fn err(e: impl std::fmt::Display) -> String {
+    e.to_string()
+}
+
+/// Runs a command's work and puts it in the log when it took longer than half a second, so a
+/// report of a freeze names the command and how long it held things up.
+fn timed<T>(name: &str, f: impl FnOnce() -> T) -> T {
+    let start = std::time::Instant::now();
+    let out = f();
+    let ms = start.elapsed().as_millis();
+    if ms > 500 {
+        log::warn!("slow command {name}: {ms} ms");
+    }
+    out
+}
+
+/// Where the recorder writes. More than one candidate: the user folder can be moved, and the
+/// configured profiles folder may know better than the default.
+pub(crate) fn session_dirs(cfg: &AppConfig) -> Vec<PathBuf> {
+    let mut out: Vec<PathBuf> = Vec::new();
+    let users = [cfg.profiles_dir().parent().map(Path::to_path_buf), config::default_user_dir(cfg.game())];
+    for user in users.into_iter().flatten() {
+        let dir = user.join("mxbcoach").join("sessions");
+        if !out.contains(&dir) {
+            out.push(dir);
+        }
+    }
+    out
+}
+
+/// Where the `.cue` and `.hud` sheets go: `cues/` under the same `mxbcoach` folder `hud.ini`
+/// is written to, which is the one the recorder actually uses. Taking the first candidate
+/// instead put the sheets somewhere the plugin never opens whenever the configured profiles
+/// folder wasn't the one the game writes to — and then the cue and the trail simply never
+/// appeared, with nothing on screen to say why.
+/// Said wherever Coach needs the game's own folder under Documents and can't find it.
+pub(crate) fn no_user_folder() -> String {
+    tr!("err.no_user_folder", "The game's user folder wasn't found.")
+}
+
+pub(crate) fn sheets_dir(cfg: &AppConfig) -> Option<PathBuf> {
+    crate::hud::coach_dir_of(&session_dirs(cfg)).map(|c| c.join("cues"))
+}
+
+fn plugin_path(cfg: &AppConfig) -> Option<PathBuf> {
+    let dir = cfg.install_dir();
+    (!dir.trim().is_empty()).then(|| Path::new(&dir).join("plugins").join(PLUGIN))
+}
+
+pub(crate) fn load_config(app: &AppHandle) -> AppConfig {
+    config::load(app).unwrap_or_default()
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Status {
+    pub game_dir: String,
+    pub plugin_path: Option<String>,
+    pub plugin_installed: bool,
+    pub session_dirs: Vec<String>,
+    /// The recorder's own version, as it wrote it the last time the game ran it. None until
+    /// the game has run it once.
+    pub recorder_version: Option<String>,
+    /// The recorder that ran is older than the one the HUD and the spoken cues need.
+    pub recorder_outdated: bool,
+    /// The recorder that ran keeps drawing the line and the hints after Coach is switched off
+    /// or closed: it predates `coach.ini` (see `link.rs`).
+    pub recorder_no_clear: bool,
+}
+
+#[tauri::command]
+pub fn coach_status(app: AppHandle) -> Status {
+    let cfg = load_config(&app);
+    let plugin = plugin_path(&cfg);
+    let dirs = session_dirs(&cfg);
+    let recorder_version = crate::hud::coach_dir_of(&dirs).as_deref().and_then(crate::hud::recorder_version);
+    Status {
+        game_dir: cfg.install_dir(),
+        plugin_installed: plugin.as_ref().is_some_and(|p| p.is_file()),
+        plugin_path: plugin.map(|p| p.to_string_lossy().into_owned()),
+        session_dirs: dirs.iter().map(|d| d.to_string_lossy().into_owned()).collect(),
+        recorder_outdated: recorder_version
+            .as_deref()
+            .is_some_and(|v| !crate::hud::at_least(v, crate::hud::RECORDER_NEEDS)),
+        recorder_no_clear: recorder_version.as_deref().is_some_and(|v| !crate::hud::at_least(v, crate::link::CLEAR_NEEDS)),
+        recorder_version,
+    }
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LapSummary {
+    pub num: i32,
+    /// The recording this lap is in: a session is every stint of one event.
+    #[serde(default)]
+    pub path: String,
+    /// Which stint of the session it was ridden in, from 0. The game numbers laps per stint,
+    /// so two stints both have a lap 1.
+    #[serde(default)]
+    pub stint: i32,
+    pub time_ms: i32,
+    pub invalid: bool,
+    /// Started and finished at the line: it can be compared.
+    pub whole: bool,
+    /// Why it can't be compared, when it can't: `out lap`, `unfinished`, `gap in the recording`.
+    #[serde(default)]
+    pub issue: Option<String>,
+    #[serde(default)]
+    pub crashed: bool,
+    /// The game put the bike back on the track during it (see `telemetry::Lap::reset`).
+    #[serde(default)]
+    pub reset: bool,
+    /// Part of the track was cut (see `telemetry::Lap::cut`).
+    #[serde(default)]
+    pub cut: bool,
+    /// The stint's first lap, from standstill (see `telemetry::Lap::warmup`).
+    #[serde(default)]
+    pub warmup: bool,
+    /// How long it took by the recording, for a lap the game left untimed.
+    #[serde(default)]
+    pub ridden_ms: i32,
+}
+
+impl LapSummary {
+    pub(crate) fn comparable(&self) -> bool {
+        self.whole && !self.invalid
+    }
+
+    /// A lap worth racing and drawing as the line: comparable, and ridden at pace with no crash,
+    /// reset or cut. The reference and the in-game line only ever come from these.
+    pub(crate) fn clean(&self) -> bool {
+        self.comparable() && !self.crashed && !self.reset && !self.cut && !self.warmup
+    }
+}
+
+/// One stint on track: one recording. A session is every stint of one event.
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Stint {
+    pub path: String,
+    pub started: String,
+    /// The setup it was ridden on, as the game names it.
+    pub setup: String,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionSummary {
+    /// The first stint's file. Every stint is in `stints`.
+    pub path: String,
+    /// `yyyymmdd-hhmmss-mmm`, local time the first stint started. Sorts by date.
+    pub started: String,
+    pub rider: String,
+    pub track_id: String,
+    pub track_name: String,
+    pub bike_id: String,
+    pub bike_name: String,
+    pub category: String,
+    /// 1 = testing, 2 = race, 4 = straight rhythm. A stint of another kind is another session.
+    #[serde(default)]
+    pub event_type: i32,
+    pub track_length: f32,
+    pub limiter: i32,
+    /// False when the game quit mid-stint.
+    pub complete: bool,
+    pub laps: Vec<LapSummary>,
+    pub best_ms: Option<i32>,
+    /// The setup the last stint was ridden on, as the game names it (without a common
+    /// setup's ':').
+    #[serde(default)]
+    pub setup: String,
+    /// Every stint this session was ridden in, oldest first.
+    #[serde(default)]
+    pub stints: Vec<Stint>,
+}
+
+pub(crate) fn summarize(path: &Path, rec: &Recording) -> SessionSummary {
+    let file = path.to_string_lossy().into_owned();
+    let laps: Vec<LapSummary> = rec
+        .laps()
+        .iter()
+        .map(|l| LapSummary {
+            num: l.num,
+            path: file.clone(),
+            stint: 0,
+            time_ms: l.time_ms,
+            invalid: l.invalid,
+            whole: l.whole,
+            issue: l.issue.map(str::to_owned),
+            crashed: l.crashed,
+            reset: l.reset,
+            cut: l.cut,
+            warmup: l.warmup,
+            ridden_ms: l.ridden_ms,
+        })
+        .collect();
+    let e = &rec.event;
+    let started = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+    let setup = rec.session.setup.trim_start_matches(':').to_string();
+    SessionSummary {
+        path: file.clone(),
+        rider: e.rider.clone(),
+        track_id: e.track_id.clone(),
+        track_name: e.track_name.clone(),
+        bike_id: e.bike_id.clone(),
+        bike_name: e.bike_name.clone(),
+        category: e.category.clone(),
+        event_type: e.event_type,
+        track_length: e.track_length,
+        limiter: e.limiter,
+        complete: rec.complete,
+        best_ms: laps.iter().filter(|l| l.comparable()).map(|l| l.time_ms).min(),
+        laps,
+        stints: vec![Stint { path: file, started: started.clone(), setup: setup.clone() }],
+        started,
+        setup,
+    }
+}
+
+/// How long a break makes the next stint a new session. Going out and back in during one
+/// event writes another file every time, and those are all the same session.
+const SAME_EVENT_GAP_S: i64 = 3 * 60 * 60;
+
+/// Days since 1970-01-01, by Howard Hinnant's `days_from_civil`.
+fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
+    let y = if m <= 2 { y - 1 } else { y };
+    let era = if y >= 0 { y } else { y - 399 } / 400;
+    let yoe = y - era * 400;
+    let mp = (m + 9) % 12;
+    let doy = (153 * mp + 2) / 5 + d - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    era * 146_097 + doe - 719_468
+}
+
+/// A `yyyymmdd-hhmmss-mmm` stamp as seconds, so two stints can be held apart in time.
+fn stamp_secs(stamp: &str) -> Option<i64> {
+    let date: i64 = stamp.get(..8)?.parse().ok()?;
+    let time: i64 = stamp.get(9..15)?.parse().ok()?;
+    let day = days_from_civil(date / 10_000, date / 100 % 100, date % 100);
+    Some(day * 86_400 + time / 10_000 * 3600 + time / 100 % 100 * 60 + time % 100)
+}
+
+/// How long a stint was on track, seconds, by its laps.
+fn ridden_s(s: &SessionSummary) -> i64 {
+    s.laps.iter().map(|l| i64::from(l.time_ms.max(l.ridden_ms)).max(0)).sum::<i64>() / 1000
+}
+
+/// Whether two stints are the same event: the same rider on the same bike at the same track,
+/// in the same kind of event. Not the game's session — one race event runs through practice,
+/// qualifying and the race, and all of it is one session.
+fn same_event(a: &SessionSummary, b: &SessionSummary) -> bool {
+    (&a.rider, &a.track_id, &a.bike_id, a.event_type) == (&b.rider, &b.track_id, &b.bike_id, b.event_type)
+}
+
+/// Adds a stint to the session it belongs to.
+fn merge_stint(into: &mut SessionSummary, s: SessionSummary) {
+    let stint = into.stints.len() as i32;
+    into.laps.extend(s.laps.into_iter().map(|l| LapSummary { stint, ..l }));
+    into.best_ms = [into.best_ms, s.best_ms].into_iter().flatten().min();
+    // The last stint says how the session ended and what it was ridden on.
+    into.complete = s.complete;
+    into.setup = s.setup;
+    into.stints.extend(s.stints);
+}
+
+/// One session per event: stints of the same event, ridden back to back, become one session
+/// with all their laps. Oldest first.
+pub(crate) fn group_sessions(mut stints: Vec<SessionSummary>) -> Vec<SessionSummary> {
+    stints.sort_by(|a, b| a.started.cmp(&b.started));
+    // Each group with the time its last stint came off track.
+    let mut out: Vec<(SessionSummary, i64)> = Vec::new();
+    for s in stints {
+        let start = stamp_secs(&s.started);
+        let end = start.unwrap_or(0) + ridden_s(&s);
+        let joins = out.last().is_some_and(|(g, off)| {
+            same_event(g, &s) && start.map_or(true, |t| t - off <= SAME_EVENT_GAP_S)
+        });
+        match out.len().checked_sub(1).filter(|_| joins) {
+            Some(i) => {
+                let (g, off) = &mut out[i];
+                merge_stint(g, s);
+                *off = end;
+            }
+            None => out.push((s, end)),
+        }
+    }
+    out.into_iter().map(|(g, _)| g).collect()
+}
+
+#[derive(Serialize, Deserialize)]
+struct Indexed {
+    size: u64,
+    modified: u64,
+    summary: SessionSummary,
+}
+
+fn index_path(app: &AppHandle) -> Option<PathBuf> {
+    // v4: stints carry the event they belong to, and laps the file they're in.
+    // v5: laps say whether they had a reset, a cut or were the warm-up, so a lap summarised
+    // before that isn't taken for a clean one.
+    Some(config::data_dir(app)?.join("coach").join("index-v5.json"))
+}
+
+/// Every recording in `dirs`, summarised one stint at a time, with `index_file` as a cache
+/// keyed by path, size and modified time. A file that won't parse is skipped, not fatal.
+///
+/// The imported trainer laps are read the same way out of their own folder, with their own
+/// index: they are recordings like any other, they just aren't the rider's.
+pub(crate) fn summaries(dirs: &[PathBuf], index_file: Option<PathBuf>) -> Vec<SessionSummary> {
+    let mut index: HashMap<String, Indexed> = index_file
+        .as_ref()
+        .and_then(|p| fs::read(p).ok())
+        .and_then(|b| serde_json::from_slice(&b).ok())
+        .unwrap_or_default();
+    let mut changed = false;
+    let mut seen = HashSet::new();
+    let mut out = Vec::new();
+    for dir in dirs {
+        let Ok(entries) = fs::read_dir(dir) else { continue };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("mxbc") {
+                continue;
+            }
+            // The file's own size and time, not the folder listing's (`entry.metadata()`). NTFS
+            // only brings a directory entry up to date when the writer closes the file, so while
+            // the game is still appending to a recording the listing kept saying the size it had
+            // when it was first seen. That stale key matched the cache, and the session list sat
+            // at lap 5 while the rider was on lap 21; Refresh read the same stale key again, and
+            // only a restart (a fresh index read after the game closed the file) caught up.
+            // `fs::metadata` opens the file and asks its handle, which is always live.
+            let Ok(meta) = fs::metadata(&path) else { continue };
+            let size = meta.len();
+            let modified = meta
+                .modified()
+                .ok()
+                .and_then(|m| m.duration_since(UNIX_EPOCH).ok())
+                .map_or(0, |d| d.as_secs());
+            let key = path.to_string_lossy().into_owned();
+            seen.insert(key.clone());
+            let summary = match index.get(&key) {
+                // A stint still being recorded (`complete == false`) is only served from the
+                // cache while its live size hasn't moved; any growth is new laps, re-read now.
+                Some(i) if i.size == size && i.modified == modified => i.summary.clone(),
+                _ => {
+                    let Some(rec) = fs::read(&path).ok().and_then(|b| telemetry::parse(&b).ok()) else {
+                        continue;
+                    };
+                    let s = summarize(&path, &rec);
+                    index.insert(key, Indexed { size, modified, summary: s.clone() });
+                    changed = true;
+                    s
+                }
+            };
+            out.push(summary);
+        }
+    }
+    let before = index.len();
+    index.retain(|k, _| seen.contains(k));
+    changed |= index.len() != before;
+    if let (true, Some(file)) = (changed, index_file) {
+        if let Some(parent) = file.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        if let Ok(json) = serde_json::to_vec(&index) {
+            let _ = fs::write(file, json);
+        }
+    }
+    out
+}
+
+/// Every session on disk, newest first: the stints of one event as one session.
+pub(crate) fn all_sessions(app: &AppHandle) -> Vec<SessionSummary> {
+    let dirs = session_dirs(&load_config(app));
+    let mut out = group_sessions(summaries(&dirs, index_path(app)));
+    out.sort_by(|a, b| b.started.cmp(&a.started));
+    out
+}
+
+#[tauri::command]
+pub async fn coach_sessions(app: AppHandle) -> Vec<SessionSummary> {
+    tauri::async_runtime::spawn_blocking(move || timed("coach_sessions", || coach_sessions_sync(app))).await.unwrap_or_default()
+}
+
+fn coach_sessions_sync(app: AppHandle) -> Vec<SessionSummary> {
+    // The folder only exists once the recorder has written to it, so the watch that couldn't
+    // start when the app opened gets another go here.
+    ensure_watching(&app);
+    all_sessions(&app)
+}
+
+/// The sessions folders, watched while the app is open.
+#[derive(Default)]
+pub struct SessionWatch(pub mxb_core::paintwatch::WatchSet);
+
+/// The installed tracks folder, watched so a new track gets its ground before anyone rides it.
+#[derive(Default)]
+pub struct TrackWatch(pub mxb_core::paintwatch::WatchSet);
+
+/// Make the ground grids now (start), and again whenever `mods/tracks` changes.
+pub fn watch_tracks(app: &AppHandle) {
+    crate::groundgrid::prepare_all(app);
+    let Some(state) = app.try_state::<TrackWatch>() else { return };
+    let dir = mxb_core::library::mods_subdir(&load_config(app).mods_path, "mods/tracks");
+    let handle = app.clone();
+    mxb_core::paintwatch::watch_folders(
+        &state.0,
+        "track watcher",
+        &[dir.to_string_lossy().into_owned()],
+        Duration::from_secs(10),
+        move |_| crate::groundgrid::prepare_all(&handle),
+    );
+}
+
+/// Told to the frontend when a recording is written or grows: the session list and the open
+/// session's laps re-read themselves rather than waiting for the rider to leave and come back.
+pub const SESSIONS_CHANGED: &str = "coach-sessions-changed";
+
+/// Slower than the paint watcher's. A recording is appended to all the way through a stint, so
+/// events never stop while the rider is out; the answer to each one is re-reading a file that
+/// is still growing, and nobody needs that several times a second.
+const SESSION_DEBOUNCE: Duration = Duration::from_secs(2);
+
+/// Watch the sessions folders, replacing any watch already running.
+pub fn watch_sessions(app: &AppHandle) {
+    let Some(state) = app.try_state::<SessionWatch>() else { return };
+    let dirs: Vec<String> = session_dirs(&load_config(app)).iter().map(|d| d.to_string_lossy().into_owned()).collect();
+    let handle = app.clone();
+    mxb_core::paintwatch::watch_folders(&state.0, "session watcher", &dirs, SESSION_DEBOUNCE, move |paths| {
+        log::info!("session watcher: {} file(s) changed", paths.len());
+        // The track's own ground for the recorder's line, the moment a track is seen ridden:
+        // no lap needed (groundgrid.rs). Once per track per run.
+        for p in paths.iter().filter(|p| p.to_ascii_lowercase().ends_with(".mxbc")) {
+            crate::groundgrid::ensure_for(&handle, Path::new(p));
+        }
+        let _ = handle.emit(SESSIONS_CHANGED, ());
+    });
+    poll_live_recording(app, session_dirs(&load_config(app)));
+}
+
+/// How often the newest recording's live size is looked at.
+const LIVE_POLL: Duration = Duration::from_secs(3);
+
+/// Which `poll_live_recording` thread is the current one. Starting a new watch bumps it, and
+/// the thread before sees that and ends.
+static LIVE_POLL_GEN: AtomicU64 = AtomicU64::new(0);
+
+/// The newest recording in `dirs`: the file names are the stamp the stint started at.
+fn newest_recording(dirs: &[PathBuf]) -> Option<PathBuf> {
+    dirs.iter()
+        .filter_map(|d| fs::read_dir(d).ok())
+        .flat_map(|entries| entries.flatten().map(|e| e.path()))
+        .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("mxbc"))
+        .max_by(|a, b| a.file_name().cmp(&b.file_name()))
+}
+
+/// The folder watcher alone doesn't see a recording grow. It is told about changes to the
+/// folder's entries, and NTFS leaves a file's entry alone while the game keeps it open and
+/// appends to it, so a stint being ridden could go minutes without one event. A cheap poll of
+/// the one file that can be growing, the newest, by its live size (one folder listing and one
+/// open every few seconds), says so whenever it has: a finished recording never grows, so it
+/// costs no re-reads once the rider is off track.
+fn poll_live_recording(app: &AppHandle, dirs: Vec<PathBuf>) {
+    let gen = LIVE_POLL_GEN.fetch_add(1, Ordering::SeqCst) + 1;
+    let handle = app.clone();
+    let spawned = std::thread::Builder::new().name("coach live recording".into()).spawn(move || {
+        let mut last: Option<(PathBuf, u64)> = None;
+        loop {
+            std::thread::sleep(LIVE_POLL);
+            if LIVE_POLL_GEN.load(Ordering::SeqCst) != gen {
+                return;
+            }
+            let Some(newest) = newest_recording(&dirs) else { continue };
+            let Ok(size) = fs::metadata(&newest).map(|m| m.len()) else { continue };
+            let grew = last.as_ref().is_some_and(|(p, s)| *p == newest && *s != size);
+            last = Some((newest.clone(), size));
+            if grew {
+                crate::groundgrid::ensure_for(&handle, &newest);
+                let _ = handle.emit(SESSIONS_CHANGED, ());
+            }
+        }
+    });
+    if let Err(e) = spawned {
+        log::warn!("live recording poll didn't start: {e}");
+    }
+}
+
+fn ensure_watching(app: &AppHandle) {
+    let watching = app.try_state::<SessionWatch>().is_some_and(|s| mxb_core::paintwatch::is_watching(&s.0));
+    if !watching {
+        watch_sessions(app);
+    }
+}
+
+pub(crate) fn load(path: &str) -> Result<Recording, String> {
+    telemetry::parse(&fs::read(path).map_err(err)?).map_err(err)
+}
+
+fn trace(rec: &Recording, num: i32) -> Result<Trace, String> {
+    let lap = rec
+        .laps()
+        .into_iter()
+        .find(|l| l.num == num)
+        .ok_or_else(|| tr!("err.lap_missing", "Lap {n} isn't in that session.", n = num))?;
+    Trace::new(&lap, rec.event.track_length).ok_or_else(|| tr!("err.lap_short", "Lap {n} is too short to review.", n = num))
+}
+
+/// Where a reference lap came from. The rider is told, because it changes what the comparison
+/// means: another rider's lap isn't theirs to ride back, and the ideal lap was never ridden.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum RefKind {
+    /// A lap the rider rode themselves.
+    Own,
+    /// A lap from another rider, imported into the coach.
+    Imported,
+    /// The rider's own best sections added up: a time that was never ridden whole.
+    Ideal,
+}
+
+/// A lap somewhere on disk — or the ideal lap, which is nowhere.
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LapRef {
+    pub path: String,
+    pub lap: i32,
+    pub time_ms: i32,
+    pub started: String,
+    pub bike_name: String,
+    /// The bike it was ridden on. A 250 and a 450 don't take a corner the same way, so the
+    /// review says so when it isn't the same one.
+    pub bike_id: String,
+    /// Whose lap it is, as the recorder saved it.
+    pub rider: String,
+    pub kind: RefKind,
+}
+
+impl LapRef {
+    /// Lap `l` of session `s`, as something to be reviewed against.
+    fn of(s: &SessionSummary, l: &LapSummary, kind: RefKind) -> LapRef {
+        LapRef {
+            // The lap's own file and the stint it was ridden in: a session spans several.
+            path: l.path.clone(),
+            lap: l.num,
+            time_ms: l.time_ms,
+            started: s.stints.get(l.stint.max(0) as usize).map_or(&s.started, |x| &x.started).clone(),
+            bike_name: s.bike_name.clone(),
+            bike_id: s.bike_id.clone(),
+            rider: s.rider.clone(),
+            kind,
+        }
+    }
+}
+
+/// The fastest clean lap on this track, other than `exclude`, across every session the rider has
+/// ridden here. The same bike wins over a faster lap on a different one: a 250 and a 450 don't
+/// take a corner the same way.
+///
+/// Clean, not just whole: a lap with a crash, a reset or a cut in it, or the warm-up out of the
+/// pits, was taken here before and drawn in the game as the line to ride, through the scenery
+/// wherever the bike had been thrown (GAMING PROFI 2, v0.1.24). None until there is a clean one.
+fn best_reference(sessions: &[SessionSummary], track_id: &str, bike_id: &str, exclude: Option<(&str, i32)>) -> Option<LapRef> {
+    sessions
+        .iter()
+        .filter(|s| s.track_id == track_id)
+        .flat_map(|s| s.laps.iter().filter(|l| l.clean()).map(move |l| (s, l)))
+        .filter(|(_, l)| exclude != Some((l.path.as_str(), l.num)))
+        .min_by_key(|(s, l)| (s.bike_id != bike_id, l.time_ms))
+        .map(|(s, l)| LapRef::of(s, l, RefKind::Own))
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionDetail {
+    pub summary: SessionSummary,
+    /// The lap every lap here is reviewed against by default.
+    pub reference: Option<LapRef>,
+    /// This session's best sections added up, on the reference's sections.
+    pub ideal: Option<Ideal>,
+}
+
+/// The whole session `path` belongs to: every stint of that event, with all their laps.
+#[tauri::command]
+pub async fn coach_session(app: AppHandle, path: String) -> Result<SessionDetail, String> {
+    tauri::async_runtime::spawn_blocking(move || timed("coach_session", || coach_session_sync(app, path))).await.map_err(err)?
+}
+
+fn coach_session_sync(app: AppHandle, path: String) -> Result<SessionDetail, String> {
+    let sessions = all_sessions(&app);
+    let summary = match sessions.iter().find(|s| s.stints.iter().any(|x| x.path == path)) {
+        Some(s) => s.clone(),
+        None => summarize(Path::new(&path), &load(&path)?),
+    };
+    let reference = best_reference(&sessions, &summary.track_id, &summary.bike_id, None);
+    let ideal = match &reference {
+        Some(r) => {
+            let ref_trace = trace(&load(&r.path)?, r.lap)?;
+            let mut sections = analysis::sections(&ref_trace);
+            // The same names the review uses, or the section-bests table disagrees with the
+            // page it sits on.
+            label(&app, &summary.track_id, summary.track_length, &[], &mut sections);
+            // Keyed by where each lap sits in the session's list, not by its number: every
+            // stint starts counting at lap 1 again.
+            let mut laps: Vec<(i32, Trace)> = Vec::new();
+            for (i, st) in summary.stints.iter().enumerate() {
+                let Ok(rec) = load(&st.path) else { continue };
+                for l in rec.laps().iter().filter(|l| l.whole && !l.invalid) {
+                    let at = summary.laps.iter().position(|x| x.stint as usize == i && x.num == l.num);
+                    if let (Some(at), Some(t)) = (at, Trace::new(l, rec.event.track_length)) {
+                        laps.push((at as i32, t));
+                    }
+                }
+            }
+            analysis::ideal(&sections, &laps)
+        }
+        None => None,
+    };
+    Ok(SessionDetail { summary, reference, ideal })
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReviewOut {
+    pub track_id: String,
+    pub track_name: String,
+    pub lap: LapRef,
+    pub reference: LapRef,
+    pub review: Review,
+    /// How many of the rider's own laps the ideal lap was stitched from, when that is what
+    /// this lap is held against. None otherwise.
+    pub ideal_from: Option<i32>,
+    /// Other riders in the session worth comparing with, where the recorder saw them.
+    pub rivals: Vec<crate::others::Rival>,
+    /// No lap of the rider's on this track is faster than this one. Held against a slower lap
+    /// the review has nothing to say — every section is a gain — so the page says why rather
+    /// than showing an empty list of tips, and offers the ideal lap instead.
+    pub best_here: bool,
+}
+
+/// Whether no whole lap of the rider's on this track is quicker than `time_ms`. `this` is the
+/// lap being asked about, which isn't compared with itself.
+fn nothing_faster(sessions: &[SessionSummary], track_id: &str, this: (&str, i32), time_ms: i32) -> bool {
+    let faster = sessions
+        .iter()
+        .filter(|s| s.track_id == track_id)
+        .flat_map(|s| s.laps.iter())
+        .filter(|l| l.comparable() && (l.path.as_str(), l.num) != this)
+        .any(|l| l.time_ms < time_ms);
+    // A lap the game never timed has no time to be anybody's best.
+    time_ms > 0 && !faster
+}
+
+/// How far two centrelines can differ and still be the same track. A rebuilt layout is a
+/// different length, and the two laps then sit on different grids.
+const TRACK_LENGTH_SLACK_M: f32 = 1.0;
+
+/// The rider's own best time for each section of this track, across every session they have
+/// ridden here: the ideal lap. The sections come from the fastest lap on the track, which is
+/// the grid every lap is timed on; the times come from every whole lap ridden here, on the bike
+/// this lap is on where there are any — a 250 and a 450 don't take a corner the same way.
+///
+/// Gives back the sections, a target for each, how many laps went into it, and the bike they
+/// were ridden on.
+fn ideal_targets(
+    sessions: &[SessionSummary],
+    summary: &SessionSummary,
+) -> Result<(Vec<analysis::Section>, Vec<f32>, i32, String), String> {
+    let pool = ideal_pool(sessions, summary)?;
+    Ok((pool.sections, pool.ideal.sections.iter().map(|b| b.best).collect(), pool.laps.len() as i32, pool.bike))
+}
+
+/// Everything the ideal lap is made of: the sections, which lap set each one's best, and the laps
+/// themselves (each with where it came from), for the line to be stitched from.
+struct IdealPool {
+    sections: Vec<analysis::Section>,
+    ideal: Ideal,
+    laps: Vec<(i32, Trace)>,
+    /// For each lap in `laps`: its recording and lap number, and which session of the pool it was in.
+    meta: Vec<(String, i32, usize)>,
+    bike: String,
+}
+
+fn ideal_pool(sessions: &[SessionSummary], summary: &SessionSummary) -> Result<IdealPool, String> {
+    let grid = best_reference(sessions, &summary.track_id, &summary.bike_id, None)
+        .ok_or_else(|| {
+            tr!("err.ideal_no_lap", "Ride one whole lap on this track first: the ideal lap is built out of your own laps.")
+        })?;
+    let sections = analysis::sections(&trace(&load(&grid.path)?, grid.lap)?);
+    let on_this_bike = sessions
+        .iter()
+        .any(|s| s.track_id == summary.track_id && s.bike_id == summary.bike_id && s.laps.iter().any(|l| l.clean()));
+    let mut laps: Vec<(i32, Trace)> = Vec::new();
+    let mut meta: Vec<(String, i32, usize)> = Vec::new();
+    for (si, s) in sessions.iter().filter(|s| s.track_id == summary.track_id).enumerate() {
+        if on_this_bike && s.bike_id != summary.bike_id {
+            continue;
+        }
+        for st in &s.stints {
+            let Ok(rec) = load(&st.path) else { continue };
+            // Clean laps only: a reset is a section crossed in no time, and the stitched line would
+            // run through wherever a crash threw the bike.
+            for l in rec.laps().iter().filter(|l| l.clean()) {
+                if let Some(t) = Trace::new(l, rec.event.track_length) {
+                    laps.push((laps.len() as i32, t));
+                    meta.push((st.path.clone(), l.num, si + 1));
+                }
+            }
+        }
+    }
+    let ideal = analysis::ideal(&sections, &laps)
+        .ok_or_else(|| tr!("err.ideal_few_laps", "There aren't enough whole laps of yours on this track to build an ideal lap."))?;
+    let bike = if on_this_bike { summary.bike_name.clone() } else { grid.bike_name.clone() };
+    Ok(IdealPool { sections, ideal, laps, meta, bike })
+}
+
+/// The line the in-game HUD draws, and which laps it is made of: shown in Coach.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LineOut {
+    /// `fastest`, `ideal` or `chosen`: what the line is.
+    pub kind: String,
+    /// For the ideal line, each stretch and the lap it came from, in lap order.
+    pub from: Vec<LinePiece>,
+    /// Anything worth telling the rider: a join moved, or the ideal line couldn't be built and the
+    /// fastest lap's is drawn instead.
+    pub notes: Vec<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LinePiece {
+    pub start_m: f32,
+    pub end_m: f32,
+    pub lap: i32,
+    /// Which session of this track the lap was ridden in, 1 being the newest.
+    pub session: usize,
+    pub bike: String,
+}
+
+/// The ideal lap as a line: each section from the lap that set its best, stitched (see
+/// `stitch.rs`). Err says why not, for the rider; the caller draws the fastest lap's instead.
+fn ideal_line(
+    sessions: &[SessionSummary],
+    summary: &SessionSummary,
+) -> Result<(Trace, Vec<analysis::Section>, LineOut), String> {
+    let pool = ideal_pool(sessions, summary)?;
+    // The grid most of the laps are on (a rebuilt layout is another length: those are left out).
+    let n = {
+        let mut counts: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
+        for (_, t) in &pool.laps {
+            *counts.entry(t.len()).or_default() += 1;
+        }
+        counts.into_iter().max_by_key(|&(len, c)| (c, len)).map_or(0, |(len, _)| len)
+    };
+    let refs: Vec<&Trace> = pool.laps.iter().map(|(_, t)| t).collect();
+    // Gaps between sections, and any lap off the grid, are the fastest whole lap's line.
+    let base = (0..refs.len())
+        .filter(|&i| refs[i].len() == n)
+        .min_by(|&a, &b| {
+            let t = |i: usize| refs[i].pts.last().map_or(f32::MAX, |p| p.t);
+            t(a).total_cmp(&t(b))
+        })
+        .ok_or_else(|| tr!("err.ideal_no_grid", "No lap here fits the track's grid."))?;
+    let best: Vec<usize> = pool.ideal.sections.iter().map(|b| b.lap.max(0) as usize).collect();
+    let ranges: Vec<(usize, usize)> = pool.sections.iter().map(|s| (s.start, s.end)).collect();
+    let st = crate::stitch::stitch(&ranges, &best, &refs, base)
+        .ok_or_else(|| {
+            tr!(
+                "err.ideal_no_join",
+                "The ideal line didn't join up into a line worth riding (the laps' lines are too far apart)."
+            )
+        })?;
+    let from = st
+        .pieces
+        .iter()
+        .map(|p| {
+            let (_, lap, session) = &pool.meta[p.lap];
+            LinePiece {
+                start_m: p.start as f32 * crate::analysis::STEP_M,
+                end_m: p.end as f32 * crate::analysis::STEP_M,
+                lap: *lap,
+                session: *session,
+                bike: pool.bike.clone(),
+            }
+        })
+        .collect();
+    Ok((st.trace, pool.sections, LineOut { kind: "ideal".into(), from, notes: st.notes }))
+}
+
+/// Reviews lap `lap` of `path` against `ref_path`/`ref_lap` — which can be an imported lap of
+/// another rider's — against the rider's ideal lap on this track when `ideal`, or against the
+/// fastest other lap on the track when none is given. `solo`, or no other lap to compare with,
+/// reviews it on its own instead.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub async fn coach_review(
+    app: AppHandle,
+    path: String,
+    lap: i32,
+    ref_path: Option<String>,
+    ref_lap: Option<i32>,
+    solo: Option<bool>,
+    ideal: Option<bool>,
+) -> Result<ReviewOut, String> {
+    tauri::async_runtime::spawn_blocking(move || timed("review", || review_sync(app, path, lap, ref_path, ref_lap, solo, ideal))).await.map_err(err)?
+}
+
+fn review_sync(
+    app: AppHandle,
+    path: String,
+    lap: i32,
+    ref_path: Option<String>,
+    ref_lap: Option<i32>,
+    solo: Option<bool>,
+    ideal: Option<bool>,
+) -> Result<ReviewOut, String> {
+    let rec = load(&path)?;
+    let summary = summarize(Path::new(&path), &rec);
+    // Read once: the reference, the ideal lap's targets and whether anything here is faster
+    // all ask the same question of the same list.
+    let sessions = all_sessions(&app);
+    let alone = solo.unwrap_or(false);
+    let want_ideal = ideal.unwrap_or(false) && !alone;
+    let reference = if alone || want_ideal {
+        None
+    } else {
+        match (ref_path, ref_lap) {
+            (Some(p), Some(n)) => {
+                let s = if p == path { summary.clone() } else { summarize(Path::new(&p), &load(&p)?) };
+                let l = s.laps.iter().find(|l| l.num == n).ok_or_else(|| tr!("err.lap_missing", "Lap {n} isn't in that session.", n = n))?;
+                let kind = if crate::imports::is_import(&app, &p) { RefKind::Imported } else { RefKind::Own };
+                Some(LapRef::of(&s, l, kind))
+            }
+            _ => best_reference(&sessions, &summary.track_id, &summary.bike_id, Some((&path, lap))),
+        }
+    };
+    let e = &rec.event;
+    // The whole session, so one lap's floors are this rider's on this bike.
+    let laps: Vec<analysis::Trace> = rec.laps().iter().filter_map(|l| analysis::Trace::new(l, e.track_length)).collect();
+    let (land_scale, torque_scale) = analysis::norm(&laps);
+    let bike = analysis::Bike {
+        limiter: e.limiter as f32,
+        max_rpm: e.max_rpm as f32,
+        shift_rpm: e.shift_rpm as f32,
+        travel: e.susp_max_travel,
+        land_scale,
+        torque_scale,
+    };
+    let mine = trace(&rec, lap)?;
+    let time_ms = summary.laps.iter().find(|l| l.num == lap).map_or(0, |l| l.time_ms);
+    let this = LapRef {
+        path,
+        lap,
+        time_ms,
+        started: summary.started.clone(),
+        bike_name: summary.bike_name.clone(),
+        bike_id: summary.bike_id.clone(),
+        rider: summary.rider.clone(),
+        kind: RefKind::Own,
+    };
+    let mut ideal_from = None;
+    let (review, reference) = if want_ideal {
+        let (secs, targets, from, bike_name) = ideal_targets(&sessions, &summary)?;
+        ideal_from = Some(from);
+        // The ideal lap is nowhere on disk: it is a time for each section, so it has no file,
+        // no lap number and no day it was ridden.
+        let r = LapRef {
+            path: String::new(),
+            lap: -1,
+            time_ms: (targets.iter().sum::<f32>() * 1000.0).round() as i32,
+            started: String::new(),
+            bike_name,
+            bike_id: summary.bike_id.clone(),
+            rider: summary.rider.clone(),
+            kind: RefKind::Ideal,
+        };
+        (analysis::against_targets(&mine, &secs, &targets, bike), r)
+    } else {
+        match reference {
+            Some(reference) => {
+                let ref_rec = if reference.path == this.path { None } else { Some(load(&reference.path)?) };
+                let ref_rec = ref_rec.as_ref().unwrap_or(&rec);
+                if ref_rec.event.track_id != rec.event.track_id {
+                    return Err(tr!("err.other_track", "That lap is on a different track."));
+                }
+                // A recording from another rider can carry the right track id and still be a
+                // different build of it. A changed layout is a different centreline, so the two
+                // laps sit on different grids and every section would be measured elsewhere.
+                if (ref_rec.event.track_length - rec.event.track_length).abs() > TRACK_LENGTH_SLACK_M {
+                    return Err(tr!(
+                        "err.other_version",
+                        "That lap is on a different version of this track: its centreline is {theirs} m against your {mine} m, \
+                         so the two can't be lined up.",
+                        theirs = num(ref_rec.event.track_length, 0),
+                        mine = num(rec.event.track_length, 0)
+                    ));
+                }
+                (analysis::review(&mine, &trace(ref_rec, reference.lap)?, bike), reference)
+            }
+            None => (analysis::solo(&mine, bike), this.clone()),
+        }
+    };
+    // The ground under each section and the lap, from the rear wheel: the review can't know
+    // the weather, and wet soil is mud.
+    let mut review = review;
+    let wet = rec.session.conditions == 2;
+    for s in &mut review.sections {
+        let end = s.section.end.min(mine.pts.len().saturating_sub(1));
+        s.soil = mine.pts.get(s.section.start..=end).and_then(|p| crate::soil::profile(p, wet));
+    }
+    review.setup.extend(crate::soil::profile(&mine.pts, wet).as_ref().and_then(crate::soil::finding));
+    // Stable names, so "Turn 5" is the same corner next week and the cue history keyed on it
+    // doesn't quietly re-attribute. Seeded from every lap of this session the first time the
+    // rider reviews the track, so the numbering runs along the lap from day one; after that it
+    // only ever grows.
+    let mut named: Vec<analysis::Section> = review.sections.iter().map(|s| s.section.clone()).collect();
+    label(&app, &summary.track_id, e.track_length, &laps, &mut named);
+    for (s, n) in review.sections.iter_mut().zip(named) {
+        s.section = n;
+    }
+    // Lap-wide setup tips that come from the recording and the setup file, not the lap: sag, tyres.
+    let r = rider_setup(&app, &rec);
+    review.setup.extend(r.sag.as_ref().and_then(|s| crate::sag::finding(s, rec.event.susp_max_travel)));
+    if let (Some(s), Some(o)) = (&r.setup, &r.opts) {
+        review.setup.extend(crate::fixes::pressure_finding(s, o, r.optimal));
+    }
+    // The other riders, timed over this lap's own sections.
+    let parts: Vec<crate::others::Part> = review
+        .sections
+        .iter()
+        .map(|s| crate::others::Part { name: s.section.name.clone(), start: s.section.start, end: s.section.end, time: s.lap_time })
+        .collect();
+    let ended = rec.laps().into_iter().find(|l| l.num == this.lap).and_then(|l| l.samples.last().map(|s| s.t)).unwrap_or(0.0);
+    let rivals = crate::others::rivals(&rec, &parts, this.time_ms, ended, rec.event.event_type == 2);
+    let best_here = nothing_faster(&sessions, &summary.track_id, (&this.path, this.lap), this.time_ms);
+    Ok(ReviewOut {
+        track_id: summary.track_id,
+        track_name: summary.track_name,
+        lap: this,
+        reference,
+        review,
+        ideal_from,
+        rivals,
+        best_here,
+    })
+}
+
+/// Where a setup the coach saves goes, and what it is called. It never writes over a file.
+///
+/// Always this track's folder, whatever folder the setup it was built from came out of. A copy
+/// of a `common` setup used to go back into `common`, where the game reads no record of which
+/// setup to load: it went on loading the rider's old one, so the next lap named that setup
+/// again and left another copy behind, and the copies piled up.
+struct Save {
+    /// `<profile>\setups\<track>\<bike>`.
+    dir: PathBuf,
+    /// The names to try, in order.
+    names: Vec<String>,
+    /// Which setup these are copies of (see [`crate::setupbook`]): `coach:<base>`, or
+    /// `fresh:<track>` for one built from the game's default.
+    lineage: String,
+}
+
+impl Save {
+    /// A copy of a setup of the rider's own, numbered off its name and kept in their profile.
+    ///
+    /// Riding a copy Coach wrote keeps that copy's lineage. So does one of the "Coach <track>"
+    /// setups Coach builds from the default, which used to become "Coach <track> (coach)" on
+    /// the next save: a second way of naming the same setup.
+    fn beside(file: &Path, track: &str, book: &crate::setupbook::Book) -> Option<Save> {
+        let dir = crate::stp::track_dir(file, track)?;
+        let hash = fs::read(file).ok().map(|b| crate::setupbook::fingerprint(&b));
+        let lineage = match book.ours(file, hash.as_deref()) {
+            Some(e) => e.lineage.clone(),
+            None if is_fresh_name(file, track) => format!("fresh:{track}"),
+            None => format!("coach:{}", setup_base(file)),
+        };
+        Some(Save { names: names_for(&lineage), dir, lineage })
+    }
+
+    /// One the coach built for a rider who rode the game's default: there is no name of theirs
+    /// to build on, so it is named after the track.
+    fn fresh(dir: PathBuf, track: &str) -> Save {
+        let lineage = format!("fresh:{track}");
+        Save { names: names_for(&lineage), dir, lineage }
+    }
+
+    /// Where a save goes now: back onto Coach's own untouched copy with the game closed, else
+    /// the first free name. The plan's preview and the save both ask this, so they agree.
+    fn target(&self, book: &crate::setupbook::Book, game_open: bool) -> Option<crate::setupbook::Target> {
+        let on_disk = |p: &Path| fs::read(p).ok().map(|b| (p.to_path_buf(), crate::setupbook::fingerprint(&b)));
+        let taken = |n: &str| self.dir.join(format!("{n}.stp")).exists();
+        book.target(&self.lineage, &self.dir, &self.names, game_open, &on_disk, &taken)
+    }
+}
+
+/// The names a lineage's copies go under, in order.
+fn names_for(lineage: &str) -> Vec<String> {
+    match lineage.split_once(':') {
+        Some(("fresh", track)) => crate::stp::fresh_names(track).collect(),
+        Some((_, base)) => crate::stp::coach_names(base).collect(),
+        None => crate::stp::coach_names(lineage).collect(),
+    }
+}
+
+/// Whether `file` is named like a setup Coach built from the default for `track`.
+fn is_fresh_name(file: &Path, track: &str) -> bool {
+    let Some(stem) = file.file_stem().and_then(|s| s.to_str()) else { return false };
+    crate::stp::fresh_names(track).any(|n| n.eq_ignore_ascii_case(stem))
+}
+
+/// Where the book of setups Coach wrote is kept.
+fn setup_book_path(app: &AppHandle) -> Option<PathBuf> {
+    Some(config::data_dir(app)?.join("coach").join("setup-book.json"))
+}
+
+/// The setup the rider had on for a recording, as far as the coach could find and read it.
+struct RiderSetup {
+    name: String,
+    file: Option<PathBuf>,
+    setup: Option<crate::stp::Setup>,
+    opts: Option<crate::bikecfg::BikeOptions>,
+    why: Option<String>,
+    sag: Option<crate::sag::Sag>,
+    /// The pressure each tyre the setup runs is made for, kPa.
+    optimal: [Option<f32>; 2],
+    /// Where a copy with the coach's changes would go.
+    save: Option<Save>,
+}
+
+/// The bike's cfg and what it offers for each setting, the swingarm's lengths included.
+fn bike_options(cfg: &AppConfig, bike: &str) -> (Option<mxb_core::cfg::CfgNode>, Option<crate::bikecfg::BikeOptions>) {
+    let bike_cfg = crate::bikecfg::load_cfg(&cfg.mods_path, bike);
+    let mut opts = bike_cfg.as_ref().map(crate::bikecfg::options);
+    // The swingarm's lengths are in the bike's `.geom`, not its cfg.
+    if let (Some(bc), Some(o)) = (&bike_cfg, opts.as_mut()) {
+        if let Some(sw) = crate::bikecfg::load_geom(&cfg.mods_path, bike, bc).as_ref().and_then(crate::bikecfg::swingarm) {
+            o.insert(crate::stp::Field::SwingarmLength, sw);
+        }
+    }
+    (bike_cfg, opts)
+}
+
+/// Adds the pressure lists of the tyres `setup` runs to `opts`, and returns what each is made for.
+fn tyre_options(cfg: &AppConfig, bike_cfg: &mxb_core::cfg::CfgNode, setup: &crate::stp::Setup, opts: &mut crate::bikecfg::BikeOptions) -> [Option<f32>; 2] {
+    use crate::stp::Field;
+    let mut optimal = [None, None];
+    let wheels = [(Field::FrontTyre, Field::FrontPressure), (Field::RearTyre, Field::RearPressure)];
+    for (k, (tyre, pressure)) in wheels.into_iter().enumerate() {
+        if let Some(t) = crate::tyres::load(&cfg.mods_path, &cfg.install_dir(), bike_cfg, k, setup.get(tyre)) {
+            opts.insert(pressure, t.pressure);
+            optimal[k] = Some(t.optimal);
+        }
+    }
+    optimal
+}
+
+fn rider_setup(app: &AppHandle, rec: &Recording) -> RiderSetup {
+    let cfg = load_config(app);
+    let e = &rec.event;
+    let raw = rec.session.setup.clone();
+    let name = raw.trim_start_matches(':').to_string();
+    let (bike_cfg, mut opts) = bike_options(&cfg, &e.bike_id);
+    let profiles = cfg.profiles_dir();
+    let gears = usize::try_from(e.gears).ok().filter(|&g| g > 0);
+    let read = |p: &Path| {
+        fs::read(p)
+            .ok()
+            .and_then(|b| crate::stp::Setup::parse(&b, gears).ok())
+            .filter(|s| s.bike_id() == e.bike_id)
+    };
+    let file = crate::stp::locate(&profiles, &raw, &e.track_id, &e.bike_id);
+    let book = setup_book_path(app).map(|p| crate::setupbook::Book::load(&p)).unwrap_or_default();
+    // Riding the game's default used to be the end of it: the coach asked the rider to go and
+    // save a setup in the garage first. Now it writes them one. Best is another setup of their
+    // own for this bike, which keeps every slot the coach doesn't model at a value the game
+    // itself wrote; failing that, the bike's own defaults out of its cfg.
+    let (setup, save) = match file.as_deref().and_then(read) {
+        Some(s) => (Some(s), file.as_deref().and_then(|f| Save::beside(f, &e.track_id, &book))),
+        None => {
+            let donor = crate::stp::setups_for_bike(&profiles, &e.track_id, &e.bike_id).into_iter().find_map(|p| read(&p));
+            let built = || {
+                let g = gears?;
+                let slots = crate::bikecfg::default_slots(bike_cfg.as_ref()?, g)?;
+                let version = crate::bikecfg::setup_version(bike_cfg.as_ref()?).unwrap_or(crate::stp::SETUP_VERSION);
+                crate::stp::Setup::build(&e.bike_id, g, &slots, version).ok()
+            };
+            let s = donor.or_else(built);
+            let where_to = crate::stp::fresh_dir(&profiles, &e.track_id, &e.bike_id);
+            let save = match (&s, where_to) {
+                (Some(_), Some(d)) => Some(Save::fresh(d, &e.track_id)),
+                _ => None,
+            };
+            (s, save)
+        }
+    };
+    // The tyres the setup runs: their pressure lists join the bike's, with what they're made for.
+    let mut optimal = [None, None];
+    if let (Some(bc), Some(s), Some(o)) = (&bike_cfg, &setup, opts.as_mut()) {
+        optimal = tyre_options(&cfg, bc, s, o);
+    }
+    let why = if opts.is_none() {
+        Some(tr!("setup.why.no_options", "The bike's own settings couldn't be read, so the coach can't tell how far each one goes."))
+    } else if setup.is_none() {
+        Some(if name.is_empty() || name.eq_ignore_ascii_case("default") {
+            tr!(
+                "setup.why.no_bike",
+                "The coach couldn't read {bike}'s own settings, so it has nothing to build a setup from.",
+                bike = e.bike_name
+            )
+        } else {
+            tr!(
+                "setup.why.unreadable",
+                "Your setup \"{name}\" couldn't be read, and the coach found no other setup for this bike.",
+                name = name
+            )
+        })
+    } else if save.is_none() {
+        Some(tr!("setup.why.no_folder", "The coach couldn't find a setups folder of yours to save into."))
+    } else {
+        None
+    };
+    RiderSetup { name, file, setup, opts, why, sag: crate::sag::measure(rec), optimal, save }
+}
+
+/// Every fix for the lap's setup tips, the sag and tyre ones included when they're asked for.
+fn all_fixes(r: &RiderSetup, skills: &[String], travel: [f32; 2]) -> Vec<crate::fixes::Fix> {
+    fixes_for(r.setup.as_ref(), r.opts.as_ref(), r.sag.as_ref(), r.optimal, skills, travel)
+}
+
+/// The same against any setup of the bike, not only the one that was ridden.
+fn fixes_for(
+    setup: Option<&crate::stp::Setup>,
+    opts: Option<&crate::bikecfg::BikeOptions>,
+    sag: Option<&crate::sag::Sag>,
+    optimal: [Option<f32>; 2],
+    skills: &[String],
+    travel: [f32; 2],
+) -> Vec<crate::fixes::Fix> {
+    let mut fixes = crate::fixes::plan(skills, setup, opts);
+    let asked = |s: &str| skills.iter().any(|k| k == s);
+    if let Some(off) = sag.and_then(|s| crate::sag::rear_off(s, travel[1])) {
+        let fix = crate::fixes::sag_fix(off, setup, opts);
+        if asked(&fix.skill) {
+            fixes.push(fix);
+        }
+    }
+    if let (Some(s), Some(o)) = (setup, opts) {
+        if let Some(fix) = crate::fixes::pressure_fix(s, o, optimal) {
+            if asked(&fix.skill) {
+                fixes.push(fix);
+            }
+        }
+    }
+    // Last, over the whole list: what the save will really do decides what the rider is told
+    // it will do. Both commands come through here, so they can't disagree.
+    crate::fixes::settle(&mut fixes, setup, opts);
+    fixes
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetupPlan {
+    /// The setup the rider had on.
+    pub name: String,
+    pub file: Option<String>,
+    /// The name a saved copy gets: the next free "(coach)", "(coach 2)" … off the rider's own
+    /// name, or "Coach <track>" when they rode the game's default and have none here. It is
+    /// saved under this track either way.
+    pub save_as: Option<String>,
+    /// Why the coach can't make the changes itself, when it can't.
+    pub why: Option<String>,
+    pub fixes: Vec<crate::fixes::Fix>,
+    /// The sag measured in this session, standing still or riding.
+    pub sag: Option<crate::sag::Sag>,
+    /// The most of each end's travel this session used, as a share: what the feel check
+    /// holds "it bottoms" and "it's harsh" against.
+    pub travel_used: Option<[f32; 2]>,
+}
+
+/// The rider's setup name without any "(coach)" the coach added: copies of a copy are numbered.
+fn setup_base(file: &Path) -> String {
+    crate::stp::base_name(file.file_stem().and_then(|s| s.to_str()).unwrap_or("setup")).to_string()
+}
+
+/// The changes behind a lap's setup tips, against the setup the rider had on.
+#[tauri::command]
+pub async fn coach_setup_plan(app: AppHandle, path: String, skills: Vec<String>) -> Result<SetupPlan, String> {
+    tauri::async_runtime::spawn_blocking(move || timed("coach_setup_plan", || coach_setup_plan_sync(app, path, skills))).await.map_err(err)?
+}
+
+fn coach_setup_plan_sync(app: AppHandle, path: String, skills: Vec<String>) -> Result<SetupPlan, String> {
+    let rec = load(&path)?;
+    let r = rider_setup(&app, &rec);
+    let fixes = all_fixes(&r, &skills, rec.event.susp_max_travel);
+    let book = setup_book_path(&app).map(|p| crate::setupbook::Book::load(&p)).unwrap_or_default();
+    let game_open = mxb_core::gamewindow::is_game_running();
+    let save_as = r.save.as_ref().and_then(|s| s.target(&book, game_open)).map(|t| t.name());
+    let (sag, travel_used) = (r.sag, crate::sag::travel_used(&rec));
+    Ok(SetupPlan { name: r.name, file: r.file.map(|p| p.display().to_string()), save_as, why: r.why, fixes, sag, travel_used })
+}
+
+/// A setup the coach wrote: what it is called, what it really changed, and whether the game
+/// will load it.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SavedSetup {
+    pub name: String,
+    /// Named rather than counted, so the rider can check each one in the garage. A setting two
+    /// tips wanted opposite ways is not in here, and was never claimed as a change either.
+    pub changed: Vec<crate::stp::Field>,
+    /// The game's own record now names it, so practice on this track loads it.
+    pub selected: bool,
+    /// It doesn't, because MX Bikes is open. The rider can pick it in the garage now, or press
+    /// Select once the game is closed. Neither of these set means the record was written and
+    /// didn't come back out naming the setup: saved, but the game will load something else.
+    pub game_open: bool,
+}
+
+/// What came of pointing the game at a setup.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Picked {
+    /// The game's own record names it.
+    Done,
+    /// Not tried: MX Bikes is open.
+    GameOpen,
+    /// The record was written and doesn't name it. Nothing to tell the rider but the truth.
+    Missed,
+}
+
+/// Point the game at a setup for practice on this track.
+///
+/// Only with the game closed. MX Bikes holds the garage in memory and writes this file itself
+/// when it closes, so a change made while it runs is silently undone — which would be worse
+/// than not making it, because the rider would be told it had worked.
+fn select(file: &Path, track: &str, wet: bool) -> Result<Picked, String> {
+    if mxb_core::gamewindow::is_game_running() {
+        return Ok(Picked::GameOpen);
+    }
+    point_at(file, track, wet)
+}
+
+/// Writes the game's own record for this track and reads it back (see `stp::select_default`).
+/// The rider is told what the record says, not what the coach meant to put in it.
+fn point_at(file: &Path, track: &str, wet: bool) -> Result<Picked, String> {
+    let dir = crate::stp::track_dir(file, track).ok_or_else(|| tr!("err.setup_folder", "The setup's folder couldn't be found."))?;
+    let name = file
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .ok_or_else(|| tr!("err.setup_name", "The setup's name couldn't be read."))?;
+    let want = crate::stp::reference(file.parent().unwrap_or(&dir), name);
+    crate::stp::select_default(&dir, &want, wet)?;
+    let got = crate::stp::selected_default(&dir);
+    Ok(if got.as_deref() == Some(want.as_str()) { Picked::Done } else { Picked::Missed })
+}
+
+/// Saves a lap's setup fixes under this track (named after the rider's own setup, or after the
+/// track when they rode the game's default) and points the game at it. Only the practice keys
+/// of `default.ini` are touched.
+///
+/// The fixes go back onto Coach's own copy of this setup when the book says Coach wrote it,
+/// it's unchanged since, and the game is closed (see [`crate::setupbook`]). So one setup keeps
+/// one name instead of gaining a number every session. Any other file is never overwritten.
+#[tauri::command]
+pub async fn coach_save_setup(app: AppHandle, path: String, skills: Vec<String>) -> Result<SavedSetup, String> {
+    tauri::async_runtime::spawn_blocking(move || timed("coach_save_setup", || coach_save_setup_sync(app, path, skills))).await.map_err(err)?
+}
+
+fn coach_save_setup_sync(app: AppHandle, path: String, skills: Vec<String>) -> Result<SavedSetup, String> {
+    let rec = load(&path)?;
+    let r = rider_setup(&app, &rec);
+    let fixes = all_fixes(&r, &skills, rec.event.susp_max_travel);
+    let (Some(setup), Some(opts), Some(save)) = (r.setup, r.opts, r.save) else {
+        return Err(r.why.unwrap_or_else(|| tr!("err.setup_cant", "The coach can't change this setup.")));
+    };
+    let (out, changed) = crate::fixes::apply(&setup, &fixes, &opts);
+    if changed.is_empty() {
+        return Err(tr!("err.setup_nothing", "There's nothing in this setup the coach can change."));
+    }
+    fs::create_dir_all(&save.dir).map_err(err)?;
+    let book_path = setup_book_path(&app);
+    let mut book = book_path.as_deref().map(crate::setupbook::Book::load).unwrap_or_default();
+    let game_open = mxb_core::gamewindow::is_game_running();
+    let written = match save.target(&book, game_open) {
+        Some(crate::setupbook::Target::Over(path)) => replace_own(&path, &book, out.bytes()).then_some(path),
+        _ => None,
+    };
+    let path = match written {
+        Some(p) => p,
+        None => write_new(&save, out.bytes())?,
+    };
+    let name = path.file_stem().and_then(|s| s.to_str()).unwrap_or_default().to_string();
+    let now = std::time::SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64);
+    book.record(&path, out.bytes(), &save.lineage, now, &|p| p.exists());
+    if let Some(p) = &book_path {
+        book.store(p);
+    }
+    // A setup the rider has to go and find in the garage is a setup they ride without.
+    // Failing to select it is not failing to save it, so it is reported rather than raised.
+    let picked = select(&path, &rec.event.track_id, rec.session.conditions == 2).unwrap_or(Picked::Missed);
+    let (selected, game_open) = (picked == Picked::Done, picked == Picked::GameOpen);
+    Ok(SavedSetup { name, changed, selected, game_open })
+}
+
+/// A file in `dir` nothing else has, reserved by creating it: `.<stem>.<tag>-<pid>-<nanos>`.
+fn reserve(dir: &Path, stem: &str, tag: &str) -> Option<PathBuf> {
+    let nanos = std::time::SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_nanos());
+    for n in 0..16u32 {
+        let p = dir.join(format!(".{stem}.{tag}-{}-{nanos}-{n}", std::process::id()));
+        if fs::OpenOptions::new().write(true).create_new(true).open(&p).is_ok() {
+            return Some(p);
+        }
+    }
+    None
+}
+
+/// Put `bytes` in place of `path`, Coach's own copy, and say whether it happened.
+///
+/// The copy is moved aside first and its bytes checked *after* the move, so what gets replaced
+/// is exactly what was checked. An edit the rider saved a moment before can't slip in between.
+/// If it isn't Coach's untouched copy, or the game has opened, it goes back where it was
+/// and the caller writes a new file instead. Every name used is reserved first, so nothing
+/// else is ever overwritten.
+fn replace_own(path: &Path, book: &crate::setupbook::Book, bytes: &[u8]) -> bool {
+    let (Some(dir), Some(stem)) = (path.parent(), path.file_stem().and_then(|s| s.to_str())) else { return false };
+    let Some(tmp) = reserve(dir, stem, "coach-new") else { return false };
+    if fs::write(&tmp, bytes).is_err() {
+        let _ = fs::remove_file(&tmp);
+        return false;
+    }
+    let Some(parked) = reserve(dir, stem, "coach-old") else {
+        let _ = fs::remove_file(&tmp);
+        return false;
+    };
+    if fs::rename(path, &parked).is_err() {
+        let _ = fs::remove_file(&tmp);
+        let _ = fs::remove_file(&parked);
+        return false;
+    }
+    let hash = fs::read(&parked).ok().map(|b| crate::setupbook::fingerprint(&b));
+    let ok = book.ours(path, hash.as_deref()).is_some() && !mxb_core::gamewindow::is_game_running();
+    if ok && fs::rename(&tmp, path).is_ok() {
+        let _ = fs::remove_file(&parked);
+        return true;
+    }
+    // Not ours to replace after all, or the swap failed: put the rider's file back. If
+    // something has taken its place meanwhile, the parked copy is kept rather than lost.
+    let _ = fs::remove_file(&tmp);
+    if !path.exists() {
+        let _ = fs::rename(&parked, path);
+    }
+    false
+}
+
+/// A new file under the first of `save`'s names nothing has taken. Never overwrites.
+fn write_new(save: &Save, bytes: &[u8]) -> Result<PathBuf, String> {
+    for name in &save.names {
+        let path = save.dir.join(format!("{name}.stp"));
+        match fs::OpenOptions::new().write(true).create_new(true).open(&path) {
+            Ok(mut f) => {
+                std::io::Write::write_all(&mut f, bytes).map_err(err)?;
+                return Ok(path);
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(err(e)),
+        }
+    }
+    Err(tr!("err.setup_too_many", "There are already too many coach setups for this one."))
+}
+
+/// Point the game at a setup the coach already saved: for when it was written while MX Bikes
+/// was open, so selecting it then would not have stuck.
+#[tauri::command]
+pub async fn coach_select_setup(app: AppHandle, path: String, name: String) -> Result<SavedSetup, String> {
+    tauri::async_runtime::spawn_blocking(move || timed("coach_select_setup", || coach_select_setup_sync(app, path, name))).await.map_err(err)?
+}
+
+fn coach_select_setup_sync(app: AppHandle, path: String, name: String) -> Result<SavedSetup, String> {
+    let rec = load(&path)?;
+    let e = &rec.event;
+    let cfg = load_config(&app);
+    // Through `locate`, so the coach can only ever select a setup that is really there.
+    let file = crate::stp::locate(&cfg.profiles_dir(), &name, &e.track_id, &e.bike_id)
+        .ok_or_else(|| tr!("err.setup_gone", "\"{name}\" isn't in your profiles folder any more.", name = name))?;
+    let picked = select(&file, &e.track_id, rec.session.conditions == 2)?;
+    // Nothing was written to the setup itself here: this only points the game at one.
+    Ok(SavedSetup { name, changed: Vec::new(), selected: picked == Picked::Done, game_open: picked == Picked::GameOpen })
+}
+
+// ---- Apply to the rider's own setup ----------------------------------------------------------
+//
+// "Save a copy" leaves their setup alone; this writes into it (see [`crate::apply`]): every
+// setup the rider has for this bike across all their profile folders is listed with exactly what
+// would change in it, they pick, and the file is backed up beside itself before it is written.
+
+/// One setting that changes, in the bike's own terms.
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct Diff {
+    pub field: crate::stp::Field,
+    /// Positions in the bike's list for the setting.
+    pub from: u32,
+    pub to: u32,
+    /// What those are where the bike's file says: "5.5 N/mm", "13T".
+    pub from_value: Option<String>,
+    pub to_value: Option<String>,
+}
+
+/// A setup file of the rider's for this bike, and what applying would do to it.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ApplyFile {
+    pub path: String,
+    pub name: String,
+    /// The profile folder it is in, and the place under it: a track, or `common`.
+    pub profile: String,
+    pub place: String,
+    /// Milliseconds since the epoch.
+    pub modified: u64,
+    pub changes: Vec<Diff>,
+    /// Backups of it from earlier applies: how many times Undo can step back.
+    pub backups: usize,
+    /// Why it can't be written, when it can't.
+    pub problem: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ApplyPreview {
+    /// MX Bikes is running: nothing is written until it is closed.
+    pub game_open: bool,
+    pub files: Vec<ApplyFile>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ApplyResult {
+    pub path: String,
+    pub name: String,
+    pub ok: bool,
+    /// The backup written beside it, or the one restored.
+    pub backup: Option<String>,
+    pub changed: Vec<Diff>,
+    pub error: Option<String>,
+}
+
+struct Candidate {
+    bytes: Vec<u8>,
+    setup: crate::stp::Setup,
+    opts: crate::bikecfg::BikeOptions,
+    fixes: Vec<crate::fixes::Fix>,
+}
+
+fn stem(p: &Path) -> String {
+    p.file_stem().and_then(|s| s.to_str()).unwrap_or_default().to_string()
+}
+
+fn same_file(a: &Path, b: &Path) -> bool {
+    a.to_string_lossy().replace('\\', "/").eq_ignore_ascii_case(&b.to_string_lossy().replace('\\', "/"))
+}
+
+/// Every readable setup of the bike across all the rider's profiles, with the fixes worked out
+/// against each one's own settings: two setups differ, and so do the steps they need.
+fn apply_candidates(app: &AppHandle, rec: &Recording, skills: &[String]) -> Vec<(PathBuf, Result<Candidate, String>)> {
+    let cfg = load_config(app);
+    let e = &rec.event;
+    let r = rider_setup(app, rec);
+    let (bike_cfg, base) = bike_options(&cfg, &e.bike_id);
+    let gears = usize::try_from(e.gears).ok().filter(|&g| g > 0);
+    let mut seen: Vec<PathBuf> = Vec::new();
+    let mut out = Vec::new();
+    for file in crate::stp::setups_for_bike(&cfg.profiles_dir(), &e.track_id, &e.bike_id) {
+        if seen.iter().any(|s| same_file(s, &file)) {
+            continue;
+        }
+        seen.push(file.clone());
+        let made = (|| {
+            let bytes = fs::read(&file).map_err(err)?;
+            let setup = crate::stp::Setup::parse(&bytes, gears).map_err(|_| tr!("apply.unreadable", "The coach can't read this setup."))?;
+            if setup.bike_id() != e.bike_id {
+                return Err(tr!("apply.other_bike", "This setup is for another bike."));
+            }
+            let mut opts = base.clone().ok_or_else(|| {
+                tr!("setup.why.no_options", "The bike's own settings couldn't be read, so the coach can't tell how far each one goes.")
+            })?;
+            let optimal = bike_cfg.as_ref().map_or([None, None], |bc| tyre_options(&cfg, bc, &setup, &mut opts));
+            let fixes = fixes_for(Some(&setup), Some(&opts), r.sag.as_ref(), optimal, skills, e.susp_max_travel);
+            Ok(Candidate { bytes, setup, opts, fixes })
+        })();
+        out.push((file, made));
+    }
+    out
+}
+
+fn diffs(c: &Candidate) -> (crate::stp::Setup, Vec<Diff>) {
+    let (out, changed) = crate::fixes::apply(&c.setup, &c.fixes, &c.opts);
+    let at = |f: crate::stp::Field, i: u32| c.opts.get(&f).and_then(|o| crate::fixes::value(f, o, i));
+    let rows = changed
+        .into_iter()
+        .map(|f| {
+            let (from, to) = (c.setup.get(f), out.get(f));
+            Diff { field: f, from, to, from_value: at(f, from), to_value: at(f, to) }
+        })
+        .collect();
+    (out, rows)
+}
+
+/// Every setup of the rider's this bike has, and exactly what applying would change in each.
+#[tauri::command]
+pub async fn coach_apply_preview(app: AppHandle, path: String, skills: Vec<String>) -> Result<ApplyPreview, String> {
+    tauri::async_runtime::spawn_blocking(move || timed("coach_apply_preview", || coach_apply_preview_sync(app, path, skills))).await.map_err(err)?
+}
+
+fn coach_apply_preview_sync(app: AppHandle, path: String, skills: Vec<String>) -> Result<ApplyPreview, String> {
+    let rec = load(&path)?;
+    let files = apply_candidates(&app, &rec, &skills)
+        .into_iter()
+        .map(|(file, made)| {
+            let (profile, place) = crate::apply::describe(&file);
+            let modified = fs::metadata(&file)
+                .and_then(|m| m.modified())
+                .ok()
+                .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+                .map_or(0, |d| d.as_millis() as u64);
+            let (changes, problem) = match made {
+                Ok(c) => (diffs(&c).1, None),
+                Err(e) => (Vec::new(), Some(e)),
+            };
+            ApplyFile {
+                path: file.display().to_string(),
+                name: stem(&file),
+                profile,
+                place,
+                modified,
+                changes,
+                backups: crate::apply::backups(&file).len(),
+                problem,
+            }
+        })
+        .collect();
+    Ok(ApplyPreview { game_open: mxb_core::gamewindow::is_game_running(), files })
+}
+
+fn game_open_error() -> String {
+    tr!(
+        "apply.game_open",
+        "MX Bikes is open. It writes its setups out when it closes and would undo this. Close the game, then apply: it takes effect the next time you load the bike."
+    )
+}
+
+fn failed(path: &Path, error: String) -> ApplyResult {
+    ApplyResult { path: path.display().to_string(), name: stem(path), ok: false, backup: None, changed: Vec::new(), error: Some(error) }
+}
+
+/// Writes the fixes into the chosen setups, each backed up beside itself first. Refused while
+/// MX Bikes runs. Only files the preview lists can be chosen.
+#[tauri::command]
+pub async fn coach_apply_setup(app: AppHandle, path: String, skills: Vec<String>, files: Vec<String>) -> Result<Vec<ApplyResult>, String> {
+    tauri::async_runtime::spawn_blocking(move || timed("coach_apply_setup", || coach_apply_setup_sync(app, path, skills, files))).await.map_err(err)?
+}
+
+fn coach_apply_setup_sync(app: AppHandle, path: String, skills: Vec<String>, files: Vec<String>) -> Result<Vec<ApplyResult>, String> {
+    if mxb_core::gamewindow::is_game_running() {
+        return Err(game_open_error());
+    }
+    let rec = load(&path)?;
+    let stamp = crate::apply::stamp(std::time::SystemTime::now());
+    let mut found = apply_candidates(&app, &rec, &skills);
+    let mut results = Vec::new();
+    for want in files.into_iter().map(PathBuf::from) {
+        let Some(at) = found.iter().position(|(f, _)| same_file(f, &want)) else {
+            results.push(failed(&want, tr!("apply.not_listed", "That isn't one of this bike's setups.")));
+            continue;
+        };
+        let (file, made) = found.remove(at);
+        let done = made.and_then(|c| {
+            let (out, rows) = diffs(&c);
+            if rows.is_empty() {
+                return Err(tr!("err.setup_nothing", "There's nothing in this setup the coach can change."));
+            }
+            // Checked again right before the write: the game may have started meanwhile.
+            if mxb_core::gamewindow::is_game_running() {
+                return Err(game_open_error());
+            }
+            let backup = crate::apply::commit(&file, &c.bytes, out.bytes(), &stamp)?;
+            Ok((backup, rows))
+        });
+        results.push(match done {
+            Ok((backup, changed)) => ApplyResult {
+                path: file.display().to_string(),
+                name: stem(&file),
+                ok: true,
+                backup: Some(backup.display().to_string()),
+                changed,
+                error: None,
+            },
+            Err(e) => failed(&file, e),
+        });
+    }
+    Ok(results)
+}
+
+/// Puts each chosen setup back from the backup made when the coach changed it.
+#[tauri::command]
+pub async fn coach_undo_setup(app: AppHandle, path: String, files: Vec<String>) -> Result<Vec<ApplyResult>, String> {
+    tauri::async_runtime::spawn_blocking(move || timed("coach_undo_setup", || coach_undo_setup_sync(app, path, files))).await.map_err(err)?
+}
+
+fn coach_undo_setup_sync(app: AppHandle, path: String, files: Vec<String>) -> Result<Vec<ApplyResult>, String> {
+    if mxb_core::gamewindow::is_game_running() {
+        return Err(game_open_error());
+    }
+    let rec = load(&path)?;
+    let listed: Vec<PathBuf> = apply_candidates(&app, &rec, &[]).into_iter().map(|(f, _)| f).collect();
+    Ok(files
+        .into_iter()
+        .map(PathBuf::from)
+        .map(|want| match listed.iter().find(|f| same_file(f, &want)) {
+            Some(file) => match crate::apply::restore(file) {
+                Ok(b) => ApplyResult {
+                    path: file.display().to_string(),
+                    name: stem(file),
+                    ok: true,
+                    backup: Some(b.display().to_string()),
+                    changed: Vec::new(),
+                    error: None,
+                },
+                Err(e) => failed(file, e),
+            },
+            None => failed(&want, tr!("apply.not_listed", "That isn't one of this bike's setups.")),
+        })
+        .collect())
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CuesOut {
+    /// The file the recorder reads, next to the sessions.
+    pub file: String,
+    pub cues: Vec<crate::cues::CueOut>,
+    /// The lap the HUD's gap and ghost run against, which the rider is shown. It is the
+    /// reference they picked wherever that is a lap somebody rode; the ideal lap never was,
+    /// so there the HUD races the fastest lap on the track instead.
+    pub ghost: LapRef,
+    /// What the in-game line is: the fastest lap, the ideal lap stitched from several, or the lap
+    /// the rider chose.
+    pub line: LineOut,
+}
+
+/// The rider's bike as it stands, from the id the recording carries.
+///
+/// Not `viewer::load_bike_model`, which reads a plain bike folder: a bike with a FrostMod model
+/// swap installed keeps its `.geom` in the archive and layers the active variant's files over
+/// it, so a plain read gets meshes with nothing to place them and draws a heap of parts.
+/// `modelswap::preview_set` works out which files the active variant puts where, exactly as the
+/// garage does — the swap is its business, and turning the answer into a model is the viewer's.
+/// The rider's bike as it stands, for the shared viewer.
+///
+/// Named for the command `ViewerPanel` calls, so Coach can use the garage's own panel rather
+/// than re-wiring the viewer by hand. `variant` is ignored: the panel's default is "Stock",
+/// which is a sound-mod word, and Coach only ever wants the model the rider is actually on —
+/// so the active one is resolved here.
+///
+/// Not `viewer::load_bike_model`, which reads a plain bike folder: an OEM bike keeps its
+/// `.geom` in a locked `.pkz` and a swapped one layers a variant over it, so a plain read
+/// returns parts with nothing to place them and draws a heap.
+#[tauri::command]
+pub async fn preview_model_swap(
+    app: AppHandle,
+    bike: String,
+    _variant: String,
+    tyres: Option<String>,
+) -> Result<mxb_core::viewer::BikeModel, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        use mxb_core::{library, viewer};
+        let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+        let root = library::mods_subdir(cfg.mods_path.trim(), "mods/bikes").join(&bike);
+        // The archive only, deliberately: the bike as it shipped. Layering the loose files over
+        // it — which is what the garage does, and what the game does — draws whatever a model
+        // swap left at the root, and a folder can hold a mesh from another bike entirely long
+        // after its swap was meant to be reverted. Coach is illustrating the machine behind a
+        // suspension question, so the bike the session names is the one to draw.
+        let files = viewer::packed_layer(&root);
+        if files.is_empty() {
+            return Err(format!("no archive to read for {bike}"));
+        }
+        let tyre_dir = library::mods_subdir(cfg.mods_path.trim(), "mods/tyres");
+        let key = format!("coach-oem#{bike}#{}", tyres.as_deref().unwrap_or(""));
+        viewer::build_bike_model(&bike, key, files, Vec::new(), Some(tyre_dir), tyres, std::time::Instant::now())
+    })
+    .await
+    .map_err(|e| format!("preview_model_swap task failed: {e}"))?
+}
+
+/// The rider's own body, as the shared viewer's rider parts.
+///
+/// The body alone, deliberately: `viewer::load_rider_model` wants a whole loadout, and the
+/// rider's kit is the garage's business rather than the coach's. Handing `load_rider_body` no
+/// paints leaves it wearing the textures baked into the mesh — the rider's model as it stands —
+/// and the body is the only part that carries a rig, which is what the replay poses on the bike.
+///
+/// The loose-file trap that makes the bike above read its archive doesn't reach here: a rider
+/// model installs as its own `mods/rider/riders/<profile>/` folder, a model swap only ever
+/// touches `mods/bikes`, and reading the archive alone once left a picked profile with no body.
+#[tauri::command]
+pub async fn coach_rider_body(
+    app: AppHandle,
+    profile: String,
+) -> Result<Vec<mxb_core::viewer::RiderPart>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        use mxb_core::{texstore, viewer};
+        let t0 = std::time::Instant::now();
+        let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+        let name = viewer::rider_profile_or_stock(&profile).to_string();
+        // A profile nobody installed is a fact about the rider's folder, not a failure: the
+        // replay then runs the bike on its own rather than an error the screen can't act on.
+        let Some(body) = viewer::load_rider_body(&cfg, &name, Vec::new()) else {
+            log::info!("coach_rider_body {name}: no body installed ({:?})", t0.elapsed());
+            return Ok(Vec::new());
+        };
+        log::info!(
+            "coach_rider_body {name}: {} node(s), {} bone(s), {} texture(s) | total {:?} | {:.1} MB resident in the texture store",
+            body.nodes.len(),
+            body.skeleton.len(),
+            body.textures.len(),
+            t0.elapsed(),
+            texstore::resident_bytes() as f64 / (1024.0 * 1024.0),
+        );
+        Ok(vec![body])
+    })
+    .await
+    .map_err(|e| format!("coach_rider_body task failed: {e}"))?
+}
+
+/// What the rider has already been called on this track and bike, beside the session index.
+/// Losing it is no worse than a fresh start: the next sheet simply repeats itself once.
+fn map_path(app: &AppHandle, track: &str) -> Option<PathBuf> {
+    Some(config::data_dir(app)?.join("coach").join("tracks").join(crate::trackmap::file_name(track)))
+}
+
+/// The track's frozen roster of corners and jumps. A map for another build of the track, or
+/// from older code, is discarded rather than trusted: both it and the cue history keyed on it
+/// are derived caches, and the cost of rebuilding them is one cue sheet.
+fn read_map(app: &AppHandle, track: &str, length: f32) -> crate::trackmap::TrackMap {
+    map_path(app, track)
+        .and_then(|p| fs::read(p).ok())
+        .and_then(|b| serde_json::from_slice::<crate::trackmap::TrackMap>(&b).ok())
+        .filter(|m| !m.stale(length, TRACK_LENGTH_SLACK_M))
+        .unwrap_or_else(|| crate::trackmap::TrackMap::empty(track, length))
+}
+
+fn write_map(app: &AppHandle, track: &str, m: &crate::trackmap::TrackMap) {
+    let Some(path) = map_path(app, track) else { return };
+    if let Some(parent) = path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    if let Ok(json) = serde_json::to_vec(m) {
+        let _ = fs::write(path, json);
+    }
+}
+
+/// Labels a freshly detected section list with the track's stable ids and names, so every
+/// screen calls the same corner the same thing. `seed` is whatever laps the caller has to hand:
+/// the first time a track is mapped, the roster is built from all of them at once so the
+/// numbering runs along the lap even for a feature only one lap saw.
+pub(crate) fn label(app: &AppHandle, track: &str, length: f32, seed: &[Trace], secs: &mut [analysis::Section]) {
+    let mut map = read_map(app, track, length);
+    let fresh = map.marks.is_empty();
+    if fresh && !seed.is_empty() {
+        let per_lap: Vec<Vec<analysis::Section>> = seed.iter().map(analysis::sections).collect();
+        map = crate::trackmap::build(track, length, &per_lap);
+    }
+    let grew = crate::trackmap::apply(&mut map, secs);
+    if fresh || grew {
+        write_map(app, track, &map);
+    }
+}
+
+fn history_path(app: &AppHandle, track: &str, bike: &str) -> Option<PathBuf> {
+    Some(config::data_dir(app)?.join("coach").join("cues").join(crate::cues::history_name(track, bike)))
+}
+
+/// A history from before the sections had stable ids keys on names that may since have been
+/// renumbered, and translating it needs the very map that didn't exist when it was written. So
+/// it is dropped: one sheet doesn't know what the rider has already heard, and the sheet after
+/// that has rebuilt it. Cheaper than a translation that would be wrong exactly on the tracks
+/// whose numbering had already drifted.
+fn read_history(app: &AppHandle, track: &str, bike: &str) -> crate::cues::History {
+    history_path(app, track, bike)
+        .and_then(|p| fs::read(p).ok())
+        .and_then(|b| serde_json::from_slice::<crate::cues::History>(&b).ok())
+        .filter(|h| h.version == crate::cues::HISTORY_VERSION)
+        .unwrap_or_default()
+}
+
+fn write_history(app: &AppHandle, track: &str, bike: &str, h: &crate::cues::History) {
+    let Some(path) = history_path(app, track, bike) else { return };
+    if let Some(parent) = path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    if let Ok(json) = serde_json::to_vec(h) {
+        let _ = fs::write(path, json);
+    }
+}
+
+/// The newest lap of this track and bike worth coaching from, so a sheet written mid-session
+/// is about the laps the rider is riding now rather than the one they opened the page on.
+fn newest_lap(app: &AppHandle, track: &str, bike: &str) -> Option<(String, i32)> {
+    newest_lap_in(&all_sessions(app), track, bike)
+}
+
+/// [`newest_lap`] over `sessions`, which [`all_sessions`] lists newest first.
+///
+/// The newest session with a lap worth coaching from, and its last such lap. It used to take
+/// the last lap of the whole list, which, newest first, is the oldest session's: on a track
+/// ridden before, the live sheet was about a lap from the first time the rider went there.
+/// A session still being ridden counts. Its first whole, valid lap is usable the moment it is
+/// on disk, which is what lets coaching start on the lap after it.
+fn newest_lap_in(sessions: &[SessionSummary], track: &str, bike: &str) -> Option<(String, i32)> {
+    sessions
+        .iter()
+        .filter(|s| s.track_id == track && s.bike_id == bike)
+        .find_map(|s| s.laps.iter().filter(|l| l.comparable()).next_back())
+        .map(|l| (l.path.clone(), l.num))
+}
+
+/// What each HUD sheet written this run was made from, so an unchanged line isn't written again.
+fn hud_keys() -> &'static std::sync::Mutex<std::collections::HashMap<String, String>> {
+    static KEYS: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, String>>> = std::sync::OnceLock::new();
+    KEYS.get_or_init(Default::default)
+}
+
+/// Windows refusing to replace a file another process has open: `ERROR_SHARING_VIOLATION`, or
+/// `ERROR_ACCESS_DENIED`, which is how `MoveFileEx` usually reports the same thing.
+fn held_open(e: &std::io::Error) -> bool {
+    matches!(e.raw_os_error(), Some(32) | Some(5))
+}
+
+/// Move a sheet written aside into place, trying once more after a moment if the file is held
+/// open. Now that the recorder looks for a sheet while the rider rides, it can be reading the
+/// old one at the instant the new one lands, and that read is over in milliseconds.
+fn move_into_place(tmp: &Path, file: &Path) -> std::io::Result<()> {
+    match fs::rename(tmp, file) {
+        Err(e) if held_open(&e) => {
+            std::thread::sleep(Duration::from_millis(100));
+            fs::rename(tmp, file)
+        }
+        r => r,
+    }
+}
+
+/// Writes the live cues for this lap's track and bike: the few calls the recorder shows in
+/// practice, from where this lap loses time to the lap it is held against. The reference is the
+/// one the rider picked in the review, so the cue sheet and the HUD sheet beside it are both
+/// against the lap they chose.
+///
+/// `latest` writes them for the newest lap on this track and bike instead of the one named,
+/// which is what the review page asks for while the rider is still out: a sheet is only worth
+/// anything if it is about the laps they are riding now. The reference stands either way: it is
+/// the lap they chose to be held against, not the lap being reviewed.
+#[tauri::command]
+pub fn coach_write_cues(
+    app: AppHandle,
+    path: String,
+    lap: i32,
+    level: crate::cues::Level,
+    amount: crate::cues::Amount,
+    ref_path: Option<String>,
+    ref_lap: Option<i32>,
+    ideal: Option<bool>,
+    latest: Option<bool>,
+    line_from: Option<String>,
+) -> Result<CuesOut, String> {
+    // Which lap is coached is settled before the review, so the reference the rider picked is
+    // applied to the lap the calls actually come from.
+    let (path, lap) = match latest.unwrap_or(false) {
+        true => {
+            let head = summarize(Path::new(&path), &load(&path)?);
+            newest_lap(&app, &head.track_id, &head.bike_id).unwrap_or((path, lap))
+        }
+        false => (path, lap),
+    };
+    let ref_arg_given = ref_path.is_some() || ideal.unwrap_or(false);
+    let mut out = review_sync(app.clone(), path.clone(), lap, ref_path, ref_lap, None, ideal)?;
+    let rec = load(&path)?;
+    let sessions = all_sessions(&app);
+    // The lap the calls are placed on, and the one the HUD races. The ideal lap can't be
+    // either: there is no line to draw a ghost from and no ghost to run a gap against, so the
+    // fastest lap on the track stands in and the rider is told which lap that is.
+    //
+    // Nor can a lap with a crash, a reset or a cut in it, or the warm-up. With nothing faster to
+    // hold it against, the review is of the lap on its own and names that lap as its reference:
+    // the first lap of a session, crashes and all, became the line in the game. The fastest clean
+    // lap stands in for any of those, and with none yet there is no line at all.
+    let ghost = match out.reference.kind {
+        RefKind::Ideal => best_reference(&sessions, &out.track_id, &rec.event.bike_id, None),
+        _ if lap_is_clean(&sessions, &out.reference.path, out.reference.lap) => Some(out.reference.clone()),
+        _ => best_reference(&sessions, &out.track_id, &rec.event.bike_id, None),
+    };
+    let Some(ghost) = ghost else {
+        clear_hud_sheet(&app, &rec)?;
+        return Err(tr!("err.no_clean_lap", "There's no clean lap on this track yet, so there's no line to draw in the game."));
+    };
+    // The calls are about where this lap loses time to the line, so a lap that stood in for an
+    // unclean reference is the one it is reviewed against.
+    let here = (ghost.path.as_str(), ghost.lap);
+    let stood_in = out.reference.kind != RefKind::Ideal && here != (out.reference.path.as_str(), out.reference.lap);
+    if stood_in && here != (path.as_str(), lap) {
+        out = review_sync(app.clone(), path.clone(), lap, Some(ghost.path.clone()), Some(ghost.lap), None, None)?;
+    }
+    let r = &ghost;
+    let ref_rec = if r.path == path { None } else { Some(load(&r.path)?) };
+    // The line the HUD draws: the fastest lap (today's), the ideal lap stitched from the laps that
+    // set each section's best, or the lap the rider chose. The cues come from the same line.
+    let want_line = line_from.as_deref().unwrap_or("fastest");
+    let own_fast = |g: &LapRef| -> Result<Trace, String> {
+        let rec2 = if g.path == path { None } else { Some(load(&g.path)?) };
+        trace(rec2.as_ref().unwrap_or(&rec), g.lap)
+    };
+    let mut fast = trace(ref_rec.as_ref().unwrap_or(&rec), r.lap)?;
+    let mut line = LineOut { kind: "fastest".into(), from: Vec::new(), notes: Vec::new() };
+    let mut stitched_sections: Option<Vec<analysis::Section>> = None;
+    let mut line_id = format!("{}#{}", r.path, r.lap);
+    match want_line {
+        "chosen" => line.kind = "chosen".into(),
+        "ideal" => {
+            let summary = match sessions.iter().find(|s| s.stints.iter().any(|x| x.path == path)) {
+                Some(s) => s.clone(),
+                None => summarize(Path::new(&path), &rec),
+            };
+            match ideal_line(&sessions, &summary) {
+                Ok((t, secs, l)) => {
+                    fast = t;
+                    stitched_sections = Some(secs);
+                    line_id = l.from.iter().map(|p| format!("{}-{}:{}.{}", p.start_m, p.end_m, p.session, p.lap)).collect::<Vec<_>>().join(",");
+                    line = l;
+                }
+                Err(why) => line.notes.push(tr!(
+                    "line.ideal_unused",
+                    "The ideal line wasn't used: {why} The fastest lap's is drawn.",
+                    why = why
+                )),
+            }
+        }
+        // The fastest lap on the track, whatever reference the review is held against.
+        _ if ref_arg_given => {
+            if let Some(g) = best_reference(&sessions, &out.track_id, &rec.event.bike_id, None) {
+                fast = own_fast(&g)?;
+                line_id = format!("{}#{}", g.path, g.lap);
+            }
+        }
+        _ => {}
+    }
+    let points = analysis::cue_points(&fast, &stitched_sections.unwrap_or_else(|| analysis::sections(&fast)));
+    // What the last sheets said, so this one moves on rather than repeating itself.
+    let seen = read_history(&app, &rec.event.track_id, &rec.event.bike_id);
+    let picked = crate::cues::pick(&points, &out.review, level, amount, &seen);
+    let (cues, next) = (picked.cues, picked.history);
+    let cfg = load_config(&app);
+    let dir = sheets_dir(&cfg).ok_or_else(no_user_folder)?;
+    fs::create_dir_all(&dir).map_err(err)?;
+    let file = dir.join(crate::cues::file_name(&rec.event.track_id, &rec.event.bike_id));
+    // Written aside and moved in, so the recorder never reads half a file.
+    let tmp = dir.join(format!("{}.tmp", crate::cues::file_name(&rec.event.track_id, &rec.event.bike_id)));
+    fs::write(&tmp, crate::cues::write(rec.event.track_length, &cues, amount)).map_err(err)?;
+    move_into_place(&tmp, &file).map_err(err)?;
+    // The HUD sheet beside it: the fast lap for the gap and the ghost, and each section's tip.
+    // The sag prompt asks for a stop when this session has no standing-still sag yet.
+    let hud_name = crate::hudsheet::file_name(&rec.event.track_id, &rec.event.bike_id);
+    let parts = crate::hudsheet::parts(&out.review, rec.event.track_length);
+    let flags = if crate::sag::measure(&rec).is_some_and(|s| s.still) { 0 } else { crate::hudsheet::SAG_PROMPT };
+    let hud_tmp = dir.join(format!("{hud_name}.tmp"));
+    // The track's own ground under the line, when its terrain reads and the laps sit steadily on
+    // it; otherwise the recorder falls back to the centreline's heights.
+    let master = terrain_under(&app, &rec);
+    let terrain = master.as_ref().map(|m| crate::hudsheet::Terrain {
+        width: m.info.width as usize,
+        height: m.info.height as usize,
+        metres_per_sample: m.info.metres_per_sample,
+        heights: &m.heights,
+    });
+    // Coach rewrote this after every lap, and the recorder took each one into the line it was
+    // drawing. The line only changes when the lap it is made of does (a new best, another
+    // reference, a section best that moved), so an unchanged line is not written again.
+    let hud_path = dir.join(&hud_name);
+    let key = format!("{want_line}|{line_id}|{flags}|{}", terrain.is_some());
+    let unchanged = hud_path.exists() && hud_keys().lock().map_or(false, |m| m.get(&hud_name) == Some(&key));
+    if !unchanged {
+        let sheet = crate::hudsheet::write_with(rec.event.track_length, &fast, &parts, flags, terrain.as_ref());
+        fs::write(&hud_tmp, sheet).map_err(err)?;
+        move_into_place(&hud_tmp, &hud_path).map_err(err)?;
+        if let Ok(mut m) = hud_keys().lock() {
+            m.insert(hud_name.clone(), key);
+        }
+    }
+    // Only once the sheet is really on disk: a write that failed is a sheet the rider never
+    // heard, and it would be wrong to count it against them.
+    write_history(&app, &rec.event.track_id, &rec.event.bike_id, &next);
+    Ok(CuesOut { file: file.display().to_string(), cues, ghost, line })
+}
+
+/// Whether lap `num` of the recording at `path` is clean (see [`LapSummary::clean`]): from the
+/// sessions already read when it is one of them, else from the file (an imported lap).
+fn lap_is_clean(sessions: &[SessionSummary], path: &str, num: i32) -> bool {
+    match sessions.iter().flat_map(|s| s.laps.iter()).find(|l| l.path == path && l.num == num) {
+        Some(l) => l.clean(),
+        None => load(path)
+            .ok()
+            .is_some_and(|rec| summarize(Path::new(path), &rec).laps.iter().any(|l| l.num == num && l.clean())),
+    }
+}
+
+/// With no clean lap to draw, the HUD sheet for this track and bike says so: a sheet with no line
+/// in it, which the recorder takes as "draw nothing" rather than keeping a line made of a bad lap.
+fn clear_hud_sheet(app: &AppHandle, rec: &Recording) -> Result<(), String> {
+    let dir = sheets_dir(&load_config(app)).ok_or_else(no_user_folder)?;
+    fs::create_dir_all(&dir).map_err(err)?;
+    let hud_name = crate::hudsheet::file_name(&rec.event.track_id, &rec.event.bike_id);
+    let hud_path = dir.join(&hud_name);
+    let key = "none".to_string();
+    if hud_path.exists() && hud_keys().lock().map_or(false, |m| m.get(&hud_name) == Some(&key)) {
+        return Ok(());
+    }
+    let tmp = dir.join(format!("{hud_name}.tmp"));
+    fs::write(&tmp, crate::hudsheet::write_empty(rec.event.track_length)).map_err(err)?;
+    move_into_place(&tmp, &hud_path).map_err(err)?;
+    if let Ok(mut m) = hud_keys().lock() {
+        m.insert(hud_name, key);
+    }
+    Ok(())
+}
+
+/// The session's lines and its track, with the stint the lap under review was ridden in.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LinesOut {
+    #[serde(flatten)]
+    pub lines: crate::lines::Lines,
+    /// Which stint of the session the recording under review is. The game numbers laps per
+    /// stint, so it takes both to pick the rider's own line out of the rest.
+    pub stint: i32,
+}
+
+/// How the session's lines and the track changed, against the fastest lap on the track; see
+/// `lines.rs`. None until there is a lap to compare with.
+///
+/// Every stint of the session, not just the one recording: a rider who goes out, comes in and
+/// goes back out has one session in three files, and the notes take several laps through the
+/// same corner before one line can be told from another.
+///
+/// Off the main thread: reading every stint of a long session is several recordings' worth of
+/// parsing, the same reason [`coach_ground`] is off it.
+#[tauri::command]
+pub async fn coach_lines(app: AppHandle, path: String) -> Result<Option<LinesOut>, String> {
+    tauri::async_runtime::spawn_blocking(move || lines_for(&app, &path)).await.map_err(err)?
+}
+
+fn lines_for(app: &AppHandle, path: &str) -> Result<Option<LinesOut>, String> {
+    let sessions = all_sessions(app);
+    let rec = load(path)?;
+    // The session this recording belongs to. A recording that isn't on disk to be grouped —
+    // one the rider opened from somewhere else — is a session of its own.
+    let summary = match sessions.iter().find(|s| s.stints.iter().any(|x| x.path == path)) {
+        Some(s) => s.clone(),
+        None => summarize(Path::new(path), &rec),
+    };
+    let Some(r) = best_reference(&sessions, &summary.track_id, &summary.bike_id, None) else {
+        return Ok(None);
+    };
+    let ref_rec = if r.path == path { None } else { Some(load(&r.path)?) };
+    let reference = trace(ref_rec.as_ref().unwrap_or(&rec), r.lap)?;
+    let mut laps: Vec<(crate::lines::LapId, Trace)> = Vec::new();
+    // Everyone else the recorder saw, for where the track will wear.
+    let mut others: Vec<[f32; 2]> = Vec::new();
+    for (i, st) in summary.stints.iter().enumerate() {
+        let Ok(rec) = load(&st.path) else { continue };
+        let stint = i as i32;
+        for l in rec.laps().iter().filter(|l| l.whole && !l.invalid) {
+            if let Some(t) = Trace::new(l, rec.event.track_length) {
+                laps.push((crate::lines::LapId { lap: l.num, stint }, t));
+            }
+        }
+        let me = crate::others::local_num(&rec);
+        others.extend(
+            rec.frames.iter().flat_map(|f| &f.bikes).filter(|b| Some(b.num) != me && !b.crashed).map(|b| [b.x, b.z]),
+        );
+    }
+    let stint = summary.stints.iter().position(|x| x.path == path).unwrap_or(0) as i32;
+    let mut secs = analysis::sections(&reference);
+    label(&app, &summary.track_id, summary.track_length, &[], &mut secs);
+    Ok(Some(LinesOut { lines: crate::lines::lines(&laps, &reference, &others, &secs), stint }))
+}
+
+/// The track's own terrain for a session: installed, readable, and lined up with the laps.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Ground {
+    pub path: String,
+    pub prefix: Option<String>,
+    pub name: String,
+    /// How high the bike rides above this terrain, metres.
+    pub lift: f32,
+    /// The laps didn't sit steadily above this terrain, so `lift` is the best guess rather
+    /// than a measurement and the lines may float or sink a little. The track is still drawn:
+    /// a rider looking at their lap wants to see their track, and the ground built from the
+    /// laps is a poor substitute for it.
+    pub rough_fit: bool,
+}
+
+/// The track's own terrain, or why the ground built from the laps is drawn instead.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GroundAnswer {
+    pub ground: Option<Ground>,
+    pub why: Option<String>,
+}
+
+/// Off the main thread: the first read of a big track is most of a second.
+#[tauri::command]
+pub async fn coach_ground(app: AppHandle, path: String) -> Result<GroundAnswer, String> {
+    tauri::async_runtime::spawn_blocking(move || ground_for(&app, &path)).await.map_err(err)?
+}
+
+fn ground_for(app: &AppHandle, path: &str) -> Result<GroundAnswer, String> {
+    let no = |why: String| Ok(GroundAnswer { ground: None, why: Some(why) });
+    let rec = load(path)?;
+    let Some(src) = mxb_core::tracksource::resolve(&load_config(app), &rec.event.track_id) else {
+        return no(tr!("ground.not_installed", "the track isn't in your mods"));
+    };
+    // A GUID-locked track opens here the way it does in MXB App, through the private reader
+    // in a release build; only one that still can't be read counts as locked.
+    if src.locked {
+        return no(tr!("ground.locked", "the track is locked"));
+    }
+    let Ok(master) = mxb_core::track::load_master(app, &src.path, src.prefix.as_deref()) else {
+        return no(tr!("ground.unreadable", "its terrain couldn't be read"));
+    };
+    let points: Vec<[f32; 3]> =
+        rec.samples.iter().filter(|s| !s.airborne() && !s.crashed).step_by(5).map(|s| [s.x, s.y, s.z]).collect();
+    let i = &master.info;
+    let fit = crate::ground::measure(i.width as usize, i.height as usize, i.metres_per_sample, &master.heights, &points);
+    // The track is shown whenever its terrain can be read, exactly as MXB App shows it: the
+    // check below decides how high to hang the lines over it, not whether the rider gets to
+    // see their track at all. Refusing on a poor fit meant a rutted lap came back as a blurred
+    // grid of its own telemetry, which is nobody's idea of the circuit they just rode.
+    let ground = Ground {
+        path: src.path,
+        prefix: src.prefix,
+        name: src.name,
+        lift: fit.lift.unwrap_or(fit.median_lift),
+        rough_fit: fit.lift.is_none(),
+    };
+    // Said only when it is true, and only about the lines: what was measured, so a lap sitting
+    // oddly over the ground can be looked into rather than guessed at.
+    let why = fit.lift.is_none().then(|| {
+        if fit.on_grid < points.len() / 2 {
+            tr!(
+                "ground.off_grid",
+                "only {on} of {of} points on your laps land on this terrain, so your lines may not sit on it",
+                on = fit.on_grid,
+                of = fit.offered
+            )
+        } else {
+            tr!(
+                "ground.wanders",
+                "the height of your laps above the ground wanders by {m} m, so your lines may float or sink a little",
+                m = num(fit.spread, 1)
+            )
+        }
+    });
+    Ok(GroundAnswer { ground: Some(ground), why })
+}
+
+/// The track's terrain for the HUD sheet, only when the laps ridden on it say it is the right
+/// terrain (`ground::measure` found a steady lift): a wrong one would lay the line in the air or
+/// under the dirt with total confidence.
+fn terrain_under(app: &AppHandle, rec: &Recording) -> Option<mxb_core::track::Master> {
+    let src = mxb_core::tracksource::resolve(&load_config(app), &rec.event.track_id)?;
+    if src.locked {
+        return None;
+    }
+    let master = mxb_core::track::load_master(app, &src.path, src.prefix.as_deref()).ok()?;
+    let points: Vec<[f32; 3]> =
+        rec.samples.iter().filter(|s| !s.airborne() && !s.crashed).step_by(5).map(|s| [s.x, s.y, s.z]).collect();
+    let i = &master.info;
+    crate::ground::measure(i.width as usize, i.height as usize, i.metres_per_sample, &master.heights, &points)
+        .lift
+        .map(|_| master)
+}
+
+/// The ground under a session's laps, built from the laps; see `surface.rs`.
+#[tauri::command]
+pub async fn coach_surface(path: String) -> Result<Option<crate::surface::Surface>, String> {
+    tauri::async_runtime::spawn_blocking(move || timed("coach_surface", || coach_surface_sync(path))).await.map_err(err)?
+}
+
+fn coach_surface_sync(path: String) -> Result<Option<crate::surface::Surface>, String> {
+    Ok(crate::surface::build(&load(&path)?.samples, 400))
+}
+
+/// Puts the recorder in `<game>\plugins`: downloaded from the latest FrostMod release, or
+/// copied from `from` when given. Returns where it went.
+#[tauri::command]
+pub async fn coach_install_plugin(app: AppHandle, from: Option<String>) -> Result<String, String> {
+    let cfg = load_config(&app);
+    let target = plugin_path(&cfg).ok_or_else(|| tr!("err.no_game_dir", "Set the MX Bikes game folder in Settings first."))?;
+    let downloaded = from.is_none();
+    let bytes = match from {
+        Some(f) => fs::read(&f).map_err(err)?,
+        None => {
+            let mut last = tr!("err.download", "Couldn't download the recorder.");
+            let mut got = None;
+            for repo in PLUGIN_REPOS {
+                match reqwest::get(plugin_url(repo)).await {
+                    Ok(resp) if resp.status().is_success() => {
+                        got = Some(resp.bytes().await.map_err(err)?.to_vec());
+                        break;
+                    }
+                    Ok(resp) => last = tr!("err.download_status", "Couldn't download the recorder ({status}).", status = resp.status()),
+                    Err(e) => last = err(e),
+                }
+            }
+            got.ok_or(last)?
+        }
+    };
+    if !bytes.starts_with(b"MZ") {
+        return Err(tr!("err.not_plugin", "That isn't a Windows plugin file."));
+    }
+    if let Some(dir) = target.parent() {
+        fs::create_dir_all(dir).map_err(err)?;
+    }
+    let part = target.with_extension("dlo.part");
+    fs::write(&part, &bytes).map_err(err)?;
+    // A downloaded recorder runs inside mxbikes.exe, so it goes in only if it is signed by us.
+    if let Err(e) = accept_recorder(&part, downloaded) {
+        let _ = fs::remove_file(&part);
+        return Err(e);
+    }
+    if fs::rename(&part, &target).is_err() {
+        let _ = fs::remove_file(&part);
+        return Err(tr!("err.replace_recorder", "Couldn't replace the recorder. Close MX Bikes and try again."));
+    }
+    Ok(target.to_string_lossy().into_owned())
+}
+
+/// Whether the recorder at `path` may go into the game folder.
+///
+/// A downloaded one must carry a valid Authenticode signature from the publisher our release
+/// builds are signed as, so a release asset swapped on GitHub can't put native code in the
+/// game. One the rider picked from disk is their choice and only has to be a PE file (that
+/// is checked before this). Off Windows there is no way to check a signature, so a download
+/// is refused there.
+fn accept_recorder(path: &Path, downloaded: bool) -> Result<(), String> {
+    if !downloaded {
+        return Ok(());
+    }
+    if mxb_core::fileinfo::signed_by(path, mxb_core::fileinfo::RELEASE_PUBLISHER) {
+        return Ok(());
+    }
+    Err(tr!(
+        "err.recorder_unsigned",
+        "The downloaded recorder isn't signed by Creste LLC, so it wasn't installed."
+    ))
+}
+
+/// Point Coach at the MX Bikes folder itself.
+///
+/// It shares one `config.json` with MXB App, so this is the same setting the manager has — but
+/// until now only the manager could set it, and everything Coach does with the recorder is
+/// gated on it. A rider whose game isn't where autodetect looks was told to go and open MXB
+/// App, which is the whole "open the app, set it, close it, come back" dance.
+#[tauri::command]
+pub fn coach_set_game_dir(app: AppHandle, dir: String) -> Result<Status, String> {
+    let dir = dir.trim().to_string();
+    if !dir.is_empty() {
+        let path = Path::new(&dir);
+        if !path.is_dir() {
+            return Err(tr!("err.no_folder", "That folder isn't there."));
+        }
+        // The folder the game actually runs from, so a rider who picks the mods folder or the
+        // Steam library root is told now rather than after a download that goes nowhere.
+        if !path.join("mxbikes.exe").is_file() {
+            return Err(tr!("err.not_game_dir", "That isn't the MX Bikes folder: it has no mxbikes.exe in it."));
+        }
+    }
+    let mut keys = serde_json::Map::new();
+    keys.insert("game_path".into(), serde_json::Value::String(dir));
+    config::patch_json(&app, keys).map_err(|e| format!("{e:#}"))?;
+    Ok(coach_status(app))
+}
+
+fn installed_note_path(app: &AppHandle) -> Option<PathBuf> {
+    config::data_dir(app).map(|d| d.join("coach").join(INSTALLED_FILE))
+}
+
+fn installed_note(app: &AppHandle) -> Option<String> {
+    let bytes = fs::read(installed_note_path(app)?).ok()?;
+    let doc: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
+    doc.get("version").and_then(|v| v.as_str()).map(str::to_string)
+}
+
+fn write_installed_note(app: &AppHandle, version: &str) {
+    let Some(path) = installed_note_path(app) else { return };
+    if let Some(parent) = path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    let _ = fs::write(path, serde_json::json!({ "version": version }).to_string());
+}
+
+/// The newest FrostMod release's version, without the `v`.
+async fn latest_recorder() -> Result<String, String> {
+    let client = reqwest::Client::builder().user_agent("mxb-coach").build().map_err(err)?;
+    let mut last = String::from("no FrostMod release source");
+    let mut found = None;
+    for repo in PLUGIN_REPOS {
+        match client.get(plugin_release(repo)).send().await {
+            Ok(resp) if resp.status().is_success() => {
+                found = Some(resp);
+                break;
+            }
+            Ok(resp) => last = format!("GitHub answered {}", resp.status()),
+            Err(e) => last = err(e),
+        }
+    }
+    let body: serde_json::Value = found.ok_or(last)?.json().await.map_err(err)?;
+    let tag = body.get("tag_name").and_then(|t| t.as_str()).ok_or("no tag in the release")?;
+    Ok(tag.trim_start_matches('v').to_string())
+}
+
+/// Keep the recorder current without being asked.
+///
+/// The manager has refreshed its own `frostmod.dlo` from `status()` for a while; nothing ever
+/// did the same for `mxbcoach.dlo`, so a rider installed it once and kept it forever. A
+/// recorder older than the app it serves draws nothing and says nothing, and before 0.23 it
+/// couldn't even report its own version — so the app insisted everything was fine while the
+/// cue, the section tip, the gap and the setup card were all silently dropped.
+///
+/// Nothing is installed without the rider saying so: Settings asks [`coach_recorder_update`]
+/// first and only calls this when they press Update.
+///
+/// Returns the version now installed when it changed anything.
+#[tauri::command]
+pub async fn coach_refresh_plugin(app: AppHandle) -> Result<Option<String>, String> {
+    let Some(latest) = coach_recorder_update(app.clone()).await? else { return Ok(None) };
+    coach_install_plugin(app.clone(), None).await?;
+    write_installed_note(&app, &latest);
+    Ok(Some(latest))
+}
+
+/// The newest recorder's version when the installed one is older or missing, else `None`.
+/// Only looks: installing is [`coach_refresh_plugin`], after the rider agrees.
+#[tauri::command]
+pub async fn coach_recorder_update(app: AppHandle) -> Result<Option<String>, String> {
+    let cfg = load_config(&app);
+    let Some(target) = plugin_path(&cfg) else { return Ok(None) };
+    let latest = latest_recorder().await?;
+    // What is there now: what the game last ran, else what Coach last installed. Neither, with
+    // a file present, means a recorder of unknown age — treat that as out of date, because the
+    // versions that can't say are precisely the ones that are.
+    let dirs = session_dirs(&cfg);
+    let ran = crate::hud::coach_dir_of(&dirs).as_deref().and_then(crate::hud::recorder_version);
+    let noted = installed_note(&app);
+    let have = ran.or(noted);
+    let current = target.is_file() && have.as_deref().is_some_and(|v| crate::hud::at_least(v, &latest));
+    Ok((!current).then_some(latest))
+}
+
+#[tauri::command]
+pub fn coach_uninstall_plugin(app: AppHandle) -> Result<(), String> {
+    let Some(target) = plugin_path(&load_config(&app)) else { return Ok(()) };
+    match fs::remove_file(&target) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(_) => Err(tr!("err.remove_recorder", "Couldn't remove the recorder. Close MX Bikes and try again.")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A downloaded recorder that isn't signed by us never reaches the game folder, however
+    /// much it looks like a plugin.
+    #[test]
+    fn an_unsigned_download_is_refused_and_a_picked_file_is_not() {
+        let dir = std::env::temp_dir().join(format!("coach-recorder-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let fake = dir.join("mxbcoach.dlo.part");
+        let mut bytes = b"MZ".to_vec();
+        bytes.extend_from_slice(&[0u8; 512]);
+        std::fs::write(&fake, &bytes).unwrap();
+        assert!(accept_recorder(&fake, true).is_err(), "a download must be signed");
+        assert!(accept_recorder(&fake, false).is_ok(), "a file the rider picked is their call");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The whole of "Apply to my setup" on isolated files: a rider with the same bike in two
+    /// profile folders sees both, gets each one's own before and after, applies to one only, and
+    /// undoes it. The other is never touched, and no real MX Bikes folder is involved.
+    #[test]
+    fn apply_reaches_every_profile_writes_only_the_picked_one_and_undoes() {
+        use crate::stp::{tests::{file, SAND_85}, Field};
+        let root = std::env::temp_dir().join(format!("coach-apply-e2e-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let (first, second) = (root.join("Terp/setups/indiana/2027_K85M"), root.join("Second/setups/common/2027_K85M"));
+        fs::create_dir_all(&first).unwrap();
+        fs::create_dir_all(&second).unwrap();
+        // The second profile's copy has a softer fork, so it needs a different step.
+        let mut other = SAND_85;
+        other[5] = 1;
+        fs::write(first.join("race.stp"), file("2027_K85M", &SAND_85)).unwrap();
+        fs::write(second.join("race.stp"), file("2027_K85M", &other)).unwrap();
+        fs::write(second.join("other bike.stp"), file("2024_OTHER", &SAND_85)).unwrap();
+
+        let found = crate::stp::setups_for_bike(&root, "indiana", "2027_K85M");
+        assert_eq!(found.len(), 3, "{found:?}");
+        let opts = crate::bikecfg::options(&mxb_core::cfg::parse(crate::bikecfg::tests::CFG_85.as_bytes()));
+        let skills = vec!["setup_bottoming_fork".to_string()];
+        let make = |p: &Path| -> Result<Candidate, String> {
+            let bytes = fs::read(p).unwrap();
+            let setup = crate::stp::Setup::parse(&bytes, None)?;
+            if setup.bike_id() != "2027_K85M" {
+                return Err("another bike".into());
+            }
+            let fixes = fixes_for(Some(&setup), Some(&opts), None, [None, None], &skills, [0.3, 0.3]);
+            Ok(Candidate { bytes, setup, opts: opts.clone(), fixes })
+        };
+        let mine = found.iter().find(|p| p.starts_with(&first)).unwrap().clone();
+        let theirs = found.iter().find(|p| p.ends_with("Second/setups/common/2027_K85M/race.stp") || p.starts_with(&second) && stem(p) == "race").unwrap().clone();
+        let wrong = found.iter().find(|p| stem(p) == "other bike").unwrap().clone();
+        assert!(make(&wrong).is_err(), "a setup for another bike is not offered for writing");
+
+        let (c1, c2) = (make(&mine).unwrap(), make(&theirs).unwrap());
+        let (new1, rows1) = diffs(&c1);
+        let (_, rows2) = diffs(&c2);
+        assert!(rows1.iter().any(|d| d.field == Field::ForkCompression && d.from == 3 && d.to == 5), "{:?}", rows1.iter().map(|d| (d.field, d.from, d.to)).collect::<Vec<_>>());
+        let comp2 = rows2.iter().find(|d| d.field == Field::ForkCompression);
+        assert!(comp2.is_some_and(|d| d.from == 1), "{:?} the other profile's copy is worked out from its own settings", rows2.iter().map(|d| (d.field, d.from, d.to)).collect::<Vec<_>>());
+
+        // Apply to the first only.
+        let before2 = fs::read(&theirs).unwrap();
+        let backup = crate::apply::commit(&mine, &c1.bytes, new1.bytes(), "20261112-120000").unwrap();
+        assert_eq!(fs::read(&backup).unwrap(), c1.bytes);
+        let now = crate::stp::Setup::parse(&fs::read(&mine).unwrap(), None).unwrap();
+        assert_eq!(now.get(Field::ForkCompression), 5, "the file on disk has the change");
+        assert_eq!(fs::read(&theirs).unwrap(), before2, "the other profile's setup is untouched");
+        // The game reads it back as a valid setup of the same bike and length.
+        assert_eq!(now.bike_id(), "2027_K85M");
+        assert_eq!(now.bytes().len(), c1.bytes.len());
+
+        // Undo.
+        crate::apply::restore(&mine).unwrap();
+        assert_eq!(fs::read(&mine).unwrap(), c1.bytes, "byte for byte what it was");
+        assert!(crate::apply::backups(&mine).is_empty());
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// A plain `fn` command runs on the main thread, so a click that parses a recording froze the
+    /// window ("Not Responding"). Only these small ones may stay that way.
+    #[test]
+    fn heavy_commands_run_off_the_main_thread() {
+        let src = include_str!("coach.rs");
+        let cheap = ["coach_status", "coach_write_cues", "coach_set_game_dir", "coach_uninstall_plugin"];
+        let lines: Vec<&str> = src.lines().collect();
+        for (i, l) in lines.iter().enumerate() {
+            if l.trim() != "#[tauri::command]" {
+                continue;
+            }
+            let next = lines[i + 1..].iter().find(|x| x.contains("fn ")).unwrap();
+            if next.trim_start().starts_with("pub fn ") {
+                let name = next.trim_start()["pub fn ".len()..].split('(').next().unwrap();
+                assert!(cheap.contains(&name), "{name} is a sync command: make it async + spawn_blocking");
+            }
+        }
+    }
+
+
+    fn session(path: &str, track: &str, bike: &str, laps: &[(i32, i32, bool)]) -> SessionSummary {
+        SessionSummary {
+            path: path.into(),
+            started: path.into(),
+            rider: String::new(),
+            track_id: track.into(),
+            track_name: String::new(),
+            bike_id: bike.into(),
+            bike_name: bike.into(),
+            category: String::new(),
+            event_type: 1,
+            track_length: 1000.0,
+            limiter: 0,
+            complete: true,
+            laps: laps
+                .iter()
+                .map(|&(num, time_ms, whole)| LapSummary {
+                    num,
+                    path: path.into(),
+                    stint: 0,
+                    time_ms,
+                    invalid: false,
+                    whole,
+                    issue: None,
+                    crashed: false,
+                    reset: false,
+                    cut: false,
+                    warmup: false,
+                    ridden_ms: time_ms,
+                })
+                .collect(),
+            setup: String::new(),
+            best_ms: laps.iter().filter(|l| l.2).map(|l| l.1).min(),
+            stints: vec![Stint { path: path.into(), started: path.into(), setup: String::new() }],
+        }
+    }
+
+    /// A stint of one event. Its file is its stamp, and each lap took as long as it says.
+    fn stint(started: &str, bike: &str, event_type: i32, laps: &[(i32, i32)]) -> SessionSummary {
+        let whole: Vec<(i32, i32, bool)> = laps.iter().map(|&(num, time_ms)| (num, time_ms, true)).collect();
+        let mut s = session(started, "indiana", bike, &whole);
+        s.rider = "Frost".into();
+        s.event_type = event_type;
+        s
+    }
+
+    /// The lap a rider is most likely to open is their fastest one, and "your best ever here"
+    /// leaves that lap out — so the reference is a slower lap, every section is a gain and the
+    /// review finds nothing. The page says so, and this is how it knows.
+    #[test]
+    fn a_lap_with_nothing_quicker_behind_it_is_their_best_here() {
+        let sessions = vec![
+            session("a", "indiana", "kx450", &[(0, 60_000, true), (1, 58_000, true), (2, 50_000, false)]),
+            session("b", "indiana", "kx450", &[(0, 59_000, true)]),
+            session("c", "erzberg", "kx450", &[(0, 50_000, true)]),
+        ];
+        // The 50 in that session is an out lap: a lap that can't be compared can't beat one.
+        assert!(nothing_faster(&sessions, "indiana", ("a", 1), 58_000), "nothing here is quicker");
+        assert!(!nothing_faster(&sessions, "indiana", ("b", 0), 59_000), "the 58 is quicker");
+        // Another track's quicker laps say nothing about this one.
+        assert!(nothing_faster(&sessions, "erzberg", ("c", 0), 50_000));
+        // A lap the game never timed has no time to be the best with.
+        assert!(!nothing_faster(&sessions, "indiana", ("a", 3), 0));
+    }
+
+    #[test]
+    fn the_stints_of_one_event_are_one_session() {
+        let out = group_sessions(vec![
+            stint("20260915-100000-000", "kx450", 1, &[(0, 60_000), (1, 59_000)]),
+            stint("20260915-101500-000", "kx450", 1, &[(0, 58_000)]),
+            stint("20260915-104500-000", "kx450", 1, &[(0, 61_000)]),
+        ]);
+        assert_eq!(out.len(), 1, "going out and back in is still one session");
+        assert_eq!(out[0].laps.len(), 4);
+        assert_eq!(out[0].best_ms, Some(58_000), "the best lap is across the whole session");
+        assert_eq!(out[0].started, "20260915-100000-000", "it started when its first stint did");
+        let stints: Vec<i32> = out[0].laps.iter().map(|l| l.stint).collect();
+        assert_eq!(stints, [0, 0, 1, 2], "every lap knows the stint it was ridden in");
+        assert_eq!(out[0].laps[3].path, "20260915-104500-000", "and the file it's in");
+        assert_eq!(out[0].stints.len(), 3);
+    }
+
+    #[test]
+    fn another_event_is_another_session() {
+        let out = group_sessions(vec![
+            stint("20260915-100000-000", "kx450", 1, &[(0, 60_000)]),
+            stint("20260915-101000-000", "yz250", 1, &[(0, 60_000)]),
+            stint("20260915-102000-000", "kx450", 2, &[(0, 60_000)]),
+        ]);
+        assert_eq!(out.len(), 3, "another bike, or a race rather than testing, stands on its own");
+    }
+
+    #[test]
+    fn a_long_break_starts_a_new_session() {
+        let out = group_sessions(vec![
+            stint("20260915-100000-000", "kx450", 1, &[(0, 60_000)]),
+            stint("20260915-140000-000", "kx450", 1, &[(0, 60_000)]),
+        ]);
+        assert_eq!(out.len(), 2, "four hours later is a new session");
+    }
+
+    /// The break is measured from when the rider came off track, not from when the stint
+    /// started: two hours on track and another ride half an hour later is one session.
+    #[test]
+    fn the_break_is_measured_from_the_end_of_a_stint() {
+        let long: Vec<(i32, i32)> = (0..120).map(|k| (k, 60_000)).collect();
+        let out = group_sessions(vec![
+            stint("20260915-100000-000", "kx450", 1, &long),
+            stint("20260915-143000-000", "kx450", 1, &[(0, 60_000)]),
+        ]);
+        assert_eq!(out.len(), 1);
+    }
+
+    #[test]
+    fn a_stint_after_midnight_belongs_to_the_evening_before() {
+        let out = group_sessions(vec![
+            stint("20260930-235000-000", "kx450", 1, &[(0, 60_000)]),
+            stint("20261001-000500-000", "kx450", 1, &[(0, 60_000)]),
+        ]);
+        assert_eq!(out.len(), 1, "fifteen minutes, over the end of a month");
+    }
+
+    /// The line in the game is the fastest clean lap: never one with a crash, a reset or a cut,
+    /// and never the warm-up, however fast. The next best clean lap stands in, a faster clean lap
+    /// takes over as soon as it is on disk, and with no clean lap there is no line at all
+    /// (GAMING PROFI 2: the first lap, crashes and all, was drawn off the track).
+    #[test]
+    fn the_line_is_the_fastest_clean_lap() {
+        let laps = [(1, 50_000, true), (2, 52_000, true), (3, 53_000, true), (4, 51_000, true), (5, 60_000, true)];
+        let mut s = session("a", "indiana", "kx450", &laps);
+        s.laps[0].warmup = true; // the out lap, quickest only on paper
+        s.laps[1].crashed = true;
+        s.laps[2].reset = true;
+        s.laps[3].cut = true;
+        let r = best_reference(&[s.clone()], "indiana", "kx450", None).expect("lap 5 is clean");
+        assert_eq!(r.lap, 5, "the only clean lap, slow as it is");
+
+        // Only laps with something wrong in them: no line rather than a bad one.
+        let mut bad = s.clone();
+        bad.laps.truncate(4);
+        assert!(best_reference(&[bad], "indiana", "kx450", None).is_none());
+
+        // A faster clean lap arrives: it is the line now.
+        s.laps.push(session("a", "indiana", "kx450", &[(6, 55_000, true)]).laps.remove(0));
+        assert_eq!(best_reference(&[s.clone()], "indiana", "kx450", None).unwrap().lap, 6);
+        // And a faster one with a crash in it doesn't take over.
+        let mut crash = session("a", "indiana", "kx450", &[(7, 49_000, true)]).laps.remove(0);
+        crash.crashed = true;
+        s.laps.push(crash);
+        assert_eq!(best_reference(&[s.clone()], "indiana", "kx450", None).unwrap().lap, 6);
+        assert!(lap_is_clean(&[s.clone()], "a", 6));
+        assert!(!lap_is_clean(&[s], "a", 7));
+    }
+
+    #[test]
+    fn the_reference_is_the_fastest_whole_lap_on_the_same_bike() {
+        let all = [
+            session("a", "indiana", "kx450", &[(1, 60_000, true), (2, 58_000, false)]),
+            session("b", "indiana", "yz250", &[(1, 55_000, true)]),
+            session("c", "indiana", "kx450", &[(1, 59_000, true)]),
+            session("d", "other", "kx450", &[(1, 40_000, true)]),
+        ];
+        let r = best_reference(&all, "indiana", "kx450", None).unwrap();
+        assert_eq!((r.path.as_str(), r.lap), ("c", 1), "same bike beats a faster other bike; broken lap skipped");
+        let r = best_reference(&all, "indiana", "kx450", Some(("c", 1))).unwrap();
+        assert_eq!((r.path.as_str(), r.lap), ("a", 1), "never the lap under review");
+        let r = best_reference(&all, "indiana", "crf250", None).unwrap();
+        assert_eq!(r.path, "b", "no lap on this bike: the fastest on any");
+        assert!(best_reference(&all, "nowhere", "kx450", None).is_none());
+    }
+
+    /// Only a file being held open is worth a second try; anything else fails at once.
+    #[test]
+    fn only_a_file_held_open_is_retried() {
+        use std::io::Error;
+        assert!(held_open(&Error::from_raw_os_error(32)), "sharing violation");
+        assert!(held_open(&Error::from_raw_os_error(5)), "access denied");
+        assert!(!held_open(&Error::from_raw_os_error(2)), "not found");
+        assert!(!held_open(&Error::new(std::io::ErrorKind::Other, "no code")));
+    }
+
+    #[test]
+    fn a_sheet_is_moved_into_place_over_the_old_one() {
+        let dir = std::env::temp_dir().join(format!("coach-move-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let (tmp, file) = (dir.join("a.cue.tmp"), dir.join("a.cue"));
+        fs::write(&file, b"old").unwrap();
+        fs::write(&tmp, b"new").unwrap();
+        move_into_place(&tmp, &file).unwrap();
+        assert_eq!(fs::read(&file).unwrap(), b"new");
+        assert!(!tmp.exists());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Live coaching follows the session being ridden. Sessions come newest first, and taking
+    /// the last lap of that list coached from the oldest session on the track instead.
+    #[test]
+    fn live_cues_follow_the_newest_session() {
+        let newest_first = [
+            session("today", "indiana", "kx450", &[(1, 61_000, true), (2, 60_000, true), (3, 0, false)]),
+            session("last-week", "indiana", "kx450", &[(1, 55_000, true), (2, 54_000, true)]),
+        ];
+        assert_eq!(
+            newest_lap_in(&newest_first, "indiana", "kx450"),
+            Some(("today".into(), 2)),
+            "today's last whole lap, not last week's and not the one still being ridden"
+        );
+    }
+
+    /// The usable-reference rule the in-game coaching starts from. On a new track the first
+    /// whole, valid lap of the session still being ridden is enough, so the next lap is
+    /// coached without a restart. Nothing else is: an out lap, a lap cut short or an invalid
+    /// one, another bike, another track.
+    #[test]
+    fn the_first_good_lap_of_a_new_track_is_enough_to_coach_from() {
+        let mut riding = session("now", "indiana", "kx450", &[(0, 0, false)]);
+        riding.complete = false;
+        assert_eq!(newest_lap_in(&[riding.clone()], "indiana", "kx450"), None, "only an out lap so far");
+
+        riding.laps.push(session("now", "indiana", "kx450", &[(1, 62_000, true)]).laps.remove(0));
+        assert_eq!(newest_lap_in(&[riding.clone()], "indiana", "kx450"), Some(("now".into(), 1)));
+        let r = best_reference(&[riding.clone()], "indiana", "kx450", None).expect("a reference to race");
+        assert_eq!((r.path.as_str(), r.lap), ("now", 1), "the same lap is the HUD's ghost");
+
+        let mut invalid = session("cut", "indiana", "kx450", &[(1, 50_000, true)]);
+        invalid.laps[0].invalid = true;
+        assert_eq!(newest_lap_in(&[invalid], "indiana", "kx450"), None, "an invalid lap");
+        assert_eq!(newest_lap_in(&[riding.clone()], "indiana", "yz250"), None, "another bike");
+        assert_eq!(newest_lap_in(&[riding], "erzberg", "kx450"), None, "another track");
+    }
+
+    /// The `.cue` and `.hud` sheets and `hud.ini` must land under one `mxbcoach` folder. They
+    /// were chosen two different ways, and when the candidates disagreed the sheets went where
+    /// the plugin never looks: the HUD switches worked while the cue and the trail showed
+    /// nothing at all.
+    #[test]
+    fn the_sheets_go_where_hud_ini_goes() {
+        let dir = std::env::temp_dir().join(format!("coach-sheets-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let (moved, default) = (dir.join("moved"), dir.join("default"));
+        let dirs = [moved.join("mxbcoach").join("sessions"), default.join("mxbcoach").join("sessions")];
+        // The recorder writes to the second candidate, not the first.
+        std::fs::create_dir_all(&dirs[1]).unwrap();
+        let coach = crate::hud::coach_dir_of(&dirs).expect("a coach folder");
+        assert_eq!(coach, default.join("mxbcoach"), "the one the recorder uses");
+        assert_eq!(
+            coach.join("cues"),
+            crate::hud::coach_dir_of(&dirs).map(|c| c.join("cues")).unwrap(),
+            "the sheets sit beside hud.ini, never under the first candidate blindly"
+        );
+        assert_ne!(coach.join("cues"), moved.join("mxbcoach").join("cues"), "not the unused candidate");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A profile with one setup kept for every track, which is how the rider in the report had
+    /// theirs saved.
+    fn common_setup(tag: &str) -> (PathBuf, PathBuf) {
+        let root = std::env::temp_dir().join(format!("coach-{tag}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let common = root.join("Frost").join("setups").join("common").join("2027_K85M");
+        fs::create_dir_all(&common).unwrap();
+        let file = common.join("frost-race.stp");
+        fs::write(&file, b"x").unwrap();
+        (root, file)
+    }
+
+    /// A copy of a setup kept for every track goes under the track the rider rode. Left in
+    /// `common` it could never be loaded, and the next lap would name the old setup again and
+    /// leave another copy behind.
+    #[test]
+    fn a_copy_of_a_common_setup_is_saved_under_the_track() {
+        let (root, mine) = common_setup("common-save");
+        let track = root.join("Frost").join("setups").join("indiana").join("2027_K85M");
+        let save = Save::beside(&mine, "indiana", &crate::setupbook::Book::default()).expect("somewhere to save");
+        assert_eq!(save.dir, track, "under the track, not beside the setup it came from");
+        assert_eq!(save.target(&crate::setupbook::Book::default(), false).map(|t| t.name()).as_deref(), Some("frost-race (coach)"), "still named off the rider's own");
+        // A setup already under a track stays where it is.
+        let theirs = track.join("wet.stp");
+        assert_eq!(Save::beside(&theirs, "indiana", &crate::setupbook::Book::default()).unwrap().dir, track);
+        // Riding a "Coach <track>" setup built from the default keeps it in that lineage,
+        // rather than becoming "Coach indiana (coach)" on the next save.
+        let fresh = track.join("Coach indiana 2.stp");
+        let s = Save::beside(&fresh, "indiana", &crate::setupbook::Book::default()).unwrap();
+        assert_eq!(s.lineage, "fresh:indiana");
+        assert_eq!(s.names[0], "Coach indiana");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// Replacing Coach's own copy: done when it's untouched, refused when the rider edited it,
+    /// and either way no temp or parked file is left behind in their setups folder.
+    #[test]
+    fn replacing_coachs_copy_checks_the_bytes_it_replaces() {
+        let dir = std::env::temp_dir().join(format!("coach-replace-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let copy = dir.join("Fast (coach).stp");
+        fs::write(&copy, b"v1").unwrap();
+        let mut book = crate::setupbook::Book::default();
+        book.record(&copy, b"v1", "coach:Fast", 1, &|p| p.exists());
+        let only_the_copy = || fs::read_dir(&dir).unwrap().count() == 1;
+
+        assert!(replace_own(&copy, &book, b"v2"), "untouched: replaced");
+        assert_eq!(fs::read(&copy).unwrap(), b"v2");
+        assert!(only_the_copy(), "nothing left over");
+
+        // The book still remembers v1, so v2 on disk reads as changed: it isn't replaced.
+        assert!(!replace_own(&copy, &book, b"v3"), "not what Coach wrote: refused");
+        assert_eq!(fs::read(&copy).unwrap(), b"v2", "and put back exactly as it was");
+        assert!(only_the_copy(), "nothing left over");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Riding the copy Coach wrote, a new save goes back onto it under the same name.
+    #[test]
+    fn saving_again_from_coachs_copy_keeps_its_name() {
+        let (root, mine) = common_setup("coach-again");
+        let first = Save::beside(&mine, "indiana", &crate::setupbook::Book::default()).unwrap();
+        fs::create_dir_all(&first.dir).unwrap();
+        let copy = first.dir.join("frost-race (coach).stp");
+        fs::write(&copy, b"coach v1").unwrap();
+        let mut book = crate::setupbook::Book::default();
+        book.record(&copy, b"coach v1", &first.lineage, 1, &|p| p.exists());
+
+        // Next session the rider is on the copy.
+        let again = Save::beside(&copy, "indiana", &book).unwrap();
+        assert_eq!(again.lineage, "coach:frost-race");
+        assert_eq!(again.target(&book, false), Some(crate::setupbook::Target::Over(copy.clone())));
+        assert_eq!(again.target(&book, true).map(|t| t.name()).as_deref(), Some("frost-race (coach 2)"), "not with the game open");
+
+        // Edited in the garage: it's the rider's now.
+        fs::write(&copy, b"rider tweaked it").unwrap();
+        assert_eq!(again.target(&book, false).map(|t| t.name()).as_deref(), Some("frost-race (coach 2)"));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// The record goes where the game reads it, and says what the coach thinks it says.
+    #[test]
+    fn the_game_is_pointed_at_the_copy_and_says_so_itself() {
+        let (root, mine) = common_setup("common-point");
+        let save = Save::beside(&mine, "indiana", &crate::setupbook::Book::default()).expect("somewhere to save");
+        let copy = save.dir.join("frost-race (coach).stp");
+        fs::create_dir_all(&save.dir).unwrap();
+        fs::write(&copy, b"x").unwrap();
+
+        assert_eq!(point_at(&copy, "indiana", false), Ok(Picked::Done));
+        assert!(save.dir.join(crate::stp::DEFAULT_INI).is_file(), "where the game reads it");
+        let beside_it = mine.parent().unwrap().join(crate::stp::DEFAULT_INI);
+        assert!(!beside_it.exists(), "nothing is written into common, where the game reads nothing");
+        // Read back through the game's own record: a setup under the track is named plainly.
+        assert_eq!(crate::stp::selected_default(&save.dir).as_deref(), Some("frost-race (coach)"));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// Selecting an older coach setup that is still in `common`: the record is under the track
+    /// all the same, and names it the way the game names a setup kept for every track.
+    #[test]
+    fn a_common_setup_is_named_with_the_colon_the_game_uses() {
+        let (root, mine) = common_setup("common-colon");
+        let track = root.join("Frost").join("setups").join("indiana").join("2027_K85M");
+        assert_eq!(point_at(&mine, "indiana", true), Ok(Picked::Done));
+        assert_eq!(crate::stp::selected_default(&track).as_deref(), Some(":frost-race"));
+        let text = fs::read_to_string(track.join(crate::stp::DEFAULT_INI)).unwrap();
+        let keys = crate::ini::read_section(&text, "setup");
+        assert_eq!(crate::ini::get(&keys, "wet_testing"), Some(":frost-race"), "a wet session too");
+        assert_eq!(crate::ini::get(&keys, "race"), None, "the rider's race pick is theirs");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// A stint the game is still writing: the file stays open for writing the whole time, and
+    /// NTFS doesn't update the folder's entry for it until it's closed. The session list keyed
+    /// its cache on that entry and sat at the lap count it first saw (5 laps while the rider
+    /// was on 21) until the app was restarted. Each listing has to pick up the laps added since.
+    #[cfg(windows)]
+    #[test]
+    fn a_recording_held_open_shows_its_new_laps() {
+        use std::io::Write;
+        use crate::telemetry::testfile::File;
+
+        let dir = std::env::temp_dir().join(format!("coach-live-laps-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let index = dir.join("index.json");
+        let path = dir.join("20261023-120000-000.mxbc");
+
+        let mut rec = File::new();
+        rec.event("indiana", 1650.0);
+        let mut out = std::fs::OpenOptions::new().create(true).truncate(true).write(true).open(&path).unwrap();
+        let mut written = 0;
+        let mut append = |rec: &File, out: &mut std::fs::File| {
+            out.write_all(&rec.0[written..]).unwrap();
+            out.flush().unwrap();
+            written = rec.0.len();
+        };
+        let laps = |dirs: &[PathBuf]| -> Vec<i32> {
+            let s = summaries(dirs, Some(index.clone()));
+            assert_eq!(s.len(), 1);
+            assert!(!s[0].complete, "still being recorded");
+            s[0].laps.iter().map(|l| l.num).collect()
+        };
+        let dirs = [dir.clone()];
+
+        for n in 1..=2 {
+            rec.sample(0.0, 0.0, |_| {}).lap(n, 60_000);
+        }
+        append(&rec, &mut out);
+        // Anything that opens the file brings the folder's entry up to date, once: the cue
+        // writer and the ground grid both open the newest recording, and did so right before
+        // the list was read. The entry then matched the cache and stayed that way, because
+        // nothing opened the file again while the game kept appending.
+        drop(std::fs::File::open(&path).unwrap());
+        assert_eq!(laps(&dirs), vec![1, 2]);
+
+        for n in 3..=5 {
+            rec.sample(0.0, 0.0, |_| {}).lap(n, 60_000);
+        }
+        append(&rec, &mut out);
+        assert_eq!(laps(&dirs), vec![1, 2, 3, 4, 5], "the laps since the last listing, file still open");
+
+        rec.sample(0.0, 0.0, |_| {}).lap(6, 60_000);
+        append(&rec, &mut out);
+        assert_eq!(laps(&dirs), vec![1, 2, 3, 4, 5, 6], "and again: Refresh is just another listing");
+        assert_eq!(newest_recording(&dirs).as_deref(), Some(path.as_path()));
+
+        drop(out);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}

@@ -1,7 +1,6 @@
-import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState, type Ref } from "react";
 import { Canvas, useThree } from "@react-three/fiber";
 import { Line, OrbitControls } from "@react-three/drei";
-import { Move, Rotate3d, ZoomIn } from "lucide-react";
 import * as THREE from "three";
 import { cn } from "../../lib/utils";
 import type {
@@ -28,8 +27,9 @@ import {
 } from "./ModelViewer";
 import type { RiderPose } from "../../lib/riderPose";
 import { ErrorBoundary } from "../ErrorBoundary";
-import { useT } from "../../i18n/context";
 import { reportRenderer } from "../../lib/glInfo";
+import type { ViewportNav } from "../../lib/viewportNav";
+import { NavBridge, ViewportNavOverlay, useNavHintItems } from "./ViewportNav";
 
 /** The terrain is scaled to sit this many units across, whatever its real size. */
 const VIEW_SPAN = 10;
@@ -417,7 +417,7 @@ const NO_SHEETS: PaintTexture[] = [];
  * What stands there is `ModelViewer`'s own `BikeOnGround` — joints, seating, lean and all —
  * so the machine out on the hillside is the machine the studio draws. This only says where.
  */
-function TrackActor({ terrain, actor }: { terrain: TrackTerrain; actor: ViewerActor }) {
+function TrackActor({ terrain, actor, root }: { terrain: TrackTerrain; actor: ViewerActor; root?: Ref<THREE.Group> }) {
   const lift = useContext(ReliefContext);
   const { nodes, rig, yaw, roll, pitch, riderParts = null, riderPose } = actor;
   const [ax, ay, az] = actor.at;
@@ -458,6 +458,7 @@ function TrackActor({ terrain, actor }: { terrain: TrackTerrain; actor: ViewerAc
     // Turned the other way about Y than the heading says, because `toView` negates X: a rider
     // bearing towards world +X is bearing towards -X here.
     <group
+      ref={root}
       position={place.at}
       rotation={[0, -yaw * THREE.MathUtils.DEG2RAD, 0]}
       scale={place.scale}
@@ -491,7 +492,7 @@ function TrackActor({ terrain, actor }: { terrain: TrackTerrain; actor: ViewerAc
  * and zoom on every frame. This only ever moves the target, and slides the camera by the same
  * amount, so where the rider put themselves is exactly where they stay.
  */
-function FollowCamera({ terrain, at }: { terrain: TrackTerrain; at: { x: number; z: number } | null }) {
+function FollowCamera({ terrain, at, distance = WATCH_M }: { terrain: TrackTerrain; at: { x: number; z: number; y?: number } | null; distance?: number }) {
   const { camera, controls, invalidate } = useThree();
   const lift = useContext(ReliefContext);
   const was = useRef<THREE.Vector3 | null>(null);
@@ -501,8 +502,10 @@ function FollowCamera({ terrain, at }: { terrain: TrackTerrain; at: { x: number;
       return;
     }
     const frame = viewFrame(terrain, lift);
-    const [x, , z] = toView(frame, at.x, terrain.minHeight, at.z);
-    const now = new THREE.Vector3(x, 0, z);
+    const [x, y, z] = toView(frame, at.x, at.y ?? terrain.minHeight, at.z);
+    // A height, when given, is the thing being watched: a bike in the air is metres above the
+    // ground under it, and aiming at the ground puts it out of the top of the frame.
+    const now = new THREE.Vector3(x, at.y != null ? y : 0, z);
     const orbit0 = controls as unknown as { target?: THREE.Vector3 } | null;
     const orbit = controls as unknown as {
       target?: THREE.Vector3 & { set: (x: number, y: number, z: number) => void };
@@ -515,7 +518,7 @@ function FollowCamera({ terrain, at }: { terrain: TrackTerrain; at: { x: number;
     if (!was.current) {
       const from = camera.position.clone().sub(orbit0?.target ?? now);
       const back = from.lengthSq() > 1e-6 ? from.normalize() : new THREE.Vector3(0.5, 0.45, 0.5).normalize();
-      const near = viewFrame(terrain, lift).unitsPerMetre * WATCH_M;
+      const near = viewFrame(terrain, lift).unitsPerMetre * distance;
       camera.position.set(now.x + back.x * near, now.y + Math.max(back.y * near, near * 0.35), now.z + back.z * near);
     } else {
       camera.position.add(now.clone().sub(was.current));
@@ -524,7 +527,43 @@ function FollowCamera({ terrain, at }: { terrain: TrackTerrain; at: { x: number;
     orbit?.target?.set(now.x, now.y, now.z);
     orbit?.update?.();
     invalidate();
-  }, [at, terrain, camera, controls, invalidate, lift]);
+  }, [at, terrain, camera, controls, invalidate, lift, distance]);
+  return null;
+}
+
+/**
+ * The viewer's camera, in the track's world. `position` is world metres (game axes: x right,
+ * y up, z forward); `quaternion` is the camera's turn in the view's own frame, which is the
+ * world's with x mirrored and every axis scaled by the same amount, so it carries straight
+ * over once x is flipped back; `fov` is vertical, degrees.
+ */
+export interface ViewerCamera {
+  position: [number, number, number];
+  quaternion: [number, number, number, number];
+  fov: number;
+  aspect: number;
+}
+
+function CameraProbe({ terrain, probe }: { terrain: TrackTerrain; probe: { current: (() => ViewerCamera | null) | null } }) {
+  const { camera } = useThree();
+  const lift = useContext(ReliefContext);
+  useEffect(() => {
+    probe.current = () => {
+      const f = viewFrame(terrain, lift);
+      const p = camera.position;
+      const q = camera.quaternion;
+      const persp = camera as THREE.PerspectiveCamera;
+      return {
+        position: [(f.originX - p.x) / f.unitsPerMetre, p.y / f.heightScale + f.midHeight, (p.z + f.originZ) / f.unitsPerMetre],
+        quaternion: [q.x, q.y, q.z, q.w],
+        fov: persp.fov ?? 45,
+        aspect: persp.aspect ?? 16 / 9,
+      };
+    };
+    return () => {
+      probe.current = null;
+    };
+  }, [camera, terrain, lift, probe]);
   return null;
 }
 
@@ -1787,12 +1826,7 @@ function PlacementMarkers({
 /** Legend for the orbit gestures — the canvas gives no other clue that it can be moved.
  *  Same wording and placement as the model viewer's, so the two read as one control. */
 function ControlsHint() {
-  const t = useT();
-  const items = [
-    { Icon: Rotate3d, label: t("viewer.dragToRotate") },
-    { Icon: ZoomIn, label: t("viewer.scrollToZoom") },
-    { Icon: Move, label: t("viewer.rightDragToPan") },
-  ];
+  const items = useNavHintItems();
   return (
     <div className="pointer-events-none absolute bottom-2 left-2 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md bg-white/[0.06] px-2 py-1 text-[11px] leading-none text-white/45">
       {items.map(({ Icon, label }) => (
@@ -1850,11 +1884,12 @@ interface TrackViewerProps {
   focus?: { x: number; z: number } | null;
   /**
    * Somewhere moving to keep the camera pointed at, in world metres — a bike being replayed.
+   * With `y`, the camera aims at that height rather than the ground's, for a bike in the air.
    *
    * Unlike `focus` this never chooses a distance or an angle: it slides the camera and its
    * target together, so the rider keeps whatever view they had and the subject stays in it.
    */
-  follow?: { x: number; z: number } | null;
+  follow?: { x: number; z: number; y?: number } | null;
   /**
    * A stretch of track to light up: world-metre points along it, and how wide it is.
    *
@@ -1872,6 +1907,15 @@ interface TrackViewerProps {
    * Null or absent draws the scene the viewer has always drawn. See {@link ViewerActor}.
    */
   actor?: ViewerActor | null;
+  /**
+   * Filled with a reader for where the camera is, for a caller that wants to reuse the view
+   * the user set up (MXB Cinema exports it as the shot's camera).
+   */
+  cameraProbe?: { current: (() => ViewerCamera | null) | null };
+  /** "Frame" (Home, numpad .) fits the actor rather than the whole track. */
+  frameActor?: boolean;
+  /** How close, in metres, the camera comes in on the actor when it first follows it. */
+  followDistance?: number;
   className?: string;
 }
 
@@ -1893,11 +1937,19 @@ export function TrackViewer({
   highlight = null,
   lines = [],
   actor = null,
+  cameraProbe,
+  frameActor = false,
+  followDistance,
   className,
 }: TrackViewerProps) {
   const lift = RELIEF_EXAGGERATION;
+  // Blender-style navigation; "frame all" fits the ground, not the sky and land around it.
+  const box = useRef<HTMLDivElement>(null);
+  const terrainRoot = useRef<THREE.Group>(null);
+  const actorRoot = useRef<THREE.Group>(null);
+  const [nav, setNav] = useState<ViewportNav | null>(null);
   return (
-    <div className={cn("relative", className)}>
+    <div ref={box} className={cn("relative", className)}>
       <ErrorBoundary compact label="track-viewer">
         <Canvas
           className="h-full w-full"
@@ -1977,6 +2029,7 @@ export function TrackViewer({
             shadow-bias={-0.0006}
           />
           <directionalLight position={[-6, 3, -5]} intensity={0.4} />
+          <group ref={terrainRoot}>
           {terrain && (
             <TerrainMesh
               terrain={terrain}
@@ -1988,6 +2041,7 @@ export function TrackViewer({
               onGroundClick={onGroundClick}
             />
           )}
+          </group>
           {terrain && showObjects && scenery && (
             <SceneryMesh
               scenery={scenery}
@@ -2001,10 +2055,11 @@ export function TrackViewer({
             <PlacementMarkers placements={placements} terrain={terrain} />
           )}
           {terrain && <FocusCamera terrain={terrain} focus={focus} />}
-          {terrain && <FollowCamera terrain={terrain} at={follow} />}
+          {terrain && <FollowCamera terrain={terrain} at={follow} distance={followDistance} />}
+          {terrain && cameraProbe && <CameraProbe terrain={terrain} probe={cameraProbe} />}
           {terrain && highlight && <Highlight terrain={terrain} at={highlight} />}
           {terrain && lines.length > 0 && <Lines terrain={terrain} lines={lines} />}
-          {terrain && actor && <TrackActor terrain={terrain} actor={actor} />}
+          {terrain && actor && <TrackActor terrain={terrain} actor={actor} root={actorRoot} />}
           </group>
           </ReliefContext.Provider>
           <OrbitControls
@@ -2020,8 +2075,10 @@ export function TrackViewer({
             maxPolarAngle={Math.PI / 2.05}
             target={[0, 0, 0]}
           />
+          <NavBridge container={box} frameRoot={frameActor ? actorRoot : terrainRoot} onNav={setNav} />
         </Canvas>
       </ErrorBoundary>
+      {terrain && <ViewportNavOverlay nav={nav} />}
       {terrain && <ControlsHint />}
     </div>
   );

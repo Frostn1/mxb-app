@@ -48,6 +48,7 @@ export default function FrostmodBadge() {
   const onReload = async () => {
     const outcome = await reload();
     if (outcome === "signaled") toast.success(t("frostmod.reloadedGame"));
+    else if (outcome === "held") toast.info(t("frostmod.reloadHeld"));
     else if (outcome === "not_running") toast.info(t("frostmod.notRunningToast"));
   };
 

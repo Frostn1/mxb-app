@@ -83,7 +83,7 @@ fn names_from_archive<R: Read + Seek>(mut archive: zip::ZipArchive<R>) -> Result
         if !entry.is_file() {
             continue;
         }
-        let name = safe_name(entry.name())?;
+        let name = safe_name(&entry.name()?)?;
         if !folded.insert(name.to_ascii_lowercase()) {
             bail!("archive contains a case-colliding duplicate entry: {name}");
         }
@@ -104,7 +104,7 @@ fn selected_from_archive<R: Read + Seek>(
         if !entry.is_file() {
             continue;
         }
-        let name = safe_name(entry.name())?;
+        let name = safe_name(&entry.name()?)?;
         if !folded.insert(name.to_ascii_lowercase()) {
             bail!("archive contains a case-colliding duplicate entry: {name}");
         }
@@ -162,8 +162,8 @@ mod tests {
     fn package(entries: &[(&str, &[u8])]) -> Vec<u8> {
         let cursor = Cursor::new(Vec::new());
         let mut writer = zip::ZipWriter::new(cursor);
-        let options: zip::write::FileOptions<'_, ()> =
-            zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+        let options: zip::write::SimpleFileOptions =
+            zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
         for (name, bytes) in entries {
             writer.start_file(*name, options).unwrap();
             writer.write_all(bytes).unwrap();

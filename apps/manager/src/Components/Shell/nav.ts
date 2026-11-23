@@ -8,6 +8,8 @@ import type { TKey } from "@/i18n";
  */
 export type DashboardView =
   | `plugin:${string}`
+  /** An extension's sandboxed tab: `ext:<extension id>/<view id>`. */
+  | `ext:${string}`
   | "browse"
   | "servers"
   | "ranked"
@@ -20,6 +22,9 @@ export type DashboardView =
   | "locker"
   | "presets"
   | "manage"
+  /** The extension marketplace: browse, installed, updates. */
+  | "extensions"
+  | "gameplugins"
   | "settings";
 
 /**
@@ -39,6 +44,8 @@ export interface RailTab extends Gated {
   label: TKey;
   /** A label the app cannot translate, because a plugin wrote it. Wins over `label`. */
   rawLabel?: string;
+  /** Draw a line before this tab: the Marketplace and the extensions' own tabs. */
+  dividerBefore?: boolean;
 }
 
 /** One item in the top rail. Its `tabs` become the context bar when it is active. */
@@ -73,8 +80,8 @@ export function isModsView(view: DashboardView): view is ModsView {
 /**
  * The rail, left to right.
  *
- * Four items, because four errands is all the app has: race, find a mod, see what you own,
- * set up the bike. Browse, Shop and MXB Hub were three rail items for one errand — three
+ * One item per errand: race, find a mod, find a game plugin, see what you own, set up the
+ * bike. Browse, Shop and MXB Hub were three rail items for one errand — three
  * catalogues of the same thing — so they are one MODS screen now, with the store picked by a
  * filter inside it rather than by the rail. Locker, Presets and Race mode share GARAGE for
  * the same reason: they all decide what you take onto the track.
@@ -94,6 +101,9 @@ export const RAIL: RailItem[] = [
   // Never capability-gated: mxb-mods works for every title, and the two stores are what the
   // screen's own source filter hides when `caps.shop` is off.
   { id: "mods", label: "nav.mods", view: "browse", owns: ["shop", "hub"] },
+  // Game plugins (.dlo files the game loads) get their own place beside Mods: installing
+  // and browsing them is the same errand as mods, not part of setting up the bike.
+  { id: "gameplugins", label: "nav.gamePlugins", view: "gameplugins" },
   {
     id: "library",
     label: "nav.library",

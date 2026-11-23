@@ -74,6 +74,22 @@ pub fn command_json(verb: &str, bike_id: &str) -> String {
     command_json_at(verb, bike_id, now_millis())
 }
 
+/// Build the one command whose payload is a complete set of remote rider looks.
+/// Kept separate so the stable two-field command builder above does not change shape.
+pub fn rider_looks_json_at(looks: &str, at: u128) -> String {
+    serde_json::json!({
+        "verb": "set_rider_looks",
+        "bikeId": "",
+        "looks": looks,
+        "at": at.to_string(),
+    })
+    .to_string()
+}
+
+pub fn rider_looks_json(looks: &str) -> String {
+    rider_looks_json_at(looks, now_millis())
+}
+
 /// Milliseconds since the epoch, or 0 from a clock we can't read.
 fn now_millis() -> u128 {
     std::time::SystemTime::now()
@@ -94,6 +110,8 @@ pub enum CommandOutcome {
     WriteFailed,
     /// Non-Windows dev build — can't talk to FrostMod.
     Unsupported,
+    /// Deliberately delayed until the game is safely off an online server.
+    Held,
     /// Deliberately not sent: the installed FrostMod isn't one we'll hand this verb to, or
     /// its version couldn't be read. Only the caller knows which verb it wanted and which
     /// release made it safe, so nothing in this module produces it.
@@ -146,6 +164,14 @@ mod tests {
         assert_eq!(
             command_json_at("reload_bike_gfx", "MX2OEM_2023_KTM_250_SX-F", 7),
             r#"{"at":"7","bikeId":"MX2OEM_2023_KTM_250_SX-F","verb":"reload_bike_gfx"}"#
+        );
+    }
+
+    #[test]
+    fn rider_looks_shape() {
+        assert_eq!(
+            rider_looks_json_at("Ann|||;Bob|abc||", 7),
+            r#"{"at":"7","bikeId":"","looks":"Ann|||;Bob|abc||","verb":"set_rider_looks"}"#
         );
     }
 }

@@ -1,0 +1,8 @@
+/* Same arrangement as Coach's: Tailwind's own scanner is off, so every source glob is declared,
+   and the shared package declares its own inside @frost/shared/theme.css. The dark skin is the
+   one Coach and Studio share. */
+@import "tailwindcss" source(none);
+@import "@frost/shared/theme.css";
+@import "@frost/shared/Skins/dark.css";
+@source "./**/*.{ts,tsx}";
+@source "../index.html";

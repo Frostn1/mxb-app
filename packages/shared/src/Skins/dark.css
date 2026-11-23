@@ -40,9 +40,12 @@
   --radius: 0.75rem;
 }
 
-/* Dark, the site's dark palette. Two classes so it outranks the shared `.dark`. */
-.coach-skin,
-.coach-skin.dark {
+/* Dark, the site's dark palette. Two classes so it outranks the shared `.dark`.
+ * An app that offers colorways puts `skin-follows-colorway` on <html>: then a colorway other
+ * than frost replaces these palettes with its own (theme.css). `:where` keeps the specificity
+ * what it was, so nothing that already outranks the skin changes. */
+.coach-skin:where(:not(.skin-follows-colorway[data-colorway]:not([data-colorway="frost"]))),
+.coach-skin.dark:where(:not(.skin-follows-colorway[data-colorway]:not([data-colorway="frost"]))) {
   color-scheme: dark;
 
   --window: #000000;
@@ -81,7 +84,7 @@
 }
 
 /* Light, the site's light palette. */
-.coach-skin.light {
+.coach-skin.light:where(:not(.skin-follows-colorway[data-colorway]:not([data-colorway="frost"]))) {
   color-scheme: light;
 
   --window: #f5f5f7;

@@ -545,7 +545,7 @@ mod tests {
         let dest = root.join("out.zip");
         export(&dest, &info, "").unwrap();
         let zip = zip::ZipArchive::new(std::fs::File::open(&dest).unwrap()).unwrap();
-        let files: Vec<String> = zip.file_names().map(str::to_string).collect();
+        let files: Vec<String> = zip.file_names().filter_map(|n| n.ok().map(|n| n.into_owned())).collect();
         assert!(files.contains(&"plugins/frostmod_session.log".to_string()), "{files:?}");
         assert!(files.contains(&"game/log.txt".to_string()), "{files:?}");
         let _ = std::fs::remove_dir_all(&root);
@@ -622,7 +622,7 @@ mod tests {
         let dest = root.join("out.zip");
         export(&dest, &info, &text).unwrap();
         let zip = zip::ZipArchive::new(std::fs::File::open(&dest).unwrap()).unwrap();
-        let names: Vec<String> = zip.file_names().map(str::to_string).collect();
+        let names: Vec<String> = zip.file_names().filter_map(|n| n.ok().map(|n| n.into_owned())).collect();
         for want in [
             "game/log.txt",
             "game/e3dlog.txt",
@@ -701,7 +701,7 @@ mod tests {
         assert_eq!(result.files, 4);
 
         let mut zip = zip::ZipArchive::new(std::fs::File::open(&dest).unwrap()).unwrap();
-        let names: Vec<String> = zip.file_names().map(str::to_string).collect();
+        let names: Vec<String> = zip.file_names().filter_map(|n| n.ok().map(|n| n.into_owned())).collect();
         assert!(names.contains(&"summary.txt".to_string()));
         assert!(names.contains(&"app/frost.log".to_string()));
         assert!(names.contains(&"frostmod/frostmod.log".to_string()));

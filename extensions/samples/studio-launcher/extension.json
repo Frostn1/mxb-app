@@ -1,0 +1,44 @@
+{
+  "manifestVersion": 1,
+  "id": "mxbsecure.studio-launcher",
+  "name": "Studio Launcher",
+  "version": "1.0.1",
+  "author": "mxbsecure",
+  "description": "Jump from MXB App straight into Frost's Studio: the paint designer, the bike and rider viewers, tracks, poses and replays, one click each.",
+  "homepage": "https://github.com/Frostn1/mxb-app/blob/main/docs/extensions.md",
+  "permissions": [
+    "studio.launch"
+  ],
+  "categories": [
+    "integrations"
+  ],
+  "tags": [
+    "studio",
+    "paint",
+    "designer",
+    "shortcuts"
+  ],
+  "screenshots": [
+    "store/1.webp"
+  ],
+  "contributes": {
+    "views": [
+      {
+        "id": "studio",
+        "title": "Studio",
+        "entry": "view/index.html"
+      }
+    ],
+    "main": "main.html",
+    "commands": [
+      {
+        "id": "designer",
+        "title": "Open the paint designer"
+      },
+      {
+        "id": "bike",
+        "title": "Open the bike viewer"
+      }
+    ]
+  }
+}

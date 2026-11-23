@@ -417,7 +417,7 @@ const ServerCard = memo(function ServerCard({
                 </IconButton>
               )}
             </>
-          ) : action.kind === "missing" ? (
+          ) : (action.kind === "missing" || action.kind === "guess") ? (
             // Not a plain Join: the player doesn't have this track, and a catalogue name that
             // only resembles the id is not a reason to pretend otherwise. Still possible — a
             // server may be about to rotate — but outlined and said plainly.

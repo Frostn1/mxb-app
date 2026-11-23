@@ -1,0 +1,69 @@
+{
+  "manifestVersion": 1,
+  "id": "mxbsecure.server-watcher",
+  "name": "Server Watcher",
+  "version": "1.0.1",
+  "author": "mxbsecure",
+  "description": "Tells you when a server on a track you like fills up, or when a friend starts riding. Watches in the background while MXB App is open.",
+  "homepage": "https://github.com/Frostn1/mxb-app/blob/main/docs/extensions.md",
+  "permissions": [
+    "servers.read",
+    "friends.presence",
+    "game.state"
+  ],
+  "categories": [
+    "game",
+    "tabs"
+  ],
+  "tags": [
+    "servers",
+    "notifications",
+    "friends",
+    "tracks"
+  ],
+  "screenshots": [
+    "store/1.webp"
+  ],
+  "contributes": {
+    "views": [
+      {
+        "id": "watch",
+        "title": "Watcher",
+        "entry": "view/index.html"
+      }
+    ],
+    "main": "main.html",
+    "commands": [
+      {
+        "id": "checkNow",
+        "title": "Check servers now"
+      }
+    ],
+    "settings": [
+      {
+        "key": "tracks",
+        "type": "string",
+        "label": "Tracks to watch (comma separated)",
+        "default": ""
+      },
+      {
+        "key": "minRiders",
+        "type": "number",
+        "label": "Tell me at this many riders",
+        "default": 10
+      },
+      {
+        "key": "friends",
+        "type": "boolean",
+        "label": "Tell me when a friend starts riding",
+        "default": true
+      },
+      {
+        "key": "quietInGame",
+        "type": "boolean",
+        "label": "Stay quiet while I'm in game",
+        "default": true
+      }
+    ]
+  }
+}

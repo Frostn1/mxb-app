@@ -46,12 +46,9 @@ export default function GameIntegrationConsent({ paused = false }: { paused?: bo
         onPointerDownOutside={(event) => event.preventDefault()}
       >
         <div className="flex items-start gap-3">
-          <div className="grid size-10 flex-none place-items-center rounded-xl bg-primary/10 text-primary">
-            <ShieldCheck className="size-5" />
-          </div>
           <div className="flex min-w-0 flex-col gap-1.5">
             <DialogTitle className="text-[18px] leading-tight">
-              {t("setup.integrationTitle")}
+              <span className="inline-flex items-center gap-2"><ShieldCheck className="size-4 text-muted-foreground" />{t("setup.integrationTitle")}</span>
             </DialogTitle>
             <DialogDescription>{t("setup.integrationIntro")}</DialogDescription>
           </div>

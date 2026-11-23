@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["message", "actions"],
+  "properties": {
+    "message": { "type": "string", "description": "A short description of what the plan changes, or what the user must select when no safe action is possible." },
+    "actions": {
+      "type": "array",
+      "maxItems": 12,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["op", "sheetId", "layerId", "regionId", "x", "y", "dx", "dy", "scale", "rotation", "opacity", "visible", "clip"],
+        "properties": {
+          "op": { "type": "string", "enum": ["place", "move", "resize", "rotate", "opacity", "visibility", "clip"] },
+          "sheetId": { "type": "string" },
+          "layerId": { "type": "string" },
+          "regionId": { "type": "string" },
+          "x": { "type": "number", "minimum": -1, "maximum": 2 },
+          "y": { "type": "number", "minimum": -1, "maximum": 2 },
+          "dx": { "type": "number", "minimum": -1, "maximum": 1 },
+          "dy": { "type": "number", "minimum": -1, "maximum": 1 },
+          "scale": { "type": "number", "minimum": 0.05, "maximum": 4 },
+          "rotation": { "type": "number", "minimum": -360, "maximum": 360 },
+          "opacity": { "type": "number", "minimum": 0, "maximum": 1 },
+          "visible": { "type": "boolean" },
+          "clip": { "type": "boolean" }
+        }
+      }
+    }
+  }
+}

@@ -1,6 +1,6 @@
 pub mod hub;
 pub mod hubaccount;
-pub mod mirror;
+pub mod mxbmods_api;
 pub mod mxb;
 pub mod mxbshop;
 pub mod shop_catalog;
@@ -65,12 +65,10 @@ pub struct ModSummary {
 
 /// The order a browse listing comes back in.
 ///
-/// Deliberately short, because the catalog gives us little to work with: mxb-mods.com
-/// accepts `orderby` on its REST API and then ignores it — `date`, `title`, `modified`
-/// and `relevance` all return the same fixed listing. So alphabetical and
-/// recently-updated orders are simply not on offer. What does work is `offset` (which
-/// buys us oldest-first by counting back from the end) and the site's popular-posts
-/// plugin, which ranks a category by view count over a window.
+/// Deliberately short. On mxb-mods.com these map onto its official API (through our control
+/// plane): `orderby=date` either way, and `/popular` over a window. gpb-mods.com has no API:
+/// its REST API ignores `orderby`, so oldest-first counts back from the end with `offset`, and
+/// popular comes from its popular-posts plugin.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ModSort {
@@ -85,7 +83,8 @@ pub enum ModSort {
 }
 
 impl ModSort {
-    /// The popular-posts `range` this maps to, or `None` for the plain catalog listing.
+    /// The popular-posts plugin's `range` (gpb-mods.com) this maps to, or `None` for the
+    /// plain catalog listing. mxb-mods.com uses [`ModSort::api_range`].
     pub fn popular_range(self) -> Option<&'static str> {
         match self {
             ModSort::PopularAll => Some("all"),

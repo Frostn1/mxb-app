@@ -14,5 +14,6 @@ export function installNoteKey(
   gameRunning: boolean,
 ): TKey {
   if (reload === "signaled") return "install.reloadedDesc";
+  if (reload === "held") return "frostmod.reloadHeld";
   return gameRunning ? "install.restartDesc" : "install.addedDesc";
 }

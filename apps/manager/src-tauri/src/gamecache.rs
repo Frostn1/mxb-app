@@ -37,7 +37,16 @@ pub fn inspect(mods_root: &Path) -> Result<CacheInfo, String> {
     Ok(info)
 }
 
-pub fn clear(mods_root: &Path) -> Result<CacheInfo, String> {
+pub fn clear(mods_root: &Path, configured_path: &Path) -> Result<CacheInfo, String> {
+    let Some(parent) = mods_root.parent() else {
+        return Err("the game cache folder could not be located safely".into());
+    };
+    let ordinary_config = crate::docsdir::same_folder(parent, configured_path)
+        && !crate::docsdir::same_folder(mods_root, configured_path);
+    let shaped_like_user_folder = mods_root.is_dir() && parent.join("profiles").is_dir();
+    if !ordinary_config && !shaped_like_user_folder {
+        return Err("the game cache folder could not be located safely for this mods folder".into());
+    }
     let info = inspect(mods_root)?;
     if !info.exists {
         return Ok(info);
@@ -100,10 +109,24 @@ mod tests {
         assert_eq!(info.files, 2);
         assert!(root.join("mods").is_dir());
 
-        let cleared = clear(&root.join("mods")).unwrap();
+        let cleared = clear(&root.join("mods"), &root).unwrap();
         assert_eq!(cleared.bytes, 30);
         assert!(!cache.exists());
         assert!(root.join("mods").is_dir());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn refuses_a_cache_beside_a_relocated_mods_tree() {
+        let root = test_root("relocated");
+        let relocated = root.join("relocated-mods");
+        std::fs::create_dir_all(relocated.join("bikes")).unwrap();
+        let cache = root.join("cache");
+        std::fs::create_dir_all(&cache).unwrap();
+        std::fs::write(cache.join("user.bin"), b"mine").unwrap();
+
+        assert!(clear(&relocated, &relocated).is_err());
+        assert_eq!(std::fs::read(cache.join("user.bin")).unwrap(), b"mine");
         let _ = std::fs::remove_dir_all(root);
     }
 }

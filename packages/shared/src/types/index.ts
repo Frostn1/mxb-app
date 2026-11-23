@@ -106,6 +106,8 @@ export interface Config {
   queueRestartGame?: boolean;
   /** Tell accepted friends which server you are on (default true). */
   friendsPresence?: boolean;
+  /** The ReShade busy-server warning was closed on this install. */
+  reshadeWarningDismissed?: boolean;
   /** Extra command-line flags for `frostmod.exe`, exactly as typed. Empty by default. */
   frostmodArgs?: string;
   instantRefresh?: boolean;
@@ -159,6 +161,8 @@ export interface Config {
    *  something anyone discovers by accident. */
   voiceEnabled?: boolean;
   paintSyncEnabled?: boolean;
+  /** Share model-swap ids through PaintSync. Off by default. */
+  paintSyncModels?: boolean;
   mxbsecureEnabled?: boolean;
   /** Microphone to listen to. **Blank means "follow the system default"**, so a player
    *  who never picks one keeps tracking the device they change in Windows later. */
@@ -1075,7 +1079,7 @@ export interface InstallProgress {
   message?: string;
 }
 
-export type ReloadOutcome = "signaled" | "not_running" | "unsupported";
+export type ReloadOutcome = "signaled" | "not_running" | "unsupported" | "held";
 
 /** Emitted on `frostmod-reload` after a mod is placed. */
 export interface FrostmodReload {
@@ -1131,6 +1135,7 @@ export type CommandOutcome =
   | "not_running"
   | "write_failed"
   | "unsupported"
+  | "held"
   /** Deliberately not sent — the installed FrostMod isn't one we'll give this verb to. */
   | "withheld";
 
@@ -1178,6 +1183,68 @@ export interface ReshadeStatus {
 
 /** Outcome of switching preset. Thin by nature — nothing of ours reloads. */
 export interface ReshadeApplyOutcome {
+  gameRunning: boolean;
+}
+
+/** The Graphics preset setting. Mirrors `reshade_pack::Choice`. */
+export type GraphicsPreset = "off" | "clean" | "photo";
+
+/** A ReShade (or other `opengl32.dll`) the player already has. Mirrors `reshade_pack::Existing`. */
+export interface GraphicsExisting {
+  reshade: boolean;
+  version: string | null;
+  /** An `opengl32.dll` that isn't ReShade. */
+  otherDll: boolean;
+  config: boolean;
+}
+
+/** Mirrors `reshade_pack::Status`. */
+export interface GraphicsPresetStatus {
+  gameDir: string;
+  /** The folder holds the game's executable. */
+  gameFound: boolean;
+  installed: boolean;
+  /** `null` when installed but pointed at some other preset by hand. */
+  choice: GraphicsPreset | null;
+  /** Our ReShade was turned off by the health check (`opengl32.dll.off`). */
+  disabled: boolean;
+  existing: GraphicsExisting | null;
+  reshadeVersion: string;
+  /** Where ReShade saves screenshots (`<game>/MXB Photos` unless rebound). */
+  photoFolder: string;
+  /** The photo-mode keys as bound right now. Mirrors `reshade_pack::Hotkeys`. */
+  hotkeys: GraphicsHotkeys;
+  /** For the super-resolution tip. `null` when it can't be told. */
+  gpu: "nvidia" | "amd" | "intel" | null;
+  /** MX Bikes' own F10 high-res shots: `<user dir>/hrsshots`. */
+  hiresFolder: string;
+  /** F10 shots there that are still only TGA. */
+  hiresPending: number;
+}
+
+/** Mirrors `reshade_pack::HiresConverted`. */
+export interface HiresConverted {
+  converted: number;
+  /** Files that wouldn't decode, by name. */
+  failed: string[];
+}
+
+/** Key labels like "F9" or "Ctrl+Shift+P"; empty when unbound. */
+export interface GraphicsHotkeys {
+  /** MXB Clean and MXB Photo, back and forth. */
+  photo: string;
+  /** Depth of field on/off in MXB Photo. */
+  dof: string;
+  /** ReShade's screenshot. */
+  screenshot: string;
+  /** ReShade's menu. */
+  overlay: string;
+}
+
+export interface GraphicsPresetOutcome {
+  status: GraphicsPresetStatus;
+  /** The player's own setup is in the way; nothing changed. Ask, then retry with replace. */
+  needsConfirm: GraphicsExisting | null;
   gameRunning: boolean;
 }
 
@@ -1304,6 +1371,8 @@ export interface ReshadeHealth {
   addons: string[];
   config: boolean;
   log: boolean;
+  /** It is MXB App's own one-click graphics preset, not a hand install. */
+  managed: boolean;
 }
 
 /** Folders in `mods/tyres` that break the bike list. Mirrors `tyres::TyreHealth`. */
@@ -1479,6 +1548,8 @@ export interface ModsStateOutcome {
   enabled: number;
   deleted: number;
   failed: [string, string][];
+  /** Unrecognised content deliberately left in mxbapp_disabled during Restore all. */
+  left?: string[];
   content_reload: ReloadOutcome;
   game_running: boolean;
   /** Present only on a race apply, when cosmetics went in alongside the content. */

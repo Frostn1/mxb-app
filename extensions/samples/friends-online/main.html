@@ -1,0 +1,37 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Friends Online (background)</title>
+  </head>
+  <body>
+    <script>
+      // The extension's invisible page: it runs while the extension is enabled, whether or
+      // not its tab is open. Here it answers the `friends_online` tool an AI assistant can
+      // call through the app (see docs/extensions.md, "MCP").
+      async function online() {
+        const friends = await mxb.friends.list();
+        return friends.filter((f) => f.online);
+      }
+
+      // Commands run from Extensions → Installed, where the tab isn't open, so they're
+      // answered here.
+      mxb.commands.on("whosOnline", async () => {
+        try {
+          const list = await online();
+          mxb.ui.toast(
+            list.length === 0
+              ? "Nobody's riding right now"
+              : list.map((f) => (f.server ? `${f.name} on ${f.server}` : f.name)).join(", "),
+          );
+        } catch (e) {
+          mxb.ui.toast(String(e.message || e), "error");
+        }
+      });
+
+      mxb.mcp.handle("friends_online", async () => {
+        return (await online()).map((f) => ({ name: f.name, server: f.server, track: f.track, riders: f.riders }));
+      });
+    </script>
+  </body>
+</html>

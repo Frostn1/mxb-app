@@ -288,7 +288,7 @@ pub fn scan_sound_swaps(mods_path: &str) -> Vec<BikeSounds> {
                 Some(n) => n.to_string(),
                 None => continue,
             };
-            if bike.starts_with('.') {
+            if bike.starts_with('.') || crate::library::is_frostmod_shadow_bike(&bike) {
                 continue;
             }
             // A bike is relevant to sounds if it already has a sound library or any

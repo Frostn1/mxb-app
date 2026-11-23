@@ -6,7 +6,9 @@ import {
   moveEmptyTyreFolders,
   onModsDehydrated,
   setReshadeEnabled,
+  setReshadeWarningDismissed,
 } from "@frost/shared/api/mods";
+import { useConfig } from "@frost/shared/Context/Config";
 import type { HealthReport } from "@frost/shared/types";
 import { useGameRunning } from "@/lib/useGameRunning";
 import { useT } from "@/i18n";
@@ -25,6 +27,7 @@ import { Bar } from "./RuntimeBanner";
  */
 export default function HealthBanner() {
   const t = useT();
+  const { config, reloadConfig } = useConfig();
   const { running } = useGameRunning();
   const [report, setReport] = useState<HealthReport | null>(null);
   const [dismissed, setDismissed] = useState<{
@@ -86,7 +89,11 @@ export default function HealthBanner() {
 
   if (!report) return null;
 
-  const showReshade = report.reshade.active && !dismissed.reshade;
+  // Closing it is for good on this install (saved in the config, not the session); Settings
+  // -> ReShade brings it back. Not for the Graphics preset the player switched on in Settings:
+  // that is MXB App's own ReShade, stripped to light effects, and Settings is where it is turned off.
+  const showReshade =
+    report.reshade.active && !report.reshade.managed && !dismissed.reshade && !config.reshadeWarningDismissed;
   const tyres = tyreNotices(report);
 
   return (
@@ -138,7 +145,12 @@ export default function HealthBanner() {
           busy={togglingReshade}
           busyLabel={t("health.reshadeBusy")}
           onAction={() => void toggleReshade(false)}
-          onDismiss={() => setDismissed((d) => ({ ...d, reshade: true }))}
+          onDismiss={() => {
+            setDismissed((d) => ({ ...d, reshade: true }));
+            void setReshadeWarningDismissed(true)
+              .then(() => reloadConfig())
+              .catch(() => {});
+          }}
           dismissLabel={t("runtime.dismiss")}
         />
       )}

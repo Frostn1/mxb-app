@@ -11,6 +11,8 @@ interface SegmentedProps<T extends string> {
   onChange: (value: T) => void;
   className?: string;
   size?: "sm" | "md";
+  /** Fill the container's width, options sharing it equally. */
+  stretch?: boolean;
 }
 
 /** A compact segmented control (the design's Tracks/Bikes + theme toggles). */
@@ -20,11 +22,13 @@ export function Segmented<T extends string>({
   onChange,
   className,
   size = "md",
+  stretch = false,
 }: SegmentedProps<T>) {
   return (
     <div
       className={cn(
         "inline-flex gap-0.5 rounded-lg border border-input bg-card p-[3px]",
+        stretch && "w-full",
         className,
       )}
     >
@@ -34,9 +38,11 @@ export function Segmented<T extends string>({
           <button
             key={opt.value}
             type="button"
+            aria-pressed={active}
             onClick={() => onChange(opt.value)}
             className={cn(
               "cursor-default rounded-md font-semibold transition-colors",
+              stretch && "flex-1",
               size === "sm" ? "px-3.5 py-1 text-[11.5px]" : "px-4 py-[5px] text-[12.5px]",
               active
                 ? "bg-secondary text-foreground"

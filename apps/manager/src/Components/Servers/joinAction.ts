@@ -16,6 +16,9 @@ export type JoinAction =
   /** On disk but switched off in Manage: switch it on, then join. Never a download. */
   | { kind: "activate"; rel: string }
   | { kind: "install"; product: CatalogTrack }
+  /** A free post whose name only resembles the track. Never installed on its own: the player
+   *  sees the candidate, opens its page and installs it by name if it is the right one. */
+  | { kind: "guess"; product: CatalogTrack }
   | { kind: "buy"; product: CatalogTrack }
   /** An install of this track failed, stalled or found nothing to download. Joining must
    *  still be one click away — the game handles a missing track itself — next to Retry
@@ -48,11 +51,16 @@ export function joinAction(i: JoinInputs): JoinAction {
     // Ahead of Install: offering the same download again as the only button is how a 403
     // left a player unable to join from this tab at all.
     if (i.failed) {
-      const retry = i.product?.source === "mods" && i.product.slug ? i.product : undefined;
+      const retry =
+        i.product?.source === "mods" && i.product.exact && i.product.slug ? i.product : undefined;
       return retry ? { kind: "failed", product: retry } : { kind: "failed" };
     }
     if (i.product?.source === "mods" && i.product.slug) {
-      return { kind: "install", product: i.product };
+      // Only a name that is the track's own is installed (and joined) in one click. A
+      // resemblance is a candidate: the wrong numbered sibling is a different track.
+      return i.product.exact
+        ? { kind: "install", product: i.product }
+        : { kind: "guess", product: i.product };
     }
     if (i.product?.source === "shop") return { kind: "buy", product: i.product };
     return { kind: "missing" };

@@ -422,6 +422,7 @@ fn bikes_in(doc: &IniDoc) -> Vec<String> {
     if bikes.is_empty() {
         bikes = doc.section_keys("paint");
     }
+    bikes.retain(|bike| !crate::library::is_frostmod_shadow_bike(bike));
     bikes.sort_by(|a, b| a.to_lowercase().cmp(&b.to_lowercase()));
     bikes.dedup();
     bikes
@@ -1011,6 +1012,14 @@ BSB23_Ducati_V4R=BS_Racing_Battlax
         let bikes = list_bikes(&profiles, "main").unwrap();
         assert_eq!(bikes, vec!["KTM250", "YZ450F"]);
         let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn frostmod_shadow_bikes_never_become_profile_or_paintsync_bikes() {
+        let doc = IniDoc::parse(
+            "[rider]\nKTM450=default_mx\nKTM450~09af12bc=default_mx\n",
+        );
+        assert_eq!(bikes_in(&doc), vec!["KTM450"]);
     }
 
     /// A folder that isn't there and a folder with nothing in it both list zero

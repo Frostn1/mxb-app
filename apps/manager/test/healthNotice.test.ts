@@ -13,6 +13,7 @@ function report(): HealthReport {
       addons: [],
       config: false,
       log: false,
+      managed: false,
     },
     tyres: { empty: [], overrides: [] },
   };

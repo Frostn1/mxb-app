@@ -21,6 +21,7 @@ import type { InstalledIndex } from "../../lib/installedMatch";
 import { shopCatalogAvailable } from "../../api/shop";
 import { hubDetail } from "../../api/hub";
 import Browse from "../Browse/Browse";
+import { ListingBoundary, ListingError } from "../Browse/ListingError";
 import { useQuickInstall } from "../Browse/useQuickInstall";
 import ShopDetail from "../Shop/ShopDetail";
 import MyDownloads from "../Shop/MyDownloads";
@@ -235,9 +236,16 @@ export default function Mods({
       if (store) {
         const allId = active && active.roots.length > 1 ? GROUPED_CATEGORY_ID : active?.root?.id;
         setStoreCategoryId(id === allId ? null : id);
-      } else listing.setCategoryId(id);
+      } else {
+        // The left-hand categories shown for the merged source are mxb-mods ids. Hub and
+        // Shop have unrelated trees, so leaving them merged made a narrow choice such as
+        // Track Assets look like the unchanged All list. A category choice therefore names
+        // both the source and its category.
+        if (source === "all") setSource("mods");
+        listing.setCategoryId(id);
+      }
     },
-    [store, active, listing],
+    [store, active, listing, source],
   );
 
   const selectType = useCallback(
@@ -252,12 +260,26 @@ export default function Mods({
 
   const items = useMemo<MergedMod[]>(() => {
     if (source === "mods") return [];
+    // A source whose listing failed contributes nothing: what it still holds belongs to the
+    // previous order or filter, and showing it under the new one is a wrong answer.
     const out: MergedMod[] = [];
-    if (modsOn) out.push(...listing.mods.map(fromModSummary));
-    if (hubOn) out.push(...hub.items);
-    if (shopOn) out.push(...shop.items);
+    if (modsOn && !listing.error) out.push(...listing.mods.map(fromModSummary));
+    if (hubOn && !hub.error) out.push(...hub.items);
+    if (shopOn && !shop.error) out.push(...shop.items);
     return source === "all" ? sortMerged(out, activeSort) : out;
-  }, [source, modsOn, hubOn, shopOn, listing.mods, hub.items, shop.items, activeSort]);
+  }, [
+    source,
+    modsOn,
+    hubOn,
+    shopOn,
+    listing.mods,
+    listing.error,
+    hub.items,
+    hub.error,
+    shop.items,
+    shop.error,
+    activeSort,
+  ]);
 
   const busy =
     (modsOn && listing.loading) || (hubOn && hub.loading) || (shopOn && shop.loading);
@@ -420,18 +442,12 @@ export default function Mods({
             )}
 
             <div ref={gridScroller} className="min-h-0 flex-1 overflow-y-auto px-7 pb-6">
+              <ListingBoundary key={`${source}|${activeSort}`} onRetry={retry}>
               {allFailed ? (
-                <div className="mx-auto flex max-w-md flex-col items-center gap-3 py-20 text-center">
-                  <p className="text-[13px] font-semibold text-destructive">
-                    {t("browse.loadFailed")}
-                  </p>
-                  <p className="select-text text-[12.5px] leading-relaxed text-muted-foreground">
-                    {errors[0].replace(/^Error:\s*/, "")}
-                  </p>
-                  <Button variant="outline" size="sm" onClick={retry}>
-                    {t("common.retry")}
-                  </Button>
-                </div>
+                <ListingError message={errors[0]} onRetry={retry} />
+              ) : items.length === 0 && errors.length > 0 && !busy ? (
+                // Some sources failed and the rest had nothing: say why, rather than "empty".
+                <ListingError message={errors[0]} onRetry={retry} />
               ) : items.length === 0 && busy ? (
                 <div className="grid grid-cols-[repeat(auto-fill,minmax(clamp(200px,13vw,280px),1fr))] gap-3.5">
                   {Array.from({ length: 8 }).map((_, i) => (
@@ -468,6 +484,7 @@ export default function Mods({
                   )}
                 </>
               )}
+              </ListingBoundary>
             </div>
           </div>
         )}

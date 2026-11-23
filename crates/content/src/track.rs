@@ -181,8 +181,8 @@ mod tests {
 
     fn package(entries: &[(&str, &[u8])]) -> Vec<u8> {
         let mut writer = zip::ZipWriter::new(Cursor::new(Vec::new()));
-        let options: zip::write::FileOptions<'_, ()> =
-            zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+        let options: zip::write::SimpleFileOptions =
+            zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
         for (name, bytes) in entries {
             writer.start_file(*name, options).unwrap();
             writer.write_all(bytes).unwrap();

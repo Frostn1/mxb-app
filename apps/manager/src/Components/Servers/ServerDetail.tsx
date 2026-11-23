@@ -735,6 +735,53 @@ const ServerDetail = ({
                 </Button>
               )}
             </div>
+          ) : action.kind === "guess" ? (
+            // A free post that only resembles this server's track. Not installed unless the
+            // player picks it: the page first, the install by name, joining as it is.
+            <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+              <Button
+                className="flex-1"
+                onClick={() => void openUrl(action.product.url)}
+                title={action.product.url}
+              >
+                <ExternalLink className="size-3.5" />
+                {t("serverBrowser.checkCandidate", { name: action.product.name })}
+              </Button>
+              <Button
+                variant="outline"
+                className="shrink-0"
+                onClick={() => onInstall(s, action.product)}
+                title={t("serverBrowser.installGuessHint", { name: action.product.name })}
+              >
+                <Download className="size-3.5" />
+                {t("serverBrowser.installGuess", { name: action.product.name })}
+              </Button>
+              <Button
+                variant="outline"
+                className="shrink-0"
+                onClick={() => onJoin(s)}
+                disabled={!s.joinable || busy}
+                title={t("serverBrowser.joinAnywayHint")}
+              >
+                {joining === s.address ? (
+                  <Loader2 className="size-3.5 animate-spin" />
+                ) : (
+                  <Plug className="size-3.5" />
+                )}
+                {t("serverBrowser.joinAnyway")}
+              </Button>
+              {onPickTrack && (
+                <Button
+                  variant="outline"
+                  className="shrink-0 px-3"
+                  onClick={() => onPickTrack(s)}
+                  title={t("serverBrowser.pickTrackHint")}
+                  aria-label={t("serverBrowser.pickTrack")}
+                >
+                  <FolderOpen className="size-3.5" />
+                </Button>
+              )}
+            </div>
           ) : action.kind === "missing" ? (
             // The player doesn't have this track. A name that only resembles it is a lead,
             // not a reason to offer a plain Join: the page it came from goes first, and

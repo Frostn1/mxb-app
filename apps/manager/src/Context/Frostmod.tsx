@@ -214,6 +214,8 @@ export function FrostmodProvider({ children }: { children: ReactNode }) {
             : t("frostmod.modsAdded", { count: mods.length }),
           { description: watchDescription(mods, t) },
         );
+      } else if (p.outcome === "held") {
+        toast.info(t("frostmod.reloadHeld"));
       }
       void probe();
     }).then((fn) => {

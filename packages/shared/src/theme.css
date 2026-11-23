@@ -440,6 +440,74 @@
   --ring: #4f7a00;
 }
 
+/* --- Halloween: jack-o'-lantern orange over witching-hour plum. Seasonal, and more than a
+   palette: a moonlit track sits behind the content (the art below) and the one action
+   glows like a lantern. Plum rather than black so the orange reads warm, not as a warning. --- */
+.dark[data-colorway="halloween"] {
+  --window: #08050c;
+  --background: #0e0914;
+  --card: #181020;
+  --popover: #21162b;
+  --secondary: #2a1b34;
+  --muted: #1c1424;
+  --muted-foreground: #b7a9bf;
+  --faint: #7d6b86;
+  --foreground: #f6eff8;
+  --primary: #ff8a24;
+  --primary-foreground: #211006;
+  --accent: rgba(255, 138, 36, 0.14);
+  --accent-foreground: #ffb56f;
+  --ring: #ff9b45;
+  /* Slime green for "ok", the only other saturated colour, kept to status. */
+  --success: #9acb62;
+  --warning: #f5bd4f;
+  --destructive: #f05a67;
+  --border: rgba(211, 184, 222, 0.13);
+  --input: rgba(211, 184, 222, 0.17);
+}
+.light[data-colorway="halloween"] {
+  --window: #dfcba8;
+  --background: #ead9ba;
+  --card: #f7ead3;
+  --popover: #fff5e2;
+  --secondary: #d8c2a4;
+  --muted: #e5d2b4;
+  --foreground: #2b192a;
+  --muted-foreground: #715d69;
+  --faint: #88727b;
+  --primary: #b7440b;
+  --primary-foreground: #fff8ec;
+  --accent: rgba(183, 68, 11, 0.12);
+  --accent-foreground: #7e2d08;
+  --ring: #a43b0a;
+  --success: #496f2d;
+  --warning: #8c5b00;
+  --destructive: #a52d38;
+  --border: rgba(61, 34, 55, 0.16);
+  --input: rgba(61, 34, 55, 0.2);
+}
+
+/* The art: moon, bats and a rider over a graveyard track, drawn into the content
+   ground so cards and lists sit on top of it and it only shows in the gaps. Never on
+   the overlay, which is transparent over the game. */
+html.dark[data-colorway="halloween"]:not(.overlay-window) main.bg-background,
+html.light[data-colorway="halloween"]:not(.overlay-window) main.bg-background {
+  background-repeat: no-repeat;
+  background-position: center bottom;
+  background-size: cover;
+}
+html.dark[data-colorway="halloween"]:not(.overlay-window) main.bg-background {
+  background-image: url("./halloween/backdrop-dark.svg");
+}
+html.light[data-colorway="halloween"]:not(.overlay-window) main.bg-background {
+  background-image: url("./halloween/backdrop-light.svg");
+}
+
+/* The one action on the screen gets a lantern's glow. */
+[data-colorway="halloween"] button.bg-primary {
+  box-shadow: 0 0 18px -4px color-mix(in srgb, var(--primary) 75%, transparent);
+}
+
 /* --- Retro: amber phosphor. More than a palette — see the treatment below. --- */
 .dark[data-colorway="retro"] {
   --window: #0a0806;

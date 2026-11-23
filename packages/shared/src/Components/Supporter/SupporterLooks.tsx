@@ -5,6 +5,7 @@ import { Button } from "../ui/button";
 import { useT, type BaseTKey } from "../../i18n/context";
 import { cn } from "../../lib/utils";
 import {
+  colorwayUnlocked,
   PACK_COLORWAYS,
   PACK_SWATCH,
   parseAccent,
@@ -13,15 +14,18 @@ import {
 } from "../../Context/Theme";
 import { hasLooks, recheckSupporter, useSupporter } from "../../api/supporter";
 import { SUPPORT_URL } from "../../api/support";
+import { colorwayActive } from "../../extensions/appearance";
+import { parsePick, setPick, useExtensions } from "../../extensions/store";
 
 const PACK_LABEL: Record<PackColorway, BaseTKey> = {
   night: "colorway.night",
   works: "colorway.works",
   lime: "colorway.lime",
+  halloween: "colorway.halloween",
 };
 
 /**
- * The Style Pack's looks: three extra colorways and a custom accent colour.
+ * The Style Pack's looks: its extra colorways and a custom accent colour.
  *
  * Shown to everybody, so the pack can be found; usable with the Style Pack or as a supporter.
  * Nothing here replaces or locks the free colorways, which each app draws on its own.
@@ -30,6 +34,7 @@ export default function SupporterLooks() {
   const t = useT();
   const unlocked = hasLooks(useSupporter());
   const { colorway, setColorway, accent, setAccent } = useTheme();
+  const pickedTheme = parsePick(useExtensions().picks.theme);
   const [checking, setChecking] = useState(false);
 
   const recheck = async () => {
@@ -54,18 +59,22 @@ export default function SupporterLooks() {
           {PACK_COLORWAYS.map((c) => {
             const [tint, chrome] = PACK_SWATCH[c];
             const label = t(PACK_LABEL[c]);
+            const usable = colorwayUnlocked(c, unlocked);
             return (
               <button
                 key={c}
                 type="button"
                 title={label}
                 aria-label={label}
-                aria-pressed={colorway === c}
-                disabled={!unlocked}
-                onClick={() => setColorway(c)}
+                aria-pressed={colorwayActive(c, colorway, pickedTheme)}
+                disabled={!usable}
+                onClick={() => {
+                  setPick("theme", null);
+                  setColorway(c);
+                }}
                 className={cn(
                   "size-6 cursor-default rounded-full border transition-shadow disabled:opacity-40",
-                  colorway === c && unlocked
+                  colorwayActive(c, colorway, pickedTheme) && usable
                     ? "border-primary ring-2 ring-primary/40"
                     : "border-input hover:border-foreground/30",
                 )}
@@ -81,7 +90,9 @@ export default function SupporterLooks() {
           {t("supporter.accent")}
           {!unlocked && <Lock className="size-3 text-muted-foreground" />}
         </span>
-        <div className="flex items-center gap-2">
+        {pickedTheme ? (
+          <span className="text-[12px] text-muted-foreground">{t("ext.themeActive")}</span>
+        ) : <div className="flex items-center gap-2">
           <input
             type="color"
             aria-label={t("supporter.accent")}
@@ -95,7 +106,7 @@ export default function SupporterLooks() {
               {t("supporter.accentReset")}
             </Button>
           )}
-        </div>
+        </div>}
       </div>
 
       {!unlocked && (

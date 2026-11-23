@@ -13,6 +13,7 @@ import type { DropCommitItem, DropPlan, NewDownload } from "@frost/shared/types"
 import { useDownloads } from "./Downloads";
 import { useT } from "@/i18n";
 import DropReview, { type RowState } from "../Components/Dropzone/DropReview";
+import type { ReviewOutcome } from "../lib/installQueue";
 
 /**
  * The staged-install review sheet, and the one place that owns it.
@@ -35,7 +36,7 @@ interface DropReviewContextValue {
    * Put a staged plan up for review. Handles the empty plan itself (says so and releases the
    * staging directory), so callers only have to produce one.
    */
-  reviewPlan: (plan: DropPlan) => void;
+  reviewPlan: (plan: DropPlan, onSettled?: (outcome: ReviewOutcome) => void) => void;
   /** Whether a sheet is currently up — lets a caller suppress its own overlay behind it. */
   reviewing: boolean;
 }
@@ -74,43 +75,64 @@ export function DropReviewProvider({
    * may have been gigabytes. The OEM bike pack is 3.8 GB. So they wait their turn instead.
    */
   const waitingRef = useRef<DropPlan[]>([]);
+  const settledCallbacksRef = useRef<Map<string, (outcome: ReviewOutcome) => void>>(
+    new Map(),
+  );
 
-  const show = useCallback((next: DropPlan) => {
-    setInstalling(false);
-    if (next.items.length === 0) {
-      setPlan(null);
-      setRows([]);
-      toast.error(tRef.current("drop.nothingUsable"), {
-        description: next.skipped[0]?.reason,
-      });
-      void cancelDrop(next.id).catch(() => {});
-      return;
+  /** A staged plan has one terminal answer, even when it waited behind another sheet. */
+  const settle = useCallback((id: string, outcome: ReviewOutcome) => {
+    const callback = settledCallbacksRef.current.get(id);
+    settledCallbacksRef.current.delete(id);
+    if (!callback) return;
+    try {
+      callback(outcome);
+    } catch (error) {
+      console.error("Drop review settlement callback failed", error);
     }
-
-    setPlan(next);
-    setRows(
-      next.items.map((item) => ({
-        item,
-        keep: true,
-        subpath: item.subpath,
-        destFolder: item.destFolder,
-        // A row that already has a destination shows it, rather than inviting a choice it
-        // doesn't need; only genuinely undecided rows get the "choose one" placeholder.
-        destLabel: item.needsChoice
-          ? ""
-          : (item.choices.find(
-              (c) => c.value === item.destFolder && c.subpath === item.subpath,
-            )?.label ??
-            item.choices.find((c) => c.value === "" && c.subpath === item.subpath)
-              ?.label ??
-            ""),
-        picked: item.needsChoice ? "" : item.destFolder,
-        fileCount: item.fileCount,
-        collisions: item.collisions,
-        busy: false,
-      })),
-    );
   }, []);
+
+  const show = useCallback(
+    (next: DropPlan) => {
+      setInstalling(false);
+      if (next.items.length === 0) {
+        setPlan(null);
+        setRows([]);
+        toast.error(tRef.current("drop.nothingUsable"), {
+          description: next.skipped[0]?.reason,
+        });
+        void cancelDrop(next.id).catch(() => {});
+        settle(next.id, { kind: "discarded" });
+        const waiting = waitingRef.current.shift();
+        if (waiting) show(waiting);
+        return;
+      }
+
+      setPlan(next);
+      setRows(
+        next.items.map((item) => ({
+          item,
+          keep: true,
+          subpath: item.subpath,
+          destFolder: item.destFolder,
+          // A row that already has a destination shows it, rather than inviting a choice it
+          // doesn't need; only genuinely undecided rows get the "choose one" placeholder.
+          destLabel: item.needsChoice
+            ? ""
+            : (item.choices.find(
+                (c) => c.value === item.destFolder && c.subpath === item.subpath,
+              )?.label ??
+              item.choices.find((c) => c.value === "" && c.subpath === item.subpath)
+                ?.label ??
+              ""),
+          picked: item.needsChoice ? "" : item.destFolder,
+          fileCount: item.fileCount,
+          collisions: item.collisions,
+          busy: false,
+        })),
+      );
+    },
+    [settle],
+  );
 
   /** Close the current sheet and open whatever was waiting behind it. */
   const reset = useCallback(() => {
@@ -126,12 +148,16 @@ export function DropReviewProvider({
 
   const discard = useCallback(() => {
     const current = planRef.current;
-    if (current) void cancelDrop(current.id).catch(() => {});
+    if (current) {
+      void cancelDrop(current.id).catch(() => {});
+      settle(current.id, { kind: "discarded" });
+    }
     reset();
-  }, [reset]);
+  }, [reset, settle]);
 
   const reviewPlan = useCallback<DropReviewContextValue["reviewPlan"]>(
-    (next) => {
+    (next, onSettled) => {
+      if (onSettled) settledCallbacksRef.current.set(next.id, onSettled);
       const current = planRef.current;
       if (current && current.id !== next.id) {
         waitingRef.current.push(next);
@@ -261,6 +287,12 @@ export function DropReviewProvider({
       }
 
       reset();
+      settle(current.id, {
+        kind: "installed",
+        installed: outcome.installed.length,
+        failed: outcome.failed.length,
+        firstError: outcome.failed[0]?.error,
+      });
       if (outcome.installed.length > 0) {
         toast.success(
           tRef.current("drop.installed", { count: outcome.installed.length }),
@@ -284,7 +316,7 @@ export function DropReviewProvider({
         description: String(e),
       });
     }
-  }, [rows, reset, note]);
+  }, [rows, reset, note, settle]);
 
   const value = useMemo(
     () => ({ reviewPlan, reviewing: plan !== null }),

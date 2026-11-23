@@ -41,8 +41,8 @@ const MAGIC: &[u8; 4] = b"MP2\0";
 /// Where the material records start, and how big one is. Geometry follows the last of them.
 const MATERIALS_AT: usize = 0x0C;
 const MATERIAL_RECORD: usize = 56;
-/// Word 11 of a material record: the material's own one-based sequence number, which
-/// TerrainEd renumbers. It does not point at a sheet, but 0 means the material has none.
+/// Word 11 of a material record: a one-based index into the surface entry table.
+/// Zero means the material has no sheet.
 const MATERIAL_TEX_WORD: usize = 11;
 
 /// Bytes per vertex, and where each attribute's array begins within the block — every one
@@ -157,6 +157,11 @@ impl MapMesh {
 
 fn u32le(b: &[u8], o: usize) -> u32 {
     u32::from_le_bytes([b[o], b[o + 1], b[o + 2], b[o + 3]])
+}
+
+fn u32le_checked(b: &[u8], o: usize) -> Option<u32> {
+    let bytes: [u8; 4] = b.get(o..o.checked_add(4)?)?.try_into().ok()?;
+    Some(u32::from_le_bytes(bytes))
 }
 
 fn f32le(b: &[u8], o: usize) -> f32 {
@@ -652,13 +657,7 @@ fn tex_name(b: &[u8], o: usize) -> Option<String> {
     (3..=95).contains(&name.len()).then_some(name)
 }
 
-/// Every colour surface in a map, in file order.
-///
-/// Every record in the table, in order, name included — no filtering by what it is called.
-///
-/// Order is the whole point. Nothing in a material record points at a texture — the *k*-th
-/// colour map is material *k*'s — so a record skipped here silently repaints every material
-/// after it, and one read that shouldn't be shifts the rest along by one.
+/// Every texture-shaped record after the surface table, in file order.
 ///
 /// The scan starts at the table rather than the top of the file, so a texture-shaped run of
 /// bytes inside the geometry can't be mistaken for a surface, and it reads the 16- and
@@ -710,6 +709,138 @@ fn colour_records(b: &[u8], from: usize) -> Vec<(String, u32, u32, usize, usize)
         o += 1;
     }
     out
+}
+
+#[derive(Clone, Debug)]
+struct SurfaceEntry {
+    name: String,
+    width: u32,
+    height: u32,
+    data_off: usize,
+    data_len: usize,
+}
+
+/// Read one colour or sub-map record and return its first frame and end offset.
+fn surface_record(b: &[u8], o: usize, woff: usize) -> Option<(SurfaceEntry, usize)> {
+    let name_field = b.get(o..o.checked_add(100)?)?;
+    let nul = name_field.iter().position(|&c| c == 0)?;
+    let first = *name_field.first()?;
+    if !(first.is_ascii_alphanumeric() || first == b'_')
+        || !name_field[..nul].iter().all(|&c| (32..127).contains(&c))
+        || name_field[nul..].iter().any(|&c| c != 0)
+    {
+        return None;
+    }
+    let name = std::str::from_utf8(&name_field[..nul]).ok()?.to_owned();
+    let w_at = o.checked_add(woff)?;
+    let width = u32le_checked(b, w_at)?;
+    let height = u32le_checked(b, w_at.checked_add(4)?)?;
+    let valid_dimension = |n: u32| n.is_power_of_two() && n <= 16384;
+    if !valid_dimension(width) || !valid_dimension(height) {
+        return None;
+    }
+    let base = w_at.checked_add(24)?;
+    let extra = u32le_checked(b, base)? as usize;
+    let frame = |at: usize, size: usize| -> Option<(usize, usize)> {
+        if size < 8 {
+            return None;
+        }
+        let len = size - 8;
+        let end = at.checked_add(len)?;
+        if end > b.len() || stream_extent(&b[..end], at, width, height)?.1 != len {
+            return None;
+        }
+        Some((at, len))
+    };
+
+    if extra == 0 {
+        let size = u32le_checked(b, base.checked_add(4)?)? as usize;
+        let at = base.checked_add(16)?;
+        if let Some((data_off, data_len)) = frame(at, size) {
+            return Some((
+                SurfaceEntry {
+                    name: name.clone(),
+                    width,
+                    height,
+                    data_off,
+                    data_len,
+                },
+                base.checked_add(8)?.checked_add(size)?,
+            ));
+        }
+    }
+
+    let size = u32le_checked(b, base)? as usize;
+    let at = base.checked_add(12)?;
+    if let Some((data_off, data_len)) = frame(at, size) {
+        return Some((
+            SurfaceEntry {
+                name: name.clone(),
+                width,
+                height,
+                data_off,
+                data_len,
+            },
+            base.checked_add(4)?.checked_add(size)?,
+        ));
+    }
+
+    if !(1..4096).contains(&extra) {
+        return None;
+    }
+    let mut p = base.checked_add(4)?.checked_add(extra.checked_mul(16)?)?;
+    let mut first_frame = None;
+    for _ in 0..=extra {
+        let size = u32le_checked(b, p)? as usize;
+        let at = p.checked_add(12)?;
+        let payload = frame(at, size)?;
+        first_frame.get_or_insert(payload);
+        p = p.checked_add(4)?.checked_add(size)?;
+    }
+    let (data_off, data_len) = first_frame?;
+    Some((
+        SurfaceEntry {
+            name,
+            width,
+            height,
+            data_off,
+            data_len,
+        },
+        p,
+    ))
+}
+
+/// Walk the declared surface entries, keeping only each entry's colour record.
+fn surface_entries(b: &[u8]) -> Option<Vec<SurfaceEntry>> {
+    let (mut o, count) = texture_table(b)?;
+    let mut out = Vec::with_capacity(count);
+    let mut next = None;
+    for entry in 0..count {
+        let (colour, end) = next.take().or_else(|| surface_record(b, o, 104))?;
+        out.push(colour);
+        o = end;
+        // The final entry's tail belongs to the following section and is immaterial.
+        if entry + 1 == count {
+            continue;
+        }
+        let mut words = 0;
+        loop {
+            if let Some(record) = surface_record(b, o, 104) {
+                next = Some(record);
+                break;
+            }
+            if let Some((_, end)) = surface_record(b, o, 100) {
+                o = end;
+                continue;
+            }
+            if words == 256 || o.checked_add(4)? > b.len() {
+                return None;
+            }
+            o += 4;
+            words += 1;
+        }
+    }
+    Some(out)
 }
 
 /// Inflate far enough to prove a record, returning `(pixel bytes, compressed bytes)`.
@@ -866,6 +997,34 @@ fn painting_records(
     all.into_iter().filter(|(n, ..)| !is_companion_name(n)).collect()
 }
 
+type ResolvedSurfaces = (Vec<SurfaceEntry>, Vec<(usize, usize)>, bool);
+
+/// Resolve materials to surface entries, using the legacy positional scan only on failure.
+fn resolved_surfaces(b: &[u8]) -> Option<ResolvedSurfaces> {
+    let (from, table_count) = texture_table(b)?;
+    if let Some(entries) = surface_entries(b) {
+        let materials = material_count(b)?;
+        let bound = bindings(b, materials, entries.len());
+        return Some((entries, bound, true));
+    }
+    let painting = painting_records(colour_records(b, from));
+    if !covers(painting.len(), table_count) {
+        return None;
+    }
+    let bound = positional_bindings(b, table_count, painting.len());
+    let entries = painting
+        .into_iter()
+        .map(|(name, width, height, data_off, data_len)| SurfaceEntry {
+            name,
+            width,
+            height,
+            data_off,
+            data_len,
+        })
+        .collect();
+    Some((entries, bound, false))
+}
+
 /// Every surface record a map holds, as `(name, width, height)`, in table order.
 ///
 /// A diagnostic: names and dimensions only, nothing inflated. What a map calls its sheets is
@@ -902,20 +1061,14 @@ pub fn primaries(b: &[u8]) -> Vec<(String, u32, u32)> {
 /// because it stops at each record's header and steps over the payload. Indexed by material,
 /// so a material with no sheet holds an empty name rather than shifting the rest along.
 pub fn declared(b: &[u8]) -> Vec<(String, u32, u32)> {
-    let Some((from, count)) = texture_table(b) else {
+    let Some((entries, bound, _)) = resolved_surfaces(b) else {
         return Vec::new();
     };
-    // The same binding `textures` makes, so a slot and the sheet that fills it agree.
-    let painting = painting_records(colour_records(b, from));
-    if !covers(painting.len(), count) {
-        return Vec::new();
-    }
-    let bound = bindings(b, count, painting.len());
     let len = bound.iter().map(|&(m, _)| m + 1).max().unwrap_or(0);
     let mut out = vec![(String::new(), 0, 0); len];
     for (m, sheet) in bound {
-        if let Some((n, w, h, ..)) = painting.get(sheet) {
-            out[m] = (n.clone(), *w, *h);
+        if let Some(entry) = entries.get(sheet) {
+            out[m] = (entry.name.clone(), entry.width, entry.height);
         }
     }
     out
@@ -1139,16 +1292,6 @@ pub fn reduced_texture(name: &str, w: u32, h: u32, mut rgba: Vec<u8>) -> MapText
     }
 }
 
-/// A map's colour surfaces, one per material, inflated and reduced.
-///
-/// Nothing in a material record points at a texture, so the binding is positional: the *k*-th
-/// colour map paints material *k*. Everything therefore turns on not *skipping* a colour map,
-/// because a single miss slides every material after it onto its neighbour's sheet — see
-/// [`is_companion_name`], which is why the test is for the companion maps rather than for the
-/// colour ones.
-///
-/// A map's table still holds more records than it has materials: the terrain's own sheets
-/// trail the scenery's, so the walk stops at the material count.
 /// Push a cut-out's colour outwards into the texels its alpha throws away.
 ///
 /// A foliage sheet stores black in every transparent texel — there is no reason for an artist
@@ -1224,10 +1367,7 @@ fn bleed_cutout(rgba: &mut [u8], w: u32, h: u32) {
 /// Briarcliff names one sheet by the convention out of eighty-five materials and SFDR none at
 /// all, so every triangle of both is untextured.
 pub fn binds(b: &[u8]) -> bool {
-    let Some((from, count)) = texture_table(b) else {
-        return false;
-    };
-    covers(painting_records(colour_records(b, from)).len(), count)
+    resolved_surfaces(b).is_some_and(|(_, bound, structural)| !structural || !bound.is_empty())
 }
 
 /// Whether a map offers enough sheets to be worth binding at all.
@@ -1243,24 +1383,34 @@ fn covers(painting: usize, materials: usize) -> bool {
 
 /// The materials a map actually binds a sheet to. Every other one is drawn in flat grey.
 pub fn bound_materials(b: &[u8]) -> std::collections::HashSet<u32> {
-    let Some((from, count)) = texture_table(b) else {
+    let Some((_, bound, _)) = resolved_surfaces(b) else {
         return Default::default();
     };
-    if !binds(b) {
-        return Default::default();
-    }
-    bindings(b, count, painting_records(colour_records(b, from)).len())
-        .into_iter()
-        .map(|(m, _)| m as u32)
-        .collect()
+    bound.into_iter().map(|(m, _)| m as u32).collect()
 }
 
 /// Which sheet paints each material, as `(material, sheet)` pairs.
 ///
-/// One sheet per material, in order; a material whose word 11 is 0 owns none — a blank record,
-/// or a colour-only one such as Maryland's black tyres. Checked by triangle count on Indiana, Millville and a compiled track of ours: the
-/// same 15,301-triangle castle is material 11, 12 and 24 and lands on its own sheet in each.
+/// Word 11 is a one-based entry index. Zero and out-of-range indices bind nothing.
 fn bindings(b: &[u8], materials: usize, sheets: usize) -> Vec<(usize, usize)> {
+    let mut out = Vec::with_capacity(materials);
+    for m in 0..materials {
+        let at = MATERIALS_AT + m * MATERIAL_RECORD + MATERIAL_TEX_WORD * 4;
+        let Some(index) = u32le_checked(b, at) else {
+            continue;
+        };
+        if let Some(sheet) = (index as usize)
+            .checked_sub(1)
+            .filter(|&sheet| sheet < sheets)
+        {
+            out.push((m, sheet));
+        }
+    }
+    out
+}
+
+/// The former positional binding, retained for maps whose structural walk fails.
+fn positional_bindings(b: &[u8], materials: usize, sheets: usize) -> Vec<(usize, usize)> {
     let mut out = Vec::with_capacity(materials);
     let mut sheet = 0;
     for m in 0..materials {
@@ -1278,22 +1428,19 @@ fn bindings(b: &[u8], materials: usize, sheets: usize) -> Vec<(usize, usize)> {
 }
 
 pub fn textures(b: &[u8], max_dim: u32) -> Vec<MapTexture> {
-    let Some((from, count)) = texture_table(b) else {
+    let Some((entries, bound, _)) = resolved_surfaces(b) else {
         return Vec::new();
     };
-    let painting = painting_records(colour_records(b, from));
-    if !covers(painting.len(), count) {
-        return Vec::new();
-    }
     // Each material names its own sheet, so nothing here is positional. One sheet may paint
     // several materials, and it is inflated once per material that asks for it — the sheets
     // are reduced immediately and a map rarely shares more than a handful.
-    let bound = bindings(b, count, painting.len());
     bound
         .into_iter()
         .filter_map(|(material, sheet)| {
-            let (name, w, h, off, len) = painting.get(sheet)?.clone();
-            let mut rgba = inflate(b, off, len, w, h)?;
+            let entry = entries.get(sheet)?;
+            let name = entry.name.clone();
+            let (w, h) = (entry.width, entry.height);
+            let mut rgba = inflate(b, entry.data_off, entry.data_len, w, h)?;
             let i = material;
             // Read from the pixels, not the name: `_c_a` is the convention, but the alpha
             // channel is the fact, and a sheet that is half see-through is a cut-out whatever
@@ -2824,17 +2971,118 @@ mod tests {
         assert_eq!(&b[b.len() - 8..], &[7u8; 8]);
     }
 
-    /// Sheets follow the materials in order, and a material numbered 0 owns none.
+    /// Material words index entries directly, and zero owns none.
     #[test]
-    fn sheets_follow_the_materials_and_blanks_own_none() {
+    fn material_words_index_entries_and_blanks_own_none() {
         let mut b = vec![0u8; MATERIALS_AT + 4 * MATERIAL_RECORD];
-        for m in [0, 1, 3] {
+        for (m, index) in [(0, 3u32), (1, 1), (3, 3)] {
             let at = MATERIALS_AT + m * MATERIAL_RECORD + MATERIAL_TEX_WORD * 4;
-            b[at] = m as u8 + 1;
+            b[at..at + 4].copy_from_slice(&index.to_le_bytes());
         }
-        assert_eq!(bindings(&b, 4, 5), vec![(0, 0), (1, 1), (3, 2)]);
+        assert_eq!(bindings(&b, 4, 5), vec![(0, 2), (1, 0), (3, 2)]);
         // Never a sheet the map doesn't carry.
-        assert_eq!(bindings(&b, 4, 2), vec![(0, 0), (1, 1)]);
+        assert_eq!(bindings(&b, 4, 2), vec![(1, 0)]);
+        assert_eq!(positional_bindings(&b, 4, 5), vec![(0, 0), (1, 1), (3, 2)]);
+    }
+
+    fn deflate_solid(rgba: [u8; 4]) -> Vec<u8> {
+        use std::io::Write;
+        let mut encoder =
+            flate2::write::DeflateEncoder::new(Vec::new(), flate2::Compression::fast());
+        encoder.write_all(&rgba.repeat(16 * 16)).unwrap();
+        encoder.finish().unwrap()
+    }
+
+    fn record_header(b: &mut Vec<u8>, name: &str, colour: bool) {
+        let start = b.len();
+        b.resize(start + 100, 0);
+        b[start..start + name.len()].copy_from_slice(name.as_bytes());
+        if colour {
+            b.extend_from_slice(&0u32.to_le_bytes());
+        }
+        b.extend_from_slice(&16u32.to_le_bytes());
+        b.extend_from_slice(&16u32.to_le_bytes());
+        b.extend_from_slice(&[0u8; 16]);
+    }
+
+    fn long_record(b: &mut Vec<u8>, name: &str, colour: bool, rgba: [u8; 4]) {
+        record_header(b, name, colour);
+        let payload = deflate_solid(rgba);
+        b.extend_from_slice(&0u32.to_le_bytes());
+        b.extend_from_slice(&((payload.len() + 8) as u32).to_le_bytes());
+        b.extend_from_slice(&[0u8; 8]);
+        b.extend_from_slice(&payload);
+    }
+
+    fn short_record(b: &mut Vec<u8>, name: &str, rgba: [u8; 4]) {
+        record_header(b, name, true);
+        let payload = deflate_solid(rgba);
+        b.extend_from_slice(&((payload.len() + 8) as u32).to_le_bytes());
+        b.extend_from_slice(&[0u8; 8]);
+        b.extend_from_slice(&payload);
+    }
+
+    fn animated_record(b: &mut Vec<u8>, name: &str, frames: [[u8; 4]; 2]) {
+        record_header(b, name, true);
+        b.extend_from_slice(&1u32.to_le_bytes());
+        b.extend_from_slice(&[0u8; 16]);
+        for rgba in frames {
+            let payload = deflate_solid(rgba);
+            b.extend_from_slice(&((payload.len() + 8) as u32).to_le_bytes());
+            b.extend_from_slice(&[0u8; 8]);
+            b.extend_from_slice(&payload);
+        }
+    }
+
+    #[test]
+    fn structural_entries_bind_by_material_index() {
+        let mut b = synth(5, 8, 1);
+        for (material, index) in [3u32, 0, 1, 3, 2].into_iter().enumerate() {
+            let at = MATERIALS_AT + material * MATERIAL_RECORD + MATERIAL_TEX_WORD * 4;
+            b[at..at + 4].copy_from_slice(&index.to_le_bytes());
+        }
+        b.extend_from_slice(&3u32.to_le_bytes());
+        long_record(&mut b, "EntryOne", true, [201, 1, 2, 255]);
+        b.extend_from_slice(&17u32.to_le_bytes());
+        b.extend_from_slice(&29u32.to_le_bytes());
+        long_record(&mut b, "Wall_Normal", false, [9, 9, 9, 255]);
+        animated_record(&mut b, "EntryTwo", [[3, 202, 4, 255], [8, 8, 8, 255]]);
+        short_record(&mut b, "EntryThree", [5, 6, 203, 255]);
+
+        let declared = declared(&b);
+        assert_eq!(
+            declared.iter().map(|x| x.0.as_str()).collect::<Vec<_>>(),
+            ["EntryThree", "", "EntryOne", "EntryThree", "EntryTwo"]
+        );
+        assert_eq!(bound_materials(&b), [0, 2, 3, 4].into_iter().collect());
+        assert!(binds(&b));
+
+        let textures = textures(&b, 16);
+        assert_eq!(
+            textures
+                .iter()
+                .map(|t| (t.material, t.name.as_str()))
+                .collect::<Vec<_>>(),
+            [
+                (0, "EntryThree"),
+                (2, "EntryOne"),
+                (3, "EntryThree"),
+                (4, "EntryTwo")
+            ]
+        );
+        assert_eq!(
+            textures
+                .iter()
+                .map(|t| [t.rgba[0], t.rgba[1], t.rgba[2]])
+                .collect::<Vec<_>>(),
+            [[5, 6, 203], [201, 1, 2], [5, 6, 203], [3, 202, 4]]
+        );
+
+        assert_ne!(
+            positional_bindings(&b, 5, 3),
+            bindings(&b, 5, 3),
+            "the former positional order must not accidentally satisfy this fixture"
+        );
     }
 
     /// A sheet's name may end in a space, and is read without it.

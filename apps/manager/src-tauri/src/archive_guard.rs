@@ -250,7 +250,7 @@ pub(crate) fn extract_zip<R: Read + Seek>(reader: R, dest: &Path, label: &Path) 
     let mut planned = Vec::with_capacity(zip.len());
     for i in 0..zip.len() {
         let e = zip.by_index_raw(i)?;
-        let name = e.name().to_string();
+        let name = e.name()?.into_owned();
         if e.is_symlink() {
             return Err(rejected(label, &name, "links are not allowed"));
         }

@@ -47,10 +47,10 @@ pub enum ContentKind {
     BikePaint,
     SoundSet,
     RiderGear,
-    /// A tyre set — `mods/tyres`. Only ever produced by [`split_tree`]: read on its own a
-    /// tyre `.pkz` looks like nothing in particular, and it is the tree it arrived in that
-    /// says what it is. The OEM bike pack ships one (`oem_mx`), and the wheel meshes of
-    /// every bike in it live there rather than in the bikes.
+    /// A tyre set — `mods/tyres`. A loose folder identifies itself by its front/rear wheel
+    /// meshes; a tyre `.pkz` still needs the `mods/tyres` tree it arrived in to say what it
+    /// is. The OEM bike pack ships one (`oem_mx`), and the wheel meshes of every bike in it
+    /// live there rather than in the bikes.
     Tyres,
     /// A ReShade preset `.ini`. The one kind that doesn't live in the mods tree at all —
     /// see [`crate::reshade`].
@@ -339,6 +339,7 @@ fn from_route_rule(rule: RouteRule, dir: &Path, ctx: Ctx) -> Option<Verdict> {
         RouteRule::PaintsBundle => Some(Verdict::new(ContentKind::BikePaint, DetectReason::PaintsBundle)),
         RouteRule::SoundBundle => Some(Verdict::new(ContentKind::SoundSet, DetectReason::SoundMarkers)),
         RouteRule::LooseSound => Some(sound_verdict(&install::unwrap_wrapper(dir), ctx)),
+        RouteRule::TyreSet => Some(Verdict::new(ContentKind::Tyres, DetectReason::PackLayout)),
         RouteRule::Typed => None,
     }
 }

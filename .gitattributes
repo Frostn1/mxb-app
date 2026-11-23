@@ -10,3 +10,10 @@
 *.ts diff
 *.tsx diff
 *.rs diff
+
+# Extension packages are signed over their exact bytes; LF everywhere means a .mxbext packed
+# on Windows and one packed on Linux are the same file, signature included.
+extensions/** text eol=lf
+extensions/**/*.png binary
+extensions/**/*.webp binary
+extensions/**/*.woff2 binary

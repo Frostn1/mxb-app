@@ -129,6 +129,7 @@ function phaseLabel(phase: BundlePhase, t: TFunc<TKey>): string {
 /** Which whole-sentence toast an apply produced. A key, not a fragment: the
  *  English "Applied X to Y — {note}" shape doesn't survive translation. */
 function applyNoteKey(outcome: PresetApplyOutcome): TKey {
+  if (outcome.content_reload === "held") return "frostmod.reloadHeld";
   // A preset carrying a model swap only shows its new mesh once FrostMod re-applies the
   // bike. `live_refresh` says nothing about that — it reloads paints and gear, never the
   // mesh — so when the model didn't refresh, "refreshed live in-game" is a promise the

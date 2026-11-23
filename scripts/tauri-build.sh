@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+#
+# The build tauri-action runs on Linux — `tauriScript` in .github/workflows/release.yml.
+#
+#   scripts/tauri-build.sh build [args...]
+#
+# The same `tauri build` every other platform gets, plus the one thing that has to happen
+# in between the bundler writing the AppImage and the action collecting it: the bundled
+# libwayland comes out (scripts/appimage-drop-bundled-wayland.sh, which says why), and the
+# updater signature is taken again over the bytes that will actually ship. Doing it here
+# rather than after the release is published means the action uploads the stripped image
+# and writes `latest.json` from the matching signature, so nothing downstream can drift.
+#
+# Windows and macOS don't go through this — the workflow leaves `tauriScript` empty there
+# and the action detects the package manager as before.
+
+set -euo pipefail
+
+here="$(cd "$(dirname "$0")" && pwd)"
+root="$(dirname "$here")"
+# The Tauri project is one app inside the workspace, so `tauri build` has to run from there
+# to find its tauri.conf.json. The bundles, though, land in the workspace target at the
+# repo root — which is why the globs below are anchored on "$root", not on the cwd.
+cd "$root/apps/manager"
+
+# `bunx tauri` is the `tauri` script in package.json without a round trip through a
+# shell — which matters below, where the bundle's path has a space in it.
+bunx tauri "$@"
+
+# `tauri dev` and the rest produce no bundles to fix up.
+if [ "${1:-}" != "build" ]; then
+  exit 0
+fi
+
+shopt -s nullglob
+# Second pattern for a `--target`ed build, which bundles under the triple instead.
+images=(
+  "$root"/target/release/bundle/appimage/*.AppImage
+  "$root"/target/*/release/bundle/appimage/*.AppImage
+)
+if [ "${#images[@]}" -eq 0 ]; then
+  echo "$0: no AppImage in this build — nothing to fix up"
+  exit 0
+fi
+
+for image in "${images[@]}"; do
+  bash "$here/appimage-drop-bundled-wayland.sh" "$image"
+
+  # The bundler signed the file the updater is about to be told to trust, and those bytes
+  # have changed. Without this every Linux self-update fails signature verification.
+  if [ -f "$image.sig" ]; then
+    echo "$(basename "$image"): signing again over the rebuilt image"
+    bunx tauri signer sign "$image"
+  fi
+done

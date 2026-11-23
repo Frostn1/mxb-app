@@ -15,6 +15,8 @@ export interface Friend {
   riderName: string;
   /** Null when they are offline, hiding their presence, or not on a server. */
   presence: FriendPresence | null;
+  /** When they were last around, in ms. Null when unknown or hidden; absent from an older control plane. */
+  lastSeenAt: number | null;
 }
 
 export interface Person {

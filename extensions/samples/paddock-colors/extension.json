@@ -1,0 +1,251 @@
+{
+  "manifestVersion": 1,
+  "id": "mxbsecure.paddock-colors",
+  "name": "Paddock Colors",
+  "version": "1.0.1",
+  "author": "mxbsecure",
+  "description": "Six race-plate themes for MXB App, each in dark and light, with number-plate buttons and two track-light backdrops.",
+  "homepage": "https://github.com/Frostn1/mxb-app/blob/main/docs/extensions.md",
+  "permissions": [],
+  "categories": [
+    "themes"
+  ],
+  "tags": [
+    "colors",
+    "dark",
+    "light",
+    "race"
+  ],
+  "screenshots": [
+    "store/1.webp",
+    "store/2.webp"
+  ],
+  "contributes": {
+    "themes": [
+      {
+        "id": "red-plate",
+        "label": "Red Plate",
+        "dark": {
+          "window": "#0d0707",
+          "background": "#120a0a",
+          "card": "#1d1212",
+          "popover": "#261818",
+          "secondary": "#2a1b1b",
+          "muted": "#1d1212",
+          "foreground": "#f6eeee",
+          "mutedForeground": "#b6a2a2",
+          "primary": "#ff3b30",
+          "primaryForeground": "#ffffff",
+          "accent": "rgba(255, 59, 48, 0.16)",
+          "accentForeground": "#ff6b62",
+          "ring": "#ff3b30",
+          "border": "rgba(255, 235, 235, 0.12)"
+        },
+        "light": {
+          "window": "#f1e7e6",
+          "background": "#faf5f4",
+          "card": "#ffffff",
+          "primary": "#d70015",
+          "primaryForeground": "#ffffff",
+          "accent": "rgba(215, 0, 21, 0.10)",
+          "accentForeground": "#b30012",
+          "ring": "#d70015"
+        },
+        "buttonStyle": "plate",
+        "background": "lights"
+      },
+      {
+        "id": "lime-plate",
+        "label": "Lime Plate",
+        "dark": {
+          "window": "#070a05",
+          "background": "#0b0f08",
+          "card": "#151b11",
+          "popover": "#1c2416",
+          "secondary": "#1f2818",
+          "muted": "#151b11",
+          "foreground": "#f1f6ec",
+          "mutedForeground": "#a3b096",
+          "primary": "#a3e635",
+          "primaryForeground": "#0b1203",
+          "accent": "rgba(163, 230, 53, 0.15)",
+          "accentForeground": "#bef264",
+          "ring": "#a3e635",
+          "border": "rgba(236, 255, 220, 0.11)"
+        },
+        "light": {
+          "window": "#e9eedf",
+          "background": "#f6f9f0",
+          "card": "#ffffff",
+          "primary": "#4d7c0f",
+          "primaryForeground": "#ffffff",
+          "accent": "rgba(77, 124, 15, 0.12)",
+          "accentForeground": "#3f6212",
+          "ring": "#4d7c0f"
+        },
+        "buttonStyle": "plate"
+      },
+      {
+        "id": "blue-plate",
+        "label": "Blue Plate",
+        "dark": {
+          "window": "#05070d",
+          "background": "#080b14",
+          "card": "#111827",
+          "popover": "#172036",
+          "secondary": "#1a2338",
+          "muted": "#111827",
+          "foreground": "#eef2fb",
+          "mutedForeground": "#9aa6bf",
+          "primary": "#3b82f6",
+          "primaryForeground": "#ffffff",
+          "accent": "rgba(59, 130, 246, 0.16)",
+          "accentForeground": "#7aa8ff",
+          "ring": "#3b82f6",
+          "border": "rgba(220, 230, 255, 0.11)"
+        },
+        "light": {
+          "window": "#e4e9f3",
+          "background": "#f3f6fb",
+          "card": "#ffffff",
+          "primary": "#1d4ed8",
+          "primaryForeground": "#ffffff",
+          "accent": "rgba(29, 78, 216, 0.10)",
+          "accentForeground": "#1e40af",
+          "ring": "#1d4ed8"
+        },
+        "buttonStyle": "plate",
+        "background": "lights"
+      },
+      {
+        "id": "orange-plate",
+        "label": "Orange Plate",
+        "dark": {
+          "window": "#0d0804",
+          "background": "#120b06",
+          "card": "#1f140c",
+          "popover": "#2a1b10",
+          "secondary": "#2d1f13",
+          "muted": "#1f140c",
+          "foreground": "#f8efe6",
+          "mutedForeground": "#bba691",
+          "primary": "#ff7a00",
+          "primaryForeground": "#170900",
+          "accent": "rgba(255, 122, 0, 0.16)",
+          "accentForeground": "#ff9d47",
+          "ring": "#ff7a00",
+          "border": "rgba(255, 240, 225, 0.12)"
+        },
+        "light": {
+          "window": "#f3e9df",
+          "background": "#fbf6f0",
+          "card": "#ffffff",
+          "primary": "#c2410c",
+          "primaryForeground": "#ffffff",
+          "accent": "rgba(194, 65, 12, 0.10)",
+          "accentForeground": "#9a3412",
+          "ring": "#c2410c"
+        },
+        "buttonStyle": "plate"
+      },
+      {
+        "id": "night-race",
+        "label": "Night Race",
+        "dark": {
+          "window": "#000000",
+          "background": "#030303",
+          "card": "#0e0e10",
+          "popover": "#18181b",
+          "secondary": "#18181b",
+          "muted": "#0e0e10",
+          "foreground": "#fafafa",
+          "mutedForeground": "#8b8b93",
+          "primary": "#facc15",
+          "primaryForeground": "#111111",
+          "accent": "rgba(250, 204, 21, 0.14)",
+          "accentForeground": "#fde047",
+          "ring": "#facc15",
+          "border": "rgba(255, 255, 255, 0.10)"
+        },
+        "buttonStyle": "plate",
+        "background": "lights"
+      },
+      {
+        "id": "mud",
+        "label": "Mud",
+        "dark": {
+          "window": "#0c0a07",
+          "background": "#13100b",
+          "card": "#1e1912",
+          "popover": "#272118",
+          "secondary": "#2a241a",
+          "muted": "#1e1912",
+          "foreground": "#efe8dc",
+          "mutedForeground": "#a99d88",
+          "primary": "#c8a26a",
+          "primaryForeground": "#161006",
+          "accent": "rgba(200, 162, 106, 0.16)",
+          "accentForeground": "#dcbc8a",
+          "ring": "#c8a26a",
+          "border": "rgba(240, 230, 210, 0.11)"
+        },
+        "light": {
+          "window": "#ebe3d5",
+          "background": "#f6f1e8",
+          "card": "#fffdf8",
+          "primary": "#8a6a36",
+          "primaryForeground": "#ffffff",
+          "accent": "rgba(138, 106, 54, 0.12)",
+          "accentForeground": "#6f5428",
+          "ring": "#8a6a36"
+        },
+        "radius": "4px"
+      }
+    ],
+    "buttonStyles": [
+      {
+        "id": "plate",
+        "label": "Number plate",
+        "radius": "3px",
+        "uppercase": true,
+        "letterSpacing": 0.05,
+        "weight": 800
+      },
+      {
+        "id": "round",
+        "label": "Round",
+        "radius": "999px",
+        "weight": 600,
+        "shadow": "soft"
+      }
+    ],
+    "backgrounds": [
+      {
+        "id": "lights",
+        "label": "Track lights",
+        "gradient": {
+          "angle": 180,
+          "stops": [
+            "rgba(255, 255, 255, 0.06)",
+            "rgba(255, 255, 255, 0)",
+            "rgba(0, 0, 0, 0)"
+          ]
+        },
+        "opacity": 1
+      },
+      {
+        "id": "dusk",
+        "label": "Dusk",
+        "gradient": {
+          "angle": 160,
+          "stops": [
+            "rgba(255, 120, 60, 0.10)",
+            "rgba(120, 60, 200, 0.08)",
+            "rgba(0, 0, 0, 0)"
+          ]
+        },
+        "opacity": 1
+      }
+    ]
+  }
+}

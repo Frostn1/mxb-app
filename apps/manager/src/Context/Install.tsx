@@ -30,6 +30,12 @@ import { useDownloads } from "./Downloads";
 import { useDropReview } from "./DropReview";
 import { useT } from "@/i18n";
 import { installNoteKey } from "../lib/installNote";
+import {
+  reviewOutcomeStage,
+  TIMED_OUT,
+  withTimeout,
+  type ReviewOutcome,
+} from "../lib/installQueue";
 import { supportMoment } from "@frost/shared/api/support";
 
 /** Where the bytes come from — a resolvable host, a file the user picked, or something already
@@ -171,6 +177,9 @@ const MAX_CONCURRENT = 2;
 /** How far ahead of the running jobs to resolve download links. See `prefetch`. */
 const PREFETCH_AHEAD = 2;
 
+/** A page lookup must not occupy one of the two install lanes forever. */
+const RESOLVE_TIMEOUT_MS = 60_000;
+
 /**
  * How much of the recent past the transfer rate is measured over.
  *
@@ -285,6 +294,17 @@ export function InstallProvider({
     [],
   );
 
+  /** Auto-retire a successful card after the user has had time to see it. */
+  const retireDone = useCallback((key: string) => {
+    clearTimers.current.set(
+      key,
+      window.setTimeout(() => {
+        clearTimers.current.delete(key);
+        setActive((cur) => cur.filter((it) => !(it.key === key && it.stage === "done")));
+      }, 5000),
+    );
+  }, []);
+
   /** Republish the pending queue for rendering. Called wherever `queueRef` moves. */
   const syncQueue = useCallback(() => {
     setQueued(
@@ -390,6 +410,19 @@ export function InstallProvider({
         error,
       });
 
+    const settleReview = (outcome: ReviewOutcome) => {
+      const action = reviewOutcomeStage(outcome, tRef.current("drop.installFailed"));
+      if ("remove" in action) {
+        setActive((cur) => cur.filter((it) => it.key !== key));
+        return;
+      }
+      patch(key, (cur) => ({ ...cur, ...action }));
+      if (action.stage === "done") {
+        onInstalledRef.current?.();
+        retireDone(key);
+      }
+    };
+
     try {
       if (source.kind === "download") {
         const pack = await addToLibrary(slug, source.url, source.host, subpath, destFolder);
@@ -399,7 +432,7 @@ export function InstallProvider({
           // commits, so this run is finished: the lane frees and the queue moves on. The card
           // stays up saying what is waiting, because the sheet may be behind another one.
           patch(key, (cur) => ({ ...cur, stage: "review" }));
-          reviewRef.current(pack);
+          reviewRef.current(pack, settleReview);
           return;
         }
       } else if (source.kind === "shop") {
@@ -411,7 +444,7 @@ export function InstallProvider({
         // the browser saved is read like any other drop, and the review sheet sorts it.
         const plan = await planDrop([source.path]);
         patch(key, (cur) => ({ ...cur, stage: "review" }));
-        reviewRef.current(plan);
+        reviewRef.current(plan, settleReview);
         return;
       } else {
         await importFile(source.path, subpath, destFolder);
@@ -440,15 +473,7 @@ export function InstallProvider({
       // Only once nothing else is queued or running: the support card never lands mid-task.
       if (queueRef.current.length === 0 && activeKeysRef.current.size <= 1) supportMoment();
       // Auto-retire the sidebar/detail card a few seconds after success.
-      clearTimers.current.set(
-        key,
-        window.setTimeout(() => {
-          clearTimers.current.delete(key);
-          setActive((cur) =>
-            cur.filter((it) => !(it.key === key && it.stage === "done")),
-          );
-        }, 5000),
-      );
+      retireDone(key);
     } catch (e) {
       // A stop the user asked for isn't a failure: retire the card quietly rather than leaving
       // a red error and a Retry button behind. Note this only runs when the backend actually
@@ -488,7 +513,7 @@ export function InstallProvider({
       unlisten();
       unlistenFrost();
     }
-  }, [patch]);
+  }, [patch, retireDone]);
 
   // Auto-unlock secured content: try any `.mxbsecure` that has no key yet, at startup and after
   // each install/reload (both emit `frostmod-reload`). Quiet — a no-op unless you're enrolled and
@@ -570,8 +595,14 @@ export function InstallProvider({
               // resolves, so another lane's `prefetch` would otherwise see it as unresolved
               // and fetch the same mod page a second time.
               head.resolving ??= head.resolve!();
-              const resolved = await head.resolving;
-              if (resolved) {
+              const resolved = await withTimeout(head.resolving, RESOLVE_TIMEOUT_MS);
+              if (resolved === TIMED_OUT) {
+                // Said out loud rather than dropped: the row would otherwise just vanish from
+                // the panel, which reads as the click never having happened.
+                console.warn(`Timed out resolving install for ${head.slug}`);
+                toast.error(tRef.current("install.failed", { title: head.title }));
+                params = null;
+              } else if (resolved) {
                 const { url, host, ...rest } = resolved;
                 params = { ...rest, source: { kind: "download", url, host } };
               }

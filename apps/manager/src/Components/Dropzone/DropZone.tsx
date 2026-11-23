@@ -1,6 +1,9 @@
 import { useEffect, useState } from "react";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { Loader2, PackageOpen } from "lucide-react";
+import { toast } from "sonner";
+import { onShopDownloadSaved } from "@frost/shared/api/mods";
+import { isOverDropTarget } from "@frost/shared/extensions/dropTargets";
 import { useDropReview } from "../../Context/DropReview";
 import { useT } from "@/i18n";
 import { useImport } from "./useImport";
@@ -33,6 +36,10 @@ export default function DropZone() {
 
     void getCurrentWebview()
       .onDragDropEvent((event) => {
+        if (event.payload.type !== "leave" && isOverDropTarget(event.payload.position, "ext-publish")) {
+          setHovering(false);
+          return;
+        }
         // The upload dialog takes drops while it is open: those are files to upload, not install.
         const claim = dropClaim();
         if (claim) {
@@ -64,6 +71,24 @@ export default function DropZone() {
       unlisten?.();
     };
   }, [stagePaths]);
+
+  // A purchase the user clicked on the shop's page while its check window was up lands in
+  // Downloads. Installing it is the same review a drop of that file gets.
+  useEffect(() => {
+    const unlisten = onShopDownloadSaved(({ path, name, success }) => {
+      if (!success) {
+        toast.error(t("shopSaved.failed", { name }));
+        return;
+      }
+      toast.success(t("shopSaved.done", { name }), {
+        duration: 15000,
+        action: { label: t("shopSaved.install"), onClick: () => void stagePaths([path]) },
+      });
+    });
+    return () => {
+      void unlisten.then((off) => off()).catch(() => {});
+    };
+  }, [stagePaths, t]);
 
   // `staging` is this hook instance's own — a pick from the Library drives a separate one, and
   // reports itself on its own button — so the overlay still only ever follows a drop.

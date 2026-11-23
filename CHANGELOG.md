@@ -1,5 +1,287 @@
 # Changelog
 
+## Unreleased — MXB App: Graphics preset
+
+### Added
+- MXB App: Settings → Graphics preset: Off, MXB Clean or MXB Photo, one click each (MX Bikes). Clean is light sharpening (AMD CAS), SMAA, a subtle warm grade and soft bloom for racing; Photo pushes the same chain further with a vignette, for screenshots. Picking one downloads the official ReShade 6.8.0 from reshade.me and the effects from their repositories, each checked against a pinned SHA-256, into the game folder. Your own ReShade, `ReShade.ini` or other `opengl32.dll` is never replaced without asking; it is moved aside and Off puts it back byte for byte. No ambient occlusion, GI or add-on build; the one depth effect is MXB Photo's depth of field.
+- MXB App: Graphics preset photo mode. In game, F9 flips between MXB Clean and MXB Photo, F6 turns MXB Photo's depth of field (CinematicDOF by Frans Bouma, auto-focus on the screen centre) on and off, and F11 saves a lossless PNG with the effects into `MXB Photos` in the game folder. The settings card lists the keys as bound (rebinding them in ReShade's menu shows there), opens the photos folder, explains MX Bikes' own F10 4K/8K shot (no HUD, no ReShade) and converts those TGAs to PNG beside them, and gives the NVIDIA DSR or AMD VSR tip for effects above screen resolution.
+
+## Unreleased — fbx3edf
+
+### Fixed
+- Textures are found again wherever the FBX was exported: the path the FBX recorded, the FBX folder, the output folder (where bike.tga is), and an optional Texture folder. A texture is matched by file name, any case, any of .tga .png .dds .jpg. A missing texture lists every place looked in.
+
+## Unreleased — Studio: Bike builder positioning
+
+### Fixed
+- Online races: the app no longer reloads game content while you're on a server. A reload mid-session made every other rider disappear, for example at the switch from practice to race. This covers every reload the app sends: mod changes, secured content unlocks, loadouts, model and sound swaps and the manual reload. It also holds through the short gap between races when the game reports no server. Held reloads run once you've been off a server for 5 minutes; new paints still show up live.
+- **A bike exported from the game no longer shows back to front.** Its mount points — front and rear axle, handlebar, steering head — follow the base bike's own nodes, so the front wheel goes at the front and the handlebar on the steering head.
+- **Store forks put the front wheel where the fork's axle is.** A Blends fork snapped into Front suspension brought its axle point along without the fork's rake, so the front wheel (and what hangs from it) sat straight under the fork's top instead of at the bottom of its legs. On a base bike facing the other way the wheel ended up behind the bike. A kit steer's handlebar and plate points are carried the same way, so levers, handguards and plates follow it.
+- **R keeps turning past half a turn** instead of jumping to the other side at 180°.
+
+### Added
+- **Hold Ctrl while moving or turning** (G or R) to step by 5 mm or 5°, as in Blender.
+
+## Unreleased — Studio: choose your mods folder
+
+### Added
+
+- Studio users can browse for or auto-detect the MX Bikes mods and profiles folder in Settings.
+
+## 2026-11-14 — v0.20.10 — Extensions
+
+### Added
+- **Extensions tab.** Browse and install extensions: themes, extra tabs and tools that read your MXB data with the permissions you grant. Eight first-party extensions to start, including Coach Laps, Friends Online, Server Watcher and the Dunes theme.
+- **Verified, Suggested and community extensions.** Verified ones are signed by mxbsecure. Community ones say who published them and that mxbsecure hasn't checked them, and ask before install. A file from outside the marketplace gets a stronger warning, and an update that wants more access asks again.
+- **Publish your extension** from the Build tab or mxbsecure.com, and request Verified.
+- **Build your own.** A developer kit, samples, docs and an MCP server for building extensions with an AI agent.
+- **Blends shop:** download an earlier revision of a part.
+
+### Fixed
+- **mxb-mods Tracks:** the Beginner, Intermediate and Pro filters are gone (mxb-mods removed them); Tracks shows all tracks.
+- **Track matching:** Walnut 2 is no longer matched to Walnut 1.
+
+## 2026-11-13 — v0.20.9 — Plugins tab
+
+### Added
+- **Plugins tab.** Manage every MX Bikes game plugin in one place, and see which ones FrostMod already covers.
+- **Coach: apply a suggested setup in one click.** Coach writes its suggested changes into your own setup file.
+- **Aussie mode** in Game Integration settings (off by default).
+- **Hosted servers:** league options, co-owners, Stop/Start, track upload and a join password.
+
+### Fixed
+- Tracks whose files write whole numbers as decimals load again.
+
+## 2026-11-12 — v0.20.8 — Mac and Linux are back
+
+### Added
+- **Mac and Linux builds again.** Every release now ships a Mac (Apple Silicon) `.dmg`, a Linux `.AppImage` and `.deb`, and the Windows installer. The Mac app and the Linux AppImage update themselves like Windows does.
+- **SHA256SUMS** on every release, to check a download by hand.
+
+### Fixed
+- **Game Integration off means off on Linux and Mac too.** The app no longer adds its secure-content module to the game under Proton or Wine when Game Integration is turned off.
+
+## 2026-11-12 — v0.20.7 — Installs you can trust
+
+### Fixed
+- **Your own files are safe.** Restore all, presets, swaps and cleanups never delete a bike, paint or mod you added yourself.
+- **Installs land in the right place.** Sound packs, tyre sets and mods wrapped in an extra folder go where MX Bikes loads them.
+- **No more lag while installing.** The game reloads once instead of twice, folder scans no longer freeze the app, and progress updates are throttled.
+- **"Waiting for you" clears** once you answer a pack's review.
+- **mxb-mods ratings and Popular** come from mxb-mods' official API in batches, and the app backs off on errors instead of retrying in a loop.
+
+## 2026-11-21 — fbx3edf v0.6.4
+
+### Fixed
+- **Textures are found wherever you export the FBX.** 0.6.3 only looked in the FBX folder, so a texture like bike.tga somewhere else came out grey. Convert now tries the path saved in the FBX, the FBX folder and its textures/tex folders, and the bike folder you convert into, matching the file name in any case and any common image type. If a texture is still missing it lists every place it looked.
+- **Optional Texture folder in Convert.** Point Convert at a folder of textures and it uses it, and remembers the last one.
+
+## 2026-11-20 — fbx3edf v0.6.3
+
+### Fixed
+- **Rider: the body shows in game.** A model converted as Rider showed only the helmet and boots in Bike Selection. Each bone was missing the bind data the game skins the body with, so nothing of the body was drawn. Re-convert your rider with this version.
+- **Bike parts without a `[Hierarchy]` in the export script convert.** Bike parts used to refuse a script with no `[Hierarchy]`. Convert now uses the standard bike hierarchy for it, the same one PiBoSo's bike template has, and says so under the script.
+
+## 2026-11-16 — fbx3edf v0.6.2
+
+### Fixed
+- **Liner: a fork in its own fsusp.edf lines up again.** It was moved with the frame, so the lower legs ended up off the fork tubes. When the new bike's fork is longer, the lower legs are stretched along their axis so the tubes still sit in them, with the axle on the new bike's axle.
+
+## 2026-11-16 — fbx3edf v0.6.1
+
+### Fixed
+- **Riders on the community skeleton convert again.** A rig with a riderRIG_armour_end bone wasn't recognised as a rider, so the body came out invisible in game with the helmet floating. It's now picked as Rider and skinned like the stock rider. Re-convert with Type = Rider.
+
+## 2026-11-15 — fbx3edf v0.6.0
+
+### Added
+- **Rider type.** Converts a rider FBX into rider.edf with its gfx.cfg, the way MX Bikes riders are laid out.
+- **Liner plugin.** Frost Liner is now part of fbx3edf.
+- **Dirt layers.** Mud layers for a texture without Photoshop.
+
+### Fixed
+- **Extra pieces on a rider, like a watch, follow the bone they belong to** instead of staying where they were in the FBX.
+- **A posed armature is written at its bind pose**, the pose the game's animations start from.
+- **A rig without riderRIG_armour gets one**, so the helmet, boots and armour have somewhere to hang.
+- No more false "posed" and armour warnings on a rest rig, and the skipped end bones are one line.
+
+## 2026-11-01 — fbx3edf v0.5.2
+
+### Fixed
+- GFX: Auto-line chain finds the sprocket again on a bike exported as one model. 0.5.1 read those bikes turned on their side, so the chain landed in the wrong place.
+- Chain Maker: the Convert settings note shows its real values instead of placeholders.
+
+## 2026-10-28 — fbx3edf v0.5.1
+
+### Added
+- Optimize textures, in Settings → Conversion. Off by default. High, Balanced, Small, Sharp or Original size; Smart keeps edges and text sharp. Normal maps are stored tighter and texels no UV reaches are filled. The result shows the size before → after. Command line: `--textures`, `--smart-textures`.
+- Chain Maker in a Plugins tab: neck chains, converted with the Convert tab's settings.
+- Preview is a top tab beside Convert and GFX.
+- GFX tab: Blender-style controls. Shift for fine steps, Ctrl to snap, Esc or a right click puts the value back, G grabs a dot.
+- GFX tab: the game's own rider hands, see-through, sit on the grip markers and follow them, so bars and grips line up with where the hands will be. Hands button to hide them.
+
+### Fixed
+- The GFX preview draws the whole bike, also when its model is in an encrypted `.pkz`.
+- 3D view: clicking an axis ball snaps the view to it, Blender's way, and orbiting no longer stops at the top and bottom.
+- Typing a grip value no longer hides its row halfway through.
+
+## 2026-10-26 — fbx3edf v0.5.0
+
+### Added
+- Converts everything FBX2EDF does: Tracks (`.map`), Track collision (`.trp`), rider Animations (`.anm`) and Append to an existing `.edf`. Tracks and collision come out the same as FBX2EDF 1.32's.
+- One Type dropdown (Bike, Part, Track, Track collision, Animation) picks what you convert; only that type's settings show.
+- Make LODs (better FPS on full gates), in Settings. Off by default.
+- Command line: `--type edf|map|collision|animation`, `--append`, `--lods` and the track and animation settings.
+
+### Changed
+- A clearer Convert screen, with a ✕ on each file to remove it.
+- The shadow model follows the model's name, and the bike's `gfx.cfg` shadow lines point to it.
+
+### Fixed
+- Recalculate normals keeps sharp edges.
+- A bike exported under one `model` empty with a `model.shadow` twin converts as a bike.
+
+## 2026-10-25 — Frost's Studio v0.10.0 — New Bike tab
+
+- New Bike tab: Outliner on the left, 3D view, Properties on the right. Turn parts, click a stage to go back, fits small windows.
+- Blender controls: middle mouse orbit, Shift pan, numpad views, G move, R rotate, H hide, X remove, Ctrl+Z undo. Press ? for the list.
+- Store Blends come in as just the full-detail model, and forks split into Steering and Front suspension and snap onto the bike.
+- Split works on single-mesh parts.
+- Settings grouped into sections. Blender path is under Paths and found automatically.
+- Style Pack themes work in Studio.
+- File menu moved into the Editor. Editor and Bike sit together in the top bar.
+- New app icon. Selected items are easier to see.
+
+## 2026-10-25 — fbx3edf v0.4.5
+
+### Fixed
+- GFX: Auto-line chain now also fixes a wrong chain `pos`, which made the chain hang to the ground.
+
+## 2026-10-25 — fbx3edf v0.4.4
+
+### Fixed
+- `_s` spec maps plugged into Specular in Blender were added as an extra blended layer and washed out the paint. Bikes convert like they did before 0.2.3 again.
+
+## 2026-10-24 — fbx3edf v0.4.3 — Your own shadow FBX
+
+### Added
+- **Use your own shadow FBX.** Put the bike's FBX and its shadow FBX in the list together and both are converted: the shadow FBX becomes the bike's shadow model, `model_s.edf` (`<name>_s.edf` for any other name), instead of one made from the bike. It's paired by name in the same folder: `bike_shadow.fbx`, then `bike_s.fbx`, then a lone `shadow.fbx` next to a single bike. The Files list shows the pair on one row (`bike.fbx + shadow: bike_shadow.fbx`), with a tick to leave the shadow FBX out. It's converted with the bike's scale, axes and export script, with no textures, and keeps its own parts and nodes by name. It's converted even when **Also make shadow model** is off, because you added it, and the screen says so. After converting, each bike says which shadow it got: `shadow model_s.edf from bike_shadow.fbx` or `made from the model`. On the command line, folders and files pair the same way, and `--shadow-fbx FILE` names the shadow FBX for a single model.
+
+## 2026-10-23 — fbx3edf v0.4.2 — GFX on OEM model swaps
+
+### Fixed
+- **GFX: an OEM bike or a model swap on one is assembled.** An OEM bike keeps its .geom, which puts the fork, steer and swingarm in place, inside an encrypted .pkz that the GFX tab doesn't open. The parts were drawn apart. Now they're put together with the .geom from a folder beside the bike for the same bike (such as `<bike> config`) when there is one. Else the mounts are read off the model's own shape, the way Auto-line chain finds the sprocket: the axles, the fork tubes in the clamps, the steering stem and the frame's head tube. Anything it can't find, such as the swingarm pivot, uses a typical bike's mounts. On the 2025 KTM model swap it lands the steer, fork and front axle within about 1 cm of the KTM's own .geom, and the swingarm and rear axle within about 2 cm. The view says the placement is approximate and how confident it is. The gfx.cfg values you edit are still exact.
+- **GFX: grips always show.** A grip gfx.cfg doesn't set shows as "Not set", with a faint dot where it would go. **Add grips** writes it to gfx.cfg, in the main copy and in the first-person copy when the bike has a first-person steer. The tab also says what in gfx.cfg keeps the grips from working, such as a block that's never closed with `}` or grips that aren't under `steer`.
+- **GFX: a protected gfx.cfg is never written.** A protected model's encrypted gfx.cfg opens read-only (or not at all) instead of getting values written into it.
+
+## 2026-10-23 — fbx3edf v0.4.1 — Shadow model, GFX textures, license fixes
+
+### Added
+- **Also make shadow model.** Converting a model can now write its shadow model too, `model_s.edf` beside `model.edf` (`<name>_s.edf` for any other name), the way the game's own shadows are named. It has the same parts and nodes in the same places, so steer, suspension and rider rigs line up, with no textures or materials. On by default for a bike. Name the file in gfx.cfg's `shadow` entries. **Lighter shadow** also merges vertices within 5 mm of each other, for a smaller file. On the command line: `--shadow-model`, `--no-shadow-model` and `--lighter-shadow`.
+
+### Fixed
+- **GFX: every texture on a converted model.** Flat-colour materials are embedded as small 16x16 textures, and the 3D view (and Preview) skipped them. The parts using them showed without a texture, and on some models the textures after them went onto the wrong parts. They all show now.
+- **GFX: textures found the way the game finds them.** A texture missing from the model and the paint is looked for beside the model, in its paints and textures folders, then in the bike folder, in any letter case, as .tga, .dds or another image format. Any still missing are listed in the corner of the view. The number plate's texture isn't listed, since the game draws it.
+- **GFX: first-person copy shown.** When gfx.cfg's first-person (`cockpit`) copy of the chain's engine sprocket, a grip or the exhaust differs from the main copy, the view draws it as a second, faint dot. In first person the game uses that copy, so a sprocket that looks right from the saddle can be in a different place in the view.
+- **The license check no longer drops your license when the server can't answer.** A server error or an answer without a reason used to count as "no license" and deleted the license kept for offline use. Now only a definite answer from the license service ends it; anything else is "can't check right now" and a valid kept license keeps working.
+- **The license agreement is no longer asked for on every start.** An older Frost Converter on the same PC and fbx3edf kept undoing each other's acceptance. fbx3edf now keeps every version you accepted in its own file and still honours the old one.
+
+## 2026-10-23 — MXB Coach v0.1.27 — Live lap counts
+
+### Fixed
+- **Sessions you're still riding now update their lap count live; Refresh works.** While the game was still recording, the Sessions list could stay at an old lap count (5 laps on lap 21) until Coach was restarted.
+
+### Added
+- **Keep Coach on top.** A switch in Settings → General keeps the Coach window above the game instead of behind it. Off by default.
+
+## 2026-10-23 — fbx3edf v0.4.0 — GFX tab
+
+### Added
+- **GFX tab.** Edit a bike's or FrostMod model's gfx.cfg next to Convert: grips, chain, levers, exhaust and the rider offset, with sliders and number fields, on the model in 3D. Every save writes the first-person `cockpit` copy too, and FrostMod reloads it in game straight away. It moved here from Frost's Studio.
+- **Auto-line chain.** Finds the front sprocket on the bike's model by its shape and puts the chain's engine end on it. It shows how sure it is and the other parts it considered. A chain linked to a node (`link_obj`) gets plain numbers instead, so it reloads live.
+- **Chain ratio warning.** A chain with `ratio = 0` doesn't scroll its texture in game. The tab says so and sets the stock 0.035 in one click.
+- **Check for updates.** A button in Settings checks for a new version now instead of waiting for the next launch, and installs it from there.
+
+## 2026-10-23 — Frost's Studio v0.9.0 — GFX moves to fbx3edf
+
+### Changed
+- **No GFX tab.** The gfx.cfg editor is now in fbx3edf (mxbsecure.com/converter), with auto-line chain added.
+
+## 2026-10-22 — fbx3edf v0.3.3 — Gear that hangs from a rider bone
+
+### Fixed
+- **An export script's `rotation` now turns a one-model conversion.** In `[Hierarchy]`, `rotation = x y z` sets the model's root rotation and replaces Blender's axis turn, as `steer_rot` does for a bike part. Before, fbx3edf ignored it, as fbx2edf does. Use it for gear the game hangs from a rider bone, such as a neck chain or protection. The bone's X runs up the spine, so a chain built upright in Blender stood sideways in front of the chest. `rotation = 90 0 -90` hangs it round the neck. `0 0 0`, the bike template's value, still changes nothing.
+
+## 2026-10-21 — MXB Coach v0.1.26 — French
+
+### Added
+- **French: the whole app and the coach's advice.**
+
+## 2026-10-21 — fbx3edf v0.3.2 — Themes
+
+### Added
+- **Themes.** Light, dark or your system's, and the colorways from MXB App, in Settings → Appearance. The Halloween theme is free for everyone until October 31. Supporters and Style Pack owners get the pack's colorways and a custom accent colour, the same as in MXB App.
+
+## 2026-10-20 — fbx3edf v0.3.1 — Live reload
+
+### Added
+- **Live reload.** After you convert, save the FBX again and fbx3edf converts it again with the same settings. A line above the files shows when it last updated. If a save doesn't convert, the last good .edf stays and the error shows. Turn it off in Settings.
+
+## 2026-10-20 — fbx3edf v0.3.0 — Frost Converter is now fbx3edf
+
+### Changed
+- **New name.** Frost Converter is now fbx3edf, the next step after fbx2edf. Your license, settings and shortcuts carry over; the update moves them for you.
+
+## 2026-10-20 — Frost Converter v0.2.4 — Pay what you want
+
+### Changed
+- **Pay once, at a price you choose.** Frost Converter is now a one-time purchase: $15 minimum, $25 suggested. It's yours to keep, on one PC at a time. The monthly plan is gone, and monthly subscribers have been moved to a lifetime license for free.
+- **License agreement 2026-10-20.** Covers the one-time license. You accept it again on next start.
+
+## 2026-10-19 — v0.20.6 — Halloween for everyone
+
+### Changed
+- **Halloween theme.** Free for everyone until October 31, in Settings → Appearance.
+
+## 2026-10-19 — v0.20.5 — Shop purchases load
+
+### Fixed
+- **mxbikes-shop.com purchases.** After the shop's security check, your purchases now load even if you close the check window yourself. The app sees the signed-in page and closes it for you.
+- **Downloads in the shop window.** A download you click inside the shop window is saved to Downloads, with an Install button, instead of going nowhere.
+
+## 2026-10-19 — Frost Converter v0.2.3 — Reflection maps, logs
+
+### Fixed
+- **Texture names with spaces.** A .shd that names a map with a space in it ("SRSCHRUM Honda_r.tga") lost that map; it now keeps the whole name.
+- **Reflection maps from Blender.** A reflection map wired to Blender's Specular IOR Level is now carried over, like fbx2edf does.
+
+### Added
+- **Logs.** Frost Converter writes a log file, and Settings has Copy logs and Share logs for support.
+
+## 2026-10-19 — Frost Converter v0.2.2 — Lifetime license
+
+### Added
+- **Lifetime license.** Buy Frost Converter once for $39 instead of $7.99 a month. It never expires, runs on one PC at a time like the monthly one, and covers Frost Converter only.
+- **Switch to lifetime.** Subscribers can switch from Settings or the store page. What you've already paid counts toward the $39, and the monthly subscription stops.
+
+### Changed
+- **License agreement 2026-10-19.** Covers the lifetime license. You accept it again on next start.
+
+## 2026-10-18 — v0.20.4 — Halloween, supporter perks, track names
+
+### Added
+- **Halloween theme.** A new Style Pack theme for supporters.
+- **Supporter perks.** Supporters get a badge on their account, live shares and servers, plus the Style Pack's themes and accent colour. A Buy Me a Coffee membership grants it; the Style Pack can also be bought on its own.
+- **A support card** in Settings, for anyone who wants to back the app.
+
+### Fixed
+- **Downloaded tracks keep their real names.** A name with spaces was saved as `%20`, so the game didn't see it or reported a track mismatch on join. Tracks also go in the folder their category names.
+- **Server list sign-in.** The Servers tab no longer reports "auth" failures while the master server is still holding the last session.
+- **Shop sign-in** shows mxbikes-shop.com's Cloudflare check instead of timing out in a hidden window.
+
+### Changed
+- **Latest version only.** An app far behind the current build asks you to update before it starts.
+
 ## 2026-10-18 — Frost Converter v0.2.1 — One PC per license
 
 ### Changed

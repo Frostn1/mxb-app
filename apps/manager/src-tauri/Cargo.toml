@@ -3,8 +3,8 @@
 # whatever cargo called it. Cargo target names can't hold a space, so this is as close as
 # it gets. The description is what Windows Task Manager shows in its Processes tab.
 name = "mxb-app"
-version = "0.20.3"
-description = "MXB App — MX Bikes mod manager"
+version = "0.20.10"
+description = "MXB App, the unofficial MX Bikes app"
 authors = ["Frost"]
 edition = "2021"
 
@@ -79,9 +79,11 @@ futures-util = { version = "0.3", features = ["io"] }
 # shared links in-app, so end users don't need the megatools/MEGAcmd binary.
 mega = "0.8"
 scraper = "0.20"
+# Allowlist HTML sanitiser for remote descriptions rendered in the webview.
+ammonia = "4"
 regex = "1"
 html-escape = "0.2"
-zip = "2"
+zip = "9"
 sevenz-rust = "0.6"
 unrar = "0.5"
 # DEFLATE codec for compressed in-app payloads.

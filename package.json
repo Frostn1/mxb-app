@@ -2,10 +2,16 @@
   "name": "frost-monorepo",
   "private": true,
   "version": "0.15.1",
+  "license": "LicenseRef-PolyForm-Strict-1.0.0",
   "type": "module",
   "workspaces": [
     "packages/shared",
-    "apps/manager"
+    "packages/mxbsecure-ui",
+    "apps/manager",
+    "apps/studio",
+    "apps/coach",
+    "apps/servers",
+    "apps/cinema"
   ],
   "scripts": {
     "dev": "cd apps/manager && bun run dev",
@@ -17,7 +23,15 @@
     "check:secure-boundary": "bun scripts/check-secure-boundary.mjs",
     "check:no-ban-guids": "bun scripts/check-no-ban-guids.mjs",
     "typecheck": "bun run --filter '*' typecheck",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "dev:studio": "cd apps/studio && bun run dev",
+    "tauri:studio": "cd apps/studio && bun run tauri",
+    "dev:coach": "cd apps/coach && bun run dev",
+    "tauri:coach": "cd apps/coach && bun run tauri",
+    "dev:servers": "cd apps/servers && bun run dev",
+    "tauri:servers": "cd apps/servers && bun run tauri",
+    "dev:cinema": "cd apps/cinema && bun run dev",
+    "tauri:cinema": "cd apps/cinema && bun run tauri"
   },
   "overrides": {
     "postcss": "^8.5.25"

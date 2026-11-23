@@ -1,0 +1,148 @@
+[
+ {
+  "file": "animate.py",
+  "from": "integrate\\animate.py",
+  "kind": "patch",
+  "patches": [
+   [
+    "ap.add_argument('--root', default='CINEMA_bike_root')\nap.add_argument('--out', default=r'C:\\dev\\MXB\\claude-work\\outbox\\cinema')\n",
+    "ap.add_argument('--root', default='CINEMA_bike_root')\nap.add_argument('--out', default='')\n"
+   ]
+  ]
+ },
+ {
+  "file": "cameras.py",
+  "from": "integrate\\cameras.py",
+  "kind": "patch",
+  "patches": [
+   [
+    "cut2 = min(n - 30, land - 10)\nseg = list(range(cut1 - 1, cut2, 4))\n",
+    "cut2 = min(n - 30, land - 10)\nseg = list(range(cut1 - 1, cut2, 4)) or [min(n - 1, max(0, pk))]\n"
+   ],
+   [
+    "                best = (key, b.copy(), md)\n",
+    "                best = (key, b.copy(), md)\nif best is None:   # nowhere on the ground near the apex to stand: a camera beside it, off the ground\n    best = ((0, 0), P[pk] + side[pk] * 10 + Vector((0, 0, 1.5)), 10.0)\n"
+   ]
+  ]
+ },
+ {
+  "file": "drive_scene.py",
+  "from": "integrate\\drive_scene.py",
+  "kind": "patch",
+  "patches": [
+   [
+    "  blender -b scene.blend -P animate.py -P drive_scene.py -P render.py -- --json clip.json ...\nSwingarm comes from the shock through the .geom linkage (rig/build_rig.py table -> linkage.json),\nrider lean from chassis roll (rig/apply_frames.py key_rider_lean), pivoted at the seat.\"\"\"\n",
+    "  blender -b scene.blend -P animate.py -P drive_scene.py -P render.py -- --json clip.json ...\nSwingarm comes from the shock through the .geom linkage (scene.py solves it into the root's `linkage` table),\nrider lean from chassis roll (only with --lean-gain > 0; pose.py moves the body otherwise), pivoted at the seat.\"\"\"\n"
+   ],
+   [
+    "# 2) swingarm prop keyed from shock via linkage\ntab = json.load(open(os.path.join(HERE, 'linkage.json')))\n",
+    "# 2) swingarm prop keyed from shock via linkage\ntab = json.loads(root.get('linkage', '[]')) or [[0.0, 0.0], [1.0, 0.0]]\n"
+   ],
+   [
+    "\n# 3) rider lean beyond the bike, pivoted at the seat so the pelvis stays on it\nrr = O['CINEMA_rider_root']\nbase = rr.matrix_basis.copy()\nseat = Vector((0.0, 0.05, 0.95))\nif rr.animation_data:\n    rr.animation_data_clear()\nrr.rotation_mode = 'XYZ'\nfor fr in range(f0, f1 + 1):\n    sc.frame_set(fr)\n    R = root.matrix_world.to_3x3()\n    up, fwd = R @ Vector((0, 0, 1)), R @ Vector((0, -1, 0))\n    side = fwd.cross(Vector((0, 0, 1)))\n    roll = math.asin(max(-1, min(1, up.dot(side.normalized())))) if side.length > 1e-6 else 0.0\n    lean = a.lean_gain * roll\n    # rotate about the bike's forward axis (local Y); sign chosen so the rider tilts further the way the bike does\n    Rl = Matrix.Rotation(-lean, 4, 'Y')\n    T = Matrix.Translation(seat) @ Rl @ Matrix.Translation(-seat)\n    rr.matrix_basis = T @ base\n    rr.keyframe_insert('location', frame=fr)\n    rr.keyframe_insert('rotation_euler', frame=fr)\n",
+    "\n# 3) rider lean beyond the bike, pivoted at the seat so the pelvis stays on it. Off (--lean-gain 0) whenever pose.py\n#    moves the body from the telemetry itself, and there is nothing to lean without a rider.\nrr = O.get('CINEMA_rider_root')\nif rr is not None and a.lean_gain != 0:\n    base = rr.matrix_basis.copy()\n    seat = Vector((0.0, 0.05, 0.95))\n    if rr.animation_data:\n        rr.animation_data_clear()\n    rr.rotation_mode = 'XYZ'\n    for fr in range(f0, f1 + 1):\n        sc.frame_set(fr)\n        R = root.matrix_world.to_3x3()\n        up, fwd = R @ Vector((0, 0, 1)), R @ Vector((0, -1, 0))\n        side = fwd.cross(Vector((0, 0, 1)))\n        roll = math.asin(max(-1, min(1, up.dot(side.normalized())))) if side.length > 1e-6 else 0.0\n        lean = a.lean_gain * roll\n        # rotate about the bike's forward axis (local Y); sign chosen so the rider tilts further the way the bike does\n        Rl = Matrix.Rotation(-lean, 4, 'Y')\n        T = Matrix.Translation(seat) @ Rl @ Matrix.Translation(-seat)\n        rr.matrix_basis = T @ base\n        rr.keyframe_insert('location', frame=fr)\n        rr.keyframe_insert('rotation_euler', frame=fr)\n"
+   ]
+  ]
+ },
+ {
+  "file": "contact.py",
+  "from": "integrate\\contact.py",
+  "kind": "patch",
+  "patches": [
+   [
+    "done = []\nfor piv, tyre_mat in (('fwheel', 'fgeomax'), ('rwheel', 'rgeomax')):\n    mesh = next((o for o in O[piv].children_recursive if o.type == 'MESH' and not o.hide_render\n                 and any(s.material and s.material.name == tyre_mat for s in o.material_slots)), None)\n    if mesh is None:\n        continue\n",
+    "done = []\nfor piv in ('fwheel', 'rwheel'):\n    # the tyre: a material scene.py marked as rubber (the tyre mod's own sheets), on a mesh that turns with this wheel\n    mesh, tyre = None, None\n    for o in O[piv].children_recursive:\n        if o.type != 'MESH' or o.hide_render:\n            continue\n        tm = next((s.material for s in o.material_slots if s.material and s.material.get('cinema_tyre')), None)\n        if tm is not None:\n            mesh, tyre = o, tm\n            break\n    if mesh is None:\n        continue\n    tyre_mat = tyre.name\n"
+   ]
+  ]
+ },
+ {
+  "file": "shots.py",
+  "from": "integrate\\shots.py",
+  "kind": "patch",
+  "patches": [
+   [
+    "ap.add_argument('--no-rider', action='store_true')\nap.add_argument('--mode', default='stills')\nap.add_argument('--stills-out', default=r'C:\\dev\\MXB\\claude-work\\outbox\\cinema\\stills')\nap.add_argument('--prefix', default='norider')\nap.add_argument('--samples', type=int, default=256)\nap.add_argument('--res', type=int, nargs=2, default=[1920, 1080])\nap.add_argument('--only', default='')\nap.add_argument('--out', default=r'C:\\dev\\MXB\\claude-work\\outbox\\cinema')\n",
+    "ap.add_argument('--no-rider', action='store_true')\nap.add_argument('--mode', default='stills')        # none: cameras and settings only (cinema_run.py renders)\nap.add_argument('--stills-out', default='')\nap.add_argument('--prefix', default='norider')\nap.add_argument('--samples', type=int, default=256)\nap.add_argument('--res', type=int, nargs=2, default=[1920, 1080])\nap.add_argument('--only', default='')\nap.add_argument('--out', default='')\n"
+   ],
+   [
+    "cy.filter_width = 1.0\ntry:\n    pr = bpy.context.preferences.addons['cycles'].preferences\n    for t in ('OPTIX', 'CUDA'):\n        try:\n            pr.compute_device_type = t\n            break\n        except Exception:\n            continue\n    pr.get_devices()\n    for dv in pr.devices:\n        dv.use = dv.type != 'CPU'\n    cy.device = 'GPU'\nexcept Exception as e:\n    print('gpu', e)\n",
+    "cy.filter_width = 1.0\n# the GPU is gpu.py's: OptiX on the NVIDIA card only, set before anything else ran\n"
+   ],
+   [
+    "r.image_settings.file_format = 'PNG'\nif a.mode == 'stills':\n",
+    "r.image_settings.file_format = 'PNG'\nif a.mode == 'none':\n    pass\nelif a.mode == 'stills':\n"
+   ]
+  ]
+ },
+ {
+  "file": "fx.py",
+  "from": "fx\\fx.py",
+  "kind": "copy"
+ },
+ {
+  "file": "pose.py",
+  "from": "rider\\pose.py",
+  "kind": "copy"
+ },
+ {
+  "file": "outfit.py",
+  "from": "rider\\outfit.py",
+  "kind": "port",
+  "hash": "9fc29ae121e59051"
+ },
+ {
+  "file": "scene.py",
+  "from": "scene\\build_scene.py",
+  "kind": "port",
+  "hash": "d1735b56fd25f4c4"
+ },
+ {
+  "file": "gpu.py",
+  "from": "gpu.py",
+  "kind": "port",
+  "hash": "0299c8cfbc5478a9"
+ },
+ {
+  "file": "ground.py",
+  "from": "scene/ground.py",
+  "kind": "copy"
+ },
+ {
+  "file": "lighting.py",
+  "from": "scene/lighting.py",
+  "kind": "copy"
+ },
+ {
+  "file": "nmapfix.py",
+  "from": "scene/nmapfix.py",
+  "kind": "copy"
+ },
+ {
+  "file": "cinematic.py",
+  "from": "scene/cinematic.py",
+  "kind": "copy"
+ },
+ {
+  "file": "realism.py",
+  "from": "scene/realism.py",
+  "kind": "patch",
+  "patches": [
+   [
+    "MUD_RGB = (152, 118, 88)\n",
+    "MUD_RGB = (152, 118, 88)\nMUD_AMOUNT = 1.0          # the app's Mud slider (0..1): 0 a clean bike and clean gear; 1 about 2.5x the prototype's layer, wider spread, double the dust\n"
+   ],
+   [
+    "        splat = _ramp(N, L, _noise(N, L, 160.0, 8.0, 0.7, obj), 0.48, 0.62)\n",
+    "        splat = _ramp(N, L, _noise(N, L, 160.0, 8.0, 0.7, obj), 0.48 - 0.14 * MUD_AMOUNT, 0.62)\n"
+   ],
+   [
+    "        mud = _math(N, L, 'MULTIPLY', mud, _math(N, L, 'SUBTRACT', 1.0, inside, clamp=True))\n",
+    "        mud = _math(N, L, 'MULTIPLY', _math(N, L, 'MULTIPLY', mud, _math(N, L, 'SUBTRACT', 1.0, inside, clamp=True)), 2.5 * MUD_AMOUNT, clamp=True)\n"
+   ],
+   [
+    "def _dust(m, z_low, amount):\n",
+    "def _dust(m, z_low, amount):\n    amount *= 2.0 * MUD_AMOUNT\n"
+   ]
+  ]
+ }
+]

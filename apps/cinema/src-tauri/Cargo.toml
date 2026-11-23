@@ -1,0 +1,38 @@
+[package]
+# The binary is `mxb-cinema.exe`; the installer and the window call it MXB Cinema.
+name = "mxb-cinema"
+version = "0.1.0"
+description = "MXB Cinema: a ride, a moment, a shot in Blender"
+authors = ["Frost"]
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+# build.rs reads blender/upstream.json to check the bundled scripts against the prototype.
+serde_json = "1"
+
+[dependencies]
+# The game's formats, the shared config and the 3D viewer's commands: the same core every app
+# in the lineup links. Cinema reads a bike, a rider and a track exactly the way Coach draws them.
+mxb-core = { path = "../../../crates/core" }
+tauri = { version = "2", features = [] }
+tauri-plugin-shell = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-log = "2"
+tauri-plugin-process = "2"
+tauri-plugin-single-instance = "2"
+log = "0.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+flate2 = "1"
+base64 = "0.22"
+# Reading a few hundred recordings for the session list, a core each.
+rayon = "1"
+
+[features]
+# Matches the other apps'. `tauri build` turns it on; a dev run leaves it off.
+custom-protocol = ["tauri/custom-protocol"]
+# A windowless dev run that answers the frontend's commands over HTTP on 127.0.0.1, so the UI
+# can be driven from a headless browser for screenshots. Never in a release build.
+bridge = []

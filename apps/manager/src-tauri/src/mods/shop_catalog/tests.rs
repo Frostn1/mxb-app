@@ -514,9 +514,37 @@ fn description_html_is_stripped_of_anything_executable() {
 }
 
 #[test]
-fn stripping_does_not_eat_a_tag_that_merely_starts_the_same_way() {
+fn an_unknown_tag_is_dropped_but_its_text_kept() {
     let html = sanitize_html("<p>a</p><scriptish>b</scriptish>").unwrap();
-    assert!(html.contains("scriptish"), "<scriptish> is not <script>");
+    assert!(!html.contains("<scriptish"), "{html}");
+    assert!(html.contains('b'), "{html}");
+}
+
+/// Markup that runs script without a `<script>` tag. The old blocklist sanitiser kept
+/// `<svg>`, `<meta>` and `<base>`, and only dropped attributes when it spotted `on…=`.
+#[test]
+fn script_without_a_script_tag_is_removed_too() {
+    for raw in [
+        r#"<svg onload="alert(1)"><circle r="1"/></svg><p>text</p>"#,
+        r#"<details open ontoggle="alert(1)"><summary>s</summary></details><p>text</p>"#,
+        r#"<img src="x" onerror="alert(1)"><p>text</p>"#,
+        r#"<a href="javascript:alert(1)">x</a><p>text</p>"#,
+        r#"<a href=" JaVaScRiPt:alert(1)">x</a><p>text</p>"#,
+        r#"<iframe srcdoc="<script>alert(1)</script>"></iframe><p>text</p>"#,
+        r#"<meta http-equiv="refresh" content="0;url=https://example.invalid"><p>text</p>"#,
+        r#"<base href="https://example.invalid/"><p>text</p>"#,
+        r#"<svg><a xlink:href="javascript:alert(1)"><text>x</text></a></svg><p>text</p>"#,
+        r#"<form action="https://example.invalid"><button>go</button></form><p>text</p>"#,
+        r#"<object data="x.swf"></object><embed src="x.swf"><p>text</p>"#,
+        r#"<p style="background:url(javascript:alert(1))">text</p>"#,
+    ] {
+        let html = sanitize_html(raw).unwrap_or_default();
+        let lower = html.to_ascii_lowercase();
+        for bad in ["<svg", "<iframe", "<meta", "<base", "<form", "<object", "<embed", "javascript:", "onload", "ontoggle", "onerror", "srcdoc", "style="] {
+            assert!(!lower.contains(bad), "{bad} survived in {html} (from {raw})");
+        }
+        assert!(html.contains("text") || raw.contains("<a href"), "{html}");
+    }
 }
 
 #[test]

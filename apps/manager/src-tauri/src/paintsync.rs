@@ -182,6 +182,9 @@ pub const MAX_BIKES: usize = 32;
 pub fn local_look(cfg: &AppConfig, profile: &str) -> anyhow::Result<LocalLook> {
     let profiles_dir = cfg.profiles_dir();
     let mut loadouts = presets::read_all_loadouts(&profiles_dir, profile)?;
+    // FrostMod's remote-rider shadow folders can leak into profile.ini if the game scans
+    // while one exists. They are not this rider's bikes and must never be published.
+    loadouts.retain(|(bike, _)| !crate::library::is_frostmod_shadow_bike(bike));
 
     // The active bike leads, so a profile over the cap keeps the one being ridden.
     if let Some(active) = presets::active_bike(&profiles_dir, profile) {
@@ -634,9 +637,8 @@ pub async fn pull(
             let held = sha256_file(&dest).ok();
             if held.as_deref() == Some(paint.sha256.as_str()) {
                 out.already_had += 1;
-                // Claim it: an identical file is one we'd have written anyway, and recording
-                // it means a later change by this player is still recognised as theirs.
-                manifest.claim(&paint.rel_dest, &paint.sha256);
+                // Matching bytes do not prove ownership. The player may have installed this
+                // exact paint before sync was enabled, so only files we write are claimed.
                 continue;
             }
             // The file is there and is not what the roster says. If we didn't put it there —
@@ -725,8 +727,8 @@ pub fn remove_installed(cfg: &AppConfig) -> RemoveOutcome {
             manifest.installed.insert(rel_dest, sha);
             continue;
         }
-        match std::fs::remove_file(&dest) {
-            Ok(()) => {
+        match crate::safedelete::trash(&mods_dir.to_string_lossy(), &dest) {
+            Ok(_) => {
                 out.removed += 1;
                 manifest.dirty = true;
                 prune_empty(&mods_dir, dest.parent());
@@ -1335,15 +1337,7 @@ mod live_sync {
         let file_name = rel_dest.rsplit('/').next().unwrap().to_string();
         let http = client().unwrap();
 
-        http.put(format!("{}/v1/paints/{sha}", control_plane()))
-            .bearer_auth(&rider.token)
-            .body(bytes.to_vec())
-            .send()
-            .await
-            .unwrap()
-            .error_for_status()
-            .expect("a self-serve account must be able to store a paint");
-
+        // The loadout first: the control plane only stores a paint a published loadout names.
         http.put(format!("{}/v1/loadouts", control_plane()))
             .bearer_auth(&rider.token)
             .json(&serde_json::json!({
@@ -1363,6 +1357,15 @@ mod live_sync {
             .unwrap()
             .error_for_status()
             .expect("a self-serve account must be able to publish a loadout");
+
+        http.put(format!("{}/v1/paints/{sha}", control_plane()))
+            .bearer_auth(&rider.token)
+            .body(bytes.to_vec())
+            .send()
+            .await
+            .unwrap()
+            .error_for_status()
+            .expect("a self-serve account must be able to store a paint");
         sha
     }
 

@@ -1,0 +1,99 @@
+{
+  "version": "2026-10-20",
+  "models": {
+    "subscription": {
+      "grant": "While you have an active subscription, or another license we have given you, we grant you a personal, non-exclusive, non-transferable, revocable license to install and use the Software on one computer at a time, signed in with your own Steam account, {{PURPOSE}} Signing in on another computer moves the license there; it can move once every seven days.",
+      "term": "4. Subscription and ending the license\nThe license lasts while your subscription is paid. It ends when the subscription ends, when a payment is refunded or charged back, or when you break this agreement. The Software checks your license with mxbsecure.com and keeps a signed copy so it works offline for up to seven days. When the license ends you must stop using the Software. Sections 2, 5, 6, 7 and 8 continue after it ends."
+    },
+    "free": {
+      "grant": "We grant you a personal, non-exclusive, non-transferable, revocable license to install and use the Software free of charge, on computers you own or control, {{PURPOSE}}",
+      "term": "4. Ending the license\nThe license lasts until you stop using the Software and remove it, or until you break this agreement. We may also end it for anyone who misuses the Software or the services it connects to. When the license ends you must stop using the Software. Sections 2, 5, 6, 7 and 8 continue after it ends."
+    },
+    "subscription_or_lifetime": {
+      "grant": "While you have an active subscription, a lifetime license you bought, or another license we have given you, we grant you a personal, non-exclusive, non-transferable, revocable license to install and use the Software on one computer at a time, signed in with your own Steam account, {{PURPOSE}} Signing in on another computer moves the license there; it can move once every seven days.",
+      "term": "4. Subscription, lifetime license and ending the license\nA subscription license lasts while the subscription is paid and ends when the subscription ends. A lifetime license is paid for once and has no end date; it covers this Software and its updates only, not other mxbsecure products. Either license ends when its payment is refunded or charged back, or when you break this agreement. The Software checks your license with mxbsecure.com and keeps a signed copy so it works offline for up to seven days. When the license ends you must stop using the Software. Sections 2, 5, 6, 7 and 8 continue after it ends."
+    },
+    "one_time_new": {
+      "grant": "While you have a license you bought, or another license we have given you, we grant you a personal, non-exclusive, non-transferable, revocable license to install and use the Software on one computer at a time, signed in with your own Steam account, {{PURPOSE}} Signing in on another computer moves the license there; it can move once every seven days.",
+      "term": "4. Your license and ending it\nYou pay for the license once, at a price you choose at checkout that is at least the minimum shown there. It has no end date and covers this Software and its updates only, not other mxbsecure products. The license ends when its payment is refunded or charged back, or when you break this agreement. The Software checks your license with mxbsecure.com and keeps a signed copy so it works offline for up to seven days. When the license ends you must stop using the Software. Sections 2, 5, 6, 7 and 8 continue after it ends."
+    },
+    "one_time": {
+      "grant": "While you have a license you bought, or another license we have given you, we grant you a personal, non-exclusive, non-transferable, revocable license to install and use the Software on one computer at a time, signed in with your own Steam account, {{PURPOSE}} Signing in on another computer moves the license there; it can move once every seven days.",
+      "term": "4. Your license and ending it\nYou pay for the license once, at a price you choose at checkout that is at least the minimum shown there. It has no end date and covers this Software and its updates only, not other mxbsecure products. A monthly subscription bought before 20 October 2026 is moved to the same license. The license ends when its payment is refunded or charged back, or when you break this agreement. The Software checks your license with mxbsecure.com and keeps a signed copy so it works offline for up to seven days. When the license ends you must stop using the Software. Sections 2, 5, 6, 7 and 8 continue after it ends."
+    }
+  },
+  "apps": [
+    {
+      "dir": "apps/converter",
+      "product": "fbx3edf",
+      "model": "one_time",
+      "covers": "its command line, ",
+      "purpose": "to convert 3D models for your own use and for content you make and share.",
+      "content": "Files you convert are yours, or belong to whoever owns them. We claim no rights in them. You are responsible for having the rights to the models you convert and to anything you publish.",
+      "competing": "converter or service",
+      "output": "converted files",
+      "private": true
+    },
+    {
+      "dir": "apps/workflow",
+      "private": true,
+      "product": "Frost Workflow",
+      "model": "one_time_new",
+      "covers": "the Blender scripts and tools it bundles, ",
+      "purpose": "to build 3D models into MX Bikes content for your own use and for content you make and share.",
+      "content": "Files you build are yours, or belong to whoever owns them. We claim no rights in them. You are responsible for having the rights to the models you build and to anything you publish.",
+      "competing": "pipeline, converter or service",
+      "output": "the files it builds"
+    },
+    {
+      "dir": "apps/studio",
+      "product": "Frost Studio",
+      "model": "free",
+      "covers": "",
+      "purpose": "to make paints, tracks, replays and other content for MX Bikes, for your own use and to share.",
+      "content": "Files you make with the Software are yours, or belong to whoever owns what you built them from. We claim no rights in them. You are responsible for having the rights to what you use and to anything you publish.",
+      "competing": "product or service",
+      "output": "what it makes"
+    },
+    {
+      "dir": "apps/manager",
+      "product": "MXB App",
+      "model": "free",
+      "covers": "",
+      "purpose": "to find, install and manage MX Bikes content and to use the mxbsecure services, for your own use.",
+      "content": "Mods and other files you install or share with the Software belong to whoever owns them. We claim no rights in them. You are responsible for having the rights to anything you install, share or publish.",
+      "competing": "product or service",
+      "output": "the mods it installs"
+    },
+    {
+      "dir": "apps/coach",
+      "product": "MXB Coach",
+      "model": "free",
+      "covers": "its in-game overlay, ",
+      "purpose": "to record and review your own MX Bikes riding, for your own use.",
+      "content": "Your recordings and the data the Software keeps about your riding are yours. We claim no rights in them. You are responsible for anything you publish.",
+      "competing": "product or service",
+      "output": "its recordings and advice"
+    },
+    {
+      "dir": "apps/servers",
+      "product": "MXB Servers",
+      "model": "free",
+      "covers": "",
+      "purpose": "to set up and run MX Bikes servers you are allowed to run, for your own use.",
+      "content": "Your server settings and files are yours, or belong to whoever owns them. We claim no rights in them. You are responsible for your servers and for anything you publish on them.",
+      "competing": "product or service",
+      "output": "the servers it sets up"
+    },
+    {
+      "dir": "apps/cinema",
+      "product": "MXB Cinema",
+      "model": "free",
+      "covers": "the Blender scripts it bundles, ",
+      "purpose": "to turn your own MX Bikes riding into scenes, pictures and clips, for your own use and to share.",
+      "content": "Scenes, pictures and clips you make with the Software are yours, or belong to whoever owns the tracks, bikes and gear they show. We claim no rights in them. You are responsible for having the rights to what you use and to anything you publish.",
+      "competing": "product or service",
+      "output": "the scenes it builds"
+    }
+  ]
+}

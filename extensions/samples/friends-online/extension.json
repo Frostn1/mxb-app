@@ -1,0 +1,74 @@
+{
+  "manifestVersion": 1,
+  "id": "mxbsecure.friends-online",
+  "name": "Friends Online",
+  "version": "1.0.3",
+  "author": "mxbsecure",
+  "description": "See who's riding right now and where, with an AI tool that can answer the same question.",
+  "homepage": "https://github.com/Frostn1/mxb-app/blob/main/docs/extensions.md",
+  "permissions": [
+    "friends.presence",
+    "game.state",
+    "mcp.tools"
+  ],
+  "categories": [
+    "tabs",
+    "ai-tools"
+  ],
+  "tags": [
+    "friends",
+    "presence",
+    "online"
+  ],
+  "screenshots": [
+    "store/1.webp"
+  ],
+  "contributes": {
+    "views": [
+      {
+        "id": "online",
+        "title": "Friends online",
+        "entry": "view/index.html"
+      }
+    ],
+    "main": "main.html",
+    "commands": [
+      {
+        "id": "whosOnline",
+        "title": "Who's online?"
+      }
+    ],
+    "settings": [
+      {
+        "key": "showOffline",
+        "type": "boolean",
+        "label": "Show offline friends",
+        "default": false
+      },
+      {
+        "key": "refreshSeconds",
+        "type": "enum",
+        "label": "Refresh every",
+        "options": [
+          "15",
+          "30",
+          "60"
+        ],
+        "default": "30"
+      }
+    ],
+    "mcp": {
+      "tools": [
+        {
+          "name": "friends_online",
+          "description": "List the user's MX Bikes friends who are online right now, with the server and track each is on.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": false
+          }
+        }
+      ]
+    }
+  }
+}

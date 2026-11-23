@@ -17,6 +17,7 @@ import {
   reshadeStatus,
   setReshadeEnabled,
   setReshadePath,
+  setReshadeWarningDismissed,
   RESHADE_OFF,
 } from "@frost/shared/api/mods";
 import type { ReshadePreset, ReshadeStatus } from "@frost/shared/types";
@@ -293,6 +294,23 @@ export default function ReshadeCard() {
           </Button>
         </span>
       </div>
+
+      {config.reshadeWarningDismissed && (
+        <div className="flex items-center justify-between gap-2 text-[12px] text-muted-foreground">
+          <span>{t("health.reshadeWarningHidden")}</span>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() =>
+              void setReshadeWarningDismissed(false)
+                .then(() => reloadConfig())
+                .catch((e) => toast.error(String(e)))
+            }
+          >
+            {t("health.reshadeWarningShow")}
+          </Button>
+        </div>
+      )}
 
       {!status.hasShaders && (
         <div className="flex gap-2 rounded-lg border border-warning/40 bg-warning/10 p-3">

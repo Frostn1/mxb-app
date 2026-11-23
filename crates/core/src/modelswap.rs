@@ -162,6 +162,19 @@ fn has_packed_fallback(bike_dir: &Path) -> bool {
     crate::library::sibling_pkz(bike_dir).is_file()
         || list_files(bike_dir).iter().any(|f| f.to_ascii_lowercase().ends_with(".pkz"))
 }
+
+fn has_loose_bike_identity(dir: &Path) -> bool {
+    let Some(stem) = dir.file_name().and_then(|n| n.to_str()) else { return false };
+    dir.join(format!("{stem}.ini")).is_file() && dir.join(format!("{stem}.cfg")).is_file()
+}
+
+fn is_managed_bike_root(mods_path: &str, bike: &str) -> bool {
+    let root = bike_dir(mods_path, bike);
+    has_loose_bike_identity(&root)
+        || has_packed_fallback(&root)
+        || lib_dir(mods_path, bike).is_dir()
+        || root.join(crate::soundmods::SOUND_LIB_DIR).is_dir()
+}
 fn is_bookkeeping(name: &str) -> bool {
     name.eq_ignore_ascii_case(MANIFEST) || name.eq_ignore_ascii_case(MARKER)
 }
@@ -312,13 +325,7 @@ fn move_set(src: &Path, dst: &Path, files: &[String]) -> bool {
 }
 
 fn move_one(src: &Path, dst: &Path) -> bool {
-    if fs::rename(src, dst).is_ok() {
-        return true;
-    }
-    if fs::copy(src, dst).is_ok() && fs::remove_file(src).is_ok() {
-        return true;
-    }
-    false
+    !dst.exists() && fs::rename(src, dst).is_ok()
 }
 
 // ---------------------------------------------------------------------------
@@ -699,6 +706,9 @@ pub fn scan_model_swaps(mods_path: &str) -> Vec<BikeModels> {
                 Some(n) => n.to_string(),
                 None => continue,
             };
+            if crate::library::is_frostmod_shadow_bike(&bike) {
+                continue;
+            }
             // Any mesh qualifies, not just `model.edf` — a bike may ship one EDF per
             // part (`96cr250.edf`, `96cr250_st.edf`, …), and those were invisible here.
             let qualifies =
@@ -942,12 +952,24 @@ pub fn disable_all_model_swaps(mods_path: &str) -> DisableReport {
         .flatten()
         .filter(|e| e.path().is_dir())
         .filter_map(|e| e.file_name().to_str().map(str::to_string))
-        .filter(|b| !b.starts_with('.') && is_simple_name(b))
+        .filter(|b| {
+            !b.starts_with('.')
+                && is_simple_name(b)
+                && !crate::library::is_frostmod_shadow_bike(b)
+        })
         .collect();
     bikes.sort_by_key(|b| b.to_lowercase());
 
     for bike in bikes {
         let root = bike_dir(mods_path, &bike);
+        if has_loose_bike_identity(&root) {
+            continue;
+        }
+        let managed = lib_dir(mods_path, &bike).is_dir()
+            || root.join(crate::soundmods::SOUND_LIB_DIR).is_dir();
+        if !managed {
+            continue;
+        }
         let active = current_active(mods_path, &bike);
         let has_mesh = crate::bikefiles::dir_has_mesh(&root);
         if has_packed_fallback(&root) {
@@ -1082,7 +1104,9 @@ pub fn bike_folders(mods_path: &str) -> Vec<String> {
         for e in rd.flatten() {
             if e.path().is_dir() {
                 if let Some(n) = e.file_name().to_str() {
-                    out.push(n.to_string());
+                    if !crate::library::is_frostmod_shadow_bike(n) {
+                        out.push(n.to_string());
+                    }
                 }
             }
         }
@@ -1370,7 +1394,10 @@ pub fn detect_orphaned_setup(mods_path: &str) -> Vec<OrphanedSetup> {
                 Some(n) => n.to_string(),
                 None => continue,
             };
-            if bike.starts_with('.') || !is_simple_name(&bike) {
+            if bike.starts_with('.')
+                || !is_simple_name(&bike)
+                || crate::library::is_frostmod_shadow_bike(&bike)
+            {
                 continue;
             }
             let files: Vec<String> =
@@ -1511,22 +1538,22 @@ fn subdirs(dir: &Path) -> Vec<(String, PathBuf)> {
     out
 }
 
-/// Move a whole directory: try a fast rename, then fall back to a recursive copy +
-/// remove (handles cross-volume). Refuses to overwrite an existing destination.
+/// Move a whole directory on its existing volume without deleting the source after a copy.
 fn move_dir(src: &Path, dst: &Path) -> bool {
     if dst.exists() {
         return false;
     }
-    if fs::rename(src, dst).is_ok() {
-        return true;
+    // The copy fallback that used to sit here created the destination's folders as it went;
+    // a bare rename needs the parent to exist already (a bike's first `FrostMod Models`).
+    if let Some(parent) = dst.parent() {
+        if fs::create_dir_all(parent).is_err() {
+            return false;
+        }
     }
-    if copy_tree(src, dst).is_ok() && fs::remove_dir_all(src).is_ok() {
-        return true;
-    }
-    let _ = fs::remove_dir_all(dst); // don't leave a half-copied dir behind
-    false
+    fs::rename(src, dst).is_ok()
 }
 
+#[cfg(test)]
 fn copy_tree(src: &Path, dst: &Path) -> std::io::Result<()> {
     fs::create_dir_all(dst)?;
     for e in fs::read_dir(src)?.flatten() {
@@ -1548,6 +1575,9 @@ fn scan_loose_candidates(mods_path: &str, bike: &str) -> Vec<LooseSwapCandidate>
         if is_reserved_child(&name) || !is_simple_name(&name) {
             continue;
         }
+        if has_loose_bike_identity(&path) || crate::library::sibling_pkz(&path).is_file() {
+            continue;
+        }
         if let Some(kind) = classify_set(&path) {
             // A model or sound set dropped straight into the bike dir.
             out.push(LooseSwapCandidate {
@@ -1561,6 +1591,11 @@ fn scan_loose_candidates(mods_path: &str, bike: &str) -> Vec<LooseSwapCandidate>
             // look one level down for variant folders.
             for (child, child_path) in subdirs(&path) {
                 if child.starts_with('.') || !is_simple_name(&child) {
+                    continue;
+                }
+                if has_loose_bike_identity(&child_path)
+                    || crate::library::sibling_pkz(&child_path).is_file()
+                {
                     continue;
                 }
                 if let Some(kind) = classify_set(&child_path) {
@@ -1599,7 +1634,13 @@ pub fn detect_loose_swaps(mods_path: &str) -> Vec<LooseSwapBike> {
                 Some(n) => n.to_string(),
                 None => continue,
             };
-            if bike.starts_with('.') || !is_simple_name(&bike) {
+            if bike.starts_with('.')
+                || !is_simple_name(&bike)
+                || crate::library::is_frostmod_shadow_bike(&bike)
+            {
+                continue;
+            }
+            if !is_managed_bike_root(mods_path, &bike) {
                 continue;
             }
             let candidates = scan_loose_candidates(mods_path, &bike);
@@ -1691,6 +1732,57 @@ mod tests {
     }
     fn file_exists(p: &Path) -> bool {
         p.is_file()
+    }
+
+    fn identify_bike(mp: &str, bike: &str) {
+        touch(&bike_dir(mp, bike).join(format!("{bike}.ini")));
+        touch(&bike_dir(mp, bike).join(format!("{bike}.cfg")));
+    }
+
+    #[test]
+    fn move_one_refuses_to_overwrite_an_existing_file() {
+        let root = tmp("move-one-collision");
+        let src = root.join("source.edf");
+        let dst = root.join("destination.edf");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(&src, b"mine").unwrap();
+        fs::write(&dst, b"yours").unwrap();
+        assert!(!move_one(&src, &dst));
+        assert_eq!(fs::read(&src).unwrap(), b"mine");
+        assert_eq!(fs::read(&dst).unwrap(), b"yours");
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn grouped_unpacked_bikes_are_never_offered_or_moved_as_swaps() {
+        let root = tmp("grouped-bikes");
+        let mp = root.to_str().unwrap();
+        let bike = bikes_root(mp).join("MyBikes/KTM450");
+        touch(&bike.join("KTM450.ini"));
+        touch(&bike.join("KTM450.cfg"));
+        touch(&bike.join("model.edf"));
+        assert!(detect_loose_swaps(mp).is_empty());
+        let report = register_loose_swaps(mp, true).unwrap();
+        assert_eq!(report.registered, 0);
+        assert!(bike.join("model.edf").is_file());
+        assert!(!bikes_root(mp).join("MyBikes/FrostMod Models").exists());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn disable_all_leaves_an_unpacked_bikes_own_files_in_place() {
+        let root = tmp("disable-unpacked");
+        let mp = root.to_str().unwrap();
+        identify_bike(mp, "MyBike");
+        touch(&bike_dir(mp, "MyBike").join("model.edf"));
+        touch(&bike_dir(mp, "MyBike").join("bike.cfg"));
+        touch(&variant_dir(mp, "MyBike", "Factory").join("other.edf"));
+        write_active(mp, "MyBike", "Factory").unwrap();
+        let report = disable_all_model_swaps(mp);
+        assert!(report.reverted.is_empty() && report.cleaned.is_empty());
+        assert!(bike_dir(mp, "MyBike").join("model.edf").is_file());
+        assert!(bike_dir(mp, "MyBike").join("bike.cfg").is_file());
+        let _ = fs::remove_dir_all(root);
     }
 
     /// A realistic extracted bike: mesh + the setup files the game needs to see it.
@@ -2442,6 +2534,7 @@ mod tests {
         let root = tmp("loose-per-part");
         let mp = root.to_str().unwrap();
         make_bike(mp, "CR250", "96cr250.edf");
+        identify_bike(mp, "CR250");
         touch(&bike_dir(mp, "CR250").join("OEM Replica").join("96cr250.edf"));
 
         let found = detect_loose_swaps(mp);
@@ -3135,6 +3228,7 @@ mod tests {
     fn detects_loose_variants_at_root_and_in_a_container() {
         let root = tmp("detect");
         let mp = root.to_str().unwrap();
+        identify_bike(mp, "KTM");
         // Active loose set (root-level model.edf) — never a candidate.
         touch(&bike_dir(mp, "KTM").join("model.edf"));
         touch(&bike_dir(mp, "KTM").join("KTM.cfg"));
@@ -3172,6 +3266,7 @@ mod tests {
     fn register_moves_loose_sets_into_the_library() {
         let root = tmp("register-move");
         let mp = root.to_str().unwrap();
+        identify_bike(mp, "KTM");
         touch(&bike_dir(mp, "KTM").join("model.edf"));
         touch(&bike_dir(mp, "KTM").join("Factory OEM").join("model.edf"));
         touch(&bike_dir(mp, "KTM").join("models").join("Race Kit").join("model.edf"));
@@ -3205,6 +3300,7 @@ mod tests {
     fn register_without_move_only_creates_the_folder() {
         let root = tmp("register-nomove");
         let mp = root.to_str().unwrap();
+        identify_bike(mp, "KTM");
         touch(&bike_dir(mp, "KTM").join("model.edf"));
         touch(&bike_dir(mp, "KTM").join("Factory OEM").join("model.edf"));
 
@@ -3251,6 +3347,7 @@ mod tests {
     fn detects_loose_sound_sets_alongside_models() {
         let root = tmp("detect-sound");
         let mp = root.to_str().unwrap();
+        identify_bike(mp, "KTM");
         // Active loose model + sound at the bike root — never candidates.
         touch(&bike_dir(mp, "KTM").join("model.edf"));
         touch_sound(&bike_dir(mp, "KTM"));
@@ -3279,6 +3376,7 @@ mod tests {
     fn register_moves_sound_sets_into_frostmod_sounds() {
         let root = tmp("register-sound");
         let mp = root.to_str().unwrap();
+        identify_bike(mp, "KTM");
         touch(&bike_dir(mp, "KTM").join("model.edf"));
         touch_sound(&bike_dir(mp, "KTM").join("Braaap"));
         touch(&bike_dir(mp, "KTM").join("Braaap").join("idle.wav"));
@@ -3315,6 +3413,7 @@ mod tests {
     fn register_folders_only_creates_both_libraries() {
         let root = tmp("register-sound-nomove");
         let mp = root.to_str().unwrap();
+        identify_bike(mp, "KTM");
         touch(&bike_dir(mp, "KTM").join("model.edf"));
         touch(&bike_dir(mp, "KTM").join("Factory OEM").join("model.edf"));
         touch_sound(&bike_dir(mp, "KTM").join("Braaap"));

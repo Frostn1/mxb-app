@@ -5,6 +5,7 @@ import Dashboard from "./Components/Dashboard/Dashboard";
 import Setup from "./Components/Setup/Setup";
 import LooseSwapPrompt from "./Components/Locker/LooseSwapPrompt";
 import { ThemeProvider } from "@frost/shared/Context/Theme";
+import { ExtensionAppearance } from "@frost/shared/extensions/ExtensionHost";
 import { FrostmodProvider } from "./Context/Frostmod";
 import { ConfigContext, MXB_FALLBACK } from "@frost/shared/Context/Config";
 import { toast } from "sonner";
@@ -29,6 +30,7 @@ import RuntimeBanner from "./Components/RuntimeBanner/RuntimeBanner";
 import SigninGate from "@frost/shared/Components/SigninGate/SigninGate";
 import SurveyPrompt from "@frost/shared/Components/Survey/SurveyPrompt";
 import SupportPrompt from "@frost/shared/Components/Support/SupportPrompt";
+import PetCorner from "./Components/Pet/PetCorner";
 import UpdateBanner from "./Components/UpdateBanner/UpdateBanner";
 import type { Config, GameId, GameInfo } from "@frost/shared/types";
 import { invoke } from "@tauri-apps/api/core";
@@ -177,6 +179,8 @@ const App = () => {
 
   return (
     <ThemeProvider>
+      {/* Extension looks draw over the colorway, so they live inside the theme. */}
+      <ExtensionAppearance />
       <FrostmodProvider>
         <TooltipProvider delayDuration={300}>
           <UpdateProvider>
@@ -246,6 +250,8 @@ const App = () => {
             {/* Offer to register loose model-swap folders once the app is set up and the
                 intro tour is out of the way. */}
             {ready && config && <LooseSwapPrompt />}
+            {/* Pip, the free pet, in the corner once the app is set up (Settings → Appearance). */}
+            {ready && config?.modsPath && config.setupComplete && <PetCorner />}
             {/* The survey prompt. Shows itself rarely and on its own schedule — the decision
                 is in `crates/core/src/survey.rs`, not here. Mounted last so it sits over the
                 shell and under the sign-in wall. */}

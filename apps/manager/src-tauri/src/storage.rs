@@ -432,7 +432,7 @@ pub fn list_archive(path: &Path) -> Option<Vec<(String, u64)>> {
             for i in 0..z.len() {
                 let e = z.by_index_raw(i).ok()?;
                 if !e.is_dir() {
-                    out.push((base(e.name()), e.size()));
+                    out.push((base(&e.name().ok()?), e.size()));
                 }
             }
             Some(out)

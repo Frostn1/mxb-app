@@ -302,6 +302,9 @@ fn resolve_model_swap(
                 continue;
             }
             let bike = e.file_name().to_string_lossy().into_owned();
+            if library::is_frostmod_shadow_bike(&bike) {
+                continue;
+            }
             let variant = e.path().join("FrostMod Models").join(value);
             if variant.is_dir() {
                 assets.push(AssetRef {

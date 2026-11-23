@@ -2,6 +2,7 @@ use crate::config::AppConfig;
 use anyhow::Context;
 use futures_util::StreamExt;
 use obfstr::obfstr;
+use percent_encoding::percent_decode_str;
 use regex::Regex;
 use reqwest::Client;
 use scraper::{Html, Selector};
@@ -14,12 +15,21 @@ use std::io::{Read, Write};
 pub use mxb_core::names::{has_ext, is_junk, sanitize, staging_dir, staging_dir_near};
 
 use std::path::{Component, Path, PathBuf};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager};
 
 // Same string as `shop_session::UA`, kept in one place.
 use crate::shop_session::UA;
 const EMIT_EVERY_BYTES: u64 = 512 * 1024;
+const EMIT_EVERY_TIME: Duration = Duration::from_millis(150);
+
+/// Archive extraction and placement are both sustained disk/CPU work. Downloads may overlap,
+/// but only one install at a time is allowed into this section process-wide.
+static INSTALL_IO: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn install_io_guard() -> std::sync::MutexGuard<'static, ()> {
+    INSTALL_IO.lock().unwrap_or_else(|e| e.into_inner())
+}
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -47,6 +57,17 @@ pub(crate) fn emit_progress(
     total: Option<u64>,
 ) {
     emit(app, slug, stage, received, total);
+}
+
+/// The browser download path has no total, so it must name its last byte count explicitly.
+pub(crate) fn emit_progress_done(
+    app: &AppHandle,
+    slug: &str,
+    stage: &'static str,
+    received: Option<u64>,
+    total: Option<u64>,
+) {
+    emit_with(app, slug, stage, received, total, true);
 }
 
 /// Bytes received by each of several downloads sharing one bar.
@@ -90,7 +111,72 @@ fn report(app: &AppHandle, slug: &str, progress: Slot<'_>, received: u64, total:
     }
 }
 
+fn report_final(
+    app: &AppHandle,
+    slug: &str,
+    progress: Slot<'_>,
+    received: u64,
+    total: Option<u64>,
+) {
+    match progress {
+        Some((shared, slot)) => {
+            let (sum, whole) = shared.record(slot, received);
+            let all_done = whole.is_some_and(|total| sum >= total);
+            emit_with(app, slug, "downloading", Some(sum), whole, all_done);
+        }
+        None => emit_with(app, slug, "downloading", Some(received), total, true),
+    }
+}
+
+#[derive(Clone, Copy)]
+struct LastProgressEmit {
+    stage: &'static str,
+    at: Instant,
+}
+
+static LAST_PROGRESS_EMITS: std::sync::OnceLock<
+    std::sync::Mutex<std::collections::HashMap<String, LastProgressEmit>>,
+> = std::sync::OnceLock::new();
+
+fn should_emit(
+    last_emit_at: Option<Instant>,
+    now: Instant,
+    stage_changed: bool,
+    done: bool,
+) -> bool {
+    done
+        || stage_changed
+        || last_emit_at.is_none_or(|last| now.saturating_duration_since(last) >= EMIT_EVERY_TIME)
+}
+
 fn emit(app: &AppHandle, slug: &str, stage: &'static str, received: Option<u64>, total: Option<u64>) {
+    let done = stage == "done";
+    emit_with(app, slug, stage, received, total, done);
+}
+
+fn emit_with(
+    app: &AppHandle,
+    slug: &str,
+    stage: &'static str,
+    received: Option<u64>,
+    total: Option<u64>,
+    done: bool,
+) {
+    let now = Instant::now();
+    let mut last = LAST_PROGRESS_EMITS
+        .get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    let previous = last.get(slug).copied();
+    let stage_changed = previous.is_none_or(|previous| previous.stage != stage);
+    if !should_emit(previous.map(|previous| previous.at), now, stage_changed, done) {
+        return;
+    }
+    last.insert(slug.to_string(), LastProgressEmit { stage, at: now });
+    if stage == "done" {
+        last.remove(slug);
+    }
+    drop(last);
     let _ = app.emit(
         "install-progress",
         Progress {
@@ -296,6 +382,7 @@ async fn place_staged_named(
     let dest_folder = dest_folder.to_string();
     let source_name = source_name.to_string();
     tauri::async_runtime::spawn_blocking(move || {
+        let _install_io = install_io_guard();
         place_staged_as(
             &app,
             &cfg,
@@ -369,6 +456,7 @@ pub(crate) fn extract_and_place(
     dest_folder: &str,
     packs: Packs,
 ) -> anyhow::Result<Placed> {
+    let _install_io = install_io_guard();
     emit(app, slug, "extracting", None, None);
     let extracted = work.join(STAGED_DIR);
     std::fs::create_dir_all(&extracted)?;
@@ -387,6 +475,13 @@ pub(crate) fn extract_and_place(
 /// half the presets on the site are shared as the bare `.ini`, which [`extract_archive`]
 /// rejects outright — so carry it through, exactly as the "choose file" import does.
 fn stage_download(downloaded: &Path, extracted: &Path, subpath: &str) -> anyhow::Result<()> {
+    if crate::gameplugins::is_plugins_subpath(subpath)
+        && downloaded.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("dlo"))
+    {
+        let name = downloaded.file_name().unwrap_or_default();
+        std::fs::copy(downloaded, extracted.join(name))?;
+        return Ok(());
+    }
     if crate::reshade::is_reshade_subpath(subpath)
         && detect_ext(downloaded).is_err()
         && crate::reshade::is_preset_file(downloaded)
@@ -430,7 +525,10 @@ fn place_staged_as(
     // A pack is several mods in one download, and only now — with the archive open — can it
     // be seen to be one. Hand it to the review sheet rather than placing 3.8 GB of bikes the
     // user was never shown. An ordinary single-mod download answers `None` and carries on.
-    if packs != Packs::PlaceWhole && !crate::reshade::is_reshade_subpath(subpath) {
+    if packs != Packs::PlaceWhole
+        && !crate::reshade::is_reshade_subpath(subpath)
+        && !crate::gameplugins::is_plugins_subpath(subpath)
+    {
         let name = source_name.to_string();
         let plan = if packs == Packs::OfferFolder {
             crate::dropzone::plan_folder(&cfg.mods_path, &extracted, work.to_path_buf(), &name)
@@ -465,6 +563,12 @@ fn place_staged_as(
     // file type rather than routed by folder — none of the placement planner below applies.
     if crate::reshade::is_reshade_subpath(subpath) {
         crate::reshade::install_extracted(&extracted, &cfg.reshade_dir())?;
+        let _ = std::fs::remove_dir_all(work);
+        emit(app, slug, "done", None, None);
+        return Ok(Placed::Done);
+    }
+    if crate::gameplugins::is_plugins_subpath(subpath) {
+        crate::gameplugins::install_extracted(app, &extracted, &cfg.install_dir(), slug)?;
         let _ = std::fs::remove_dir_all(work);
         emit(app, slug, "done", None, None);
         return Ok(Placed::Done);
@@ -699,7 +803,7 @@ async fn download_mega_folder_and_place(
         let _ = std::fs::remove_dir_all(&work);
         return Err(e);
     }
-    emit(app, slug, "downloading", Some(total), Some(total));
+    emit_with(app, slug, "downloading", Some(total), Some(total), true);
 
     if let Some(one) = archive {
         let path = root.join(&one.rel);
@@ -708,7 +812,10 @@ async fn download_mega_folder_and_place(
     }
     emit(app, slug, "extracting", None, None);
     let staged = root.clone();
-    tauri::async_runtime::spawn_blocking(move || extract_nested(&staged))
+    tauri::async_runtime::spawn_blocking(move || {
+        let _install_io = install_io_guard();
+        extract_nested(&staged)
+    })
         .await
         .map_err(|e| anyhow::anyhow!("install task failed: {e}"))??;
     place_staged_named(app, cfg, slug, work, subpath, dest_folder, Packs::OfferFolder, &name).await
@@ -761,7 +868,7 @@ pub(crate) async fn download_mega(
         cancel.check()?;
         return Err(anyhow::anyhow!("MEGA download failed: {e}"));
     }
-    emit(app, slug, "downloading", total, total);
+    emit_with(app, slug, "downloading", total, total, true);
 
     Ok(path)
 }
@@ -822,6 +929,7 @@ pub fn import_file(
     subpath: &str,
     dest_folder: &str,
 ) -> anyhow::Result<()> {
+    let _install_io = install_io_guard();
     let src = Path::new(file_path);
     if !src.is_file() {
         anyhow::bail!("file not found: {file_path}");
@@ -839,7 +947,11 @@ pub fn import_file(
 
     // A bare `.ini` isn't an archive — `extract_archive` would reject it — but it is the most
     // common way a preset arrives. Stage it as if it had been extracted.
-    if crate::reshade::is_reshade_subpath(subpath) && crate::reshade::is_preset_file(src) {
+    if crate::gameplugins::is_plugins_subpath(subpath)
+        && src.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("dlo"))
+    {
+        std::fs::copy(src, extracted.join(src.file_name().unwrap_or_default()))?;
+    } else if crate::reshade::is_reshade_subpath(subpath) && crate::reshade::is_preset_file(src) {
         std::fs::copy(src, extracted.join(src.file_name().unwrap_or_default()))?;
     } else {
         extract_archive(src, &extracted)?;
@@ -847,6 +959,12 @@ pub fn import_file(
 
     if crate::reshade::is_reshade_subpath(subpath) {
         crate::reshade::install_extracted(&extracted, &cfg.reshade_dir())?;
+        let _ = std::fs::remove_dir_all(&work);
+        return Ok(());
+    }
+    if crate::gameplugins::is_plugins_subpath(subpath) {
+        let slug = src.file_stem().unwrap_or_default().to_string_lossy();
+        crate::gameplugins::install_extracted(app, &extracted, &cfg.install_dir(), &slug)?;
         let _ = std::fs::remove_dir_all(&work);
         return Ok(());
     }
@@ -1797,7 +1915,7 @@ pub(crate) async fn download_into(
     }
 
     file.flush()?;
-    report(app, slug, progress, received, total);
+    report_final(app, slug, progress, received, total);
     Ok(path)
 }
 
@@ -1840,7 +1958,10 @@ async fn download_folder(
 
     emit(app, slug, "extracting", None, None);
     let into = into.to_path_buf();
-    tauri::async_runtime::spawn_blocking(move || extract_nested(&into))
+    tauri::async_runtime::spawn_blocking(move || {
+        let _install_io = install_io_guard();
+        extract_nested(&into)
+    })
         .await
         .map_err(|e| anyhow::anyhow!("install task failed: {e}"))?
 }
@@ -2106,33 +2227,90 @@ fn parse_gdrive_confirm(html: &str) -> Option<(String, Vec<(String, String)>)> {
 }
 
 fn filename_from(resp: &reqwest::Response, url: &str) -> String {
-    if let Some(cd) = resp
+    let cd = resp
         .headers()
         .get(reqwest::header::CONTENT_DISPOSITION)
-        .and_then(|v| v.to_str().ok())
-    {
-        if let Some(c) = Regex::new(r#"filename\*?=(?:UTF-8''|")?([^";]+)"#)
-            .unwrap()
-            .captures(cd)
-        {
-            let name = c[1].trim().trim_matches('"');
-            if is_usable_filename(name) {
-                return sanitize(name);
-            }
+        .and_then(|v| v.to_str().ok());
+    download_filename(cd, url)
+}
+
+/// The name a download is saved under, from its `Content-Disposition` when it has one and
+/// the URL's last segment when not.
+///
+/// Both arrive percent-encoded. The URL leaf used to be taken as it stood, so a track served
+/// as `…/KMX-Mesquite%20MX.pkz` landed on disk as `KMX-Mesquite%20MX.pkz` — and the game,
+/// which matches a server's track by file name, called it a different track.
+fn download_filename(content_disposition: Option<&str>, url: &str) -> String {
+    if let Some(name) = content_disposition.and_then(disposition_filename) {
+        let name = windows_file_name(&name);
+        if is_usable_filename(&name) {
+            return name;
         }
     }
-    let from_url = url
+    let leaf = url
         .split(['?', '#'])
         .next()
         .unwrap_or(url)
         .rsplit('/')
         .next()
-        .unwrap_or("")
-        .to_string();
-    if is_usable_filename(&from_url) {
-        sanitize(&from_url)
+        .unwrap_or("");
+    let name = windows_file_name(&percent_decode_str(leaf).decode_utf8_lossy());
+    if is_usable_filename(&name) {
+        name
     } else {
         "download.bin".to_string()
+    }
+}
+
+/// The file name a `Content-Disposition` names, decoded.
+///
+/// RFC 6266: `filename*=UTF-8''…` is percent-encoded and wins over a plain `filename=` when a
+/// server sends both. Some servers percent-encode the plain form too, so it is decoded as well
+/// — a real `%` followed by two hex digits in a mod's name is far rarer than that.
+fn disposition_filename(cd: &str) -> Option<String> {
+    let extended = Regex::new(r#"(?i)filename\*\s*=\s*([^']*)'[^']*'([^;]+)"#).unwrap();
+    if let Some(c) = extended.captures(cd) {
+        let raw = c[2].trim().trim_matches('"');
+        let name = if c[1].eq_ignore_ascii_case("utf-8") || c[1].is_empty() {
+            percent_decode_str(raw).decode_utf8_lossy().into_owned()
+        } else {
+            // ISO-8859-1, the only other charset the RFC names: one byte, one char.
+            percent_decode_str(raw).map(char::from).collect()
+        };
+        if !name.trim().is_empty() {
+            return Some(name);
+        }
+    }
+    let plain = Regex::new(r#"(?i)(?:^|;)\s*filename\s*=\s*(?:"([^"]*)"|([^;]+))"#).unwrap();
+    let c = plain.captures(cd)?;
+    let raw = c.get(1).or_else(|| c.get(2))?.as_str().trim();
+    let name = percent_decode_str(raw).decode_utf8_lossy().into_owned();
+    (!name.trim().is_empty()).then_some(name)
+}
+
+/// A name Windows will create as written.
+///
+/// `sanitize` swaps the characters a path can't hold; Windows refuses more than that. Control
+/// characters are invalid in a name, a trailing dot or space is silently dropped by Explorer
+/// and the shell (so the file on disk would not be the one asked for), and `CON`, `NUL` and the
+/// rest are devices whatever extension follows them.
+fn windows_file_name(name: &str) -> String {
+    let cleaned: String = sanitize(name.trim())
+        .chars()
+        .map(|c| if c.is_control() { '_' } else { c })
+        .collect();
+    let cleaned = cleaned.trim_end_matches(['.', ' ']).trim_start().to_string();
+    let stem = cleaned.split('.').next().unwrap_or("").trim_end();
+    let reserved = matches!(
+        stem.to_ascii_uppercase().as_str(),
+        "CON" | "PRN" | "AUX" | "NUL"
+            | "COM1" | "COM2" | "COM3" | "COM4" | "COM5" | "COM6" | "COM7" | "COM8" | "COM9"
+            | "LPT1" | "LPT2" | "LPT3" | "LPT4" | "LPT5" | "LPT6" | "LPT7" | "LPT8" | "LPT9"
+    );
+    if reserved {
+        format!("_{cleaned}")
+    } else {
+        cleaned
     }
 }
 
@@ -2310,6 +2488,8 @@ pub(crate) enum RouteRule {
     SoundBundle,
     /// Loose `engine.scl`+`sfx.cfg` at the root, destined for a bike the caller picked.
     LooseSound,
+    /// A loose tyre folder identified by its front/rear wheel meshes.
+    TyreSet,
     /// Nothing self-describing was found; the caller's category decides.
     Typed,
 }
@@ -2408,6 +2588,31 @@ pub(crate) fn plan_placement(
 
     for base in &candidates {
         if let Some(m) = child_dir(base, "mods") {
+            // Some sound packs keep shared samples in a real `mods/` tree and put the
+            // bike-specific sample list beside it in an INSTALL folder. When the caller
+            // already has a bike choice, carry both halves instead of returning after the
+            // tree and silently dropping the file that switches the sound on.
+            if !dest_folder.trim().is_empty() {
+                let sound_folders: Vec<PathBuf> = std::fs::read_dir(base)
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|entry| entry.ok())
+                    .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_dir()))
+                    .map(|entry| entry.path())
+                    .filter(|dir| dir != &m && is_sound_fragment(dir))
+                    .collect();
+                if let [sound] = sound_folders.as_slice() {
+                    return route(
+                        RouteRule::ModsTree,
+                        Placement::MergeEach {
+                            pairs: vec![
+                                (m, mods_dir.to_path_buf()),
+                                (sound.clone(), sound_destination(mods_dir, dest_folder)),
+                            ],
+                        },
+                    );
+                }
+            }
             return route(
                 RouteRule::ModsTree,
                 Placement::Merge {
@@ -2435,6 +2640,29 @@ pub(crate) fn plan_placement(
         }
     }
 
+    // Tyre downloads are often filed under a site's Bikes category, but the game never
+    // looks for their wheel meshes there. The folder identifies itself by the pair of wheel
+    // definitions and its compiled model, so keep its own name under `mods/tyres` regardless
+    // of the category that supplied the download.
+    for base in &candidates {
+        // Only a folder the author named: tyre files loose at the archive root would
+        // otherwise be filed under the staging folder's own name (`mods/tyres/extracted`),
+        // which no bike asks for. Those keep the category route and the review.
+        if is_staging_folder_name(base) {
+            continue;
+        }
+        if is_tyre_set(base) {
+            let name = base.file_name().unwrap_or_default();
+            return route(
+                RouteRule::TyreSet,
+                Placement::Merge {
+                    src: base.to_path_buf(),
+                    dst: mods_dir.join("tyres").join(name),
+                },
+            );
+        }
+    }
+
     // A `<Bike>/paints/…` bundle is bike content → route to `mods/bikes` regardless of
     // the caller's default type. Rider paints are exempt (kept under `mods/rider` below).
     if !type_folder.eq_ignore_ascii_case("rider") {
@@ -2455,6 +2683,24 @@ pub(crate) fn plan_placement(
     // NEVER inside `paints/` → route to `mods/bikes` and drop any trailing `paints` segment.
     for base in &candidates {
         if contains_sound_bundle(base) {
+            let sets = sound_bundle_dirs(base);
+            // A single wrapper named after the download is not a bike. When the user has
+            // already picked a bike, unwrap that folder and put the sound in the bike root.
+            // A folder that really names an installed bike keeps its authored layout, and a
+            // pack with no bike choice stays a bundle for the review sheet to split.
+            if !dest_folder.trim().is_empty()
+                && matches!(sets.as_slice(), [set] if !is_installed_bike_folder(mods_dir, set))
+            {
+                return route(
+                    RouteRule::LooseSound,
+                    Placement::Plain {
+                        src: sets[0].clone(),
+                        dst: sound_destination(mods_dir, dest_folder),
+                        slug: slug.to_string(),
+                        wrap_loose: false,
+                    },
+                );
+            }
             // `<Bike>/{engine.scl,sfx.cfg}` — merge the bike folder(s) as-is.
             return route(
                 RouteRule::SoundBundle,
@@ -2466,18 +2712,11 @@ pub(crate) fn plan_placement(
         }
         if is_sound_set(base) {
             // Loose `engine.scl`+`sfx.cfg` — drop into the chosen bike's root.
-            let mut dir = mods_dir.join("bikes");
-            for seg in dest_folder.split(['/', '\\']).filter(|s| !s.is_empty()) {
-                if seg.eq_ignore_ascii_case("paints") {
-                    continue;
-                }
-                dir.push(sanitize(seg));
-            }
             return route(
                 RouteRule::LooseSound,
                 Placement::Plain {
                     src: base.to_path_buf(),
-                    dst: dir,
+                    dst: sound_destination(mods_dir, dest_folder),
                     slug: slug.to_string(),
                     wrap_loose: false,
                 },
@@ -2636,7 +2875,13 @@ pub(crate) fn place_mod_with(
 ) -> anyhow::Result<usize> {
     let route = plan_placement(extracted, mods_dir, type_folder, dest_folder, slug);
     guard_placement(mods_dir, &route.placement)?;
-    apply(&route.placement, on_conflict, staging).inspect_err(|e| {
+    // Capture destinations before a consuming placement empties the staged tree. The watcher
+    // reduces these exact paths with the same `mod_key` it uses for filesystem events.
+    let installed_paths: Vec<PathBuf> = roots_for(&route.placement)
+        .into_iter()
+        .chain(writes_for(&route.placement).into_iter().map(|(_, dst)| dst))
+        .collect();
+    let written = apply(&route.placement, on_conflict, staging).inspect_err(|e| {
         // The one place every install — download, import, drop — funnels through, so one
         // log line here covers all three. Without it a failed install left no trace at all
         // beyond a toast the player had already dismissed by the time they reported it.
@@ -2644,7 +2889,9 @@ pub(crate) fn place_mod_with(
             "installing {slug} into {type_folder}/{dest_folder} ({:?}) failed: {e:#}",
             route.rule
         );
-    })
+    })?;
+    crate::modwatch::note_installed(mods_dir, &installed_paths);
+    Ok(written)
 }
 
 /// Every `(source file, destination file)` a placement would produce, in order.
@@ -2697,21 +2944,33 @@ fn roots_for(placement: &Placement) -> Vec<PathBuf> {
 /// wrote, and the dropzone's destination comes back from the frontend. Every install funnels
 /// through [`place_mod_with`], so the check belongs here rather than at each of its doors.
 fn guard_placement(mods_dir: &Path, placement: &Placement) -> anyhow::Result<()> {
-    let dsts = roots_for(placement)
-        .into_iter()
-        .chain(writes_for(placement).into_iter().map(|(_, dst)| dst));
-    for dst in dsts {
+    let inside = |dst: &Path| {
         // `starts_with` alone would pass `<mods>/..`: joining never normalises, so the
         // climb is still sitting there as a component.
-        let inside = dst
+        dst
             .strip_prefix(mods_dir)
             .map(|rel| !rel.components().any(|c| c == Component::ParentDir))
-            .unwrap_or(false);
-        if !inside {
+            .unwrap_or(false)
+    };
+    for root in roots_for(placement) {
+        if !inside(&root) {
             anyhow::bail!(
                 "refusing to install to {} — that's outside the mods folder",
-                dst.display()
+                root.display()
             );
+        }
+        if root.exists() && !root.is_dir() {
+            anyhow::bail!("refusing to replace {} with a folder", root.display());
+        }
+    }
+    for (_, dst) in writes_for(placement) {
+        if !inside(&dst) {
+            anyhow::bail!("refusing to install to {} — that's outside the mods folder", dst.display());
+        }
+        // A file landing where a folder already is would have to take the folder's place:
+        // a bike unpacked as `UserBike.pkz/` by hand, say. Never that.
+        if dst.exists() && !dst.is_file() {
+            anyhow::bail!("refusing to replace the folder {} with a file", dst.display());
         }
     }
     Ok(())
@@ -3019,14 +3278,80 @@ pub(crate) fn is_sound_set(dir: &Path) -> bool {
     dir_has_sound_markers(dir) && crate::bikeswap::read_identity(dir).is_none()
 }
 
+fn is_sound_fragment(dir: &Path) -> bool {
+    std::fs::read_dir(dir).is_ok_and(|entries| {
+        entries.filter_map(|entry| entry.ok()).any(|entry| {
+            entry.file_type().is_ok_and(|kind| kind.is_file()) && has_ext(&entry.path(), "scl")
+        })
+    })
+}
+
 pub(crate) fn contains_sound_bundle(base: &Path) -> bool {
+    !sound_bundle_dirs(base).is_empty()
+}
+
+fn sound_bundle_dirs(base: &Path) -> Vec<PathBuf> {
     std::fs::read_dir(base)
         .map(|rd| {
             rd.filter_map(|e| e.ok())
                 .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
-                .any(|d| is_sound_set(&d.path()))
+                .map(|e| e.path())
+                .filter(|path| is_sound_set(path))
+                .collect()
         })
-        .unwrap_or(false)
+        .unwrap_or_default()
+}
+
+fn is_installed_bike_folder(mods_dir: &Path, folder: &Path) -> bool {
+    let Some(name) = folder.file_name().and_then(|name| name.to_str()) else {
+        return false;
+    };
+    child_dir(&mods_dir.join("bikes"), name)
+        .is_some_and(|installed| crate::bikeswap::read_identity(&installed).is_some())
+}
+
+fn sound_destination(mods_dir: &Path, dest_folder: &str) -> PathBuf {
+    let mut dir = mods_dir.join("bikes");
+    for seg in dest_folder.split(['/', '\\']).filter(|s| !s.is_empty()) {
+        if !seg.eq_ignore_ascii_case("paints") {
+            dir.push(sanitize(seg));
+        }
+    }
+    dir
+}
+
+/// A loose tyre set has both wheel definitions and at least one compiled model. Requiring
+/// all three markers avoids treating an ordinary bike's wheel override as a complete tyre.
+/// A folder the app named while staging (`extracted`, a drop's numbered slot, a
+/// `frost-…` work dir) rather than one the mod's author named.
+fn is_staging_folder_name(dir: &Path) -> bool {
+    let name = dir.file_name().map(|n| n.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
+    name.is_empty()
+        || name == STAGED_DIR
+        || name.starts_with("frost-")
+        || name.chars().all(|c| c.is_ascii_digit())
+}
+
+pub(crate) fn is_tyre_set(dir: &Path) -> bool {
+    // An unpacked bike can carry its own wheel meshes beside its model; its `<Bike>.ini` and
+    // `<Bike>.cfg` say it is a bike, and moving it into `tyres` would take it out of the game.
+    if crate::bikeswap::read_identity(dir).is_some() {
+        return false;
+    }
+    let (mut front, mut rear, mut model) = (false, false, false);
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return false;
+    };
+    for entry in entries.filter_map(|entry| entry.ok()) {
+        if !entry.file_type().is_ok_and(|kind| kind.is_file()) {
+            continue;
+        }
+        let name = entry.file_name().to_string_lossy().to_ascii_lowercase();
+        front |= name == "fwheel.hrc";
+        rear |= name == "rwheel.hrc";
+        model |= has_ext(&entry.path(), "edf");
+    }
+    front && rear && model
 }
 
 pub fn sound_bikes_in(extracted: &Path) -> Vec<String> {
@@ -3105,6 +3430,16 @@ fn has_root_pkz(dir: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn progress_time_gate_keeps_first_final_and_stage_changes() {
+        let t0 = Instant::now();
+        assert!(should_emit(None, t0, false, false), "the first event is immediate");
+        assert!(!should_emit(Some(t0), t0 + EMIT_EVERY_TIME / 2, false, false));
+        assert!(should_emit(Some(t0), t0 + EMIT_EVERY_TIME, false, false));
+        assert!(should_emit(Some(t0), t0, true, false), "stage changes bypass the timer");
+        assert!(should_emit(Some(t0), t0, false, true), "the final total bypasses the timer");
+    }
 
     fn mega(handle: &str, parent: Option<&str>, name: &str, is_file: bool, size: u64) -> MegaEntry {
         MegaEntry {
@@ -3907,6 +4242,67 @@ mod tests {
     }
 
     #[test]
+    fn download_name_decodes_a_space_in_the_url() {
+        // The CBRSERVERS KMX-Mesquite MX install: saved as `KMX-Mesquite%20MX.pkz`, which the
+        // game read as a different track from the server's `KMX-Mesquite MX.pkz`.
+        assert_eq!(
+            download_filename(None, "https://example.com/tracks/KMX-Mesquite%20MX.pkz?dl=1"),
+            "KMX-Mesquite MX.pkz"
+        );
+        // `+` is only a space in a query string, never in a path.
+        assert_eq!(download_filename(None, "https://x.test/a+b.pkz"), "a+b.pkz");
+        // A broken escape is kept as written rather than dropping the name.
+        assert_eq!(download_filename(None, "https://x.test/100%25%zz.pkz"), "100%%zz.pkz");
+    }
+
+    #[test]
+    fn download_name_prefers_content_disposition() {
+        let url = "https://x.test/download?id=7";
+        assert_eq!(
+            download_filename(Some(r#"attachment; filename="KMX-Mesquite MX.pkz""#), url),
+            "KMX-Mesquite MX.pkz"
+        );
+        assert_eq!(
+            download_filename(Some("attachment; filename=KMX-Mesquite%20MX.pkz"), url),
+            "KMX-Mesquite MX.pkz"
+        );
+        // The encoded form wins over the plain one, in either order.
+        assert_eq!(
+            download_filename(
+                Some(r#"attachment; filename="fallback.pkz"; filename*=UTF-8''Pista%20%C3%9Cber.pkz"#),
+                url
+            ),
+            "Pista Über.pkz"
+        );
+        assert_eq!(
+            download_filename(Some("attachment; filename*=iso-8859-1'en'caf%E9.pkz"), url),
+            "café.pkz"
+        );
+        // A header naming nothing usable falls back to the URL.
+        assert_eq!(
+            download_filename(Some(r#"attachment; filename="..""#), "https://x.test/My%20Track.pkz"),
+            "My Track.pkz"
+        );
+        assert_eq!(download_filename(None, url), "download");
+        assert_eq!(download_filename(None, "https://x.test/"), "download.bin");
+    }
+
+    #[test]
+    fn download_name_is_safe_on_windows() {
+        let url = "https://x.test/";
+        let named = |cd: &str| download_filename(Some(cd), url);
+        assert_eq!(named(r#"attachment; filename="a%2Fb%5Cc%3Ad.pkz""#), "a_b_c_d.pkz");
+        assert_eq!(named(r#"attachment; filename*=UTF-8''..%2F..%2Fevil.pkz"#), ".._.._evil.pkz");
+        assert_eq!(named(r#"attachment; filename="what?<>|*.pkz""#), "what_____.pkz");
+        assert_eq!(named(r#"attachment; filename*=UTF-8''tab%09bell%07.pkz"#), "tab_bell_.pkz");
+        assert_eq!(named(r#"attachment; filename="Track. . ""#), "Track");
+        assert_eq!(named(r#"attachment; filename="CON.pkz""#), "_CON.pkz");
+        assert_eq!(named(r#"attachment; filename="nul""#), "_nul");
+        assert_eq!(named(r#"attachment; filename="Console.pkz""#), "Console.pkz");
+        assert_eq!(download_filename(None, "https://x.test/%2E%2E"), "download.bin");
+    }
+
+    #[test]
     fn extract_passes_through_bare_pnt() {
         let dir = std::env::temp_dir().join(format!("frost-test-pnt-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
@@ -4308,6 +4704,21 @@ mod tests {
     }
 
     #[test]
+    fn refuses_to_replace_a_folder_with_an_install_file() {
+        let root = place_tmp("file-over-folder");
+        let staged = root.join("UserBike.pkz");
+        touch(&staged);
+        let mods = root.join("mods");
+        let existing = mods.join("bikes/UserBike.pkz");
+        std::fs::create_dir_all(&existing).unwrap();
+
+        let err = place_mod(&staged, &mods, "bikes", "", "UserBike").unwrap_err();
+        assert!(err.to_string().contains("replace the folder"), "{err}");
+        assert!(existing.is_dir());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn places_rider_kit_into_profile_paints() {
         let root = place_tmp("rider-kit");
         let ex = root.join("ex");
@@ -4691,10 +5102,13 @@ mod tests {
         let mods = root.join("mods");
         std::fs::create_dir_all(mods.join("bikes/cool.pnt")).unwrap();
 
+        // Refused before any copy is tried now (`guard_placement`), and the refusal still
+        // names the path it would not overwrite.
         let err = place_mod(&ex, &mods, "bikes", "", "slug").unwrap_err();
         let msg = format!("{err:#}");
-        assert!(msg.contains("copying"), "{msg}");
+        assert!(msg.contains("replace the folder"), "{msg}");
         assert!(msg.contains("cool.pnt"), "{msg}");
+        assert!(mods.join("bikes/cool.pnt").is_dir(), "the folder is left alone");
         assert!(msg.contains(&mods.display().to_string()), "{msg}");
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -4800,10 +5214,19 @@ mod tests {
         let dst = root.join("mods/cool.pnt");
         std::fs::create_dir_all(&dst).unwrap();
 
+        // The decision itself, which is what this test is about: a folder in the way is
+        // never worth another attempt, whatever the error says.
+        let err = std::fs::copy(staging.join("cool.pnt"), &dst).unwrap_err();
+        assert!(!worth_retrying(&dst, &err), "a directory in the way would be retried");
+
+        // And end to end, measured against the retry window rather than a single wait. One
+        // copy attempt on a busy Windows CI runner (the whole suite in parallel) took longer
+        // than the 150 ms `COPY_RETRY_WAIT` and failed this test on a PR that touched no
+        // Rust; a retried copy sits through ~1.8 s of waits, so this still catches one.
         let start = std::time::Instant::now();
         assert!(copy_staged(&staging.join("cool.pnt"), &dst).is_err());
         assert!(
-            start.elapsed() < COPY_RETRY_WAIT,
+            start.elapsed() < COPY_RETRY_WAIT * (COPY_ATTEMPTS - 1),
             "a directory in the way was retried"
         );
         let _ = std::fs::remove_dir_all(&root);
@@ -4848,6 +5271,9 @@ mod tests {
         touch(&ex.join(format!("{bike}/sfx.cfg")));
         touch(&ex.join("ASS KTM250-0.1/mods/bikes/sounds/idle.wav"));
         let mods = root.join("mods");
+        let installed = mods.join("bikes/MX2OEM_2023_KTM_250_SX-F");
+        touch(&installed.join("MX2OEM_2023_KTM_250_SX-F.ini"));
+        touch(&installed.join("MX2OEM_2023_KTM_250_SX-F.cfg"));
         // Picker may pass `<Bike>/paints`; a self-structured archive ignores it.
         place_mod(&ex, &mods, "bikes", "MX2OEM_2023_KTM_250_SX-F/paints", "slug").unwrap();
         assert!(mods

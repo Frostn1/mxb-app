@@ -1,0 +1,17 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Studio Launcher (background)</title>
+  </head>
+  <body>
+    <script>
+      // Commands run from the Extensions tab, where no tab is open, so they're answered here.
+      for (const screen of ["designer", "bike"]) {
+        mxb.commands.on(screen, () =>
+          mxb.studio.open(screen).catch((e) => mxb.ui.toast(String(e.message || e), "error")),
+        );
+      }
+    </script>
+  </body>
+</html>

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useThree } from "@react-three/fiber";
 import { OrbitControls, Center, ContactShadows } from "@react-three/drei";
-import { ChevronDown, Move, Move3d, Rotate3d, SlidersHorizontal, ZoomIn } from "lucide-react";
+import { ChevronDown, Move3d, SlidersHorizontal } from "lucide-react";
 import * as THREE from "three";
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
 import { cn } from "../../lib/utils";
@@ -22,6 +22,8 @@ import { ErrorBoundary } from "../ErrorBoundary";
 import { useT } from "../../i18n/context";
 import { sceneOf, skyTexture, type SceneId } from "../../lib/viewerScene";
 import { reportRenderer } from "../../lib/glInfo";
+import type { ViewportNav } from "../../lib/viewportNav";
+import { NavBridge, ViewportNavOverlay, useNavHintItems } from "./ViewportNav";
 
 /**
  * `both` draws the bike and the rider in one scene, side by side — see {@link SideBySide};
@@ -655,6 +657,36 @@ function straightenYaw(geom: THREE.BufferGeometry, rotM: THREE.Matrix4): number 
  * `skin` binds the vertices to a rig. Its four-per-vertex arrays run across every node in
  * order, so each node takes the slice that belongs to it.
  */
+/**
+ * A stand-in drawn see-through and grey beside a model: the stock torso under a chain in the
+ * Chain Maker preview, the stock hands on a bike's grips in the GFX tab. Untextured, never casts a shadow, and drawn after the model so the
+ * model shows through it.
+ */
+export function GhostMesh({ nodes, opacity = 0.32 }: { nodes: EdfNode[]; opacity?: number }) {
+  const geoms = useNodeGeometries(nodes);
+  const mat = useMemo(
+    () =>
+      new THREE.MeshStandardMaterial({
+        color: 0x9aa2ad,
+        roughness: 0.8,
+        metalness: 0,
+        transparent: true,
+        opacity,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+      }),
+    [opacity],
+  );
+  useEffect(() => () => mat.dispose(), [mat]);
+  return (
+    <group>
+      {geoms.map((g, i) => (
+        <mesh key={i} geometry={g} material={mat} renderOrder={1} />
+      ))}
+    </group>
+  );
+}
+
 function useNodeGeometries(nodes: EdfNode[], skin?: Skin | null) {
   const geoms = useMemo(() => {
     let vertsSoFar = 0;
@@ -2096,6 +2128,9 @@ function CameraRig({ frame, view }: { frame: Framing; view?: ViewerView | null }
     | null;
   const invalidate = useThree((s) => s.invalidate);
   useEffect(() => {
+    // An orbit past the pole leaves the camera's up turned over (see `viewportNav`); a fresh
+    // framing starts the right way up.
+    camera.up.set(0, 1, 0);
     if (view) {
       camera.position.set(...view.position);
       camera.updateProjectionMatrix();
@@ -2350,12 +2385,7 @@ function PoseControls({
 // Legend for the OrbitControls gestures — the canvas gives no other clue that it's
 // draggable. Kept muted so it reads as chrome, never competing with the model.
 function ControlsHint({ tight }: { tight?: boolean }) {
-  const t = useT();
-  const items = [
-    { Icon: Rotate3d, label: t("viewer.dragToRotate") },
-    { Icon: ZoomIn, label: t("viewer.scrollToZoom") },
-    { Icon: Move, label: t("viewer.rightDragToPan") },
-  ];
+  const items = useNavHintItems();
   return (
     <div
       className={cn(
@@ -2520,6 +2550,12 @@ export interface ModelViewerProps {
   /** Draw the floor and the contact shadow. Off for a piece that doesn't stand on anything. */
   grounded?: boolean;
   /**
+   * Leave a lone model where its file puts it rather than centring it: for a piece whose
+   * origin means something (a chain's is the base of the neck), so `bikeOverlay` beside it
+   * neither moves it nor moves the view.
+   */
+  keepOrigin?: boolean;
+  /**
    * Photo mode: the model and the backdrop, and nothing else.
    *
    * Hides the grab dots, the panels and the hint. Somebody framing a shot doesn't want the
@@ -2605,6 +2641,7 @@ export function ModelViewer({
   noStandIn = false,
   className,
   grounded = true,
+  keepOrigin = false,
   bikeOverlay,
   view = null,
   tyreTextures = null,
@@ -2674,12 +2711,16 @@ export function ModelViewer({
     return [0, 0, 0] as Vec3;
   }, [hasReal, hasRider, nodes, riderParts]);
   // Only the halves on screen can be moved. Bike first, matching the pair's left-to-right.
+  // Blender-style navigation: read off the box around the canvas, framing the model only.
+  const box = useRef<HTMLDivElement>(null);
+  const modelRoot = useRef<THREE.Group>(null);
+  const [nav, setNav] = useState<ViewportNav | null>(null);
   const placeTargets: PlaceTarget[] = [
     ...(showBike ? (["bike"] as const) : []),
     ...(showRider ? (["rider"] as const) : []),
   ];
   return (
-    <div className={cn("relative", className)}>
+    <div ref={box} className={cn("relative", className)}>
       <ErrorBoundary compact label="model-viewer">
         <Canvas
           className="h-full w-full"
@@ -2738,7 +2779,7 @@ export function ModelViewer({
           <directionalLight position={[-4, 2, -3]} intensity={look.back} />
           {/* Front fill from the camera side so the front of the kit isn't in shadow. */}
           <directionalLight position={[0, 1.5, 5]} intensity={look.front} />
-          <Center>
+          <Center ref={modelRoot} disable={keepOrigin}>
             {seat ? (
               <BikeOnGround
                 nodes={nodes!}
@@ -2830,8 +2871,10 @@ export function ModelViewer({
             maxDistance={20}
             target={[0, 0, 0]}
           />
+          <NavBridge container={box} frameRoot={modelRoot} onNav={setNav} />
         </Canvas>
       </ErrorBoundary>
+      {!loading && <ViewportNavOverlay nav={nav} hideGizmo={photo || hideHints} />}
       {!loading && !photo && !hideHints && <ControlsHint tight={placeControls || poseControls} />}
       {/* One stack, so the two panels line up on the same edge whether both are offered or
           only one — placement above, because moving a model comes before fussing its joints. */}

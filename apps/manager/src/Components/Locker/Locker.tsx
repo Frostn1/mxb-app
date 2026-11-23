@@ -134,6 +134,8 @@ function swapNote(
       case "signaled":
       case "withheld":
         return t("locker.modelSwitchCategory");
+      case "held":
+        return t("frostmod.reloadHeld");
       case "not_running":
         return t("locker.modelFrostmodNotRunning");
       case "write_failed":

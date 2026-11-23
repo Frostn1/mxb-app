@@ -66,6 +66,8 @@ pub struct State {
     /// One shown check at a time: a second request arriving mid-check waits here, and finds the
     /// answer the first one got instead of opening anything.
     asking: tokio::sync::Mutex<()>,
+    /// What the last probe saw, for the log lines that say how a check ended.
+    seen: Mutex<String>,
 }
 
 impl State {
@@ -74,6 +76,7 @@ impl State {
             gave_up: AtomicU8::new(0),
             ready: AtomicBool::new(false),
             asking: tokio::sync::Mutex::const_new(()),
+            seen: Mutex::new(String::new()),
         }
     }
 }
@@ -157,7 +160,28 @@ impl Site {
     /// Read the page's state straight out of the WebView. See [`probe_script`].
     pub async fn probe(&self, window: &WebviewWindow) -> Probe {
         let reply = eval_json::<ProbeReply>(window, &probe_script(), Duration::from_secs(1)).await;
+        *self.state.seen.lock().unwrap_or_else(|e| e.into_inner()) = describe(reply.as_ref());
         classify(reply, (self.base)())
+    }
+
+    /// What the last probe saw, and the names (never the values) of the cookies the window
+    /// holds for the site. Logged whenever a shown check ends, so a report says which page the
+    /// window was on and whether it held a clearance and a session.
+    async fn seen(&self, window: Option<&WebviewWindow>) -> String {
+        let page = self.state.seen.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        let Some(window) = window.cloned() else {
+            return page;
+        };
+        let Ok(url) = (self.base)().parse::<tauri::Url>() else {
+            return page;
+        };
+        // Off the async workers: on Windows this waits on the UI thread.
+        let read = tauri::async_runtime::spawn_blocking(move || window.cookies_for_url(url)).await;
+        let cookies = match read {
+            Ok(Ok(cookies)) => cookie_names(cookies.iter().map(|c| c.name())),
+            _ => "unreadable".to_string(),
+        };
+        format!("{page}; cookies: {cookies}")
     }
 
     /// Wait until the window shows a page past Cloudflare's check — and, when `replacing` is
@@ -238,7 +262,9 @@ impl Site {
 
         let domain = (self.domain)();
         log::info!(
-            "{domain} check did not clear by itself within {REVEAL_AFTER:?} — showing it to the user"
+            "{domain} check did not clear by itself within {REVEAL_AFTER:?} — showing it to the \
+             user (saw {})",
+            self.seen(Some(window)).await
         );
         self.reveal(window);
         self.notify(app, "shown");
@@ -252,15 +278,20 @@ impl Site {
                 self.set_ready(false);
                 log::info!(
                     "user closed the {domain} check after {:?} — not asking again until they \
-                     ask for it",
-                    shown.elapsed()
+                     ask for it (last saw {})",
+                    shown.elapsed(),
+                    self.seen(None).await
                 );
                 self.notify(app, "dismissed");
                 return Err(self.give_up(GiveUp::Dismissed));
             }
             match done().await {
                 Ok(true) => {
-                    log::info!("{domain} check cleared by the user after {:?}", shown.elapsed());
+                    log::info!(
+                        "{domain} check cleared by the user after {:?} (saw {})",
+                        shown.elapsed(),
+                        self.seen(Some(window)).await
+                    );
                     self.conceal(window);
                     self.notify(app, "cleared");
                     return Ok(());
@@ -352,14 +383,49 @@ impl Probe {
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct ProbeReply {
     ipc: bool,
     complete: bool,
+    /// Shaped like Cloudflare's interstitial. See [`probe_script`].
     challenge: bool,
+    /// Carries the site's own content, which the interstitial never does.
+    #[serde(default)]
+    site_page: bool,
+    /// `window._cf_chl_opt` exists at all. Logged, never decided on (see [`probe_script`]).
+    #[serde(default)]
+    chl_opt: bool,
+    #[serde(default)]
+    path: String,
+    #[serde(default)]
+    title: String,
     origin: f64,
     /// `location.origin`.
     #[serde(default)]
     site: String,
+}
+
+/// One line for the log: where the window was and every signal the probe read there.
+fn describe(reply: Option<&ProbeReply>) -> String {
+    let Some(r) = reply else {
+        return "no answer from the page".to_string();
+    };
+    let title: String = r.title.chars().take(80).collect();
+    format!(
+        "{}{} {title:?}: interstitial={} sitePage={} _cf_chl_opt={} complete={} ipc={}",
+        r.site, r.path, r.challenge, r.site_page, r.chl_opt, r.complete, r.ipc
+    )
+}
+
+/// Cookie names, sorted, for the log. Names only: the values are the user's session.
+fn cookie_names<'a>(names: impl Iterator<Item = &'a str>) -> String {
+    let mut names: Vec<&str> = names.collect();
+    if names.is_empty() {
+        return "none".to_string();
+    }
+    names.sort_unstable();
+    names.dedup();
+    names.join(", ")
 }
 
 fn classify(reply: Option<ProbeReply>, base: &str) -> Probe {
@@ -370,7 +436,8 @@ fn classify(reply: Option<ProbeReply>, base: &str) -> Probe {
             on_site: false,
         };
     };
-    let page = if r.challenge {
+    // The site's own page is never the check, whatever Cloudflare's scripts left on it.
+    let page = if r.challenge && !r.site_page {
         Page::Challenge
     } else if r.complete && r.ipc {
         Page::Ready
@@ -396,16 +463,25 @@ pub fn same_site(origin: &str, base: &str) -> bool {
 /// still one of the answers: the fetches depend on it, and if a Tauri upgrade ever renames
 /// `__TAURI_INTERNALS__` this reports "loading" for good rather than declaring the page ready.
 ///
-/// "On the check" is asked as `window._cf_chl_opt`, which the interstitial defines and an
-/// ordinary page does not, or a "Just a moment…" title. The obvious test — looking for
-/// `challenge-platform` in the HTML — is wrong, and quietly so: Cloudflare injects that script
-/// into ordinary pages too when JS detections are on, so the window would never be ready.
+/// "On the check" is asked as a `window._cf_chl_opt` carrying the interstitial's own fields
+/// (`cType`, `cRay`), or a "Just a moment…" title. Neither a bare `_cf_chl_opt` nor
+/// `challenge-platform` in the HTML will do, and both fail the same quiet way: Cloudflare's
+/// precursor script, which it injects into ordinary pages, defines `_cf_chl_opt` without those
+/// fields, and its JS detections put `challenge-platform` in the HTML. Keyed on either, a page
+/// the user is already past reads as the check for good — which is what mxbikes-shop.com's
+/// All My Downloads did: the shown check sat on the signed-in page until the user closed it,
+/// and the close failed the load.
+///
+/// `sitePage` is the positive answer: anything from the site's own `/wp-content/` (both sites
+/// are WordPress) is a page the site served, and the interstitial carries none of it.
 fn probe_script() -> String {
-    "(function(){ try { return { \
+    "(function(){ try { var o = window._cf_chl_opt; return { \
        ipc: !!window.__TAURI_INTERNALS__, \
        complete: document.readyState === 'complete', \
-       challenge: typeof window._cf_chl_opt !== 'undefined' \
+       challenge: !!(o && (o.cType || o.cRay)) \
          || /^just a moment/i.test(document.title || ''), \
+       sitePage: !!document.querySelector('[src*=\"/wp-content/\"],[href*=\"/wp-content/\"]'), \
+       chlOpt: typeof o !== 'undefined', path: location.pathname, title: document.title || '', \
        origin: performance.timeOrigin, site: location.origin }; } catch (e) { return null; } })()"
         .to_string()
 }
@@ -441,6 +517,10 @@ mod tests {
             ipc,
             complete,
             challenge,
+            site_page: false,
+            chl_opt: challenge,
+            path: "/".to_string(),
+            title: String::new(),
             origin,
             site: BASE.to_string(),
         })
@@ -465,6 +545,10 @@ mod tests {
     fn the_probe_asks_every_question() {
         let js = probe_script();
         assert!(js.contains("_cf_chl_opt"), "{js}");
+        assert!(js.contains("o.cType || o.cRay"), "{js}");
+        // The bare global is what Cloudflare's precursor script defines on ordinary pages.
+        assert!(!js.contains("typeof window._cf_chl_opt"), "{js}");
+        assert!(js.contains("/wp-content/"), "{js}");
         assert!(js.contains("just a moment"), "{js}");
         assert!(js.contains("readyState === 'complete'"), "{js}");
         assert!(js.contains("__TAURI_INTERNALS__"), "{js}");
@@ -485,6 +569,48 @@ mod tests {
         assert_eq!(classify(reply(true, false, false, 1.0), BASE).page, Page::Loading);
         assert_eq!(classify(reply(false, true, false, 1.0), BASE).page, Page::Loading);
         assert_eq!(classify(None, BASE).page, Page::Loading);
+    }
+
+    /// mxbikes-shop.com's All My Downloads, signed in, after the user passed the shown check:
+    /// Cloudflare's precursor script had defined `_cf_chl_opt` on it. The page's own content
+    /// settles it, so the check is past and the window hides itself.
+    #[test]
+    fn the_sites_own_page_is_past_whatever_cloudflare_left_on_it() {
+        let mut downloads = reply(true, true, true, 1.0).unwrap();
+        downloads.site_page = true;
+        let p = classify(Some(downloads), BASE);
+        assert_eq!(p.page, Page::Ready);
+        assert!(p.is_past(None));
+        // Still loading is still loading, and a reply without the field reads as before.
+        let mut loading = reply(true, false, true, 1.0).unwrap();
+        loading.site_page = true;
+        assert_eq!(classify(Some(loading), BASE).page, Page::Loading);
+        let bare: ProbeReply = serde_json::from_str(
+            r#"{"ipc":true,"complete":true,"challenge":true,"origin":1,"site":"https://example-shop.com"}"#,
+        )
+        .unwrap();
+        assert_eq!(classify(Some(bare), BASE).page, Page::Challenge);
+    }
+
+    /// A report has to say which page the window was on and what the probe made of it, and the
+    /// cookies by name only.
+    #[test]
+    fn the_log_line_says_what_the_window_saw() {
+        let mut r = reply(true, true, false, 1.0).unwrap();
+        r.path = "/all-my-downloads/".into();
+        r.title = "All My Downloads - MX Bikes Shop".into();
+        r.site_page = true;
+        r.chl_opt = true;
+        let line = describe(Some(&r));
+        assert!(line.starts_with("https://example-shop.com/all-my-downloads/"), "{line}");
+        assert!(line.contains(r#""All My Downloads - MX Bikes Shop""#), "{line}");
+        assert!(line.contains("interstitial=false sitePage=true _cf_chl_opt=true"), "{line}");
+        assert_eq!(describe(None), "no answer from the page");
+        assert_eq!(
+            cookie_names(["wordpress_logged_in_x", "cf_clearance", "cf_clearance"].into_iter()),
+            "cf_clearance, wordpress_logged_in_x"
+        );
+        assert_eq!(cookie_names(std::iter::empty()), "none");
     }
 
     /// Straight after a navigation the old page is still loaded and past its check. It must

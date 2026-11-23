@@ -1,0 +1,21 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Library Insights (background)</title>
+    <script src="summary.js"></script>
+  </head>
+  <body>
+    <script>
+      mxb.mcp.handle("library_summary", async () => {
+        const s = summarise(await mxb.mods.list());
+        return {
+          mods: s.count,
+          totalSize: bytes(s.total),
+          byType: s.types.map((t) => ({ type: typeLabel(t.type), count: t.count, size: bytes(t.size) })),
+          largest: s.biggest.slice(0, 10).map((m) => ({ name: m.name, type: typeLabel(m.type), size: bytes(m.size) })),
+        };
+      });
+    </script>
+  </body>
+</html>

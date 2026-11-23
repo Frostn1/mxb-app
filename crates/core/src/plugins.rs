@@ -388,8 +388,9 @@ pub fn install_bundle(
 
     for i in 0..zip.len() {
         let mut entry = zip.by_index(i)?;
-        let Some(rel) = safe_path(entry.name()) else {
-            bail!("that bundle contains an unsafe path: {}", entry.name());
+        let name = entry.name()?.into_owned();
+        let Some(rel) = safe_path(&name) else {
+            bail!("that bundle contains an unsafe path: {name}");
         };
         let out = root.join(&rel);
         if entry.is_dir() {
@@ -1034,6 +1035,7 @@ pub async fn plugin_install(app: tauri::AppHandle, id: String) -> Result<String,
 
 #[tauri::command]
 pub async fn plugin_remove(app: tauri::AppHandle, id: String) -> Result<(), String> {
+    validate_plugin_id(&id)?;
     let dir = plugins_dir(&app).map_err(|e| e.to_string())?;
     std::fs::remove_dir_all(dir.join(&id)).ok();
     let mut state = load_state(&app);
@@ -1042,6 +1044,12 @@ pub async fn plugin_remove(app: tauri::AppHandle, id: String) -> Result<(), Stri
     state.installed.remove(&id);
     save_state(&app, &state).map_err(|e| e.to_string())?;
     Ok(())
+}
+
+fn validate_plugin_id(id: &str) -> Result<(), String> {
+    crate::library::is_simple_name(id)
+        .then_some(())
+        .ok_or_else(|| "That plugin id is not valid.".to_string())
 }
 
 /// What the webview needs to mount a plugin: its manifest, and its entry module's source.
@@ -1265,6 +1273,14 @@ mod sandbox_tests {
         for bad in ["../escape", "../../etc/passwd", "/etc/passwd", "C:/Windows/x"] {
             assert!(resolve_in(&r, bad).is_err(), "accepted {bad}");
         }
+    }
+
+    #[test]
+    fn plugin_remove_ids_are_one_plain_name() {
+        for bad in ["", "..", "../other", "/tmp/plugin", r"C:\plugins\x"] {
+            assert!(validate_plugin_id(bad).is_err(), "accepted {bad:?}");
+        }
+        assert!(validate_plugin_id("lap-timer").is_ok());
     }
 
     #[test]

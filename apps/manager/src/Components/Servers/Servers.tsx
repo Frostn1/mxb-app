@@ -20,6 +20,7 @@ import {
   Bookmark,
 } from "lucide-react";
 import { toast } from "sonner";
+import ProtectionCard from "../Protection/ProtectionCard";
 import { invoke } from "@tauri-apps/api/core";
 import { open as pickFile } from "@tauri-apps/plugin-dialog";
 import { SearchBox } from "@frost/shared/Components/ui/search-box";
@@ -48,6 +49,7 @@ import {
   onServersSwept,
   joinListedServer,
   closeAndJoinListedServer,
+  joinHint,
   queueJoin,
   serversWithPaintSync,
   supporterServers,
@@ -217,9 +219,11 @@ interface ServersProps {
   /** A server someone shared, as an `mxb://server?addr=…` link. A fresh object each time,
    *  so the same address arriving twice still opens the dialog. */
   link?: { address: string } | null;
+  /** Open the Crash protection page. Absent where FrostMod does not run: no strip then. */
+  onOpenProtection?: () => void;
 }
 
-const Servers = ({ link }: ServersProps) => {
+const Servers = ({ link, onOpenProtection }: ServersProps) => {
   const t = useT();
   const [servers, setServers] = useState<MasterServer[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -717,7 +721,12 @@ const Servers = ({ link }: ServersProps) => {
     async (server: MasterServer) => {
       setJoining(server.address);
       try {
-        await closeAndJoinListedServer(server.address, server.categories, server.bikes);
+        await closeAndJoinListedServer(
+          server.address,
+          server.categories,
+          server.bikes,
+          joinHint(server),
+        );
         toast.success(t("join.launching", { address: server.address }));
       } catch (e) {
         toast.error(joinError(e));
@@ -733,7 +742,12 @@ const Servers = ({ link }: ServersProps) => {
       if (joining) return;
       setJoining(server.address);
       try {
-        const outcome = await joinListedServer(server.address, server.categories, server.bikes);
+        const outcome = await joinListedServer(
+          server.address,
+          server.categories,
+          server.bikes,
+          joinHint(server),
+        );
         if (outcome === "already_running") {
           // The game reads the connect flag only at startup, so an open copy can't be sent
           // anywhere — which used to be the end of it. The way through is to replace the
@@ -1301,6 +1315,8 @@ const Servers = ({ link }: ServersProps) => {
         <HelpHint title={t("servers.title")} description={t("serverBrowser.help")} />
       </ContextBarRight>
 
+      {onOpenProtection && <ProtectionCard onOpen={onOpenProtection} />}
+
       <JoinServerDialog
         open={joinOpen}
         onOpenChange={(open) => {
@@ -1443,7 +1459,7 @@ const Servers = ({ link }: ServersProps) => {
             <div className="flex w-[34%] min-w-[340px] max-w-[560px] shrink-0 flex-col overflow-hidden rounded-xl border border-input">
               {/* The table's sortable headers, kept as a strip. Seven columns don't fit
                   400px; the sorting they carried is still what orders the list. */}
-              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-input bg-card px-3 py-2">
+              <div className="mxb-server-sort-row flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-input bg-card px-3 py-2">
                 {chip("name", t("serverBrowser.name"))}
                 {chip("players", t("serverBrowser.players"))}
                 {chip("track", t("servers.track"))}

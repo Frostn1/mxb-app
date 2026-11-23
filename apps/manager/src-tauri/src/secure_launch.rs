@@ -503,8 +503,7 @@ async fn ensure_module(app: &AppHandle) -> Result<Option<PathBuf>, String> {
 }
 
 /// Is Game Integration on? The secure-content plugin is part of it: off means nothing of ours
-/// in the game's folder, and nothing downloaded.
-#[cfg_attr(not(windows), allow(dead_code))]
+/// in the game's folder or injected into it, and nothing downloaded.
 fn game_integration_on(app: &AppHandle) -> bool {
     crate::config::load(app).map(|c| c.auto_run_frostmod).unwrap_or(false)
 }
@@ -779,12 +778,13 @@ pub fn arm(app: &AppHandle, dll_log_mark: Option<u64>) {
         return;
     }
     write_identity(&dir);
+    // Off means off on every platform: no plugin on Windows, no injection under Proton or Wine.
+    if !game_integration_on(app) {
+        log::info!("[secure] Game Integration is off; the secure-content plugin stays out");
+        return;
+    }
     #[cfg(windows)]
     {
-        if !game_integration_on(app) {
-            log::info!("[secure] Game Integration is off; the secure-content plugin stays out");
-            return;
-        }
         // The game loaded its plugins when it started, so there is nothing to do in it now:
         // a plugin already in place is serving, and one written now serves from next start.
         match plugins_dir(app).ok_or_else(|| "the game folder isn't known".to_string())

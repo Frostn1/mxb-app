@@ -120,8 +120,38 @@ pub fn uninstall_mod(mods_path: &str, from_path: &str, subpath: &str) -> anyhow:
         anyhow::bail!("path not found: {from_path}");
     }
     let type_dir = mods_subdir(mods_path, subpath);
-    if !from.starts_with(&type_dir) {
+    if subpath.trim().is_empty() || !from.starts_with(&type_dir) || from == type_dir {
         anyhow::bail!("refusing to uninstall a file outside the {subpath} folder");
     }
-    move_to_trash(&from)
+    crate::safedelete::trash(mods_path, &from)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn uninstall_refuses_roots_escapes_and_outside_paths() {
+        let root = std::env::temp_dir().join(format!("mxb-uninstall-guard-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        for dir in ["mods/bikes", "mods/tracks", "mxbapp_disabled/bikes"] {
+            fs::create_dir_all(root.join(dir)).unwrap();
+        }
+        let outside = root.parent().unwrap().join("mxb-uninstall-outside");
+        fs::create_dir_all(&outside).unwrap();
+        let mp = root.to_string_lossy();
+        let cases = [
+            (root.clone(), ""),
+            (root.join("mods"), ""),
+            (root.join("mods/bikes"), "mods/bikes"),
+            (root.join("mods/tracks"), "mods/tracks"),
+            (root.join("mods/bikes/../tracks"), "mods/bikes"),
+            (outside.clone(), "mods/bikes"),
+        ];
+        for (path, subpath) in cases {
+            assert!(uninstall_mod(&mp, &path.to_string_lossy(), subpath).is_err(), "accepted {}", path.display());
+        }
+        let _ = fs::remove_dir_all(root);
+        let _ = fs::remove_dir_all(outside);
+    }
 }

@@ -4,6 +4,10 @@
         <meta charset="UTF-8" />
         <link rel="icon" type="image/svg+xml" href="/logo.svg" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <!-- Frames only: extension tabs are sandboxed srcdoc frames, and this is what stops one
+             navigating itself to a page of its choosing (and taking whatever it read along).
+             No other directive, so nothing else the app loads is affected. -->
+        <meta http-equiv="Content-Security-Policy" content="frame-src 'none'" />
         <title>MXB App</title>
     </head>
 

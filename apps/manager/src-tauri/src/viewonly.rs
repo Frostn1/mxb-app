@@ -126,8 +126,8 @@ pub fn sweep(mods_dir: &Path, session_store: Option<&Path>) -> SweepOutcome {
                 out.kept_yours += 1;
                 continue;
             }
-            match std::fs::remove_file(&dest) {
-                Ok(()) => {
+            match crate::safedelete::trash(&mods_dir.to_string_lossy(), &dest) {
+                Ok(_) => {
                     out.removed += 1;
                     manifest.forget(&rel_dest);
                     paintsync::prune_empty(mods_dir, dest.parent());
